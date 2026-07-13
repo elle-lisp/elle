@@ -188,12 +188,22 @@ pub(crate) struct RegionPool {
     ref_objs: Vec<*mut HeapObject>,
     /// Next page size to claim (doubles each time — geometric growth).
     next_page_size: usize,
+    /// This region's owning-instance trace cell (a clone of the heap's), read by
+    /// the `PAGES` page-claim gate in [`add_page`](Self::add_page). Per-instance,
+    /// never a process-global — a `--trace=pages` toggle in one instance cannot
+    /// make another instance's page claims spam.
+    trace: crate::config::TraceCell,
 }
 
 mod introspect;
 
 impl RegionPool {
-    pub fn new(region_id: u32, stamp: PageStamp, initial_page_size: usize) -> Self {
+    pub fn new(
+        region_id: u32,
+        stamp: PageStamp,
+        initial_page_size: usize,
+        trace: crate::config::TraceCell,
+    ) -> Self {
         RegionPool {
             pages: Vec::new(),
             region_id,
@@ -202,6 +212,7 @@ impl RegionPool {
             dtors: Vec::new(),
             ref_objs: Vec::new(),
             next_page_size: initial_page_size,
+            trace,
         }
     }
 
@@ -324,7 +335,9 @@ impl RegionPool {
         let claimed = page.len();
         self.pages
             .push(RegionPage::new(page, self.region_id, self.stamp));
-        if crate::config::global_trace_bit_enabled(crate::config::trace_bits::PAGES) {
+        if self.trace.load(std::sync::atomic::Ordering::Relaxed) & crate::config::trace_bits::PAGES
+            != 0
+        {
             eprintln!(
                 "[trace:pages] add_page region={} requested={} claimed={} page_count={} total_bytes={} obj_count={}",
                 self.region_id,

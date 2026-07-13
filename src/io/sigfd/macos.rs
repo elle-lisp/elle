@@ -1,9 +1,16 @@
 use super::{drain_pending_blocked, posix_trace, saved_dispositions, with_watched_set, SigEvent};
+use crate::config::TraceCell;
 use std::cell::RefCell;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 pub(crate) struct SignalReceiver {
     inner: RefCell<SignalReceiverInner>,
+    /// The owning instance's trace cell (captured at `os/sig-watch`). Held outside
+    /// the `RefCell` so `Drop` reads it without borrowing `inner`. Threaded to
+    /// `posix_trace` here and — via the `KqSigRead` `PoolOp` — onto the blocking
+    /// `kevent` worker thread, so every POSIX diagnostic gates on this receiver's
+    /// instance, not a global. Mirrors the Linux receiver.
+    trace: TraceCell,
 }
 
 struct SignalReceiverInner {
@@ -35,11 +42,11 @@ fn noop_sigaction() -> libc::sigaction {
 }
 
 impl SignalReceiver {
-    pub fn new(signals: Vec<libc::c_int>) -> Result<Self, String> {
-        posix_trace(format_args!(
-            "macos: SignalReceiver::new signals={:?}",
-            signals
-        ));
+    pub fn new(signals: Vec<libc::c_int>, trace: TraceCell) -> Result<Self, String> {
+        posix_trace(
+            &trace,
+            format_args!("macos: SignalReceiver::new signals={:?}", signals),
+        );
         for &s in &signals {
             if s == libc::SIGKILL || s == libc::SIGSTOP {
                 return Err(format!(
@@ -69,10 +76,13 @@ impl SignalReceiver {
         unsafe {
             libc::pthread_sigmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
         }
-        posix_trace(format_args!(
-            "macos: pthread_sigmask blocked newly_watched={:?} on main thread",
-            newly_watched
-        ));
+        posix_trace(
+            &trace,
+            format_args!(
+                "macos: pthread_sigmask blocked newly_watched={:?} on main thread",
+                newly_watched
+            ),
+        );
 
         // Install the no-op handler on each newly-watched signal,
         // saving the old disposition so `rollback` can restore it
@@ -91,16 +101,19 @@ impl SignalReceiver {
                 let ret = unsafe { libc::sigaction(s, &new_sa, &mut old) };
                 if ret == 0 {
                     saved.insert(s, old);
-                    posix_trace(format_args!(
-                        "macos: installed no-op sigaction for signum={}",
-                        s
-                    ));
+                    posix_trace(
+                        &trace,
+                        format_args!("macos: installed no-op sigaction for signum={}", s),
+                    );
                 } else {
                     let err = std::io::Error::last_os_error();
-                    posix_trace(format_args!(
-                        "macos: sigaction install FAILED for signum={}: {} — kqueue may not fire",
-                        s, err
-                    ));
+                    posix_trace(
+                        &trace,
+                        format_args!(
+                            "macos: sigaction install FAILED for signum={}: {} — kqueue may not fire",
+                            s, err
+                        ),
+                    );
                 }
                 // sigaction failure on a watchable signal is rare;
                 // fall back to whatever disposition was already in
@@ -112,15 +125,18 @@ impl SignalReceiver {
         let kq = unsafe { libc::kqueue() };
         if kq < 0 {
             let err = std::io::Error::last_os_error();
-            posix_trace(format_args!("macos: kqueue() failed: {}", err));
-            rollback(&signals);
+            posix_trace(&trace, format_args!("macos: kqueue() failed: {}", err));
+            rollback(&trace, &signals);
             return Err(format!("os/sig-watch: kqueue: {}", err));
         }
         // SAFETY: fresh kqueue fd we own. Holding it as an OwnedFd means
         // the early return below (kevent failure) closes it for us.
         let kq = unsafe { OwnedFd::from_raw_fd(kq) };
         unsafe { libc::fcntl(kq.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
-        posix_trace(format_args!("macos: kqueue() opened kq={}", kq.as_raw_fd()));
+        posix_trace(
+            &trace,
+            format_args!("macos: kqueue() opened kq={}", kq.as_raw_fd()),
+        );
 
         // Register one EVFILT_SIGNAL filter per signal.
         let changelist: Vec<libc::kevent> = signals
@@ -146,26 +162,39 @@ impl SignalReceiver {
         };
         if ret < 0 {
             let err = std::io::Error::last_os_error();
-            posix_trace(format_args!(
-                "macos: kevent EV_ADD EVFILT_SIGNAL FAILED for {:?}: {}",
-                signals, err
-            ));
+            posix_trace(
+                &trace,
+                format_args!(
+                    "macos: kevent EV_ADD EVFILT_SIGNAL FAILED for {:?}: {}",
+                    signals, err
+                ),
+            );
             // `kq` (still an OwnedFd) drops here on return, closing it.
-            rollback(&signals);
+            rollback(&trace, &signals);
             return Err(format!("os/sig-watch: kevent register: {}", err));
         }
-        posix_trace(format_args!(
-            "macos: kevent EV_ADD EVFILT_SIGNAL registered {:?} on kq={}",
-            signals,
-            kq.as_raw_fd()
-        ));
+        posix_trace(
+            &trace,
+            format_args!(
+                "macos: kevent EV_ADD EVFILT_SIGNAL registered {:?} on kq={}",
+                signals,
+                kq.as_raw_fd()
+            ),
+        );
 
         Ok(SignalReceiver {
             inner: RefCell::new(SignalReceiverInner {
                 kq: Some(kq),
                 signals,
             }),
+            trace,
         })
+    }
+
+    /// This receiver's instance trace cell, for the `posix_trace` sites that hold
+    /// the receiver Value (io-completion, sig-next submit) rather than `&self`.
+    pub fn trace(&self) -> TraceCell {
+        std::sync::Arc::clone(&self.trace)
     }
 
     pub fn raw_fd(&self) -> Result<RawFd, String> {
@@ -184,19 +213,23 @@ impl SignalReceiver {
     pub fn close(&self) {
         let mut inner = self.inner.borrow_mut();
         if inner.kq.is_none() {
-            posix_trace(format_args!(
-                "macos: SignalReceiver::close already closed (idempotent)"
-            ));
+            posix_trace(
+                &self.trace,
+                format_args!("macos: SignalReceiver::close already closed (idempotent)"),
+            );
             return;
         }
-        posix_trace(format_args!(
-            "macos: SignalReceiver::close kq={:?} signals={:?}",
-            inner.kq.as_ref().map(|kq| kq.as_raw_fd()),
-            inner.signals
-        ));
+        posix_trace(
+            &self.trace,
+            format_args!(
+                "macos: SignalReceiver::close kq={:?} signals={:?}",
+                inner.kq.as_ref().map(|kq| kq.as_raw_fd()),
+                inner.signals
+            ),
+        );
         // Dropping the OwnedFd closes the descriptor.
         inner.kq = None;
-        rollback(&inner.signals);
+        rollback(&self.trace, &inner.signals);
         inner.signals.clear();
     }
 
@@ -229,7 +262,7 @@ impl Drop for SignalReceiver {
         // Taking the OwnedFd drops (closes) it; roll back the signal
         // refcounts only if we hadn't already been closed explicitly.
         if inner.kq.take().is_some() {
-            rollback(&inner.signals);
+            rollback(&self.trace, &inner.signals);
         }
     }
 }
@@ -247,7 +280,7 @@ impl std::fmt::Debug for SignalReceiver {
     }
 }
 
-fn rollback(signals: &[libc::c_int]) {
+fn rollback(trace: &TraceCell, signals: &[libc::c_int]) {
     let mut to_unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&mut to_unblock) };
     // Collect signals whose refcount fell to zero so we can both
@@ -301,11 +334,14 @@ fn rollback(signals: &[libc::c_int]) {
     // invoking the (still no-op) handler. Done while the signals
     // are still blocked, so sigwait returns immediately for
     // already-pending entries.
-    posix_trace(format_args!(
-        "macos: rollback draining newly_freed={:?}; unblocking subset {:?}",
-        newly_freed, newly_freed_unblockable
-    ));
-    drain_pending_blocked(&newly_freed);
+    posix_trace(
+        trace,
+        format_args!(
+            "macos: rollback draining newly_freed={:?}; unblocking subset {:?}",
+            newly_freed, newly_freed_unblockable
+        ),
+    );
+    drain_pending_blocked(trace, &newly_freed);
     // Restore the saved sigactions, then unblock the subset of
     // signums that should re-arm their kernel default. Order
     // matters: any signal generated AFTER the unblock should
@@ -316,10 +352,10 @@ fn rollback(signals: &[libc::c_int]) {
         for &s in &newly_freed {
             if let Some(old) = saved.remove(&s) {
                 unsafe { libc::sigaction(s, &old, std::ptr::null_mut()) };
-                posix_trace(format_args!(
-                    "macos: rollback restored sigaction for signum={}",
-                    s
-                ));
+                posix_trace(
+                    trace,
+                    format_args!("macos: rollback restored sigaction for signum={}", s),
+                );
             }
         }
     }

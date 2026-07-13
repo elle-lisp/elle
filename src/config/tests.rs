@@ -2,6 +2,67 @@
 
 use super::*;
 
+/// Trace state is per-instance: a `RuntimeConfig` reads and writes its own
+/// [`TraceCell`], so a diagnostic toggle on one instance never reaches another.
+/// This is the property the corpus runner relies on to keep a `--trace=`-heavy
+/// file from bleeding into a parallel file's run — before the relocation the two
+/// shared a process-global atomic, so any instance's `set_trace` flipped the bit
+/// every off-VM reader saw.
+#[test]
+fn trace_bits_are_per_cell_not_global() {
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    let cell_a: TraceCell = Arc::new(AtomicU32::new(0));
+    let cell_b: TraceCell = Arc::new(AtomicU32::new(0));
+    let cfg = Config::default();
+    let mut a = RuntimeConfig::from_static_config(&cfg, Arc::clone(&cell_a));
+    let b = RuntimeConfig::from_static_config(&cfg, Arc::clone(&cell_b));
+
+    // Enable :call on instance A only.
+    a.set_trace(HashSet::from(["call".to_string()]));
+
+    assert!(a.has_trace_bit(trace_bits::CALL), "A sees its own :call");
+    assert!(
+        !b.has_trace_bit(trace_bits::CALL),
+        "B must NOT see A's :call — the cells are independent per-instance"
+    );
+    assert_eq!(
+        cell_a.load(Ordering::Relaxed) & trace_bits::CALL,
+        trace_bits::CALL
+    );
+    assert_eq!(
+        cell_b.load(Ordering::Relaxed) & trace_bits::CALL,
+        0,
+        "B's authoritative cell is untouched by A's set_trace"
+    );
+}
+
+/// A reader holding a *clone* of the same cell (the region pool's `PAGES` gate, a
+/// channel's `WakeList`) observes the instance's live trace — one shared bitfield
+/// updated in place by `set_trace`, so a runtime toggle reaches the off-VM readers
+/// without a process-global.
+#[test]
+fn trace_cell_clone_observes_updates() {
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    let cell: TraceCell = Arc::new(AtomicU32::new(0));
+    // Stands in for a RegionPool / WakeList clone of the heap's cell.
+    let reader = Arc::clone(&cell);
+    let mut cfg = RuntimeConfig::from_static_config(&Config::default(), Arc::clone(&cell));
+
+    assert_eq!(reader.load(Ordering::Relaxed) & trace_bits::PAGES, 0);
+    cfg.set_trace(HashSet::from(["pages".to_string()]));
+    assert_eq!(
+        reader.load(Ordering::Relaxed) & trace_bits::PAGES,
+        trace_bits::PAGES,
+        "an off-VM reader holding a clone of the cell sees the live update"
+    );
+}
+
 /// Every defined trace bit must be reachable via `--trace=all`.
 ///
 /// `--trace=all` expands to exactly `TRACE_KEYWORDS` (see `Config::parse`),

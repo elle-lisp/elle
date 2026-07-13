@@ -87,7 +87,12 @@ impl RegionStore {
                 store: self.store_id,
             };
             self.regions[idx] = Some(RegionEntry {
-                pool: RegionPool::new(id, stamp, self.pool.initial_page_size()),
+                pool: RegionPool::new(
+                    id,
+                    stamp,
+                    self.pool.initial_page_size(),
+                    std::sync::Arc::clone(&self.trace),
+                ),
                 reclaim: Reclaim::Counted(1),
                 owned_children: Vec::new(),
                 outgoing: FxHashMap::default(),

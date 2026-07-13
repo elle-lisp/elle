@@ -302,7 +302,11 @@ impl AsyncBackend {
             .as_external::<SignalReceiver>()
             .ok_or("sig-next: expected a signal receiver handle")?;
         let fd = receiver.raw_fd()?;
-        posix_trace(format_args!("submit_sig_next fd={}", fd));
+        // The receiver's own instance trace cell — used for the diagnostic below
+        // and carried into the threadpool `PoolOp` so the worker's blocking-read
+        // `posix_trace` gates per-instance.
+        let trace = receiver.trace();
+        posix_trace(&trace, format_args!("submit_sig_next fd={}", fd));
 
         let mut inner = self.inner.borrow_mut();
         let id = inner.mint_id();
@@ -329,7 +333,7 @@ impl AsyncBackend {
             }
             PlatformBackend::ThreadPool => {
                 #[cfg(any(target_os = "linux", target_os = "android"))]
-                hub.submit(id, PoolOp::SigfdRead { fd })?;
+                hub.submit(id, PoolOp::SigfdRead { fd, trace })?;
                 #[cfg(target_os = "macos")]
                 hub.submit(
                     id,
@@ -340,6 +344,7 @@ impl AsyncBackend {
                         // as the delivery target — see kq_sig_read_blocking
                         // in src/io/threadpool.rs.
                         signals: receiver.signals(),
+                        trace,
                     },
                 )?;
                 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]

@@ -22,26 +22,26 @@
 //! default disposition — preferred to silent swallowing. See
 //! `docs/posix-signals.md` for the user-facing contract.
 
+use crate::config::TraceCell;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-/// Emit a `[trace:posix] …` line to stderr when the `posix` trace bit
-/// is active (set via `--trace=posix`, `--trace=all`, or `(vm/config)`
-/// at runtime). Used to triage POSIX-signal regressions — correlate
-/// these with the per-test progress lines emitted by
-/// `tests/elle/posix.lisp` to pinpoint exactly which kernel call
-/// diverges between Linux and macOS.
+/// Emit a `[trace:posix] …` line to stderr when `trace`'s owning instance has the
+/// `posix` bit set (`--trace=posix`, `--trace=all`, or `(vm/config-set :trace …)`
+/// at runtime). Used to triage POSIX-signal regressions — correlate these with the
+/// per-test progress lines emitted by `tests/elle/posix.lisp` to pinpoint exactly
+/// which kernel call diverges between Linux and macOS.
 ///
-/// Gated on the process-global `crate::config::GLOBAL_TRACE_BITS`
-/// mirror so threadpool worker threads and other off-VM callers (which
-/// have no `&VM` and therefore can't use the per-VM `etrace!` macro)
-/// can still gate cheaply.
+/// `trace` is the instance's own [`TraceCell`], threaded here from a
+/// `SignalReceiver` (which captured it at `os/sig-watch`), a `NativeCtx`'s heap,
+/// or a `PoolOp` that carried it onto a worker thread — so every one of these
+/// context-free call sites gates on the right instance with no process-global.
 ///
 /// Output goes via a direct `write(2, …)` syscall, bypassing the elle
 /// scheduler and Rust's stdio buffering, so trace lines survive even
 /// when the process is about to be killed by an outer timeout.
-pub(crate) fn posix_trace(args: std::fmt::Arguments<'_>) {
-    if !crate::config::global_trace_bit_enabled(crate::config::trace_bits::POSIX) {
+pub(crate) fn posix_trace(trace: &TraceCell, args: std::fmt::Arguments<'_>) {
+    if trace.load(std::sync::atomic::Ordering::Relaxed) & crate::config::trace_bits::POSIX == 0 {
         return;
     }
     let line = format!("[trace:posix] {}\n", args);
@@ -338,7 +338,10 @@ pub fn currently_watched() -> Vec<libc::c_int> {
 /// until a signal in `set` becomes pending — we gate every call on
 /// `sigpending` so it returns immediately. The dequeued signum is
 /// discarded; this is the close path, no one is left to observe it.
-fn drain_pending_blocked(signals: &[libc::c_int]) {
+///
+/// `trace` is the closing receiver's instance trace cell, threaded from
+/// `rollback` for the `posix_trace` diagnostics below.
+fn drain_pending_blocked(trace: &TraceCell, signals: &[libc::c_int]) {
     if signals.is_empty() {
         return;
     }
@@ -363,10 +366,13 @@ fn drain_pending_blocked(signals: &[libc::c_int]) {
         }
         let mut sig_dequeued: libc::c_int = 0;
         let ret = unsafe { libc::sigwait(&drain_set, &mut sig_dequeued) };
-        posix_trace(format_args!(
-            "rollback: drained pending signum={} via sigwait (ret={})",
-            sig_dequeued, ret
-        ));
+        posix_trace(
+            trace,
+            format_args!(
+                "rollback: drained pending signum={} via sigwait (ret={})",
+                sig_dequeued, ret
+            ),
+        );
         if ret != 0 {
             // sigwait shouldn't fail for a blocked, already-pending
             // signal. If it does, fall through to the unblock rather
@@ -374,10 +380,13 @@ fn drain_pending_blocked(signals: &[libc::c_int]) {
             return;
         }
     }
-    posix_trace(format_args!(
-        "rollback: drain loop hit ceiling for signals={:?}; pending instances may remain",
-        signals
-    ));
+    posix_trace(
+        trace,
+        format_args!(
+            "rollback: drain loop hit ceiling for signals={:?}; pending instances may remain",
+            signals
+        ),
+    );
 }
 
 // ── Linux: signalfd ────────────────────────────────────────────────────

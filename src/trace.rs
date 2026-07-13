@@ -1,7 +1,7 @@
 //! Trace macro for runtime-gated debug output.
 //!
-//! Uses the VM's `runtime_config.trace_bits` bitfield for fast hot-path
-//! checks. No HashSet lookup — just a bitwise AND.
+//! Gates on the VM's `runtime_config.has_trace_bit` — one relaxed atomic load
+//! of this instance's shared trace cell, no HashSet lookup.
 //!
 //! Format: `[trace:SUBSYSTEM] message` for easy grep filtering.
 

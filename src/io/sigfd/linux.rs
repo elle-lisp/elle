@@ -1,9 +1,16 @@
 use super::{drain_pending_blocked, posix_trace, with_watched_set, SigEvent};
+use crate::config::TraceCell;
 use std::cell::RefCell;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 pub(crate) struct SignalReceiver {
     inner: RefCell<SignalReceiverInner>,
+    /// The owning instance's trace cell (captured at `os/sig-watch` from the
+    /// `NativeCtx`'s heap). Held outside the `RefCell` so `Drop` reads it without
+    /// borrowing `inner`. Threaded to `posix_trace` here and — via the
+    /// `SigfdRead`/`KqSigRead` `PoolOp` — onto the blocking-read worker thread, so
+    /// every POSIX diagnostic gates on this receiver's instance, not a global.
+    trace: TraceCell,
 }
 
 struct SignalReceiverInner {
@@ -15,11 +22,11 @@ struct SignalReceiverInner {
 }
 
 impl SignalReceiver {
-    pub fn new(signals: Vec<libc::c_int>) -> Result<Self, String> {
-        posix_trace(format_args!(
-            "linux: SignalReceiver::new signals={:?}",
-            signals
-        ));
+    pub fn new(signals: Vec<libc::c_int>, trace: TraceCell) -> Result<Self, String> {
+        posix_trace(
+            &trace,
+            format_args!("linux: SignalReceiver::new signals={:?}", signals),
+        );
         // Reject sigkill/sigstop — kernel forbids blocking them.
         for &s in &signals {
             if s == libc::SIGKILL || s == libc::SIGSTOP {
@@ -48,9 +55,10 @@ impl SignalReceiver {
         unsafe {
             libc::pthread_sigmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
         }
-        posix_trace(format_args!(
-            "linux: blocked newly-watched signals on main thread"
-        ));
+        posix_trace(
+            &trace,
+            format_args!("linux: blocked newly-watched signals on main thread"),
+        );
 
         // Build the signalfd mask: all watched signals (including
         // ones that were already blocked by some other receiver).
@@ -63,14 +71,14 @@ impl SignalReceiver {
         if fd < 0 {
             // Roll back refcounts and unblock the signals we just blocked.
             let err = std::io::Error::last_os_error();
-            posix_trace(format_args!("linux: signalfd() failed: {}", err));
-            rollback(&signals);
+            posix_trace(&trace, format_args!("linux: signalfd() failed: {}", err));
+            rollback(&trace, &signals);
             return Err(format!("os/sig-watch: signalfd: {}", err));
         }
-        posix_trace(format_args!(
-            "linux: signalfd opened fd={} for {:?}",
-            fd, signals
-        ));
+        posix_trace(
+            &trace,
+            format_args!("linux: signalfd opened fd={} for {:?}", fd, signals),
+        );
 
         Ok(SignalReceiver {
             inner: RefCell::new(SignalReceiverInner {
@@ -78,7 +86,14 @@ impl SignalReceiver {
                 fd: Some(unsafe { OwnedFd::from_raw_fd(fd) }),
                 signals,
             }),
+            trace,
         })
+    }
+
+    /// This receiver's instance trace cell, for the `posix_trace` sites that hold
+    /// the receiver Value (io-completion, sig-next submit) rather than `&self`.
+    pub fn trace(&self) -> TraceCell {
+        std::sync::Arc::clone(&self.trace)
     }
 
     pub fn raw_fd(&self) -> Result<RawFd, String> {
@@ -97,19 +112,23 @@ impl SignalReceiver {
     pub fn close(&self) {
         let mut inner = self.inner.borrow_mut();
         if inner.fd.is_none() {
-            posix_trace(format_args!(
-                "linux: SignalReceiver::close already closed (idempotent)"
-            ));
+            posix_trace(
+                &self.trace,
+                format_args!("linux: SignalReceiver::close already closed (idempotent)"),
+            );
             return;
         }
-        posix_trace(format_args!(
-            "linux: SignalReceiver::close fd={:?} signals={:?}",
-            inner.fd.as_ref().map(|f| f.as_raw_fd()),
-            inner.signals
-        ));
+        posix_trace(
+            &self.trace,
+            format_args!(
+                "linux: SignalReceiver::close fd={:?} signals={:?}",
+                inner.fd.as_ref().map(|f| f.as_raw_fd()),
+                inner.signals
+            ),
+        );
         // Dropping the OwnedFd closes the descriptor.
         inner.fd = None;
-        rollback(&inner.signals);
+        rollback(&self.trace, &inner.signals);
         inner.signals.clear();
     }
 
@@ -140,7 +159,7 @@ impl Drop for SignalReceiver {
         // Taking the OwnedFd drops (closes) it; roll back the signal
         // refcounts only if we hadn't already been closed explicitly.
         if inner.fd.take().is_some() {
-            rollback(&inner.signals);
+            rollback(&self.trace, &inner.signals);
         }
     }
 }
@@ -158,7 +177,7 @@ impl std::fmt::Debug for SignalReceiver {
     }
 }
 
-fn rollback(signals: &[libc::c_int]) {
+fn rollback(trace: &TraceCell, signals: &[libc::c_int]) {
     // Decrement refcounts; collect signals whose refcount fell to
     // zero so we can pthread_sigmask-unblock them.
     //
@@ -204,11 +223,14 @@ fn rollback(signals: &[libc::c_int]) {
         // queued is harmless on its own, but a future user
         // os/sig-watch on the same signum would observe stale
         // pending state. See `drain_pending_blocked`.
-        posix_trace(format_args!(
-            "linux: rollback draining newly_freed={:?}; unblocking subset {:?}",
-            newly_freed_drainable, newly_freed_unblockable
-        ));
-        drain_pending_blocked(&newly_freed_drainable);
+        posix_trace(
+            trace,
+            format_args!(
+                "linux: rollback draining newly_freed={:?}; unblocking subset {:?}",
+                newly_freed_drainable, newly_freed_unblockable
+            ),
+        );
+        drain_pending_blocked(trace, &newly_freed_drainable);
         if !newly_freed_unblockable.is_empty() {
             unsafe {
                 libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());

@@ -71,13 +71,24 @@ pub struct FiberHeap {
     /// Regions held on behalf of this instance — resident roots the teardown
     /// sweep releases by RC (decref once) so their graph can be reclaimed.
     process_roots: Vec<RuntimeRegion>,
+    /// This instance's authoritative trace bitfield (`--trace=` / runtime
+    /// `(vm/config-set :trace …)`). The VM's `RuntimeConfig` and the region
+    /// pool's `PAGES` gate each hold a clone of this one cell, so a diagnostic
+    /// toggle is scoped to this instance — two coexisting heaps never share it.
+    trace: crate::config::TraceCell,
 }
 
 impl FiberHeap {
     pub fn new() -> Self {
         let cfg = crate::config::get();
+        let trace: crate::config::TraceCell =
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         FiberHeap {
-            region_store: RegionStore::new(cfg.region_page_size, cfg.page_pool_max),
+            region_store: RegionStore::new(
+                cfg.region_page_size,
+                cfg.page_pool_max,
+                std::sync::Arc::clone(&trace),
+            ),
             alloc_count: 0,
             peak_alloc_count: 0,
             custom_alloc_stack: Vec::new(),
@@ -86,7 +97,16 @@ impl FiberHeap {
             default_traits: Vec::new(),
             root_region: None,
             process_roots: Vec::new(),
+            trace,
         }
+    }
+
+    /// A clone of this instance's trace cell, for a reader that lives off the VM
+    /// (the VM's `RuntimeConfig`, a channel's `WakeList`, a spawned worker). Every
+    /// clone reads and writes the same bitfield, so the whole instance shares one
+    /// trace state.
+    pub fn trace_cell(&self) -> crate::config::TraceCell {
+        std::sync::Arc::clone(&self.trace)
     }
 
     // ── Instance-owned rider state ──────────────────────────────────────

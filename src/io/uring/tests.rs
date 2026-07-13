@@ -80,7 +80,10 @@ fn sig_next_via_uring_returns_after_kill_to_self() {
 /// Returns small positive codes identifying the failing step so
 /// the parent's panic message points at the broken kernel call.
 fn sig_next_uring_child_logic() -> i32 {
-    let r = match SignalReceiver::new(vec![libc::SIGUSR1]) {
+    let r = match SignalReceiver::new(
+        vec![libc::SIGUSR1],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    ) {
         Ok(r) => r,
         Err(_) => return 31,
     };

@@ -9,6 +9,32 @@ fn rr(n: u32) -> RuntimeRegion {
     RuntimeRegion::new(n).unwrap()
 }
 
+/// Each `FiberHeap` owns an independent trace cell — two coexisting instances in
+/// one process never share a diagnostic toggle (the multi-instance correctness the
+/// trace relocation restores). Setting one heap's cell leaves the other's at zero,
+/// and a heap hands out a *clone* of its one cell, not a fresh one each call.
+#[test]
+fn heaps_have_independent_trace_cells() {
+    use std::sync::atomic::Ordering;
+    let h1 = FiberHeap::new();
+    let h2 = FiberHeap::new();
+    let c1 = h1.trace_cell();
+    let c2 = h2.trace_cell();
+
+    c1.store(crate::config::trace_bits::PAGES, Ordering::Relaxed);
+    assert_eq!(c1.load(Ordering::Relaxed), crate::config::trace_bits::PAGES);
+    assert_eq!(
+        c2.load(Ordering::Relaxed),
+        0,
+        "a second heap's trace cell must be independent of the first's"
+    );
+    assert_eq!(
+        h1.trace_cell().load(Ordering::Relaxed),
+        crate::config::trace_bits::PAGES,
+        "trace_cell() returns a clone of the one heap cell, so the write is visible"
+    );
+}
+
 #[test]
 fn test_fiber_heap_alloc_in_region() {
     let mut heap = FiberHeap::new();

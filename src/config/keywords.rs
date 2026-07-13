@@ -99,16 +99,17 @@ pub mod trace_bits {
     pub const ESCAPE: u32 = 1 << 15;
     pub const BYTECODE: u32 = 1 << 16;
     /// POSIX-signal subsystem (os/sig-* primitives, signalfd / kqueue
-    /// EVFILT_SIGNAL plumbing, threadpool blocking sig reads). Read both
-    /// from a per-VM `RuntimeConfig` via `has_trace_bit` and from the
-    /// process-global mirror `GLOBAL_TRACE_BITS` (below) — threadpool
-    /// worker threads and other off-VM call sites have no VM reference.
+    /// EVFILT_SIGNAL plumbing, threadpool blocking sig reads). Read via
+    /// `sigfd::posix_trace`, which takes the instance's trace cell — threaded
+    /// from the `SignalReceiver` (captured at `os/sig-watch`), a `NativeCtx`'s
+    /// heap, or a `PoolOp` that carried it onto a worker thread; these sites
+    /// have no VM reference (src/io/sigfd.rs).
     pub const POSIX: u32 = 1 << 17;
     /// Channel wake protocol (`chan/wait-ready` register/deregister,
-    /// `chan/send` wake_all, wake-fd write/close).  Read both from
-    /// per-VM `RuntimeConfig` and from `GLOBAL_TRACE_BITS` — `chan/send`
-    /// can fire from any thread (including `sys/spawn`'d OS threads)
-    /// which has no `&VM` reference.
+    /// `chan/send` wake_all, wake-fd write/close). Read through the
+    /// channel's `WakeList`-carried trace cell (a clone of the creating
+    /// instance's), so a cross-thread `chan/send` (from a `sys/spawn`'d OS
+    /// thread with no `&VM`) still gates on the right instance.
     pub const CHAN: u32 = 1 << 18;
     pub const RC: u32 = 1 << 19;
     pub const REGIONS: u32 = 1 << 20;

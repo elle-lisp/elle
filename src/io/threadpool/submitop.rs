@@ -375,14 +375,16 @@ impl CompletionHub {
                 }
                 PoolOp::WatchRead { fd } => watch_read_blocking(fd),
                 #[cfg(any(target_os = "linux", target_os = "android"))]
-                PoolOp::SigfdRead { fd } => sigfd_read_blocking(fd),
+                PoolOp::SigfdRead { fd, trace } => sigfd_read_blocking(&trace, fd),
                 #[cfg(not(any(target_os = "linux", target_os = "android")))]
                 PoolOp::SigfdRead { .. } => (
                     -libc::ENOTSUP,
                     b"sig-next: signalfd not supported on this platform".to_vec(),
                 ),
                 #[cfg(target_os = "macos")]
-                PoolOp::KqSigRead { fd, signals } => kq_sig_read_blocking(fd, &signals),
+                PoolOp::KqSigRead { fd, signals, trace } => {
+                    kq_sig_read_blocking(&trace, fd, &signals)
+                }
                 #[cfg(not(target_os = "macos"))]
                 PoolOp::KqSigRead { .. } => (
                     -libc::ENOTSUP,

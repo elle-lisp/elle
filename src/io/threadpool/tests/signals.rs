@@ -133,7 +133,10 @@ fn sig_read_child_logic() -> i32 {
     use crate::io::sigfd::SignalReceiver;
     use std::time::Duration;
 
-    let r = match SignalReceiver::new(vec![libc::SIGUSR1]) {
+    let r = match SignalReceiver::new(
+        vec![libc::SIGUSR1],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    ) {
         Ok(r) => r,
         Err(_) => return 11,
     };
@@ -144,13 +147,20 @@ fn sig_read_child_logic() -> i32 {
 
     let mut pool = CompletionHub::new();
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let submit = pool.submit(SubmissionId::from_raw(1), PoolOp::SigfdRead { fd });
+    let submit = pool.submit(
+        SubmissionId::from_raw(1),
+        PoolOp::SigfdRead {
+            fd,
+            trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        },
+    );
     #[cfg(target_os = "macos")]
     let submit = pool.submit(
         1,
         PoolOp::KqSigRead {
             fd,
             signals: vec![libc::SIGUSR1],
+            trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         },
     );
     if submit.is_err() {
@@ -227,7 +237,10 @@ fn close_drain_child_logic() -> i32 {
     use crate::io::sigfd::SignalReceiver;
     use std::time::Duration;
 
-    let r = match SignalReceiver::new(vec![libc::SIGUSR1]) {
+    let r = match SignalReceiver::new(
+        vec![libc::SIGUSR1],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    ) {
         Ok(r) => r,
         Err(_) => return 21,
     };
@@ -243,13 +256,20 @@ fn close_drain_child_logic() -> i32 {
     }
     let mut pool = CompletionHub::new();
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let submit = pool.submit(SubmissionId::from_raw(1), PoolOp::SigfdRead { fd });
+    let submit = pool.submit(
+        SubmissionId::from_raw(1),
+        PoolOp::SigfdRead {
+            fd,
+            trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        },
+    );
     #[cfg(target_os = "macos")]
     let submit = pool.submit(
         1,
         PoolOp::KqSigRead {
             fd,
             signals: vec![libc::SIGUSR1],
+            trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         },
     );
     if submit.is_err() {

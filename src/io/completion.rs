@@ -231,12 +231,21 @@ pub(super) fn process_raw_completion(
             Completion::ok(id, ctx.array(event_values))
         }
         PendingOp::SigNext { receiver, .. } => {
-            crate::io::sigfd::posix_trace(format_args!(
-                "completion: SigNext id={} result_code={} data_len={}",
-                id,
-                result_code,
-                data.len()
-            ));
+            // The receiver's own instance trace cell gates these diagnostics
+            // per-instance (the completion runs on the scheduler thread, off any VM).
+            let recv = receiver.as_external::<crate::io::sigfd::SignalReceiver>();
+            let trace = recv.map(|r| r.trace());
+            if let Some(t) = &trace {
+                crate::io::sigfd::posix_trace(
+                    t,
+                    format_args!(
+                        "completion: SigNext id={} result_code={} data_len={}",
+                        id,
+                        result_code,
+                        data.len()
+                    ),
+                );
+            }
             if result_code <= 0 {
                 let msg = if result_code == 0 {
                     "signal receiver closed".to_string()
@@ -248,16 +257,17 @@ pub(super) fn process_raw_completion(
                 };
                 return Completion::err(id, crate::io::io_error("io-error", msg, origin_heap));
             }
-            let events = if let Some(r) = receiver.as_external::<crate::io::sigfd::SignalReceiver>()
-            {
+            let events = if let Some(r) = recv {
                 r.parse_events(&data[..result_code as usize])
             } else {
                 Vec::new()
             };
-            crate::io::sigfd::posix_trace(format_args!(
-                "completion: SigNext parsed {} events",
-                events.len()
-            ));
+            if let Some(t) = &trace {
+                crate::io::sigfd::posix_trace(
+                    t,
+                    format_args!("completion: SigNext parsed {} events", events.len()),
+                );
+            }
             // One shared region (the ctx's): each event struct lives inside the array.
             let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
             let ctx = crate::primitives::ctx::Alloc::new(heap);

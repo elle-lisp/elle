@@ -119,6 +119,10 @@ pub(crate) struct RegionStore {
     /// from its earlier incarnation by generation. `None` outside such a scope
     /// (the common case: one branch on the mint path).
     mint_log: Option<Vec<(u32, u32)>>,
+    /// This instance's trace cell (a clone of the heap's), handed to each
+    /// `RegionPool` at creation so the `PAGES` page-claim gate reads its own
+    /// instance's trace state rather than a process-global.
+    trace: crate::config::TraceCell,
 }
 
 mod alloc;
@@ -148,7 +152,11 @@ static NEXT_STORE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU3
 const MAX_PLAUSIBLE_REGION_ID: u32 = 1 << 28;
 
 impl RegionStore {
-    pub fn new(initial_page_size: usize, max_cached: usize) -> Self {
+    pub fn new(
+        initial_page_size: usize,
+        max_cached: usize,
+        trace: crate::config::TraceCell,
+    ) -> Self {
         RegionStore {
             regions: Vec::new(),
             pool: PagePool::new(initial_page_size, max_cached),
@@ -157,6 +165,7 @@ impl RegionStore {
             generations: Vec::new(),
             store_id: NEXT_STORE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             mint_log: None,
+            trace,
         }
     }
 
@@ -191,7 +200,11 @@ impl Drop for RegionStore {
 
 impl Default for RegionStore {
     fn default() -> Self {
-        Self::new(super::pagepool::BASE_PAGE, 4 * 1024 * 1024)
+        Self::new(
+            super::pagepool::BASE_PAGE,
+            4 * 1024 * 1024,
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        )
     }
 }
 

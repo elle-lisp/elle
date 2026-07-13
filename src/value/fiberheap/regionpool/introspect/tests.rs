@@ -146,7 +146,9 @@ fn obj_with_value_in_every_channel(
                 handle: crate::value::heap::ThreadHandle {
                     result: std::sync::Arc::new(std::sync::Mutex::new(None)),
                     done_rx: crossbeam_channel::unbounded().1,
-                    done_wake: crate::primitives::chan::WakeList::new(),
+                    done_wake: crate::primitives::chan::WakeList::new(std::sync::Arc::new(
+                        std::sync::atomic::AtomicU32::new(0),
+                    )),
                 },
                 traits: vt,
             },

@@ -217,7 +217,15 @@
       # timeout, but it runs (docs/test-runner.md § Isolation). Any other
       # thread-error (e.g. a worker panic) stays a recorded fail.
       (if (serialization-error? (get outcome 1))
-        (capture-run tier thunk out-path err-path)
+        # In-process runs share the MAIN VM, so a form that sets :trace (e.g.
+        # config.lisp / trace.lisp toggling :call) and never clears it — an
+        # assert aborts first — would leave the runner's own machinery traced.
+        # Save and restore the main VM's trace around the run to contain it
+        # (worker runs are already isolated by their fresh VM).
+        (let [saved-trace (vm/config :trace)
+              r (capture-run tier thunk out-path err-path)]
+          (vm/config-set :trace saved-trace)
+          r)
         (struct :result [false (get outcome 1)] :stdout "" :stderr "")))))
 
 # Run THUNK as a scheduled, PUMPED fiber and capture its stdout/stderr. Elle has
@@ -290,11 +298,15 @@
       # JIT policy is set for the run and restored after (it is shared, not fresh).
       (if (serialization-error? (get outcome 1))
         (let [saved (vm/config :jit)
+              saved-trace (vm/config :trace)
               thunk (get (get (compile/whole-module-syntax forms name) 0) 1)]
           (vm/config-set :jit policy)
           (let [r (capture-pumped ev/run ev/spawn ev/join *stdout* *stderr*
                                   thunk out-path err-path)]
             (vm/config-set :jit saved)
+            # Restore the main VM's trace too: a whole-file form that sets
+            # :trace and aborts before clearing must not bleed into the runner.
+            (vm/config-set :trace saved-trace)
             r))
         (struct :result [false (get outcome 1)] :stdout "" :stderr "")))))
 

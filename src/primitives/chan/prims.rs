@@ -166,7 +166,7 @@ pub(super) fn prim_chan_new(
         crossbeam_channel::bounded(cap)
     };
 
-    let wake = WakeList::new();
+    let wake = WakeList::new(ctx.heap_mut().trace_cell());
     let sender = ctx.external(
         "chan/sender",
         ChanSender(RefCell::new(Some(tx)), Arc::clone(&wake)),
@@ -423,9 +423,12 @@ pub(super) fn prim_chan_wait_ready(
     };
 
     match with_receivers(&args[0], "chan/wait-ready", ctx, |recvs, ctx| {
+        // The selecting instance's trace cell — carried into the wake fds and the
+        // park guard so their `chan_trace` lines gate on this instance's trace.
+        let trace = ctx.heap_mut().trace_cell();
         let wake_lists: Vec<Arc<WakeList>> = recvs.iter().map(|r| Arc::clone(&r.1)).collect();
 
-        let (poll_fd, wake_fd) = match make_wake_fd() {
+        let (poll_fd, wake_fd) = match make_wake_fd(&trace) {
             Ok(pair) => pair,
             Err(e) => {
                 return (
@@ -510,6 +513,7 @@ pub(super) fn prim_chan_wait_ready(
                 poll_fd,
                 wake_fd,
                 wake_lists,
+                trace: trace.clone(),
             };
             return (SIG_OK, result);
         }
@@ -518,6 +522,7 @@ pub(super) fn prim_chan_wait_ready(
             poll_fd,
             wake_fd,
             wake_lists,
+            trace,
         };
         let cell = ChanSelectGuardCell::new(guard);
         let req = IoRequest::with_timeout(ctx, IoOp::ChanSelectPark(cell), Value::NIL, timeout);

@@ -4,9 +4,16 @@ use super::super::pagepool::BASE_PAGE;
 use super::*;
 use crate::value::heap::Pair;
 
-/// A pool for `region_id` with a default (generation 0, store 0) stamp.
+/// A pool for `region_id` with a default (generation 0, store 0) stamp and an
+/// isolated (all-zero) trace cell — these unit tests never exercise the `PAGES`
+/// gate.
 fn pool_for(region_id: u32) -> RegionPool {
-    RegionPool::new(region_id, PageStamp::default(), BASE_PAGE)
+    RegionPool::new(
+        region_id,
+        PageStamp::default(),
+        BASE_PAGE,
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    )
 }
 
 fn cons_obj() -> HeapObject {
@@ -191,7 +198,12 @@ fn page_header_stamp_roundtrip() {
         generation: 7,
         store: 9,
     };
-    let mut rp = RegionPool::new(42, stamp, 4096);
+    let mut rp = RegionPool::new(
+        42,
+        stamp,
+        4096,
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    );
     let v = rp.alloc_obj(cons_obj(), &mut pool);
     let ptr = v.as_heap_ptr().unwrap();
     let (rid, read_back) = unsafe { header_of_page_ptr(ptr, 4096) };

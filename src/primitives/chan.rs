@@ -48,23 +48,30 @@ pub struct WakeList {
     /// Write-side fds.  Iterated under `fds` lock from `wake_all`.
     wake_fds: Mutex<Vec<RawFd>>,
     nonempty: AtomicBool,
+    /// The trace cell of the instance that created this channel (a clone of its
+    /// heap's). `chan_trace` gates on it, so a `--trace=chan` toggle is scoped to
+    /// this channel's own instance — a cross-thread `chan/send` (from `sys/spawn`,
+    /// which holds no `&VM`) still reads the right instance's trace because the
+    /// `WakeList` travels with the channel.
+    trace: crate::config::TraceCell,
 }
 
-/// Trace channel wake events (register / deregister / wake_all /
-/// write / close) to stderr when `--trace=chan` is set.  Gated on the
-/// process-global trace bits so threadpool worker threads and other
-/// off-VM sites (which have no `&VM` reference) gate cheaply.
+/// True when this channel's instance has the `chan` trace bit set. Read through
+/// the channel's own [`WakeList`]-carried trace cell — per-instance, no
+/// process-global, so a cross-thread send still gates on the creating instance.
+fn chan_trace_enabled(trace: &crate::config::TraceCell) -> bool {
+    trace.load(Ordering::Relaxed) & crate::config::trace_bits::CHAN != 0
+}
+
+/// Trace channel wake events (register / deregister / wake_all / write / close)
+/// to stderr when the channel's instance has `--trace=chan` set.
 ///
 /// Mirrors `posix_trace` in `io::sigfd`: direct `write(2, …)` syscall
 /// to bypass Rust stdio buffering, so trace lines survive even when
 /// the process is about to be killed by an outer timeout.
-fn chan_trace_enabled() -> bool {
-    crate::config::global_trace_bit_enabled(crate::config::trace_bits::CHAN)
-}
-
 #[inline]
-fn chan_trace(args: std::fmt::Arguments<'_>) {
-    if !chan_trace_enabled() {
+fn chan_trace(trace: &crate::config::TraceCell, args: std::fmt::Arguments<'_>) {
+    if !chan_trace_enabled(trace) {
         return;
     }
     let line = format!("[trace:chan] {}\n", args);
@@ -76,10 +83,14 @@ fn chan_trace(args: std::fmt::Arguments<'_>) {
 }
 
 impl WakeList {
-    pub fn new() -> Arc<Self> {
+    /// Build a wake list carrying `trace` — the creating instance's trace cell
+    /// (`ctx.heap().trace_cell()`), so every `chan_trace` this channel emits gates
+    /// on that instance's own `--trace=chan` state.
+    pub fn new(trace: crate::config::TraceCell) -> Arc<Self> {
         Arc::new(WakeList {
             wake_fds: Mutex::new(Vec::new()),
             nonempty: AtomicBool::new(false),
+            trace,
         })
     }
 
@@ -90,11 +101,10 @@ impl WakeList {
         let mut fds = self.wake_fds.lock().expect("WakeList lock poisoned");
         fds.push(wake_fd);
         self.nonempty.store(true, Ordering::Release);
-        chan_trace(format_args!(
-            "register fd={} (wake-list len now {})",
-            wake_fd,
-            fds.len()
-        ));
+        chan_trace(
+            &self.trace,
+            format_args!("register fd={} (wake-list len now {})", wake_fd, fds.len()),
+        );
     }
 
     fn deregister(&self, wake_fd: RawFd) {
@@ -105,12 +115,15 @@ impl WakeList {
         if fds.is_empty() {
             self.nonempty.store(false, Ordering::Release);
         }
-        chan_trace(format_args!(
-            "deregister fd={} ({}→{} entries)",
-            wake_fd,
-            before,
-            fds.len()
-        ));
+        chan_trace(
+            &self.trace,
+            format_args!(
+                "deregister fd={} ({}→{} entries)",
+                wake_fd,
+                before,
+                fds.len()
+            ),
+        );
     }
 
     /// Signal every registered wake fd.  Called after a successful
@@ -126,9 +139,12 @@ impl WakeList {
             return;
         }
         let fds = self.wake_fds.lock().expect("WakeList lock poisoned");
-        chan_trace(format_args!("wake_all signaling {} fd(s)", fds.len()));
+        chan_trace(
+            &self.trace,
+            format_args!("wake_all signaling {} fd(s)", fds.len()),
+        );
         for &fd in fds.iter() {
-            wake_fd_signal(fd);
+            wake_fd_signal(&self.trace, fd);
         }
     }
 }
@@ -138,43 +154,43 @@ impl WakeList {
 /// pipe (single-byte write).  Either way the matching poll on the
 /// scheduler thread observes POLLIN and resumes the parked fiber.
 #[cfg(target_os = "linux")]
-fn wake_fd_signal(fd: RawFd) {
+fn wake_fd_signal(trace: &crate::config::TraceCell, fd: RawFd) {
     debug_assert!(fd >= 0, "wake_fd_signal: invalid fd {}", fd);
     // Same 8-byte eventfd write the io backend's bridge uses to wake the
     // scheduler; one definition lives in `crate::io::eventfd`. Failures (EAGAIN
     // on counter overflow, EBADF on already-closed) are benign for the wake
     // protocol — a parked poll either already observed POLLIN or no longer cares.
     let ret = crate::io::eventfd::signal(fd);
-    if chan_trace_enabled() {
+    if chan_trace_enabled(trace) {
         let err = if ret < 0 {
             std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
         } else {
             0
         };
-        chan_trace(format_args!(
-            "write(eventfd={}, 1) -> {} errno={}",
-            fd, ret, err
-        ));
+        chan_trace(
+            trace,
+            format_args!("write(eventfd={}, 1) -> {} errno={}", fd, ret, err),
+        );
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn wake_fd_signal(fd: RawFd) {
+fn wake_fd_signal(trace: &crate::config::TraceCell, fd: RawFd) {
     debug_assert!(fd >= 0, "wake_fd_signal: invalid fd {}", fd);
     let one: u8 = 1;
     // SAFETY: a single-byte write to a pipe fd is always valid;
     // failures are benign — see Linux variant.
     let ret = unsafe { libc::write(fd, &one as *const u8 as *const libc::c_void, 1) };
-    if chan_trace_enabled() {
+    if chan_trace_enabled(trace) {
         let err = if ret < 0 {
             std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
         } else {
             0
         };
-        chan_trace(format_args!(
-            "write(pipe={}, 1) -> {} errno={}",
-            fd, ret, err
-        ));
+        chan_trace(
+            trace,
+            format_args!("write(pipe={}, 1) -> {} errno={}", fd, ret, err),
+        );
     }
 }
 
@@ -186,16 +202,16 @@ fn wake_fd_signal(fd: RawFd) {
 /// senders MUST write to `wake_fd`, not `poll_fd`.  Both ends are set
 /// `O_NONBLOCK | O_CLOEXEC`.
 #[cfg(target_os = "linux")]
-fn make_wake_fd() -> std::io::Result<(RawFd, RawFd)> {
+fn make_wake_fd(trace: &crate::config::TraceCell) -> std::io::Result<(RawFd, RawFd)> {
     // One non-blocking, close-on-exec eventfd; poll and wake share the one fd on
     // Linux. The same `crate::io::eventfd::create` backs the io backend's bridge.
     let fd = crate::io::eventfd::create()?;
-    chan_trace(format_args!("alloc eventfd={}", fd));
+    chan_trace(trace, format_args!("alloc eventfd={}", fd));
     Ok((fd, fd))
 }
 
 #[cfg(not(target_os = "linux"))]
-fn make_wake_fd() -> std::io::Result<(RawFd, RawFd)> {
+fn make_wake_fd(trace: &crate::config::TraceCell) -> std::io::Result<(RawFd, RawFd)> {
     let mut fds: [libc::c_int; 2] = [-1, -1];
     // SAFETY: fds is a 2-element c_int array; pipe(2) writes both
     // entries on success and neither on failure.
@@ -230,10 +246,13 @@ fn make_wake_fd() -> std::io::Result<(RawFd, RawFd)> {
             }
         }
     }
-    chan_trace(format_args!(
-        "alloc pipe poll_fd(read)={} wake_fd(write)={}",
-        read_fd, write_fd
-    ));
+    chan_trace(
+        trace,
+        format_args!(
+            "alloc pipe poll_fd(read)={} wake_fd(write)={}",
+            read_fd, write_fd
+        ),
+    );
     Ok((read_fd, write_fd))
 }
 
@@ -248,6 +267,9 @@ pub struct ChanSelectGuard {
     poll_fd: RawFd,
     wake_fd: RawFd,
     wake_lists: Vec<Arc<WakeList>>,
+    /// The selecting instance's trace cell (from `ctx` at `chan/wait-ready`),
+    /// so the guard's own wake/close `chan_trace` lines gate per-instance.
+    trace: crate::config::TraceCell,
 }
 
 impl ChanSelectGuard {
@@ -277,11 +299,11 @@ impl Drop for ChanSelectGuard {
         // Then wake any in-flight poll so it returns before we close
         // the fd — critical on the thread-pool backend where a worker
         // may still be in libc::poll(2).
-        wake_fd_signal(self.wake_fd);
-        chan_trace(format_args!(
-            "close poll_fd={} wake_fd={}",
-            self.poll_fd, self.wake_fd
-        ));
+        wake_fd_signal(&self.trace, self.wake_fd);
+        chan_trace(
+            &self.trace,
+            format_args!("close poll_fd={} wake_fd={}", self.poll_fd, self.wake_fd),
+        );
         // SAFETY: we own both fds; closing twice (same value on Linux)
         // is guarded by a wake_fd == poll_fd check.
         unsafe {

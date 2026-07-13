@@ -95,6 +95,9 @@ pub(super) enum PoolOp {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     SigfdRead {
         fd: RawFd,
+        /// The watching receiver's instance trace cell, carried onto the worker
+        /// thread so its `posix_trace` diagnostics gate per-instance.
+        trace: crate::config::TraceCell,
     },
     /// Blocking kevent() on a kqueue fd registered with EVFILT_SIGNAL (macOS).
     /// On Linux the corresponding op is `SigfdRead`.
@@ -112,6 +115,9 @@ pub(super) enum PoolOp {
     KqSigRead {
         fd: RawFd,
         signals: Vec<libc::c_int>,
+        /// The watching receiver's instance trace cell, carried onto the worker
+        /// thread so its `posix_trace` diagnostics gate per-instance.
+        trace: crate::config::TraceCell,
     },
     /// Poll a raw fd for readiness via libc::poll(). Returns revents mask.
     PollFd {

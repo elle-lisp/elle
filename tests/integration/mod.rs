@@ -137,6 +137,9 @@ mod scratch {
 mod truncation {
     include!("truncation.rs");
 }
+mod trace_isolation {
+    include!("trace_isolation.rs");
+}
 mod spawn_stack {
     include!("spawn_stack.rs");
 }

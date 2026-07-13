@@ -111,7 +111,9 @@ fn spawn_closure_impl(
     // wait. The sentinel is an immediate integer (no heap) — trivially safe to
     // cross threads.
     let (done_tx, done_rx) = crossbeam_channel::unbounded::<SendableValue>();
-    let done_wake = WakeList::new();
+    // The completion channel's wake list carries the spawning instance's trace
+    // cell, so a `chan_trace` on the joiner's wake path gates on that instance.
+    let done_wake = WakeList::new(ctx.heap_mut().trace_cell());
     let worker_wake = Arc::clone(&done_wake);
 
     // Size the worker's stack to the main thread's (see `worker_stack_size`):

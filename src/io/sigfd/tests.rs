@@ -53,7 +53,11 @@ fn parse_events_decodes_synthesized_siginfo() {
     }
     // Create a SignalReceiver just to call parse_events; the fd it
     // opens is real but we don't read from it.
-    let r = SignalReceiver::new(vec![libc::SIGWINCH]).expect("receiver");
+    let r = SignalReceiver::new(
+        vec![libc::SIGWINCH],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    )
+    .expect("receiver");
     let events = r.parse_events(&buf);
     r.close();
     assert_eq!(events.len(), 2);
@@ -84,11 +88,19 @@ fn refcount_block_while_watched_absorb_set_stays_blocked_after_close() {
         }
         assert!(!current_thread_blocked().contains(&libc::SIGURG));
 
-        let r1 = SignalReceiver::new(vec![libc::SIGURG]).unwrap();
+        let r1 = SignalReceiver::new(
+            vec![libc::SIGURG],
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        )
+        .unwrap();
         assert!(current_thread_blocked().contains(&libc::SIGURG));
         assert!(currently_watched().contains(&libc::SIGURG));
 
-        let r2 = SignalReceiver::new(vec![libc::SIGURG]).unwrap();
+        let r2 = SignalReceiver::new(
+            vec![libc::SIGURG],
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        )
+        .unwrap();
         assert!(current_thread_blocked().contains(&libc::SIGURG));
 
         r1.close();
@@ -112,13 +124,19 @@ fn refcount_block_while_watched_absorb_set_stays_blocked_after_close() {
 
 #[test]
 fn cannot_watch_sigkill() {
-    let r = SignalReceiver::new(vec![libc::SIGKILL]);
+    let r = SignalReceiver::new(
+        vec![libc::SIGKILL],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    );
     assert!(r.is_err());
 }
 
 #[test]
 fn cannot_watch_sigstop() {
-    let r = SignalReceiver::new(vec![libc::SIGSTOP]);
+    let r = SignalReceiver::new(
+        vec![libc::SIGSTOP],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    );
     assert!(r.is_err());
 }
 
@@ -375,7 +393,10 @@ fn sigusr1_absorbed_when_unwatched() {
 fn watcher_overrides_builtin_for_sigterm() {
     let status = fork_run(5, || {
         init_process_signals();
-        let r = match SignalReceiver::new(vec![libc::SIGTERM]) {
+        let r = match SignalReceiver::new(
+            vec![libc::SIGTERM],
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        ) {
             Ok(r) => r,
             Err(_) => return 81,
         };

@@ -59,16 +59,13 @@ impl VM {
         // Root fiber starts alive (it's the currently executing context)
         fiber.status = crate::value::FiberStatus::Alive;
 
-        let rc = crate::config::RuntimeConfig::from_static_config(crate::config::get());
-        // Merge --trace= keywords from CLI into the RuntimeConfig
-        let mut rc = rc;
-        if !crate::config::get().trace_keywords.is_empty() {
-            let mut kws = rc.trace.clone();
-            for kw in &crate::config::get().trace_keywords {
-                kws.insert(kw.clone());
-            }
-            rc.set_trace(kws);
-        }
+        // Root the VM's trace state in THIS instance's heap cell (a clone), so
+        // `runtime_config.has_trace_bit` and the off-VM readers (region pages,
+        // channels) all read one per-instance bitfield. `from_static_config`
+        // seeds it from the CLI `--trace=` keywords and mirrors the POSIX bit onto
+        // the constructing thread (the scheduler thread).
+        let trace_cell = unsafe { &*heap_ptr }.trace_cell();
+        let rc = crate::config::RuntimeConfig::from_static_config(crate::config::get(), trace_cell);
 
         #[cfg(feature = "mlir")]
         let mlir_enabled = rc.mlir.enabled();

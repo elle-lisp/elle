@@ -203,14 +203,18 @@ fn prim_sig_send(
             return (SIG_ERROR, ctx.error(kind, msg));
         }
     };
-    crate::io::sigfd::posix_trace(format_args!(
-        "prim_sig_send kill(pid={}, signum={})",
-        pid, signum
-    ));
+    let trace = ctx.heap_mut().trace_cell();
+    crate::io::sigfd::posix_trace(
+        &trace,
+        format_args!("prim_sig_send kill(pid={}, signum={})", pid, signum),
+    );
     let ret = unsafe { libc::kill(pid, signum) };
     if ret < 0 {
         let err = std::io::Error::last_os_error();
-        crate::io::sigfd::posix_trace(format_args!("prim_sig_send kill FAILED errno={}", err));
+        crate::io::sigfd::posix_trace(
+            &trace,
+            format_args!("prim_sig_send kill FAILED errno={}", err),
+        );
         return (
             SIG_ERROR,
             ctx.error("os-signal-error", format!("os/sig-send: {}", err)),
@@ -235,14 +239,18 @@ fn prim_sig_raise(
     // libc::raise sends to the calling thread; for kqueue/signalfd we want
     // it delivered to the process, so use kill(getpid()) instead. On
     // single-threaded targets they're equivalent.
-    crate::io::sigfd::posix_trace(format_args!(
-        "prim_sig_raise kill(getpid(), signum={})",
-        signum
-    ));
+    let trace = ctx.heap_mut().trace_cell();
+    crate::io::sigfd::posix_trace(
+        &trace,
+        format_args!("prim_sig_raise kill(getpid(), signum={})", signum),
+    );
     let ret = unsafe { libc::kill(libc::getpid(), signum) };
     if ret < 0 {
         let err = std::io::Error::last_os_error();
-        crate::io::sigfd::posix_trace(format_args!("prim_sig_raise kill FAILED errno={}", err));
+        crate::io::sigfd::posix_trace(
+            &trace,
+            format_args!("prim_sig_raise kill FAILED errno={}", err),
+        );
         return (
             SIG_ERROR,
             ctx.error("os-signal-error", format!("os/sig-raise: {}", err)),
@@ -270,7 +278,11 @@ fn prim_sig_watch(
             ),
         );
     }
-    match SignalReceiver::new(signums) {
+    // Hand the receiver this instance's trace cell (captured here at watch time),
+    // so every `posix_trace` on its signalfd/kqueue path — including the blocking
+    // read that runs on a threadpool worker — gates on this instance.
+    let trace = ctx.heap_mut().trace_cell();
+    match SignalReceiver::new(signums, trace) {
         Ok(r) => (SIG_OK, ctx.external("signal-receiver", r)),
         Err(msg) => (SIG_ERROR, ctx.error("os-signal-error", msg)),
     }

@@ -4,7 +4,8 @@
 //! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -47,22 +48,16 @@ pub use policy::{JitPolicy, MlirPolicy, WasmPolicy};
 mod keywords;
 pub use keywords::{dump_bits, trace_bits, DUMP_KEYWORDS, TRACE_KEYWORDS};
 
-/// Process-global mirror of the active VM's trace bits, kept in sync by
-/// `RuntimeConfig::set_trace` and `from_static_config`. Threadpool
-/// worker threads, signal-handler-adjacent code, and other off-VM call
-/// sites (which can't carry a `&VM` reference) check this directly via
-/// `global_trace_bit_enabled`. In a multi-VM process the most recent
-/// `set_trace` wins — adequate for the diagnostic use case.
-pub static GLOBAL_TRACE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-/// Fast check for off-VM trace gates. Single relaxed atomic load when
-/// the bit is off; format args are only evaluated when the bit is on.
-#[inline]
-pub fn global_trace_bit_enabled(bit: u32) -> bool {
-    GLOBAL_TRACE_BITS.load(std::sync::atomic::Ordering::Relaxed) & bit != 0
-}
-
 // ── RuntimeConfig ─────────────────────────────────────────────────
+
+/// The authoritative trace bitfield of one Elle instance — an `Arc<AtomicU32>`
+/// rooted on the instance's `FiberHeap`. Every reader of *this instance's* trace
+/// state reads this one cell: the VM (via `RuntimeConfig::has_trace_bit`), the
+/// region pool's `PAGES` gate, and a channel's `CHAN` gate (each holds a clone).
+/// Two coexisting instances own two distinct cells, so a diagnostic toggle on one
+/// never leaks into the other — the isolation the corpus runner relies on to keep
+/// a `--trace=`-heavy file from bleeding into the rest of a shared run.
+pub type TraceCell = Arc<AtomicU32>;
 
 /// Mutable runtime configuration stored on the VM.
 ///
@@ -71,10 +66,14 @@ pub fn global_trace_bit_enabled(bit: u32) -> bool {
 /// per-test configuration is possible.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    /// Active trace keywords.
+    /// Active trace keywords. The human-readable set behind `(vm/config :trace)`;
+    /// the fast-path bits live in `trace_cell`, which is the single source of truth
+    /// (`set_trace` keeps the two in step).
     pub trace: HashSet<String>,
-    /// Bitfield cache mirroring `trace` for fast hot-path checks.
-    pub trace_bits: u32,
+    /// This instance's authoritative trace bitfield (shared with the heap and the
+    /// off-VM readers). A clone of the heap's [`TraceCell`]; reads are one relaxed
+    /// atomic load, so there is no separate `u32` cache to fall stale across files.
+    trace_cell: TraceCell,
     /// JIT compilation policy.
     pub jit: JitPolicy,
     /// WASM compilation policy.
@@ -88,45 +87,43 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Build a RuntimeConfig from the static global Config.
-    pub fn from_static_config(config: &Config) -> Self {
+    /// Build a RuntimeConfig from the static global Config, threading in the
+    /// instance's [`TraceCell`] (the heap's) so `has_trace_bit` and every off-VM
+    /// reader observe one shared bitfield. The CLI `--trace=` keywords seed it.
+    pub fn from_static_config(config: &Config, trace_cell: TraceCell) -> Self {
         let mut trace = HashSet::new();
         let mut bits = 0u32;
         for kw in &config.trace_keywords {
             trace.insert(kw.clone());
             bits |= trace_bits::from_name(kw);
         }
-        // Mirror to the process-global so off-VM call sites can gate
-        // tracing without a VM reference. See `GLOBAL_TRACE_BITS`.
-        GLOBAL_TRACE_BITS.store(bits, std::sync::atomic::Ordering::Relaxed);
-
-        RuntimeConfig {
+        let rc = RuntimeConfig {
             trace,
-            trace_bits: bits,
+            trace_cell,
             jit: config.jit.clone(),
             wasm: config.wasm.clone(),
             mlir: config.mlir.clone(),
             debug_bytecode: bits & trace_bits::BYTECODE != 0,
             stats: config.stats,
-        }
+        };
+        rc.trace_cell.store(bits, Ordering::Relaxed);
+        rc
     }
 
-    /// Set the trace keyword set and update the bitfield cache.
+    /// Set the trace keyword set and update the shared bitfield.
     pub fn set_trace(&mut self, keywords: HashSet<String>) {
         let mut bits = 0u32;
         for kw in &keywords {
             bits |= trace_bits::from_name(kw);
         }
         self.trace = keywords;
-        self.trace_bits = bits;
-        // Keep the off-VM mirror in sync.
-        GLOBAL_TRACE_BITS.store(bits, std::sync::atomic::Ordering::Relaxed);
+        self.trace_cell.store(bits, Ordering::Relaxed);
     }
 
-    /// Check if a trace bit is set (fast path — no HashSet lookup).
+    /// Check if a trace bit is set (fast path — one relaxed atomic load).
     #[inline(always)]
     pub fn has_trace_bit(&self, bit: u32) -> bool {
-        self.trace_bits & bit != 0
+        self.trace_cell.load(Ordering::Relaxed) & bit != 0
     }
 }
 
@@ -134,7 +131,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         RuntimeConfig {
             trace: HashSet::new(),
-            trace_bits: 0,
+            trace_cell: Arc::new(AtomicU32::new(0)),
             jit: JitPolicy::Adaptive { threshold: 10 },
             wasm: WasmPolicy::Off,
             mlir: MlirPolicy::Adaptive { threshold: 10 },
