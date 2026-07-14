@@ -64,33 +64,57 @@ impl RegionStore {
     /// drop"). When a `moves_out` funnel (`%pop`) removes an element that was
     /// adopted into its container's Owned subtree, the element LEAVES the container
     /// and becomes the call's result — so it must no longer be reclaimed by the
-    /// container's subtree drop. **Moves** `child` from `Owned` back to `Counted(1)`
-    /// — the single owning reference is now the caller's (the moves-out result,
-    /// whose `DecrefValueRegion` reclaims it) — and unlinks it from its owner's
-    /// `owned_children`. The forward/back edges stay consistent (the child recorded
+    /// container's subtree drop. **Moves** `child` from `Owned` back to `Counted`
+    /// and unlinks it from its owner's `owned_children`. The forward/back edges
+    /// stay consistent (the child recorded
     /// its owner; we remove it from exactly that owner's set). A `Counted` child is
     /// left untouched (an idempotent no-op): a non-adopted element takes the
     /// ordinary RC moves-out path (escape-retain + un-record + decref), not this.
     ///
-    /// Why `Counted(1)` and not the container's remaining structure: adoption
-    /// requires external uniqueness, so an Owned child is referenced ONLY through
-    /// its owner — removing it from the container leaves exactly the caller's one
-    /// reference. On an Owned region `incref`/`decref` are inert (RC frozen), so the
-    /// escape-retain the Counted path uses cannot establish that reference here; the
-    /// move to `Counted(1)` IS the retain.
+    /// The rebuilt count is **1 + the recorded external incoming edges**: the 1 is
+    /// the caller's moves-out reference (the result, whose `DecrefValueRegion`
+    /// reclaims it — on an Owned region `incref`/`decref` are inert, so the
+    /// escape-retain the Counted path uses cannot establish that reference here;
+    /// this move IS the retain). Each admitted incoming edge is a live container
+    /// still holding a value in the child's region — the pop funnel un-records the
+    /// popped container edge *before* extracting, so what remains is genuinely
+    /// external and releases through the ordinary unrecord+decref / frontier
+    /// cascade of its holder. The child's own subtree's back-edges are excluded,
+    /// exactly as the drop-time rescue excludes them (they release only at the
+    /// child's own drop; docs/impl/region/ownership.md § "The incoming edge table
+    /// and the external-reference rescue").
     pub(crate) fn extract_owned_region(&mut self, child: RuntimeRegion) {
-        let entry = match self
+        let owner = match self
             .regions
-            .get_mut(child.get() as usize)
-            .and_then(|s| s.as_mut())
+            .get(child.get() as usize)
+            .and_then(|s| s.as_ref())
         {
-            Some(e) => e,
+            Some(e) => match e.reclaim {
+                Reclaim::Owned { owner } => owner,
+                // Counted — the ordinary RC moves-out path owns it.
+                Reclaim::Counted(_) => return,
+            },
             None => return,
         };
-        let Reclaim::Owned { owner } = entry.reclaim else {
-            return; // Counted (or absent) — the ordinary RC moves-out path owns it.
-        };
-        entry.reclaim = Reclaim::Counted(1);
+        // The child's own surviving subtree, whose back-edges are not counted.
+        let mut subtree: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut stack = vec![child];
+        while let Some(m) = stack.pop() {
+            if !subtree.insert(m.get()) {
+                continue;
+            }
+            if let Some(e) = self.regions[m.get() as usize].as_ref() {
+                stack.extend(e.owned_children.iter().copied());
+            }
+        }
+        let entry = self.regions[child.get() as usize].as_mut().unwrap();
+        let external: u32 = entry
+            .incoming
+            .iter()
+            .filter(|(s, _)| !subtree.contains(&s.get()))
+            .map(|(_, &n)| n)
+            .sum();
+        entry.reclaim = Reclaim::Counted(1 + external);
         if let Some(owner_entry) = self
             .regions
             .get_mut(owner.get() as usize)

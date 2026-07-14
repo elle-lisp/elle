@@ -96,6 +96,7 @@ impl RegionStore {
                 reclaim: Reclaim::Counted(1),
                 owned_children: Vec::new(),
                 outgoing: FxHashMap::default(),
+                incoming: FxHashMap::default(),
             });
         }
     }

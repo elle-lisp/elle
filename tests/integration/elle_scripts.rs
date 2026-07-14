@@ -155,18 +155,18 @@ fn region_reassign_captured_cell_reader() {
 }
 
 // Guard — a self-recursive closure that is ALSO captured by a sibling (so it is
-// cell-held) must NOT have its region released by a tail-call adopt: the
+// cell-held) must NOT have its region released by a tail-call deferred release: the
 // capturing cell owns that release, and its lifetime outlives the tail-call
 // activation. Marking such a binding `stranded_self` frees its region under the
 // live cell (a generation panic / SIGSEGV under guardfree at the next
-// `tail_callee_adopt_region` deref). This is the scheduler's mutually recursive
+// `tail_callee_release_region` deref). This is the scheduler's mutually recursive
 // `handle-fiber-after-resume` group, whose regression SIGSEGVs
 // tests/elle/process-io.lisp. Only CELL-FREE self-recursion is stranded
 // (docs/impl/selfrec.md).
 #[test]
-fn region_selfrec_captured_tail_adopt() {
+fn region_selfrec_captured_tail_release() {
     run_elle_script_with_args(
-        "region-selfrec-captured-tail-adopt",
+        "region-selfrec-captured-tail-release",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
@@ -175,7 +175,7 @@ fn region_selfrec_captured_tail_adopt() {
 // tail call to a NON-member (a native `%add`, the redefined-closure operator `+`, a
 // foreign fn `g`, and a MIXED member+non-member `if`) must reclaim its merged arena
 // soundly. The frame-replacing `TailCall` strands the arena's binding-scope drop, so
-// a closure callee rides the explicit arena adopt (`TailCall::adopt_region_slot`) at
+// a closure callee rides the explicit arena adopt (`TailCall::deferred_release_slot`) at
 // recursion completion while a native callee falls through to the live scope-exit
 // drop — mutually exclusive per call, exactly one release. A premature free leaves
 // `ev`/`od` (whose regions ARE the merged arena) dereferencing recycled pages on the
@@ -408,30 +408,15 @@ fn region_fold_closure_arg_uaf() {
     );
 }
 
-// RED (known over-free, not yet fixed) — the STRING sibling of
-// region_fold_closure_arg_uaf. A helper accumulates a string by reassigning a
-// `@`-capture cell in a loop (`(assign out (string out …))`) and RETURNS `out`;
-// the returned string's region reaches refcount 0 as the activation unwinds, so
-// its `DecrefValueRegion` frees it, and the caller — which reads the returned
-// value one form later — derefs the freed page (SIGSEGV under guardfree, traced
-// to `DecrefValueRegion of string … context: UpdateCapture`, same context as the
-// closure sibling). Dropping any one ingredient makes it clean: the accumulation
-// must be a LOOP over the cell (a single `(assign out …)` is clean), the builder
-// must be a FUNCTION whose result a CALLER consumes (inlined at top level is
-// clean), and the returned string must be READ after return. This is mu's
-// `_safe-uri` (lib/cont/repo.lisp) / `_slug` (lib/cont/config.lisp): guardfree on
-// the mu suites points at the identical free site for dial-owner-git, repo, and
-// adopt-config, and without guardfree the freed region is silently reused (the
-// slug reads back as garbage — adopt-config saw an empty `:branch`). When the
-// region solver keeps a loop-reassigned capture cell's returned region live across
-// the caller's read, this exits 0 under guardfree. Distinct from the fixed struct
-// write-path over-free (`struct_put_with_rebind`); this is the capture-cell string
-// return path. Full repro + trace in the fixture header.
-// NOT #[ignore]'d (unlike the older RED pins): a fixture runs as a guardfree
-// SUBPROCESS via `run_elle_file_with_args`, so its SIGSEGV fails THIS test cleanly
-// and cannot take the harness process down (that hazard is the tests/elle/*.lisp
-// glob's shared process, not this one). ACTIVE RED — fails today, flips green when
-// the over-free is fixed.
+// The STRING sibling of region_fold_closure_arg_uaf: a helper accumulates a
+// string by reassigning a `@`-capture cell in a loop (`(assign out (string out
+// …))`) and RETURNS `out`; the caller reads the returned value one form later.
+// Green pins that the loop-reassigned capture cell's returned region stays live
+// across the caller's read (the mu `_safe-uri` / `_slug` builder shape). Runs as
+// a guardfree SUBPROCESS via `run_elle_file_with_args`, so an over-free's
+// SIGSEGV fails THIS test cleanly instead of taking a shared harness process
+// down (that hazard is the tests/elle/*.lisp glob's shared process, not this
+// one). Full shape in the fixture header.
 #[test]
 fn region_capture_cell_string_accum_uaf() {
     run_elle_file_with_args(
@@ -440,23 +425,21 @@ fn region_capture_cell_string_accum_uaf() {
     );
 }
 
-// RED (known cascade over-free, not yet fixed) — the CASCADE / stored-member twin
-// of region_capture_cell_string_accum_uaf. A server fiber reads a request off a
-// socket, stores a MEMBER of the parsed request (`(get req :params)`) into a
-// module-level `@`-capture cell, then reads a SIBLING member (`(get req :id)`) to
-// frame the reply. The sibling read is `req`'s last use, so the solver frees
-// `req`'s region — and the stored `:params` member, a CHILD region, CASCADE-frees
-// under the still-live cell (SIGSEGV under guardfree, `freed via cascade(…) …
-// context: UpdateCapture`). Dropping any one ingredient is clean: the cell must
-// store a MEMBER (not the whole `req`), a SIBLING member must be read AFTER the
-// store, and the value must arrive OVER A SOCKET into a spawned fiber (an
-// in-process literal / json/parse of a literal string is clean). This is mu's
-// lib/cont/ipc.lisp driver callbacks (`(assign got-X params)` of an RPC request's
-// params while the same dispatch reads its id to frame the reply); guardfree on
-// the mu suites detonates here for ipc, ipc-roundtrip, spawn-agent, and
-// adopt-grant, all of which PASS the normal gate — a latent corruption the smoke
-// run reads past. Fixed when a member stored into a captured cell pins its region
-// live independent of its parent. NOT #[ignore]'d (see the note above); ACTIVE RED.
+// The CASCADE / stored-member twin of region_capture_cell_string_accum_uaf, and
+// the e2e witness of the drop-time external-reference rescue
+// (docs/impl/region/ownership.md § "The incoming edge table and the external-
+// reference rescue"). A server fiber reads a request off a socket, stores a
+// MEMBER of the parsed request (`(get req :params)`) into a module-level
+// `@`-capture cell, then reads a SIBLING member (`(get req :id)`) inside a
+// `protect` sub-fiber to frame the reply — so `req`'s region is capture-adopted
+// into that fiber's closure and would die with its subtree drop at the fiber's
+// completion, while the cell still holds the `:params` member inline in it (the
+// mu lib/cont/ipc.lisp driver-callback shape: `(assign got-X params)` while the
+// same dispatch reads the request's id). Green pins that the drop rescues the
+// externally-referenced region to the RC baseline: the cell's read after the
+// fiber completes sees the live member, and the region frees at the cell's
+// release. The rescue unit family is `regionstore::tests::forest`. Subprocess
+// guardfree run, same rationale as the twin above.
 #[test]
 fn region_capture_cell_member_cascade_uaf() {
     run_elle_file_with_args(
@@ -797,7 +780,7 @@ fn recur_entry_guardfree() {
 
 // In-lambda MUTUAL recursion under the UAF oracle: the closure-cycle merge puts
 // the ev/od pair and their forward cells in ONE arena, released either by the
-// letrec binding-scope drop (non-tail body) or by the tail-call adopt at the
+// letrec binding-scope drop (non-tail body) or by the tail-call deferred release at the
 // recursion's normal completion (tail body). A mis-accounted release — the arena
 // freed while a rotation is still in flight, or freed twice across the two
 // channels — reads a freed page here and faults deterministically.

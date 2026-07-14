@@ -160,48 +160,117 @@ impl RegionStore {
         self.decref(id)
     }
     /// Record one outgoing content edge `src → dst` into `src`'s edge table
-    /// (docs/impl/region/ownership.md § "The outgoing edge table"). Applies the same
+    /// (docs/impl/region/ownership.md § "The outgoing edge table"), mirrored into
+    /// `dst`'s `incoming` table (§ "The incoming edge table and the external-
+    /// reference rescue") in the same call so the two ledgers cannot drift
+    /// independently. Applies the same
     /// filter `find_object_cross_refs` applies — a reserved target (0/1) or a
     /// self-edge (`dst == src`) records nothing — so the recorded table stays
     /// scan-equivalent, which the free-time oracle asserts. `src` must already
     /// exist (the alloc funnel `ensure_raw`s it; the mutable-store seam and the
     /// fiber-signal funnel hold a live container/fiber); a missing source is a
-    /// defensive no-op.
+    /// defensive no-op. `dst` names the region a live `Value` resides in, so it
+    /// always has an entry when an edge is recorded.
     pub(crate) fn record_outgoing(&mut self, src: u32, dst: u32) {
         if dst == 0 || dst == 1 || dst == src {
             return;
         }
-        let Some(dst_r) = RuntimeRegion::new(dst) else {
+        let (Some(src_r), Some(dst_r)) = (RuntimeRegion::new(src), RuntimeRegion::new(dst)) else {
             return;
         };
-        if let Some(entry) = self.regions.get_mut(src as usize).and_then(|s| s.as_mut()) {
-            *entry.outgoing.entry(dst_r).or_insert(0) += 1;
+        let recorded = match self.regions.get_mut(src as usize).and_then(|s| s.as_mut()) {
+            Some(entry) => {
+                *entry.outgoing.entry(dst_r).or_insert(0) += 1;
+                true
+            }
+            None => false,
+        };
+        if recorded {
+            match self.regions.get_mut(dst as usize).and_then(|s| s.as_mut()) {
+                Some(entry) => {
+                    *entry.incoming.entry(src_r).or_insert(0) += 1;
+                }
+                None => debug_assert!(
+                    false,
+                    "record_outgoing({src} → {dst}): the target has no entry, so the \
+                     incoming mirror cannot be maintained — an edge to a region no live \
+                     value can reside in (docs/impl/region/ownership.md § 'The incoming \
+                     edge table and the external-reference rescue')"
+                ),
+            }
         }
     }
 
     /// Remove one outgoing content edge `src → dst` — the overwrite / removal half
     /// of the mutable-store seam (a pop/remove/del, or the old target of a
-    /// replace). Same filter as [`Self::record_outgoing`]. A debug-assert fires on
+    /// replace) — and its `incoming` mirror. Same filter as
+    /// [`Self::record_outgoing`]. A debug-assert fires on
     /// an absent edge: an unbalanced un-record is recording drift, caught here
     /// rather than only at the next free's equivalence oracle.
     pub(crate) fn unrecord_outgoing(&mut self, src: u32, dst: u32) {
         if dst == 0 || dst == 1 || dst == src {
             return;
         }
-        let Some(dst_r) = RuntimeRegion::new(dst) else {
+        let (Some(src_r), Some(dst_r)) = (RuntimeRegion::new(src), RuntimeRegion::new(dst)) else {
             return;
         };
-        if let Some(entry) = self.regions.get_mut(src as usize).and_then(|s| s.as_mut()) {
-            match entry.outgoing.get_mut(&dst_r) {
-                Some(count) if *count > 1 => *count -= 1,
+        let removed = match self.regions.get_mut(src as usize).and_then(|s| s.as_mut()) {
+            Some(entry) => match entry.outgoing.get_mut(&dst_r) {
+                Some(count) if *count > 1 => {
+                    *count -= 1;
+                    true
+                }
                 Some(_) => {
                     entry.outgoing.remove(&dst_r);
+                    true
+                }
+                None => {
+                    debug_assert!(
+                        false,
+                        "unrecord_outgoing({src} → {dst}): no recorded edge to remove — \
+                         outgoing-edge accounting drift (docs/impl/region/ownership.md \
+                         § 'The outgoing edge table')"
+                    );
+                    false
+                }
+            },
+            None => false,
+        };
+        if removed {
+            self.unmirror_incoming(src_r, dst_r, 1);
+        }
+    }
+
+    /// Remove `count` from `dst`'s incoming mirror of the edge `src → dst` — the
+    /// shared bookkeeping of [`Self::unrecord_outgoing`] and the subtree drop's
+    /// frontier walk (which retires a dying source's whole footprint at once).
+    /// An absent `dst` entry is tolerated: the edge outlived its target (the
+    /// target died first, taking its mirror with it), so there is nothing left to
+    /// maintain. An absent mirror ENTRY on a live target is drift, debug-asserted
+    /// exactly as the outgoing side is.
+    pub(super) fn unmirror_incoming(&mut self, src: RuntimeRegion, dst: RuntimeRegion, count: u32) {
+        if let Some(entry) = self
+            .regions
+            .get_mut(dst.get() as usize)
+            .and_then(|s| s.as_mut())
+        {
+            match entry.incoming.get_mut(&src) {
+                Some(c) if *c > count => *c -= count,
+                Some(c) => {
+                    debug_assert!(
+                        *c == count,
+                        "unmirror_incoming({src} → {dst}): removing {count} from a mirror \
+                         of {c} — incoming-edge accounting drift \
+                         (docs/impl/region/ownership.md § 'The incoming edge table and \
+                         the external-reference rescue')"
+                    );
+                    entry.incoming.remove(&src);
                 }
                 None => debug_assert!(
                     false,
-                    "unrecord_outgoing({src} → {dst}): no recorded edge to remove — \
-                     outgoing-edge accounting drift (docs/impl/region/ownership.md \
-                     § 'The outgoing edge table')"
+                    "unmirror_incoming({src} → {dst}): no mirrored edge to remove — \
+                     incoming-edge accounting drift (docs/impl/region/ownership.md \
+                     § 'The incoming edge table and the external-reference rescue')"
                 ),
             }
         }

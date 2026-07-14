@@ -72,7 +72,9 @@ not expressible the other way.
   `regionstore::tests::forest::reparent_*`.
 - **Subtree drop, in phases.** Freeing a region (`free_runtime_region_pages`)
   collects the whole owned subtree — the region plus every transitive
-  `owned_children`, walked Rust-side with no heap deref — then **reads every member's
+  `owned_children`, walked Rust-side with no heap deref — **rescues** any member the
+  recorded edge tables prove is still externally referenced (§ The incoming edge
+  table and the external-reference rescue), then **reads every remaining member's
   recorded `outgoing` edge table** (§ The outgoing edge table) and partitions its
   targets: a target *in* the freed set is interior and dropped (reclaimed by this drop,
   never cascaded), a target *outside* is a genuinely-**Shared** frontier ref to cascade;
@@ -154,4 +156,48 @@ Research footing: classic Tofte–Talpin regions need no cascade at all (a regio
 at longer-lived outer regions, so freeing it dereferences nothing). Elle's hybrid adds exactly
 one scan-needing edge class — Owned/Shared → Shared — and recording it eagerly eliminates the
 lazy free-time discovery.
+
+## The incoming edge table and the external-reference rescue
+
+Adoption's soundness condition is **external uniqueness**: an `Owned` member is
+referenced only through its owning subtree, so the root's demise strands no live
+reference. The compile-time walk (`regions::ownership::compute_owned_subtrees`)
+proves that condition over the edges the solver can name; the runtime holds the
+ground truth — every recorded content edge — and enforces the same condition **at
+the drop itself**:
+
+- **The incoming edge table.** Each `RegionEntry` mirrors its `outgoing` table with
+  `incoming: FxHashMap<RuntimeRegion, u32>`: for every recorded content edge
+  `src → dst`, `dst.incoming[src]` carries the same count. It is maintained by
+  exactly the sites that maintain `outgoing` — `record_outgoing` /
+  `unrecord_outgoing`, plus the subtree drop's frontier walk (which removes a dying
+  source's footprint from each live target it referenced) — so the two ledgers move
+  in lockstep; an unbalanced un-record debug-asserts exactly as the outgoing side
+  does. Like `outgoing`, it records content edges only: the transfer/borrow
+  references in the incoming RC count are balanced by compiler-emitted decrefs and
+  are not edges.
+
+- **The rescue.** A subtree drop first collects its member set read-only. A
+  non-root member whose `incoming` table names a source that **survives the drop**
+  — neither in the dying set nor inside the member's own subtree — is **rescued**
+  instead of torn down: it leaves the forest (`Owned → Counted`) with a count
+  rebuilt from its recorded incoming edges, and its own subtree stays intact
+  beneath it. Dying sources are counted in (their frontier decrefs arrive in the
+  same drop); the member's own subtree's back-edges are excluded (they release only
+  at the member's own drop, so counting them would self-sustain the count). Every
+  remaining referencer then releases the member through the ordinary cascade — the
+  last release frees it. Rescue iterates to a fixpoint: a rescued member's
+  surviving edges can make a sibling member externally referenced, which rescues
+  the sibling too.
+
+The rescue is the runtime's **refusal-to-Shared** (the always-legal baseline),
+applied at the last moment the forest can still choose it: a region whose external
+uniqueness does not hold at the drop — however the external reference arose, and
+whichever adopt kind claimed the region — falls back to per-region RC instead of
+being freed under a live reference. It fires only when a live external edge exists
+at the drop; the externally-unique common case pays one empty-map check per
+member. Pinned by `regionstore::tests::forest` (the rescue unit family) and, end
+to end, by the guardfree fixture pin `region_capture_cell_member_cascade_uaf`
+(tests/integration/elle_scripts.rs): a struct member stored into a module-level
+capture cell survives its parent's subtree drop and frees at the cell's release.
 

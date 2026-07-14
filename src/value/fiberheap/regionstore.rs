@@ -67,6 +67,19 @@ struct RegionEntry {
     /// asserts at every free. Distinct from the incoming RC (`Reclaim::Counted`),
     /// which also counts owner/transfer/borrow references the cascade never walks.
     outgoing: FxHashMap<RuntimeRegion, u32>,
+    /// Incoming content edges: `source → count`, the exact mirror of every
+    /// source's `outgoing` entry for this region (docs/impl/region/ownership.md
+    /// § "The incoming edge table and the external-reference rescue"). Maintained
+    /// in lockstep by `record_outgoing`/`unrecord_outgoing` and by the subtree
+    /// drop's frontier walk (a dying source's footprint is removed from each live
+    /// target), so for a live region it lists precisely the live-or-currently-
+    /// dying regions whose heap contents reference it. This is what lets a
+    /// subtree drop enforce external uniqueness at the drop itself: a member
+    /// still referenced from outside the dying set is rescued to `Counted`
+    /// instead of torn down under the live reference. Content edges only — the
+    /// RC count's transfer/borrow references are balanced by compiler-emitted
+    /// decrefs and are not mirrored here.
+    incoming: FxHashMap<RuntimeRegion, u32>,
 }
 
 impl RegionEntry {

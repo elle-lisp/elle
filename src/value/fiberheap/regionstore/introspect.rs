@@ -35,8 +35,10 @@ impl RegionStore {
 
     /// Inject a spurious outgoing edge `src → dst`, bypassing the record filter —
     /// a test-only way to manufacture table/scan drift so the free-time equivalence
-    /// oracle's teeth can be pinned (`edges::oracle_panics_on_drift`). Never a
-    /// production path.
+    /// oracle's teeth can be pinned (`edges::oracle_panics_on_drift`). The incoming
+    /// mirror IS maintained: the drift under test is recorded-table vs content,
+    /// not the outgoing/incoming lockstep (whose own tripwire is
+    /// `unmirror_incoming`'s debug assert). Never a production path.
     #[cfg(test)]
     pub fn force_outgoing_edge_for_test(&mut self, src: RuntimeRegion, dst: RuntimeRegion) {
         if let Some(e) = self
@@ -45,6 +47,15 @@ impl RegionStore {
             .and_then(|s| s.as_mut())
         {
             *e.outgoing.entry(dst).or_insert(0) += 1;
+        } else {
+            return;
+        }
+        if let Some(e) = self
+            .regions
+            .get_mut(dst.get() as usize)
+            .and_then(|s| s.as_mut())
+        {
+            *e.incoming.entry(src).or_insert(0) += 1;
         }
     }
 

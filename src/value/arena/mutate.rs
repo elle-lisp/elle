@@ -65,10 +65,10 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
 /// element would be reclaimed by the container's subtree drop while the returned
 /// Value still points into it (the moves-out-of-owned-subtree UAF the
 /// `region_pop_tail_moves_out_uaf` fixture pins). So EXTRACT it: un-record the
-/// container's outgoing edge and move the element back to `Counted(1)` — the
-/// caller's one owning reference — via `extract_owned_region`. External uniqueness
-/// (the adoption precondition) guarantees the container was its only referrer, so
-/// one reference is exact.
+/// container's outgoing edge (first, so it is not counted), then move the element
+/// back to `Counted` via `extract_owned_region` — the caller's one owning
+/// reference plus any remaining recorded external edges (each held by a live
+/// container that releases it through the ordinary cascade).
 ///
 /// **Counted element (not adopted — the common path).** The element carries an
 /// ordinary RC. Hold the caller's reference FIRST (the pass-through retain a native
