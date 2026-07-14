@@ -4,7 +4,7 @@
 ## In-lambda MUTUAL recursion — a `letrec` pair nested in a function body, each
 ## closure capturing the other through its forward cell. The closure-cycle merge
 ## collapses the pair and its cells onto one arena, freed at the letrec binding
-## scope or — when the letrec body tail-calls a member — by the tail-call adopt
+## scope or — when the letrec body tail-calls a member — by the tail-call deferred release
 ## at the recursion's normal completion (docs/impl/region/letrec.md § The letrec
 ## closure-cycle merge). The leak side is pinned by oracle.lisp
 ## (recur-local-mutual); these assert VALUES, which neither the leak gauge nor
@@ -13,7 +13,7 @@
 ## wrong-but-well-typed result, caught only here.
 
 ## 1. Tail-call letrec body (the canonical shape): the binding-scope drop is
-## dead past the frame-replacing TailCall; the adopt supplies the release.
+## dead past the frame-replacing TailCall; the deferred release supplies it.
 (defn parity [n]
   (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1))))
            od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))]
@@ -33,7 +33,7 @@
 (assert (= (parity-nontail 6) :even) "non-tail mutual letrec body: even depth")
 (assert (= (parity-nontail 3) :odd) "non-tail mutual letrec body: odd depth")
 
-## 3. Mixed tail exits: the member-callee path adopts; the value path falls
+## 3. Mixed tail exits: the member-callee path defers its release; the value path falls
 ## through to the live binding-scope drop. Exactly one release per path.
 (defn parity-mixed [n]
   (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1))))

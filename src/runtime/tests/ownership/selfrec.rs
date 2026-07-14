@@ -121,7 +121,7 @@ fn closure_cycle_discarded_release_is_prompt() {
 /// captured (`hir/arena.rs::mark_captured`), so it has no forward cell and no
 /// cell↔closure cycle — its self-reference resolves to the executing closure
 /// (`LoadSelf` / a self-call). The per-call closure region is reclaimed by ordinary RC
-/// (the tail-call adopt for a self-tail-loop), NOT the merge (which serves the
+/// (the tail-call deferred release for a self-tail-loop), NOT the merge (which serves the
 /// cell-bearing mutual cycle). Same bounded-vs-discriminator counterfactual as the
 /// mutual case: reclaimed self-recursion reads bounded region growth beside a leaking
 /// bare-@array-cycle discriminator, and — being cell-free RC/adopt, flag-independent
@@ -143,7 +143,7 @@ fn region_ownership_reclaims_self_recursion_closure_cycle() {
     assert!(
         growth <= 0,
         "the cell-free self-recursive closure must be reclaimed by ordinary RC / the \
-         tail-call adopt — per-run live-region growth {growth} must be <= 0 (the \
+         tail-call deferred release — per-run live-region growth {growth} must be <= 0 (the \
          discriminator leaks {leak} per run, so the gauge is live)",
     );
 }
@@ -159,7 +159,7 @@ fn region_ownership_reclaims_self_recursion_closure_cycle() {
 /// (`hir/arena.rs::mark_captured`), so there is no forward cell and no cell↔closure cycle —
 /// its self-reference resolves to the executing closure (`LoadSelf` / a self-call). The
 /// closure is an ordinary per-call region whose demise the recursive `TailCall` strands as
-/// dead code; the tail-call adopt (`lir/lower/control/call.rs::tail_callee_adopts`,
+/// dead code; the tail-call deferred release (`lir/lower/control/call.rs::tail_callee_defers_release`,
 /// `stranded_self_bindings`) supplies the once-only release at the recursion's normal
 /// completion, so the region is reclaimed per call — RC-identical to a top-level recursive
 /// `defn`. (The merge is unrelated here: it serves the cell-bearing MUTUAL cycle, not this
@@ -221,7 +221,7 @@ fn closure_cycle_nested_letrec_reclaims_per_call() {
     assert!(
         call_growth < 50,
         "a cell-free self-recursive local closure nested in an invoked function must be \
-         reclaimed per call by the tail-call adopt — region growth over 200 calls must be \
+         reclaimed per call by the tail-call deferred release — region growth over 200 calls must be \
          near zero, got {call_growth} (each call's stranded closure region leaks to program \
          teardown if the adopt does not supply its release)",
     );
@@ -232,7 +232,7 @@ fn closure_cycle_nested_letrec_reclaims_per_call() {
 /// merge; oracle.lisp `recur-local-mutual`). Each `(f 3)` builds one ev↔od
 /// cell↔closure cycle inside `f`'s body; the merge collapses the four members
 /// (two closures + two forward cells) onto one arena, and — the letrec body
-/// `(ev k)` being a tail call to a member — the tail-call adopt releases that
+/// `(ev k)` being a tail call to a member — the tail-call deferred release releases that
 /// arena once at the recursion's normal completion. `(f 0)` is the base-case-only
 /// path: the recursion never rotates to a sibling, so the ENTRY call's adopt is
 /// the sole release channel — a marking that only covered interior rotations
@@ -291,7 +291,7 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
     assert!(
         rotating < 50,
         "an in-lambda mutual letrec cycle must be reclaimed per call by the \
-         closure-cycle merge + the tail-call adopt — region growth over 200 calls \
+         closure-cycle merge + the tail-call deferred release — region growth over 200 calls \
          must be near zero, got {rotating} (each call's merged arena leaks if the \
          cycle is refused or the stranded binding-scope drop is never supplied)",
     );
@@ -316,7 +316,7 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
 /// The closure is an ordinary per-call region whose scope-end `DecrefRegion` the
 /// frame-replacing `(loop k)` `TailCall` strands as dead code, so without the adopt every
 /// `(f false)` would leak one region. The program samples `arena/region-count` across 10
-/// discarded `loop` closures; with the tail-scoped adopt (`tail_callee_adopts` /
+/// discarded `loop` closures; with the tail-scoped adopt (`tail_callee_defers_release` /
 /// `stranded_self_bindings`) the region is freed once at the recursion's normal completion,
 /// so the delta stays bounded — RC-identical to a top-level recursive `defn`.
 #[test]
@@ -348,7 +348,7 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
         delta <= 2,
         "a cell-free self-recursive loop closure must be reclaimed per call: live region \
          growth over 10 discarded closures must be ~0, got {delta} — its per-call region \
-         leaks if the tail-call adopt does not supply the tail-call-stranded scope-end \
+         leaks if the tail-call deferred release does not supply the tail-call-stranded scope-end \
          DecrefRegion",
     );
 }
@@ -408,7 +408,7 @@ fn tail_or_short_circuit_returns_owned_param_no_uaf() {
 /// of the `(loop …)` recursive call — which the lowerer would emit as a LIVE `DecrefRegion`
 /// right before that tail call, freeing the closure out from under its own re-entry. So
 /// `lower_define` SUPPRESSES that decref (`suppressed_self_regions`) and STRANDS the binding
-/// (`stranded_self_bindings`); the tail-call adopt is then the sole, once-only release,
+/// (`stranded_self_bindings`); the tail-call deferred release is then the sole, once-only release,
 /// reproducing the `letrec` path's accounting. The gauge (region growth over 200 calls)
 /// additionally pins the region is reclaimed per call — a leak would grow it unbounded.
 ///
@@ -466,7 +466,7 @@ fn self_recursive_define_with_arith_reclaims_per_call() {
     assert!(
         call_growth < 50,
         "a cell-free self-recursive `def` closure must be reclaimed per call by the \
-         tail-call adopt — region growth over 200 calls must be near zero, got {call_growth} \
+         tail-call deferred release — region growth over 200 calls must be near zero, got {call_growth} \
          (its per-call closure region leaks, or worse, is freed before the `(loop k)` tail \
          call re-enters it)",
     );
@@ -476,7 +476,7 @@ fn self_recursive_define_with_arith_reclaims_per_call() {
 /// exactly like a self-recursive `letrec`: no forward cell, the self-reference resolves to
 /// the executing closure. `lower_define` STRANDS the binding (`stranded_self_bindings`) and
 /// SUPPRESSES its closure region's would-be-live `DecrefRegion` (`suppressed_self_regions`)
-/// so the tail-call adopt is the sole release — the closure region must be freed EXACTLY
+/// so the tail-call deferred release is the sole release — the closure region must be freed EXACTLY
 /// once. A leaked suppression (both the live decref AND the adopt firing) is a double-free.
 /// This pins that the program runs to completion (the double-free was a `DecrefRegion(...) —
 /// phantom region or double-free` panic in `regionstore/refcount.rs`).
@@ -508,11 +508,11 @@ fn self_recursive_define_in_lambda_no_double_free() {
 /// sibling capture makes it `needs_capture`, so it keeps a forward cell whose cascade
 /// owns the closure region's single release (docs/impl/selfrec.md § the cell-free gate).
 /// `lower_define`/`lower_letrec` therefore must NOT strand it — stranding a cell-held
-/// binding makes the tail-call adopt decref its region a SECOND time, under the still-live
+/// binding makes the tail-call deferred release decref its region a SECOND time, under the still-live
 /// cell (the captured-self-tail double-free). This is the runtime peer to
-/// `tests/elle/region-selfrec-captured-tail-adopt.lisp`: `loop` self-recurses AND is
+/// `tests/elle/region-selfrec-captured-tail-release.lisp`: `loop` self-recurses AND is
 /// captured by `other`, so it must run to completion with its region freed exactly once.
-/// A regression that re-strands it trips the `tail_callee_adopts` consumer assertion
+/// A regression that re-strands it trips the `tail_callee_defers_release` consumer assertion
 /// (a loud panic at the seam) or, in release, the `DecrefRegion` double-free panic.
 #[test]
 fn self_recursive_and_sibling_captured_no_double_free() {

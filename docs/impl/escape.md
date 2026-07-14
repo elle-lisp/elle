@@ -132,7 +132,7 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     a returned region onto a cell, since `binding_source_regions` is "where the
     value points," not "where it lives").
 - **The lowerer** (`lir/lower`) reads `lambda_escapes_definition` /
-  `binding_escapes_activation` in `control/call.rs::tail_callee_adopts`, the
+  `binding_escapes_activation` in `control/call.rs::tail_callee_defers_release`, the
   escape half of the per-call adopt decision (a per-call callee closure that dies
   at the call → the runtime supplies the stranded decref). Region-locality — does
   the callee have a per-call region demising here, vs a program-root/primitive —
@@ -256,7 +256,7 @@ another analysis. Three layers:
 `EscapeInfo` is the durable artifact: it becomes the forest's Owned-vs-Shared
 classifier — the hierarchical single-owner region endpoint the region work builds
 toward. The lowerer's value-RC predicates `tail_arg_is_borrowed` and
-`tail_callee_adopts` (mint/adopt compensation) are **transitional** — the forest
+`tail_callee_defers_release` (mint/adopt compensation) are **transitional** — the forest
 reclaims an intra-fiber Owned subtree by drop, including any reference cycle
 interior to it (no mint, no adopt), and edge-RC scopes reference counting to
 cross-fiber Shared edges, so both predicates are subsumed, not preserved. Lexical

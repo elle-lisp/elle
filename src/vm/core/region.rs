@@ -267,17 +267,17 @@ impl VM {
     }
     /// Resolve a static slot to the physical region it currently maps to in this
     /// activation, WITHOUT minting or clearing — the read a closure-cycle
-    /// merged-arena tail-call adopt needs (`TailCall::adopt_region_slot`,
+    /// merged-arena tail-call deferred release needs (`TailCall::deferred_release_slot`,
     /// docs/impl/region/letrec.md § The letrec closure-cycle merge).
     ///
     /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping
     /// in place: the arena is handed to the completing activation's
-    /// `adopted_closures`, and its own scope-exit `DecrefRegion` is dead code past
+    /// `deferred_releases`, and its own scope-exit `DecrefRegion` is dead code past
     /// the frame-replacing tail call, so the mapping is never consumed by a drop.
     /// `None` when the slot is unmapped — the merged alloc did not execute in this
-    /// activation (nothing to adopt).
+    /// activation (nothing to release).
     #[inline]
-    pub(crate) fn runtime_region_for_adopt_slot(
+    pub(crate) fn runtime_region_for_release_slot(
         &self,
         static_id: StaticRegion,
     ) -> Option<RuntimeRegion> {
@@ -376,16 +376,17 @@ impl VM {
             self.heap().decref_region_if_present(node);
         }
     }
-    /// The callee closure's runtime region, for adoption by the new activation.
+    /// The callee closure's runtime region, whose release the new activation
+    /// takes over (`TailCallInfo::deferred_release_region`).
     /// Called ONLY when the compiler flagged this tail call's callee as a
     /// per-call local closure whose release is dead past the `TailCall`
-    /// (`lower_call`'s `adopt_callee`, plumbed through `TailCallInfo`). The
+    /// (`lower_call`'s `defer_callee_release`, plumbed through `TailCallInfo`). The
     /// program-root-vs-local discrimination is made at compile time (the solver
     /// knows whether the closure's region dies at the call), so this is just the
     /// runtime region lookup. `None` for an immediate (no region). See
     /// `TailCallInfo` and `tests/elle/region-tailcall-closure-callee-leak.lisp`.
     #[inline]
-    pub(crate) fn tail_callee_adopt_region(&self, func: Value) -> Option<RuntimeRegion> {
+    pub(crate) fn tail_callee_release_region(&self, func: Value) -> Option<RuntimeRegion> {
         crate::value::arena::region_of(unsafe { &mut *self.heap_ptr }, func)
     }
     /// Pop the current region-remap frame on normal closure return, with its

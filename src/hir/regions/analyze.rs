@@ -178,7 +178,7 @@ pub fn analyze_regions_with(
     // members).
     for cm in super::merge::compute_closure_cycle_merges(hir, arena, &info, &escape_info, &order) {
         for &m in &cm.members {
-            // The member set (roots included) feeds `tail_callee_adopts`' refusal
+            // The member set (roots included) feeds `tail_callee_defers_release`' refusal
             // and the letrec-body stranded-cycle marking: the merged arena has
             // exactly one release channel, so no other tail call may adopt it.
             info.closure_cycle_members.insert(m);
@@ -188,12 +188,12 @@ pub fn analyze_regions_with(
         }
         // A NON-member body tail (a native `%add`, a redefined `+`, a foreign `g`)
         // strands the binding-scope drop past the frame-replacing `TailCall`; the
-        // lowerer keys `adopt_region_slot = static_slot(root)` at each such site so a
+        // lowerer keys `deferred_release_slot = static_slot(root)` at each such site so a
         // closure callee's frame replacement is balanced by the activation-completion
         // adopt (region/letrec.md § The letrec closure-cycle merge). A member tail
         // keeps its own `stranded_cycle_bindings` channel and is not recorded here.
-        for &site in &cm.tail_adopt_sites {
-            info.cycle_tail_adopt.insert(site, cm.root);
+        for &site in &cm.tail_release_sites {
+            info.cycle_tail_release.insert(site, cm.root);
         }
         info.region_data
             .entry(cm.root)

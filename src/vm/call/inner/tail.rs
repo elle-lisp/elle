@@ -16,8 +16,8 @@ impl VM {
         args: Vec<Value>,
         checked: bool,
         region_id: StaticRegion,
-        adopt_callee: bool,
-        adopt_region_slot: Option<StaticRegion>,
+        defer_callee_release: bool,
+        deferred_release_slot: Option<StaticRegion>,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             let blocked = def
@@ -122,9 +122,10 @@ impl VM {
                 return Some(SIG_ERROR);
             }
 
-            // Adopt the callee closure when the compiler flagged it as a per-call
-            // local closure whose release is dead past this `TailCall`
-            // (`lower_call`'s `adopt_callee`). The new activation releases this
+            // Take over the callee closure's release when the compiler flagged it
+            // as a per-call local closure whose release is dead past this
+            // `TailCall` (`lower_call`'s `defer_callee_release`). The new
+            // activation releases this
             // region when it completes — the missing decref the frame replacement
             // skipped. Recorded BEFORE `populate_env` (which copies the closure's
             // env uncounted): the closure must stay alive through the callee's
@@ -132,21 +133,22 @@ impl VM {
             // done here. A program-root callee is never flagged, so its
             // program-lifetime region is never released. See `TailCallInfo`.
             //
-            // `adopt_region_slot` takes precedence: a letrec body tail-calling a
+            // `deferred_release_slot` takes precedence: a letrec body tail-calling a
             // NON-member out of a closure-cycle merged arena carries the arena's
-            // static slot (`RegionInfo::cycle_tail_adopt`), which we resolve
+            // static slot (`RegionInfo::cycle_tail_release`), which we resolve
             // through THIS activation's region map — the arena was minted during
             // the letrec setup and its scope-exit `DecrefRegion` is dead past this
             // frame-replacing tail call. We reached the closure arm, so the frame
-            // IS replaced; the adopt supplies that dead release at the recursion's
+            // IS replaced; the deferred release supplies that dead drop at the
+            // recursion's
             // completion. (A native callee never reaches here — it keeps the frame
-            // and runs the live scope-exit drop — so the slot and `adopt_callee`
+            // and runs the live scope-exit drop — so the slot and `defer_callee_release`
             // are mutually exclusive per call and never both apply.) See
-            // `LirInstr::TailCall::adopt_region_slot`.
-            let adopt_region = if let Some(slot) = adopt_region_slot {
-                self.runtime_region_for_adopt_slot(slot)
-            } else if adopt_callee {
-                self.tail_callee_adopt_region(func)
+            // `LirInstr::TailCall::deferred_release_slot`.
+            let deferred_release_region = if let Some(slot) = deferred_release_slot {
+                self.runtime_region_for_release_slot(slot)
+            } else if defer_callee_release {
+                self.tail_callee_release_region(func)
             } else {
                 None
             };
@@ -180,7 +182,7 @@ impl VM {
                 env: new_env_rc,
                 closure: func,
                 squelch_mask: closure.squelch_mask,
-                adopt_region,
+                deferred_release_region,
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));

@@ -3,9 +3,10 @@ use super::*;
 impl<'a> Lowerer<'a> {
     /// Does this tail call's callee CLOSURE die at the call node — i.e. is it a
     /// per-call local closure whose `DecrefRegion` the solver placed here, which
-    /// the frame-replacing `TailCall` then strands as dead code? If so, the
-    /// runtime must ADOPT the closure (release its region when the new activation
-    /// completes) to supply that missing decref.
+    /// the frame-replacing `TailCall` then strands as dead code? If so, the new
+    /// activation must TAKE OVER that release (run it when it completes) to
+    /// supply the missing decref — a deferred decref on a still-`Counted` region,
+    /// never an ownership-forest adoption.
     ///
     /// Two facts decide it, from two sources:
     /// - **region-locality** (a region fact): the callee's region demises at this
@@ -13,23 +14,23 @@ impl<'a> Lowerer<'a> {
     ///   (not in `suppressed_decref_regions`). A program-root callee (a top-level
     ///   `defn`) or a primitive has no per-call region here, and a suppressed
     ///   region's decref is owned by the store path (never stamped as an ordinary
-    ///   alloc) — adopting either decrements an RC the frame never raised (a
+    ///   alloc) — deferring either's release decrements an RC the frame never raised (a
     ///   phantom `DecrefRegion` / use-after-free). `EscapeInfo` cannot express
     ///   "has an owned per-call region here", so this stays a region fact.
-    /// - **escape** (the authoritative analysis): the callee is adopted only when
+    /// - **escape** (the authoritative analysis): the release is deferred only when
     ///   it does NOT escape its definition (`EscapeInfo::lambda_escapes_definition`
     ///   / `binding_escapes_activation`). An escaping closure outlives the call and
     ///   must not be freed by the new activation. This reads the one escape
     ///   analysis every consumer reads, in place of the region-level
     ///   `suppressed_decref_regions` proxy.
     ///
-    /// Like `tail_arg_is_borrowed`, adopt is **transitional value-RC machinery**:
+    /// Like `tail_arg_is_borrowed`, the deferred release is **transitional value-RC machinery**:
     /// the ownership forest reclaims a non-escaping per-call callee as part
     /// of the activation's Owned subtree (dropped as a unit — no stranded decref to
     /// supply), so this predicate is subsumed there, not preserved. Its lasting
     /// contribution is reading `EscapeInfo`, the analysis that drives the forest's
     /// Owned/Shared classification.
-    fn tail_callee_adopts(&self, func: &Hir) -> bool {
+    fn tail_callee_defers_release(&self, func: &Hir) -> bool {
         let Some(call_id) = self.current_hir_id else {
             return false;
         };
@@ -41,7 +42,7 @@ impl<'a> Lowerer<'a> {
         // `DerefCell` that `functionalize` wraps around a needs-capture binding —
         // look through it to the `Var`, exactly as the solver's `Return` arm
         // does. Without this, captured closures (the whole HOF layer) never match
-        // and never adopt.
+        // and never defer their release.
         let func = match &func.kind {
             HirKind::DerefCell { cell } => &**cell,
             _ => func,
@@ -66,7 +67,7 @@ impl<'a> Lowerer<'a> {
         // actually owns. A program-root callee (top-level `defn`) or a primitive
         // has no per-call region here, and a SUPPRESSED region's decref is owned
         // by the store path (the reassign-gate / container model) and was never
-        // stamped as an ordinary alloc — adopting either decrements an RC the
+        // stamped as an ordinary alloc — deferring either's release decrements an RC the
         // frame never raised (a phantom `DecrefRegion` panic / use-after-free).
         // `EscapeInfo` cannot express "has an owned per-call region here", so this
         // stays a region fact.
@@ -80,16 +81,16 @@ impl<'a> Lowerer<'a> {
         // `TailCall` strands that release as dead code (`stranded_self_bindings`), and
         // — because the binding is referenced across branches and its own body —
         // `dies_here` (the demise landing at THIS call node) does not reliably catch
-        // it. So a tail call to a stranded self-recursive binding adopts its region
-        // directly: the runtime frees it once at the recursion's normal completion
+        // it. So a tail call to a stranded self-recursive binding defers its region's
+        // release directly: the runtime frees it once at the recursion's normal completion
         // (deduped), reclaimed per call like a top-level recursive `defn`. Gating on
         // `stranded_self_bindings` (a tail-call body) — not merely self-recursive — is
-        // load-bearing: a non-tail body's release fires LIVE, and adopting it too would
+        // load-bearing: a non-tail body's release fires LIVE, and deferring it too would
         // free the region twice (the executing-closure re-dispatch then reads a
         // recycled page). Gated additionally on the GENUINE frontier escape — return ∪
         // fiber, not the full `binding_escapes_activation`: the latter folds in
         // store/capture CONTAINMENT (a self-recursive closure held by a local container
-        // dies WITH the activation, so it must still be adopted), which would
+        // dies WITH the activation, so its release must still be deferred), which would
         // over-conservatively re-strand the release into a leak. Only a closure
         // actually returned or sent to a fiber outlives the activation.
         if let HirKind::Var(b) = &func.kind {
@@ -98,15 +99,15 @@ impl<'a> Lowerer<'a> {
                 // (`!needs_capture()`; the strand sites in `binding.rs` both gate on
                 // it, docs/impl/selfrec.md § the cell-free gate). A sibling-captured
                 // (`needs_capture`) member's closure region is released by its forward
-                // cell's cascade; adopting it here decrefs that region a SECOND time,
+                // cell's cascade; deferring its release here decrefs that region a SECOND time,
                 // under the still-live cell — the captured-self-tail double-free
-                // (tests/elle/region-selfrec-captured-tail-adopt.lisp). Asserting at
+                // (tests/elle/region-selfrec-captured-tail-release.lisp). Asserting at
                 // the CONSUMER catches any future strand path that skips the gate,
                 // turning that UAF into a loud panic at the seam.
                 debug_assert!(
                     !self.arena.get(*b).needs_capture(),
                     "stranded self-recursive binding {b:?} is needs_capture: its forward \
-                     cell already releases the closure region, so a tail-call adopt would \
+                     cell already releases the closure region, so a tail-call deferred release would \
                      double-free it (see docs/impl/selfrec.md § the cell-free gate)"
                 );
                 let frontier_escapes = self.escape_info.binding_escapes_via_return(*b)
@@ -115,13 +116,13 @@ impl<'a> Lowerer<'a> {
             }
             // A letrec closure-cycle merge member the enclosing letrec's BODY
             // tail-calls: the merged arena's binding-scope DecrefRegion is dead
-            // past this frame-replacing TailCall, so the adopt supplies its
-            // release once at the recursion's normal completion — the mutual
-            // twin of the stranded-self adopt above. Honoured only through a
+            // past this frame-replacing TailCall, so the deferred release supplies
+            // it once at the recursion's normal completion — the mutual
+            // twin of the stranded-self deferral above. Honoured only through a
             // NON-upvalue reference: in the letrec's own function the binding is
             // a plain stack-slot local, while a nested closure reads it as an
             // upvalue — and a nested closure's activation completes before later
-            // uses of the arena, so adopting there would free it early. Gated on
+            // uses of the arena, so deferring there would free it early. Gated on
             // the genuine frontier escape exactly as the self path is.
             if self.stranded_cycle_bindings.contains(b) && !self.upvalue_bindings.contains(b) {
                 let frontier_escapes = self.escape_info.binding_escapes_via_return(*b)
@@ -129,10 +130,10 @@ impl<'a> Lowerer<'a> {
                 return !frontier_escapes;
             }
         }
-        // Any other reference to a closure-cycle merge member never adopts: the
+        // Any other reference to a closure-cycle merge member never defers: the
         // merged arena is released exactly once by the merge's own channel (the
-        // binding-scope DecrefRegion, or the stranded-cycle adopt above), so a
-        // second adopt — an interior sibling rotation (`ev` tail-calling `od`,
+        // binding-scope DecrefRegion, or the stranded-cycle deferral above), so a
+        // second deferred release — an interior sibling rotation (`ev` tail-calling `od`,
         // whose region demises at that in-body call node and would otherwise
         // pass `dies_here` below), or a nested-closure call — would release the
         // still-live arena a second time (a double-free on a non-tail letrec
@@ -144,7 +145,7 @@ impl<'a> Lowerer<'a> {
             return false;
         }
         // Escape is read from the authoritative analysis: among those owned
-        // per-call callees, adopt only one that does NOT escape its definition —
+        // per-call callees, defer only one that does NOT escape its definition —
         // an escaping closure outlives the call and must not be freed by the new
         // activation. This escape refinement is a distinct responsibility from
         // the region-level suppression proxy.
@@ -271,19 +272,20 @@ impl<'a> Lowerer<'a> {
                 // (see `LirInstr::TailCall`); the interpreter leaves the result
                 // on the stack and ignores it.
                 let dst = self.fresh_reg();
-                let adopt_callee = self.tail_callee_adopts(func);
+                let defer_callee_release = self.tail_callee_defers_release(func);
                 // A letrec body tail-calling a NON-member out of a closure-cycle
                 // merged arena carries the arena's root slot: the binding-scope
                 // `DecrefRegion` is dead past this frame-replacing `TailCall`, so a
-                // closure callee's new activation adopts and frees the arena at the
+                // closure callee's new activation takes over the arena's release,
+                // freeing it at the
                 // recursion's completion (a native callee never consumes it and the
                 // live scope-exit drop fires). Keyed by the tail-call HirId in
-                // `cycle_tail_adopt`; canonicalized through `merged_root` by
+                // `cycle_tail_release`; canonicalized through `merged_root` by
                 // `static_slot` like every merge slot. A MEMBER callee is absent from
-                // the map and keeps `adopt_callee` (the two never both fire).
-                let adopt_region_slot = self
+                // the map and keeps `defer_callee_release` (the two never both fire).
+                let deferred_release_slot = self
                     .current_hir_id
-                    .and_then(|id| self.region_info.cycle_tail_adopt.get(&id).copied())
+                    .and_then(|id| self.region_info.cycle_tail_release.get(&id).copied())
                     .map(|root| self.static_slot(root));
                 self.emit_alloc(|region| LirInstr::TailCall {
                     region,
@@ -291,8 +293,8 @@ impl<'a> Lowerer<'a> {
                     func: func_reg,
                     args: arg_regs,
                     arity_checked,
-                    adopt_callee,
-                    adopt_region_slot,
+                    defer_callee_release,
+                    deferred_release_slot,
                 });
                 // ReturnValue retain on the native-completion fall-through, the
                 // tail-position mirror of `lower_return`'s `IncrefValueRegion`.

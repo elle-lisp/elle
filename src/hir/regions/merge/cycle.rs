@@ -26,13 +26,13 @@ pub(crate) struct ClosureCycleMerge {
     pub drop_site: HirId,
     /// The HirIds of the letrec body's tail calls to a **non-member** callee — the
     /// sites whose binding-scope `DecrefRegion` is stranded past a frame-replacing
-    /// `TailCall` with no member-adopt channel. The lowerer keys `adopt_region_slot`
+    /// `TailCall` with no member-deferral channel. The lowerer keys `deferred_release_slot`
     /// (this cycle's `root` slot) at each so a closure callee's frame replacement is
-    /// balanced by the activation-completion adopt (a native callee falls through to
+    /// balanced by the activation-completion deferred release (a native callee falls through to
     /// the live scope-exit drop). Empty when the body has no tail call, or only
     /// member-callee tail calls (which ride `stranded_cycle_bindings` instead).
-    /// Recorded in `RegionInfo::cycle_tail_adopt` keyed to this `root`.
-    pub tail_adopt_sites: Vec<HirId>,
+    /// Recorded in `RegionInfo::cycle_tail_release` keyed to this `root`.
+    pub tail_release_sites: Vec<HirId>,
 }
 
 /// One tail call in a `letrec` body, as the closure-cycle merge's tail gate reads
@@ -41,17 +41,17 @@ pub(crate) struct ClosureCycleMerge {
 /// the gate must know both the callee and whether any cycle MEMBER flows in as an
 /// argument, so a member passed by-move (`(g od)`) is refused — its own
 /// move/return machinery would decref the arena a second time, colliding with the
-/// adopt (a double-free), where a member merely STORED into a fresh aggregate then
+/// deferred release (a double-free), where a member merely STORED into a fresh aggregate then
 /// passed is RC-counted and safe (after ANF the argument is a temp, not a member
 /// reference, so it is admitted).
 struct TailCallSite {
     /// The tail-call `Call` node's HirId — the key the lowerer sets
-    /// `adopt_region_slot` at for a non-member callee.
+    /// `deferred_release_slot` at for a non-member callee.
     hir_id: HirId,
     /// The callee, unwrapped through `functionalize`'s `DerefCell`: `Some(b)` for a
     /// binding reference (a member, a native, a redefined operator, a foreign fn),
     /// `None` for a callee the gate cannot resolve (which refuses — no site to key
-    /// the adopt at).
+    /// the deferred release at).
     callee: Option<crate::hir::Binding>,
     /// Every binding referenced in the tail call's ARGUMENT subtrees (Var reads,
     /// including a cell read's inner `Var`; nested lambdas are not descended). A
@@ -76,7 +76,7 @@ struct TailCallSite {
 /// cell-free — the self-edge does not mark it captured (`hir/analyze/scopes.rs`), so it
 /// has no forward cell and its self-reference resolves to the executing closure
 /// (`LoadSelf` / a self-call), never a cell — so there is no cell↔closure cycle for the
-/// merge to collapse; it is reclaimed by ordinary RC / the tail-call adopt, RC-identical
+/// merge to collapse; it is reclaimed by ordinary RC / the tail-call deferred release, RC-identical
 /// to a top-level recursive `defn`.
 ///
 /// Two-layer detection. The **closures** carry the cycle: a `closure ⊇ closure`
@@ -102,16 +102,16 @@ struct TailCallSite {
 /// letrec BODY's tail calls must each have a **release channel** for the merged
 /// arena's binding-scope drop, which a frame-replacing tail call strands as dead
 /// code. Two channels: a MEMBER callee rides `stranded_cycle_bindings` →
-/// `tail_callee_adopts` (`region_of(callee)` is the arena); a NON-member callee — a
-/// native, a redefined operator, a foreign fn — rides the explicit `adopt_region_slot`
-/// (this cycle's root slot, recorded in `tail_adopt_sites`), so a closure callee's
-/// frame replacement is balanced by the activation-completion adopt while a native
+/// `tail_callee_defers_release` (`region_of(callee)` is the arena); a NON-member callee — a
+/// native, a redefined operator, a foreign fn — rides the explicit `deferred_release_slot`
+/// (this cycle's root slot, recorded in `tail_release_sites`), so a closure callee's
+/// frame replacement is balanced by the activation-completion deferred release while a native
 /// callee falls through to the live scope-exit drop (the two are mutually exclusive
 /// per call, so exactly one release fires — the compiler never classifies the callee).
 /// A non-member tail is refused only when its callee is unresolvable (no site to key
-/// the adopt at) or when a cycle MEMBER flows into it **by-move** as an argument
+/// the deferred release at) or when a cycle MEMBER flows into it **by-move** as an argument
 /// (`(g od)`): the member's own move/return machinery would decref the arena a second
-/// time, colliding with the adopt (a double-free). A member merely STORED into a fresh
+/// time, colliding with the deferred release (a double-free). A member merely STORED into a fresh
 /// aggregate then passed is RC-counted and safe, and after ANF is a temp argument, not
 /// a member reference, so it is admitted. The result extends the same `merged_parent`
 /// forest the builder-idiom seed populates and rides the same `merged_root`
@@ -301,13 +301,13 @@ pub(crate) fn compute_closure_cycle_merges(
         // lambda — those run in their own activations) must have a release channel
         // for the merged arena's binding-scope drop, which a frame-replacing
         // `TailCall` strands as dead code. A MEMBER callee rides the existing
-        // stranded-cycle adopt (`stranded_cycle_bindings` → `tail_callee_adopts`,
+        // stranded-cycle deferral (`stranded_cycle_bindings` → `tail_callee_defers_release`,
         // `lir/lower/binding.rs`). A NON-member callee rides the explicit
-        // `adopt_region_slot` (recorded below) — admissible only when the callee is
-        // resolvable (a site to key the adopt at) AND no cycle member flows into the
+        // `deferred_release_slot` (recorded below) — admissible only when the callee is
+        // resolvable (a site to key the deferred release at) AND no cycle member flows into the
         // tail call BY-MOVE as an argument: a member passed by-value (`(g od)`) has
         // its own move/return machinery decref the arena a SECOND time, colliding
-        // with the adopt (a double-free), where a member stored into a fresh
+        // with the deferred release (a double-free), where a member stored into a fresh
         // aggregate then passed is RC-counted and (after ANF) a temp argument, so it
         // is admitted. Any tail call failing both channels refuses the cycle to
         // Shared (the always-legal baseline).
@@ -331,7 +331,7 @@ pub(crate) fn compute_closure_cycle_merges(
         }
         // Every non-member-callee body tail is an admitted adopt site (a member
         // callee stays on its own channel and is excluded). Keyed to the root below.
-        let tail_adopt_sites: Vec<HirId> = sites
+        let tail_release_sites: Vec<HirId> = sites
             .map(|sites| {
                 sites
                     .iter()
@@ -370,7 +370,7 @@ pub(crate) fn compute_closure_cycle_merges(
             root,
             members,
             drop_site,
-            tail_adopt_sites,
+            tail_release_sites,
         });
     }
     out

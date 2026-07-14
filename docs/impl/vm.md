@@ -65,7 +65,7 @@ closure's heap value (the region solver frees the value at its last use while
 the body's `code`/`env` live on as `Rc`s), so the register may hold a dead value
 for a body that never reads it. It is guaranteed live exactly where it is read:
 `LoadSelf` occurs only in a self-recursive body, whose closure region outlives
-the recursion (the tail-call adopt releases it on the recursion's completion —
+the recursion (the tail-call deferred release releases it on the recursion's completion —
 [selfrec.md](selfrec.md)). No other site may dereference it.
 
 It is per-activation and threaded across every control-flow boundary, mirroring

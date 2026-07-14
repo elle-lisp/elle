@@ -137,7 +137,7 @@
   ; closure[0] <anon>
     block0: DecrefValueRegion v8
     block0: DecrefRegion s27
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v12
     block0: DecrefValueRegion v13
     block0: DecrefValueRegion v15
@@ -147,7 +147,7 @@
   ; closure[2] <anon>
     block0: DecrefValueRegion v8
     block0: DecrefRegion s28
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v12
     block0: DecrefValueRegion v13
     block0: DecrefValueRegion v15
@@ -155,7 +155,7 @@
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2
   ; closure[4] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7
     block0: DecrefRegion s29
@@ -163,7 +163,7 @@
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2
   ; closure[6] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7
     block0: DecrefRegion s30

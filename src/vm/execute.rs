@@ -188,8 +188,9 @@ impl VM {
         let mut current_env = closure_env.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        // Closure-callee regions adopted from frame-replacing tail calls in this
-        // activation (`TailCallInfo::adopt_region`). A tail call's callee closure
+        // Closure-callee releases taken over from frame-replacing tail calls in
+        // this activation (`TailCallInfo::deferred_release_region`). A tail
+        // call's callee closure
         // is a per-call local allocation whose compiler-emitted release is dead
         // past the `TailCall`; this activation took over that release and runs it
         // on NORMAL completion below. Deduped by region: a tail-recursive `go`
@@ -200,7 +201,7 @@ impl VM {
         // double-free (unlike the activation owner node, these regions are
         // `Counted` and not moved into the park, so no discard-time release can
         // be sound without per-frame liveness).
-        let mut adopted_closures: Vec<crate::hir::region::RuntimeRegion> = Vec::new();
+        let mut deferred_releases: Vec<crate::hir::region::RuntimeRegion> = Vec::new();
 
         loop {
             let (bits, ip) =
@@ -234,9 +235,9 @@ impl VM {
 
             if let Some(tail) = self.pending_tail_call.take() {
                 accumulated_squelch_mask |= tail.squelch_mask;
-                if let Some(r) = tail.adopt_region {
-                    if !adopted_closures.contains(&r) {
-                        adopted_closures.push(r);
+                if let Some(r) = tail.deferred_release_region {
+                    if !deferred_releases.contains(&r) {
+                        deferred_releases.push(r);
                     }
                 }
                 // The frame is reused in place but now runs the tail callee: track
@@ -252,14 +253,14 @@ impl VM {
             } else {
                 // Normal completion: run the deferred closure-callee releases —
                 // the decrefs the frame-replacing tail calls left dead.
-                for &r in &adopted_closures {
+                for &r in &deferred_releases {
                     self.heap().decref_region_if_present(r);
                 }
                 // ... and free this activation's owner node, if an
                 // `AdoptIntoActivation` minted one: the node's single decref
                 // subtree-drops every member the activation adopted
                 // (docs/impl/region/owner.md § "Owner nodes"). The same
-                // clean-break discipline as the adopted-closure releases above —
+                // clean-break discipline as the deferred callee releases above —
                 // a frame-replacing tail call keeps the activation (and its
                 // node) alive to the recursion's completion here.
                 self.release_activation_owner_node();

@@ -29,7 +29,7 @@
 //! - `[suppressed_decref_regions]` — the reassign-gate / store-path-owned set.
 //! - `[region_instrs]` — per LIR function, the emitted RC instructions
 //!   (`Incref/DecrefRegion`, `Incref/DecrefValueRegion`, `DecrefCellRegion`) and
-//!   each tail call's `adopt_callee` flag — the behavior the facts above produce.
+//!   each tail call's `defer_callee_release` flag — the behavior the facts above produce.
 //!
 //! ## Normalization (why it is freezable)
 //!
@@ -216,7 +216,7 @@ pub fn escape_module(
     sup.sort();
     let _ = writeln!(s, "  [{}]", sup.join(", "));
 
-    // [region_instrs] — per function, the emitted RC ops + tail adopt flags.
+    // [region_instrs] — per function, the emitted RC ops + tail deferred-release flags.
     let _ = writeln!(s, "[region_instrs]");
     let mut lir_region_norm: HashMap<StaticRegion, usize> = HashMap::new();
     let mut next_s = 0usize;
@@ -271,8 +271,11 @@ fn render_func_region_instrs(
                 LirInstr::IncrefValueRegion { src } => format!("IncrefValueRegion v{}", src.0),
                 LirInstr::DecrefValueRegion { src } => format!("DecrefValueRegion v{}", src.0),
                 LirInstr::DecrefCellRegion { src } => format!("DecrefCellRegion v{}", src.0),
-                LirInstr::TailCall { adopt_callee, .. } => {
-                    format!("TailCall adopt_callee={adopt_callee}")
+                LirInstr::TailCall {
+                    defer_callee_release,
+                    ..
+                } => {
+                    format!("TailCall defer_callee_release={defer_callee_release}")
                 }
                 LirInstr::TailCallArrayMut { .. } => "TailCallArrayMut".to_string(),
                 _ => continue,

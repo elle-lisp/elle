@@ -170,13 +170,13 @@
   ; closure[1] <anon>
     block0: DecrefValueRegion v7
     block0: DecrefValueRegion v15
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v19
     block0: DecrefValueRegion v20
     block0: DecrefValueRegion v22
     block0: DecrefValueRegion v24
   ; closure[2] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v5
     block0: DecrefValueRegion v6
     block0: DecrefValueRegion v8
@@ -190,37 +190,37 @@
   ; closure[4] <anon>
     block0: DecrefValueRegion v6
     block0: DecrefValueRegion v13
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v17
     block0: DecrefValueRegion v18
     block0: DecrefValueRegion v20
     block0: DecrefValueRegion v22
   ; closure[5] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
     block0: DecrefValueRegion v16
     block0: DecrefValueRegion v18
   ; closure[6] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
     block0: DecrefValueRegion v16
     block0: DecrefValueRegion v18
   ; closure[7] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
     block0: DecrefValueRegion v16
     block0: DecrefValueRegion v18
   ; closure[8] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
     block0: DecrefValueRegion v16
     block0: DecrefValueRegion v18
   ; closure[9] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
     block0: DecrefValueRegion v16

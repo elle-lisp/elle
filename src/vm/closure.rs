@@ -73,7 +73,7 @@ pub(crate) fn handle_make_closure(
     // closure-cycle merge's mint-or-reuse for a mutual-recursion SCC (`merged_slots`).
     // A self-recursive closure is cell-free — its self-reference resolves to the
     // executing closure, not a forward cell — so its region is an ordinary per-call
-    // allocation reclaimed at its last use (the tail-call adopt for a self-tail-loop,
+    // allocation reclaimed at its last use (the tail-call deferred release for a self-tail-loop,
     // `lir/lower/control/call.rs`).
     let region_id = vm.runtime_region_for_alloc_slot_maybe_merged(static_region, merged_slots);
 

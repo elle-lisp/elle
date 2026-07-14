@@ -42,7 +42,7 @@ The lowerer:
 | [`binding.rs`](binding.rs) | Binding forms: `let`, `def`, `var`, `fn` |
 | [`lambda.rs`](lambda.rs) | fn lowering, closure capture, lbox wrapping |
 | [`control.rs`](control.rs) | Control flow: `and`, `or`, `eval`, `emit`, `match`; tail-arg ownership |
-| [`control/call.rs`](control/call.rs) | Call/tail-call lowering; `tail_callee_adopts` |
+| [`control/call.rs`](control/call.rs) | Call/tail-call lowering; `tail_callee_defers_release` |
 | [`pattern.rs`](pattern.rs) | Pattern matching lowering |
 | [`regionemit.rs`](regionemit.rs) | Region RC instruction emission from the solver's `RegionInfo` |
 

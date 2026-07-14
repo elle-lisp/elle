@@ -161,37 +161,37 @@ pub struct Lowerer<'a> {
     /// The subset of `self_recursive_bindings` whose defining body is a **tail call**,
     /// so the closure's scope-end `DecrefRegion` is emitted as dead code past that
     /// frame-replacing `TailCall` and never runs — the per-call closure region would
-    /// otherwise leak. `tail_callee_adopts` routes a tail call to such a binding
-    /// through the runtime's `adopted_closures` release (`vm/execute.rs`), which frees
+    /// otherwise leak. `tail_callee_defers_release` routes a tail call to such a binding
+    /// through the runtime's `deferred_releases` release (`vm/execute.rs`), which frees
     /// the region exactly once at the recursion's normal completion. Gating on the
-    /// tail-call body is what keeps the adopt from double-freeing a self-recursive
+    /// tail-call body is what keeps the deferral from double-freeing a self-recursive
     /// closure whose `DecrefRegion` instead fires live (a non-tail body) — the
     /// use-after-free that gate prevents.
     stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
     /// Letrec bindings of a closure-cycle merge whose MERGED arena the enclosing
     /// letrec's body TAIL-CALLS. The frame-replacing `TailCall` strands the
     /// arena's single binding-scope `DecrefRegion` as dead code, so a tail call
-    /// to one of these adopts the merged region (`tail_callee_adopts` →
-    /// `TailCallInfo::adopt_region`), released exactly once at the recursion's
+    /// to one of these defers the merged region's release (`tail_callee_defers_release`
+    /// → `TailCallInfo::deferred_release_region`), run exactly once at the recursion's
     /// normal completion — the same channel `stranded_self_bindings` rides.
     /// Marked by `lower_letrec` from the letrec BODY's tail callees only (after
-    /// the inits are lowered, so interior sibling rotations never adopt), and
+    /// the inits are lowered, so interior sibling rotations never defer), and
     /// honoured only through a non-upvalue reference (a nested closure that
-    /// captures the binding must not adopt the arena out from under a later use
+    /// captures the binding must not free the arena out from under a later use
     /// in the enclosing activation).
     stranded_cycle_bindings: rustc_hash::FxHashSet<Binding>,
     /// Closure regions of self-recursive **`def`** bindings whose scope-end
     /// `DecrefRegion` must be SUPPRESSED. A `letrec`-bound self-recursive closure has
     /// its release land at the letrec scope end — dead code past the body's
-    /// frame-replacing `TailCall`, supplied once by the runtime adopt. A `def`-bound
+    /// frame-replacing `TailCall`, supplied once by the runtime's deferred release. A `def`-bound
     /// one instead has its closure region demise at the binding's last use — the
     /// func-load of the `(loop …)` recursive call — which the lowerer would emit as a
     /// LIVE `DecrefRegion` immediately BEFORE that call, freeing the closure out from
     /// under its own re-entry (the executing-closure re-dispatch then reads a recycled
-    /// page). Suppressing that decref and adopting at the tail call instead (the
+    /// page). Suppressing that decref and deferring it to the tail call instead (the
     /// binding is also `stranded_self_bindings`) reproduces the `letrec` path's runtime
-    /// accounting: the region is freed exactly once, by the adopt at the recursion's
-    /// normal completion.
+    /// accounting: the region is freed exactly once, by the deferred release at the
+    /// recursion's normal completion.
     suppressed_self_regions: rustc_hash::FxHashSet<crate::hir::region::Region>,
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
@@ -200,8 +200,8 @@ pub struct Lowerer<'a> {
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
     /// Authoritative escape facts (`src/hir/escape.rs`), computed once at the
-    /// top of `lower`. Read by `control/call.rs::tail_callee_adopts` for the
-    /// escape half of the adopt decision (region-locality stays a region fact).
+    /// top of `lower`. Read by `control/call.rs::tail_callee_defers_release` for the
+    /// escape half of the deferral decision (region-locality stays a region fact).
     /// NOT read by `tail_arg_is_borrowed` (a structural ownership-location test —
     /// escape over-marks owned tail-args and double-frees across fiber resume; see
     /// `control.rs`) nor by the `lower_return` mint (unconditional since the move
@@ -513,7 +513,7 @@ impl<'a> Lowerer<'a> {
         // Escape analysis is whole-module, like region inference — compute it
         // once over the full canonical HIR before lowering recurses into
         // closures. Computing it here keeps the pass on every real lowering path
-        // through a single chokepoint; `tail_callee_adopts` reads it.
+        // through a single chokepoint; `tail_callee_defers_release` reads it.
         self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
 
         self.current_func = LirFunction::new(Arity::Exact(0));

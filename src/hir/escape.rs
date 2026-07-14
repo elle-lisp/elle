@@ -84,9 +84,9 @@
 //!   never the `is_captured` proxy), branch **compensation**'s escaping-exclusion
 //!   (the return frontier), and the reassign 1-slot-container gate
 //!   (`binding_escapes_via_return`, per binding).
-//! - **The lowerer** (`lir/lower`): `tail_callee_adopts` reads
+//! - **The lowerer** (`lir/lower`): `tail_callee_defers_release` reads
 //!   `lambda_escapes_definition` / `binding_escapes_activation` for the escape half
-//!   of the adopt decision — region-locality stays a region fact.
+//!   of the deferral decision — region-locality stays a region fact.
 //!
 //! Two lowerer/HIR decisions deliberately do **not** read this analysis, because
 //! the question they answer is *ownership-location / mutation-sharing*, which is

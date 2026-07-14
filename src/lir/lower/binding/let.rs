@@ -258,11 +258,12 @@ impl<'a> Lowerer<'a> {
         // letrec's scope end. When the body is a tail call that scope end is dead code
         // past the `TailCall`, so the decref never runs and the region leaks. Mark such
         // bindings stranded BEFORE lowering the body, so a tail call to one (`(loop k)`
-        // here, or its own `(loop …)` self-call) adopts the region — the runtime's
-        // `adopted_closures` release supplies the stranded decref exactly once. Gating
+        // here, or its own `(loop …)` self-call) defers the region's release — the
+        // runtime's
+        // `deferred_releases` supplies the stranded decref exactly once. Gating
         // on `body_is_tail_call` (not `tail_scoped`, which also requires a scope region)
         // is deliberate: the stranding is a property of the body. Without the tail-call
-        // gate a non-tail letrec body would adopt a binding whose decref fires live — a
+        // gate a non-tail letrec body would defer a binding whose decref fires live — a
         // double-free.
         if Self::body_is_tail_call(body) {
             for (b, _) in bindings.iter() {
@@ -270,13 +271,13 @@ impl<'a> Lowerer<'a> {
                 // ALSO captured by a sibling (`needs_capture`) is held by a letrec
                 // cell whose lifetime outlives this tail-call activation; its
                 // closure region is released by the cell's cascade, so a tail-call
-                // adopt would decref it a SECOND time and free it under the still-live
+                // deferred release would decref it a SECOND time and free it under the still-live
                 // cell (the scheduler's `handle-fiber-after-resume` — self-recursive
                 // AND sibling-captured — freed under its forward cell; a stale
-                // `tail_callee_adopt_region` deref of the next self-call).
+                // `tail_callee_release_region` deref of the next self-call).
                 // docs/impl/selfrec.md: the cell-free case is exactly the one the
                 // self-edge leaves uncaptured. Pinned by
-                // tests/elle/region-selfrec-captured-tail-adopt.lisp.
+                // tests/elle/region-selfrec-captured-tail-release.lisp.
                 if self.self_recursive_bindings.contains(b) && !self.arena.get(*b).needs_capture() {
                     self.stranded_self_bindings.insert(*b);
                 }
@@ -285,18 +286,18 @@ impl<'a> Lowerer<'a> {
         // A letrec body that TAIL-CALLS a closure-cycle merge MEMBER strands the
         // merged arena's binding-scope DecrefRegion as dead code past the
         // frame-replacing TailCall; mark those callees so the body's tail call
-        // adopts the merged region (`tail_callee_adopts`) — the runtime then
+        // defers the merged region's release (`tail_callee_defers_release`) — the runtime then
         // releases it exactly once at the recursion's normal completion. Scanned
         // over the letrec BODY only and never through nested lambdas: a nested
         // closure's tail call completes inside its own activation, before later
-        // uses of the arena, so adopting there would free it early (the
-        // non-upvalue guard in `tail_callee_adopts` is the second half of that
+        // uses of the arena, so deferring there would free it early (the
+        // non-upvalue guard in `tail_callee_defers_release` is the second half of that
         // exclusion). Marked BEFORE lowering the body so the body's own call
         // sites see it; the init lambdas were lowered above, so an interior
         // sibling rotation (`ev` tail-calling `od`) is never marked. A NON-member
         // body tail (a native / redefined operator / foreign fn) instead rides the
-        // explicit `TailCall::adopt_region_slot` (keyed by HirId in
-        // `RegionInfo::cycle_tail_adopt`), NOT this binding-keyed marking — the two
+        // explicit `TailCall::deferred_release_slot` (keyed by HirId in
+        // `RegionInfo::cycle_tail_release`), NOT this binding-keyed marking — the two
         // channels are disjoint, so every admitted cycle's stranding tail paths are
         // covered exactly once (`compute_closure_cycle_merges`).
         {
@@ -335,7 +336,7 @@ impl<'a> Lowerer<'a> {
     /// `functionalize` adds around a needs-capture binding read) is a `Var`.
     /// Never descends into a `Lambda` — a nested closure's tail calls run in
     /// that closure's own activation, not the letrec's, so they neither strand
-    /// nor may adopt the letrec's merged arena.
+    /// nor may free the letrec's merged arena.
     fn collect_body_tail_callees(hir: &Hir, out: &mut Vec<Binding>) {
         if matches!(hir.kind, HirKind::Lambda { .. }) {
             return;

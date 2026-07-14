@@ -47,13 +47,13 @@
     block0: DecrefValueRegion v5
     block0: IncrefRegion s4
     block0: IncrefRegion s4
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v18
     block0: DecrefValueRegion v19
     block0: DecrefRegion s5
     block0: DecrefRegion s6
   ; closure[1] <anon>
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v2
     block0: DecrefValueRegion v3
   ; closure[2] <anon>
@@ -61,7 +61,7 @@
     block0: DecrefValueRegion v15
     block0: DecrefValueRegion v20
     block0: DecrefValueRegion v23
-    block0: TailCall adopt_callee=false
+    block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v28
     block0: IncrefValueRegion v29
     block0: DecrefValueRegion v30

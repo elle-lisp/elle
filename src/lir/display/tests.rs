@@ -86,8 +86,8 @@ fn test_instr_tailcall() {
         args: vec![Reg(1), Reg(2)],
         arity_checked: false,
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
-        adopt_callee: false,
-        adopt_region_slot: None,
+        defer_callee_release: false,
+        deferred_release_slot: None,
     };
     assert_eq!(format!("{}", instr), "tailcall r0(r1, r2)");
 }

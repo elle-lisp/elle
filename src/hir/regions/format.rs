@@ -74,7 +74,7 @@ pub fn format_regions(
     // for a mutual-recursion SCC/cell member (vs a builder-idiom aggregate child),
     // plus the non-member body-tail adopt sites keyed to their merged arena. The
     // permanent instrument for which cliques merged and how each is released.
-    if !info.merged_parent.is_empty() || !info.cycle_tail_adopt.is_empty() {
+    if !info.merged_parent.is_empty() || !info.cycle_tail_release.is_empty() {
         writeln!(buf).unwrap();
         writeln!(buf, ";; ── merge forest ──").unwrap();
         let mut merges: Vec<_> = info.merged_parent.iter().collect();
@@ -94,10 +94,10 @@ pub fn format_regions(
             )
             .unwrap();
         }
-        let mut sites: Vec<_> = info.cycle_tail_adopt.iter().collect();
+        let mut sites: Vec<_> = info.cycle_tail_release.iter().collect();
         sites.sort_by_key(|(id, _)| id.0);
         for (site, root) in &sites {
-            writeln!(buf, "  tail-adopt @{} → arena r{}", site.0, root.0).unwrap();
+            writeln!(buf, "  tail-release @{} → arena r{}", site.0, root.0).unwrap();
         }
     }
 

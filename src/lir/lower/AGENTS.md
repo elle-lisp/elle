@@ -132,9 +132,9 @@ other is structural ownership-location, NOT escape:
   owned), and minting for those owned-escaping args double-releases across
   a fiber suspend/resume — a phantom `DecrefRegion`/UAF (witnessed on
   `contracts.lisp`). The env-ownership fact is structural lexical capture.
-- `control/call.rs::tail_callee_adopts` — the per-call callee closure
+- `control/call.rs::tail_callee_defers_release` — the per-call callee closure
   whose `DecrefRegion` the solver placed at this node is stranded as
-  dead code by the `TailCall`; setting `adopt_callee` makes the runtime
+  dead code by the `TailCall`; setting `defer_callee_release` makes the runtime
   supply that decref. Two facts: region-locality (the callee has an owned
   per-call region demising here — `decrefs_by_decref_point` minus
   `suppressed_decref_regions`, which `EscapeInfo` cannot express) AND
@@ -221,7 +221,7 @@ No new bytecode instructions — break compiles to existing Move + Jump + Decref
 - **Changing control flow**: Update `control.rs`
 - **Changing pattern matching**: Update `pattern.rs` and `pattern/{keyed,matching,seq}.rs`
 - **Changing region RC emission**: Update `regionemit.rs` (it reads the solver's `RegionInfo`); to change *what* is escaping or *where* a region is dropped, edit the region solver in `src/hir/regions.rs`, not the lowerer
-- **Changing tail-call ownership**: Update `control.rs::tail_arg_is_borrowed` and `control/call.rs::tail_callee_adopts`
+- **Changing tail-call ownership**: Update `control.rs::tail_arg_is_borrowed` and `control/call.rs::tail_callee_defers_release`
 - **Adding new bytecode instructions**: Update `expr.rs`, `control.rs`, `binding.rs`, or `lambda.rs` to emit them
 
 ## Common pitfalls

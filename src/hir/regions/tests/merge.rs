@@ -390,7 +390,7 @@ fn self_recursive_letrec_is_cell_free_not_merged() {
     // load. There is no cell↔closure cycle for the merge to collapse — the merge is
     // the MUTUAL-recursion instrument now (`merge_collapses_mutual_recursion_*`). So
     // `loop` mints no capture cell and is not a merge member; it is reclaimed by
-    // ordinary RC / the tail-call adopt, RC-identical to a top-level recursive
+    // ordinary RC / the tail-call deferred release, RC-identical to a top-level recursive
     // `defn`. This is the region-solver-level counterpart of the runtime
     // `self_recursive_loop_is_cell_free` mint pin.
     let (hir, _, info) = pipeline(
@@ -513,7 +513,7 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     // the ev/od SCC ∪ cells onto ONE region exactly as at top level, and the root drops
     // at the in-lambda letrec (the binding scope). The body `(ev k)` is a tail call to
     // an SCC member — the shape whose stranded binding-scope drop rides the tail-call
-    // adopt — and must be ADMITTED (the tail-strand refusal bites only a non-member
+    // deferred release — and must be ADMITTED (the tail-strand refusal bites only a non-member
     // callee, `merge_refuses_in_lambda_cycle_with_foreign_tail_callee`).
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(
@@ -585,7 +585,7 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
 /// Analyze `source` under the REAL primitive classification, returning the arena
 /// so `letrec_binding_node` can locate the cycle. A storing/copying `%`-op compiles
 /// as a native funnel `Call`, so a body tail like `(%freeze …)` is a frame-replacing
-/// `TailCall` — the shape the non-member body-tail adopt exists for.
+/// `TailCall` — the shape the non-member body-tail release slot exists for.
 fn analyze_cycle_with_effects(
     source: &str,
     symbols: &mut SymbolTable,
@@ -619,8 +619,8 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
     // INVERTED from the old tail-strand refusal: a letrec body tail-calling a
     // NON-member closure `g` (a foreign fn) now MERGES. The frame-replacing
     // TailCall strands the binding-scope drop, but the non-member release channel —
-    // `RegionInfo::cycle_tail_adopt` → `TailCall::adopt_region_slot` — is wired, so a
-    // closure callee's new activation adopts and frees the arena at recursion
+    // `RegionInfo::cycle_tail_release` → `TailCall::deferred_release_slot` — is wired, so a
+    // closure callee's new activation takes over the arena's release, freeing it at recursion
     // completion. The tail argument is `(ev k)`'s RESULT (a value), not a member, so
     // no member flows in by-move (contrast
     // `merge_refuses_member_passed_by_move_to_foreign_tail`). `g` is a user closure,
@@ -646,7 +646,7 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
         roots.len(),
         1,
         "a foreign-closure body tail ((g (ev k))) must now MERGE the cycle — the \
-         non-member tail adopt supplies the stranded release; cells={cells:?} \
+         non-member tail release slot supplies the stranded release; cells={cells:?} \
          merged_parent={:?}",
         info.merged_parent,
     );
@@ -657,12 +657,12 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
         root.0,
     );
     // The non-member tail site is recorded, keyed to the merged root — the datum the
-    // lowerer reads to set `adopt_region_slot`.
+    // lowerer reads to set `deferred_release_slot`.
     assert!(
-        info.cycle_tail_adopt.values().any(|&r| r == root),
-        "the (g r) tail site must record cycle_tail_adopt → merged root r{}; got {:?}",
+        info.cycle_tail_release.values().any(|&r| r == root),
+        "the (g r) tail site must record cycle_tail_release → merged root r{}; got {:?}",
         root.0,
-        info.cycle_tail_adopt,
+        info.cycle_tail_release,
     );
 }
 
@@ -671,9 +671,9 @@ fn merge_admits_native_tail() {
     // The native body tail `(%freeze (ev k))`: a copying `%`-op compiles as a native
     // funnel `Call`, so in tail position it is a frame-replacing `TailCall` (an inline
     // arith `%`-op would be an `Intrinsic` node and not a Call tail at all). The cycle
-    // must MERGE and record the `%freeze` site in `cycle_tail_adopt`: at runtime the
+    // must MERGE and record the `%freeze` site in `cycle_tail_release`: at runtime the
     // native keeps the frame and the live scope-exit drop frees the arena, but the
-    // adopt slot is carried anyway (the compiler never classifies the callee), so a
+    // release slot is carried anyway (the compiler never classifies the callee), so a
     // rebound `%freeze` closure is also covered. This is the native-tail shape the
     // whole class regressed on.
     let mut symbols = SymbolTable::new();
@@ -700,10 +700,10 @@ fn merge_admits_native_tail() {
     );
     let root = roots.into_iter().next().unwrap();
     assert!(
-        info.cycle_tail_adopt.values().any(|&r| r == root),
-        "the (%freeze …) tail site must record cycle_tail_adopt → merged root r{}; got {:?}",
+        info.cycle_tail_release.values().any(|&r| r == root),
+        "the (%freeze …) tail site must record cycle_tail_release → merged root r{}; got {:?}",
         root.0,
-        info.cycle_tail_adopt,
+        info.cycle_tail_release,
     );
 }
 
@@ -711,7 +711,7 @@ fn merge_admits_native_tail() {
 fn merge_refuses_member_passed_by_move_to_foreign_tail() {
     // THE SAFETY BOUNDARY. A member closure `od` passed BY-MOVE as an argument to a
     // non-member tail call `(g od)` must REFUSE the merge. Freeing the arena at the
-    // recursion's completion (the adopt) collides with `od`'s own move/return
+    // recursion's completion (the deferred release) collides with `od`'s own move/return
     // machinery — which also decrefs the merged arena — a double-free. The escape
     // gate does NOT catch this (an opaque callee's argument is not a return/fiber
     // Shared-seed), and the ANF hoist temp aliasing `od` is a synthetic holder
@@ -744,16 +744,16 @@ fn merge_refuses_member_passed_by_move_to_foreign_tail() {
             info.merged_root(c),
             c,
             "a cycle passing a member (od) BY-MOVE into a non-member tail (g od) must \
-             NOT merge — the adopt would double-free the arena against od's own \
+             NOT merge — the deferred release would double-free the arena against od's own \
              move/return release; cell r{} merged; merged_parent={:?}",
             c.0,
             info.merged_parent,
         );
     }
     assert!(
-        info.cycle_tail_adopt.is_empty(),
-        "a refused cycle records no non-member tail adopt site; got {:?}",
-        info.cycle_tail_adopt,
+        info.cycle_tail_release.is_empty(),
+        "a refused cycle records no non-member tail release site; got {:?}",
+        info.cycle_tail_release,
     );
 }
 

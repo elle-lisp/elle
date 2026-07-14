@@ -5,8 +5,8 @@
 # The closure-cycle merge collapses the `ev`/`od` SCC and their forward cells onto
 # one arena, freed once by the arena's binding-scope `DecrefRegion`. When the body
 # is a frame-replacing tail call, that drop is dead code past the `TailCall`, so the
-# release rides the explicit arena adopt (`TailCall::adopt_region_slot`,
-# `RegionInfo::cycle_tail_adopt`): a CLOSURE callee's new activation adopts the arena
+# release rides the explicit arena adopt (`TailCall::deferred_release_slot`,
+# `RegionInfo::cycle_tail_release`): a CLOSURE callee's new activation adopts the arena
 # and frees it at the recursion's completion; a NATIVE callee never replaces the
 # frame and falls through to the live scope-exit drop. The two are mutually exclusive
 # per call, so exactly one release fires however the callee resolves at runtime — the

@@ -33,20 +33,22 @@ pub(crate) struct TailCallInfo {
     /// — see `lower_call`'s `is_tail` arm). A tail call replaces the frame, so
     /// that trailing release never runs and the closure's region leaks (one per
     /// call through every higher-order stdlib fn: `fold`/`map`/`filter`/…, whose
-    /// recursion tail-calls a `letrec`-bound `go`). The new activation ADOPTS the
-    /// closure here and releases its region when the activation completes (the
+    /// recursion tail-calls a `letrec`-bound `go`). The new activation TAKES OVER
+    /// that release and runs it when the activation completes (the
     /// trampoline-loop break) — the missing decref, deferred to where the
-    /// frame-replacing tail call moved the closure's lifetime.
+    /// frame-replacing tail call moved the closure's lifetime. The region stays
+    /// `Counted` throughout: this is a deferred decref, never an ownership-forest
+    /// adoption.
     ///
     /// `None` for a callee that is NOT a per-call local closure — a top-level
     /// `defn` (a program-root closure, region held for the program's life: it has
     /// no per-call decref and tail-calling it never leaked) or a native/parameter
     /// callee (no frame replacement). The discriminator is
-    /// `VM::tail_callee_adopt_region`: a local closure's region is recorded in the
+    /// `VM::tail_callee_release_region`: a local closure's region is recorded in the
     /// CURRENT activation's region map (and, with its decref dead, never cleared);
     /// a program-root closure's region was minted in a different, popped
     /// activation. Releasing a program-root region would be a use-after-free.
-    pub adopt_region: Option<RuntimeRegion>,
+    pub deferred_release_region: Option<RuntimeRegion>,
 }
 
 /// Pending fiber resume for the trampoline.

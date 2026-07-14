@@ -49,7 +49,7 @@ impl VM {
         // callee is live by construction — at the body-entry installs
         // (`debug_assert_entry_closure_matches`) — and `LoadSelf`, its reader,
         // asserts the register is populated (a self-recursive body's closure
-        // region is kept live through the recursion by the tail-call adopt, so
+        // region is kept live through the recursion by the tail-call deferred release, so
         // the value LoadSelf reads is never stale).
 
         loop {

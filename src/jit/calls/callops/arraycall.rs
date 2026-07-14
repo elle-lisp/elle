@@ -255,7 +255,7 @@ pub extern "C" fn elle_jit_tail_call(
             // Leaving `None` keeps today's behaviour (the closure region leaks,
             // as before this change) — a no-regression placeholder until the
             // adopt-and-release is extended to the JIT trampolines.
-            adopt_region: None,
+            deferred_release_region: None,
         });
 
         return TAIL_CALL_SENTINEL;

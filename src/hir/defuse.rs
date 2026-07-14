@@ -134,7 +134,7 @@ impl DefUseBuilder {
                 // self-recursive binding's region alive to its enclosing letrec/def
                 // scope; because the dominant recursive body is a frame-replacing tail
                 // call, that scope-end release is stranded as dead code and supplied
-                // once by the tail-call adopt (`lir/lower/control/call.rs`).
+                // once by the tail-call deferred release (`lir/lower/control/call.rs`).
                 for cap in captures {
                     self.record_use(cap.binding, hir.id);
                 }

@@ -288,7 +288,7 @@
 # marks the struct escaping; this shrinks only as escape analysis is made
 # branch/path-sensitive. (The IN-LAMBDA self-recursive letrec closure `+`/`<` build over
 # their varargs is cell-free — its self-reference resolves to the executing closure, no
-# cell↔closure cycle — reclaimed per call by ordinary RC / the tail-call adopt,
+# cell↔closure cycle — reclaimed per call by ordinary RC / the tail-call deferred release,
 # docs/impl/selfrec.md; that class is pinned directly by the `recur-local-self` probe
 # below.)
 (defn probe-io-yield [j]
@@ -835,7 +835,7 @@
 # cell↔closure cycle; its self-reference resolves to the executing closure (`LoadSelf` /
 # a self-call), RC-identical to a top-level recursive `defn` (docs/impl/selfrec.md). The
 # per-call closure region is stranded past the recursive `TailCall` and reclaimed by the
-# tail-call adopt (lir/lower/control/call.rs `tail_callee_adopts`). The HOF pins above
+# tail-call deferred release (lir/lower/control/call.rs `tail_callee_defers_release`). The HOF pins above
 # (map/reduce/zip/…) ride this same cell-free mechanism — their `go` helpers.
 #
 # MUTUAL recursion (`recur-local-mutual`) is reclaimed (rate 0): `ev`/`od` each capture
@@ -843,7 +843,7 @@
 # letrec binding's forward cell is a compiled static-slot cell in every position, so the
 # closure-cycle merge collapses the SCC + cells onto one arena in-lambda exactly as at
 # top level. The tail-call letrec body `(ev n)` strands the binding-scope drop; the
-# tail-call adopt releases the merged arena once at the recursion's normal completion
+# tail-call deferred release releases the merged arena once at the recursion's normal completion
 # (docs/impl/region/letrec.md § The letrec closure-cycle merge).
 (defn lcl-self [n]
   (letrec [go (fn [m] (if (%lt m 1) :done (go (%sub m 1))))]
@@ -862,8 +862,8 @@
 # whose operand is the call) and `(+ (ev n) 0)` (the stdlib redefines `+`
 # to a bytecode CLOSURE) end in a frame-replacing tail call to a non-member.
 # That strands the merged arena's binding-scope drop as dead code, so the
-# release rides the explicit arena adopt (`TailCall::adopt_region_slot`,
-# `RegionInfo::cycle_tail_adopt`): a closure callee (`+`) adopts the arena at
+# release rides the explicit arena adopt (`TailCall::deferred_release_slot`,
+# `RegionInfo::cycle_tail_release`): a closure callee (`+`) adopts the arena at
 # the recursion's completion, a native callee (`%add`) never replaces
 # the frame and falls through to the live scope-exit drop — mutually exclusive per call,
 # so exactly one release fires however the callee resolves. Both reclaim (rate 0); the

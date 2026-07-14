@@ -149,11 +149,11 @@ impl VM {
     ) -> Option<SignalBits> {
         let arg_count = self.read_u16(bytecode, ip) as usize;
         let region_id = self.read_static_region(bytecode, ip);
-        let adopt_callee = self.read_u8(bytecode, ip) != 0;
-        // Closure-cycle merged-arena adopt slot: `0` encodes `None` (a
+        let defer_callee_release = self.read_u8(bytecode, ip) != 0;
+        // Closure-cycle merged-arena release slot: `0` encodes `None` (a
         // `StaticRegion` is `NonZeroU32`, so a real slot is never 0). See
-        // `LirInstr::TailCall::adopt_region_slot`.
-        let adopt_region_slot = StaticRegion::new(self.read_u32(bytecode, ip));
+        // `LirInstr::TailCall::deferred_release_slot`.
+        let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
         let func = self
             .fiber
             .stack
@@ -176,8 +176,8 @@ impl VM {
             args,
             checked,
             region_id,
-            adopt_callee,
-            adopt_region_slot,
+            defer_callee_release,
+            deferred_release_slot,
         )
     }
 
@@ -220,8 +220,8 @@ impl VM {
             return Some(SIG_ERROR);
         };
 
-        // Splice/apply tail call (`TailCallArrayMut`): closure-callee adoption
-        // and the closure-cycle merged-arena adopt are not wired through this
+        // Splice/apply tail call (`TailCallArrayMut`): the closure-callee deferred
+        // release and the closure-cycle merged-arena release slot are not wired through this
         // path yet — `false`/`None` keep today's behaviour (no regression). The
         // common `(f …)` tail call uses `TailCall`, which carries both.
         self.tail_call_inner(func, args, checked, region_id, false, None)

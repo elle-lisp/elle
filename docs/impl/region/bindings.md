@@ -162,7 +162,7 @@ cost of minting a return that *could* have moved is a +1 that the caller's
 decref reclaims. Whether a closure escapes its
 definition is answered authoritatively by the escape analysis
 (`EscapeInfo`/`src/hir/escape.rs`), read by the consumers that genuinely need it
-(`tail_callee_adopts`, the reassign gate's return facet) — not by the return-mint
+(`tail_callee_defers_release`, the reassign gate's return facet) — not by the return-mint
 path, which is unconditional. The tail-call-arg twin (`tail_arg_is_borrowed`,
 `src/lir/lower/control.rs`) likewise needs no escape test — its mint is balanced
 by the callee's owned-param release, which always fires.

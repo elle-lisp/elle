@@ -409,8 +409,8 @@ fn test_compile_batch_mutual_calls() {
             args: vec![Reg(0)],
             arity_checked: false,
             region: crate::hir::region::StaticRegion::new(2).unwrap(),
-            adopt_callee: false,
-            adopt_region_slot: None,
+            defer_callee_release: false,
+            deferred_release_slot: None,
         },
         Span::synthetic(),
     ));

@@ -15,7 +15,7 @@ unboundedly.
 only itself) is **cell-free**: its self-edge does not mark it captured
 (`hir/analyze/scopes.rs`), so it has no forward cell and no cell↔closure cycle — its
 self-reference resolves to the currently-executing closure ([selfrec.md](../selfrec.md)),
-reclaimed by ordinary RC / the tail-call adopt, RC-identical to a top-level recursive
+reclaimed by ordinary RC / the tail-call deferred release, RC-identical to a top-level recursive
 `defn`. So the merge is the **mutual**-recursion instrument; a pure self-recursive letrec
 never has a cell and never reaches it.
 
@@ -110,7 +110,7 @@ named). The remaining slack — the binding scope-exit can still fall after a me
 last use *within* the letrec body — is bounded by that one scope, a granularity nit,
 not the unbounded blowup.
 
-**A tail-call letrec body hands the drop to a tail-call adopt — for a member *or* a
+**A tail-call letrec body hands the drop to a tail-call deferred release — for a member *or* a
 non-member callee.** When the letrec body ends in a frame-replacing tail call, the
 binding-scope `DecrefRegion` is emitted past the `TailCall` — dead code — so the
 release must ride the activation's completion instead. **The compiler cannot know at
@@ -124,45 +124,45 @@ and lets exactly one fire.
 - **A tail call to an SCC member** rides the existing stranded-cycle channel:
   `lower_letrec` marks the member bindings the letrec body tail-calls
   (`stranded_cycle_bindings`, derived from the body's `is_tail` calls without
-  descending into nested lambdas), `tail_callee_adopts` returns true for such a callee
+  descending into nested lambdas), `tail_callee_defers_release` returns true for such a callee
   (read through a **non-upvalue** reference only, so a nested closure in the body can
-  never adopt the arena out from under a later use), and the `TailCall` carries
-  `adopt_region = region_of(callee)` — the merged arena, because a member lives in it.
+  never free the arena out from under a later use), and the `TailCall` carries
+  `deferred_release_region = region_of(callee)` — the merged arena, because a member lives in it.
 
 - **A tail call to a NON-member** (a native `%add`, a redefined operator `+`, a
   foreign closure `g`) rides an explicit slot instead. The analysis records the tail
-  site in `RegionInfo::cycle_tail_adopt` (site HirId → the merged root region), the
-  lowerer sets the `TailCall`'s `adopt_region_slot` to the root's static slot
-  (`compute_closure_cycle_merges` → `ClosureCycleMerge::tail_adopt_sites`), and the
+  site in `RegionInfo::cycle_tail_release` (site HirId → the merged root region), the
+  lowerer sets the `TailCall`'s `deferred_release_slot` to the root's static slot
+  (`compute_closure_cycle_merges` → `ClosureCycleMerge::tail_release_sites`), and the
   runtime resolves that slot through the executing activation's region map — the arena
   was minted during the letrec setup and its scope-exit drop is dead. If the callee
   turns out a **closure**, the frame is replaced and `trampoline_loop`'s
-  `adopted_closures` frees the resolved arena once (deduped) at the recursion's
+  `deferred_releases` frees the resolved arena once (deduped) at the recursion's
   completion; if it turns out a **native**, the frame is not replaced, the slot is
   never consumed, and the live scope-exit `DecrefRegion` frees the arena — mutually
   exclusive, exactly one release, the compiler having classified nothing.
 
 Both member and non-member releases run at the recursion's completion / the
-scope-exit, so the same channel the cell-free self-recursive adopt rides
+scope-exit, so the same channel the cell-free self-recursive deferred release rides
 ([selfrec.md](../selfrec.md)). Interior sibling calls (`ev` tail-calling `od` inside the
-SCC bodies) never adopt: `tail_callee_adopts` refuses any callee whose region is a
+SCC bodies) never defer: `tail_callee_defers_release` refuses any callee whose region is a
 closure-cycle merge member (`RegionInfo::closure_cycle_members` — the merge owns the
 release), and only the letrec-body marking overrides that refusal. On a body with
 mixed tail exits (`(if c (ev k) (%add (ev k) 0))`) exactly one release fires per path:
-the member arm adopts via `region_of` (its binding-scope drop dead there), the
-non-member arm via `adopt_region_slot` or the live scope-exit drop.
+the member arm defers via `region_of` (its binding-scope drop dead there), the
+non-member arm via `deferred_release_slot` or the live scope-exit drop.
 
 **What the non-member tail still refuses — the by-move boundary.** A cycle member
 passed **by-move as a tail argument** (`(g od)` — `od` itself, not `(ev k)`'s result)
 refuses the whole cycle to Shared. The member's own move/return machinery decrefs the
-merged arena a second time, colliding with the adopt (a double-free); the escape gate
+merged arena a second time, colliding with the deferred release (a double-free); the escape gate
 does not catch it (an opaque callee's argument is not a return/fiber Shared-seed). So
 the tail gate reads each argument's region-transparent flow bindings (mirroring
 escape's `tail_sources`: through control/select/deref, stopping at a `Call`/
 `Intrinsic`/`Lambda`) and refuses when one is an SCC member. A member stored into a
 fresh aggregate then passed (`(g (%pair od 1))`) is RC-counted, and a member *called*
 in an argument (`(g (ev k))`) contributes its result, not itself — both admitted. An
-unresolvable non-member callee (no site to key the adopt at) likewise refuses.
+unresolvable non-member callee (no site to key the deferred release at) likewise refuses.
 
 **All-tier, unconditional.** The merge extends the same `merged_parent` forest the
 builder seed populates and rides the same `merged_root` canonicalization and
@@ -174,7 +174,7 @@ onto one `merged_root`; `merge_collapses_in_lambda_mutual_recursion_letrec_closu
 — the same collapse and binding-scope drop for a letrec that is a lambda body;
 `merge_admits_in_lambda_cycle_with_foreign_tail_callee` and
 `merge_admits_native_tail` — a non-member (foreign closure / native) body
-tail now MERGES and records `cycle_tail_adopt`;
+tail now MERGES and records `cycle_tail_release`;
 `merge_refuses_member_passed_by_move_to_foreign_tail` — the by-move boundary (`(g od)`
 double-free) still refuses; `merge_refuses_escaping_letrec_closure`;
 `merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing`;
@@ -191,5 +191,5 @@ per call (bounded beside the live-chain discriminator, base case included) and
 discarded top-level cycle freed at its letrec, not held to teardown).
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a
 pure self-recursive closure, which is reclaimed cell-free (ordinary RC / the tail-call
-adopt — [selfrec.md](../selfrec.md)), not by this merge.
+deferred release — [selfrec.md](../selfrec.md)), not by this merge.
 

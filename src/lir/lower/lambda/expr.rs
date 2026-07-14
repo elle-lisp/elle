@@ -117,8 +117,8 @@ impl<'a> Lowerer<'a> {
         // of: the binding it captures as `CaptureKind::Recursive` (a same-binding
         // self-edge). Such a closure is cell-free, but its region lives through the
         // whole recursion (its self-reference borrows the executing closure), so a
-        // recursive tail call strands its scope-end release — `tail_callee_adopts`
-        // reads this set to supply it via the runtime adopt. Recorded BEFORE lowering
+        // recursive tail call strands its scope-end release — `tail_callee_defers_release`
+        // reads this set to supply it via the runtime deferred release. Recorded BEFORE lowering
         // the body so a self-tail-call inside the body already sees the fact.
         for cap in captures {
             if let crate::hir::CaptureKind::Recursive { binding } = cap.kind {
