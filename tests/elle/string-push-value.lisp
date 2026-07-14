@@ -17,10 +17,16 @@
 # so it hid. This test pins JIT==VM agreement for it.
 
 # A closure that pushes its second arg onto its first and returns the first.
+# The `(match (type-of …))` arm proves `dst` authoritatively for the raw
+# intrinsic (docs/intrinsics.md § What counts as proof) — the pin is
+# %string-push itself, never a wrapper.
 (def push-onto
   (fn [dst v]
-    (%string-push dst v)
-    dst))
+    (match (type-of dst)
+      :@string (begin
+                 (%string-push dst v)
+                 dst)
+      _ (error {:error :type-error :message "push-onto: @string dst required"}))))
 
 # Case 1: pushed value is an @string (the failing case).
 (defn case-mut-value [tier]

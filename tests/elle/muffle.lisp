@@ -18,7 +18,9 @@
 (defn fast-abs [x]
   (silence)
   (muffle :error)
-  (if (> x 0) x (- 0 x)))
+  (when (%not (number? x))
+    (error {:error :type-error :message "fast-abs: number required"}))
+  (if (%gt x 0) x (%sub 0 x)))
 
 (assert (= (fast-abs -7) 7) "muffled abs works")
 (assert (= (fast-abs 5) 5) "muffled abs positive")

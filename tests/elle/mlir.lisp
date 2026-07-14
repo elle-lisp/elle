@@ -12,10 +12,13 @@
 # ── Arithmetic ───────────────────────────────────────────────────────
 
 (defn ml-add [a b]
+  (numeric!)
   (%add a b))
 (defn ml-mul [a b]
+  (numeric!)
   (%mul a b))
 (defn ml-sub [a b]
+  (numeric!)
   (%sub a b))
 
 # Call past hotness threshold (default 10)
@@ -32,6 +35,7 @@
 # ── Multi-operation ──────────────────────────────────────────────────
 
 (defn ml-quad [a b c]
+  (numeric!)
   (%add (%mul a (%add b c)) c))
 
 (repeat 15 (ml-quad 1 2 3))
@@ -41,6 +45,7 @@
 # ── Control flow ─────────────────────────────────────────────────────
 
 (defn ml-abs [x]
+  (numeric!)
   (if (%gt x 0) x (%sub 0 x)))
 
 (repeat 15 (ml-abs 1))
@@ -49,6 +54,7 @@
 (assert (= (ml-abs 0) 0) "MLIR abs zero")
 
 (defn ml-max [a b]
+  (numeric!)
   (if (%gt a b) a b))
 
 (repeat 15 (ml-max 1 2))
@@ -61,6 +67,7 @@
 
 (def outer 100)
 (defn ml-with-capture [x]
+  (numeric!)
   (%add x outer))
 (repeat 15 (ml-with-capture 1))
 (assert (= (ml-with-capture 5) 105) "captured var works (not MLIR)")
@@ -78,6 +85,7 @@
 # comparisons where the branch condition is always 0 or 1.
 
 (defn ml-clamp [x lo hi]
+  (numeric!)
   (if (%lt x lo) lo (if (%gt x hi) hi x)))
 
 (repeat 15 (ml-clamp 5 0 10))

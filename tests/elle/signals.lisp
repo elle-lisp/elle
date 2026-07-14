@@ -43,7 +43,7 @@
     (fn (f x y)
       (silence f)
       (f x y)))
-  (assert (= (apply-inert (fn [x y] (%add x y)) 42 1) 43)
+  (assert (= (apply-inert (fn [x y] x) 43 1) 43)
           "silence runtime: silent function passes"))
 
 # silence with non-closure (primitive) passes at runtime
@@ -69,8 +69,8 @@
     (fn (f x y)
       (silence f)
       (f x y)))
-  (def @g (fn [x y] (%add x y)))
-  (assert (= (apply-inert3 g 42 1) 43) "silence runtime: dynamic silent passes"))
+  (def @g (fn [x y] x))
+  (assert (= (apply-inert3 g 43 1) 43) "silence runtime: dynamic silent passes"))
 
 # ============================================================================
 # silence runtime checks — failing cases

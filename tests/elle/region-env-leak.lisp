@@ -55,7 +55,7 @@
 (defn make-acc ()
   (def @total 0)
   (fn (x)
-    (assign total (%add total x))
+    (assign total (+ total x))
     total))
 
 # (d) The same captured-mutated-param closure wrapped in a fiber, built fresh

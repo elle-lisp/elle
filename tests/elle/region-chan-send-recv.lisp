@@ -35,7 +35,7 @@
 (defn churn [n]
   (let [[s r] (chan)]
     (var i 0)
-    (while (%lt i n)
+    (while (< i n)
       (chan/send s {:k i :v (string "v" i)})
       (let [got (chan/recv r)]
         (assert (= (get got 0) :ok) "recv should observe the sent message")
@@ -48,7 +48,7 @@
 (def @sink @[])
 (defn grow [n]
   (var i 0)
-  (while (%lt i n)
+  (while (< i n)
     (push sink {:k i})
     (assign i (%add i 1))))
 

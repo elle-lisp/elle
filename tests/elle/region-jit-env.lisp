@@ -48,7 +48,7 @@
 (defn vsum (& xs)
   (var s 0)
   (each x xs
-    (assign s (%add s x)))
+    (assign s (+ s x)))
   s)
 
 # fixed params + rest: exercises the prologue's fixed-arg loads AND the rest
@@ -62,8 +62,8 @@
   (var s 0)
   (var j 0)
   (while (%lt j k)
-    (assign s (%add s (vsum 1 2 3 4 5)))
-    (assign s (%add s (vtail 10 20 1 2 3)))
+    (assign s (+ s (vsum 1 2 3 4 5)))
+    (assign s (+ s (vtail 10 20 1 2 3)))
     (assign j (%add j 1)))
   s)
 

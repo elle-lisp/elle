@@ -32,7 +32,7 @@
   (while (%lt i n)
     (let [x (%pair i i)
           junk {:a i :b [i i i]}]
-      (yield (%add (first x) (get junk :a))))
+      (yield (+ (first x) (get junk :a))))
     (assign i (%add i 1))))
 
 (let [g (fiber/new (fn [] (gen 200)) |:yield|)]
@@ -43,7 +43,7 @@
       (unless (= v (%mul 2 j)) (assign bad (%add bad 1))))  # churn the driver's own regions between resumes
     (let [m (%pair j j)
           s {:x j}]
-      (%add (first m) (get s :x)))
+      (+ (first m) (get s :x)))
     (unless (struct? tbl) (assign bad (%add bad 1)))
     (assign j (%add j 1)))
   (check "cross-yield-values" (= bad 0) (string "bad=" bad))

@@ -32,7 +32,9 @@
 ## same collection. The function below is called >15 times so the JIT
 ## compiles it; if IntrBytesPush is unimplemented the JIT panics.
 (defn push-mut-hot (buf b)
-  (%bytes-push buf b))
+  (match (type-of buf)
+    :@bytes (%bytes-push buf b)
+    _ (error {:error :type-error :message "push-mut-hot: @bytes required"})))
 
 (def @hot-buf (@bytes))
 (repeat2 30 push-mut-hot hot-buf 65)  # 'A'
@@ -44,7 +46,9 @@
 
 ## Identity-preservation: push must return the same @bytes we passed in.
 (defn push-returns-same? (buf b)
-  (%identical? (%bytes-push buf b) buf))
+  (match (type-of buf)
+    :@bytes (%identical? (%bytes-push buf b) buf)
+    _ (error {:error :type-error :message "push-returns-same?: @bytes required"})))
 
 (def @id-buf (@bytes 1))
 (repeat2 20 push-returns-same? id-buf 2)
@@ -60,7 +64,9 @@
 ## %bytes-push on an immutable bytes value allocates a new bytes with the
 ## byte appended; the original is untouched.
 (defn push-imm-hot (b byte)
-  (%bytes-push b byte))
+  (match (type-of b)
+    :bytes (%bytes-push b byte)
+    _ (error {:error :type-error :message "push-imm-hot: bytes required"})))
 
 (def orig (bytes 1 2 3))
 (repeat2 30 push-imm-hot orig 4)
