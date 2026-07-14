@@ -98,40 +98,46 @@ the scope-based solver shares regions, so skipping there leaks an aliased value
 cells") keep a read from claiming the init region; the backstop is the
 correct-by-construction floor they build on.
 
-**Returned fn-local reassigned mutables.** The "over-keeping, never
-mis-freeing" guarantee of the unsuppressed baseline holds only while the
-callee owns the sole release of its result. With the mint-at-return
-convention it does not: every `Return` mints one owning reference, and the
-CALLER balances that mint with a `DecrefValueRegion` at the call result's
-decref_point. So a fn-local reassigned mutable read in return position,
-falling through the "not returned" gate to the unsuppressed baseline, is
-freed TWICE — once by the callee's ordinary assign-value decref, once by the
-caller's mint-balancing decref. The double-release is latent: the returned
-value transiently has rc≥2 (its alloc plus the cell), so the extra decref
-only drops it to rc 1 and a plain read sees stale-but-intact bytes. A
-scheduler **park** (`chan/select`, `chan/wait-ready`, `ev/sleep`, any
-`SIG_IO` yield) that built the value AFTER the resume leaves it at rc 1, so
-the callee's extra decref frees the live result out from under the
-resumed/caller read — the io/scheduler cross-fiber UAF
-(`tests/elle/region-reassign-return-park-uaf.lisp`). It fires only when the
-callee has no direct, statically-resolved call site in its compilation unit:
-only then does the solver skip `try_inline_call`, whose re-walk in the caller's
-escaping context would otherwise suppress the return region. Every suspending
-stdlib function is called only cross-unit from user code, so all of them hit
-it. So a returned fn-local reassigned mutable is treated as a 1-slot
-container exactly like the module-scope case — suppress the init AND
-assign-value region releases (drop-on-overwrite frees the displaced
-intermediates; the caller's mint-balancing decref frees the final returned
-value), when sole-held; otherwise suppress without drop-on-overwrite and
-accept the displaced-intermediate leak (tolerated debt, never a UAF). This is
-the only place the container model applies to a *returned* binding, and only
-because the return mint hands the caller the single external owner the
-original gate assumed could not exist. One obligation binds the fallback: **a mutated slot is not a
-release route.** A value-routed release (`LoadLocal slot` +
-`DecrefValueRegion`) may target a slot only if the slot's occupant at the
-release point is provably the value whose region is being released; a
-reassigned binding's slot fails that by construction. With no untainted
-route the release is skipped — an over-keep, never a mis-free.
+**Returned fn-local reassigned mutables.** A returned fn-local reassigned
+mutable stays balanced under one rule: exactly one callee decref per
+callee-held reference, plus the caller's mint. The mint-at-return convention
+supplies the caller's side — every `Return` mints one owning reference
+(`lower_return`'s `IncrefValueRegion`) which the caller balances with a
+`DecrefValueRegion` at the call result's decref_point — while the callee
+releases its own single reference with the reaching **assign-value** region's
+ordinary decref. So the callee KEEPS its assign-value decref (dropping it, or
+the mint, unbalances the pair into a leak or a double-free — the io/scheduler
+cross-fiber guard `tests/elle/region-reassign-return-park-uaf.lisp`, where a
+scheduler park that rebuilt the value at rc 1 makes a dropped-mint double-free
+fatal rather than latent).
+
+When the binding is assigned ONCE, its binding region and its assign-value
+region coalesce onto a single region (`binding_regs == regions`): one callee
+decref fires, the mint carries ownership to the caller, balanced — and there
+is nothing to suppress. A **loop** over the cell breaks that coalescing: the
+binding gets its own loop-carried region (the slot that carries the
+accumulator across the back-edge) DISTINCT from the per-iteration assign-value
+region, yet both name the same runtime value at the tail. The unsuppressed
+baseline then emits a value-route decref for EACH at the `Return` — two callee
+decrefs of the one callee-held reference, the second freeing the caller's
+minted reference before the caller reads it (the loop-reassigned-return
+double-free, `tests/integration/fixtures/region-capture-cell-string-accum-uaf.lisp`,
+guardfree pin `region_capture_cell_string_accum_uaf`). So a sole-held returned
+fn-local reassigned mutable suppresses the binding's OWN regions
+(`binding_regs \ regions` — the init region and the loop-carried region) while
+KEEPING the assign-value regions' decref: one callee release plus the mint,
+exactly as the single-assign case. The single-assign case has
+`binding_regs == regions`, so this suppresses nothing there and leaves the park
+guard's baseline untouched. (No drop-on-overwrite for a returned binding: the
+displaced intermediates leak as tolerated debt, never a UAF.)
+
+One obligation binds the fallback for a NON-sole returned binding (left at the
+unsuppressed baseline): **a mutated slot is not a release route.** A
+value-routed release (`LoadLocal slot` + `DecrefValueRegion`) may target a slot
+only if the slot's occupant at the release point is provably the value whose
+region is being released; a reassigned binding's slot fails that by
+construction. With no untainted route the release is skipped — an over-keep,
+never a mis-free.
 
 **Returns mint one owning reference (borrowed captured upvalues).** Every
 `Return` (and the native-tail post-block in `src/lir/lower/control.rs`) emits an

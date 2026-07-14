@@ -158,10 +158,12 @@ pub(super) fn apply_reassign_containers(
     // difference: a fn-local cell's final value is NOT a program-lifetime root
     // (top-level cells are); the binding's scope exits and its `decref_point`
     // frees whatever the cell last held. So we KEEP the assign-value regions'
-    // decrefs — they ARE the cell's scope-exit demise — and suppress ONLY the
-    // init region's decref. (Top-level suppresses the assign-value regions too
-    // because there the final value lives forever; doing that here would drop
-    // the cell's scope-exit decref and leak the final value.)
+    // decrefs — they ARE the cell's scope-exit demise (and, for a returned
+    // binding, the callee's one release balanced by the return mint) — and
+    // suppress the binding's OTHER regions (`binding_regs \ regions`). (Top-level
+    // suppresses the assign-value regions too because there the final value lives
+    // forever; doing that here would drop the cell's scope-exit decref and leak
+    // the final value.)
     //
     // The defect this fixes: without the incref-on-store the cell slot holds an
     // UNCOUNTED reference (plain `StoreLocal`) yet still receives that
@@ -173,13 +175,14 @@ pub(super) fn apply_reassign_containers(
     // drop-on-overwrite, so its ordinary decref (suppressed here) is the
     // duplicate. SOLE-HELD gates this, as for the top-level path.
     //
-    // The gate is sole-held AND not-returned, as for the top-level path
-    // (`returned_regions` above; docs/impl/region/bindings.md "Reassigned mutable
-    // bindings are 1-slot containers"). Distinct mechanism: a `@`-mutable PARAMETER
-    // (a captured cell the callee owns) reassigned then moved into a tail call is
-    // released by the callee's own cell `DecrefCellRegion`, and the tail move's
-    // borrowed-arg retain must order ahead of that release's cascade — enforced in
-    // `lower_call` (pinned by region-mutable-reassign-param.lisp), not by this gate.
+    // The gate is sole-held (BOTH not-returned and returned — see the split
+    // below and docs/impl/region/bindings.md "Reassigned mutable bindings are
+    // 1-slot containers" § "Returned fn-local reassigned mutables"). Distinct
+    // mechanism: a `@`-mutable PARAMETER (a captured cell the callee owns)
+    // reassigned then moved into a tail call is released by the callee's own cell
+    // `DecrefCellRegion`, and the tail move's borrowed-arg retain must order ahead
+    // of that release's cascade — enforced in `lower_call` (pinned by
+    // region-mutable-reassign-param.lisp), not by this gate.
     for (b, (sites, regions)) in local_reassigns {
         let binding_regs = inference_binding_regions
             .get(b)
@@ -194,45 +197,71 @@ pub(super) fn apply_reassign_containers(
         // Guarded by "carries a heap region" (immediate cells carry no reference).
         let returned = !binding_regs.is_empty() && escape_info.binding_escapes_via_return(*b);
 
-        if sole && !returned {
-            // Not returned (and sole-held): the cell's final value dies at
-            // scope exit. KEEP the assign-value regions' decrefs (that IS the
-            // scope-exit demise) and suppress ONLY the init region's decref —
-            // the first overwrite is the init value's owning demise. A
-            // *returned* sole-held cell leaves the unsuppressed baseline: under
-            // the mint-at-return convention the return's `IncrefValueRegion`
-            // hands the caller its own reference, so the callee's ordinary
-            // decref of the cell's value is correct (no double-release).
-            for &s in sites {
-                info.drop_on_overwrite_sites.insert(s);
-            }
-            // Static-alloc content (a slot-resolved fresh allocation — a
-            // `%pair` in the assign) DONATES its birth reference to the
-            // cell, exactly like the module-scope container: the
-            // drop-on-overwrite releases each displaced prior at its
-            // overwrite, and the kept scope-exit slot `DecrefRegion`
-            // releases the final (current) mint — per-value balance even
-            // when a loop re-mints the slot's region every iteration. An
-            // incref-on-store would strand every displaced prior at rc 1
-            // (born + store − overwrite = +1). Call-result content keeps
-            // the counted store: its producer claim is released by its own
-            // value-resolved `DecrefValueRegion`, so the donation there
-            // would over-free. All-or-nothing per binding, like the gate.
-            let all_static = !regions.is_empty()
-                && regions
-                    .iter()
-                    .all(|r| !info.call_result_regions.contains(r));
-            if all_static {
+        if sole {
+            if !returned {
+                // Not returned (and sole-held): the cell's final value dies at
+                // scope exit. The first overwrite is the init value's owning
+                // demise, so drop-on-overwrite is its release channel.
                 for &s in sites {
-                    info.donated_overwrite_sites.insert(s);
+                    info.drop_on_overwrite_sites.insert(s);
+                }
+                // Static-alloc content (a slot-resolved fresh allocation — a
+                // `%pair` in the assign) DONATES its birth reference to the
+                // cell, exactly like the module-scope container: the
+                // drop-on-overwrite releases each displaced prior at its
+                // overwrite, and the kept scope-exit slot `DecrefRegion`
+                // releases the final (current) mint — per-value balance even
+                // when a loop re-mints the slot's region every iteration. An
+                // incref-on-store would strand every displaced prior at rc 1
+                // (born + store − overwrite = +1). Call-result content keeps
+                // the counted store: its producer claim is released by its own
+                // value-resolved `DecrefValueRegion`, so the donation there
+                // would over-free. All-or-nothing per binding, like the gate.
+                let all_static = !regions.is_empty()
+                    && regions
+                        .iter()
+                        .all(|r| !info.call_result_regions.contains(r));
+                if all_static {
+                    for &s in sites {
+                        info.donated_overwrite_sites.insert(s);
+                    }
                 }
             }
+            // KEEP the assign-value regions' (`regions`) decrefs and suppress
+            // every OTHER region the binding may hold (`binding_regs \ regions`
+            // — the init region, and, for a binding accumulated in a LOOP, the
+            // loop-carried binding region that aliases whatever value the slot
+            // currently holds).
+            //
+            // Not returned: the kept assign-value decref IS the cell's
+            // scope-exit demise of the final value; suppressing the init's
+            // ordinary decref is safe because drop-on-overwrite (above) is its
+            // release.
+            //
+            // Returned: the binding's value is minted for the caller at the
+            // `Return` (`lower_return`'s `IncrefValueRegion`). A loop over the
+            // cell gives the binding its OWN loop-carried region (the slot that
+            // carries the accumulator across the back-edge) that aliases the SAME
+            // runtime value as the reaching assign-value region — so leaving the
+            // unsuppressed baseline emits TWO value-route decrefs of that one
+            // value (binding-region slot AND assign-value temp) at the Return.
+            // The callee owns exactly one reference (the value's birth); the
+            // second decref frees the caller's minted reference before the
+            // caller's read (the loop-reassigned-return double-free —
+            // `region_capture_cell_string_accum_uaf`). Suppressing the
+            // binding's own region keeps the single assign-value decref (the
+            // callee's one release) and lets the mint carry ownership to the
+            // caller. A single-assign returned cell coalesces its binding and
+            // assign-value regions (`binding_regs == regions`), so this
+            // suppresses nothing there — the mint-plus-lone-decref baseline the
+            // scheduler-park guard depends on
+            // (`region-reassign-return-park-uaf.lisp`) is untouched.
             for &r in binding_regs {
                 if !regions.contains(&r) {
                     info.suppressed_decref_regions.insert(r);
                 }
             }
         }
-        // else (returned, or not sole-held): leave the unsuppressed baseline.
+        // else (not sole-held): leave the unsuppressed baseline.
     }
 }

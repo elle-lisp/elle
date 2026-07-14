@@ -116,6 +116,73 @@ fn reassign_gate_refuses_returned_value() {
     );
 }
 
+/// A sole-held fn-local mutable accumulated in a LOOP and read at the tail
+/// (returned) must have its own loop-carried region SUPPRESSED while its
+/// assign-value region is KEPT. The loop gives the binding a loop-carried
+/// region distinct from the per-iteration assign-value region, but both alias
+/// the one returned value; the unsuppressed baseline would emit a value-route
+/// decref for EACH at the `Return`, double-freeing the callee's single
+/// reference — the second frees the caller's minted reference before the
+/// caller's read (`region_capture_cell_string_accum_uaf`). Suppressing the
+/// binding's own region keeps the single assign-value decref (the callee's one
+/// release) and lets the `Return` mint carry ownership to the caller. Contrast
+/// `reassign_gate_refuses_returned_value` (an `if`-shaped returned reassign is
+/// phi-aliased ⇒ not sole ⇒ no split) and a single-assign returned cell, whose
+/// binding and assign-value regions coalesce so there is nothing to suppress —
+/// the mint-plus-lone-decref baseline the scheduler-park guard
+/// (`region-reassign-return-park-uaf.lisp`) depends on.
+#[test]
+fn reassign_gate_splits_returned_loop_carried_region() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@acc (%pair 0 0)]\n\
+             (var i 0)\n\
+             (while (%lt i n)\n\
+               (begin (assign acc (%pair i 7))\n\
+                      (assign i (%add i 1))))\n\
+             acc)))\n\
+         (h 3)",
+    );
+    let sites = find_reassign_sites(&hir);
+    assert!(!sites.is_empty(), "shape must contain a reassign of acc");
+    // `acc` is the heap-carrying reassigned mutable: it has ≥2 source regions
+    // (the loop-carried binding region plus the per-iteration assign-value
+    // region); the immediate `i` counter carries none.
+    let acc = sites
+        .iter()
+        .map(|(_, b)| *b)
+        .find(|b| {
+            info.binding_source_regions
+                .get(b)
+                .is_some_and(|rs| rs.len() >= 2)
+        })
+        .expect("acc: a returned heap mutable with a loop-carried + assign-value region");
+    let acc_regs = &info.binding_source_regions[&acc];
+    let suppressed = acc_regs
+        .iter()
+        .filter(|r| info.suppressed_decref_regions.contains(r))
+        .count();
+    let kept = acc_regs.len() - suppressed;
+    // The split: the loop-carried binding region is suppressed (else it
+    // double-frees the returned value at the Return)…
+    assert!(
+        suppressed >= 1,
+        "returned loop-reassigned mutable must suppress its loop-carried binding \
+         region (regs={:?}, suppressed={:?})",
+        acc_regs,
+        info.suppressed_decref_regions
+    );
+    // …while at least one assign-value region is KEPT (the callee's one release,
+    // which the return mint balances against the caller).
+    assert!(
+        kept >= 1,
+        "returned loop-reassigned mutable must KEEP its assign-value region decref \
+         (got all {} regions suppressed: {:?})",
+        acc_regs.len(),
+        acc_regs
+    );
+}
+
 /// Stay-GREEN control: the plain sole-held, not-returned top-level
 /// reassign keeps the container model — drop-on-overwrite at the assign
 /// and suppression of the cell's value regions. Guards the exclusion
