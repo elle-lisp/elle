@@ -327,10 +327,7 @@ fn run_source(
     if elle::config::get().has_trace("bytecode") {
         eprintln!(
             "{}",
-            elle::compiler::format_bytecode_with_constants(
-                &result.bytecode.instructions,
-                &result.bytecode.constants
-            )
+            elle::compiler::format_bytecode_with_protos(&result.bytecode)
         );
     }
 

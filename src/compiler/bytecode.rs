@@ -195,5 +195,31 @@ pub fn format_bytecode_with_constants(instructions: &[u8], constants: &[crate::V
     output
 }
 
+/// Pretty print a whole compiled unit: the entry bytecode plus every nested
+/// lambda's template (`child_protos`), recursively, each labeled by its
+/// `MakeClosure` const_idx path so a dump can be matched to the instruction
+/// that materializes it.
+pub fn format_bytecode_with_protos(bytecode: &Bytecode) -> String {
+    let mut output = format_bytecode_with_constants(&bytecode.instructions, &bytecode.constants);
+    for (i, proto) in bytecode.child_protos.iter().enumerate() {
+        format_proto(&mut output, &format!("{}", i), proto);
+    }
+    output
+}
+
+fn format_proto(output: &mut String, path: &str, proto: &crate::value::closure::ClosureTemplate) {
+    output.push_str(&format!(
+        "\n── proto [{}] {} (captures={}, params={}) ──\n",
+        path,
+        proto.name.as_deref().unwrap_or("<anon>"),
+        proto.num_captures,
+        proto.num_params,
+    ));
+    output.push_str(&disassemble(&proto.bytecode));
+    for (i, child) in proto.child_protos.iter().enumerate() {
+        format_proto(output, &format!("{path}.{i}"), child);
+    }
+}
+
 #[cfg(test)]
 mod tests;
