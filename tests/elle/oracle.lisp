@@ -510,8 +510,8 @@
       (while (%lt k 10)
         {:x j :y k}
         (assign k (%add k 1)))) 0]  # collection ops
-    ["reduce" (fn [j] (reduce + 0 [1 2 3])) 1]
-   ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 3]
+    ["reduce" (fn [j] (reduce + 0 [1 2 3])) 0]
+   ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 0]
    ["zip" (fn [j] (zip [1 2] [3 4])) 9] ["sort" (fn [j] (sort [3 1 2])) 0]
    ["reverse" (fn [j] (reverse [1 2 3])) 2]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
@@ -584,7 +584,7 @@
         (cyc-mk)
         nil)) 0]  # string ops + realistic patterns
     ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1))) 0]
-   ["concat" (fn [j] (concat "a" "b" "c")) 11]
+   ["concat" (fn [j] (concat "a" "b" "c")) 5]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
    ["join" (fn [j] (string/join ["a" "b" "c"] ",")) 0]
    ["trim" (fn [j] (string/trim "  x  ")) 0]
@@ -682,7 +682,7 @@
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
         (fiber/resume f))) 0]
-   ["concat-while" (fn [j] (concat "x" (number->string j))) 10]
+   ["concat-while" (fn [j] (concat "x" (number->string j))) 4]
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
@@ -963,24 +963,24 @@
 # Stdlib per-call leak (memory.md § F1a — the transform-scratch retain). The leaked
 # objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
 # `recur-local-*` probes read 0) and NOT, mostly, cons cells. Stage 1 dissolved the
-# first/rest copy-scratch: `fold`/`reduce` now `(->array coll)` once and INDEX-walk
-# (core.lisp). `stdlib-fold`'s residual is fold's per-call `go` closure+env plus the
-# heap accumulator element the reducer threads forward — F1a scratch the guardfree-
-# safe (letrec-capture) form cannot remove (removing the go closure needs the
-# closure-arg over-free fixed, not a .lisp rewrite; see core.lisp fold). This rate
-# is the SOUND one: `go` releases the tail-transferred accumulator exactly once. A
-# transiently-lower reading came from a latent double-free of that accumulator (the
-# same over-free that SIGSEGVs stdlib `compose`/`comp` — pinned by
+# first/rest copy-scratch AND the per-call `go` closure: `fold`/`reduce` now
+# `(->array coll)` once and INDEX-walk through the shared self-recursive
+# `core-fold-step` driver (core.lisp) — `fold`/`reduce` read 0 with a fresh-lambda
+# combiner. `stdlib-fold`'s residual 1 is the heap accumulator element the reducer
+# threads forward. This rate is the SOUND one: the driver releases the
+# tail-transferred accumulator exactly once. A transiently-lower reading came from
+# a latent double-free of that accumulator (the same over-free that SIGSEGVs
+# stdlib `compose`/`comp` — pinned by
 # tests/integration/fixtures/region-compose-closure-acc-uaf.lisp); it decremented
 # one extra region per fold, an unsound reclamation, not a real one. `concat` builds
 # a fresh accumulator + per-arg combiner closures. All non-escaping, acyclic
 # call-result regions no static slot can name. Pinned at the exact `(concat "a" "b")`
 # / 2-element `fold` shapes.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
-                   count-gauge 100 6 60 0.4 0.5) 10)
+                   count-gauge 100 6 60 0.4 0.5) 4)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
-                   count-gauge 100 6 60 0.4 0.5) 5)
+                   count-gauge 100 6 60 0.4 0.5) 1)
 
 # ── HOF-composition dissolution debt — the zip-tower witness ───────────
 # `zip-tower` is a zip built as a TOWER of higher-order calls: it converts every
@@ -1193,7 +1193,7 @@
            (fn [i]
              (let [f (fn [] i)]
                (f))) 0)
-(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 10)
+(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 4)
 (pin (measure-core "yield-put"
                    (fn [b]
                      (drain-block (fn [n]
@@ -1369,7 +1369,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign s (concat s "x"))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 9)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
 (pin (measure-core "append-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

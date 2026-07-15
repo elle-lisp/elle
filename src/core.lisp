@@ -171,23 +171,27 @@
 ## Normalize once with `->array`, then walk by INDEX — never (first/rest)
 ## recursion (`rest` on an array copies the tail into a fresh slice per step: F1a
 ## transform-scratch, O(n²) time + a throwaway slice per element; `(get arr i)` is
-## O(1)). The loop MUST hold the combiner `f` by CAPTURE — a `letrec go` closing
-## over f/arr/n — NOT by a `def @`-cell accumulator (`while` loop) and NOT by
-## threading f as a recursive argument (a top-level `go` helper). Both of those
-## drop per-call scratch to ~0, but they let f's region reach refcount 0 mid-fold:
-## its `DecrefValueRegion` fires and frees the closure, and the next iteration's
-## `UpdateCapture` (cell rebind) / re-read derefs the freed page — a hard UAF
-## (traced under --trace=guardfree to `DecrefValueRegion of closure … context:
-## UpdateCapture`; the over-free twin of the F5 arg-retain gap). NOT pre-prelude
-## specific and NOT specific to `f`=`+`: it is a general closure-lifetime gap for
-## the cell/threaded-arg shape. It is STATE-DEPENDENT — it only faults once region
-## ids recycle onto the freed one, so a short loop looks clean and the full oracle
-## (deep region churn) faults; do not "verify" a rewrite of this with a small run.
-## Capturing f in the letrec keeps its region reachable through go's env for the
-## whole fold, so this is the guardfree-safe form. Its residual — the per-call `go`
-## closure+env (~1 obj/op named, ~3 with a fresh combiner) — is F1a scratch this
-## safe form cannot remove; closing it needs that closure over-free fixed in the
-## region solver, not a .lisp rewrite.
+## O(1)). The combiner is THREADED through `core-fold-step`, a self-recursive
+## top-level binding — no per-call closure at all. This form was long avoided for
+## a UAF that turned out to be the const tail-arg borrow (`arg_leaf_is_borrowed`,
+## src/lir/lower/control.rs; pinned by region-const-tail-move-borrow-uaf.lisp) —
+## a caller tail-moving a stdlib-constant combiner it never owned — not a
+## closure-lifetime property of threading. A rewrite here is re-measured against
+## the oracle's fold/reduce pins and is NOT verified on a small run: that fault
+## was state-dependent (it fired only once region ids recycled onto the freed
+## one — deep churn only).
+(def core-fold-step
+  (fn [f arr n i acc]
+    "Index-walk left-fold driver shared by fold/reduce1. A self-recursive
+     top-level binding is cell-free (self-call re-dispatch), so a fold call
+     allocates NO per-call closure — the letrec-go form this replaces
+     allocated a closure+env per call. Threading `f` is sound: a tail-moved
+     arg the frame does not own gets a fresh owning reference (docs/impl/
+     region/rules.md Rule 5, the borrowed tail-call argument)."
+    (if (%lt i n)
+      (core-fold-step f arr n (%add i 1) (f acc (get arr i)))
+      acc)))
+
 (def fold
   (fn [f init coll]
     "Left-fold `f` over `coll` from the seed `init`:
@@ -195,11 +199,7 @@
      collection. `f` is called as (f acc element)."
     (let [arr (->array coll)
           n (length arr)]
-      (letrec [go (fn [i acc]
-                    (if (%lt i n)
-                      (go (%add i 1) (f acc (get arr i)))
-                      acc))]
-        (go 0 init)))))
+      (core-fold-step f arr n 0 init))))
 
 (def reduce fold)
 
@@ -215,11 +215,7 @@
       (if (%eq n 0)
         (emit :error {:error :argument-error
                       :message "reduce1: empty collection"})
-        (letrec [go (fn [i acc]
-                      (if (%lt i n)
-                        (go (%add i 1) (f acc (get arr i)))
-                        acc))]
-          (go 1 (get arr 0)))))))
+        (core-fold-step f arr n 1 (get arr 0))))))
 
 ## ── append ─────────────────────────────────────────────────────────
 ## :syntax branch handles syntax lists from quasiquote expansion.
