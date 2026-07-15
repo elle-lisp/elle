@@ -90,15 +90,32 @@ pub(crate) fn release_fiber_owned(
 /// ([`take_fiber_owned`]). Unlike an ordinary `:error` promotion — which keeps
 /// the fiber resumable — a hard kill consumes the chain, so nothing it owned can
 /// ever be replayed.
+///
+/// The kill PARKS `error_value` as the fiber's terminal signal (read later via
+/// `fiber/value`), so it owes the same park-retain + recorded content edge the
+/// completion path takes (`do_fiber_resume` step 6a): the fiber's free releases
+/// the payload's region exactly once through the recorded edge, and the debug
+/// equivalence oracle asserts the table matches the content scan. Without the
+/// pair, a heap payload in a live foreign region is an unrecorded edge AND an
+/// over-free at the fiber's free
+/// (`runtime::tests::ownership::fnode::fiber_kill_park_retains_terminal_payload`).
+/// The retain precedes [`release_fiber_owned`], whose cascade could otherwise
+/// free a payload that lived in the fiber's owned set.
 pub(crate) fn kill_fiber(
     heap: &mut crate::value::fiberheap::FiberHeap,
     handle: &FiberHandle,
+    fiber_value: Value,
     error_value: Value,
 ) {
+    let signal = Some((SIG_ERROR, error_value));
     let owned = handle.with_mut(|fiber| {
         fiber.status = FiberStatus::Error;
-        fiber.signal = Some((SIG_ERROR, error_value));
+        fiber.signal = signal;
         take_fiber_owned(fiber)
     });
+    super::refcount::incref_signal_region(heap, &signal);
+    let fiber_r = crate::value::arena::region_of(heap, fiber_value);
+    let sig_r = crate::value::arena::region_of(heap, error_value);
+    heap.record_outgoing_edge(fiber_r, sig_r);
     release_fiber_owned(heap, owned);
 }

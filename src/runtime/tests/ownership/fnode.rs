@@ -336,6 +336,93 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
     );
 }
 
+/// `kill_fiber` parks the cancel payload as the fiber's TERMINAL signal, so it
+/// owes the SAME park-retain + recorded content edge the normal completion path
+/// takes (`do_fiber_resume` step 6a): the fiber's free releases the payload's
+/// region once (the recorded-edge cascade / the object scan's Fiber signal arm),
+/// so without the pair a heap payload in a LIVE foreign region is (a) an
+/// unrecorded content edge — the debug equivalence oracle detonates at the fiber
+/// region's free — and (b) an over-free of the payload's region (a scan decref
+/// with no matching incref). Historically masked by the borrowed tail-arg leak,
+/// which pinned every cancelled fiber's region so the free never ran.
+#[test]
+fn fiber_kill_park_retains_terminal_payload() {
+    use crate::compiler::bytecode::{Bytecode, Instruction};
+    use crate::value::fiber::FiberStatus;
+
+    let mut vm = crate::vm::VM::new();
+    let heap_ptr = vm.heap_ptr;
+    let vm_ptr: *mut crate::vm::VM = &mut vm;
+
+    // A body that parks at a yield, so the cancel takes the hard-kill arm.
+    let mut bc = Bytecode::new();
+    bc.emit(Instruction::Nil);
+    bc.emit(Instruction::Emit);
+    bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+    bc.emit(Instruction::Return);
+    let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
+
+    // The payload lives in its OWN region, held live past the fiber's free by
+    // an extra test reference — the live-frontier condition under which the
+    // missing edge/retain is observable.
+    let (payload, rid_p) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+    crate::value::arena::incref_region(unsafe { &mut *heap_ptr }, Some(rid_p));
+    let gen_p = unsafe { &*heap_ptr }.generation_raw(rid_p.get());
+
+    let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
+    assert!(
+        bits.contains(crate::value::fiber::SIG_YIELD),
+        "the body parks at the yield"
+    );
+
+    let rc_before = region_rc(unsafe { &*heap_ptr }, rid_p);
+    let ctx_region = unsafe { &mut *heap_ptr }.new_runtime_region();
+    let (bits, _v) = {
+        let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
+            ctx_region,
+            unsafe { &mut *heap_ptr },
+            vm_ptr,
+        );
+        crate::primitives::fiber_introspect::prim_fiber_cancel(&mut ctx, &[fiber_value, payload])
+    };
+    assert!(bits.is_ok(), "cancelling a parked fiber succeeds");
+    unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
+    assert_eq!(handle.with(|f| f.status), FiberStatus::Error);
+
+    // The park-retain: exactly one owning reference for the parked terminal
+    // signal (the counterfactual — kill_fiber without it leaves the rc flat,
+    // and the fiber's free then underflows it).
+    let rc_parked = region_rc(unsafe { &*heap_ptr }, rid_p);
+    assert_eq!(
+        rc_parked,
+        rc_before + 1,
+        "kill_fiber must park-retain the terminal payload's region"
+    );
+
+    // Free the fiber's region: the recorded-edge cascade releases the payload
+    // exactly once (and the debug equivalence oracle asserts the recorded
+    // table matches the content scan — an unrecorded signal edge aborts here).
+    release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_p),
+        rc_before,
+        "the fiber's free must release the park-retain exactly once"
+    );
+    assert_eq!(
+        unsafe { &*heap_ptr }.generation_raw(rid_p.get()),
+        gen_p,
+        "the payload's region must survive the fiber (the test still holds it)"
+    );
+
+    // Drop the test's references: mint + extra — the payload frees only now.
+    crate::value::arena::decref_if_present(unsafe { &mut *heap_ptr }, rid_p);
+    crate::value::arena::decref_if_present(unsafe { &mut *heap_ptr }, rid_p);
+    assert!(
+        unsafe { &*heap_ptr }.generation_raw(rid_p.get()) > gen_p,
+        "the payload's region frees once the test's references drop"
+    );
+}
+
 /// A squelch/abort DISCARD frees the parked owner node
 /// (docs/impl/region/owner.md § "Owner nodes" — "A discard frees the parked
 /// node"). The hand-emitted body adopts a fresh-region member into the

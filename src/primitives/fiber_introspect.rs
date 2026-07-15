@@ -228,7 +228,7 @@ pub(crate) fn prim_fiber_cancel(
             // fiber owned — its parked frames' activation owner nodes and its
             // fiber owner node (docs/impl/region/owner.md § "Owner nodes" —
             // "Fiber teardown frees everything the fiber owns").
-            crate::vm::fiber::kill_fiber(ctx.heap_mut(), handle, error_value);
+            crate::vm::fiber::kill_fiber(ctx.heap_mut(), handle, args[0], error_value);
             (SIG_OK, error_value)
         }
         FiberStatus::Dead => (
@@ -287,7 +287,7 @@ pub(crate) fn prim_fiber_abort(
             // Nothing to unwind — hard-kill directly (like cancel), freeing
             // anything the never-started fiber owned (its fiber owner node; a
             // :new fiber has no parked chain).
-            crate::vm::fiber::kill_fiber(ctx.heap_mut(), handle, error_value);
+            crate::vm::fiber::kill_fiber(ctx.heap_mut(), handle, args[0], error_value);
             (SIG_OK, error_value)
         }
         FiberStatus::Alive => (
