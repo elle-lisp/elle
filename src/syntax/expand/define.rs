@@ -84,7 +84,6 @@ impl Expander {
             optional_params,
             rest_param,
             template,
-            definition_scope: ScopeId(0), // Top-level scope
             cached_transformer: std::rc::Rc::new(RefCell::new(None)),
         };
 

@@ -264,7 +264,7 @@ impl Expander {
         // the call, flip_scope_recursive removes it from argument-origin
         // nodes and adds it to template-origin nodes — distinguishing the
         // two without tracking provenance through the transformer.
-        let intro_scope = self.fresh_scope();
+        let intro_scope = self.fresh_intro_scope();
 
         // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md
         // § "Macro expansion — a closed allocation scope"): the transformer's

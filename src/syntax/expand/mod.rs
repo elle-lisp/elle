@@ -30,8 +30,6 @@ pub struct MacroDef {
     pub optional_params: Vec<String>,
     pub rest_param: Option<String>,
     pub template: Syntax,
-    #[allow(dead_code)] // set during construction; read access planned for hygiene
-    pub(crate) definition_scope: ScopeId,
     /// Cached compiled transformer closure (compiled from `(fn (params...)
     /// template)`), populated LAZILY on first expansion so its quoted-literal
     /// hygiene captures the real expansion context (eager compilation at a
@@ -187,6 +185,15 @@ impl Expander {
     /// Generate a fresh scope ID
     pub(crate) fn fresh_scope(&mut self) -> ScopeId {
         let id = ScopeId(self.next_scope_id);
+        self.next_scope_id += 1;
+        id
+    }
+
+    /// Generate a fresh INTRO scope ID (same counter, intro bit set). One is
+    /// minted per macro expansion and flipped onto template-origin nodes; the
+    /// Analyzer's referential-transparency rule keys on the bit.
+    pub(crate) fn fresh_intro_scope(&mut self) -> ScopeId {
+        let id = ScopeId::intro(self.next_scope_id);
         self.next_scope_id += 1;
         id
     }

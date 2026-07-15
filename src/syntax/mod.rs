@@ -25,6 +25,24 @@ pub use span::Span;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ScopeId(pub u32);
 
+impl ScopeId {
+    /// Reserved bit marking a macro-expansion INTRO scope (minted per
+    /// expansion, flipped onto template-origin nodes). Carrying intro-ness
+    /// in the id itself lets the Analyzer apply the referential-transparency
+    /// rule (`hir::analyze::scopes::lookup`) without threading expander state.
+    const INTRO_BIT: u32 = 1 << 31;
+
+    /// Mint the intro-scope id for counter value `n`.
+    pub(crate) fn intro(n: u32) -> ScopeId {
+        ScopeId(Self::INTRO_BIT | n)
+    }
+
+    /// Is this a macro-expansion intro scope?
+    pub(crate) fn is_intro(self) -> bool {
+        self.0 & Self::INTRO_BIT != 0
+    }
+}
+
 /// Pre-analysis syntax tree node.
 #[derive(Debug, Clone)]
 pub struct Syntax {

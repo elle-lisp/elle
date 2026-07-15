@@ -3,7 +3,7 @@
 use super::*;
 use crate::primitives::register_primitives;
 use crate::symbol::SymbolTable;
-use crate::syntax::{ScopeId, Span, Syntax, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::vm::VM;
 use std::cell::RefCell;
 

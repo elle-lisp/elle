@@ -40,8 +40,21 @@ impl<'a> Analyzer<'a> {
         } else {
             self.scopes.last().map(|s| s.next_local).unwrap_or(0)
         };
-        self.scopes
-            .push(Scope::with_start_index(is_function, start_index));
+        self.scopes.push(Scope::with_start_index(
+            is_function,
+            start_index,
+            self.current_form_intros.clone(),
+        ));
+    }
+    /// Push a definition-environment frame: the global frame or a file's
+    /// top-level letrec frame. Bindings here are what a macro template's
+    /// free variables resolve to, so `lookup()` exempts these frames from
+    /// the referential-transparency rule.
+    pub(super) fn push_definition_scope(&mut self) {
+        self.push_scope(false);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.definition_env = true;
+        }
     }
     pub(super) fn pop_scope(&mut self) -> Option<Scope> {
         self.scopes.pop()
@@ -124,9 +137,30 @@ impl<'a> Analyzer<'a> {
                 // When multiple candidates share the largest scope-set size,
                 // max_by_key returns the last one (the most recently bound),
                 // which gives correct file-level redefinition semantics.
+                //
+                // Referential transparency (docs/macros.md § The Hygiene
+                // Problem, point 2): outside a definition-environment frame,
+                // a binding is visible to a reference only if every INTRO
+                // scope the reference carries is on the binding or in the
+                // frame's expansion provenance. A template-origin reference
+                // (intro scope present) therefore skips use-site local
+                // shadows (intro absent from binder and frame) and resolves
+                // at top level, while a template binder (same intro scope)
+                // and a datum->syntax binder inside a template-origin form
+                // (frame provenance carries the intro) still bind their own
+                // expansion's references, and argument-origin / datum->syntax
+                // references (no intro scope) still see call-site bindings.
                 let best = candidates
                     .iter()
                     .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
+                    .filter(|c| {
+                        scope.definition_env
+                            || ref_scopes.iter().all(|s| {
+                                !s.is_intro()
+                                    || c.scopes.contains(s)
+                                    || scope.intro_provenance.contains(s)
+                            })
+                    })
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = best {
                     found_in_scope = Some((depth, winner.binding, crossed_function_boundary));

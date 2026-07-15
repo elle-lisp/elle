@@ -121,7 +121,6 @@ fn test_macro_predicate_true() {
             optional_params: vec![],
             rest_param: None,
             template: Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
-            definition_scope: ScopeId(0),
             cached_transformer: std::rc::Rc::new(RefCell::new(None)),
         };
         expander.define_macro(macro_def);

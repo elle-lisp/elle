@@ -10,7 +10,9 @@ impl<'a> Analyzer<'a> {
             return Ok(Hir::silent(HirKind::Nil, span));
         }
 
-        self.push_scope(false);
+        // The file's top-level bindings are a macro definition environment:
+        // template free variables must resolve here past use-site shadows.
+        self.push_definition_scope();
 
         let mut entries: Vec<PreBound> = Vec::new();
         let mut gensym_counter = 0u32;

@@ -72,6 +72,13 @@ Bindings are resolved using **hygienic scope sets**:
 - A binding is visible if its scope set is a **subset** of the reference's scope set
 - When multiple bindings match, the one with the **largest scope set** wins (most specific)
 - Empty scopes `[]` is a subset of everything, so pre-expansion code works identically
+- **Referential transparency** (docs/macros.md § The Hygiene Problem): outside a
+  definition-environment frame (the global frame, a file's top-level letrec frame),
+  a binding is visible to a reference only if every INTRO scope the reference
+  carries (`ScopeId::is_intro`) is on the binding or in the frame's expansion
+  provenance (`Scope::intro_provenance` — the intro scopes of the form that opened
+  the frame). A call-site shadow therefore cannot capture a macro template's free
+  variable; resolution falls through to top level.
 
 This prevents accidental capture in macros while allowing intentional capture via `datum->syntax`.
 ## Invariants

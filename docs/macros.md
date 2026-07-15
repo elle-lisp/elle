@@ -84,12 +84,11 @@ pub struct MacroDef {
     pub name: String,
     pub params: Vec<String>,
     pub template: Syntax,
-    pub definition_scope: ScopeId,
 }
 ```
 
-A macro is a name, positional parameter names, a Syntax template, and a
-scope ID. No pattern matching, no ellipsis, no multiple clauses.
+A macro is a name, positional parameter names, and a Syntax template.
+No pattern matching, no ellipsis, no multiple clauses.
 
 ### Expansion algorithm (VM-based)
 
@@ -160,11 +159,13 @@ Macro hygiene means two things:
 
 2. **Referential transparency.** Free variables in a macro template
    resolve in the macro's definition environment, not the call site.
-   (Elle does not yet deliver this half: every top-level form carries the
-   same prelude scope, so a call-site shadow can still capture a
-   template's reference — pinned RED in
-   tests/elle/hygiene-definition-scope.lisp. The fix is a per-defmacro
-   definition scope, compatible with the intro-scope flip.)
+   Elle delivers this through the intro scope: a template-origin
+   reference carries its expansion's intro scope, and a use-site *local*
+   binding that lacks that scope is invisible to it — resolution falls
+   through to the definition environment (the file's top-level bindings
+   and primitives, whose frames are exempt from the rule). Pinned by
+   tests/elle/hygiene.lisp ("referential transparency") and
+   `hir::analyze` unit tests.
 
 Without hygiene, macro authors must manually avoid name collisions. The
 standard workaround is `gensym` — generating unique names that can't
@@ -219,6 +220,21 @@ for the common case.
 - `datum->syntax` results are exempt from the flip; they copy their
   context's scopes with the intro scope stripped, which is what makes
   deliberate capture (anaphoric macros) work.
+- intro scopes are a distinct id class (`ScopeId::is_intro`, a reserved
+  bit), so the Analyzer can recognize a template-origin reference without
+  threading expander state. `lookup()` applies the **referential
+  transparency rule**: in a non-definition-environment frame (anything
+  but the global frame and the file's top-level letrec frame), a binding
+  is visible to a reference only if every intro scope the reference
+  carries is on the binding or in the frame's expansion provenance (the
+  intro scopes of the form that opened the frame — the Analyzer's
+  stand-in for Racket's binding-form rib scope). A call-site `let`
+  shadow (user form, no intro anywhere) therefore cannot capture a
+  template's free variable — the reference resolves at top level
+  instead — while a template binder (same intro scope), a
+  `datum->syntax` binder inside a template-origin form (frame
+  provenance carries the intro), and `datum->syntax` references (no
+  intro scope, still see call-site bindings) all keep working.
 
 **How it works:**
 

@@ -38,7 +38,6 @@ fn test_expand_macro_basic() {
             optional_params: vec![],
             rest_param: None,
             template,
-            definition_scope: ScopeId(0),
             cached_transformer: std::rc::Rc::new(RefCell::new(None)),
         };
         expander.define_macro(macro_def);
@@ -303,7 +302,6 @@ fn test_macro_arg_wrapping_does_not_leak() {
             optional_params: vec![],
             rest_param: None,
             template: Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
-            definition_scope: ScopeId(0),
             cached_transformer: std::rc::Rc::new(RefCell::new(None)),
         };
         expander.define_macro(macro_def);

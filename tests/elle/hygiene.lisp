@@ -102,4 +102,23 @@
 (let [x 42]
   (assert (= (hyg-id x) 42) "identity macro preserves use-site resolution"))
 
+# ── Referential transparency ─────────────────────────────────────────
+
+## A free variable in a macro template resolves in the macro's
+## definition environment, not the call site (docs/macros.md § The
+## Hygiene Problem, point 2). A call-site local that shadows the name
+## lacks the template reference's intro scope, so it is invisible to
+## the reference — resolution falls through to the top-level binding.
+(defn rt-helper [v]
+  (* v 10))
+(defmacro rt-use (x)
+  `(rt-helper ,x))
+
+(assert (= (rt-use 5) 50) "template reference works unshadowed")
+
+(let [rt-helper (fn [v] :hijacked)]
+  (assert (= (rt-helper 5) :hijacked) "call-site code still sees its shadow")
+  (assert (= (rt-use 5) 50)
+          "a call-site shadow must not capture the template's reference"))
+
 (println "hygiene: all tests passed")

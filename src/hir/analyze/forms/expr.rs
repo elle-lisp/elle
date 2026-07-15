@@ -2,6 +2,26 @@ use super::*;
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_expr(&mut self, syntax: &Syntax) -> Result<Hir, String> {
+        // Publish this form's intro scopes for the duration of its analysis:
+        // any scope frame its handler pushes snapshots them as the frame's
+        // expansion provenance (`Scope::intro_provenance`), which the
+        // referential-transparency rule in `lookup()` consults. A
+        // template-origin binding form (carrying its expansion's intro
+        // scope) thereby opens a frame the same expansion's references may
+        // still resolve into; a user-written form opens a strict frame.
+        let form_intros: Vec<crate::syntax::ScopeId> = syntax
+            .scopes
+            .iter()
+            .copied()
+            .filter(|s| s.is_intro())
+            .collect();
+        let saved = std::mem::replace(&mut self.current_form_intros, form_intros);
+        let result = self.analyze_expr_dispatch(syntax);
+        self.current_form_intros = saved;
+        result
+    }
+
+    fn analyze_expr_dispatch(&mut self, syntax: &Syntax) -> Result<Hir, String> {
         let span = syntax.span.clone();
 
         match &syntax.kind {

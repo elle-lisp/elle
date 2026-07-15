@@ -24,7 +24,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `Expander` | Main struct that expands macros |
-| `MacroDef` | Macro definition (name, params, rest_param, template, definition_scope, cached_transformer) |
+| `MacroDef` | Macro definition (name, params, rest_param, template, cached_transformer) |
 
 ## Data flow
 

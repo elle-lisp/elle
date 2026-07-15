@@ -44,7 +44,6 @@ expander.define_macro(MacroDef {
     params: vec!["cond".to_string(), "body".to_string()],
     rest_param: None,
     template: /* `(if ,cond ,body nil) */,
-    definition_scope: ScopeId(0),
     cached_transformer: Rc::new(RefCell::new(None)),
 });
 

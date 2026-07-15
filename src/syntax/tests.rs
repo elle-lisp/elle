@@ -342,7 +342,6 @@ fn test_macro_definition_and_expansion() {
             optional_params: vec![],
             rest_param: None,
             template,
-            definition_scope: ScopeId(0),
             cached_transformer: std::rc::Rc::new(std::cell::RefCell::new(None)),
         };
 
@@ -380,7 +379,6 @@ fn test_macro_arity_check() {
         optional_params: vec![],
         rest_param: None,
         template,
-        definition_scope: ScopeId(0),
         cached_transformer: std::rc::Rc::new(std::cell::RefCell::new(None)),
     };
 

@@ -120,15 +120,35 @@ struct Scope {
     bindings: HashMap<String, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
+    /// Is this a definition-environment frame — the global frame or a file's
+    /// top-level letrec frame? These hold the bindings a macro template's
+    /// free variables resolve to, so they are exempt from the referential-
+    /// transparency rule in `lookup()` (an intro-scoped reference skips
+    /// use-site locals but must still see top-level definitions).
+    definition_env: bool,
+    /// Expansion provenance: the intro scopes carried by the form that
+    /// opened this frame (snapshot of `Analyzer::current_form_intros` at
+    /// push time). A template-origin binding form carries its expansion's
+    /// intro scope, so references from the same expansion may resolve into
+    /// its frame even when the binder itself lacks the scope (the
+    /// datum->syntax deliberate-capture case); a user-written form has no
+    /// intro scopes, so its frame is invisible to template references.
+    intro_provenance: Vec<ScopeId>,
     /// Next local index for this scope (used only for tracking local count)
     next_local: u16,
 }
 
 impl Scope {
-    fn with_start_index(is_function: bool, start_index: u16) -> Self {
+    fn with_start_index(
+        is_function: bool,
+        start_index: u16,
+        intro_provenance: Vec<ScopeId>,
+    ) -> Self {
         Scope {
             bindings: HashMap::new(),
             is_function,
+            definition_env: false,
+            intro_provenance,
             next_local: start_index,
         }
     }
@@ -143,6 +163,10 @@ pub struct Analyzer<'a> {
     current_captures: Vec<CaptureInfo>,
     /// Captures from the parent function (for nested closures)
     parent_captures: Vec<CaptureInfo>,
+    /// The intro scopes of the form currently being analyzed (set by
+    /// `analyze_expr`, save/restore bracketed). `push_scope` snapshots it
+    /// into the new frame's `intro_provenance`.
+    current_form_intros: Vec<ScopeId>,
     /// The binding whose initializer is currently being analyzed — the analyzer
     /// analogue of the lowerer's `current_function_binding` (lir/lower/binding.rs).
     /// When a lookup inside this initializer's lambda resolves back to this same
@@ -283,6 +307,7 @@ impl<'a> Analyzer<'a> {
             scopes: Vec::new(),
             current_captures: Vec::new(),
             parent_captures: Vec::new(),
+            current_form_intros: Vec::new(),
             current_init_binding: None,
             current_init_binding_depth: 0,
             signal_env: HashMap::new(),
@@ -312,7 +337,7 @@ impl<'a> Analyzer<'a> {
             import_ctx: None,
         };
         // Initialize with a global scope so top-level bindings can be registered
-        analyzer.push_scope(false);
+        analyzer.push_definition_scope();
         analyzer
     }
 
