@@ -143,6 +143,15 @@ is a correctness defect, not a tuning knob.
      CPython-C-API sense), and the caller's `DecrefValueRegion` consumes it;
    - *captured closure env* — the closure→env cross-region edge is increfed when
      the closure is built;
+   - *borrowed tail-call argument* — a tail-call arg is pure-moved into the
+     owned-param callee (the caller's dead post-`TailCall` release *is* the
+     transfer), so an arg the frame does NOT own is handed one fresh owning
+     reference, consumed by the callee's owned-param release. Two borrow
+     routes: a captured upvalue (owned by the closure env's capture-incref)
+     and a compile-time-constant heap value (`immutable_values` — a stdlib
+     export closure, a `begin-for-syntax` value — owned by the env that
+     seeded it; never captured, so the frame holds no reference at all).
+     `tail_arg_is_borrowed`, src/lir/lower/control.rs;
    - *reassigned mutable binding cell* — a reassigned binding is a 1-slot
      mutable container (see
      [bindings.md](bindings.md)): the store increfs the new

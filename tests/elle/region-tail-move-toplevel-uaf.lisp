@@ -10,25 +10,20 @@
 # RELATION TO region-tail-move-borrow-uaf. That test pins the same hazard for a
 # value captured BY VALUE into a closure from an ENCLOSING let — and its fix
 # (`tail_arg_is_borrowed` in src/lir/lower/control.rs hands the callee one fresh
-# owning reference instead of pure-moving a borrowed upvalue) makes the nested
-# case correct. This file proves that fix does NOT cover a captured TOP-LEVEL
-# binding: bisected, a closure tail-passing a value bound by `(def …)` at file
-# scope still pure-moves it and the callee's owned-param release over-frees it,
-# while the byte-identical shape with the value bound by an enclosing `(let …)`
-# is correct. The callee may even IGNORE its parameter (`sink` below returns 0) —
-# the move alone is the over-free — and it is independent of whether the body is a
-# native pass-through, confirming the defect is the tail-MOVE of the top-level
-# reference, not anything the callee does.
+# owning reference instead of pure-moving a borrowed upvalue) covers this file's
+# shape by the SAME route. The callee may even IGNORE its parameter (`sink` below
+# returns 0) — the move alone is the hazard — and it is independent of whether the
+# body is a native pass-through.
 #
-# WHY IT IS GREEN (verified on HEAD): `tail_arg_is_borrowed`
-# (src/lir/lower/control.rs) still flags an argument as borrowed only when it is a
-# captured upvalue (`upvalue_bindings`); a top-level binding read inside a closure
-# is resolved by a different path (a global/top-level load, not an env capture) and
-# is NOT flagged, so it IS pure-moved into the owned-param callee. The over-free the
-# original hypothesis predicted from that move does not happen: the top-level escape
-# is increfed through the Rule 5 EscapeSite funnel, so the callee's owned-param
-# release leaves the region's RC intact. docs/impl/region/rules.md Rules 5 (every escape
-# increfs) and 8 (no UAF / no double-free).
+# WHY IT IS GREEN (verified by disassembly, --trace=bytecode): a RUNTIME-valued
+# top-level binding like `(def s (list "z"))` is NOT a compile-time constant, so
+# the closure CAPTURES it (the lambda's proto shows the capture and the
+# `IncrefValueRegion` retain right before the `TailCall`) — the upvalue borrow
+# route of `tail_arg_is_borrowed`, same as the enclosing-let shape. Only a
+# compile-time-CONSTANT heap value (a stdlib-export closure — `immutable_values`)
+# skips the capture and reads as `LoadConst`; that route is the CONST borrow arm,
+# pinned separately by region-const-tail-move-borrow-uaf.lisp. docs/impl/region/
+# rules.md Rule 5 (the borrowed tail-call argument escape site).
 #
 # STATUS: GREEN on the vm and jit tiers, including under `--trace=guardfree` (the
 # robust oracle, pinned as a subprocess in tests/integration/elle_scripts.rs). A

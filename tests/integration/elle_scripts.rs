@@ -382,25 +382,22 @@ fn region_traits_capture_adopt_uaf() {
     );
 }
 
-// RED (known over-free, not yet fixed) — the closure-arg OVER-FREE, the over-free
-// twin of the F5 arg-retain gap. A fold-shaped helper that holds its combiner `f`
-// by THREADING it as a recursive argument (or by a `def @`-cell accumulator)
-// instead of CAPTURING it in a letrec lets `f`'s region reach refcount 0
-// mid-drive: its `DecrefValueRegion` frees the closure and a later `UpdateCapture`
-// derefs the freed page (SIGSEGV under guardfree, traced to `DecrefValueRegion of
-// closure … context: UpdateCapture`). This is exactly what blocks src/core.lisp
-// `fold`/`reduce` from dissolving their per-call `go` closure to zero — they use
-// the guardfree-safe letrec-CAPTURE form instead, and the SAME drive over that
-// form is clean, so the fixture isolates the threaded-arg / cell-held closure
-// lifetime, not folding in general. It is state-dependent (faults only once region
-// ids recycle onto the freed one), so the fixture discards results and drives
-// ~8000 reps to reach the collision deterministically. #[ignore]'d because it
-// SIGSEGVs today — an uncatchable fault that would take the shared `make smoke`
-// harness down; when the region solver keeps a threaded/cell-held closure's region
-// live across its whole use, this exits 0 under guardfree — un-ignore it then.
-// Full repro + trace in the fixture header; assessment.md Stage 1 § soundness note.
+// The fold-shaped e2e witness of the CONST tail-arg borrow (GREEN since the
+// `arg_leaf_is_borrowed` const route landed; the minimal shape and mechanism live
+// in region_const_tail_move_borrow_uaf / region-const-tail-move-borrow-uaf.lisp).
+// A driver thunk `(fn [] (fold-threaded + 0 [1 2 3]))` tail-passes the stdlib
+// CONSTANT `+` into an owned-param callee; pure-moving it drained `+`'s region rc
+// by one per call to a premature free, and a later `UpdateCapture` deref'd the
+// freed page (SIGSEGV under guardfree). Diagnosis history worth keeping: this was
+// long framed as a closure-LIFETIME gap of the threaded-arg / cell-held fold shape
+// — the framing `src/core.lisp` `fold`'s letrec-capture form was chosen around —
+// but the recursion was never the mechanism (a ZERO-iteration callee drains the
+// same 1/call); the hole was the thunk's own tail call moving a constant the frame
+// never owned. It is state-dependent (faults only once region ids recycle onto the
+// freed one), so the fixture discards results and drives ~8000 reps to reach the
+// collision deterministically — kept as the deep-churn regression witness beside
+// the corpus file's minimal shapes.
 #[test]
-#[ignore = "RED: closure threaded as recursive-arg / held in a def@ cell is over-freed (DecrefValueRegion of closure -> UpdateCapture); un-ignore when fixed"]
 fn region_fold_closure_arg_uaf() {
     run_elle_file_with_args(
         "tests/integration/fixtures/region-fold-closure-arg-uaf.lisp",
@@ -608,6 +605,27 @@ fn region_mutable_reassign_param_uaf() {
 fn region_or_tail_move_borrow_uaf() {
     run_elle_script_with_args(
         "region-or-tail-move-borrow-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// The CONST sibling of region_tail_move_borrow_uaf: a compile-time-constant HEAP
+// value — a stdlib-export closure (`+`/`inc`/`map`), a primitive's closure value,
+// a `begin-for-syntax` value — reads as `LoadConst` from `immutable_values`
+// (never captured; hir/analyze/scopes.rs skips the capture for a known-constant
+// binding), so the frame owns NO reference to it. Tail-moving it into an
+// owned-param callee lets the callee's release drain the stdlib env's region rc
+// by one per call to a premature free: user-reachable as `(defn f [xs] (map inc
+// xs))` — a handful of calls frees `inc`'s region under the live stdlib env
+// (SIGSEGV under guardfree, tag/object-mismatch panic without). GREEN since
+// `arg_leaf_is_borrowed` treats a constant HEAP value as borrowed (one fresh
+// owning reference, consumed by the callee's release); the fixture's witness (c)
+// guards the balance from above (no over-incref leak). Canonical shape:
+// tests/elle/region-const-tail-move-borrow-uaf.lisp.
+#[test]
+fn region_const_tail_move_borrow_uaf() {
+    run_elle_script_with_args(
+        "region-const-tail-move-borrow-uaf",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }

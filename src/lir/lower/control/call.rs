@@ -174,6 +174,18 @@ impl<'a> Lowerer<'a> {
             }
 
             let mut arg_regs = Vec::new();
+            // Stash slots for the borrowed args' retained values: the retain is
+            // consumed by the callee's owned-param release only when the callee
+            // is a frame-replacing CLOSURE. A NATIVE tail callee borrows its
+            // args and releases nothing, so the call falls through to the
+            // post-`TailCall` block — which must consume the retain itself
+            // (below) or every borrowed arg pins its region's rc by one per
+            // call, an unbounded over-keep
+            // (region-const-tail-move-borrow-uaf.lisp, witness (c)). The slot
+            // stash keeps the RETAINED value addressable there: re-lowering the
+            // arg instead would re-READ a cell a callee-run closure (`apply`)
+            // may have reassigned, releasing the wrong value.
+            let mut borrowed_arg_slots = Vec::new();
             for arg in args {
                 // For a tail call, a BORROWED arg must be handed the callee a
                 // fresh owning reference (see the move-on-tail-call comment at
@@ -190,7 +202,7 @@ impl<'a> Lowerer<'a> {
                 if borrowed {
                     self.deferred_decref_points.insert(arg.expr.id);
                 }
-                let reg = self.lower_expr(&arg.expr)?;
+                let mut reg = self.lower_expr(&arg.expr)?;
                 // Emit the retain HERE, while this arg's value is on top of the
                 // operand stack — the emitter's `IncrefValueRegion` peeks the
                 // stack top, so deferring it until after the remaining args and
@@ -203,6 +215,19 @@ impl<'a> Lowerer<'a> {
                 // the rest of the arg/func pushes and the `TailCall`.
                 if borrowed {
                     self.emit(LirInstr::IncrefValueRegion { src: reg });
+                    // Stash-and-reload: `StoreLocal` consumes the value (the
+                    // emitter auto-pops), so reload it as the arg actually
+                    // handed to the call — same value, layout intact.
+                    let slot = self.current_func.num_locals;
+                    self.current_func.num_locals += 1;
+                    self.emit(LirInstr::StoreLocal { slot, src: reg });
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot,
+                    });
+                    reg = reloaded;
+                    borrowed_arg_slots.push(slot);
                     self.deferred_decref_points.remove(&arg.expr.id);
                     self.emit_decrefs_for(arg.expr.id, Some(reg));
                 }
@@ -255,6 +280,10 @@ impl<'a> Lowerer<'a> {
                 // tail-position mirror of the non-tail `CallArgument` incref
                 // (`push_param`, `own_params`); the callee's release then
                 // balances this incref and leaves the env's capture-ref intact.
+                // A NATIVE callee never releases args, so the post-`TailCall`
+                // fall-through consumes the retain instead (the
+                // `borrowed_arg_slots` releases below) — one consumer on
+                // either path.
                 // The incref itself was already emitted per-arg in the
                 // arg-lowering loop above (it MUST precede the later arg/func
                 // pushes so the emitter need not `DupN` the value to the top);
@@ -351,6 +380,21 @@ impl<'a> Lowerer<'a> {
                     .is_some_and(|id| self.region_info.moves_out_release_sites.contains(&id));
                 if !container_released_here && !moves_out_here {
                     self.emit(LirInstr::IncrefValueRegion { src: dst });
+                }
+                // Consume each borrowed-arg retain on the native-completion
+                // fall-through: a native callee borrows its args (no owned-param
+                // release), so without this the retain pins the arg's region rc
+                // once per call. Dead code for a frame-replacing closure callee
+                // — there the callee's owned-param release consumes the retain
+                // and this block never runs. Each retain is thus consumed
+                // exactly once on either path. Ordered AFTER the ReturnValue
+                // retain above, which must peek the native's result while it is
+                // the stack top; the LoadLocal/DecrefValueRegion pair here is
+                // push-pop-neutral around it.
+                for &slot in &borrowed_arg_slots {
+                    let v = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal { dst: v, slot });
+                    self.emit(LirInstr::DecrefValueRegion { src: v });
                 }
                 Ok(dst)
             } else {

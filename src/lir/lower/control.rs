@@ -11,10 +11,27 @@ impl<'a> Lowerer<'a> {
     /// activation does not own, so pure-moving it into the callee would
     /// over-free it (see the move-on-tail-call comment in `lower_call`).
     ///
-    /// This is a **structural ownership-location** question, NOT true-escape: an
-    /// argument is borrowed iff `b` is a captured upvalue of the current lambda
-    /// (`upvalue_bindings`) — the closure env owns the capture-incref, so this
-    /// frame has no transferable owning reference. The authoritative escape
+    /// This is a **structural ownership-location** question, NOT true-escape.
+    /// Two routes make an argument borrowed:
+    ///
+    /// - a **captured upvalue** of the current lambda (`upvalue_bindings`) —
+    ///   the closure env owns the capture-incref, so this frame has no
+    ///   transferable owning reference;
+    /// - a **compile-time-constant heap value** (`immutable_values` — a stdlib
+    ///   export closure like `+`/`inc`/`map`, a `begin-for-syntax` value). A
+    ///   known-constant binding is deliberately never captured
+    ///   (hir/analyze/scopes.rs) and lowers to `LoadConst`, so the frame holds
+    ///   NO reference at all — the owning references belong to the env that
+    ///   seeded the constant. Pure-moving it drains that env's region rc by one
+    ///   per call to a premature free; user-reachable as
+    ///   `(defn f [xs] (map inc xs))` (the `inc` ARG is moved; `map` as the
+    ///   CALLEE is not). An immediate constant (int, keyword, native-fn) has no
+    ///   region, so only heap constants qualify
+    ///   (region-const-tail-move-borrow-uaf.lisp). Unlike the upvalue route this
+    ///   is position-independent — a top-level tail call moves a constant it
+    ///   doesn't own all the same — so it is not gated on `in_lambda`.
+    ///
+    /// The authoritative escape
     /// analysis (`EscapeInfo`) is deliberately NOT used here: among tail-args its
     /// escape set is a strict superset of the borrowed set (a born-here value that
     /// merely flows to a tail *escapes* but is *owned*), and minting for those
@@ -57,9 +74,6 @@ impl<'a> Lowerer<'a> {
     /// compound stays a pure move (never the contracts.lisp owned-escaping
     /// double-release the base case avoids by not using `EscapeInfo`).
     fn tail_arg_is_borrowed(&self, arg: &Hir) -> bool {
-        if !self.in_lambda {
-            return false;
-        }
         self.arg_leaf_is_borrowed(arg)
     }
 
@@ -76,7 +90,17 @@ impl<'a> Lowerer<'a> {
             // Look through the `DerefCell` wrapper `functionalize` adds around a
             // needs-capture binding read; the borrowed atom underneath is a `Var`.
             HirKind::DerefCell { cell } => self.arg_leaf_is_borrowed(cell),
-            HirKind::Var(binding) => self.upvalue_bindings.contains(binding),
+            // The `in_lambda` gate applies to the UPVALUE route only: at top
+            // level `upvalue_bindings` names bindings some lambda captures, but
+            // a top-level read of one is a plain owned slot load. The CONST
+            // route is position-independent (the frame never owns a constant).
+            HirKind::Var(binding) => {
+                (self.in_lambda && self.upvalue_bindings.contains(binding))
+                    || self
+                        .immutable_values
+                        .get(binding)
+                        .is_some_and(|v| v.is_heap())
+            }
             HirKind::Or(exprs) | HirKind::And(exprs) => {
                 exprs.iter().any(|e| self.arg_leaf_is_borrowed(e))
             }

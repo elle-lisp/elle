@@ -141,5 +141,6 @@
   ; closure[4] <anon>
     block0: IncrefValueRegion v1
     block0: TailCall defer_callee_release=false
-    block0: IncrefValueRegion v3
-    block0: DecrefValueRegion v4
+    block0: IncrefValueRegion v4
+    block0: DecrefValueRegion v5
+    block0: DecrefValueRegion v6

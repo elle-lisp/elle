@@ -1,43 +1,41 @@
 (elle/epoch 12)
 # tests/integration/fixtures/region-fold-closure-arg-uaf.lisp
 #
-# Quarantined here — NOT under tests/elle/ — because it SIGSEGVs under
-# --trace=guardfree, and `make smoke` globs tests/elle/*.lisp into one shared
-# process where a segfault would take the whole harness down. It is exercised by
-# the guardfree subprocess pin in tests/integration/elle_scripts.rs
-# (`region_fold_closure_arg_uaf`), which is #[ignore]'d RED until the over-free is
-# fixed.
-#
-# WHAT IT REPRODUCES — the closure-arg OVER-FREE (the over-free twin of the F5
-# arg-retain gap).
-#   A fold-shaped helper that holds its combiner `f` by THREADING it as a
-#   recursive argument (`go-threaded`) instead of CAPTURING it in a letrec lets
-#   `f`'s region reach refcount 0 mid-drive: its DecrefValueRegion frees the
-#   closure and a later UpdateCapture derefs the freed page —
+# The fold-shaped, deep-churn witness of the CONST tail-call-arg borrow — the
+# hole where a compile-time-constant heap value (here the stdlib closure `+`,
+# read as `LoadConst` from `immutable_values`, never captured) is passed as a
+# TAIL-CALL argument and pure-moved into an owned-param callee. The frame owns
+# no reference to a constant, so the callee's release drained `+`'s region rc
+# by one per drive iteration to a premature free; the next read of the page
+# faulted:
 #
 #     [guardfree] SIGSEGV — use-after-free
-#     free site: DecrefValueRegion of closure (runtime region N)   <- the `f` arg
+#     free site: DecrefValueRegion of closure (runtime region N)
 #     context:   UpdateCapture
 #
-#   A `def @`-cell accumulator (`while` loop) is the same shape with the same
-#   trace; the threaded-arg form is used here because it faults in plain user
-#   scope. The bug is NOT pre-prelude-specific and NOT specific to `f`=`+`; it is
-#   a general closure-lifetime gap for the threaded-arg / cell-held shape.
+# GREEN since `arg_leaf_is_borrowed` (src/lir/lower/control.rs) treats a
+# constant HEAP value as borrowed and hands the callee one fresh owning
+# reference. The minimal shapes and the balance guard live in
+# tests/elle/region-const-tail-move-borrow-uaf.lisp; this fixture is kept as
+# the deep-churn regression witness (exercised by the guardfree subprocess pin
+# `region_fold_closure_arg_uaf` in tests/integration/elle_scripts.rs).
 #
-#   It is STATE-DEPENDENT: it only faults once region ids recycle onto the freed
-#   one, so a short loop — or one that COMPARES the fold result — looks clean
-#   (either changes the allocation sequence). The discard-the-result drive below
-#   reaches the collision deterministically (~8000 reps; per-call `->array`
-#   churns region ids). Do NOT "verify" a fix of this with a small run.
+# DIAGNOSIS HISTORY — kept because the mis-framing cost real work. This was
+# long filed as a closure-LIFETIME gap: "a combiner THREADED as a recursive
+# argument (or held in a `def @` cell) is over-freed mid-fold", and
+# src/core.lisp `fold` was shaped around it (the letrec-capture form). The
+# recursion was never the mechanism — a ZERO-iteration `go-threaded` drains
+# exactly the same 1/call — and the letrec-capture form was "clean" only
+# because its drive passed a FRESH lambda instead of a stdlib constant. The
+# hole was the driver thunk's own tail call `(fold-threaded + 0 [1 2 3])`
+# moving the constant `+`. Decompose before attributing: vary ONE ingredient
+# at a time (here, iteration count zero was the decisive control).
 #
-# THE CONTRAST — the SAME drive over the SAFE form (combiner CAPTURED in a letrec,
-# exactly src/core.lisp `fold`) is guardfree-CLEAN, so this isolates the
-# threaded-arg / cell-held closure lifetime, not folding in general.
-#
-# WHEN FIXED — the region solver keeps a threaded/cell-held closure's region live
-# across its whole use — this exits 0 under guardfree; un-#[ignore] the pin then.
-# See src/core.lisp `fold` (the comment there) and assessment.md Stage 1 § the
-# soundness note.
+# It is STATE-DEPENDENT: the fault fires only once region ids recycle onto the
+# freed one, so a short loop — or one that COMPARES the fold result — looks
+# clean (either changes the allocation sequence). The discard-the-result drive
+# below reaches the collision deterministically (~8000 reps; per-call
+# `->array` churns region ids). Do NOT "verify" a change here with a small run.
 
 (defn go-threaded [f arr n i acc]
   (if (%lt i n)
@@ -53,8 +51,8 @@
     (thunk)
     (assign c (%add c 1))))
 
-# `+` is a shared stdlib closure; threading it per fold call over-decrefs its
-# region until it frees, then the next use faults. The result is discarded on
+# `+` is a compile-time constant (a stdlib-export closure); the thunk tail-
+# passes it into `fold-threaded` per iteration. The result is discarded on
 # purpose — comparing it changes the allocation sequence and hides the fault
 # (this is a UAF guard, not a value test).
 (drive (fn [] (fold-threaded + 0 [1 2 3])) 8000)
