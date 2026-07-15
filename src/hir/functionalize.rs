@@ -65,6 +65,11 @@ struct FnCtx<'a> {
     /// Bindings whose assigns must NOT be SSA-converted. Includes loop
     /// parameters (threaded via Recur) and outer-scope variables assigned
     /// inside a loop body (maintained via slot mutation by the lowerer).
+    /// This is a one-way door: once a binding is slot-mutated, no nested
+    /// construct may fork a fresh SSA version of it — in particular a
+    /// nested while must not promote it to its own loop parameter, since
+    /// the fork's post-loop rename escapes the enclosing branch arm and
+    /// paths that skip the nested loop would read an uninitialized slot.
     assign_preserved: BTreeSet<Binding>,
 }
 

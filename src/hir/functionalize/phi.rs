@@ -53,6 +53,14 @@ impl<'a> FnCtx<'a> {
         Self::collect_locally_introduced(cond, &mut locally_introduced);
         assigned.retain(|b| !locally_introduced.contains(b));
 
+        // A binding already maintained by slot mutation — an enclosing
+        // loop's parameter, or a branch-arm assign target — must stay
+        // slot-mutated here too. Promoting it to a loop parameter of this
+        // (nested) loop would fork a fresh version whose post-loop rename
+        // escapes the enclosing branch arm, so a path that never entered
+        // this loop would read the fork's uninitialized slot at the merge.
+        assigned.retain(|b| !self.assign_preserved.contains(&self.resolve(*b)));
+
         // Only promote bindings that are in the while's enclosing scope
         // (sibling defines). Outer-scope bindings stay as Assign — their
         // values are maintained via slot mutation by the lowerer.

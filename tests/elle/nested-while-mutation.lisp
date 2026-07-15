@@ -1,25 +1,25 @@
 (elle/epoch 12)
 # ─────────────────────────────────────────────────────────────────────
-# Elle bug: a nested `while` that assigns the SAME mutable `var` as its
-# enclosing `while` (inside a function's `let` scope) does not work.
+# A nested `while` may advance the SAME mutable `var` as its enclosing
+# `while` (a let-scoped cursor shared across both loops). The compiler
+# must keep such a slot-mutated binding on its one slot everywhere: a
+# nested loop must not fork a private version of it, or paths through
+# the sibling if-arm (which never enter the inner loop) would read the
+# fork's uninitialized slot at the branch merge.
 #
-# `group-buggy` and `group-fixed` are the same algorithm. The only
-# difference: the buggy one's inner `while` advances the OUTER loop's `k`
-# directly; the fixed one walks with a PRIVATE cursor `j` and resyncs
-# `k = j` afterward. The buggy version produces the wrong result.
+# `group-direct` and `group-cursor` are the same algorithm — group a
+# list into runs of consecutive non-:eq items. The direct variant's
+# inner while advances the OUTER loop's `k`; the cursor variant walks a
+# private cursor `j` and resyncs `k = j` afterward. Both must agree.
 #
-# Discovered writing an LCS hunk-grouper (snide lib/diff.lisp). Single
-# loops are unaffected; hoisting the var to a top-level `def` also makes
-# the buggy shape work — it is specifically a let-scoped `var` shared
-# across nested `while`s.
-#
-# Group a list into runs of consecutive non-:eq items.
 #   input:  [:eq :ch :ch :eq :ch]
 #   want:   @[@[1 2] @[4]]
 #
+# The bare-mechanism pins live in src/hir/functionalize/tests.rs
+# (nested_while_branch_arm_keeps_outer_loop_param and siblings).
 # ─────────────────────────────────────────────────────────────────────
 
-(defn group-buggy [items]
+(defn group-direct [items]
   (let [total (length items)
         result @[]]
     (def @k 0)
@@ -33,7 +33,7 @@
           (push result run))))
     result))
 
-(defn group-fixed [items]
+(defn group-cursor [items]
   (let [total (length items)
         result @[]]
     (def @k 0)
@@ -50,6 +50,23 @@
     result))
 
 (def input [:eq :ch :ch :eq :ch])
-(println "want:  @[@[1 2] @[4]]")
-(println "buggy: " (group-buggy input))
-(println "fixed: " (group-fixed input))
+(def want "@[@[1 2] @[4]]")
+
+(assert (= (string (group-direct input)) want) "direct-advance grouping")
+(assert (= (string (group-cursor input)) want) "private-cursor grouping")
+(assert (= (string (group-direct input)) (string (group-cursor input)))
+        "both variants agree")
+
+# The mechanism, minimal: the assign-arm runs on the first iteration,
+# so the inner loop has not yet executed when the outer loop-head
+# re-reads k. The read must see the arm's assignment.
+(defn count-up []
+  (def @k 0)
+  (while (< k 5)
+    (if (= k 0)
+      (assign k (+ k 1))
+      (while (< k 5) (assign k (+ k 1)))))
+  k)
+(assert (= (count-up) 5) "outer loop-head sees the arm assignment")
+
+(println "ok")
