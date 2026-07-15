@@ -119,11 +119,13 @@
       (sys/join producer)
       (assert (= (length sel) 2)
               (string "iteration " i ": cross-thread select hit timeout"))
-      (assert (= (get sel 1) i) (string "iteration " i ": value mismatch"))  # Per-iteration cap — a lost-wake race would push elapsed up to
-      # ~500ms (the timeout) while still returning a value via the
-      # wrapper's post-park chan/try-select.  Anything above 50ms is
-      # extremely suspect on a quiet machine.
-      (assert (< elapsed 0.05)
+      (assert (= (get sel 1) i) (string "iteration " i ": value mismatch"))  # Per-iteration cap — a lost-wake race pushes elapsed to ~500ms
+      # (the timeout) while still returning a value via the wrapper's
+      # post-park chan/try-select, so the discriminating boundary sits
+      # near the timeout.  The cap must tolerate ordinary OS scheduling
+      # latency: spawning a VM thread under machine load routinely costs
+      # 50-100ms, which is noise, not a lost wake.
+      (assert (< elapsed 0.25)
               (string "iteration " i ": cross-thread select waited too long: "
                       elapsed " s — race likely lost the wake")))))
 

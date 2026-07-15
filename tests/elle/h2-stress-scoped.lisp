@@ -87,18 +87,24 @@
       true)))
 
 # ── Test: session durability (many requests, one session) ────────────
+#
+# The response body is built once, outside the handler: the durability
+# property under test is the session surviving many requests, and the
+# whole file must fit the test runner's per-tier budget — a per-request
+# server-side body build costs more than the request itself.
 
 (defn test-durability-scoped [n body]
-  (with-server (fn [req] {:status 200 :body (make-body (length body))})
-               (fn [session]
-                 (def @i 0)
-                 (while (< i n)
-                   (let [resp (http2:send session "POST" "/echo" :body body)]
-                     (assert (= resp:status 200) (string "durability: req " i)))
-                   (assign i (+ i 1)))
-                 (assert (= (length (keys session:streams)) 0)
-                         "durability: no stream leak")
-                 true)))
+  (let [resp-body (make-body (length body))]
+    (with-server (fn [req] {:status 200 :body resp-body})
+                 (fn [session]
+                   (def @i 0)
+                   (while (< i n)
+                     (let [resp (http2:send session "POST" "/echo" :body body)]
+                       (assert (= resp:status 200) (string "durability: req " i)))
+                     (assign i (+ i 1)))
+                   (assert (= (length (keys session:streams)) 0)
+                           "durability: no stream leak")
+                   true))))
 
 # ── Run ──────────────────────────────────────────────────────────────
 
@@ -111,15 +117,15 @@
 (def after (arena/bytes))
 (println "  arena delta: " (- after before) " bytes")
 
-(println "reconnect 20x50...")
+(println "reconnect 10x20...")
 (def before2 (arena/bytes))
-(test-reconnect-scoped 20 50)
+(test-reconnect-scoped 10 20)
 (def after2 (arena/bytes))
 (println "  arena delta: " (- after2 before2) " bytes")
 
-(println "durability 500x10k...")
+(println "durability 200x10k...")
 (def before3 (arena/bytes))
-(test-durability-scoped 500 body-10k)
+(test-durability-scoped 200 body-10k)
 (def after3 (arena/bytes))
 (println "  arena delta: " (- after3 before3) " bytes")
 

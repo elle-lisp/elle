@@ -14,7 +14,8 @@
 #   THE CRASH (over-free). `(%array-push a (list 1 2))` on a local `@[]` the
 #   ownership forest made Owned emits an `AdoptRegion` that moves the list into `a`'s
 #   Owned subtree (RC frozen — `incref`/`decref` are then inert). `%pop` moving the
-#   list back OUT must EXTRACT it from that subtree: un-record `region(a) → region(list)`
+#   list back OUT must EXTRACT it from that subtree: un-record the
+#   `region(a) → region(list)` edge
 #   and move the list `Owned → Counted(1)` (`extract_owned_region`), the caller's one
 #   owning reference. Without the extract the list stays interior, so `a`'s scope-exit
 #   subtree drop frees it while the returned Value still points into it, and a later

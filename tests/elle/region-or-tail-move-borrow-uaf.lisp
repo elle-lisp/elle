@@ -77,7 +77,7 @@
   (assign j (%add j 1)))
 
 (assert (%lt (%sub (arena/region-count) before-reg) 50)
-        "an (or borrowed fresh) arg escaping via a mutable store was over-incref'd (leak)")
+        "an (or borrowed fresh) arg escaping via a mutable store leaked")
 (assert (= (length bag) 500) "the mutable store did not retain every reference")
 (assert (= (get (get bag 0) :n) 9)
         "the stored captured struct was freed under the container (UAF)")
