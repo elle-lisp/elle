@@ -218,6 +218,35 @@ fn test_signal_set_invalidation() {
     );
 }
 
+// A `var` that SHADOWS a global (primitive/core) name, once reassigned, must
+// resolve calls to Signal::unknown() — never the shadowed global's signal.
+//
+// This is the deterministic form of the `test_signal_set_invalidation` family:
+// those use the name `f`, which regressed only because a core.lisp symbol-order
+// shift aliased `f`'s SymbolId onto a yielding entry in the (foreign-keyed)
+// primitive_signals map. The underlying defect is name-based and reproduces
+// without any aliasing when the local's name genuinely IS a global: after
+// `analyze_assign` removes the binding from `signal_env`, `get_raw_callee_signal`
+// must NOT fall back to `primitive_signals` by name for a non-primitive local —
+// a mutated local named `length` would otherwise inherit `length`'s signal
+// instead of the sound conservative `unknown`.
+#[test]
+fn test_assign_invalidated_local_ignores_shadowed_global_signal() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(begin (var length (fn () 42)) (assign length (fn () (yield 1))) (length))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.signal,
+        Signal::unknown(),
+        "Reassigned local shadowing global `length` must be unknown, not the global's signal"
+    );
+}
+
 // ============================================================================
 // 5. DIRECT LAMBDA CALL TESTS
 // ============================================================================

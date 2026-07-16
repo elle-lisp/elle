@@ -236,6 +236,28 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The signal of a genuine primitive/global binding, looked up by name.
+    ///
+    /// `primitive_signals` is keyed by `SymbolId`, but its keys come from the
+    /// `CompileCtx`'s throwaway setup `SymbolTable`, NOT the table this analyzer
+    /// resolves user code against. The two agree only on the primitive prefix
+    /// they both intern first; any later symbol (core/prelude/user) can land on
+    /// a colliding id. So a by-name lookup is sound ONLY for a binding that is
+    /// actually a primitive — `bind_primitives` sets `is_primitive` and always
+    /// seeds `signal_env` for those, so this by-name path never even fires for a
+    /// real primitive (that hits `signal_env` first). Gating on `is_primitive`
+    /// therefore keeps a same-named — or id-aliased — *user* binding (e.g. a
+    /// `var` shadowing `length`, or one reassigned via `assign`, which clears its
+    /// `signal_env` entry) from inheriting an unrelated global's signal instead
+    /// of the sound conservative `unknown`.
+    fn primitive_signal_of(&self, binding: Binding) -> Option<Signal> {
+        let b = self.arena.get(binding);
+        if !b.is_primitive {
+            return None;
+        }
+        self.primitive_signals.get(&b.name).copied()
+    }
+
     /// Get the raw callee signal without resolving polymorphic signals.
     pub(crate) fn get_raw_callee_signal(&self, func: &Hir) -> Signal {
         match &func.kind {
@@ -245,11 +267,7 @@ impl<'a> Analyzer<'a> {
             HirKind::Var(binding) => {
                 if let Some(signal) = self.signal_env.get(binding) {
                     *signal
-                } else if let Some(signal) = self
-                    .primitive_signals
-                    .get(&self.arena.get(*binding).name)
-                    .cloned()
-                {
+                } else if let Some(signal) = self.primitive_signal_of(*binding) {
                     signal
                 } else if matches!(self.arena.get(*binding).scope, BindingScope::Parameter)
                     && self.current_lambda_params.contains(binding)
@@ -356,11 +374,7 @@ impl<'a> Analyzer<'a> {
                 .signal_env
                 .get(binding)
                 .cloned()
-                .or_else(|| {
-                    self.primitive_signals
-                        .get(&self.arena.get(*binding).name)
-                        .cloned()
-                })
+                .or_else(|| self.primitive_signal_of(*binding))
                 .unwrap_or(Signal::unknown()),
             // Opaque expression as argument — effects are indeterminate.
             _ => Signal::unknown(),

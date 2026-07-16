@@ -59,9 +59,18 @@ The analyzer tracks signals across function boundaries (see
 
 1. **Signal environment**: Maps `Binding` → `Signal` for locally-defined functions
 2. **Global signals**: Maps `SymbolId` → `Signal` for top-level defines
-3. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions
+3. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions.
+   Keyed by the `CompileCtx` setup table's ids, which agree with this analyzer's
+   table only on the shared primitive prefix — so a call only consults this map
+   when the callee binding `is_primitive` (`primitive_signal_of`), which
+   `bind_primitives` also seeds into `signal_env`. A same-named *user* binding
+   must never resolve through it (a colliding id would hand it an unrelated
+   global's signal).
 4. **Call analysis**: Looks up callee's signal and propagates it
-5. **Mutation invalidation**: `assign` clears signal tracking for the mutated binding
+5. **Mutation invalidation**: `assign` clears the mutated binding's `signal_env`
+   entry. This is sound only because the fallback in (3) is gated to primitives:
+   a reassigned non-primitive local therefore resolves to `Signal::unknown()`,
+   never a stale or same-named global's signal.
 
 ## Scope-aware binding resolution
 
