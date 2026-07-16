@@ -103,7 +103,10 @@ pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap
                 .get(&instr_ip)
                 .map(|l| format!("{l}"))
                 .unwrap_or_else(|| "?".to_string());
-            eprintln!("[trace:rc] DecrefValueRegion({region_id}) rc={rc} @ {loc} ip={instr_ip}");
+            eprintln!(
+                "[trace:rc] DecrefValueRegion({region_id}) rc={rc} of {} @ {loc} ip={instr_ip}",
+                value.type_name()
+            );
         }
         freelog_decref_reason(vm.heap(), region_id, location_map, instr_ip, || {
             format!(
@@ -148,7 +151,7 @@ pub(crate) fn handle_decref_cell_region(vm: &mut VM, location_map: &LocationMap,
     }
 }
 
-pub(crate) fn handle_incref_value_region(vm: &mut VM) {
+pub(crate) fn handle_incref_value_region(vm: &mut VM, location_map: &LocationMap, instr_ip: usize) {
     // Peek, don't pop: the value is the function result and
     // must remain on the stack for the caller.
     let value = *vm
@@ -156,6 +159,16 @@ pub(crate) fn handle_incref_value_region(vm: &mut VM) {
         .stack
         .last()
         .expect("VM bug: stack underflow on IncrefValueRegion");
+    if crate::config::get().has_trace("rc") {
+        let loc = location_map
+            .get(&instr_ip)
+            .map(|l| format!("{l}"))
+            .unwrap_or_else(|| "?".to_string());
+        eprintln!(
+            "[trace:rc] IncrefValueRegion of {} @ {loc} ip={instr_ip}",
+            value.type_name()
+        );
+    }
     let region_id = crate::value::arena::result_region_of(unsafe { &mut *vm.heap_ptr }, value);
     // Mirror of DecrefValueRegion, but unconditional: a
     // function hands its caller one owning reference to the

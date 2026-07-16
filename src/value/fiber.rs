@@ -223,7 +223,63 @@ fn noop_closure() -> Rc<Closure> {
     })
 }
 
+/// The parked region state a fiber that can never run again strands, TAKEN out
+/// of the fiber so exactly one release path reaches it: the parked chain's
+/// activation owner nodes, and the parked non-terminal signal (whose park
+/// escape retain is otherwise released only on the resume path). Consumed by
+/// the terminal-fiber teardown (`vm::fiber::release_fiber_owned`) and by the
+/// region free path's fiber discharge (`RegionStore::teardown_set`)
+/// (docs/impl/region/owner.md § "Park/unpark symmetry").
+pub struct ParkedState {
+    /// Each still-parked `BytecodeFrame`'s activation owner node, in chain order.
+    /// The activation-map regions are deliberately NOT collected: a mapped slot
+    /// can be stale (its value's release was emitted value-based, or died past a
+    /// tail call), so a blanket map release double-frees a possibly-recycled id.
+    pub nodes: Vec<crate::hir::region::RuntimeRegion>,
+    /// The parked non-terminal signal (a yielded value, a yielding io request, a
+    /// capability-denial payload) — its park took exactly one escape retain
+    /// (`EmitEscape` / `SuspendEscape`) whose symmetric release lives on the
+    /// resume path the fiber will never take. `None` when the parked signal is
+    /// terminal (the fiber's free-time signal scan releases those).
+    pub signal: Option<(SignalBits, Value)>,
+}
+
 impl Fiber {
+    /// Take the parked region state of a fiber that can never run again — see
+    /// [`ParkedState`]. Empties the fiber's `suspended` chain and, for a parked
+    /// non-terminal signal this fiber OWNS, the `signal` slot, so no second
+    /// release path can reach them. Ownership of the signal's park escape
+    /// retain is read from the chain's innermost frame: a `Bytecode` frame
+    /// means the suspend ran here (the retain was taken with this park); a
+    /// `FiberResume` frame means the signal is a propagated VIEW of an awaited
+    /// child's park — the child owns the retain, and releasing the view too
+    /// would double-free the one retain across two discharges.
+    pub fn take_parked_state(&mut self) -> ParkedState {
+        let mut nodes = Vec::new();
+        let mut owns_signal = false;
+        for (i, frame) in self
+            .suspended
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+        {
+            if let SuspendedFrame::Bytecode(f) = frame {
+                if i == 0 {
+                    owns_signal = true;
+                }
+                nodes.extend(f.activation_owner_node);
+            }
+        }
+        let signal = match self.signal {
+            Some((bits, _)) if owns_signal && !crate::vm::fiber::is_terminal_signal(bits) => {
+                self.signal.take()
+            }
+            _ => None,
+        };
+        ParkedState { nodes, signal }
+    }
+
     /// Create a new fiber from a closure with the given signal mask.
     pub fn new(closure: Rc<Closure>, mask: SignalBits) -> Self {
         Fiber {

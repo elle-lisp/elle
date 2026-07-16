@@ -166,6 +166,12 @@ pub(crate) fn prim_fiber_resume(
             // parked value's region — otherwise every yielding io op leaks its
             // IoRequest region (see `release_parked_signal`).
             crate::vm::fiber::release_parked_signal(ctx.heap_mut(), parked, resume_value);
+            // And a parked TERMINAL result this resume displaces (a restarted
+            // `:error` fiber, a re-resumed drained stream source): its
+            // park-retain + recorded content edge counted on the free-time
+            // signal scan, which will never see it once the resume value
+            // replaces it (see `release_displaced_terminal_signal`).
+            crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), args[0], parked);
             handle.with_mut(|fiber| fiber.signal = Some((SIG_OK, resume_value)));
         }
         FiberStatus::Alive => {
@@ -266,6 +272,7 @@ primitive! {
         example: "(fiber/new (fn [] 42) |:error| :deny |:io|)",
         aliases: &["fiber"],
         effect: RegionEffect::Fresh,
+        ret: crate::primitives::def::RetType::Fiber,
     }
     "fiber/resume" => prim_fiber_resume {
         signal: (Signal {

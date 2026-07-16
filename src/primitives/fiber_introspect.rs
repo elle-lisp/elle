@@ -276,7 +276,14 @@ pub(crate) fn prim_fiber_abort(
 
     match status {
         FiberStatus::Paused => {
-            // Store the error value on the fiber for do_fiber_abort to pick up
+            // Store the error value on the fiber for do_fiber_abort to pick up.
+            // A parked TERMINAL result this install displaces carries a
+            // park-retain + recorded content edge the free-time signal scan
+            // will never see (`release_displaced_terminal_signal`); a parked
+            // non-terminal signal's strand here is the abort-discard residual
+            // (memory.md § F2), not released blind.
+            let parked = handle.with(|fiber| fiber.signal);
+            crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), args[0], parked);
             handle.with_mut(|fiber| {
                 fiber.signal = Some((SIG_ERROR, error_value));
             });

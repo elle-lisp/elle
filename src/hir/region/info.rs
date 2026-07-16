@@ -113,6 +113,20 @@ pub struct RegionInfo {
     /// is unchanged — every `call_result` (Fresh or not) still frees by value
     /// (`DecrefValueRegion`); this set only widens the ownership candidacy.
     pub fresh_result_regions: FxHashSet<Region>,
+    /// Call-result regions whose callee declares
+    /// [`RetType::Fiber`](crate::primitives::def::RetType::Fiber) (`fiber/new`) —
+    /// regions holding a `Fiber` object. A fiber acquires aliases by merely
+    /// running (the scheduler's parent/child chain, the `fiber/child`/
+    /// `fiber/parent` graph reads), so no structural obligation can bound its
+    /// borrows and adoption's frozen RC would leave every such read's
+    /// pass-through retain inert; the region is therefore never a member of any
+    /// region-rooted ownership cut (`ownership::inputs::not_ownable` counts this
+    /// class among the dynamic-lifetime refusals) and reclaims on the RC
+    /// baseline (docs/impl/region/adopt.md § "The fiber member — refused at the
+    /// class level"). A fiber reached through a non-primitive route is a
+    /// non-`Fresh` call result, refused already; this set closes the `Fresh`
+    /// mint route. Baseline release is unchanged.
+    pub fiber_result_regions: FxHashSet<Region>,
     /// Structural containment edges `(funnel_call_site, contained_region,
     /// container_region)` recovered for the ownership inference from a `Funnel`
     /// store (`%array-push`/`%put`) into a **mutable retaining** container
@@ -466,6 +480,7 @@ impl RegionInfo {
             call_result_regions: FxHashSet::default(),
             counted_cell_read_sites: FxHashSet::default(),
             fresh_result_regions: FxHashSet::default(),
+            fiber_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
             funnel_bytecopy_value_sites: HashMap::new(),

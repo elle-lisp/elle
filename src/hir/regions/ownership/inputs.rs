@@ -256,13 +256,18 @@ impl OwnershipInputs {
     /// has a runtime-determined identity/lifetime: a non-`Fresh` `call_result` placeholder
     /// (a possible borrow / opaque result — but a `Fresh` call-result is a genuinely
     /// caller-owned allocation and IS ownable), a `cell_release` placeholder, a reassigned
-    /// `mutated_binding_value` region, or a `suppressed_decref` region.
+    /// `mutated_binding_value` region, a `suppressed_decref` region, or a region holding a
+    /// **fiber** (`fiber_result_regions` — a fiber acquires aliases through runtime
+    /// scheduler machinery no structural obligation can bound, so the forest is rooted at
+    /// fibers and never claims one as a member; docs/impl/region/adopt.md § "The fiber
+    /// member — refused at the class level").
     pub(super) fn not_ownable(&self, info: &RegionInfo, r: Region) -> bool {
         self.shared.contains(&r)
             || (info.call_result_regions.contains(&r) && !info.fresh_result_regions.contains(&r))
             || info.cell_release_regions.contains(&r)
             || info.mutated_binding_value_regions.contains(&r)
             || info.suppressed_decref_regions.contains(&r)
+            || info.fiber_result_regions.contains(&r)
     }
 
     /// Sole-held: at most one distinct user binding holds `r` (an ANF-temp-only region

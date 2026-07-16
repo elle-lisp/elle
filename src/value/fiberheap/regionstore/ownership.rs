@@ -37,6 +37,23 @@ impl RegionStore {
              owner; owned-and-RC'd is unrepresentable, so a double adoption is a bug \
              (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
         );
+        // A fiber's region is never a forest member: the forest is rooted at
+        // fibers, whose aliases (the scheduler's parent/child chain, the
+        // `fiber/child`/`fiber/parent` graph reads) are created at runtime, so
+        // freezing its RC would leave every such read's retain inert. The
+        // compile-time refusal is `ownership::inputs::not_ownable` over
+        // `RegionInfo::fiber_result_regions`; this is its runtime backstop
+        // (docs/impl/region/adopt.md § "The fiber member — refused at the class
+        // level").
+        debug_assert!(
+            !c.pool
+                .live_objects()
+                .any(|o| matches!(o, crate::value::heap::HeapObject::Fiber { .. })),
+            "region {child} adopted while holding a live Fiber object — a fiber's \
+             region is never a member of a region-rooted Owned subtree \
+             (docs/impl/region/adopt.md § 'The fiber member — refused at the class \
+             level')",
+        );
         c.reclaim = Reclaim::Owned { owner: parent };
         self.regions[parent.get() as usize]
             .as_mut()

@@ -521,6 +521,59 @@ fn region_variadic_tail_forward_uaf() {
     );
 }
 
+// Guard — the abort-delivery retain (docs/impl/region/owner.md § "Park/unpark
+// symmetry", the delivery rule). A replayed frame's pending release consumes
+// one owning reference of the value it is resumed with; a normally-completing
+// child funds it with its Return's ReturnValue retain, but an ABORTED child's
+// error exit runs no Return — so `do_fiber_abort`'s delivery of the error
+// payload into the remaining parked frames must take that retain itself, or
+// the replay steals a reference the abort's caller still owns and the payload
+// is freed under the caller's read (a stale-region deref once ids recycle).
+// The shape needs an io-parked protect child under the scheduler and a FRESH
+// heap payload (a constant payload has no region and masks the theft);
+// tests/elle/grpc.lisp's `with-server` teardown is the full-network witness.
+#[test]
+fn region_fiber_abort_io_protect_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — the fiber-member ownership refusal (docs/impl/region/adopt.md § "The
+// fiber member — refused at the class level"): a fiber's region is never a
+// member of a region-rooted Owned subtree, so a fiber read back out of runtime
+// graph state (`fiber/child`) rides a genuinely counted pass-through retain. The
+// counterfactual is the capture adopt of a sole-captured `fiber/new` result into
+// its capturing closure's region: the read's retain lands inert on the frozen
+// RC and the outer fiber's release subtree-drops the child under the returned
+// borrow — a stale-region deref (generation stamp) at the exhumed fiber's next
+// use. The churn face pins that the refusal reclaims on the RC baseline rather
+// than trading the UAF for a leak. Full mechanism in the fixture header.
+#[test]
+fn region_fiber_exhume_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-fiber-exhume-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — park/unpark symmetry for fiber suspension (docs/impl/region/owner.md
+// § "Park/unpark symmetry"): a parked-then-dropped / drained / cancelled /
+// aborted / denied fiber reclaims its region and parked state, the nested
+// tail-position resume frees the inner fiber, and a literal-lambda tail callee
+// defers its closure release. Leak faces assert bounded region growth; the
+// over-free face (a mis-fix releasing live parked state — e.g. a parked frame's
+// stale activation-map entries) faults under guardfree once ids recycle. Full
+// mechanism in the fixture header.
+#[test]
+fn region_fiber_park_symmetry_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-fiber-park-symmetry.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — stdlib `compose`/`comp` compose correctly, no over-free. A
 // self-tail-recursive HOF (stdlib `fold`'s letrec `go`) reached from >= 2 call
 // sites in a unit must not over-free a value its tail call transferred forward.

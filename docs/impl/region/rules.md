@@ -170,6 +170,21 @@ is a correctness defect, not a tuning knob.
    use-after-free; missing the matching decrement is a leak. The list being
    complete *is* correctness for the RC half.
 
+   **The fresh-frame invariant the releases lean on.** A value-based release
+   reads its local slot unconditionally — a branch-arm-bound temp is
+   NIL-initialized only inside its own arm, yet its scope-end
+   `LoadLocal slot; DecrefValueRegion` runs on every path — sound only because
+   an unwritten slot reads NIL (an immediate the release no-ops on). Every
+   activation entry must deliver that. A fresh call does by construction (an
+   empty per-activation stack; the prologue's bare-NIL pushes land at the slot
+   indices). A frame-replacing tail call reuses the caller's operand stack, so
+   the trampoline truncates it to the frame base before installing the callee
+   (`trampoline_loop`, src/vm/execute.rs): the caller's locals are dead there —
+   every owned value was released at its last use or moved into the callee —
+   and any slot left un-truncated would surface as the callee's stale read,
+   turning a scope-end release into an over-free of a region the frame owns no
+   reference to. Pinned by `runtime::tests::ownership::frame`.
+
 6. **No commingling.** Objects from different regions never share a page —
    otherwise freeing one region cannot munmap its pages while another's objects
    sit on them. (No exceptions.)

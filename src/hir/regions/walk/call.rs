@@ -43,6 +43,21 @@ impl RegionInference {
             self.mutable_container_regions.insert(call_r);
         }
 
+        // A declared-`RetType::Fiber` result (`fiber/new`): the region holds a
+        // fiber, which acquires aliases by merely running (the scheduler's
+        // parent/child chain, the `fiber/child`/`fiber/parent` graph reads), so
+        // it is never a member of any region-rooted ownership cut —
+        // `ownership::inputs::not_ownable` refuses this class and the region
+        // reclaims on the RC baseline (docs/impl/region/adopt.md § "The fiber
+        // member — refused at the class level"). Keyed on RetType, not effect,
+        // so the class holds however the mint is declared.
+        if matches!(
+            self.call_rettype(func),
+            Some(crate::primitives::def::RetType::Fiber)
+        ) {
+            self.fiber_result_regions.insert(call_r);
+        }
+
         // Try inlining the callee's lambda body so intrinsics
         // inside the body produce the right edges at this
         // call site. Inlining only runs when the callee binds

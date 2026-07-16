@@ -48,8 +48,10 @@ mod borrow_tests;
 // submodules) still resolves unchanged. Visibility matches each item's original
 // `pub(crate)`/private declaration.
 pub(crate) use owned::{kill_fiber, parked_owner_nodes, release_fiber_owned, take_fiber_owned};
-use refcount::{incref_signal_region, release_completed_resume_carrier};
-pub(crate) use refcount::{is_terminal_signal, release_parked_signal};
+use refcount::{incref_signal_region, release_discarded_signal};
+pub(crate) use refcount::{
+    is_terminal_signal, release_displaced_terminal_signal, release_parked_signal,
+};
 
 pub(crate) use param::flatten_param_frames;
 #[cfg(debug_assertions)]

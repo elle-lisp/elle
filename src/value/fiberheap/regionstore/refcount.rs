@@ -172,6 +172,9 @@ impl RegionStore {
     /// defensive no-op. `dst` names the region a live `Value` resides in, so it
     /// always has an entry when an edge is recorded.
     pub(crate) fn record_outgoing(&mut self, src: u32, dst: u32) {
+        if crate::config::get().has_trace("rc") {
+            eprintln!("[trace:rc] record_outgoing({src} -> {dst})");
+        }
         if dst == 0 || dst == 1 || dst == src {
             return;
         }
@@ -208,6 +211,9 @@ impl RegionStore {
     /// an absent edge: an unbalanced un-record is recording drift, caught here
     /// rather than only at the next free's equivalence oracle.
     pub(crate) fn unrecord_outgoing(&mut self, src: u32, dst: u32) {
+        if crate::config::get().has_trace("rc") {
+            eprintln!("[trace:rc] unrecord_outgoing({src} -> {dst})");
+        }
         if dst == 0 || dst == 1 || dst == src {
             return;
         }

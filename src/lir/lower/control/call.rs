@@ -37,16 +37,31 @@ impl<'a> Lowerer<'a> {
         let Some(dying) = self.decrefs_by_decref_point.get(&call_id) else {
             return false;
         };
-        // A captured callee (a self-recursive `letrec` closure like `fold`'s
-        // `go`, or any closure captured by a sibling) is read through a
-        // `DerefCell` that `functionalize` wraps around a needs-capture binding —
-        // look through it to the `Var`, exactly as the solver's `Return` arm
-        // does. Without this, captured closures (the whole HOF layer) never match
-        // and never defer their release.
-        let func = match &func.kind {
-            HirKind::DerefCell { cell } => &**cell,
-            _ => func,
-        };
+        // Resolve the callee through the value-transparent wrappers to the
+        // Var/Lambda leaf, mirroring the escape walk (`tail_sources`) and the
+        // solver's `Return` arm:
+        // - a captured callee (a self-recursive `letrec` closure like `fold`'s
+        //   `go`, or any closure captured by a sibling) is read through a
+        //   `DerefCell` that `functionalize` wraps around a needs-capture
+        //   binding;
+        // - a literal-lambda callee (`((fn [] …))`) reaches here as the `Let`
+        //   the normalizer bound it under, its body the binding `Var`.
+        // Without the resolution neither shape ever matches, its per-call
+        // closure region never defers, and every such tail call leaks the
+        // closure + template (the `protect`-body shape: the fiber wrapper's
+        // tail call to its literal body closure).
+        let mut func = func;
+        loop {
+            func = match &func.kind {
+                HirKind::DerefCell { cell } => cell,
+                HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => body,
+                HirKind::Begin(exprs) | HirKind::Block { body: exprs, .. } => match exprs.last() {
+                    Some(last) => last,
+                    None => break,
+                },
+                _ => break,
+            };
+        }
         let func_regions: Vec<crate::hir::region::Region> = match &func.kind {
             HirKind::Var(b) => self
                 .region_info

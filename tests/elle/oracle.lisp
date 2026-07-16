@@ -686,7 +686,7 @@
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
-        v)) 2]
+        v)) 0]
    ["one-shot"
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
@@ -700,7 +700,7 @@
       (let [f (fiber/new (fn []
                            (let [g (fiber/new (fn [] j) 1)]
                              (fiber/resume g))) 1)]
-        (fiber/resume f))) 3]
+        (fiber/resume f))) 0]
    ["multi-resume"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -709,7 +709,7 @@
                            3) |:yield|)]
         (fiber/resume f)
         (fiber/resume f)
-        (fiber/resume f))) 3]
+        (fiber/resume f))) 0]
    ["protect-call"
     (fn [j]
       (let [[ok v] (protect (+ 1 2))]
@@ -719,7 +719,7 @@
       (let [f (fiber/new (fn []
                            (yield {:x j})
                            99) |:yield|)]
-        (fiber/resume f))) 4]
+        (fiber/resume f))) 0]
    ["never-resumed"
     (fn [j]
       (let [f (fiber/new (fn [] {:x j}) |:yield|)]
@@ -728,14 +728,10 @@
     (fn [j]
       (let [f (fiber/new (fn [] (println "blocked")) |:error :io| :deny |:io|)]
         (fiber/resume f)
-        (get (fiber/value f) :error))) 10]  # A parked fiber hard-killed by `fiber/cancel`: the suspending resume's
-   # carrier pass-through retain is released only by a COMPLETING resume
-   # (`release_completed_resume_carrier`), and a cancelled fiber never
-   # completes, so its fiber region (dragging closure + template) stays
-   # retained — the yield-discard class at the cancel exit. The kill itself
-   # frees everything the fiber OWNS (owner nodes — the terminal-fiber
-   # teardown); this residue is the unreleased carrier retain, not owned
-   # state. Shrink-only.
+        (get (fiber/value f) :error))) 3]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
+   # frees everything the fiber owns (owner nodes, the parked signal's park
+   # escape retain), and no carrier retain pins the fiber region
+   # (docs/impl/region/owner.md § "Park/unpark symmetry").
    ["cancel-discard"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -743,22 +739,22 @@
                            9) |:yield|)]
         (fiber/resume f)
         (fiber/cancel f :dead)
-        (fiber/status f))) 3]  # `fiber/abort` of a PARKED fiber (memory.md § F2). Abort injects an error
+        (fiber/status f))) 0]  # `fiber/abort` of a PARKED fiber (memory.md § F2). Abort injects an error
    # and resumes the fiber for unwinding; with no in-body handler it lands `:error`,
-   # which the model keeps RESUMABLE (the restarts system) — so the terminal teardown
-   # (`take_fiber_owned`/`release_fiber_owned`) never fires and the fiber's parked
-   # activation node + region-map borrows + operand stack strand, plus the fresh error
-   # struct the abort mints. `protect` catches the propagated error. A hard `fiber/cancel`
-   # of the same shape (`cancel-discard`, 3) routes through `kill_fiber` and frees the
-   # owned set — the gap is precisely the resumable-`:error` non-teardown. Shrink-only:
-   # closes when a discarded `:error` fiber is routed through the terminal teardown.
+   # which the model keeps RESUMABLE (the restarts system), so its re-parked frame
+   # strands the DEAD CONTINUATION's pending value releases — the borrowed tail
+   # arg's retain from the abort call's error exit, and call-slot scratch — which
+   # only a restart replay could consume (docs/impl/region/owner.md § "The bounded
+   # residual"). The park-symmetry mechanisms (carrier, owner nodes, parked-signal
+   # retain, the fiber region itself) are closed; `denied-discard` (3) is the same
+   # residual class for a capability denial. Shrink-only.
    ["abort-discard"
     (fn [j]
       (let [f (fiber/new (fn []
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 8]])
+        (protect (fiber/abort f "boom")))) 5]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape

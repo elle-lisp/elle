@@ -1,8 +1,8 @@
 //! Region refcount bookkeeping for fiber signals: park-retains on terminal
-//! results, and the symmetric releases when a parked signal is replaced or a
-//! resumed fiber completes. These balance the `find_object_cross_refs` Fiber
-//! arm's free-time cascade against the retains taken while a fiber holds a
-//! `signal` value across a park.
+//! results, and the symmetric releases when a parked signal is replaced at a
+//! resume or discarded with an unrunnable fiber. These balance the
+//! `find_object_cross_refs` Fiber arm's free-time cascade against the retains
+//! taken while a fiber holds a `signal` value across a park.
 
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 
@@ -25,38 +25,6 @@ pub(super) fn incref_signal_region(
     }
 }
 
-/// Release the carrier pass-through retain `dispatch_native_call` applied when a
-/// `fiber/resume` primitive returned `(SIG_RESUME, carrier)`.
-///
-/// `prim_fiber_resume` returns the fiber *argument* (the carrier) as its signal
-/// value, so `dispatch_native_call` — which cannot tell a signal payload from a
-/// real result — increfs `region_of(carrier)` (the fiber's own region) as the
-/// `NativeCallResult` pass-through, expecting the caller's `DecrefValueRegion`
-/// to balance it. But the resume handler REPLACES the carrier with the child's
-/// actual result before pushing it, so the caller's decref targets the result's
-/// region, never the carrier's. The carrier retain is left dangling and the
-/// now-:dead fiber's region (dragging its closure + template) leaks
-/// (`oracle.lisp`'s `fiber-resume` probe pins this reclaimed).
-///
-/// Release it exactly when the resumed fiber ran to completion. The child's
-/// result is balanced on its own: a fresh result by its alloc reference + the
-/// caller's `DecrefValueRegion`; a terminal heap result additionally by the
-/// park-retain (`incref_signal_region`) + the free-time signal scan — so no
-/// re-target incref of the result is needed.
-///
-/// Only the completion path releases. A fiber that SUSPENDED (yield / I/O)
-/// stays alive and resumable; its carrier retain is the liveness hold the
-/// scheduler leans on between pumps, and releasing it would free a live
-/// suspended fiber (the protect/scheduler regression that sank the
-/// suppress-at-dispatch attempts). So this fires solely on :dead.
-pub(super) fn release_completed_resume_carrier(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    fiber_value: Value,
-) {
-    let r = crate::value::arena::region_of(heap, fiber_value);
-    crate::value::arena::decref_region(heap, r);
-}
-
 /// A terminal signal is a fiber's *result*: normal return (SIG_OK), error, or
 /// halt — read later via `fiber/value`, never resumed. Yield and other
 /// suspending signals are transient (the fiber runs again), so their `signal`
@@ -66,12 +34,71 @@ pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
     bits.is_ok() || bits.contains(SIG_ERROR) || bits.contains(SIG_HALT)
 }
 
+/// Release the one park escape retain a DISCARDED fiber's non-terminal parked
+/// signal carries — `EmitEscape` for a `(yield v)`/`(emit …)` value,
+/// `SuspendEscape` for a yielding io request or capability-denial payload. The
+/// retain's symmetric release lives on the resume path (the resumed body's own
+/// pending release, or [`release_parked_signal`] for an io request); a fiber
+/// that can never run again reaches neither, so its terminal teardown
+/// (`release_fiber_owned`) and the region free path's fiber discharge
+/// (`RegionStore::teardown_set`) release it here instead. Distinct from
+/// [`release_parked_signal`], whose io gate and shared-region skip are
+/// resume-path concerns: at a discard there is no resume value and no body to
+/// double-release against (docs/impl/region/owner.md § "Park/unpark symmetry").
+/// A no-op for `None` or an immediate.
+pub(crate) fn release_discarded_signal(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    parked: Option<(SignalBits, Value)>,
+) {
+    if let Some((_, v)) = parked {
+        let r = crate::value::arena::region_of(heap, v);
+        crate::value::arena::decref_region(heap, r);
+    }
+}
+
+/// Release a parked TERMINAL signal DISPLACED by a resume or abort install.
+///
+/// A terminal result parked in `fiber.signal` carries a park-retain
+/// ([`incref_signal_region`]) and a recorded `fiber-region → result-region`
+/// content edge, both counting on the fiber's free-time signal scan to
+/// consume them — sound while "terminal ⇒ never resumed" holds. It does not
+/// hold everywhere: an `:error` fiber is resumable (the restarts system), and
+/// a stream driver re-resumes a source whose parked signal went terminal
+/// under it. The resume installs the resume value over the parked terminal,
+/// so the scan never sees it: without this release the recorded table keeps
+/// the dead edge (the free-time equivalence oracle detonates on the drift),
+/// and each re-park stacks another — the free cascade then over-releases the
+/// payload region (the `region-fiber-park-symmetry.lisp` restart face).
+///
+/// A no-op for `None`, a NON-terminal parked signal (a yield value / io
+/// request, whose escape retain the resume path proper consumes — see
+/// [`release_parked_signal`] below), or an immediate payload — mirroring
+/// exactly the conditions under which the park took the retain and recorded
+/// the edge.
+pub(crate) fn release_displaced_terminal_signal(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    fiber_value: Value,
+    parked: Option<(SignalBits, Value)>,
+) {
+    let Some((bits, v)) = parked else {
+        return;
+    };
+    if !is_terminal_signal(bits) {
+        return;
+    }
+    let Some(sig_r) = crate::value::arena::region_of(heap, v) else {
+        return;
+    };
+    let fiber_r = crate::value::arena::region_of(heap, fiber_value);
+    heap.unrecord_outgoing_edge(fiber_r, Some(sig_r));
+    crate::value::arena::decref_region(heap, Some(sig_r));
+}
+
 /// Release the `SuspendEscape` an io op left on its IoRequest's region when a
 /// parked fiber is resumed and that request — held in `fiber.signal` across the
 /// park — is replaced by `resume_value`. This reclaims the IoRequest region of a
-/// yielding io op — the gauge is `oracle.lisp`'s `io-yield ev/sleep` probe, which
-/// dropped 5.5 → 4.5 net objects/op when this landed (the ≈4.5 residual is the
-/// general escape-imprecision gap, not this mechanism).
+/// yielding io op — the gauge is `oracle.lisp`'s `io-yield ev/sleep` probe (the
+/// residual it reads is the general escape-imprecision gap, not this mechanism).
 ///
 /// A yielding io op (`ev/sleep`, `port/read`, …) returns its `IoRequest` with
 /// `SIG_IO`, whereupon the suspend adds a

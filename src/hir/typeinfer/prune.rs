@@ -90,6 +90,7 @@ fn keyword_of_rettype(ret: RetType) -> Option<&'static str> {
         RetType::MutableStruct => "@struct",
         RetType::Set => "set",
         RetType::MutableSet => "@set",
+        RetType::Fiber => "fiber",
         RetType::Unknown | RetType::FirstArg => return None,
     })
 }

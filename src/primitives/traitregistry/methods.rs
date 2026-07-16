@@ -33,6 +33,7 @@ pub(super) fn build_sequence_methods(heap: &mut FiberHeap) -> Value {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Sequence trait: fiber iterator", params: &["self"],
         category: "trait", effect: RegionEffect::Fresh,
+        ret: crate::primitives::def::RetType::Fiber,
     });
 
     let mut entries = BTreeMap::new();

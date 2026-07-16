@@ -307,6 +307,25 @@ impl VM {
                         vm.fiber.signal = Some((inner_bits, inner_result));
                         inner_bits
                     } else {
+                        // The replayed frame's pending release consumes one
+                        // owning reference of the value it is resumed with (the
+                        // parked call's compiler-emitted result release). A
+                        // normally-completing child funds that reference with
+                        // its Return's ReturnValue retain; the aborted child's
+                        // ERROR exit runs no Return, so the delivery must take
+                        // the retain the missing Return would have — without
+                        // it the replay consumes a reference the abort's
+                        // caller still owns, and the payload is freed under
+                        // the caller's later read. Pinned by
+                        // `region_fiber_abort_io_protect_uaf`;
+                        // tests/elle/grpc.lisp is the full-scheduler witness.
+                        let heap = unsafe { &mut *vm.heap_ptr };
+                        let r = crate::value::arena::region_of(heap, inner_result);
+                        crate::value::arena::incref_for_escape(
+                            heap,
+                            r,
+                            crate::value::arena::EscapeSite::ReturnValue,
+                        );
                         vm.resume_suspended(remaining, inner_result)
                     }
                 }

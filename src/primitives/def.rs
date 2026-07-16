@@ -39,6 +39,17 @@ pub enum RetType {
     MutableStruct,
     Set,
     MutableSet,
+    /// A fiber, on every normally-completing path (`fiber/new`). Beside type
+    /// inference, the ownership forest reads this: a declared-`Fiber` call's
+    /// result region joins `RegionInfo::fiber_result_regions` and is never a
+    /// member of a region-rooted Owned subtree — a fiber acquires aliases by
+    /// merely running (the scheduler's parent/child chain, `fiber/child`-style
+    /// graph reads), so no structural obligation can bound its borrows
+    /// (docs/impl/region/adopt.md § "The fiber member — refused at the class
+    /// level"). A NULLABLE fiber result (`fiber/child` before any resume)
+    /// declares `Unknown` instead, or the type-dispatch prune would cut a live
+    /// nil arm.
+    Fiber,
     /// Returns its first argument (mutating pass-throughs).
     FirstArg,
 }

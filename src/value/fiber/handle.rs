@@ -73,6 +73,15 @@ impl FiberHandle {
         Some(f(fiber))
     }
 
+    /// Try to borrow the fiber mutably. Returns None if taken or already
+    /// borrowed (the free path's fiber discharge, where an executing or
+    /// mid-scan fiber must be skipped rather than panicked on).
+    pub fn try_with_mut<R>(&self, f: impl FnOnce(&mut Fiber) -> R) -> Option<R> {
+        let mut borrow = self.0.try_borrow_mut().ok()?;
+        let fiber = borrow.as_mut()?;
+        Some(f(fiber))
+    }
+
     /// Create a weak reference to this handle.
     pub fn downgrade(&self) -> WeakFiberHandle {
         WeakFiberHandle(Rc::downgrade(&self.0))

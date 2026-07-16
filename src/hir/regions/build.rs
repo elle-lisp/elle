@@ -97,6 +97,7 @@ impl RegionInference {
             call_result_regions: self.call_result_regions,
             counted_cell_read_sites: self.counted_cell_read_sites,
             fresh_result_regions: self.fresh_result_regions,
+            fiber_result_regions: self.fiber_result_regions,
             containment_edges,
             funnel_store_sites: self.funnel_store_sites,
             funnel_bytecopy_value_sites: self.funnel_bytecopy_value_sites,

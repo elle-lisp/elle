@@ -142,14 +142,6 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
-            // Fiber ran to completion (:dead): drop the misdirected carrier
-            // pass-through so the now-dead fiber's region is reclaimed. See
-            // `release_completed_resume_carrier`. Caught-but-suspended results
-            // (a yield the mask covers) leave the fiber resumable, so they keep
-            // the carrier retain.
-            if result_bits.is_ok() {
-                release_completed_resume_carrier(unsafe { &mut *self.heap_ptr }, fiber_value);
-            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
@@ -213,11 +205,11 @@ impl VM {
 
     /// Handle SIG_RESUME from a fiber primitive (TailCall position).
     ///
-    /// Same trampoline split as the Call-position variant. In tail position
-    /// this fiber has NO continuation — its result IS the child's result —
-    /// so it suspends with an empty frame list: when the child completes,
-    /// `resume_suspended([])` immediately completes this fiber with the
-    /// child's value and the unwind continues to our own parent.
+    /// Same trampoline split as the Call-position variant. In tail position the
+    /// remaining continuation is the post-`TailCall` block — the ReturnValue
+    /// retain, the compiler's owned-arg releases, and the `Return` that hands
+    /// the child's result up — which the standard interrupted-frame park
+    /// captures and the resume replays (see the in-body comment).
     // `pub(in crate::vm)`: see `handle_fiber_resume_signal` — same widening from
     // the original `pub(super)` in `fiber.rs` to keep `crate::vm::signal` reach.
     pub(in crate::vm) fn handle_fiber_resume_signal_tail(
@@ -234,8 +226,17 @@ impl VM {
 
         if self.current_fiber_handle.is_some() {
             self.seed_child_inheritance(&handle, fiber_value);
-            let existing = self.fiber.suspended.take().unwrap_or_default();
-            self.fiber.suspended = Some(existing);
+            // `suspended` is deliberately left untouched (None): the standard
+            // interrupted-frame parks (`do_fiber_first_resume`,
+            // `resume_suspended`'s re-suspend, `call_inner`) then capture this
+            // frame's continuation at the post-`TailCall` ip, and the resume
+            // replays it — running the compiler's owned-arg releases exactly as
+            // a non-suspending native tail call falls through to them
+            // (docs/impl/region/owner.md § "Park/unpark symmetry"). Parking an
+            // empty chain here instead would complete this fiber directly with
+            // the child's result, stranding every owned tail arg's moved-in
+            // reference (one region per nested drained fiber — the
+            // `fiber-nested` oracle probe).
             let parent = self
                 .current_fiber_handle
                 .clone()
@@ -259,10 +260,6 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
-            // :dead — release the misdirected carrier retain (see Call variant).
-            if result_bits.is_ok() {
-                release_completed_resume_carrier(unsafe { &mut *self.heap_ptr }, fiber_value);
-            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));

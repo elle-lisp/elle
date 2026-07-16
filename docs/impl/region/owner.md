@@ -171,9 +171,66 @@ the same clean-break discipline as the trampoline's tail-call-adopted closure re
 frame-replacing tail call likewise keeps the activation — and its node — alive to the
 recursion's completion.
 
-**A park moves the node into the suspended frame.** A suspending exit — a yield, a
-suspending native, `fiber/resume`'s SIG_SWITCH handoff, a fuel pause, a capability denial —
-parks the activation's continuation as a `BytecodeFrame`; the frame **takes** the
+**Park/unpark symmetry — what a park retains, and who releases it.** Three rules keep a
+parked fiber's accounting symmetric with its unpark:
+
+- **The resume carrier is never retained.** `prim_fiber_resume` (and `fiber/abort` /
+  `fiber/propagate`) returns its fiber *argument* as the signal payload — a carrier, not a
+  result: the resume handler replaces it with the child's actual outcome before any caller
+  release runs, so a dispatch pass-through retain on it would have no consumer.
+  `dispatch_native_call` skips the retain for a fiber-carrier signal
+  (`SignalAction::Resume`/`Abort`/`Propagate`). A parked fiber's liveness holds are its
+  holders' ordinary counted references — a binding's slot, a container store — so a fiber
+  whose last reference drops while parked genuinely reaches rc 0 and frees, chain and all
+  (the discharge below). Pinned by the `multi-resume`/`yield-discard`/`cancel-discard`
+  oracle probes and `runtime::tests::ownership::fiber_parked_then_dropped_reclaims`.
+- **A suspending native tail call parks its continuation.** A non-suspending native tail
+  call keeps its frame and falls through to the post-`TailCall` block, whose compiler-emitted
+  releases consume the tail args' moved/retained references with exact per-arg ownership
+  (`tail_call_inner`). A SUSPENDING one (`fiber/resume` in tail position — the SIG_SWITCH
+  handoff) must reach that block the same way: the handler leaves `suspended` untouched so
+  the standard interrupted-frame parks (`do_fiber_first_resume`, `resume_suspended`'s
+  re-suspend, `call_inner`) capture the continuation at the post-`TailCall` ip, and the
+  resume replays it — running exactly the releases the fall-through would have. Parking an
+  empty chain instead ("the result is the child's result") strands every owned tail arg —
+  one region per nested drained fiber (the `fiber-nested` probe;
+  `runtime::tests::ownership::fiber_nested_tail_resume_reclaims`).
+- **The parked signal's escape retain has a release on every path.** A suspending signal's
+  payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
+  `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume
+  path consumes it (the resumed body's own pending release, or `release_parked_signal` for
+  an io request); a fiber that can never run again consumes it at its terminal teardown or
+  free-path discharge instead (`release_discarded_signal` via `Fiber::take_parked_state`) —
+  the `yield-discard`/`denied-discard` probes pin both faces.
+- **A delivery into a replayed frame carries one owning reference.** A parked
+  `BytecodeFrame` re-enters at its suspending call's continuation, whose
+  compiler-emitted result release consumes one owning reference of the value the
+  replay pushes. A normally-completing child funds it: its `Return` runs the
+  ReturnValue retain before the result is handed up, and each frame of a replayed
+  chain funds the next the same way. An **aborted** child's error exit runs no
+  `Return`, so `do_fiber_abort`'s delivery of the error payload into the remaining
+  parked frames takes that retain itself — without it the replay consumes a
+  reference the abort's caller still owns, and a fresh heap payload is freed under
+  the caller's read (a constant payload has no region, which is what kept the
+  theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
+  (`tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp`);
+  `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler witness.
+- **A parked TERMINAL result displaced by a resume or abort install is released as it is
+  displaced.** A terminal result parked in `fiber.signal` carries the park-retain and a
+  recorded `fiber-region → result-region` content edge, both counting on the fiber's
+  free-time signal scan — sound only while the signal stays parked to the fiber's demise.
+  A restart (`fiber/resume` of an `:error` fiber), a re-resumed drained stream source, and
+  `fiber/abort`'s error install all replace the parked pair, so the scan never sees it:
+  the installer first releases the retain and un-records the edge
+  (`release_displaced_terminal_signal`). Skipping it leaves the recorded table holding a
+  dead edge (the free-time equivalence oracle detonates on the drift), and each re-park
+  stacks another, so the free cascade over-releases the payload region
+  (`tests/elle/async-error-propagation.lisp` § 4 is the pinning corpus shape; the
+  `region-fiber-park-symmetry.lisp` restart face churns the mechanism).
+
+A park moves the activation's owner node into the suspended frame: a suspending exit — a
+yield, a suspending native, `fiber/resume`'s SIG_SWITCH handoff, a fuel pause, a capability
+denial — parks the activation's continuation as a `BytecodeFrame`; the frame **takes** the
 activation's node (`BytecodeFrame::activation_owner_node`, a parameter of
 `BytecodeFrame::suspend` so every suspend site must decide it) exactly as it carries the
 activation's `activation_region_map`. The members stay Owned (RC frozen) across the park,
@@ -246,10 +303,13 @@ the teardown below gathers every parked node under the fiber node for one set-dr
 **Fiber teardown frees everything the fiber owns.** The members a fiber owns are released
 at its **terminal** transitions, through one take-then-release pair
 (`take_fiber_owned` / `release_fiber_owned`, `src/vm/fiber.rs`): the taking empties the
-fiber's owned slots (each still-parked `BytecodeFrame`'s activation owner node, and the
-fiber node) under the fiber borrow; the releasing then runs against the heap with the
-borrow already dropped, so heap mutation never overlaps fiber access and a cascade that
-frees the fiber's own heap value cannot invalidate a live borrow. When a fiber node
+fiber's owned slots (each still-parked `BytecodeFrame`'s activation owner node, the fiber
+node, and — via `Fiber::take_parked_state` — the parked non-terminal signal whose park
+escape retain the resume path can no longer consume) under the fiber borrow; the releasing
+then runs against the heap with the borrow already dropped, so heap mutation never overlaps
+fiber access and a cascade that frees the fiber's own heap value cannot invalidate a live
+borrow. A hard kill takes BEFORE installing its terminal error, so the superseded parked
+signal's retain is released, not stranded. When a fiber node
 exists, each parked node's members are first gathered under it
 (`reparent_owned_children`) and the emptied node freed, so the teardown is **one**
 set-drop over the fiber's whole owned set — node + members + interior cycles, the Shared
@@ -271,8 +331,27 @@ node and the fiber node reclaim), and `fiber_kill_frees_parked_and_fiber_owned`
 `tests/elle/region-fiber-cancel.lisp` under `--trace=guardfree` as the
 frees-nothing-live gate.
 
-A fiber abandoned **outside** those transitions — a parked fiber whose last handle drops,
-or a chain replaced without a discard — still strands its nodes until heap teardown
-(`RegionStore::teardown_all`), the same bounded abandoned-park class as an error park
-whose fiber is never resumed.
+**The free-path fiber discharge — the dropped-handle case.** A fiber abandoned **outside**
+the terminal transitions — a parked fiber whose last reference drops, a resumable `:error`
+or capability-denied fiber nobody restarts — reaches no teardown call, so the release runs
+where its demise is actually observed: the region free. When a dying region's pages hold a
+`Fiber` object, `RegionStore::teardown_set` takes that fiber's parked state (the same
+`Fiber::take_parked_state` set the terminal teardown consumes: parked activation owner
+nodes, the fiber owner node, and the parked non-terminal signal's escape retain) and feeds
+the regions into the free's iterative cascade — after the debug equivalence oracle, since
+these are not recorded content edges. The take empties the fiber's slots, so a fiber that
+already tore down discharges nothing, and an executing (borrowed) fiber is skipped — its
+region cannot be dying while it runs. Pinned by
+`runtime::tests::ownership::dropped_parked_fiber_discharges_owned_state` and the
+`yield-discard`/`denied-discard`/`abort-discard` oracle probes.
+
+**The bounded residual: a dead continuation's pending value releases.** A discarded fiber's
+parked frames still hold values whose releases live only in the continuation that will
+never run — parked operand-stack temporaries, call-slot scratch (a string literal
+materialized for a denied call), and a borrowed tail arg's retain stranded by a native tail
+call's ERROR exit (the restart replay would consume them; a discard cannot: the per-value
+ownership is compiler knowledge, and a blanket release of the parked stack or the parked
+activation map double-frees — a mapped slot can be stale where its value's release was
+emitted value-based or died past a tail call). This class is bounded per discarded fiber,
+measured by the `abort-discard`/`denied-discard` oracle rates.
 

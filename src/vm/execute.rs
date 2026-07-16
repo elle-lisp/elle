@@ -240,6 +240,15 @@ impl VM {
                         deferred_releases.push(r);
                     }
                 }
+                // The fresh-frame invariant (docs/impl/region/rules.md Rule 5):
+                // the callee's unwritten local slots must read NIL exactly as on
+                // a fresh activation — a branch-arm temp's scope-end release
+                // reads its slot unconditionally and no-ops only on NIL. The
+                // reused stack still holds the caller's locals at those indices
+                // (all dead: released at last use or moved into the callee), so
+                // drop them to the frame base before the callee runs
+                // (runtime::tests::ownership::frame).
+                self.fiber.stack.truncate(self.current_frame_base());
                 // The frame is reused in place but now runs the tail callee: track
                 // it as the executing closure so a self-edge resolved after this
                 // replacement names the right closure (a self-recursive `loop`

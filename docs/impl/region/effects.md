@@ -225,3 +225,17 @@ is a correctness defect the oracle converts into a deterministic panic.
 An unexamined primitive stays `Unknown`; after reading it, declare the
 strongest claim that holds on every path — `Mixed` if none does — one
 primitives table per commit.
+
+**The return-type declaration (`RetType`).** Beside its effect, a primitive may
+declare a statically-known return type (`PrimitiveDef::ret`), consumed by type
+inference (the `type-of` dispatch prune) and by the ownership forest at two
+points: a `Funnel` store's **container** classification (a
+`MutableArray`/`MutableStruct` container retains the stored value's region, so
+the walk recovers a containment edge; a `@string`/`@bytes` container copies
+bytes and retains nothing), and the **fiber-member refusal** — the result region
+of a call whose declared type is `Fiber` (`fiber/new`) is recorded in
+`RegionInfo::fiber_result_regions` and is never adoptable by any region-rooted
+cut (adopt.md § "The fiber member — refused at the class level"). A `RetType`
+claim must hold on **every** normally-completing path: a nullable result
+(`fiber/child`, which returns nil before any resume) declares `Unknown`, never
+the heap type, or the prune would cut a live `nil` dispatch arm.

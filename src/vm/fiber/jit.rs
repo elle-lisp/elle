@@ -29,10 +29,6 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
-            // :dead — release the misdirected carrier retain (see Call variant).
-            if result_bits.is_ok() {
-                release_completed_resume_carrier(unsafe { &mut *self.heap_ptr }, fiber_value);
-            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)

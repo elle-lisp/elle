@@ -8,7 +8,6 @@ use crate::value::{
     SIG_TERMINAL,
 };
 
-use super::release_completed_resume_carrier;
 use crate::vm::core::VM;
 
 impl VM {
@@ -79,31 +78,34 @@ impl VM {
                     self.fiber.child = None;
                     self.fiber.child_value = None;
 
-                    // Update the fiber's signal so fiber/value returns
-                    // the correct result to Elle code.
+                    // Update the fiber's signal so fiber/value returns the
+                    // correct result to Elle code. For the fiber whose own
+                    // execution produced (bits, value) this re-installs the
+                    // pair `with_child_fiber` already parked — retained and
+                    // edge-recorded at its step 6a — so nothing more is owed.
+                    // But an ANCESTOR catching a propagated TERMINAL signal
+                    // (a capability denial masked by the grandparent, not the
+                    // parent) receives a terminal payload it never held: park
+                    // it with the same retain + recorded content edge 6a
+                    // takes, or the fiber's free-time signal scan finds an
+                    // edge the recorded table lacks (the equivalence oracle's
+                    // drift) and its cascade decref over-releases the payload.
+                    let needs_park = current_handle.with(|f| f.signal != Some((bits, value)))
+                        && super::is_terminal_signal(bits);
                     current_handle.with_mut(|f| {
                         f.signal = Some((bits, value));
                     });
+                    if needs_park {
+                        let heap = unsafe { &mut *self.heap_ptr };
+                        super::refcount::incref_signal_region(heap, &Some((bits, value)));
+                        let fiber_r = crate::value::arena::region_of(heap, current_fv);
+                        let sig_r = crate::value::arena::region_of(heap, value);
+                        heap.record_outgoing_edge(fiber_r, sig_r);
+                    }
 
                     if fiber_stack.is_empty() {
                         // Back to the original caller.
                         return (bits, value);
-                    }
-
-                    // An intermediate parent's `(fiber/resume child)` just
-                    // completed: release the carrier pass-through retain,
-                    // exactly as the root-level caught path in
-                    // handle_fiber_resume_signal does. Intermediate levels
-                    // never return through that path (the SIG_SWITCH
-                    // trampoline suspended them), so without this every
-                    // nested completed fiber leaks its region via the
-                    // dangling carrier retain — see
-                    // `release_completed_resume_carrier`.
-                    if bits.is_ok() {
-                        release_completed_resume_carrier(
-                            unsafe { &mut *self.heap_ptr },
-                            current_fv,
-                        );
                     }
 
                     // Drop our strong handle on the completed child BEFORE

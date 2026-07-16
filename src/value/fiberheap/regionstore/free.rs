@@ -258,6 +258,62 @@ impl RegionStore {
                 );
             }
         }
+        // Phase 2b — the fiber discharge (docs/impl/region/owner.md § "The
+        // free-path fiber discharge"): a dying `Fiber` object whose
+        // fiber was never routed through a terminal transition (a dropped handle,
+        // a still-paused or `:error` fiber) still holds its parked chain's
+        // activation owner nodes, its own fiber node, and a parked non-terminal
+        // signal's park escape retain. Take that state out of each dying fiber
+        // and feed the regions to the same iterative cascade as the recorded
+        // frontier. Runs AFTER the equivalence oracle: these are not content
+        // edges (no record exists), so they must not participate in the
+        // recorded == scanned comparison. A borrowed (executing) fiber is
+        // skipped — its region cannot be dying while it runs.
+        {
+            let page_size = self.pool.initial_page_size();
+            let mut discharged: Vec<u32> = Vec::new();
+            for (_, entry) in &members {
+                for obj in entry.pool.live_objects() {
+                    let HeapObject::Fiber { handle, .. } = obj else {
+                        continue;
+                    };
+                    handle.try_with_mut(|fib| {
+                        let parked = fib.take_parked_state();
+                        discharged.extend(parked.nodes.iter().map(|r| r.get()));
+                        if let Some(node) = fib.fiber_owner_node.take() {
+                            discharged.push(node.get());
+                        }
+                        // The parked non-terminal signal's park escape retain
+                        // (EmitEscape / SuspendEscape), released at a resume
+                        // that will never come. Resolve the value's region
+                        // exactly as the content scan does (page-header read +
+                        // ownership check); a foreign or immediate value
+                        // resolves to nothing.
+                        if let Some((_, v)) = parked.signal {
+                            if let Some(ptr) = v.as_heap_ptr() {
+                                let rid = unsafe {
+                                    crate::value::fiberheap::regionpool::region_of_page_ptr(
+                                        ptr, page_size,
+                                    )
+                                };
+                                let owned_here = self
+                                    .regions
+                                    .get(rid as usize)
+                                    .and_then(|s| s.as_ref())
+                                    .is_some_and(|e| e.pool.owns(ptr));
+                                if rid > 1 && owned_here {
+                                    discharged.push(rid);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            if crate::config::get().has_trace("rc") && !discharged.is_empty() {
+                eprintln!("[trace:rc] fiber_discharge → {discharged:?}");
+            }
+            frontier.extend(discharged);
+        }
         // Phase 3 — tear down every member's pages, bump its generation (a surviving
         // pointer into them panics at its next debug-build region_of, and the recycled
         // id's next incarnation stamps fresh pages with the bumped value), and recycle

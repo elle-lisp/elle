@@ -80,6 +80,10 @@ struct RegionInference {
     /// `RegionEffect::Fresh` — a result freshly allocated in the call's own
     /// region, genuinely caller-owned. See `RegionInfo::fresh_result_regions`.
     fresh_result_regions: rustc_hash::FxHashSet<Region>,
+    /// Call-result regions whose callee declares `RetType::Fiber` — a region
+    /// holding a fiber, never a member of a region-rooted Owned subtree. See
+    /// `RegionInfo::fiber_result_regions`.
+    fiber_result_regions: rustc_hash::FxHashSet<Region>,
     /// Call-result regions whose callee returns a mutable *retaining* container
     /// (`RetType::MutableArray`/`MutableStruct`). Walk-internal: a later `Funnel`
     /// store whose container argument resolves to one of these recovers the
@@ -206,6 +210,7 @@ impl RegionInference {
             call_result_regions: rustc_hash::FxHashSet::default(),
             counted_cell_read_sites: rustc_hash::FxHashSet::default(),
             fresh_result_regions: rustc_hash::FxHashSet::default(),
+            fiber_result_regions: rustc_hash::FxHashSet::default(),
             mutable_container_regions: rustc_hash::FxHashSet::default(),
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),

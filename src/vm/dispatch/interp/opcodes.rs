@@ -429,7 +429,7 @@ impl VM {
             }
 
             Instruction::IncrefValueRegion => {
-                region::handle_incref_value_region(self);
+                region::handle_incref_value_region(self, location_map, instr_ip);
             }
 
             Instruction::AdoptRegion => {

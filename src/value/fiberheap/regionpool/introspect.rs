@@ -18,6 +18,16 @@ impl RegionPool {
         }
         out
     }
+    /// Every live object in this region, in allocation order. The free path's
+    /// fiber-discharge walk reads this to find parked `Fiber` objects whose
+    /// chain state must be released with the region (`teardown_set`).
+    pub(crate) fn live_objects(&self) -> impl Iterator<Item = &HeapObject> {
+        self.dtors
+            .iter()
+            .chain(self.ref_objs.iter())
+            .filter(|p| !p.is_null())
+            .map(|&p| unsafe { &*p })
+    }
     /// Total committed bytes across all pages.
     pub fn allocated_bytes(&self) -> usize {
         self.pages.iter().map(|p| p.page.len()).sum()

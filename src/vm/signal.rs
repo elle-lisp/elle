@@ -131,6 +131,17 @@ impl VM {
         bits: SignalBits,
         value: Value,
     ) -> SignalBits {
+        if !bits.is_ok() {
+            etrace!(
+                self,
+                crate::config::trace_bits::SIGNAL,
+                "signal",
+                "tail bits={} value_type={} action={:?}",
+                bits,
+                value.type_name(),
+                classify(bits, &value)
+            );
+        }
         match classify(bits, &value) {
             SignalAction::Ok => {
                 self.fiber.signal = Some((SIG_OK, value));

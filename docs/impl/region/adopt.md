@@ -128,6 +128,40 @@ obligation holds on the funnel face), and at runtime by
 `…_reclaims_nested_cycle_subtree`, and `…_reclaims_bare_cycle_group` (bounded flag-on
 beside the leaking flag-off counterfactual).
 
+## The fiber member — refused at the class level
+
+The forest is **rooted at fibers**: a fiber (through its activation and fiber owner
+nodes — [owner.md](owner.md)) may own regions, but the region a `Fiber` object lives
+in is never a *member* of a region-rooted subtree, a co-owned group, an activation
+SCC, or a transfer summary. Every other value enters fiber-visible state through a
+compile-time-visible escape facet (yield / emit / send / return), so the lifetime
+obligation can bound its borrows; a fiber **value** acquires aliases by merely
+*running* — the scheduler's parent/child chain, the restarts system, and the
+`fiber/child` / `fiber/parent` graph reads all create references at runtime, over
+edges no structural post-dominance predicate can see. Adoption freezes a region's
+RC, so the pass-through retain such a read hands the caller cannot pin an adopted
+fiber's region — which is why the class is refused at admission rather than
+compensated at any read site.
+
+The refusal is one class shared by every cut: the region walk records the result
+region of each native call whose declared
+[`RetType`](../../../src/primitives/def.rs) is `Fiber`
+(`RegionInfo::fiber_result_regions` — `fiber/new` is the mint; a fiber reached
+through any non-primitive route is a non-`Fresh` call result, already refused as a
+runtime placeholder), and `ownership::inputs::not_ownable` counts the class among
+the dynamic-lifetime refusals, so any candidate component containing a fiber's
+region stays Shared (the always-legal baseline). A refused fiber region reclaims on
+ordinary RC — its holders' counted references (bindings, container stores, the
+embedding closure/fiber alloc-scan) release as they die, and a parked fiber's chain
+state discharges on the free path (owner.md § "The free-path fiber discharge"). The
+runtime backstop is a debug assert at `RegionStore::adopt_region`: an adopted
+region's pool holds no live `Fiber` object. Pinned by
+`regions::tests::adopt::owned_subtree_refuses_fiber_member` (beside its admitting
+`@array` twin) and the guardfree fixture pin `region_fiber_exhume_uaf`
+(`tests/integration/fixtures/region-fiber-exhume-uaf.lisp`); `tests/elle/fibers.lisp` (the propagate
+child-chain reads) and `tests/elle/grpc.lisp` exercise the class under the full
+scheduler.
+
 ## The lifetime obligation the root carries
 
 Subtree drop fires at the **root's** single `DecrefRegion`, at the root's

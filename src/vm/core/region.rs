@@ -256,7 +256,22 @@ impl VM {
         // or a sole-owned element would be freed under the returned Value
         // (`arena::pop_with_decref`). Retaining again here would double-count (one
         // leaked region per op — the `raw-pop` oracle probe).
-        if !def.moves_out {
+        // AND EXCEPT a fiber-carrier signal (`fiber/resume`/`fiber/abort`/
+        // `fiber/propagate` returning its fiber ARGUMENT as the payload): the
+        // signal handler replaces the carrier with the child's actual outcome
+        // before any caller release runs, so a retain here would have no
+        // consumer — one dangling retain per suspending resume, pinning every
+        // parked-then-discarded fiber's region forever (docs/impl/region/owner.md
+        // § "Park/unpark symmetry"; the `multi-resume`/`yield-discard` oracle
+        // probes). A parked fiber's liveness holds are its holders' ordinary
+        // counted references, never this retain.
+        let is_fiber_carrier = matches!(
+            crate::signals::dispatch::classify(bits, &value),
+            crate::signals::dispatch::SignalAction::Resume
+                | crate::signals::dispatch::SignalAction::Abort
+                | crate::signals::dispatch::SignalAction::Propagate
+        ) && value.as_fiber().is_some();
+        if !def.moves_out && !is_fiber_carrier {
             crate::value::arena::pass_through_retain(
                 unsafe { &mut *self.heap_ptr },
                 value,

@@ -238,6 +238,12 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterne
             RetType::MutableStruct => TypeInterner::MUTABLE_STRUCT,
             RetType::Set => TypeInterner::SET,
             RetType::MutableSet => TypeInterner::MUTABLE_SET,
+            // No `TyKind::Fiber` exists in the lattice (no operand contract
+            // consumes one); the declaration's consumers are the `type-of`
+            // dispatch prune (which reads `RetType` directly through
+            // `keyword_of_rettype`) and the ownership forest's fiber-member
+            // refusal (`RegionInfo::fiber_result_regions`).
+            RetType::Fiber => TypeInterner::TOP,
             RetType::FirstArg => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
         };
     }

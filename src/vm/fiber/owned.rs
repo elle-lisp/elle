@@ -7,7 +7,7 @@
 //! invalidating a live borrow (docs/impl/region/owner.md § "Owner nodes").
 
 use crate::value::fiber::FiberStatus;
-use crate::value::{FiberHandle, SuspendedFrame, Value, SIG_ERROR};
+use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR};
 
 /// Everything a fiber owns through the ownership forest, TAKEN out of the fiber
 /// (its slots emptied) so the release can run after the fiber borrow is dropped
@@ -18,6 +18,10 @@ use crate::value::{FiberHandle, SuspendedFrame, Value, SIG_ERROR};
 pub(crate) struct FiberOwned {
     /// Each still-parked `BytecodeFrame`'s activation owner node, in chain order.
     parked_nodes: Vec<crate::hir::region::RuntimeRegion>,
+    /// The parked non-terminal signal (a yielded value / io request / denial
+    /// payload), whose one park escape retain is released on the resume path —
+    /// which will never come for a terminal fiber (`release_discarded_signal`).
+    parked_signal: Option<(SignalBits, Value)>,
     /// The fiber's own owner node ([`Fiber::fiber_owner_node`]).
     fiber_node: Option<crate::hir::region::RuntimeRegion>,
 }
@@ -38,21 +42,21 @@ pub(crate) fn parked_owner_nodes(
 }
 
 /// Take everything a TERMINAL fiber owns — the parked chain's activation owner
-/// nodes and the fiber owner node — emptying the fiber's slots so no other
-/// release path can reach them (the move discipline that makes the teardown the
-/// sole demise). Pair with [`release_fiber_owned`] once the fiber borrow is
-/// dropped. Terminal means the fiber can never be resumed: `:dead` (completion,
-/// halt) or a hard kill (cancel; abort of a not-yet-started fiber). An `:error`
-/// fiber is NOT terminal — it is resumable (the restarts system replays its
-/// re-parked frame) — so an error promotion must never take its owned state.
+/// nodes, the parked non-terminal signal, and the fiber owner node — emptying
+/// the fiber's slots so no other release path can reach them (the move
+/// discipline that makes the teardown the sole demise). Pair with
+/// [`release_fiber_owned`] once the fiber borrow is dropped. Terminal means the
+/// fiber can never be resumed: `:dead` (completion, halt) or a hard kill
+/// (cancel; abort of a not-yet-started fiber). An `:error` fiber is NOT
+/// terminal — it is resumable (the restarts system replays its re-parked
+/// frame) — so an error promotion must never take its owned state; a dropped
+/// `:error` fiber discharges at its region's free instead
+/// (docs/impl/region/owner.md § "The free-path fiber discharge").
 pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberOwned {
-    let parked_nodes = fiber
-        .suspended
-        .take()
-        .map(|frames| parked_owner_nodes(frames).collect())
-        .unwrap_or_default();
+    let parked = fiber.take_parked_state();
     FiberOwned {
-        parked_nodes,
+        parked_nodes: parked.nodes,
+        parked_signal: parked.signal,
         fiber_node: fiber.fiber_owner_node.take(),
     }
 }
@@ -70,6 +74,7 @@ pub(crate) fn release_fiber_owned(
 ) {
     let FiberOwned {
         parked_nodes,
+        parked_signal,
         fiber_node,
     } = owned;
     for node in parked_nodes {
@@ -81,6 +86,7 @@ pub(crate) fn release_fiber_owned(
     if let Some(fnode) = fiber_node {
         heap.decref_region_if_present(fnode);
     }
+    super::release_discarded_signal(heap, parked_signal);
 }
 
 /// The hard-kill teardown `fiber/cancel` (of a new/parked fiber) and
@@ -109,9 +115,13 @@ pub(crate) fn kill_fiber(
 ) {
     let signal = Some((SIG_ERROR, error_value));
     let owned = handle.with_mut(|fiber| {
+        // Take BEFORE installing the terminal error: the take releases the OLD
+        // parked signal's SuspendEscape retain (a yielded io request / denial
+        // payload the kill supersedes) — replacing first would strand it.
+        let owned = take_fiber_owned(fiber);
         fiber.status = FiberStatus::Error;
         fiber.signal = signal;
-        take_fiber_owned(fiber)
+        owned
     });
     super::refcount::incref_signal_region(heap, &signal);
     let fiber_r = crate::value::arena::region_of(heap, fiber_value);

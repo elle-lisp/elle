@@ -1066,6 +1066,59 @@ fn owned_subtree_upvalue_capture_owner_refused_on_lifetime() {
     );
 }
 
+#[test]
+fn owned_subtree_refuses_fiber_member() {
+    // A fiber's region is never a member of a region-rooted Owned subtree
+    // (region/adopt.md § "The fiber member — refused at the class level"): a fiber
+    // value acquires aliases by merely RUNNING — the scheduler's parent/child chain
+    // and the `fiber/child`/`fiber/parent` graph reads create references at runtime
+    // that no structural post-dominance predicate can see — and adoption freezes the
+    // region's RC, so no retain could pin an adopted fiber under those reads. The
+    // capture shape below is exactly what external uniqueness would otherwise admit:
+    // a closure sole-captures a `fiber/new` result ({closure ⊇ fiber}, nothing else
+    // references in). The fiber's region is a declared-`RetType::Fiber` fresh result
+    // (`RegionInfo::fiber_result_regions`), a dynamic-lifetime class `not_ownable`
+    // refuses — the family stays Shared (the always-legal baseline) and the fiber
+    // reclaims on ordinary RC.
+    let src = "(let [f (fiber/new (fn [] 1) 0)] \
+                 (let [g (fn [] (fiber/resume f))] (begin (g) nil)))";
+    let (_, _, _, cedges) = capture_edges(src);
+    assert_eq!(
+        cedges.len(),
+        1,
+        "precondition: `g` sole-captures `f` — exactly one capture edge; got {cedges:?}",
+    );
+    let (_, fiber_r, _) = cedges[0];
+    let (_, _, owned) = owned_subtrees_with_effects(src);
+    assert!(
+        !in_some_owned_subtree(&owned, fiber_r),
+        "a fiber's region (r{}) must be a member of NO Owned subtree; got {:?}",
+        fiber_r.0,
+        owned,
+    );
+
+    // The admitting twin: the same shape over an `@array` IS externally unique and
+    // adopts — proving the fiber refusal above is the fiber class, not an artifact
+    // of the capture shape.
+    let twin = "(let [f (@array)] \
+                  (let [g (fn [] (length f))] (begin (g) nil)))";
+    let (_, _, _, twin_cedges) = capture_edges(twin);
+    assert_eq!(
+        twin_cedges.len(),
+        1,
+        "precondition: the twin's `g` sole-captures `f`; got {twin_cedges:?}",
+    );
+    let (_, array_r, _) = twin_cedges[0];
+    let (_, _, twin_owned) = owned_subtrees_with_effects(twin);
+    assert!(
+        in_some_owned_subtree(&twin_owned, array_r),
+        "the @array twin (r{}) must still be adopted — if it refuses too, the fiber \
+         assertion above is vacuous; got {:?}",
+        array_r.0,
+        twin_owned,
+    );
+}
+
 // ── ownership inference: the capture-cell clique (closure ⊇ cell ⊇ content) ─────
 //
 // A local `letrec`/`def` closure that captures a sibling's forward cell forms the chain
