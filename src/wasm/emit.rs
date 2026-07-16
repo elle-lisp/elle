@@ -11,7 +11,7 @@
 //! - `controlflow.rs` — CFG emission, block dispatch, terminators
 //! - `suspend.rs` — CPS suspension/resume, spill/restore, block splitting
 
-use crate::lir::{ClosureId, Label, LirFunction, Reg};
+use crate::lir::{ClosureId, Label, LirFunction, LirInstr, Reg, Terminator};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -43,22 +43,51 @@ pub fn emit_module(
     emitter.emit_module_from_lir(module)
 }
 
-/// Emit a WASM module containing a single closure function.
+/// Whether `func` can be served as a standalone single-closure module.
 ///
-/// Used by tiered compilation: the bytecode VM compiles individual hot
-/// closures to WASM on demand. The module has the same host imports as
-/// the full module but contains only one function (at table index 0).
+/// A standalone module runs through hosts whose suspension and tail-call
+/// imports are panic stubs (`lazy/env.rs`) and whose funcref table has a
+/// single entry, so every shape whose execution would reach one of them is
+/// refused here rather than detonated at runtime
+/// (src/wasm/AGENTS.md § "Constraints on per-closure compilation"):
 ///
-/// Emit a standalone WASM module for a single closure.
+/// - `TailCall`/`TailCallArrayMut` — `return_call_indirect` needs callee
+///   funcref-table indices and `rt_prepare_tail_call`;
+/// - `SuspendingCall` and `Emit` terminators — every signal emission, yield
+///   and `(error …)` alike, routes through `rt_yield`'s suspension-frame
+///   machinery (a host-call error is unaffected: it returns via the status
+///   word);
+/// - `MakeClosure` without module context — no `ClosureId` resolution.
 ///
-/// All instruction types are supported:
-/// - MakeClosure/TailCall via host-mediated dispatch
-/// - Yield via CPS transform (same as full module) + rt_yield on host
+/// Pinned by `wasm::tests::standalone_emission_refuses_*`.
+fn standalone_emittable(func: &LirFunction, has_module_context: bool) -> bool {
+    func.blocks.iter().all(|b| {
+        b.instructions.iter().all(|si| match &si.instr {
+            LirInstr::TailCall { .. }
+            | LirInstr::TailCallArrayMut { .. }
+            | LirInstr::SuspendingCall { .. } => false,
+            LirInstr::MakeClosure { .. } => has_module_context,
+            _ => true,
+        }) && !matches!(b.terminator.terminator, Terminator::Emit { .. })
+    })
+}
+
+/// Emit a standalone WASM module for a single closure (at table index 0).
+///
+/// Used by tiered compilation (the bytecode VM compiles individual hot
+/// closures on demand) and by per-closure precaching. The module has the same
+/// host imports as the full module but contains only one function. Returns
+/// `None` for a closure the standalone hosts cannot serve
+/// (`standalone_emittable` above); the tiered caller falls back to the
+/// bytecode VM, the precache caller to full-module dispatch.
 pub fn emit_single_closure(
     func: &LirFunction,
     module: Option<&crate::lir::LirModule>,
     heap_ptr: *mut crate::value::fiberheap::FiberHeap,
 ) -> Option<EmitResult> {
+    if !standalone_emittable(func, module.is_some()) {
+        return None;
+    }
     let mut emitter = WasmEmitter::new(heap_ptr);
     // Provide module context for MakeClosure → ClosureId resolution
     if let Some(m) = module {

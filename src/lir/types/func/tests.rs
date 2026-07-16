@@ -51,3 +51,88 @@ fn adopt_into_activation_is_not_gpu_eligible() {
         "a function adopting into the activation owner node is not GPU-eligible",
     );
 }
+
+// ── The allocation-free-by-construction pins ─────────────────────────
+//
+// The MLIR/SPIR-V tier's region-reclamation state rests on one invariant
+// (docs/impl/region/diagnostics.md § "The backend-tier gauge"): the
+// eligibility whitelist admits no instruction that can put a heap value in a
+// register, and with it no region instruction except the two value-targeted
+// RC ops — no-ops on unboxed scalars, so admitting them can never unbalance
+// a real region. These pins hold both halves of that argument.
+
+fn static_region(id: u32) -> StaticRegion {
+    StaticRegion::new(id).expect("nonzero static slot")
+}
+
+#[test]
+fn gpu_eligibility_refuses_slot_and_forest_region_instructions() {
+    // Slot-resolved RC, adoption, group free, and the coalescing oracle all
+    // reach the activation region map or the ownership forest — runtime state
+    // the scalar tier does not carry.
+    let refused: Vec<LirInstr> = vec![
+        LirInstr::IncrefRegion {
+            region_id: static_region(2),
+        },
+        LirInstr::DecrefRegion {
+            region_id: static_region(2),
+        },
+        LirInstr::DecrefCellRegion { src: Reg(0) },
+        LirInstr::AdoptRegion {
+            parent: Reg(0),
+            child: Reg(0),
+        },
+        LirInstr::AdoptCellRegion {
+            parent: Reg(0),
+            child: Reg(0),
+        },
+        LirInstr::FreeRegionGroup {
+            members: vec![Reg(0)],
+        },
+        LirInstr::AssertRegionMatches {
+            region_id: static_region(2),
+            src: Reg(0),
+        },
+    ];
+    for instr in refused {
+        let label = format!("{:?}", instr);
+        assert!(
+            !one_instr_func(instr).is_gpu_eligible(),
+            "{label} reaches region-runtime state and must not be GPU-eligible",
+        );
+    }
+}
+
+#[test]
+fn gpu_eligibility_admits_value_targeted_region_rc() {
+    // The two value-targeted RC ops are admitted: every instruction that
+    // could put a heap value in a register is refused by the whitelist, so
+    // on this tier they only ever see unboxed scalars (no region) and skip.
+    for instr in [
+        LirInstr::IncrefValueRegion { src: Reg(0) },
+        LirInstr::DecrefValueRegion { src: Reg(0) },
+    ] {
+        let label = format!("{:?}", instr);
+        assert!(
+            one_instr_func(instr).is_gpu_eligible(),
+            "{label} is a scalar no-op and must stay GPU-eligible",
+        );
+    }
+}
+
+#[test]
+fn gpu_eligibility_refuses_heap_allocation() {
+    // The other half of the argument: no allocating instruction is admitted,
+    // so no region-managed value is ever minted on the tier — its heap stays
+    // with the VM, which reclaims as usual.
+    let func = one_instr_func(LirInstr::List {
+        dst: Reg(0),
+        head: Reg(0),
+        tail: Reg(0),
+        region: static_region(2),
+    });
+    assert!(
+        !func.is_gpu_eligible(),
+        "an allocating instruction must not be GPU-eligible",
+    );
+}

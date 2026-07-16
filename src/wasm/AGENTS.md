@@ -171,10 +171,21 @@ WASM bytes and reuses pre-compiled modules on cache hit (~3ms vs ~400ms).
 `--wasm=N` enables tiered execution: the bytecode VM runs by default,
 and hot closures are compiled to per-closure WASM modules on demand.
 
-**Constraints on per-closure compilation:**
-- No `MakeClosure` instructions (nested closures stay on bytecode VM)
-- No `TailCall`/`TailCallArrayMut` (uses `return_call_indirect` with callee table indices)
-- No `Yield` terminators (suspension frame management)
+**Constraints on per-closure compilation** — enforced by the
+`standalone_emittable` gate in `emit.rs` (`emit_single_closure` returns `None`;
+the tiered/precache callers fall back to the VM / full-module dispatch). A
+standalone module serves one closure through hosts whose suspension and
+tail-call imports are panic stubs (`lazy/env.rs`) and whose funcref table has a
+single entry, so the gate refuses every shape whose execution would reach one:
+- No `TailCall`/`TailCallArrayMut` (`return_call_indirect` needs callee table
+  indices + `rt_prepare_tail_call`)
+- No `SuspendingCall` and no `Emit` terminators — any signal emission, yield
+  and `(error …)` alike, routes through `rt_yield`'s suspension-frame
+  machinery (host-call errors are unaffected: they return via the status word)
+- No `MakeClosure` without module context (`ClosureId` resolution; nested
+  closures stay on the bytecode VM)
+
+Pinned by `wasm::tests::standalone_emission_refuses_*`.
 
 **Self-recursive call optimization:** When `rt_call` detects a call to the
 same closure currently executing in WASM (same bytecode pointer), it dispatches

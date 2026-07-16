@@ -1,4 +1,5 @@
-//! Emit-size invariants for the CPS suspend/resume machinery.
+//! Emit-size invariants for the CPS suspend/resume machinery, the standalone
+//! emission gate, and the backend-tier region gauge pins.
 //!
 //! A suspending WASM function spills live state before a yield/suspending-call
 //! and restores it on resume. The code for this must scale with the *live* set
@@ -8,7 +9,7 @@
 //! that exceeds Wasmtime's per-function size limit and the whole module fails
 //! to parse. These tests pin the linear-in-slots invariant.
 
-use super::emit::emit_module;
+use super::emit::{emit_module, emit_single_closure};
 use crate::lir::{
     BasicBlock, Label, LirConst, LirFunction, LirInstr, LirModule, Reg, SpannedInstr,
     SpannedTerminator, Terminator,
@@ -136,5 +137,225 @@ fn dead_locals_do_not_multiply_by_state_count() {
         "500 extra dead locals grew the module by {} bytes at 100 states — \
          spill/restore is scaling with states × slots, not live slots",
         many - few
+    );
+}
+
+// ── The standalone emission gate ─────────────────────────────────────
+//
+// A standalone single-closure module is served by hosts whose suspension and
+// tail-call imports are panic stubs (lazy/env.rs) and whose funcref table has
+// one entry, so `emit_single_closure` must refuse every shape whose execution
+// would reach one of them (src/wasm/AGENTS.md § "Constraints on per-closure
+// compilation"). Refusal means `None`: the tiered caller falls back to the
+// bytecode VM, the precache caller to full-module dispatch.
+
+fn static_region(id: u32) -> crate::hir::region::StaticRegion {
+    crate::hir::region::StaticRegion::new(id).expect("nonzero static slot")
+}
+
+/// A closure whose block carries one tail call (callee register is arbitrary —
+/// the gate is structural, it never resolves the callee).
+fn tail_calling_closure() -> LirFunction {
+    let mut f = LirFunction::new(Arity::Exact(1));
+    f.closure_id = Some(crate::lir::ClosureId(0));
+    f.num_regs = 2;
+    f.num_params = 1;
+    f.blocks = vec![block(
+        0,
+        vec![
+            LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(1),
+            },
+            LirInstr::TailCall {
+                dst: Reg(1),
+                func: Reg(0),
+                args: vec![],
+                arity_checked: false,
+                region: static_region(2),
+                defer_callee_release: false,
+                deferred_release_slot: None,
+            },
+        ],
+        Terminator::Return(Reg(1)),
+    )];
+    f
+}
+
+/// A closure that constructs a nested closure (`MakeClosure`), resolvable only
+/// with module context.
+fn nested_closure_closure() -> LirFunction {
+    let mut f = LirFunction::new(Arity::Exact(1));
+    f.closure_id = Some(crate::lir::ClosureId(1));
+    f.num_regs = 1;
+    f.num_params = 1;
+    f.blocks = vec![block(
+        0,
+        vec![LirInstr::MakeClosure {
+            dst: Reg(0),
+            closure_id: crate::lir::ClosureId(0),
+            captures: vec![],
+            region: static_region(2),
+        }],
+        Terminator::Return(Reg(0)),
+    )];
+    f
+}
+
+/// A plain numeric closure — the positive control proving the gate is not
+/// over-broad.
+fn plain_closure() -> LirFunction {
+    let mut f = LirFunction::new(Arity::Exact(1));
+    f.closure_id = Some(crate::lir::ClosureId(0));
+    f.num_regs = 1;
+    f.num_params = 1;
+    f.blocks = vec![block(
+        0,
+        vec![LirInstr::Const {
+            dst: Reg(0),
+            value: LirConst::Int(7),
+        }],
+        Terminator::Return(Reg(0)),
+    )];
+    f
+}
+
+#[test]
+fn standalone_emission_admits_plain_closures() {
+    let vm = crate::vm::VM::new();
+    assert!(
+        emit_single_closure(&plain_closure(), None, vm.heap_ptr).is_some(),
+        "a numeric closure with no stub-reaching shape must be standalone-emittable"
+    );
+}
+
+#[test]
+fn standalone_emission_refuses_suspending_closures() {
+    // An Emit terminator — yield and `(error …)` alike — routes through
+    // rt_yield's suspension-frame machinery, a panic stub outside the
+    // full-module store.
+    let vm = crate::vm::VM::new();
+    assert!(
+        emit_single_closure(&suspending_closure(1, 0), None, vm.heap_ptr).is_none(),
+        "a closure with an Emit terminator compiled standalone would panic at \
+         the tiered host's rt_yield stub"
+    );
+}
+
+#[test]
+fn standalone_emission_refuses_tail_calls() {
+    // return_call_indirect needs callee funcref-table indices and
+    // rt_prepare_tail_call — a panic stub, and a 1-entry table.
+    let vm = crate::vm::VM::new();
+    assert!(
+        emit_single_closure(&tail_calling_closure(), None, vm.heap_ptr).is_none(),
+        "a closure with a TailCall compiled standalone would panic at the \
+         tiered host's rt_prepare_tail_call stub"
+    );
+}
+
+#[test]
+fn standalone_emission_refuses_module_less_make_closure() {
+    // ClosureId resolution needs the module's closure list; with it the shape
+    // is admitted (the precache path), without it refused (the tiered path).
+    let vm = crate::vm::VM::new();
+    assert!(
+        emit_single_closure(&nested_closure_closure(), None, vm.heap_ptr).is_none(),
+        "MakeClosure without module context has no ClosureId resolution"
+    );
+    let module = LirModule {
+        entry: trivial_entry(),
+        closures: vec![plain_closure(), nested_closure_closure()],
+    };
+    assert!(
+        emit_single_closure(&nested_closure_closure(), Some(&module), vm.heap_ptr).is_some(),
+        "MakeClosure with module context resolves through rt_make_closure"
+    );
+}
+
+// ── The backend-tier region gauge pins ───────────────────────────────
+//
+// docs/impl/region/diagnostics.md § "The backend-tier gauge". The arena gauges
+// are host-side and tier-transparent, so a program sampling them under the
+// full-module WASM tier measures the tier's own region reclamation. Every
+// region instruction is a structural no-op in this emitter, so an ALLOCATING
+// boundary call strands its fresh region to process teardown — the pinned
+// program-duration over-keep. The pins are shrink-only: realizing region
+// release on this tier lowers them toward the VM's zero; they must never rise.
+
+/// Run stdlib-free source through the full-module WASM backend and return the
+/// result's display form.
+fn eval(source: &str) -> String {
+    match super::eval_wasm(source, "<gauge>") {
+        Ok(v) => format!("{}", v),
+        Err(e) => panic!("eval_wasm failed: {}", e),
+    }
+}
+
+#[test]
+fn wasm_gauge_is_live() {
+    // Gauge-live discriminator: a retained list MUST register on the object
+    // gauge on every tier — a 0 here means the gauge is dead and every other
+    // pin in this block is void, so fail loudly instead of lying.
+    let grew = eval(
+        "(def o0 (arena/count))\n\
+         (def @acc 0)\n\
+         (def @k 0)\n\
+         (while (%lt k 50)\n\
+           (assign acc (%pair k acc))\n\
+           (assign k (%add k 1)))\n\
+         (%sub (arena/count) o0)",
+    );
+    let grew: i64 = grew.parse().expect("gauge delta is an int");
+    assert!(
+        grew >= 50,
+        "50 retained pairs grew the object gauge by {grew} — the gauge is dead"
+    );
+}
+
+#[test]
+fn wasm_full_strands_one_region_per_allocating_host_call() {
+    // 200 discarded `(pair i i)` — on the VM this reclaims to 0/op; on the
+    // full-module WASM tier each allocating boundary call strands its fresh
+    // region. Shrink-only pin at 1 region/op.
+    let grew = eval(
+        "(def r0 (arena/region-count))\n\
+         (def @j 0)\n\
+         (while (%lt j 200)\n\
+           (%pair j j)\n\
+           (assign j (%add j 1)))\n\
+         (%sub (arena/region-count) r0)",
+    );
+    let grew: i64 = grew.parse().expect("gauge delta is an int");
+    eprintln!("[gauge] wasm-full strand: {grew} regions / 200 allocating ops");
+    assert!(
+        grew <= 200,
+        "200 discarded pairs stranded {grew} regions — the WASM tier's \
+         over-keep grew past 1 region per allocating host call"
+    );
+    assert!(
+        grew == 0 || grew == 200,
+        "200 discarded pairs stranded {grew} regions — neither the pinned \
+         over-keep (200) nor full reclamation (0); re-measure and re-pin"
+    );
+}
+
+#[test]
+fn wasm_full_non_allocating_calls_strand_nothing() {
+    // The per-boundary-call region MINT is free: entries materialize lazily on
+    // first allocation (regionstore/alloc.rs), so a pure-compute loop must not
+    // move the region gauge at all.
+    let grew = eval(
+        "(def r0 (arena/region-count))\n\
+         (def @j 0)\n\
+         (while (%lt j 200)\n\
+           (assign j (%add j 1)))\n\
+         (%sub (arena/region-count) r0)",
+    );
+    let grew: i64 = grew.parse().expect("gauge delta is an int");
+    assert_eq!(
+        grew, 0,
+        "a non-allocating loop stranded {grew} regions — an unused boundary \
+         mint is materializing region entries"
     );
 }

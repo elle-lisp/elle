@@ -27,27 +27,10 @@ impl VM {
 
         let bytecode_ptr = closure.template.bytecode.as_ptr();
 
-        // The WASM tiered backend panics on closures with tail calls.
-        // TailCall is an LirInstr, not a Terminator.
-        let has_tail = lir.blocks.iter().any(|b| {
-            b.instructions.iter().any(|si| {
-                matches!(
-                    si.instr,
-                    crate::lir::LirInstr::TailCall { .. }
-                        | crate::lir::LirInstr::TailCallArrayMut { .. }
-                )
-            })
-        });
-        if has_tail {
-            return (
-                SIG_ERROR,
-                rejected(
-                    self,
-                    "wasm",
-                    "closure uses tail calls (not supported by WASM tiered mode)",
-                ),
-            );
-        }
+        // Standalone-unservable shapes (tail calls, signal emission,
+        // suspending calls, module-less MakeClosure) are refused by the
+        // emission gate — `tier.compile` returns false below and the
+        // rejection error names it (src/wasm/emit.rs `standalone_emittable`).
 
         // Use the existing WasmTier if present, else create a temporary one.
         // We must NOT leave a newly-created WasmTier on the VM — the regular

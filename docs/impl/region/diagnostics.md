@@ -102,6 +102,58 @@ measured, but its *shape* — slope-based, shrink-only — is the rule.
 UAF is a separate axis, gated by `--trace=guardfree` under the full stdlib (the only
 trustworthy UAF oracle — plain-VM green is not evidence), not by the slope verdict.
 
+## The backend-tier gauge
+
+The arena gauges (`arena/count`, `arena/region-count`, `arena/bytes` —
+src/primitives/arena.rs) are **host-side and tier-transparent**: a primitive call
+executes on the host against the driving instance's own heap on every tier — the
+VM and JIT natively, the WASM host through `call_primitive` with a `NativeCtx`
+built on `vm.heap_ptr` (src/wasm/host.rs), and the MLIR tier admits no calls at
+all (below). So a program that samples the gauge measures the same `RegionStore`
+no matter which tier executes it, and an interpreter oracle probe ports to a
+backend tier by running the same shape under the tier's flag (`--wasm=full`,
+`--wasm=N`, `--mlir=eager`).
+
+Per-tier region-reclamation state, each with its pinning test:
+
+- **VM / JIT** — the region runtime proper; state is the oracle's closed/open
+  split (`tests/elle/oracle.lisp`).
+- **MLIR CPU / GPU (SPIR-V)** — **allocation-free by construction.** The
+  eligibility gate (`is_gpu_eligible`, src/lir/types/mod.rs `is_gpu_instruction`)
+  whitelists numeric instructions only: every instruction that can put a heap
+  value in a register is refused, and with it every region instruction except
+  the two value-targeted RC ops (no-ops on unboxed scalars, so admitting them
+  can never unbalance a real region). No region-managed value ever lives on
+  this tier; the program's heap stays with the VM, which reclaims as usual.
+  Pinned by the `gpu_eligibility_*` tests in `lir::types::func::tests`;
+  measured bounded by the gauge probe under `--mlir=eager`.
+- **WASM full-module (`--wasm=full`)** — **a program-duration over-keep,
+  pinned shrink-only.** Every region instruction is a structural no-op in the
+  emitter (src/wasm/instruction/dispatch.rs), and the host mints a fresh region
+  per boundary call (`rt_data_op` in src/wasm/linker/dataop.rs,
+  `call_primitive`, the closure-env cell builders). A mint alone costs nothing —
+  region entries materialize lazily on first allocation
+  (regionstore/alloc.rs) — so the strand rate is per **allocating** boundary
+  call, not per host call: every heap allocation the run makes (data-op
+  results, native results, call scaffolding such as variadic rest-lists and
+  capture cells) lives until process teardown. The `HandleTable`
+  (src/wasm/handle.rs) is the same over-keep on the host side: a handle is
+  never removed during a run, so every heap value that crosses the boundary
+  pins an entry for the store's lifetime. Pinned by the `wasm::tests` gauge
+  pins (`wasm_full_*`); realizing region release on this tier shrinks them
+  toward the VM's zero.
+- **WASM tiered (`--wasm=N`)** — the VM keeps region authority: all region
+  bytecode runs interpreted, and only closures that pass the standalone
+  emission gate (src/wasm/emit.rs `standalone_emittable` — no tail calls, no
+  signal emission, no suspending calls, no module-less `MakeClosure`) move to
+  WASM. A compiled leaf's internal allocations strand exactly as in
+  full-module mode (same no-op emitter), bounded by the leaf's body size per
+  call; the gate is pinned by `wasm::tests::standalone_emission_refuses_*`.
+
+The gauge probes measure **region reclamation**, not wall-clock or handle-table
+growth; the handle table is host-side Rust memory invisible to `arena/*`, named
+above so its growth is not mistaken for a gauge artifact.
+
 ## The squelch/abort discard
 
 Abandoning suspended work routes through one chokepoint, `VM::discard_suspended_frames`
