@@ -12,10 +12,13 @@
 # § Tiers and the agent-first runner's cross-tier execution.
 
 # Probe whether the :jit tier is compiled into this build (force-compile a
-# trivial closure in a worker; :feature-disabled means no JIT here).
+# trivial closure in a worker). A build with no JIT rejects with :error
+# :tier-rejected — keyed on :error, not :reason, since the rejection carries
+# :ineligible (the run_on stub) OR :feature-disabled (the tier signal) depending
+# on the path; both share :tier-rejected.
 (defn jit-available? []
   (let [r (os/join (os/spawn-vm (fn [] (protect (compile/run-on :jit (fn [] 0))))))]
-    (not (and (not (get r 0)) (= (get (get r 1) :reason) :feature-disabled)))))
+    (not (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)))))
 
 # Compile in the main thread (has the symbol table), then ship the closure to a
 # worker and force it onto :jit there — exactly the test runner's mechanism.

@@ -16,6 +16,19 @@
 # The policy passes never ran the value-is-@string case through the JIT,
 # so it hid. This test pins JIT==VM agreement for it.
 
+# Gate the whole file on JIT availability: it exists to pin JIT==VM parity, so a
+# build with no JIT tier compiled in (--no-default-features, e.g. the aarch64
+# no-features job) has nothing to compare — (compile/run-on :jit …) then returns
+# :tier-rejected. Re-raise as a loud :gated so `elle test` records a file-level
+# SKIP with a reason and a direct run prints "SKIP (gated)" (exit 0), matching the
+# lib-load gates in compress.lisp / git.lisp. Eager (def …) so it gates during
+# barrier-module setup, before any test thunk runs.
+(def _jit-available
+  (let [[ok? v] (protect (compile/run-on :jit (fn [] 0)))]
+    (if (and (not ok?) (= (get v :error) :tier-rejected))
+      (error (struct :error :gated :reason "JIT tier not compiled in"))
+      true)))
+
 # A closure that pushes its second arg onto its first and returns the first.
 # The `(match (type-of …))` arm proves `dst` authoritatively for the raw
 # intrinsic (docs/intrinsics.md § What counts as proof) — the pin is

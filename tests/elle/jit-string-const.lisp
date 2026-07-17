@@ -12,6 +12,17 @@
 ## fault barrier and killed the whole run. `compile/run-on :jit` force-compiles
 ## regardless of the active JIT policy, so this exercises the path on every tier.
 
+# Gate on JIT availability: a build with no JIT tier compiled in
+# (--no-default-features, e.g. the aarch64 no-features job) rejects
+# (compile/run-on :jit …) with :error :tier-rejected. This file exercises the
+# forced :jit tier, so re-raise as a loud :gated — `elle test` records a file-level
+# SKIP and a direct run prints "SKIP (gated)" (exit 0), matching compress.lisp.
+(def _jit-available
+  (let [[ok? v] (protect (compile/run-on :jit (fn [] 0)))]
+    (if (and (not ok?) (= (get v :error) :tier-rejected))
+      (error (struct :error :gated :reason "JIT tier not compiled in"))
+      true)))
+
 ## A closure whose body is a bare string constant.
 (assert (= "hello" (compile/run-on :jit (fn [] "hello")))
         "forced-JIT closure returns its string constant")

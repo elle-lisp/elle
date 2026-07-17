@@ -21,6 +21,18 @@
 ## call falls back to the interpreter — the callee's body enters through the
 ## JIT helper's fallback door. `go` is called ONLY from inside the compiled
 ## caller, so the fallback (not a JIT-to-JIT dispatch) is what runs.
+# Gate on JIT availability: a build with no JIT tier compiled in
+# (--no-default-features, e.g. the aarch64 no-features job) rejects
+# (compile/run-on :jit …) with :error :tier-rejected. This file's first case
+# forces the :jit tier, so re-raise as a loud :gated — `elle test` records a
+# file-level SKIP and a direct run prints "SKIP (gated)" (exit 0), matching
+# compress.lisp.
+(def _jit-available
+  (let [[ok? v] (protect (compile/run-on :jit (fn [] 0)))]
+    (if (and (not ok?) (= (get v :error) :tier-rejected))
+      (error (struct :error :gated :reason "JIT tier not compiled in"))
+      true)))
+
 (def go
   (letrec [g (fn [ls]
                (if (empty? ls)

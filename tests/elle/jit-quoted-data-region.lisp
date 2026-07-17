@@ -11,6 +11,17 @@
 
 ## Witness: a forced-JIT quoted list lives in a real reclaimable region (id >= 2),
 ## not an immediate (id 0, no heap).
+# Gate on JIT availability: a build with no JIT tier compiled in
+# (--no-default-features, e.g. the aarch64 no-features job) rejects
+# (compile/run-on :jit …) with :error :tier-rejected. This file exercises the
+# forced :jit tier, so re-raise as a loud :gated — `elle test` records a file-level
+# SKIP and a direct run prints "SKIP (gated)" (exit 0), matching compress.lisp.
+(def _jit-available
+  (let [[ok? v] (protect (compile/run-on :jit (fn [] 0)))]
+    (if (and (not ok?) (= (get v :error) :tier-rejected))
+      (error (struct :error :gated :reason "JIT tier not compiled in"))
+      true)))
+
 (def s (compile/run-on :jit (fn [] (quote (a b c)))))
 (assert (%ge (arena/region-of s) 2)
         (concat "forced-JIT quoted list must be an ordinary allocation in a real "
