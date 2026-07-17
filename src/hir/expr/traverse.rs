@@ -114,8 +114,16 @@ impl Hir {
                 f(expr);
                 f(env);
             }
+            // Visit the KEY before the VALUE, matching `lower_parameterize`'s
+            // evaluation order (parameter expression first, then its value).
+            // The key is a real evaluated sub-expression, so `compute_order`
+            // must rank it — skipping it left a binding whose last read is a
+            // parameterize key invisible to decref placement, reclaiming its
+            // slot before the parameterize read it (the `capture.rs:47`
+            // nil-cell panic, tests/elle/parameters.lisp).
             HirKind::Parameterize { bindings, body } => {
-                for (_, v) in bindings {
+                for (k, v) in bindings {
+                    f(k);
                     f(v);
                 }
                 f(body);
@@ -239,8 +247,12 @@ impl Hir {
                 f(expr);
                 f(env);
             }
+            // Key before value, matching `lower_parameterize` (and the
+            // mutable twin above). See that arm for why the key must be a
+            // visited child.
             HirKind::Parameterize { bindings, body } => {
-                for (_, v) in bindings {
+                for (k, v) in bindings {
+                    f(k);
                     f(v);
                 }
                 f(body);

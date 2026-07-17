@@ -51,6 +51,56 @@ fn compute_order_ranks_by_structure_not_hirid_magnitude() {
 }
 
 #[test]
+fn compute_order_indexes_parameterize_key() {
+    // `parameterize` evaluates each binding's PARAMETER (key) expression, then
+    // its value, before the body (`lower_parameterize`). `for_each_child` — the
+    // sole child enumeration `compute_order` walks — must therefore visit the
+    // key. If it skips the key, the key's subtree gets no execution-order index,
+    // so a binding whose LAST read sits in a parameterize key is invisible to
+    // decref placement: its slot is reclaimed at an EARLIER read (e.g. a
+    // fiber-captured use) and the parameterize then reads the nil'd slot. That
+    // is the `capture.rs:47` "Expected capture cell, got nil" panic pinned by
+    // tests/elle/parameters.lisp ("Creation snapshot is independent of
+    // resumer's bindings").
+    use crate::syntax::Span;
+    let sp = Span::synthetic();
+    let mk = |kind, id| {
+        let mut h = Hir::silent(kind, sp.clone());
+        h.id = HirId(id);
+        h
+    };
+    let p = Binding(0);
+    // Parameterize(id=30) { [(key=Var(p)(id=10), value=Int(id=11))] body: Int(id=12) }
+    let key = mk(HirKind::Var(p), 10);
+    let value = mk(HirKind::Int(0), 11);
+    let body = mk(HirKind::Int(0), 12);
+    let param_node = mk(
+        HirKind::Parameterize {
+            bindings: vec![(key, value)],
+            body: Box::new(body),
+        },
+        30,
+    );
+
+    let order = compute_order(&param_node);
+    assert!(
+        order.contains_key(&HirId(10)),
+        "compute_order must index the parameterize KEY (@10); for_each_child \
+         skipping it leaves the key with no execution-order index and its \
+         binding's last read invisible to decref placement"
+    );
+    assert!(
+        order[&HirId(30)] > order[&HirId(10)],
+        "the parameterize node must rank after its key in execution order"
+    );
+    assert!(
+        order[&HirId(11)] > order[&HirId(10)],
+        "the binding value must rank after the key — lower_parameterize \
+         evaluates the parameter expression before the value"
+    );
+}
+
+#[test]
 fn test_bitset_basic() {
     let mut bs = BitSet::new(128);
     assert!(!bs.contains(0));
