@@ -24,25 +24,55 @@ fn candidates_linux_passthrough() {
 
 #[test]
 fn candidates_macos_unversioned() {
-    // libz.so → libz.dylib, with the original kept as a fallback.
+    // libz.so → libz.dylib, then the Homebrew prefixes (dyld does not search
+    // /opt/homebrew/lib for a bare name), with the original kept as a fallback.
     assert_eq!(
         library_candidates("libz.so", DlOs::Macos),
-        svec(&["libz.dylib", "libz.so"])
+        svec(&[
+            "libz.dylib",
+            "/opt/homebrew/lib/libz.dylib",
+            "/usr/local/lib/libz.dylib",
+            "libz.so"
+        ])
     );
 }
 
 #[test]
 fn candidates_macos_versioned() {
-    // Linux appends the version after .so; macOS embeds it before .dylib.
+    // Linux appends the version after .so; macOS embeds it before .dylib. Each
+    // native basename (versioned first, then unversioned) also probes the
+    // Homebrew prefixes.
     assert_eq!(
         library_candidates("libcairo.so.2", DlOs::Macos),
-        svec(&["libcairo.2.dylib", "libcairo.dylib", "libcairo.so.2"])
+        svec(&[
+            "libcairo.2.dylib",
+            "/opt/homebrew/lib/libcairo.2.dylib",
+            "/usr/local/lib/libcairo.2.dylib",
+            "libcairo.dylib",
+            "/opt/homebrew/lib/libcairo.dylib",
+            "/usr/local/lib/libcairo.dylib",
+            "libcairo.so.2"
+        ])
+    );
+}
+
+#[test]
+fn candidates_macos_probes_homebrew_for_nonsystem_lib() {
+    // The bug this fixes: `(ffi/native "libzstd.so")` on Apple-Silicon macOS.
+    // libzstd is not a system library and lives in /opt/homebrew/lib, which dyld
+    // does not search for a bare name — so the bare `libzstd.dylib` alone never
+    // resolves. The prefixed candidate is what makes it loadable.
+    let cands = library_candidates("libzstd.so", DlOs::Macos);
+    assert!(
+        cands.contains(&"/opt/homebrew/lib/libzstd.dylib".to_string()),
+        "macOS candidates must probe the Homebrew prefix: {cands:?}"
     );
 }
 
 #[test]
 fn candidates_macos_preserves_directory() {
-    // Only the basename is rewritten; the directory prefix is preserved.
+    // An explicit directory prefix is honored verbatim: only the basename is
+    // rewritten, and no Homebrew prefixes are injected (the caller named a path).
     assert_eq!(
         library_candidates("/usr/lib/libz.so.1", DlOs::Macos),
         svec(&[

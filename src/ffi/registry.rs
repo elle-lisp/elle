@@ -109,15 +109,19 @@ pub(crate) fn current_dl_os() -> DlOs {
 /// rewritten to the host's native form (a directory prefix is preserved), and the
 /// original spec is always appended as a final fallback.
 ///
-/// | spec            | macOS                                | Windows                     |
-/// |-----------------|--------------------------------------|-----------------------------|
-/// | `libz.so`       | `libz.dylib`                         | `z.dll`, `libz.dll`         |
-/// | `libcairo.so.2` | `libcairo.2.dylib`, `libcairo.dylib` | `cairo.dll`, `libcairo.dll` |
+/// | spec            | macOS                                                        | Windows                     |
+/// |-----------------|--------------------------------------------------------------|-----------------------------|
+/// | `libz.so`       | `libz.dylib`, `…/homebrew/lib/libz.dylib`, `…/local/…`       | `z.dll`, `libz.dll`         |
+/// | `libcairo.so.2` | `libcairo.2.dylib` (+ prefixes), `libcairo.dylib` (+ prefixes)| `cairo.dll`, `libcairo.dll` |
 ///
 /// The version moves: Linux appends it after `.so` (`libz.so.1`), macOS embeds it
-/// before `.dylib` (`libz.1.dylib`), Windows drops it. A spec that is not a Linux
-/// soname (already `.dylib`/`.dll`, or unrecognized) is returned unchanged — the
-/// caller is assumed to have given the host form.
+/// before `.dylib` (`libz.1.dylib`), Windows drops it. On macOS a BARE soname also
+/// probes the standard Homebrew prefixes (`/opt/homebrew/lib`, `/usr/local/lib`),
+/// since dyld does not search `/opt/homebrew/lib` for a bare name and that is where
+/// non-system libraries (libzstd, libcairo, …) live; a spec that already names a
+/// directory is honored verbatim. A spec that is not a Linux soname (already
+/// `.dylib`/`.dll`, or unrecognized) is returned unchanged — the caller is assumed
+/// to have given the host form.
 pub(crate) fn library_candidates(spec: &str, os: DlOs) -> Vec<String> {
     if os == DlOs::Linux {
         return vec![spec.to_string()];
@@ -144,10 +148,27 @@ pub(crate) fn library_candidates(spec: &str, os: DlOs) -> Vec<String> {
     match os {
         DlOs::Macos => {
             // macOS embeds the version before the extension: libfoo.2.dylib.
+            // Emit the versioned basename first, then the unversioned one; each
+            // native basename also probes the standard Homebrew prefixes when the
+            // spec is a BARE name. dyld searches /usr/lib and the shared cache for
+            // a bare name but NOT /opt/homebrew/lib (Apple Silicon), so a non-system
+            // library installed by Homebrew (libzstd, libcairo, …) is otherwise
+            // unreachable via `(ffi/native "libfoo.so")`. /usr/local/lib (Intel
+            // Homebrew) is already in dyld's fallback path, but we probe it too so
+            // the on-disk existence check finds it regardless of the linker's mood.
+            // A spec with an explicit directory named a path — honor it verbatim.
+            let mut bases = Vec::new();
             if let Some(v) = version {
-                out.push(format!("{dir}{stem}.{v}.dylib"));
+                bases.push(format!("{stem}.{v}.dylib"));
             }
-            out.push(format!("{dir}{stem}.dylib"));
+            bases.push(format!("{stem}.dylib"));
+            for base in &bases {
+                out.push(format!("{dir}{base}"));
+                if dir.is_empty() {
+                    out.push(format!("/opt/homebrew/lib/{base}"));
+                    out.push(format!("/usr/local/lib/{base}"));
+                }
+            }
         }
         DlOs::Windows => {
             // Windows DLLs drop the `lib` prefix and carry no soname version.

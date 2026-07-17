@@ -244,8 +244,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: macos
-      - name: Install GNU parallel and coreutils
-        run: brew install parallel coreutils
+      - name: Install GNU parallel, coreutils, and zstd
+        # zstd (libzstd) is not a macOS system library; the `elle test` runner
+        # loads it for CAS compression and lib/compress.lisp's tests need it.
+        # Homebrew installs it under /opt/homebrew/lib, which library_candidates
+        # probes explicitly (dyld does not search there for a bare soname).
+        run: brew install parallel coreutils zstd
       - name: make elle
         run: make elle
       - name: make doctest
