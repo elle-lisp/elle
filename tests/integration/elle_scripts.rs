@@ -934,3 +934,28 @@ fn fiber_deep_nesting_jit() {
         &["--jit=eager"],
     );
 }
+
+// A signal-violation teardown (squelch/silence catching a forbidden `yield`)
+// frees a region a still-PARKED activation borrows. signals.lisp's cumulative
+// squelch/silence/yield churn recycles a region slot under a suspended frame's
+// uncounted region borrow (`frame.region_borrows`), so on resume the debug-only
+// uncounted-borrow guard (src/vm/core/resume.rs → `first_stale_borrow`,
+// docs/impl/region/generations.md § "Uncounted-borrow check") aborts: "stale
+// suspended-frame region borrow on resume".
+//
+// The abort is DEBUG-ONLY: a release build — what `make smoke`/`smoke-noffi`
+// run in CI — has the guard compiled out, silently restores the freed region,
+// and proceeds on recycled pages, so the defect escapes the corpus entirely
+// (signals.lisp passes there). This runs the same file under the debug
+// cargo-test profile, where the guard is live, so the defect is pinned as a
+// first-class regression with a named cause instead of a silent latent UAF.
+//
+// Coupled to tests/elle/signals.lisp on purpose: it is the reproducer, and the
+// trigger is state-sensitive (cumulative slot recycling — it does not minimize
+// to a small standalone form). Un-ignore once the signal-violation unwind keeps
+// the parked activation's regions alive across teardown.
+#[test]
+#[ignore = "RED: signal-violation unwind frees a region a parked activation still borrows (stale suspended-frame region borrow)"]
+fn signals_no_stale_suspended_frame_region_borrow() {
+    run_elle_script_with_args("signals", &["--jit=off"]);
+}
