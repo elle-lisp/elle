@@ -126,30 +126,18 @@ impl VM {
         for i in 0..num_captures {
             let v = closure.env[i];
             if capture_types & (1u64 << i) != 0 {
-                match v.as_float() {
-                    Some(f) => i64_args.push(f.to_bits() as i64),
-                    None => return None,
-                }
+                i64_args.push(v.as_float()?.to_bits() as i64);
             } else {
-                match v.as_int() {
-                    Some(n) => i64_args.push(n),
-                    None => return None,
-                }
+                i64_args.push(v.as_int()?);
             }
         }
 
         // Then params
         for (i, v) in args.iter().enumerate() {
             if param_types & (1u64 << i) != 0 {
-                match v.as_float() {
-                    Some(f) => i64_args.push(f.to_bits() as i64),
-                    None => return None,
-                }
+                i64_args.push(v.as_float()?.to_bits() as i64);
             } else {
-                match v.as_int() {
-                    Some(n) => i64_args.push(n),
-                    None => return None,
-                }
+                i64_args.push(v.as_int()?);
             }
         }
 

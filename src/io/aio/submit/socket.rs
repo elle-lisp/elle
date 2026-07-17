@@ -27,7 +27,6 @@ impl AsyncBackend {
                     ref mut platform,
                     ref mut hub,
                     ref mut pending,
-                    buffer_pool: _,
                     ..
                 } = *inner;
 

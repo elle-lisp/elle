@@ -256,7 +256,7 @@ pub(crate) fn infer_node(
                 // the container keyword types are flat — the keyword is the most
                 // precise type, never a supertype of the accumulated one.
                 let saved = subject
-                    .and_then(|b| pattern_type_keyword(pat).map(|ty| (b, ty)))
+                    .zip(pattern_type_keyword(pat))
                     .map(|(b, narrow_ty)| {
                         let prev = binding_types.get(&b).copied();
                         binding_types.insert(b, narrow_ty);

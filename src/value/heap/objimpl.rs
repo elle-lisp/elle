@@ -155,7 +155,7 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::Pair(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
             HeapObject::LArrayMut { data, .. } => {
                 if let Ok(borrowed) = data.try_borrow() {
-                    write!(f, "{:?}", &*borrowed)
+                    write!(f, "{:?}", *borrowed)
                 } else {
                     write!(f, "[<borrowed>]")
                 }

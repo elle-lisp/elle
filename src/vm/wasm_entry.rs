@@ -44,10 +44,7 @@ impl VM {
         }
 
         // Need LIR to compile
-        let lir_func = match &closure.template.lir_function {
-            Some(f) => f.clone(),
-            None => return None,
-        };
+        let lir_func = closure.template.lir_function.as_ref()?.clone();
 
         // Try to compile
         let heap_ptr = self.heap_ptr;
