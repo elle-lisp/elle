@@ -80,7 +80,7 @@ impl VM {
     /// The VM-scope rich-error routine (docs/impl/region/errors.md): build
     /// `{:error :kind :message msg …extra}` in a fresh result region,
     /// freed value-based by the consumer's `DecrefValueRegion`. Same name as
-    /// [`NativeCtx::error_extra`](crate::primitives::ctx::NativeCtx::error_extra)
+    /// [`NativeCtx::error_extra`](crate::primitives::ctx::Alloc::error_extra)
     /// so `rich_error!` is uniform over `ctx` and `self`. The `extra` field
     /// values must be born in the same region — immediates (keywords/ints) or
     /// pass-throughs (incref'd by `alloc`'s content scan); a VM site has no

@@ -53,7 +53,7 @@ impl RegionStore {
     }
 
     /// Ensure the entry for a raw physical id, creating it lazily. Mortal
-    /// regions reach this through [`ensure`]; the raw form exists for the
+    /// regions reach this through `ensure`; the raw form exists for the
     /// trace/alloc path that already holds a `u32`.
     pub(super) fn ensure_raw(&mut self, id: u32) {
         let idx = id as usize;

@@ -11,9 +11,9 @@ use rustc_hash::FxHashSet;
 /// (`super::super::escape::shared_seed_regions`). The region solver holds no escape
 /// logic of its own — there is no parallel escape judgment to read.
 ///
-/// Consumed by [`compute_owned_subtrees`] (the external-uniqueness walk) and pinned
+/// Consumed by `compute_owned_subtrees` (the external-uniqueness walk) and pinned
 /// directly by the `shared_seed_*` pins (`regions::tests`). The chain is reached in a
-/// shipping build through [`compute_adopt_edges`], which `analyze_regions_with` calls
+/// shipping build through `compute_adopt_edges`, which `analyze_regions_with` calls
 /// by the ownership pass.
 pub(in crate::hir::regions) fn compute_shared_seeds(
     info: &RegionInfo,

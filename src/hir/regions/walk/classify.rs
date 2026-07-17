@@ -45,7 +45,7 @@ impl RegionInference {
 
     /// Is the callee a value-RETAINING store funnel (`%put`/`%array-push`/`%add`)
     /// — a `Funnel` op whose runtime body increfs the stored value? Under the same
-    /// unshadowed-immutable-primitive condition as [`call_effect`]. Distinguishes
+    /// unshadowed-immutable-primitive condition as `call_effect`. Distinguishes
     /// the store funnels from the removals (`%del`) and byte-copy pushes
     /// (`%string-push`/`%bytes-push`), all of which share the `Funnel` effect.
     pub(super) fn is_retaining_store(&self, func: &Hir) -> bool {
@@ -62,7 +62,7 @@ impl RegionInference {
 
     /// Is the callee a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) whose
     /// non-fresh moved-out element is escape-retained IN-BODY? Under the same
-    /// unshadowed-immutable-primitive condition as [`call_effect`]. The walk records
+    /// unshadowed-immutable-primitive condition as `call_effect`. The walk records
     /// such a call site so the lowerer suppresses the redundant tail ReturnValue
     /// retain over the moved-out element (`region_pop_tail_moves_out_uaf`). A
     /// moves-out native with a fresh result (`@string`/`@bytes` pop) is absent from
@@ -81,7 +81,7 @@ impl RegionInference {
 
     /// Is the callee a BYTE-COPY store funnel (`%string-push`/`%string-push-mut`/
     /// `%bytes-push`)? Under the same unshadowed-immutable-primitive condition as
-    /// [`call_effect`]. The walk records such a call's stored value so the
+    /// `call_effect`. The walk records such a call's stored value so the
     /// compensation releases a dispatch wrapper's stranded `val` param per-arm — the
     /// byte-copy value strand (sound because the byte-copy neither increfs nor decrefs
     /// the value, so the per-arm release is its true last use, not a double-free).
@@ -99,10 +99,10 @@ impl RegionInference {
 
     /// Is the callee ANY moves-out REMOVE native (`%pop`/`%pop-string`/`%pop-bytes`),
     /// regardless of effect? Under the same unshadowed-immutable-primitive condition as
-    /// [`call_effect`]. The walk records such a call's container arg0 as a
+    /// `call_effect`. The walk records such a call's container arg0 as a
     /// `funnel_container_sites` site so the compensation releases the `pop` wrapper's
     /// stranded owned-param container per-arm — the F1b container strand. Distinct from
-    /// [`call_moves_out_passthrough`] (the element tail-retain suppression), which is
+    /// `call_moves_out_passthrough` (the element tail-retain suppression), which is
     /// the PassThrough subset.
     pub(super) fn call_moves_out(&self, func: &Hir) -> bool {
         if let HirKind::Var(binding) = &func.kind {
@@ -117,7 +117,7 @@ impl RegionInference {
     }
 
     /// The callee's declared [`RetType`](crate::primitives::def::RetType), under
-    /// the same unshadowed-immutable-primitive condition as [`call_effect`].
+    /// the same unshadowed-immutable-primitive condition as `call_effect`.
     /// `None` for an unknown/shadowed callee or an empty classification. The
     /// ownership inference uses this to recognize a `Funnel` store's container
     /// argument as a mutable *retaining* container (`MutableArray`/`MutableStruct`).
@@ -135,7 +135,7 @@ impl RegionInference {
 
     /// The 0-based argument indices the callee EMBEDS into its fresh result
     /// ([`crate::primitives::def::PrimitiveDef::embeds`]), under the same
-    /// unshadowed-immutable-primitive condition as [`call_effect`]. Empty for an
+    /// unshadowed-immutable-primitive condition as `call_effect`. Empty for an
     /// unknown/shadowed callee or an empty classification. The walk's `Fresh` arm
     /// records a `result ⊇ arg` containment edge for each, so the ownership forest
     /// tracks an argument the fresh result keeps a reference to (`with-traits`'s trait

@@ -22,7 +22,7 @@ pub(crate) struct FiberOwned {
     /// payload), whose one park escape retain is released on the resume path —
     /// which will never come for a terminal fiber (`release_discarded_signal`).
     parked_signal: Option<(SignalBits, Value)>,
-    /// The fiber's own owner node ([`Fiber::fiber_owner_node`]).
+    /// The fiber's own owner node (`Fiber::fiber_owner_node`).
     fiber_node: Option<crate::hir::region::RuntimeRegion>,
 }
 

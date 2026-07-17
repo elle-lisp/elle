@@ -12,7 +12,7 @@
 //! - **Synthetic temps are never holders.** A synthetic ANF producer temp
 //!   (`SymbolId::SYNTHETIC` — the `(let [_t e] _t)` read-once-and-flow-on binding)
 //!   aliases nothing a consumer reasons about, so it is excluded universally, at
-//!   construction and in [`add`] alike. Each consumer layers its own *eligibility*
+//!   construction and in `add` alike. Each consumer layers its own *eligibility*
 //!   predicate on top (the reassign gate additionally requires the binding to be
 //!   read; the merge seed does not), because the genuinely shared core is the index
 //!   and its queries, not the per-consumer filter.
@@ -37,7 +37,7 @@ impl RegionHolders {
     /// `binding_source_regions`), keeping a binding iff it is a non-synthetic user
     /// binding for which `eligible(b)` holds. Fold additional holders (reassign-site
     /// value regions, which are not in `binding_source_regions`) in afterward with
-    /// [`add`].
+    /// `add`.
     pub(super) fn from_source_regions(
         source_regions: &HashMap<Binding, Vec<Region>>,
         arena: &BindingArena,

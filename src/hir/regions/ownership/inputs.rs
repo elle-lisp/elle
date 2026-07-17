@@ -4,8 +4,8 @@ use super::seeds::compute_shared_seeds;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The shared containment-graph + ownership-candidate inputs read by BOTH the
-/// externally-unique subtree walk ([`compute_owned_subtrees`]) and the co-owned-cycle
-/// walk ([`compute_owned_region_groups`]): the eligible-edge child map, the `contained`
+/// externally-unique subtree walk (`compute_owned_subtrees`) and the co-owned-cycle
+/// walk (`compute_owned_region_groups`): the eligible-edge child map, the `contained`
 /// set, the Shared-seed set, the re-derived capture edges, the holder index, and the
 /// real-allocation candidate set. Factored so the two walks read the *same* graph by
 /// construction — a divergence between them would be an ownership-soundness bug.
@@ -41,8 +41,8 @@ pub(in crate::hir::regions) struct OwnershipInputs {
     /// Strongly-connected components of the eligible containment graph (`children_of`,
     /// `parent → child`), computed ONCE by one Tarjan pass. `comp_id` maps each node to its
     /// component's index in `comp_members`. Both the co-owned-group walk
-    /// ([`compute_owned_region_groups`]) and the activation-adopt walk
-    /// ([`compute_activation_adopts`]) need the SCC of each candidate region; computing it as
+    /// (`compute_owned_region_groups`) and the activation-adopt walk
+    /// (`compute_activation_adopts`) need the SCC of each candidate region; computing it as
     /// `{m ∈ reach(r) : r ∈ reach(m)}` was a reachability closure PER region — O(regions ×
     /// subtree) on the whole-stdlib letrec. A single Tarjan pass over the same graph yields
     /// every region's component at once (O(nodes + edges)); [`Self::scc_of`] is the lookup.

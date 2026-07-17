@@ -64,7 +64,7 @@ impl RegionStore {
     }
 
     /// The wholesale free shared by single-root subtree drop
-    /// ([`free_runtime_region_pages`]) and co-owned group drop ([`free_region_group`]):
+    /// (`free_runtime_region_pages`) and co-owned group drop (`free_region_group`):
     /// `roots` seeds the first tear-down — one region for a subtree, the whole member set
     /// for a group.
     ///

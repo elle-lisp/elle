@@ -3,7 +3,7 @@ use super::*;
 impl RegionStore {
     /// Open a closed-scope mint log (docs/impl/region/rules.md § "Macro
     /// expansion — a closed allocation scope"). Every region minted until the
-    /// matching [`reclaim_mint_scope`] is recorded. The scope does not nest:
+    /// matching `reclaim_mint_scope` is recorded. The scope does not nest:
     /// macro transformer bodies are compiled code that does not re-enter the
     /// expander, so a transformer call mints no nested scope.
     pub fn begin_mint_log(&mut self) {
@@ -15,7 +15,7 @@ impl RegionStore {
         self.mint_log = Some(Vec::new());
     }
 
-    /// Close the scope opened by [`begin_mint_log`] and reclaim its dead
+    /// Close the scope opened by `begin_mint_log` and reclaim its dead
     /// scratch by RC. For every region minted in the scope that is still live
     /// (its generation still matches the mint record — a recycled id whose
     /// region was already freed mid-scope is skipped), balance its

@@ -123,7 +123,7 @@ pub(crate) fn remainder_values(a: &Value, b: &Value) -> Result<Value, (&'static 
 
 /// The language `=` (docs/types.md § Equality): structural equality
 /// with numeric coercion and IEEE 754 float semantics at every depth.
-/// Compositional: (= [a] [b]) ⇔ (= a b). Used by the VM's Eq
+/// Compositional: `(= [a] [b])` ⇔ `(= a b)`. Used by the VM's Eq
 /// instruction, the `=` primitive, and the JIT's eq/ne slow paths.
 #[inline]
 pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {

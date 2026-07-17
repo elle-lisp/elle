@@ -4,7 +4,7 @@ use super::inputs::OwnershipInputs;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The externally-unique Owned subtrees of a compilation unit — the consumer of
-/// [`compute_shared_seeds`]. Maps each Owned **root** region to the
+/// `compute_shared_seeds`. Maps each Owned **root** region to the
 /// full set of regions in its subtree (the root included). A region absent from every
 /// value here is Shared (the conservative baseline: per-region RC, always legal).
 ///

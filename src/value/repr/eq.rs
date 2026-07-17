@@ -9,7 +9,7 @@
 //!   reflexive, -0.0 ≠ 0.0).
 //! - `Numeric` — the language `=`: int/int exact, mixed int/float
 //!   promotes to f64, floats follow IEEE 754 (NaN ≠ NaN, -0.0 = 0.0),
-//!   at every depth. Compositional: (= [a] [b]) ⇔ (= a b). There is
+//!   at every depth. Compositional: `(= [a] [b])` ⇔ `(= a b)`. There is
 //!   no pointer-identity shortcut — a value containing NaN is not `=`
 //!   to anything, including itself.
 //!

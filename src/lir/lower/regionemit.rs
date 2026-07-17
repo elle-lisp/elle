@@ -165,7 +165,7 @@ impl<'a> Lowerer<'a> {
     /// The static region **slot** to coalesce a value's mint onto, or `None` to
     /// stay value-resolved (docs/impl/region/mechanism.md § "Compile-time region
     /// selection (coalescing)"). Layers the lowering-time runtime-population guard
-    /// over [`coalescible_solver_region`]'s solver-fact class logic: the region's
+    /// over `coalescible_solver_region`'s solver-fact class logic: the region's
     /// slot must already be mapped (`region_to_table`) AND stamped by an allocation
     /// **emitted in this function** (`emitted_alloc_regions`), so the activation
     /// map populates it at runtime.

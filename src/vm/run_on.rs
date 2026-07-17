@@ -33,7 +33,7 @@ mod mlir;
 mod wasm;
 
 /// Build a structured `:tier-rejected` error, born in a fresh region of its own
-/// ([`VM::escaping_error_extra`]) — `vm` owns the heap that mints it.
+/// ([`VM::error_extra`]) — `vm` owns the heap that mints it.
 fn rejected(vm: &mut VM, tier: &str, msg: impl Into<String>) -> Value {
     vm.error_extra(
         "tier-rejected",

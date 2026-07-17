@@ -28,7 +28,7 @@ struct RegionInference {
     binding_region: HashMap<Binding, Region>,
     /// Binding → set of source regions a Var(b) reference may produce.
     /// Empty for opaque bindings (params, pattern bindings).
-    /// Var(b) returns binding_regions[b] to propagate value flow.
+    /// Var(b) returns `binding_regions[b]` to propagate value flow.
     binding_regions: HashMap<Binding, Vec<Region>>,
     /// Binding → (assign/set-cell sites, value regions stored) for a TOP-LEVEL
     /// (file-letrec, `in_lambda_depth == 0`), non-capture binding that is

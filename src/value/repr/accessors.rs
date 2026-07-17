@@ -199,8 +199,8 @@ impl Value {
         self.cons_list_to_vec()
     }
 
-    /// The allocation-free cons-list walk shared by [`list_to_vec`] and
-    /// [`list_to_vec_in`]. Handles a syntax-wrapped `nil`/empty list reached as a
+    /// The allocation-free cons-list walk shared by `list_to_vec` and
+    /// `list_to_vec_in`. Handles a syntax-wrapped `nil`/empty list reached as a
     /// list tail (e.g. from `letrec` in macros).
     fn cons_list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
         let mut result = Vec::new();

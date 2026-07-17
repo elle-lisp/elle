@@ -66,7 +66,7 @@
 //!
 //! ## The consumer — externally-unique Owned subtrees
 //!
-//! [`compute_owned_subtrees`] is the consumer of the seed set (external uniqueness;
+//! `compute_owned_subtrees` is the consumer of the seed set (external uniqueness;
 //! docs/impl/region/ownership.md § "Adoption and subtree drop"). It walks the region containment graph
 //! outward from each candidate root and reports the subtrees that are **externally
 //! unique**: no value inside crosses a frontier (none is a Shared seed) and no region
@@ -101,7 +101,7 @@
 //!    alloc-scan; consumed here identically to the funnel-recovered edges
 //!    (region/effects.md § `Fresh`).
 //!
-//! [`compute_owned_subtrees`] is wrapped by [`compute_adopt_edges`], which
+//! `compute_owned_subtrees` is wrapped by `compute_adopt_edges`, which
 //! `analyze_regions_with` calls unconditionally to populate
 //! `RegionInfo::owned_adopt_edges`, and the lowerer emits an `AdoptRegion` per edge
 //! (`regionemit.rs::emit_increfs_for`). A shape the walk cannot prove externally unique

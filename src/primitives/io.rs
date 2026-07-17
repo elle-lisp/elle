@@ -70,7 +70,7 @@ fn prim_io_backend(
     }
 }
 
-/// (io/submit backend request [fiber]) → submission-id
+/// `(io/submit backend request [fiber])` → submission-id
 ///
 /// Optional third arg: the fiber that issued the I/O request. When present,
 /// spawn results are allocated on the fiber's heap (eliminating cross-heap

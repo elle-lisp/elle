@@ -103,7 +103,7 @@ pub(in crate::hir::regions) fn capture_containment_edges(
 }
 
 /// Regions that hold a **closure** (a `Lambda`'s `alloc_region`) — the members
-/// [`compute_owned_region_groups`] refuses, holding the co-owned-group free to its charter:
+/// `compute_owned_region_groups` refuses, holding the co-owned-group free to its charter:
 /// **store-only** runtime cycles (a bare `@array ↔ @array` knot with no closure member). A
 /// closure-involving cycle is owned by a *different* mechanism, so routing it here would be
 /// unsound or redundant. This refusal is a **mechanism boundary**, not a conservatism.
@@ -129,7 +129,7 @@ pub(in crate::hir::regions) fn capture_containment_edges(
 /// The `closure ⊇ cell ⊇ content` containment the walk now records
 /// (`capture_containment_edges` re-pointed through the cell + the `cell ⊇ content` edge) does
 /// NOT move a cyclic closure clique into the group cut; it lets the rooted-subtree cut
-/// ([`compute_owned_subtrees`]) reclaim a **non-cyclic** local capture clique via
+/// (`compute_owned_subtrees`) reclaim a **non-cyclic** local capture clique via
 /// `AdoptCellRegion` (pinned by `owned_subtrees_admits_local_capture_cell_clique`).
 pub(super) fn closure_regions(hir: &Hir, info: &RegionInfo) -> FxHashSet<Region> {
     fn walk(h: &Hir, info: &RegionInfo, out: &mut FxHashSet<Region>) {
