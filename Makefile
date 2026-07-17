@@ -119,8 +119,15 @@ ELLE_TEST_SKIP :=
 ELLE_SKIP_VM  := -e jit-rejections.lisp -e gpu-eligible.lisp -e mlir.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
 
-# FFI skip list: tests requiring libffi (skipped when built --no-default-features)
-ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
+# FFI skip list: tests requiring the `ffi` feature (skipped when built
+# --no-default-features). These reference ffi/* primitives that are compiled out
+# of a no-features build — some as a runtime "requires `ffi` feature" error
+# (prim-ffi), others absent entirely so the file won't even compile
+# (region-ffi-callback-arg-uaf's `ffi/callback`), which a runtime gate can't
+# catch. prim-ffi is listed explicitly rather than left to the `ffi.lisp`
+# substring accidentally matching `prim-ffi.lisp`.
+ELLE_SKIP_FFI := -e ffi.lisp -e prim-ffi.lisp -e region-ffi-callback-arg-uaf.lisp \
+                 -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
 
 # Skip list for the whole-file --wasm=full pass only (eval = dynamic
 # compilation, not in the WASM backend). The runner needs no list: a form a
