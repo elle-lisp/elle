@@ -84,19 +84,21 @@
 #
 # A spawned child must NOT inherit elle's internal signal mask. Elle blocks the
 # absorb set on the main thread and ALL signals on worker threads (for its
-# signalfd machinery); fork copies that mask and exec preserves it. If it leaked
-# into the child, a process like `sleep` would have e.g. SIGTERM blocked and
-# ignore `subprocess/kill … :sigterm` (only SIGKILL would land), wedging
-# `subprocess/wait`. We read the child's OWN blocked-signal mask from
-# /proc/self/status and require it empty — the same all-zero mask a shell hands
-# its children. This guards the bug both ways: directly (the absorb set leaks)
-# and under the runner (the worker masks everything). Linux-specific (/proc).
-(let [proc (subprocess/exec "sh" ["-c" "grep SigBlk /proc/self/status"])
-      out (string (port/read-all (get proc :stdout)))]
-  (subprocess/wait proc)
-  (assert (string/contains? out "0000000000000000")
-          (string "subprocess child inherited a blocked signal mask: "
-                  (string/trim out))))
+# signalfd machinery); fork copies that mask and exec preserves it. If SIGTERM
+# leaked in pending-blocked, the child would ignore `subprocess/kill … :sigterm`
+# (only SIGKILL would land), wedging a clean shutdown.
+#
+# Assert the BEHAVIOR, not the mechanism (portable — no /proc, and it exercises
+# the real worker-thread fork path under the runner): a child sent SIGTERM must
+# die FROM SIGTERM (subprocess/wait → -15, the negated signal number), not
+# survive to exit normally (→ 0). A leaked mask resolves in ~1s (the sleep runs
+# out) rather than hanging, and reports the exit code it saw instead.
+(let [proc (subprocess/exec "sleep" ["1"])]
+  (subprocess/kill proc :sigterm)
+  (let [exit (subprocess/wait proc)]
+    (assert (= exit -15)
+            (string "child did not die from SIGTERM (subprocess/wait=" exit
+                    ") — elle's blocked signal mask leaked into the child"))))
 
 # ── port/lines with subprocess ────────────────────────────────────────────────
 

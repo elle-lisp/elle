@@ -19,47 +19,58 @@
 #   Opaque    ⇒ heap result (≠ 0); region identity unconstrained, type pinned
 # The region COUNT cannot be used (the ambient io-yield leak swamps it); region KIND can.
 
-(def path "/dev/shm/elle-region-io-effect-pass")
-
 (defn heap? [x]
   (not (= (arena/region-of x) 0)))
 (defn immediate? [x]
   (= (arena/region-of x) 0))
 
-# ── 1. Write port: open (Fresh) → flush/tell/seek/close (Immediate) ──────────
-(let [p (port/open path :write)]
-  (assert (port? p) "1a: port/open returns a port")
-  (assert (heap? p)
-          "1b: port/open is Fresh — the port is a heap value (region ≠ 0)")
-  (let [n (port/write p "hello world")]
-    (assert (immediate? n) "1c: port/write yields an immediate byte count"))
-  (let [f (port/flush p)]
-    (assert (nil? f) "1d: port/flush yields nil")
-    (assert (immediate? f) "1e: port/flush is Immediate (region 0)"))
-  (let [t (port/tell p)]
-    (assert (int? t) "1f: port/tell yields an int position")
-    (assert (immediate? t) "1g: port/tell is Immediate (region 0)"))
-  (let [s (port/seek p 0)]
-    (assert (int? s) "1h: port/seek yields an int position")
-    (assert (immediate? s) "1i: port/seek is Immediate (region 0)"))
-  (let [c (port/close p)]
-    (assert (nil? c) "1j: port/close yields nil")
-    (assert (immediate? c) "1k: port/close is Immediate (region 0)")))
+# Sections 1 & 2 share one scratch file (section 2 reads what section 1 wrote),
+# so they run in one with-temp-dir thunk: the file's whole lifecycle — create,
+# write, read, delete — is self-contained per tier. with-temp-dir honors TMPDIR
+# and cleans up after, even on failure (no hardcoded paths, no litter).
+(with-temp-dir dir
+               (let [path (path/join dir "region-io-effect-pass")]
+                 # ── 1. Write port: open (Fresh) → flush/tell/seek/close (Immediate) ────────
+                 (let [p (port/open path :write)]
+                   (assert (port? p) "1a: port/open returns a port")
+                   (assert (heap? p)
+                           "1b: port/open is Fresh — the port is a heap value (region ≠ 0)")
+                   (let [n (port/write p "hello world")]
+                     (assert (immediate? n)
+                             "1c: port/write yields an immediate byte count"))
+                   (let [f (port/flush p)]
+                     (assert (nil? f) "1d: port/flush yields nil")
+                     (assert (immediate? f)
+                             "1e: port/flush is Immediate (region 0)"))
+                   (let [t (port/tell p)]
+                     (assert (int? t) "1f: port/tell yields an int position")
+                     (assert (immediate? t)
+                             "1g: port/tell is Immediate (region 0)"))
+                   (let [s (port/seek p 0)]
+                     (assert (int? s) "1h: port/seek yields an int position")
+                     (assert (immediate? s)
+                             "1i: port/seek is Immediate (region 0)"))
+                   (let [c (port/close p)]
+                     (assert (nil? c) "1j: port/close yields nil")
+                     (assert (immediate? c)
+                             "1k: port/close is Immediate (region 0)")))
 
-# ── 2. Read port: read (Fresh) and read-all (Opaque) are heap results ────────
-(let [p (port/open path :read)]
-  (defer
-    (port/close p)
-    (let [d (port/read p 5)]
-      (assert (string? d) "2a: port/read returns a string on a text port")
-      (assert (= d "hello") "2b: port/read content")
-      (assert (heap? d)
-              "2c: port/read is Fresh — the buffer is a heap value (region ≠ 0)"))
-    (let [rest (port/read-all p)]
-      (assert (string? rest) "2d: port/read-all returns a string")
-      (assert (= rest " world") "2e: port/read-all content")
-      (assert (heap? rest)
-              "2f: port/read-all is Opaque — a heap result (minted on the origin heap)"))))
+                 # ── 2. Read port: read (Fresh) and read-all (Opaque) are heap results ──────
+                 (let [p (port/open path :read)]
+                   (defer
+                     (port/close p)
+                     (let [d (port/read p 5)]
+                       (assert (string? d)
+                               "2a: port/read returns a string on a text port")
+                       (assert (= d "hello") "2b: port/read content")
+                       (assert (heap? d)
+                               "2c: port/read is Fresh — the buffer is a heap value (region ≠ 0)"))
+                     (let [rest (port/read-all p)]
+                       (assert (string? rest)
+                               "2d: port/read-all returns a string")
+                       (assert (= rest " world") "2e: port/read-all content")
+                       (assert (heap? rest)
+                               "2f: port/read-all is Opaque — a heap result (minted on the origin heap)"))))))
 
 # ── 3. ev/sleep (Immediate, nil) ─────────────────────────────────────────────
 (let [r (ev/sleep 0)]

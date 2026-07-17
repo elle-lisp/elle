@@ -19,9 +19,15 @@
 # directly in src/hir/regions/tests/effects.rs
 # `port_write_declares_immediate_no_arg_clique`.)
 
-(let [p (port/open "/dev/shm/elle-port-write-effect-test" :write)]
-  (let [n (port/write p "hello")]
-    (assert (= n 5) (string "port/write yields the integer byte count, got " n))
-    (assert (= (arena/region-of n) 0)
-            "port/write's result is an immediate (region 0), as Immediate claims"))
-  (port/close p))
+# Scratch file under the platform temp root (with-temp-dir honors TMPDIR and
+# cleans up after — no hardcoded paths, no litter).
+(with-temp-dir dir
+               (let [p (port/open (path/join dir "port-write-effect-test")
+                                  :write)]
+                 (let [n (port/write p "hello")]
+                   (assert (= n 5)
+                           (string "port/write yields the integer byte count, got "
+                                   n))
+                   (assert (= (arena/region-of n) 0)
+                           "port/write's result is an immediate (region 0), as Immediate claims"))
+                 (port/close p)))

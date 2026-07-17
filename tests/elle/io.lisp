@@ -1,5 +1,11 @@
 (elle/epoch 12)
 # I/O — stream primitives, ev/spawn, async backend
+#
+# Scratch files live under the platform temp root: each temp-using section wraps
+# its file lifecycle in (with-temp-dir dir …), which binds a unique dir from
+# file/mktempdir (honors TMPDIR) and deletes the tree after — even on failure. No
+# hardcoded paths, no litter. Create+use+delete stay inside one thunk so the file
+# is self-contained per tier under `elle test`.
 
 
 # === Type predicates ===
@@ -20,13 +26,15 @@
 
 # === ev/spawn with I/O (result collected via mutable) ===
 
-(spit "/dev/shm/elle-test-ev-spawn-lisp" "spawn content")
-(let [result @[]]
-  (ev/spawn (fn []
-              (push result
-                    (port/read-all (port/open "/dev/shm/elle-test-ev-spawn-lisp"
-                                   :read)))))  # Pump happens naturally; spawned fiber runs before user code returns.
-  )
+(with-temp-dir dir
+               (let [fpath (path/join dir "ev-spawn")]
+                 (spit fpath "spawn content")
+                 (let [result @[]]
+                   # ev/join so the read completes inside the with-temp-dir body — the defer
+                   # cleanup would otherwise race the spawned fiber and delete the file first.
+                   (ev/join (ev/spawn (fn []
+                                        (push result
+                                        (port/read-all (port/open fpath :read)))))))))
 
 # === Error propagation ===
 
@@ -36,10 +44,12 @@
 
 # === port/read-line ===
 
-(spit "/dev/shm/elle-test-readline-lisp" "line1\nline2\nline3")
-(let [line (let [p (port/open "/dev/shm/elle-test-readline-lisp" :read)]
-             (port/read-line p))]
-  (assert (= line "line1") "port/read-line reads first line"))
+(with-temp-dir dir
+               (let [fpath (path/join dir "readline")]
+                 (spit fpath "line1\nline2\nline3")
+                 (let [line (let [p (port/open fpath :read)]
+                              (port/read-line p))]
+                   (assert (= line "line1") "port/read-line reads first line"))))
 
 # === io/backend errors ===
 
@@ -48,9 +58,11 @@
 
 # === stream I/O ===
 
-(spit "/dev/shm/elle-test-toplevel-io-lisp" "top level")
-(assert (= (string (port/read-all (port/open "/dev/shm/elle-test-toplevel-io-lisp"
-                                  :read))) "top level") "stream I/O works")
+(with-temp-dir dir
+               (let [fpath (path/join dir "toplevel-io")]
+                 (spit fpath "top level")
+                 (assert (= (string (port/read-all (port/open fpath :read)))
+                            "top level") "stream I/O works")))
 
 # === stdlib functions work with scheduler ===
 
@@ -63,12 +75,15 @@
 
 # === io/submit returns int ===
 
-(spit "/dev/shm/elle-test-submit-lisp" "test")
-(let* [backend (io/backend :async)
-       port (port/open "/dev/shm/elle-test-submit-lisp" :read)
-       f (fiber/new (fn [] (port/read-all port)) 512)]
-  (fiber/resume f)
-  (assert (int? (io/submit backend (fiber/value f))) "io/submit returns int"))
+(with-temp-dir dir
+               (let [fpath (path/join dir "submit")]
+                 (spit fpath "test")
+                 (let* [backend (io/backend :async)
+                        port (port/open fpath :read)
+                        f (fiber/new (fn [] (port/read-all port)) 512)]
+                   (fiber/resume f)
+                   (assert (int? (io/submit backend (fiber/value f)))
+                           "io/submit returns int"))))
 
 # === io/reap returns tuple ===
 
@@ -82,50 +97,59 @@
 
 # port/open must be opened BEFORE the assert-err lambda so it doesn't yield
 # inside protect's fiber (protect uses mask=1 which doesn't handle SIG_IO).
-(spit "/dev/shm/elle-test-submit-sync-lisp" "test")
-(let [submit-sync-port (port/open "/dev/shm/elle-test-submit-sync-lisp" :read)]
-  (let [[ok? _] (protect ((fn ()
-                            (let* [backend (io/backend :sync)
-                                   f (fiber/new (fn []
-                                     (port/read-all submit-sync-port)) 512)]
-                              (fiber/resume f)
-                              (io/submit backend (fiber/value f))))))]
-    (assert (not ok?) "io/submit on sync backend errors")))
+(with-temp-dir dir
+               (let [fpath (path/join dir "submit-sync")]
+                 (spit fpath "test")
+                 (let [submit-sync-port (port/open fpath :read)]
+                   (let [[ok? _] (protect ((fn ()
+                           (let* [backend (io/backend :sync)
+                                  f (fiber/new (fn []
+                                    (port/read-all submit-sync-port)) 512)]
+                             (fiber/resume f)
+                             (io/submit backend (fiber/value f))))))]
+                     (assert (not ok?) "io/submit on sync backend errors")))))
 
 # === io/submit + io/wait roundtrip ===
 
-(spit "/dev/shm/elle-test-submit-wait-lisp" "roundtrip")
-(let* [backend (io/backend :async)
-       port (port/open "/dev/shm/elle-test-submit-wait-lisp" :read)
-       f (fiber/new (fn [] (port/read-all port)) 512)]
-  (fiber/resume f)
-  (let [id (io/submit backend (fiber/value f))]
-    (let [completions (io/wait backend -1)]
-      (assert (= (length completions) 1) "io/wait returns 1 completion"))))
+(with-temp-dir dir
+               (let [fpath (path/join dir "submit-wait")]
+                 (spit fpath "roundtrip")
+                 (let* [backend (io/backend :async)
+                        port (port/open fpath :read)
+                        f (fiber/new (fn [] (port/read-all port)) 512)]
+                   (fiber/resume f)
+                   (let [id (io/submit backend (fiber/value f))]
+                     (let [completions (io/wait backend -1)]
+                       (assert (= (length completions) 1)
+                               "io/wait returns 1 completion"))))))
 
 # === Completion struct has :id ===
 
-(spit "/dev/shm/elle-test-comp-id-lisp" "test")
-(let* [backend (io/backend :async)
-       port (port/open "/dev/shm/elle-test-comp-id-lisp" :read)
-       f (fiber/new (fn [] (port/read-all port)) 512)]
-  (fiber/resume f)
-  (let [id (io/submit backend (fiber/value f))]
-    (let [completions (io/wait backend -1)]
-      (assert (= id (get (get completions 0) :id))
-              "completion :id matches submission id"))))
+(with-temp-dir dir
+               (let [fpath (path/join dir "comp-id")]
+                 (spit fpath "test")
+                 (let* [backend (io/backend :async)
+                        port (port/open fpath :read)
+                        f (fiber/new (fn [] (port/read-all port)) 512)]
+                   (fiber/resume f)
+                   (let [id (io/submit backend (fiber/value f))]
+                     (let [completions (io/wait backend -1)]
+                       (assert (= id (get (get completions 0) :id))
+                               "completion :id matches submission id"))))))
 
 # === Completion struct has :error nil ===
 
-(spit "/dev/shm/elle-test-comp-val-lisp" "hello async")
-(let* [backend (io/backend :async)
-       port (port/open "/dev/shm/elle-test-comp-val-lisp" :read)
-       f (fiber/new (fn [] (port/read-all port)) 512)]
-  (fiber/resume f)
-  (let [id (io/submit backend (fiber/value f))]
-    (let [completions (io/wait backend -1)]
-      (assert (nil? (get (get completions 0) :error))
-              "completion :error is nil on success"))))
+(with-temp-dir dir
+               (let [fpath (path/join dir "comp-val")]
+                 (spit fpath "hello async")
+                 (let* [backend (io/backend :async)
+                        port (port/open fpath :read)
+                        f (fiber/new (fn [] (port/read-all port)) 512)]
+                   (fiber/resume f)
+                   (let [id (io/submit backend (fiber/value f))]
+                     (let [completions (io/wait backend -1)]
+                       (assert (nil? (get (get completions 0) :error))
+                               "completion :error is nil on success"))))))
 
 # === make-async-scheduler ===
 
@@ -137,27 +161,30 @@
 
 # === I/O thunk (direct) ===
 
-(spit "/dev/shm/elle-test-ev-run-io-lisp" "async scheduler")
-(assert (= (string (port/read-all (port/open "/dev/shm/elle-test-ev-run-io-lisp"
-                                  :read))) "async scheduler")
-        "I/O thunk reads file")
+(with-temp-dir dir
+               (let [fpath (path/join dir "ev-run-io")]
+                 (spit fpath "async scheduler")
+                 (assert (= (string (port/read-all (port/open fpath :read)))
+                            "async scheduler") "I/O thunk reads file")))
 
 # === multiple concurrent fibers ===
 
-(spit "/dev/shm/elle-test-ev-multi-1-lisp" "first")
-(spit "/dev/shm/elle-test-ev-multi-2-lisp" "second")
-(let [results @[]]
-  (let [f1 (ev/spawn (fn []
-                       (push results
-                             (port/read-all (port/open "/dev/shm/elle-test-ev-multi-1-lisp"
-                             :read)))))
-        f2 (ev/spawn (fn []
-                       (push results
-                             (port/read-all (port/open "/dev/shm/elle-test-ev-multi-2-lisp"
-                             :read)))))]
-    (ev/join f1)
-    (ev/join f2))
-  (assert (= (length results) 2) "concurrent fibers both complete"))
+(with-temp-dir dir
+               (let [f1path (path/join dir "ev-multi-1")
+                     f2path (path/join dir "ev-multi-2")]
+                 (spit f1path "first")
+                 (spit f2path "second")
+                 (let [results @[]]
+                   (let [f1 (ev/spawn (fn []
+                                        (push results
+                                        (port/read-all (port/open f1path :read)))))
+                         f2 (ev/spawn (fn []
+                                        (push results
+                                        (port/read-all (port/open f2path :read)))))]
+                     (ev/join f1)
+                     (ev/join f2))
+                   (assert (= (length results) 2)
+                           "concurrent fibers both complete"))))
 
 # === error propagation ===
 
@@ -166,11 +193,13 @@
 
 # === async write ===
 
-(let [p (port/open "/dev/shm/elle-test-ev-write-lisp" :write)]
-  (port/write p "async write test")
-  (port/flush p))
-(assert (= (slurp "/dev/shm/elle-test-ev-write-lisp") "async write test")
-        "async write thunk")
+(with-temp-dir dir
+               (let [fpath (path/join dir "ev-write")]
+                 (let [p (port/open fpath :write)]
+                   (port/write p "async write test")
+                   (port/flush p))
+                 (assert (= (slurp fpath) "async write test")
+                         "async write thunk")))
 
 # ============================================================================
 # ev/sleep tests
@@ -200,20 +229,25 @@
 
 # === ev/sleep interleaved with I/O ===
 
-(spit "/dev/shm/elle-test-sleep-io-lisp" "sleep-and-io")
-(let [result @[]]
-  (let [f1 (ev/spawn (fn []
-                       (ev/sleep 0.01)
-                       (push result :slept)))
-        f2 (ev/spawn (fn []
-                       (push result
-                             (string (port/read-all (port/open "/dev/shm/elle-test-sleep-io-lisp"
-                                     :read))))))]
-    (ev/join f1)
-    (ev/join f2))
-  (assert (= (length result) 2) "ev/sleep + I/O: both fibers complete")
-  (assert (any? (fn [x] (= x :slept)) result) "ev/sleep fiber completed")
-  (assert (any? (fn [x] (= x "sleep-and-io")) result) "I/O fiber completed"))
+(with-temp-dir dir
+               (let [fpath (path/join dir "sleep-io")]
+                 (spit fpath "sleep-and-io")
+                 (let [result @[]]
+                   (let [f1 (ev/spawn (fn []
+                                        (ev/sleep 0.01)
+                                        (push result :slept)))
+                         f2 (ev/spawn (fn []
+                                        (push result
+                                        (string (port/read-all (port/open fpath
+                                        :read))))))]
+                     (ev/join f1)
+                     (ev/join f2))
+                   (assert (= (length result) 2)
+                           "ev/sleep + I/O: both fibers complete")
+                   (assert (any? (fn [x] (= x :slept)) result)
+                           "ev/sleep fiber completed")
+                   (assert (any? (fn [x] (= x "sleep-and-io")) result)
+                           "I/O fiber completed"))))
 
 # === ev/sleep ordering — shorter sleep finishes first ===
 
