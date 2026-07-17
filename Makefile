@@ -19,6 +19,21 @@ endif
 TIMEOUT ?= 30s
 LISP_FILES := $(shell find stdlib.lisp prelude.lisp lib/ tests/ demos/ -name '*.lisp' 2>/dev/null)
 
+# oracle.lisp is the leak-measurement instrument: dozens of adaptive
+# empirical-Bernstein probes, each looping blocks of heap ops until their
+# interval converges. That is ~17s of CPU regardless of tier (the JIT does not
+# accelerate it — the cost is region alloc/reclaim, not bytecode interpretation),
+# which fits the corpus TIMEOUT on a fast box but stretches past 30s on CI's slow
+# shared cores and gets SIGTERM'd. It (only) runs with a wider budget, pulled out
+# of the tight parallel batch so every other file still fails fast on a hang.
+# $(1) is the tier flags for the pass (e.g. --jit=off --mlir=off).
+ORACLE_TIMEOUT ?= 120s
+ORACLE_FILE    := tests/elle/oracle.lisp
+define RUN_ORACLE
+	@timeout $(ORACLE_TIMEOUT) $(ELLE) $(1) $(ORACLE_FILE) \
+		|| { echo "FAILED: oracle.lisp ($(1))"; exit 1; }
+endef
+
 all: elle docs  ## Build everything
 
 # ── Build ───────────────────────────────────────────────────────────
@@ -141,10 +156,11 @@ smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + diverg
 smoke-vm: elle
 	@echo "=== elle tests (VM, no JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_VM) | \
+		grep -v $(ELLE_SKIP_VM) | grep -v $(ORACLE_FILE) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off --mlir=off {}' \
 		|| { echo "FAILED: elle tests VM-only pass (no JIT)"; exit 1; }
+	$(call RUN_ORACLE,--jit=off --mlir=off)
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)
 	@echo "=== build elle with no features ==="
@@ -153,18 +169,20 @@ elle-noffi:           ## Build elle with no features (for smoke-noffi)
 smoke-noffi: elle-noffi
 	@echo "=== elle tests (VM, no features) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | \
+		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | grep -v $(ORACLE_FILE) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
 		|| { echo "FAILED: elle tests VM-only pass (no features)"; exit 1; }
+	$(call RUN_ORACLE,--jit=off)
 
 smoke-jit: elle
 	@echo "=== elle tests (eager JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_JIT) | \
+		grep -v $(ELLE_SKIP_JIT) | grep -v $(ORACLE_FILE) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=eager {}' \
 		|| { echo "FAILED: elle tests JIT pass (eager)"; exit 1; }
+	$(call RUN_ORACLE,--jit=eager)
 
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
@@ -175,9 +193,11 @@ smoke-mlir: elle-mlir  ## Corpus via elle test (+ mlir-cpu tier) + whole-file --
 	$(RUN_CORPUS)
 	@echo "=== elle tests (eager MLIR, whole-file) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ORACLE_FILE) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
 		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
+	$(call RUN_ORACLE,--mlir=eager)
 
 elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
 	@echo "=== build elle with WASM ==="
