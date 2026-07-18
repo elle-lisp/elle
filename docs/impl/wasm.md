@@ -237,6 +237,44 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
+## Known gaps (full-module `--wasm=full`)
+
+The full-module tier runs the whole corpus except `eval.lisp`/`eval-env.lisp`
+(dynamic compilation is not a WASM backend feature — `WASM_SKIP` in the
+Makefile). Five corpus files still fail under `make smoke-wasm`. Each is a
+distinct backend gap; each is reproduced by running the named file under
+`--wasm=full`, which is its canonical reference.
+
+- **`call-u16` — calls with more than 256 arguments.** `read_args_from_memory`
+  asserts `nargs <= 256` (`src/wasm/linker/dataop.rs`), but the WASM calling
+  convention writes arguments to a fixed linear-memory area at `ARGS_BASE`
+  (`= 256`, `emit.rs`) and passes a `nargs` count that a u16-arity call can push
+  past the cap. Fixing it means sizing/locating the arg area for the actual arity
+  (the bytecode VM already encodes u16 call counts) rather than a fixed 256-slot
+  window.
+
+- **`fiber-error-resume` — region outgoing-edge drift on error resume.** Panics
+  in `unrecord_outgoing` (`src/value/fiberheap/regionstore/refcount.rs`) with
+  "no recorded edge to remove". Resuming a fiber that errored leaves the region
+  ownership graph's outgoing-edge table out of sync under this tier. Start from
+  docs/impl/region/ownership.md § "The outgoing edge table" and the WASM host's
+  suspension/resume value handling (`resume.rs`, `suspend.rs`).
+
+- **`posix`, `region-env-leak` — teardown SEGV.** Both run to completion (the
+  `[wasm]` timing line prints) and then segfault during process teardown — the
+  region-reclamation Drop sweep frees something the WASM host still aliases.
+  `posix` additionally exercises POSIX signals and spawned waiters. Likely one
+  root cause in how the full-module store's host state is torn down relative to
+  the instance heap; investigate `store.rs`/`host.rs` Drop ordering against the
+  `eval_wasm_raw` heap lifetime.
+
+- **`region-capture-cell-loop-uaf` — hang.** Times out (no `[wasm]` line), so it
+  stalls mid-execution — a spin or deadlock in the capture-cell loop under this
+  tier, not a compile-time failure.
+
+Note the two teardown SEGVs have been observed to pass intermittently (region
+reclamation timing), so treat a green run as inconclusive; reproduce a few times.
+
 ## Testing
 
 ```bash
