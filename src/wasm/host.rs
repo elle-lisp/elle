@@ -19,8 +19,17 @@ use crate::value::Value;
 
 use super::handle::HandleTable;
 
-/// Bytecode + constants for a closure, used by spawn for cross-thread execution.
-pub type ClosureBytecode = (std::rc::Rc<Vec<u8>>, std::rc::Rc<Vec<Value>>);
+/// Bytecode + constants + child prototypes for a closure, used by spawn for
+/// cross-thread execution. `rt_make_closure` reconstructs a `ClosureTemplate`
+/// from these, and the OS-thread VM worker runs that template's bytecode. The
+/// child prototypes are the nested-lambda blueprints the bytecode's `MakeClosure`
+/// instructions index — omitting them makes the worker panic on its first
+/// `MakeClosure` (src/wasm/tests.rs `wasm_full_spawn_runs_nested_closure`).
+pub type ClosureBytecode = (
+    std::rc::Rc<Vec<u8>>,
+    std::rc::Rc<Vec<Value>>,
+    std::rc::Rc<Vec<std::rc::Rc<crate::value::closure::ClosureTemplate>>>,
+);
 
 /// A pre-compiled standalone closure Module with its constant pool.
 #[derive(Clone)]

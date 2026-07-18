@@ -83,12 +83,21 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
 
             // Create a ClosureTemplate with wasm_func_idx.
             // Also populate bytecode from dual-compiled closures so spawn works.
-            let (bytecode, constants) = caller
+            // child_protos are the nested-lambda blueprints the bytecode's
+            // MakeClosure instructions index; an OS-thread VM worker running this
+            // template needs them, so they ride alongside bytecode + constants.
+            let (bytecode, constants, child_protos) = caller
                 .data()
                 .closure_bytecodes
                 .get(table_idx as usize)
-                .map(|(bc, cs)| (bc.clone(), cs.clone()))
-                .unwrap_or_else(|| (std::rc::Rc::new(vec![]), std::rc::Rc::new(vec![])));
+                .map(|(bc, cs, cp)| (bc.clone(), cs.clone(), cp.clone()))
+                .unwrap_or_else(|| {
+                    (
+                        std::rc::Rc::new(vec![]),
+                        std::rc::Rc::new(vec![]),
+                        std::rc::Rc::new(vec![]),
+                    )
+                });
             let template = std::rc::Rc::new(crate::value::closure::ClosureTemplate {
                 num_locals,
                 num_captures: num_captures as usize,
@@ -100,6 +109,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 capture_params_mask,
                 capture_locals_mask,
                 wasm_func_idx: Some(table_idx as u32),
+                child_protos,
                 ..crate::value::closure::ClosureTemplate::new(bytecode, arity, constants)
             });
 

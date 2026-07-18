@@ -34,13 +34,19 @@ impl WasmEmitter {
                     other => {
                         let heap_ptr = self.heap_ptr;
                         let region = unsafe { (*heap_ptr).new_runtime_region() };
-                        // `None`: the wasm emitter does not yet thread the
-                        // instance's symbol table, so a compound literal with a
-                        // quoted *symbol* leaf is unsupported here — part of the
-                        // deferred wasm-build debt (the NativeCtx capability split;
-                        // docs/impl/region/ctx.md). String/list/array literals
-                        // without symbols materialize fine.
-                        let value = other.materialize(unsafe { &mut *heap_ptr }, region, None);
+                        // Re-intern quoted *symbol* leaves into the driving
+                        // instance's table so their ids are valid at runtime.
+                        // The full-module path threads `self.symbols`; the
+                        // standalone/tiered path leaves it null (no instance
+                        // table in scope), where a compound-symbol literal is
+                        // held off by `standalone_emittable` and `materialize`
+                        // would panic — see the `symbols` field on WasmEmitter.
+                        let symbols = if self.symbols.is_null() {
+                            None
+                        } else {
+                            Some(unsafe { &mut *self.symbols })
+                        };
+                        let value = other.materialize(unsafe { &mut *heap_ptr }, region, symbols);
                         self.emit_value_const(f, *dst, value);
                     }
                 }

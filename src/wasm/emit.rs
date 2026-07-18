@@ -37,9 +37,11 @@ pub fn emit_module(
     module: &crate::lir::LirModule,
     stubbed: std::collections::HashSet<ClosureId>,
     heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    symbols: *mut crate::symbol::SymbolTable,
 ) -> EmitResult {
     let mut emitter = WasmEmitter::new(heap_ptr);
     emitter.stubbed_closures = stubbed;
+    emitter.symbols = symbols;
     emitter.emit_module_from_lir(module)
 }
 
@@ -84,11 +86,13 @@ pub fn emit_single_closure(
     func: &LirFunction,
     module: Option<&crate::lir::LirModule>,
     heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    symbols: *mut crate::symbol::SymbolTable,
 ) -> Option<EmitResult> {
     if !standalone_emittable(func, module.is_some()) {
         return None;
     }
     let mut emitter = WasmEmitter::new(heap_ptr);
+    emitter.symbols = symbols;
     // Provide module context for MakeClosure → ClosureId resolution
     if let Some(m) = module {
         emitter.module_closures = Some(m.closures.clone());
@@ -269,6 +273,14 @@ pub(super) struct WasmEmitter {
     /// holds these for its lifetime, so they live on the instance heap that
     /// outlives it.
     pub heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    /// The driving instance's symbol table, needed to intern a quoted *symbol*
+    /// leaf when baking a compound literal into the const pool
+    /// (`ConstTemplate::materialize`). Null on the standalone/tiered path
+    /// (`lazy.rs`), which has no instance table in scope; a compound-symbol
+    /// literal there would panic in `materialize`, so `standalone_emittable`
+    /// keeps such closures on the bytecode VM. The full-module path always sets
+    /// it (src/wasm/tests.rs `wasm_full_bakes_quoted_symbol_literal`).
+    pub symbols: *mut crate::symbol::SymbolTable,
 }
 
 mod functions;
@@ -302,6 +314,7 @@ impl WasmEmitter {
             stubbed_closures: std::collections::HashSet::new(),
             spill_live_map: HashMap::new(),
             heap_ptr,
+            symbols: std::ptr::null_mut(),
         }
     }
 

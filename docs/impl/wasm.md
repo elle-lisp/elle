@@ -52,7 +52,7 @@ Two execution modes:
 ### Pipeline (full-module)
 
 ```text
-1. Concatenate stdlib + user source (wrapped in ev/run)
+1. Concatenate stdlib + user source (build_full_source)
 2. Parse → expand → analyze → lower → LIR (compile_file_to_lir)
 3. Collect nested closures from MakeClosure instructions
 4. Emit each closure as a WASM function (emit_closure_function)
@@ -61,6 +61,37 @@ Two execution modes:
 7. Compile via Wasmtime (cranelift) → native code
 8. Instantiate and call __elle_entry
 ```
+
+In step 1 the user code is not wrapped whole in a single `(ev/run (fn [] …))`.
+That naive wrap makes every user top-level `def` a *fn-body* binding, where
+redefinition (`(def a 10) (def a (+ a 1))`) is a duplicate-binding error — yet a
+file's top level uses sequential shadowing, so the VM accepts it. To match the
+VM, `build_scheduled_toplevel` keeps user **definitions** at the file-letrec top
+level and wraps only runs of consecutive **expressions** in `(ev/run (fn [] …))`,
+preserving order so a spawn and its join stay in one scheduler session. This is
+the source-level analogue of the VM's `execute_scheduled`, which wraps the
+scheduler around already-top-level-analyzed bytecode.
+
+Splicing stdlib as *source* (step 1) makes stdlib callable from WASM at
+**runtime** — but it does nothing for **compile time**. Macro expansion in
+step 2 runs on the compile context's macro VM, and a prelude or user macro's
+transformer body may call a stdlib function while expanding (`assert`'s
+transformer calls `pair?` to detect a comparison form). So the full-module
+path also loads stdlib into the compile context (`init_stdlib` in
+`eval_wasm_raw`) on a heap shared with the macro VM, exactly as the bytecode
+runtime does. Without it, expansion fails with `undefined variable: pair?`
+before any WASM is emitted. The two mechanisms are independent: the
+source-splice serves runtime calls, the `init_stdlib` load serves macro
+expansion. User references still bind to the spliced letrec definitions
+(lexical scope shadows the registered exports), so the emitted WASM calls the
+compiled stdlib.
+
+A quoted **symbol** inside a *compound* literal (`(quote (= a 2))`, which
+`assert`'s comparison branch emits) is baked into the const pool at emit time,
+which must intern each symbol into the driving instance's table. The emitter
+threads that table (`WasmEmitter::symbols`) on every full-module path; the
+standalone/tiered path has no instance table and refuses such closures via
+`standalone_emittable` instead.
 
 ### Value representation
 
@@ -116,6 +147,22 @@ Yielding closures use a CPS-like scheme:
 4. For yield-through-call (callee yields through a non-yielding
    caller), the caller's frame is saved too, forming a chain.
    `drive_resume_chain` in `resume.rs` walks the chain.
+
+### Cross-thread spawn (dual-compiled bytecode)
+
+`sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread **bytecode**
+VM and run it there — WASM functions are not callable off the main store. So the
+full-module emitter *dual-compiles*: alongside the WASM body it emits ordinary
+bytecode for every closure (`emit_module_closures`), stored on the host as
+`closure_bytecodes` (instructions + constants + **child prototypes**). When
+`rt_make_closure` builds a WASM closure value it stitches this bytecode into the
+`ClosureTemplate`, so a spawned worker can run `template.code()` on the VM.
+
+The child prototypes are essential: a closure's bytecode `MakeClosure`
+instructions index the template's `child_protos` (the nested-lambda blueprints).
+Reconstructing the template without them leaves that list empty and the worker
+panics on its first `MakeClosure` (`src/vm/closure.rs`). Pinned by
+`wasm::tests::wasm_full_spawn_*`.
 
 ### Register allocation
 

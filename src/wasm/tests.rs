@@ -98,7 +98,13 @@ fn emit_bytes(func: LirFunction) -> Vec<u8> {
         entry: trivial_entry(),
         closures: vec![func],
     };
-    emit_module(&module, std::collections::HashSet::new(), vm.heap_ptr).wasm_bytes
+    emit_module(
+        &module,
+        std::collections::HashSet::new(),
+        vm.heap_ptr,
+        std::ptr::null_mut(),
+    )
+    .wasm_bytes
 }
 
 #[test]
@@ -224,7 +230,7 @@ fn plain_closure() -> LirFunction {
 fn standalone_emission_admits_plain_closures() {
     let vm = crate::vm::VM::new();
     assert!(
-        emit_single_closure(&plain_closure(), None, vm.heap_ptr).is_some(),
+        emit_single_closure(&plain_closure(), None, vm.heap_ptr, std::ptr::null_mut()).is_some(),
         "a numeric closure with no stub-reaching shape must be standalone-emittable"
     );
 }
@@ -236,7 +242,13 @@ fn standalone_emission_refuses_suspending_closures() {
     // full-module store.
     let vm = crate::vm::VM::new();
     assert!(
-        emit_single_closure(&suspending_closure(1, 0), None, vm.heap_ptr).is_none(),
+        emit_single_closure(
+            &suspending_closure(1, 0),
+            None,
+            vm.heap_ptr,
+            std::ptr::null_mut()
+        )
+        .is_none(),
         "a closure with an Emit terminator compiled standalone would panic at \
          the tiered host's rt_yield stub"
     );
@@ -248,7 +260,13 @@ fn standalone_emission_refuses_tail_calls() {
     // rt_prepare_tail_call — a panic stub, and a 1-entry table.
     let vm = crate::vm::VM::new();
     assert!(
-        emit_single_closure(&tail_calling_closure(), None, vm.heap_ptr).is_none(),
+        emit_single_closure(
+            &tail_calling_closure(),
+            None,
+            vm.heap_ptr,
+            std::ptr::null_mut()
+        )
+        .is_none(),
         "a closure with a TailCall compiled standalone would panic at the \
          tiered host's rt_prepare_tail_call stub"
     );
@@ -260,7 +278,13 @@ fn standalone_emission_refuses_module_less_make_closure() {
     // is admitted (the precache path), without it refused (the tiered path).
     let vm = crate::vm::VM::new();
     assert!(
-        emit_single_closure(&nested_closure_closure(), None, vm.heap_ptr).is_none(),
+        emit_single_closure(
+            &nested_closure_closure(),
+            None,
+            vm.heap_ptr,
+            std::ptr::null_mut()
+        )
+        .is_none(),
         "MakeClosure without module context has no ClosureId resolution"
     );
     let module = LirModule {
@@ -268,8 +292,180 @@ fn standalone_emission_refuses_module_less_make_closure() {
         closures: vec![plain_closure(), nested_closure_closure()],
     };
     assert!(
-        emit_single_closure(&nested_closure_closure(), Some(&module), vm.heap_ptr).is_some(),
+        emit_single_closure(
+            &nested_closure_closure(),
+            Some(&module),
+            vm.heap_ptr,
+            std::ptr::null_mut()
+        )
+        .is_some(),
         "MakeClosure with module context resolves through rt_make_closure"
+    );
+}
+
+// ── Compile-time macro expansion resolves stdlib ─────────────────────
+//
+// The full-module WASM path (`eval_wasm_with_stdlib`) splices stdlib SOURCE
+// into the compiled unit so stdlib functions become WASM at runtime. But macro
+// expansion still runs at COMPILE time on the context's macro VM, and a prelude
+// macro's transformer body may call a stdlib function: `assert`'s transformer
+// (src/prelude.lisp) calls `pair?` (a stdlib `defn`, src/stdlib.lisp) to decide
+// whether the asserted form is a comparison. If the compile context's macro VM
+// never loaded stdlib, that call resolves to nothing and expansion dies with
+// "undefined variable: pair?" — which took down nearly every corpus file under
+// `--wasm=full`, since virtually all of them use `assert`. These pin that the
+// full-module path loads stdlib into the macro-expansion environment.
+
+/// Run stdlib-backed source through the full-module WASM backend and return the
+/// result's display form.
+///
+/// CAVEAT: `eval_wasm_*` drops the per-call heap at return, so a COMPOUND result
+/// (list, string, mutable) is left dangling and formatting it here reads freed
+/// memory (a segfault, not a clean failure). Only assert on programs whose value
+/// is an immediate — int, bool, nil — reducing any compound to one with `=`,
+/// `length`, `list?`, etc.
+fn eval_with_stdlib(source: &str) -> String {
+    match super::eval_wasm_with_stdlib(source, "<macro-stdlib>") {
+        Ok(v) => format!("{}", v),
+        Err(e) => panic!("eval_wasm_with_stdlib failed: {}", e),
+    }
+}
+
+#[test]
+fn wasm_full_expands_assert_macro() {
+    // `(assert true)` is the minimal trigger: `assert`'s transformer calls the
+    // stdlib `pair?` at expansion time. Before the macro VM loaded stdlib this
+    // failed to compile at all. The asserted form is truthy, so it yields `true`.
+    assert_eq!(
+        eval_with_stdlib("(assert true)"),
+        "true",
+        "assert's transformer calls the stdlib `pair?`; the full-module WASM \
+         path must load stdlib into the macro-expansion environment"
+    );
+}
+
+#[test]
+fn wasm_full_expands_macro_calling_stdlib_function() {
+    // The defect generalizes past `assert`: ANY user macro whose transformer
+    // body calls a stdlib function must expand. This one branches on `pair?` of
+    // its literal argument — a compile-time stdlib call independent of prelude.
+    assert_eq!(
+        eval_with_stdlib("(defmacro m [x] (if (pair? x) `1 `2))\n(m (a b))"),
+        "1",
+        "a user macro calling the stdlib `pair?` at expansion time must resolve \
+         it under the full-module WASM path"
+    );
+}
+
+#[test]
+fn wasm_full_bakes_quoted_symbol_literal() {
+    // A compound quoted literal with a *symbol* leaf (`(= a 2)` is a list of the
+    // symbols `=`, `a` and the int `2`) reaches the emitter as a
+    // `MaterializeConst` of a `ConstTemplate::Pair(...Symbol...)`. Baking it into
+    // the const pool interns each symbol into the driving instance's table; with
+    // no table threaded, `materialize` panicked ("no symbol table for a quoted
+    // symbol"). Pins the WasmEmitter::symbols wiring. Reducing to a bool with
+    // `=` proves the baked symbol interned to the SAME id the reader gives a
+    // fresh `=` — and keeps the returned value immediate (see `eval`'s caveat).
+    assert_eq!(
+        eval_with_stdlib("(= (first (quote (= a 2))) (quote =))"),
+        "true",
+        "a quoted compound literal's symbol leaves must bake into the const pool \
+         and intern to the reader's ids under the full-module WASM path"
+    );
+}
+
+#[test]
+fn wasm_full_expands_comparison_assert() {
+    // The realistic corpus shape: `(assert (= L R))` takes `assert`'s comparison
+    // branch, which embeds `(quote (= 1 1))` — a compound SYMBOL literal — into
+    // the expansion. It exercises BOTH defects at once: the transformer calls the
+    // stdlib `pair?` (macro-expansion resolution) AND the expansion bakes a
+    // quoted-symbol literal (const-pool interning). Nearly every corpus file uses
+    // this form, so it is what took the `--wasm=full` pass down. Truthy → `true`.
+    assert_eq!(
+        eval_with_stdlib("(assert (= 1 1) \"one equals one\")"),
+        "true",
+        "a comparison `assert` must both expand (stdlib `pair?`) and bake its \
+         quoted-form literal under the full-module WASM path"
+    );
+}
+
+// ── Spawning a WASM-built closure to an OS-thread VM worker ───────────
+//
+// `sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread bytecode
+// VM and run its `template.code()` there (src/primitives/concurrency.rs). Under
+// `--wasm=full` the closure is built by `rt_make_closure`, which reconstructs a
+// `ClosureTemplate` from the module's dual-compiled bytecode. That bytecode's
+// `MakeClosure` instructions index into the template's `child_protos` (the
+// nested-lambda blueprints), so the reconstruction MUST carry them: without
+// them the worker's first `MakeClosure` indexes an empty list and panics
+// (`child_protos[idx]`, src/vm/closure.rs). The corpus spawn/concurrency files
+// (concurrency.lisp, send-lir.lisp, region-spawn-*.lisp …) all hit this. These
+// return an immediate int (see `eval_with_stdlib`'s caveat); a worker failure
+// aborts the join, so the value diverges from the expected int.
+
+#[test]
+fn wasm_full_spawn_runs_closure_referencing_children() {
+    // `(+ 100 1)` compiles to a body whose dual-compiled bytecode references the
+    // template's children; before child_protos were carried, the worker panicked
+    // on its first MakeClosure. Joining the worker must yield the sum.
+    assert_eq!(
+        eval_with_stdlib("(sys/join (sys/spawn-vm (fn () (+ 100 1))))"),
+        "101",
+        "a WASM-built closure spawned to an OS-thread VM worker must carry its \
+         child prototypes so the worker can run it"
+    );
+}
+
+#[test]
+fn wasm_full_spawn_runs_nested_closure() {
+    // A spawned closure that itself builds a nested closure (`g`) exercises the
+    // MakeClosure → child_protos path directly. Joining must yield g's result.
+    assert_eq!(
+        eval_with_stdlib("(sys/join (sys/spawn-vm (fn () (let [g (fn [x] (* x x))] (g 6)))))"),
+        "36",
+        "a spawned WASM-built closure that constructs a nested closure must \
+         resolve it through the carried child prototypes"
+    );
+}
+
+// ── Top-level def semantics match the VM ─────────────────────────────
+//
+// A file's top level uses sequential shadowing, so redefining a top-level `def`
+// is a redefinition (the RHS sees the previous binding), not an error — a
+// language feature the corpus relies on (tests/elle/def-shadow.lisp). The
+// full-module WASM path used to wrap the whole user body in one `(fn [] …)`,
+// making those defs a fn-body letrec* where a duplicate binding is rejected, so
+// def-shadow/ffi/numeric/… failed to compile under `--wasm=full`. The path now
+// keeps definitions at the file top level and wraps only expression runs in
+// `ev/run` (build_scheduled_toplevel), matching the VM.
+
+#[test]
+fn wasm_full_allows_toplevel_def_redefinition() {
+    // `(def a 10)` then `(def a (+ a 1))` — the redefinition's RHS reads the
+    // previous `a`. Rejected as a duplicate binding when nested in a thunk;
+    // allowed at the file top level. Trailing `a` is the program's value.
+    assert_eq!(
+        eval_with_stdlib("(def a 10)\n(def a (+ a 1))\na"),
+        "11",
+        "top-level def redefinition must use sequential shadowing under \
+         --wasm=full, as it does on the VM"
+    );
+}
+
+#[test]
+fn wasm_full_toplevel_defs_still_run_under_scheduler() {
+    // Keeping defs top-level must not lose the scheduler. `sys/join`'s deadline
+    // is scheduler-cooperative (chan/select) and fails outside `ev/run` — the
+    // exact reason concurrency.lisp needs the wrap — so a passing join proves the
+    // expression run executes under the scheduler. The top-level `n` is read
+    // inside that same expression, proving defs stay visible. Sum is 21.
+    assert_eq!(
+        eval_with_stdlib("(def n 20)\n(+ n (sys/join (sys/spawn-vm (fn () 1))))"),
+        "21",
+        "expression runs must still execute under ev/run (so scheduler-dependent \
+         sys/join works) while top-level defs remain visible to them"
     );
 }
 
@@ -284,7 +480,7 @@ fn standalone_emission_refuses_module_less_make_closure() {
 // release on this tier lowers them toward the VM's zero; they must never rise.
 
 /// Run stdlib-free source through the full-module WASM backend and return the
-/// result's display form.
+/// result's display form. Same immediate-result-only caveat as `eval_with_stdlib`.
 fn eval(source: &str) -> String {
     match super::eval_wasm(source, "<gauge>") {
         Ok(v) => format!("{}", v),

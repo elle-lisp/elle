@@ -111,7 +111,11 @@ impl WasmTier {
             return true;
         }
 
-        let result = match emit::emit_single_closure(lir_func, None, heap_ptr) {
+        // Null symbol table: the tiered path has no instance table in scope, so
+        // a compound-symbol literal is refused by `standalone_emittable` and
+        // never reaches `materialize` (see WasmEmitter::symbols).
+        let result = match emit::emit_single_closure(lir_func, None, heap_ptr, std::ptr::null_mut())
+        {
             Some(r) => r,
             None => return false, // Can't compile this closure standalone
         };

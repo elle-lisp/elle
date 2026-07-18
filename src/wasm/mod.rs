@@ -50,100 +50,70 @@ const STDLIB: &str = include_str!("../stdlib.lisp");
 /// services rely on, so debug artifacts belong on the throwaway tmpfs.
 const WASM_DUMP_PATH: &str = "/dev/shm/elle-wasm-dump.wasm";
 
-/// Maximum number of top-level forms per user-code thunk.
-/// Balances WASM function size (Wasmtime compile time) against
-/// thunk-call overhead. 25 forms keeps each chunk under ~200KB of
-/// WASM text while allowing Wasmtime to parallelize compilation.
-const CHUNK_SIZE: usize = 25;
-
-/// Split user source forms into thunks for parallel WASM compilation.
+/// Rewrite user source so its top-level DEFINITIONS stay at the file-letrec top
+/// level while each run of consecutive EXPRESSIONS is wrapped in
+/// `(ev/run (fn [] …))` to run under the async scheduler.
 ///
-/// Forms that define bindings (def, defn, var, defmacro, signal) stay
-/// at the top level so they're visible to subsequent chunks.
-/// Expression forms (asserts, bare calls) are grouped into chunks,
-/// each wrapped in `((fn [] ...))`. The last chunk's return value
-/// is the overall return value.
+/// Two properties this buys, together:
+/// - **Top-level def semantics.** A file's top level uses sequential shadowing,
+///   so `(def a 10) (def a (+ a 1))` is a redefinition. Keeping defs out of any
+///   `(fn [] …)` preserves that; nesting them in a thunk makes the body a
+///   fn-body letrec* where a duplicate binding is an error (the `--wasm=full`
+///   divergence from the VM this rewrite removes).
+/// - **Scheduler.** Expressions still run inside `ev/run`, so `ev/spawn`,
+///   fibers+I/O, and `sys/join`'s scheduler-cooperative deadline work.
 ///
-/// If the source has few forms or is unparseable, returns it unchanged
-/// wrapped in a single thunk.
-fn chunk_user_forms(source: &str, source_name: &str) -> String {
+/// Order is preserved: the pending expression run is flushed (emitted as one
+/// `ev/run`) before each def, so a spawn and its join in the same expression run
+/// share one scheduler session. Definitions are detected conservatively (any
+/// `def*`/`var`/`signal`/`include`/`*/def*` head), so a macro that expands to a
+/// `def` is treated as one — better to leave a form at top level than to nest a
+/// binding wrongly. Unparseable source falls back to a single scheduled thunk.
+fn build_scheduled_toplevel(source: &str, source_name: &str) -> String {
     let forms = match crate::reader::read_syntax_all(source, source_name) {
         Ok(f) => f,
-        Err(_) => return format!("((fn []\n{}\n))", source),
+        Err(_) => return format!("(ev/run (fn []\n{}\n))", source),
     };
 
-    // Classify forms: definitions stay top-level, expressions get chunked.
-    // Track byte ranges so we can slice the original source.
-    let mut parts: Vec<(bool, usize, usize)> = Vec::new(); // (is_def, start, end)
-    for form in &forms {
-        let is_def = form
-            .as_list()
+    let is_def = |form: &crate::syntax::Syntax| {
+        form.as_list()
             .and_then(|l| l.first())
             .and_then(|s| s.as_symbol())
             .is_some_and(|s| {
-                // Conservative: treat any form that might define a binding
-                // as a definition. This includes macros like ffi/defbind
-                // that expand to (def ...). Better to under-chunk than to
-                // break scoping.
                 s.starts_with("def")
                     || s.starts_with("var")
                     || s == "signal"
                     || s.starts_with("include")
                     || s.contains("/def")
-            });
-        parts.push((is_def, form.span.start, form.span.end));
-    }
+            })
+    };
 
-    // Count expression forms
-    let expr_count = parts.iter().filter(|(is_def, _, _)| !is_def).count();
-    if expr_count <= CHUNK_SIZE {
-        // Small enough — single thunk, no chunking needed.
-        return format!("((fn []\n{}\n))", source);
-    }
-
-    // Build output: defs at top level, expressions in chunked thunks.
     let mut output = String::new();
-    let mut expr_chunk: Vec<&str> = Vec::new();
-
-    for (is_def, start, end) in &parts {
-        let slice = &source[*start..*end];
-        if *is_def {
-            // Flush pending expression chunk before the def
-            if !expr_chunk.is_empty() {
-                output.push_str("((fn []\n");
-                for e in &expr_chunk {
-                    output.push_str(e);
-                    output.push('\n');
-                }
-                output.push_str("))\n");
-                expr_chunk.clear();
-            }
-            output.push_str(slice);
-            output.push('\n');
-        } else {
-            expr_chunk.push(slice);
-            if expr_chunk.len() >= CHUNK_SIZE {
-                output.push_str("((fn []\n");
-                for e in &expr_chunk {
-                    output.push_str(e);
-                    output.push('\n');
-                }
-                output.push_str("))\n");
-                expr_chunk.clear();
-            }
+    let mut expr_run: Vec<&str> = Vec::new();
+    let flush = |output: &mut String, run: &mut Vec<&str>| {
+        if run.is_empty() {
+            return;
         }
-    }
-
-    // Flush remaining expressions
-    if !expr_chunk.is_empty() {
-        output.push_str("((fn []\n");
-        for e in &expr_chunk {
+        output.push_str("(ev/run (fn []\n");
+        for e in run.iter() {
             output.push_str(e);
             output.push('\n');
         }
         output.push_str("))\n");
-    }
+        run.clear();
+    };
 
+    for form in &forms {
+        let slice = &source[form.span.start..form.span.end];
+        if is_def(form) {
+            flush(&mut output, &mut expr_run);
+            output.push_str(slice);
+            output.push('\n');
+        } else {
+            expr_run.push(slice);
+        }
+    }
+    flush(&mut output, &mut expr_run);
     output
 }
 
@@ -199,7 +169,9 @@ fn compile_or_cache_module(
 }
 
 /// Build the source the full-module WASM path actually compiles: the stdlib
-/// concatenated with the user code wrapped in `(ev/run (fn [] …))`.
+/// concatenated with the user code, the latter rewritten by
+/// [`build_scheduled_toplevel`] so definitions stay top-level and expression
+/// runs execute under `ev/run`.
 ///
 /// Returns `(full_source, stdlib_form_count)`. `stdlib_form_count` is the number
 /// of leading forms epoch migration must skip (the stdlib forms are already in
@@ -207,8 +179,7 @@ fn compile_or_cache_module(
 /// them.
 ///
 /// Extracted from `eval_wasm_raw` so the exact spliced source is reachable from
-/// tests that need to inspect the compiled LIR (the user literals live inside the
-/// nested `ev/run` thunk, invisible to `--wasm-lir`, which dumps only the entry).
+/// tests that need to inspect the compiled LIR.
 fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize), String> {
     // Count stdlib forms so epoch migration skips them.
     let mut stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
@@ -240,20 +211,31 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     if stripped_epoch {
         stdlib_form_count = stdlib_form_count.saturating_sub(1);
     }
-    let wrapped_body = if crate::config::get().wasm_chunk {
-        chunk_user_forms(body, source_name)
-    } else {
-        format!("((fn []\n{}\n))", body)
-    };
-    let full_source = format!(
-        "{}\n{}\n(ev/run (fn []\n{}\n))",
-        epoch_prefix, stdlib_body, wrapped_body
-    );
+    // User DEFINITIONS stay at the file-letrec top level; only consecutive
+    // EXPRESSION runs are wrapped in `(ev/run (fn [] …))`. This matches the VM,
+    // whose `execute_scheduled` wraps the scheduler around already-top-level-
+    // analyzed bytecode (src/vm/mod.rs): a file's top level uses sequential
+    // shadowing, so `(def a 10) (def a (+ a 1))` is a redefinition, not an error.
+    // Nesting the whole body in a single `(fn [] …)` instead (the naive wrap)
+    // makes those defs a fn-body letrec* where a duplicate binding is rejected —
+    // the divergence that failed def-shadow/numeric/… under `--wasm=full`
+    // (src/wasm/tests.rs `wasm_full_allows_toplevel_def_redefinition`). Order is
+    // preserved by flushing the pending expression run before each def, so a
+    // spawn and its join stay in one `ev/run` session.
+    let scheduled_body = build_scheduled_toplevel(body, source_name);
+    let full_source = format!("{}\n{}\n{}", epoch_prefix, stdlib_body, scheduled_body);
     Ok((full_source, stdlib_form_count))
 }
 
 fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<Value, String> {
-    let mut vm = crate::vm::VM::new();
+    // One heap shared by the program/eval VM and the compile context's
+    // macro-expansion VM (as `RuntimeCore::bare` does). Compile-time macro
+    // expansion runs on the compile context's macro VM; stdlib closures it must
+    // call (see the `init_stdlib` note below) are created on this heap by the
+    // program VM, so the two VMs must share it for the cross-VM call to resolve.
+    let mut heap = Box::new(crate::value::fiberheap::FiberHeap::new());
+    let heap_ptr: *mut crate::value::fiberheap::FiberHeap = &mut *heap;
+    let mut vm = crate::vm::VM::new_with_heap(heap_ptr);
     let mut symbols = Box::new(crate::symbol::SymbolTable::new());
     crate::primitives::register_primitives(&mut vm, &mut symbols);
     let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
@@ -262,8 +244,24 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     // This standalone eval owns its per-instance compile context (the stdlib it
     // needs is spliced into the source below, so it accumulates during compile);
     // wire the VM to it so a runtime `(eval …)` in the program resolves here.
-    let mut compile = Box::new(crate::pipeline::CompileCtx::new());
+    let mut compile = Box::new(crate::pipeline::CompileCtx::new_with_heap(heap_ptr));
     vm.set_compile_ctx(&mut *compile as *mut crate::pipeline::CompileCtx);
+
+    // Load stdlib into the compile context so COMPILE-TIME macro expansion
+    // resolves stdlib functions. A prelude or user macro's transformer body may
+    // call a stdlib `defn` while expanding — `assert`'s transformer calls
+    // `pair?` (src/stdlib.lisp) to detect a comparison form — and expansion runs
+    // on the macro VM, not in the spliced source. Without stdlib loaded here that
+    // call is unbound and expansion fails with "undefined variable: pair?" before
+    // any WASM is emitted (src/wasm/tests.rs `wasm_full_expands_assert_macro`).
+    // This is independent of the source-splice in `build_full_source`: the splice
+    // makes stdlib callable from WASM at RUNTIME; this load makes it callable
+    // during macro expansion at COMPILE time. User references still bind to the
+    // spliced letrec definitions (lexical scope shadows the registered exports),
+    // so the emitted WASM calls the compiled stdlib, not the macro-VM closures.
+    if with_stdlib {
+        crate::primitives::init_stdlib(&mut vm, &mut symbols, &mut compile);
+    }
 
     let full_source;
     let stdlib_form_count;
@@ -330,7 +328,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         let mut all_ok = true;
         for (i, closure_func) in lir_module.closures.iter().enumerate() {
             if let Some(standalone) =
-                emit::emit_single_closure(closure_func, Some(&lir_module), vm.heap_ptr)
+                emit::emit_single_closure(closure_func, Some(&lir_module), vm.heap_ptr, sym_ptr)
             {
                 if let Ok(module) = compile_or_cache_module(&engine, &standalone.wasm_bytes) {
                     precached[i] = Some(host::PrecachedClosure {
@@ -358,7 +356,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     // LIR → WASM bytes + constant pool. Stubbed closures get minimal
     // bodies (unreachable) since they're served by pre-compiled Modules.
-    let result = emit::emit_module(&lir_module, stubbed, vm.heap_ptr);
+    let result = emit::emit_module(&lir_module, stubbed, vm.heap_ptr, sym_ptr);
     let t2 = std::time::Instant::now();
 
     // Dump WASM for analysis. /dev/shm (a tmpfs) rather than /tmp: the latter

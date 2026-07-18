@@ -109,9 +109,14 @@ impl WasmEmitter {
         let bc_compiled = bc_emitter.emit_module_closures(lir_module);
         let mut closure_bytecodes = Vec::with_capacity(bc_compiled.len());
         for (bytecode, _, _) in bc_compiled {
+            // Carry child_protos: the bytecode's MakeClosure instructions index
+            // this list, so a spawned worker reconstructing the template needs it
+            // (rt_make_closure, src/wasm/linker/create/closure.rs). Dropping it
+            // left the template's child list empty and the worker panicked.
             closure_bytecodes.push((
                 std::rc::Rc::new(bytecode.instructions),
                 std::rc::Rc::new(bytecode.constants),
+                std::rc::Rc::new(bytecode.child_protos),
             ));
         }
 

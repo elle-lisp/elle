@@ -48,6 +48,7 @@ fn compile_stdlib_to_wasm() {
         &lir,
         std::collections::HashSet::new(),
         core.heap() as *mut elle::value::fiberheap::FiberHeap,
+        core.symbols() as *mut elle::SymbolTable,
     );
     eprintln!(
         "stdlib WASM: {} bytes, {} constants",
@@ -74,6 +75,7 @@ fn run_stdlib_first_100_lines() {
         &lir,
         std::collections::HashSet::new(),
         core.heap() as *mut elle::value::fiberheap::FiberHeap,
+        core.symbols() as *mut elle::SymbolTable,
     );
     let engine = elle::wasm::store::create_engine().unwrap();
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
@@ -102,6 +104,7 @@ fn run_stdlib_on_wasm() {
         &lir,
         std::collections::HashSet::new(),
         core.heap() as *mut elle::value::fiberheap::FiberHeap,
+        core.symbols() as *mut elle::SymbolTable,
     );
     eprintln!(
         "WASM: {} bytes, {} consts, {} closures",
