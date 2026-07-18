@@ -197,6 +197,21 @@ impl WasmEmitter {
         self.ctx_local = 0;
         self.num_stack_locals = 0;
         self.signal_local = 1 + n * 2 + 1;
+        // Reset the suspend/resume scratch that `emit_cfg` consumes. Closures are
+        // emitted before the entry (emit_module_from_lir), and a suspending
+        // closure leaves `call_continuations` populated with offsets into ITS
+        // blocks. `emit_cfg` emits one virtual resume block per continuation and
+        // slices `func.blocks[..][instr_offset..]`; against the entry's own
+        // (unrelated, shorter) blocks a stale offset panics. The entry does not
+        // suspend to its host caller (`may_suspend = false` above), so the
+        // correct state is empty. Pinned by tests/elle/bug-propagate-free-at.lisp
+        // under `--wasm=full` (which produces multiple suspending `ev/run` thunks
+        // ahead of a short entry).
+        self.next_resume_state = 1;
+        self.resume_states.clear();
+        self.call_continuations.clear();
+        self.yield_state_map.clear();
+        self.call_state_map.clear();
 
         let mut f = Function::new([
             (n, ValType::I64),

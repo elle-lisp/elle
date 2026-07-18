@@ -455,6 +455,38 @@ fn wasm_full_allows_toplevel_def_redefinition() {
 }
 
 #[test]
+fn wasm_full_interleaved_defs_and_expression_runs_emit() {
+    // build_scheduled_toplevel turns interleaved defs and expressions into
+    // several `(ev/run (fn [] …))` thunks — each a suspending closure — followed
+    // by a short entry. Closures emit before the entry, and a suspending closure
+    // leaves resume continuations pointing into ITS blocks; the entry must reset
+    // that state or emit_cfg slices the entry's own shorter block at a stale
+    // offset and panics (src/wasm/controlflow.rs, was
+    // tests/elle/bug-propagate-free-at.lisp under --wasm=full). The trailing
+    // (length (pairs …)) is 0 — an immediate, safe to return per `eval`'s caveat.
+    assert_eq!(
+        eval_with_stdlib(
+            "(def s1 @{:a (or nil {})})\n\
+             (assert (= (type-of (get s1 :a)) :struct) \"a\")\n\
+             (def s2 @{:b (or nil {})})\n\
+             (assert (= (type-of (get s2 :b)) :struct) \"b\")\n\
+             (def s3 @{:c (or nil {})})\n\
+             (assert (= (type-of (get s3 :c)) :struct) \"c\")\n\
+             (println (type-of (get s1 :a)))\n\
+             (println (type-of (get s2 :b)))\n\
+             (println (type-of (get s3 :c)))\n\
+             (println (type-of (get s1 :a)))\n\
+             (println (type-of (get s2 :b)))\n\
+             (println (type-of (get s3 :c)))\n\
+             (length (pairs (get s1 :a)))"
+        ),
+        "0",
+        "interleaved defs and expression runs must emit without carrying stale \
+         resume continuations into the entry function"
+    );
+}
+
+#[test]
 fn wasm_full_toplevel_defs_still_run_under_scheduler() {
     // Keeping defs top-level must not lose the scheduler. `sys/join`'s deadline
     // is scheduler-cooperative (chan/select) and fails outside `ev/run` — the
