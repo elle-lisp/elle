@@ -128,7 +128,7 @@ pub struct Fiber {
     /// activation's frame; a closure call pushes a fresh frame, a normal
     /// return pops it, a tail call reuses it. Always non-empty (a base frame
     /// covers the top level). Carried on the fiber so it survives yields.
-    pub activation_region_maps: Vec<rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>>,
+    pub activation_region_maps: Vec<rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>>,
 
     /// The per-activation OWNER-NODE slots, parallel to `activation_region_maps`
     /// (one entry per activation frame; pushed/popped only through

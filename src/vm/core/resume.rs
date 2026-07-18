@@ -125,12 +125,16 @@ impl VM {
 
                     // Confirm every uncounted region borrow this suspended frame
                     // holds across park/resume is still live (debug builds). The
-                    // mapped regions are the suspended activation's own allocations,
-                    // held alive by its still-pending `DecrefRegion`s; a region freed
-                    // while the fiber was parked would be silently restored below and
-                    // corrupt the resumed body's allocs/decrefs. Panic at the
-                    // boundary, naming the slot, instead of at a later stale read
-                    // (docs/impl/region/generations.md § "Two borrow shapes").
+                    // snapshot (`record_region_borrows`) recorded only the LIVE
+                    // mapped regions — the suspended activation's own allocations,
+                    // held alive by its still-pending `DecrefRegion`s — each tagged
+                    // with the generation the slot was established at, so a dead
+                    // leftover (a recycled id the activation no longer owns) is
+                    // already excluded. A borrow freed *while the fiber was parked*
+                    // would be silently restored below and corrupt the resumed body's
+                    // allocs/decrefs. Panic at the boundary, naming the slot, instead
+                    // of at a later stale read (docs/impl/region/generations.md
+                    // § "Two borrow shapes").
                     #[cfg(debug_assertions)]
                     if let Some((slot, r)) =
                         crate::vm::fiber::first_stale_borrow(&frame.region_borrows, self.heap())

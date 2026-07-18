@@ -127,14 +127,34 @@ home** across a free, where the page can be reclaimed and re-stamped before the 
 deref. Two borrows have that shape, and both carry the handle: the cross-fiber **param
 snapshot** above, and the **suspended-frame** `activation_region_map` — the
 static-slot→physical-region remap a parked `BytecodeFrame` holds across park/resume
-(`src/value/fiber.rs`). Those regions are the suspended activation's own allocations,
-kept alive by its still-pending `DecrefRegion`s; `BytecodeFrame::suspend` snapshots
-each mapped `(slot, region, generation)` into the frame's `region_borrows`
-(`record_region_borrows`), and `resume_suspended` re-checks them with the shared
-`first_stale_borrow` just before `restore_activation_region_map` re-enters the body —
-so a region freed while the fiber was parked panics at the resume boundary, naming the
-slot, instead of corrupting the resumed activation's allocs/decrefs. Pinned by
-`suspended_frame_region_borrow_detects_freed_region` (`src/vm/fiber/borrow_tests.rs`).
+(`src/value/fiber.rs`). The regions worth snapshotting are the suspended activation's
+own **live** allocations, kept alive by its still-pending `DecrefRegion`s;
+`BytecodeFrame::suspend` snapshots each such `(slot, region, generation)` into the
+frame's `region_borrows` (`record_region_borrows`), and `resume_suspended` re-checks
+them with the shared `first_stale_borrow` just before `restore_activation_region_map`
+re-enters the body — so a region freed while the fiber was parked panics at the resume
+boundary, naming the slot, instead of corrupting the resumed activation's allocs/
+decrefs. Pinned by `suspended_frame_region_borrow_detects_freed_region`
+(`src/vm/fiber/borrow_tests.rs`).
+
+The map is not automatically dangling-free, which is what forces the snapshot to record
+the **establish-generation** (`MappedRegion::gen`, the region's generation when the slot
+was inserted) rather than the region's current generation. The map records
+`slot → region` for every ALLOC-slot allocation and is cleared only by the matching
+slot-based `DecrefRegion`. A region freed any other way — a value-based
+`DecrefValueRegion`/`DecrefCellRegion` (capture cells), a cross-region cascade, a
+subtree drop — leaves its entry behind, and the physical id it named is recycled to an
+unrelated region. Stamping such a **dead leftover** with the id's *current* generation
+would forge a live borrow of an incarnation the activation never owned, and the resume
+check would then trip when that unrelated incarnation is freed — a stale-suspended-frame
+false positive with no real UAF behind it (in release the guard is compiled out and the
+leftover's dead `DecrefRegion` never reads it, so the program runs correctly). Recording
+the establish-generation makes the two cases separable: `record_region_borrows` skips an
+entry whose `gen` no longer matches the region's current generation (a dead leftover),
+while an entry that still matches is a genuine live borrow whose free *while parked* still
+trips the check. Pinned by `stale_leftover_map_entry_is_not_snapshotted_as_a_borrow`
+(`src/vm/fiber/borrow_tests.rs`) and, at corpus scale, by
+`signals_no_stale_suspended_frame_region_borrow` (`tests/integration/elle_scripts.rs`).
 
 A **pass-through borrow** is the other shape and needs
 no handle. The `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`)

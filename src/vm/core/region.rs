@@ -33,11 +33,12 @@ impl VM {
         // Each alloc slot mints a fresh region per execution. (There is no
         // slot-0 case: the operand is a `StaticRegion`, always ≥ 1.)
         let phys = self.heap().new_runtime_region();
+        let gen = self.heap().generation_raw(phys.get());
         self.fiber
             .activation_region_maps
             .last_mut()
             .expect("region frame stack must be non-empty")
-            .insert(static_id.get(), phys);
+            .insert(static_id.get(), MappedRegion::new(phys, gen));
         phys
     }
     /// Resolve a static region slot for an allocation, honoring builder-idiom
@@ -84,13 +85,13 @@ impl VM {
         &mut self,
         static_id: StaticRegion,
     ) -> RuntimeRegion {
-        if let Some(&phys) = self
+        if let Some(m) = self
             .fiber
             .activation_region_maps
             .last()
             .and_then(|frame| frame.get(&static_id.get()))
         {
-            return phys;
+            return m.region;
         }
         self.runtime_region_for_alloc_slot(static_id)
     }
@@ -299,7 +300,7 @@ impl VM {
         self.fiber
             .activation_region_maps
             .last()
-            .and_then(|frame| frame.get(&static_id.get()).copied())
+            .and_then(|frame| frame.get(&static_id.get()).map(|m| m.region))
     }
     /// Resolve a static region id for a `DecrefRegion` (the compiler's
     /// initial-reference drop at a value's decref_point). Returns the physical
@@ -314,6 +315,7 @@ impl VM {
             .activation_region_maps
             .last_mut()
             .and_then(|frame| frame.remove(&static_id.get()))
+            .map(|m| m.region)
     }
     /// Push a fresh region-remap frame on closure entry, with its (empty)
     /// parallel owner-node slot (docs/impl/region/owner.md § "Owner nodes").
@@ -342,7 +344,7 @@ impl VM {
     #[inline]
     pub(crate) fn restore_activation_region_map(
         &mut self,
-        frame: rustc_hash::FxHashMap<u32, RuntimeRegion>,
+        frame: rustc_hash::FxHashMap<u32, MappedRegion>,
         owner_node: Option<RuntimeRegion>,
     ) {
         self.fiber.activation_region_maps.push(frame);

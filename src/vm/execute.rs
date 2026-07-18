@@ -128,7 +128,7 @@ pub(crate) struct ExecResult {
     /// the callee's returned context (the inner/fuel-pause frame) attach this
     /// so the remap survives the yield. Default (empty) for
     /// `execute_bytecode_from_ip`, whose caller manages frames itself.
-    pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+    pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     /// This activation's owner node, TAKEN by `execute_bytecode_saving_stack`
     /// beside `activation_region_map` on a non-OK exit — the channel that
     /// carries the node out of the already-popped activation to the caller

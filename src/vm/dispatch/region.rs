@@ -51,7 +51,7 @@ pub(crate) fn handle_incref_region(vm: &mut VM, bytecode: &[u8], ip: &mut usize)
         .fiber
         .activation_region_maps
         .last()
-        .and_then(|f| f.get(&region.get()).copied());
+        .and_then(|f| f.get(&region.get()).map(|m| m.region));
     if let Some(phys) = phys {
         crate::value::arena::incref_for_escape(
             unsafe { &mut *vm.heap_ptr },
@@ -334,7 +334,7 @@ pub(crate) fn handle_assert_region_matches(vm: &mut VM, bytecode: &[u8], ip: &mu
             .fiber
             .activation_region_maps
             .last()
-            .and_then(|f| f.get(&region.get()).copied());
+            .and_then(|f| f.get(&region.get()).map(|m| m.region));
         let actual = crate::value::arena::region_of(unsafe { &mut *vm.heap_ptr }, value);
         assert!(
             resolved == actual,

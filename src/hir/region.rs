@@ -20,7 +20,7 @@ mod stats;
 // test module's `use super::*;` keeps seeing these names.
 pub use classify::CallClassification;
 pub use data::{OutlivesConstraint, Region, RegionData};
-pub use id::{RuntimeRegion, StaticRegion};
+pub use id::{MappedRegion, RuntimeRegion, StaticRegion};
 pub use info::RegionInfo;
 pub use stats::RegionStats;
 

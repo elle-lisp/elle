@@ -11,6 +11,7 @@
 //! are within a single store.
 
 use super::{first_stale_borrow, record_param_borrows};
+use crate::hir::region::MappedRegion;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{HeapObject, Pair};
 use crate::value::Value;
@@ -87,10 +88,10 @@ fn suspended_frame_region_borrow_detects_freed_region() {
     let mut heap = FiberHeap::new();
     let r = heap.new_runtime_region();
     heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)), r);
-    // An activation_region_map mapping static region slot 7 to live physical region r.
-    let mut map: rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion> =
-        rustc_hash::FxHashMap::default();
-    map.insert(7u32, r);
+    // An activation_region_map mapping static region slot 7 to live physical
+    // region r, tagged with r's generation at the moment the slot was established.
+    let mut map: rustc_hash::FxHashMap<u32, MappedRegion> = rustc_hash::FxHashMap::default();
+    map.insert(7u32, MappedRegion::new(r, heap.generation_raw(r.get())));
     let borrows = crate::value::fiber::record_region_borrows(&map, &heap);
 
     assert!(
@@ -105,5 +106,67 @@ fn suspended_frame_region_borrow_detects_freed_region() {
         first_stale_borrow(&borrows, &heap),
         Some((7, r)),
         "a suspended-frame borrow into a freed region must read stale (generation moved)",
+    );
+}
+
+/// A map entry left dangling by a non-slot-clearing free (a value-based drop, a
+/// cross-region cascade, a subtree drop) names a physical id that is then
+/// recycled to an unrelated region. Such a **dead leftover** — its recorded
+/// `MappedRegion::gen` no longer matches the id's current generation — must NOT
+/// be snapshotted as a borrow: the activation never owned the recycled
+/// incarnation, so recording it would forge a live borrow and trip the resume
+/// check when that unrelated incarnation is freed (the stale-suspended-frame
+/// false positive; docs/impl/region/generations.md § "Uncounted-borrow check").
+///
+/// Counterfactual: stamping the entry with the id's CURRENT generation (what the
+/// pre-fix snapshot did) records `(slot, r, current_gen)`, and `first_stale_borrow`
+/// then trips the instant the recycled incarnation is freed — a panic on a region
+/// the parked activation never held. Recording the establish-generation and
+/// skipping the mismatched entry is what makes the snapshot honest.
+#[test]
+fn stale_leftover_map_entry_is_not_snapshotted_as_a_borrow() {
+    let mut heap = FiberHeap::new();
+
+    // Establish slot 7 → physical id `r` at its establish generation.
+    let r = heap.new_runtime_region();
+    heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)), r);
+    let establish_gen = heap.generation_raw(r.get());
+    let mut map: rustc_hash::FxHashMap<u32, MappedRegion> = rustc_hash::FxHashMap::default();
+    map.insert(7u32, MappedRegion::new(r, establish_gen));
+
+    // Free r by a path that does NOT clear the map slot, then recycle its
+    // physical id to a fresh, unrelated region. The map still says slot 7 → r,
+    // but that id now names a different incarnation (its generation moved).
+    heap.decref_region(r);
+    let recycled = heap.new_runtime_region();
+    assert_eq!(
+        recycled.get(),
+        r.get(),
+        "the freed physical id must be recycled for this test to exercise the leftover",
+    );
+    heap.alloc_in_region(
+        HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)),
+        recycled,
+    );
+    assert_ne!(
+        heap.generation_raw(r.get()),
+        establish_gen,
+        "recycling must have moved the generation past the establish generation",
+    );
+
+    // The dead leftover is skipped entirely — not recorded as a borrow.
+    let borrows = crate::value::fiber::record_region_borrows(&map, &heap);
+    assert!(
+        borrows.is_empty(),
+        "a leftover entry whose region's generation has moved is a dead mapping, \
+         not a live borrow, and must not be snapshotted (got {borrows:?})",
+    );
+
+    // And freeing the recycled incarnation must NOT retroactively trip a borrow
+    // check — the parked activation never borrowed it.
+    heap.decref_region(recycled);
+    assert!(
+        first_stale_borrow(&borrows, &heap).is_none(),
+        "freeing the unrelated recycled incarnation must not trip the check",
     );
 }

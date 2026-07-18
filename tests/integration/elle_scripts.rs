@@ -935,27 +935,31 @@ fn fiber_deep_nesting_jit() {
     );
 }
 
-// A signal-violation teardown (squelch/silence catching a forbidden `yield`)
-// frees a region a still-PARKED activation borrows. signals.lisp's cumulative
-// squelch/silence/yield churn recycles a region slot under a suspended frame's
-// uncounted region borrow (`frame.region_borrows`), so on resume the debug-only
-// uncounted-borrow guard (src/vm/core/resume.rs → `first_stale_borrow`,
-// docs/impl/region/generations.md § "Uncounted-borrow check") aborts: "stale
-// suspended-frame region borrow on resume".
+// A parked activation's region-map snapshot named a region it no longer owned,
+// so on resume the debug-only uncounted-borrow guard (src/vm/core/resume.rs →
+// `first_stale_borrow`, docs/impl/region/generations.md § "Uncounted-borrow
+// check") aborted: "stale suspended-frame region borrow on resume".
 //
-// The abort is DEBUG-ONLY: a release build — what `make smoke`/`smoke-noffi`
-// run in CI — has the guard compiled out, silently restores the freed region,
-// and proceeds on recycled pages, so the defect escapes the corpus entirely
-// (signals.lisp passes there). This runs the same file under the debug
-// cargo-test profile, where the guard is live, so the defect is pinned as a
-// first-class regression with a named cause instead of a silent latent UAF.
+// Root cause: the activation region map records `static slot → physical region`
+// for every ALLOC-slot allocation and is cleared only by the slot-based
+// `DecrefRegion`. A region freed any OTHER way — a value-based `DecrefValueRegion`/
+// `DecrefCellRegion` (capture cells), a cross-region cascade, a subtree drop —
+// leaves its entry behind, and the physical id it names is recycled to an
+// unrelated region. `record_region_borrows` stamped each parked entry with the
+// id's CURRENT generation, so such a leftover was snapshotted as a live borrow of
+// an incarnation the activation never owned; when that unrelated incarnation was
+// later freed, the resume check tripped. signals.lisp's cumulative squelch/
+// silence/yield churn recycles ids fast enough to hit it (state-sensitive — it
+// does not minimize to a small standalone form, hence the coupling to the file).
 //
-// Coupled to tests/elle/signals.lisp on purpose: it is the reproducer, and the
-// trigger is state-sensitive (cumulative slot recycling — it does not minimize
-// to a small standalone form). Un-ignore once the signal-violation unwind keeps
-// the parked activation's regions alive across teardown.
+// Fixed by carrying the establish-generation in the map (`MappedRegion`): the
+// snapshot records the generation the slot was valid at and skips entries whose
+// region has since moved on (dead leftovers), while a genuine borrow freed *while
+// parked* still trips the check. The abort was DEBUG-ONLY (release compiles the
+// guard out and the leftover's dead `DecrefRegion` never reads it, so signals.lisp
+// passed in CI's release corpus); this runs the file under the debug cargo-test
+// profile where the guard is live.
 #[test]
-#[ignore = "RED: signal-violation unwind frees a region a parked activation still borrows (stale suspended-frame region borrow)"]
 fn signals_no_stale_suspended_frame_region_borrow() {
     run_elle_script_with_args("signals", &["--jit=off"]);
 }

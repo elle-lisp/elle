@@ -93,3 +93,37 @@ impl std::fmt::Display for RuntimeRegion {
         write!(f, "{}", self.0.get())
     }
 }
+
+/// An activation-region-map entry: the physical [`RuntimeRegion`] a static slot
+/// currently resolves to in one activation, tagged with the region's generation
+/// **at the moment the slot was established** (docs/impl/region/generations.md
+/// § "Region generations").
+///
+/// The generation is what tells a live mapping from a dead leftover. A slot's
+/// entry is inserted at alloc and cleared only by the matching slot-based
+/// `DecrefRegion`; a region freed any other way (value-based `DecrefValueRegion`/
+/// `DecrefCellRegion`, a cross-region cascade, a subtree drop) leaves the entry
+/// behind, and the physical id it names is recycled to an unrelated region. Such
+/// a leftover is harmless while the activation runs (a re-alloc overwrites it),
+/// but a park snapshots the whole map (`record_region_borrows`): recording the
+/// *current* generation of a recycled id would forge a live borrow of a region
+/// the activation never owned, and the resume-time uncounted-borrow check would
+/// then panic spuriously when that unrelated incarnation is freed. Carrying
+/// `gen` lets the snapshot record the generation the slot was established at, so
+/// an entry whose region has since moved on (`gen != current`) is recognized as
+/// a dead leftover and skipped, while a genuine borrow freed *while parked* still
+/// trips the check (docs/impl/region/generations.md § "Uncounted-borrow check").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MappedRegion {
+    /// The physical region the slot resolves to.
+    pub region: RuntimeRegion,
+    /// The region's generation when this mapping was established.
+    pub gen: u32,
+}
+
+impl MappedRegion {
+    #[inline]
+    pub const fn new(region: RuntimeRegion, gen: u32) -> Self {
+        MappedRegion { region, gen }
+    }
+}

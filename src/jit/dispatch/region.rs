@@ -96,7 +96,7 @@ pub extern "C" fn elle_jit_incref_region(vm: *mut (), slot: u32) {
         .fiber
         .activation_region_maps
         .last()
-        .and_then(|f| f.get(&static_id.get()).copied());
+        .and_then(|f| f.get(&static_id.get()).map(|m| m.region));
     if let Some(phys) = phys {
         crate::value::arena::incref_for_escape(
             unsafe { &mut *vm.heap_ptr },

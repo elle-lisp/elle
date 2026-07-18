@@ -1,6 +1,6 @@
 use crate::error::StackFrame;
 use crate::ffi::FFISubsystem;
-use crate::hir::region::{RuntimeRegion, StaticRegion};
+use crate::hir::region::{MappedRegion, RuntimeRegion, StaticRegion};
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::{

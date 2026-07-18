@@ -47,7 +47,7 @@ pub struct BytecodeFrame {
     /// `DecrefRegion`'d after resume would resolve in the wrong frame (a leak,
     /// or — on a static-slot collision — a use-after-free). `resume_suspended`
     /// restores this as the activation's region frame before re-entering.
-    pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+    pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     /// This activation's owner node at the moment of suspension — MOVED (taken,
     /// never cloned) out of the activation's `Fiber::activation_owner_nodes`
     /// slot by the suspend site, so the node lives in exactly one place: the
@@ -71,14 +71,16 @@ pub struct BytecodeFrame {
     /// recursion). `NIL` for an untracked activation (e.g. a JIT-built frame).
     pub current_closure: Value,
     /// Debug-only snapshot of the uncounted region borrows `activation_region_map`
-    /// holds at suspension: `(slot, region, generation)` per mapped region. The
-    /// suspended-frame analogue of the cross-fiber param snapshot's `param_borrows`
-    /// (docs/impl/region/generations.md § "Two borrow shapes"). The mapped regions
-    /// are this activation's own allocations, kept alive by its still-pending
-    /// `DecrefRegion`s while the fiber is parked; `resume_suspended` re-checks each
-    /// recorded generation before `restore_activation_region_map`, so a region freed
-    /// while parked panics at the resume boundary (naming the slot) instead of
-    /// corrupting the resumed activation's allocs/decrefs. Filled by
+    /// holds at suspension: `(slot, region, establish-generation)` per LIVE mapped
+    /// region. The suspended-frame analogue of the cross-fiber param snapshot's
+    /// `param_borrows` (docs/impl/region/generations.md § "Two borrow shapes"). The
+    /// snapshotted regions are this activation's own live allocations, kept alive by
+    /// its still-pending `DecrefRegion`s while the fiber is parked; a map slot whose
+    /// region's generation has already moved on is a dead leftover (see
+    /// `record_region_borrows`) and is skipped, not recorded. `resume_suspended`
+    /// re-checks each recorded generation before `restore_activation_region_map`, so
+    /// a live borrow freed while parked panics at the resume boundary (naming the
+    /// slot) instead of corrupting the resumed activation's allocs/decrefs. Filled by
     /// [`BytecodeFrame::suspend`] via `record_region_borrows`; empty in release.
     #[cfg(debug_assertions)]
     pub region_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
@@ -99,7 +101,7 @@ impl BytecodeFrame {
         ip: usize,
         stack: Vec<Value>,
         push_resume_value: bool,
-        activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+        activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
         activation_owner_node: Option<crate::hir::region::RuntimeRegion>,
         current_closure: Value,
         heap: &crate::value::fiberheap::FiberHeap,
@@ -124,20 +126,34 @@ impl BytecodeFrame {
 }
 
 /// Snapshot the uncounted region borrows a suspended bytecode frame's
-/// `activation_region_map` holds: for each `(slot, region)`, record `(slot, region,
-/// current generation)`. The suspended-frame analogue of `record_param_borrows`
-/// (the cross-fiber param snapshot, `src/vm/fiber.rs`); the recorded generation lets
-/// `resume_suspended`'s `first_stale_borrow` confirm the region has not been freed
-/// since the fiber parked. The region and its generation are read from the SAME
-/// `heap`, so the recorded pair and the later check compare within one store. Debug
-/// builds only (docs/impl/region/generations.md § "Two borrow shapes").
+/// `activation_region_map` holds: for each live `(slot, region)`, record
+/// `(slot, region, establish-generation)`. The suspended-frame analogue of
+/// `record_param_borrows` (the cross-fiber param snapshot, `src/vm/fiber.rs`);
+/// the recorded generation lets `resume_suspended`'s `first_stale_borrow`
+/// confirm the region has not been freed since the fiber parked.
+///
+/// A slot whose recorded `MappedRegion::gen` no longer matches the region's
+/// current generation is a **dead leftover** — the region the activation
+/// established there was freed by a non-slot-clearing path (a value-based drop,
+/// a cross-region cascade, a subtree drop) and its physical id recycled to an
+/// unrelated region. That slot is not a borrow the activation still holds, so it
+/// is skipped: recording it would forge a borrow of a region this activation
+/// never owned and trip the resume check on an unrelated incarnation's free (the
+/// stale-suspended-frame false positive; docs/impl/region/generations.md
+/// § "Uncounted-borrow check"). A slot whose generation still matches is a
+/// genuine live borrow; recording its establish-generation means a free of *that*
+/// incarnation while the fiber is parked still trips the check. The region and
+/// its generation are read from the SAME `heap`, so the recorded pair and the
+/// later check compare within one store. Debug builds only
+/// (docs/impl/region/generations.md § "Two borrow shapes").
 #[cfg(debug_assertions)]
 pub(crate) fn record_region_borrows(
-    map: &rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+    map: &rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     heap: &crate::value::fiberheap::FiberHeap,
 ) -> Vec<(u32, crate::hir::region::RuntimeRegion, u32)> {
     map.iter()
-        .map(|(&slot, &r)| (slot, r, heap.generation_raw(r.get())))
+        .filter(|(_, m)| heap.generation_raw(m.region.get()) == m.gen)
+        .map(|(&slot, m)| (slot, m.region, m.gen))
         .collect()
 }
 
