@@ -50,6 +50,56 @@ const STDLIB: &str = include_str!("../stdlib.lisp");
 /// services rely on, so debug artifacts belong on the throwaway tmpfs.
 const WASM_DUMP_PATH: &str = "/dev/shm/elle-wasm-dump.wasm";
 
+/// Whether the user source defines the same top-level name twice — a
+/// redefinition the naive single-thunk wrap would reject as a duplicate binding.
+///
+/// Conservative and name-based: for each top-level `(def* …)` / `(var …)` /
+/// `*/def*` form it collects the leaf symbols of the binding target — a bare
+/// name (`(def x …)`) or every name a destructuring pattern binds
+/// (`(def [ok _] …)` binds `ok`, the `_` wildcard is ignored). A symbol seen
+/// twice selects the top-level restructure (build_scheduled_toplevel); otherwise
+/// the single-thunk wrap is kept, which preserves closure execution context for
+/// the whole program. A redefinition introduced only by macro expansion is not
+/// visible here and would fall through to the single wrap — none exist in the
+/// corpus, whose redefinitions are all source-level defs.
+fn has_toplevel_redefinition(source: &str, source_name: &str) -> bool {
+    let forms = match crate::reader::read_syntax_all(source, source_name) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    // Collect the leaf symbols a def binding target introduces (skipping `_`).
+    fn collect_names(target: &crate::syntax::Syntax, out: &mut Vec<String>) {
+        if let Some(name) = target.as_symbol() {
+            if name != "_" {
+                out.push(name.to_string());
+            }
+        } else if let Some(items) = target.as_list_or_tuple() {
+            for item in items {
+                collect_names(item, out);
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    for form in &forms {
+        let Some(list) = form.as_list() else { continue };
+        let head = list.first().and_then(|s| s.as_symbol());
+        let is_def = head
+            .is_some_and(|s| s.starts_with("def") || s.starts_with("var") || s.contains("/def"));
+        if !is_def {
+            continue;
+        }
+        let Some(target) = list.get(1) else { continue };
+        let mut names = Vec::new();
+        collect_names(target, &mut names);
+        for name in names {
+            if !seen.insert(name) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Rewrite user source so its top-level DEFINITIONS stay at the file-letrec top
 /// level while each run of consecutive EXPRESSIONS is wrapped in
 /// `(ev/run (fn [] …))` to run under the async scheduler.
@@ -219,10 +269,23 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     // Nesting the whole body in a single `(fn [] …)` instead (the naive wrap)
     // makes those defs a fn-body letrec* where a duplicate binding is rejected —
     // the divergence that failed def-shadow/numeric/… under `--wasm=full`
-    // (src/wasm/tests.rs `wasm_full_allows_toplevel_def_redefinition`). Order is
-    // preserved by flushing the pending expression run before each def, so a
-    // spawn and its join stay in one `ev/run` session.
-    let scheduled_body = build_scheduled_toplevel(body, source_name);
+    // (src/wasm/tests.rs `wasm_full_allows_toplevel_def_redefinition`).
+    //
+    // But the restructure has a cost: a top-level def's RHS then runs in the
+    // ENTRY function, and some operations (`eval`'s dynamic compilation) trap
+    // there while working in a closure. The single-thunk wrap keeps the WHOLE
+    // program in a closure, so it is the safe default; the restructure is used
+    // ONLY when the program actually redefines a top-level name — the case the
+    // single wrap cannot compile. (A file that both redefines AND calls `eval`
+    // in a def RHS would still hit the entry-`eval` limitation, but none do; the
+    // corpus's redefining files keep `eval` inside expressions.) Pinned by
+    // `wasm_full_allows_toplevel_def_redefinition` (restructure path) and
+    // tests/elle/region-termination-sweep.lisp (single-wrap `eval`-in-def path).
+    let scheduled_body = if has_toplevel_redefinition(body, source_name) {
+        build_scheduled_toplevel(body, source_name)
+    } else {
+        format!("(ev/run (fn []\n((fn []\n{}\n))\n))", body)
+    };
     let full_source = format!("{}\n{}\n{}", epoch_prefix, stdlib_body, scheduled_body);
     Ok((full_source, stdlib_form_count))
 }
