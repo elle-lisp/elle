@@ -201,6 +201,14 @@ impl FiberHeap {
         self.region_store.allocated_bytes()
     }
 
+    /// Clone the `data` handle of every live `External` object whose Elle-side
+    /// type name is `type_name`. The full-module WASM tier uses this to quiesce
+    /// stranded io-backend externals before the region free-sweep
+    /// (`RegionStore::collect_external_data`, docs/impl/wasm.md § the posix gap).
+    pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
+        self.region_store.collect_external_data(type_name)
+    }
+
     /// Peak number of objects allocated (high-water mark).
     pub fn peak_alloc_count(&self) -> usize {
         self.peak_alloc_count

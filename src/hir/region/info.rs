@@ -298,6 +298,20 @@ pub struct RegionInfo {
     /// a legitimate scope-exit slot route, and the scope-based solver shares
     /// regions, so skipping there would leak (region-tailcall-arg-transfer).
     pub mutated_binding_value_regions: FxHashSet<Region>,
+    /// Every fn-local (in-lambda) reassigned mutable binding — the atoms the
+    /// fn-local arm of `apply_reassign_containers` models as 1-slot containers.
+    /// Their stack slot is a mutated container that holds a live value across the
+    /// binding's whole scope (`allocate_slot` never reuses a slot, so the slot is
+    /// the binding's alone). The lowerer skips the value-route decref + nil-stamp
+    /// at `emit_decrefs_for` for any region whose `region_to_slot` names such a
+    /// binding's slot: the slot's own value must never be nil-stamped mid-scope.
+    /// This closes the reassigned-loop-counter clobber — an immediate-valued
+    /// counter (`(assign ii (%add ii 1))`) whose spurious assign-value region the
+    /// gate KEEPS (the fn-local scope-exit demise), whose `decref_point` the
+    /// analysis places inside the loop, and whose nil-stamp then zeroes the
+    /// counter before the increment reads it (pinned by
+    /// `tests/elle/region-capture-cell-loop-uaf.lisp` under `--wasm=full`).
+    pub reassigned_local_bindings: FxHashSet<Binding>,
     /// Begin HirId → per-binding region for each pre-allocated capture cell
     /// (`lower_begin`'s MakeCaptureCell pre-pass), in `collect_preallocate_
     /// bindings` order. One region PER CELL — emitting every cell against the
@@ -494,6 +508,7 @@ impl RegionInfo {
             drop_on_overwrite_sites: FxHashSet::default(),
             donated_overwrite_sites: FxHashSet::default(),
             mutated_binding_value_regions: FxHashSet::default(),
+            reassigned_local_bindings: FxHashSet::default(),
             begin_cell_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),

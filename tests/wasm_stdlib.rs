@@ -90,7 +90,7 @@ fn stdlib_with_map() {
     // Compile stdlib + user code together
     let source = format!("{}\n(map (fn [x] (+ x 1)) (list 1 2 3))", STDLIB);
     match elle::wasm::eval_wasm(&source, "<test>") {
-        Ok(v) => assert_eq!(format!("{}", v), "(2 3 4)"),
+        Ok(v) => assert_eq!(v, "(2 3 4)"),
         Err(e) => panic!("stdlib+map failed: {}", e),
     }
 }

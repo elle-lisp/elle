@@ -26,6 +26,9 @@ use env::*;
 struct CompiledClosure {
     module: Module,
     const_pool: Vec<Value>,
+    /// Byte offset where this closure's env stack begins — above its widest args
+    /// region (`emit::env_stack_base_for_func`).
+    env_stack_base: usize,
 }
 
 /// Manages lazy WASM compilation for the tiered execution model.
@@ -135,6 +138,7 @@ impl WasmTier {
                     CompiledClosure {
                         module,
                         const_pool: result.const_pool,
+                        env_stack_base: result.env_stack_base,
                     },
                 );
                 true
@@ -205,7 +209,8 @@ impl WasmTier {
         let memory = instance
             .get_memory(&mut store, "__elle_memory")
             .expect("no memory");
-        let env_base = super::host::ENV_STACK_BASE;
+        store.data_mut().inner.env_stack_ptr = compiled.env_stack_base;
+        let env_base = compiled.env_stack_base;
         build_env_in_memory(&mut store, &memory, closure, args, env_base);
 
         // Install the executing closure in this fresh store's self slot (its own

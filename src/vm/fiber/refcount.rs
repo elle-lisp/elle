@@ -25,6 +25,37 @@ pub(super) fn incref_signal_region(
     }
 }
 
+/// Take the park-retain and record the `fiber → signal` content edge for a
+/// TERMINAL signal a tier's execution driver installs directly into
+/// `fiber.signal` — the shared form of the VM's `with_child_fiber` step-6a
+/// bookkeeping (child.rs). The symmetric release is the free-time signal scan
+/// (a terminal fiber is read via `fiber/value`, not resumed) or, for a resumable
+/// `:error` / re-resumed fiber, [`release_displaced_terminal_signal`] at the next
+/// resume. A no-op for `None`, a NON-terminal signal (a yield value / io request,
+/// whose escape retain the resume path proper governs), or an immediate payload —
+/// exactly the conditions under which the park owes a retain and edge.
+///
+/// The WASM tier's `handle_fiber_resume` installs a fiber's parked/terminal
+/// signal outside the VM's fiber driver, so it must call this to keep the
+/// host-side outgoing-edge table balanced against `prim_fiber_resume`'s release
+/// (pinned by `tests/elle/fiber-error-resume.lisp` under `--wasm=full`).
+pub(crate) fn record_terminal_signal_park(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    fiber_value: Value,
+    signal: &Option<(SignalBits, Value)>,
+) {
+    let Some((bits, v)) = signal else {
+        return;
+    };
+    if !is_terminal_signal(*bits) {
+        return;
+    }
+    incref_signal_region(heap, signal);
+    let fiber_r = crate::value::arena::region_of(heap, fiber_value);
+    let sig_r = crate::value::arena::region_of(heap, *v);
+    heap.record_outgoing_edge(fiber_r, sig_r);
+}
+
 /// A terminal signal is a fiber's *result*: normal return (SIG_OK), error, or
 /// halt — read later via `fiber/value`, never resumed. Yield and other
 /// suspending signals are transient (the fiber runs again), so their `signal`

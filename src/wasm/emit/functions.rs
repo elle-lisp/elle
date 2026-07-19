@@ -124,6 +124,7 @@ impl WasmEmitter {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
             closure_bytecodes,
+            env_stack_base: super::env_stack_base(lir_module),
         }
     }
     pub(super) fn emit_single_closure_module(&mut self, func: &LirFunction) -> EmitResult {
@@ -178,6 +179,7 @@ impl WasmEmitter {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
             closure_bytecodes: Vec::new(),
+            env_stack_base: super::env_stack_base_for_func(func),
         }
     }
     /// Emit the entry function body.
@@ -244,6 +246,23 @@ impl WasmEmitter {
         for (idx, block) in func.blocks.iter().enumerate() {
             self.label_to_idx.insert(block.label, idx);
         }
+
+        // Reset the suspend/resume scratch that `emit_cfg` consumes. Closures are
+        // emitted in sequence, so a preceding SUSPENDING closure leaves
+        // `call_continuations`/`resume_states` populated with offsets into ITS
+        // blocks. A NON-suspending closure never repopulates them (only the
+        // `may_suspend` path's `pre_scan_resume_states` does), so without this
+        // reset `emit_cfg` reads the stale `call_continuations.len()` as this
+        // function's virtual-block count — inflating `total_blocks` into a giant
+        // br_table and slicing `func.blocks[stale_src][stale_offset..]` against
+        // this function's unrelated (shorter) blocks. The entry function resets
+        // the same scratch for the same reason. Pinned by
+        // `tests/elle/region-capture-cell-loop-uaf.lisp` under `--wasm=full`.
+        self.next_resume_state = 1;
+        self.resume_states.clear();
+        self.call_continuations.clear();
+        self.yield_state_map.clear();
+        self.call_state_map.clear();
 
         let alloc = super::super::regalloc::allocate(func, 0);
         let n = alloc.max_slots;

@@ -317,16 +317,12 @@ fn standalone_emission_refuses_module_less_make_closure() {
 // full-module path loads stdlib into the macro-expansion environment.
 
 /// Run stdlib-backed source through the full-module WASM backend and return the
-/// result's display form.
-///
-/// CAVEAT: `eval_wasm_*` drops the per-call heap at return, so a COMPOUND result
-/// (list, string, mutable) is left dangling and formatting it here reads freed
-/// memory (a segfault, not a clean failure). Only assert on programs whose value
-/// is an immediate — int, bool, nil — reducing any compound to one with `=`,
-/// `length`, `list?`, etc.
+/// result's display form. `eval_wasm_*` materializes that string while its
+/// per-call heap is alive, so a compound result (list, string, mutable) is
+/// returned safely — not left dangling past the heap's teardown.
 fn eval_with_stdlib(source: &str) -> String {
     match super::eval_wasm_with_stdlib(source, "<macro-stdlib>") {
-        Ok(v) => format!("{}", v),
+        Ok(s) => s,
         Err(e) => panic!("eval_wasm_with_stdlib failed: {}", e),
     }
 }
@@ -527,10 +523,11 @@ fn wasm_full_toplevel_defs_still_run_under_scheduler() {
 // release on this tier lowers them toward the VM's zero; they must never rise.
 
 /// Run stdlib-free source through the full-module WASM backend and return the
-/// result's display form. Same immediate-result-only caveat as `eval_with_stdlib`.
+/// result's display form (materialized while the heap is alive; see
+/// `eval_with_stdlib`).
 fn eval(source: &str) -> String {
     match super::eval_wasm(source, "<gauge>") {
-        Ok(v) => format!("{}", v),
+        Ok(s) => s,
         Err(e) => panic!("eval_wasm failed: {}", e),
     }
 }
@@ -580,6 +577,67 @@ fn wasm_full_strands_one_region_per_allocating_host_call() {
         grew == 0 || grew == 200,
         "200 discarded pairs stranded {grew} regions — neither the pinned \
          over-keep (200) nor full reclamation (0); re-measure and re-pin"
+    );
+}
+
+#[test]
+fn wasm_full_wide_call_from_closure_preserves_env() {
+    // A call with more args than the fixed args-region window — `(ENV_STACK_BASE
+    // - ARGS_BASE) / 16` = 240 slots — made from INSIDE a closure must not
+    // clobber that closure's env, which the env-stack allocator lays out at
+    // `env_stack_base`. A 250-key struct literal desugars to a 500-arg call to
+    // the `struct` primitive; emitted from the body of `f`, its args region
+    // `[ARGS_BASE, ARGS_BASE + 500*16)` overruns a fixed 4096-byte env base and
+    // corrupts f's param `x` and the freshly-bound `big`. The env stack must
+    // begin above the module's widest call. `call-u16.lisp` is the top-level
+    // face (no live env below the args, so only the `nargs<=256` guard tripped);
+    // this is the in-closure face the fixed window silently corrupted.
+    let pairs: String = (0..250)
+        .map(|i| format!(":k{i} {i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let src = format!("(defn f [x] (def big {{{pairs}}}) (+ x big:k249))\n(f 1000)");
+    assert_eq!(
+        eval_with_stdlib(&src),
+        "1249",
+        "a 500-arg struct call from inside `f` must not clobber f's env — the \
+         env stack must begin above the module's widest args region"
+    );
+}
+
+#[test]
+fn wasm_full_reassigned_loop_counter_survives_inner_decref() {
+    // A `@`-mutable counter reassigned inside a NESTED loop must not be clobbered
+    // by a region decref's nil-stamp. `ii`'s stack slot is its own for its whole
+    // scope (`allocate_slot` never reuses a slot), but the region analysis keeps a
+    // spurious assign-value region for the immediate-valued `(assign ii (%add ii
+    // 1))` and places its `decref_point` inside the inner loop. The lowerer's
+    // value-route release would `LoadLocal ii; DecrefValueRegion; StoreLocal ii
+    // nil` — nil-stamping the live counter before its own increment reads it, so
+    // the emitter's inline `BinOp Add` reads `Nil` as 0 and the loop never
+    // terminates. `emit_decrefs_for` refuses the value-route + nil-stamp for a
+    // reassigned-local binding's slot (`reassigned_local_slots`), so the counter
+    // survives. 2 outer × 3 inner × `(get s 0)`=10 = 60. The full corpus face is
+    // `tests/elle/region-capture-cell-loop-uaf.lisp` under `--wasm=full`.
+    let src = "\
+(defn nested []
+  (def @oi 0)
+  (def @acc 0)
+  (while (%lt oi 2)
+    (def @s @[10 20 30])
+    (def @ii 0)
+    (while (%lt ii 3)
+      (let [cl (fn [] (get s 0))]
+        (assign acc (+ acc (cl))))
+      (assign ii (%add ii 1)))
+    (assign oi (%add oi 1)))
+  acc)
+(nested)";
+    assert_eq!(
+        eval_with_stdlib(src),
+        "60",
+        "a reassigned mutable loop counter must not be nil-stamped by an in-loop \
+         region decref that names its slot — the loop must terminate"
     );
 }
 

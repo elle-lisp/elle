@@ -40,8 +40,6 @@ mod suspend;
 #[cfg(test)]
 mod tests;
 
-use crate::value::Value;
-
 /// Standard library source, embedded at compile time.
 const STDLIB: &str = include_str!("../stdlib.lisp");
 
@@ -170,8 +168,10 @@ fn build_scheduled_toplevel(source: &str, source_name: &str) -> String {
 /// Compile and execute Elle source through the WASM backend.
 ///
 /// Full pipeline: source → reader → expander → analyzer → HIR → LIR → WASM → Wasmtime.
-/// Used for testing and as the full-module WASM entry point.
-pub fn eval_wasm(source: &str, source_name: &str) -> Result<Value, String> {
+/// Used for testing and as the full-module WASM entry point. Returns the result's
+/// display form (materialized while the backend heap is alive — a heap-valued
+/// result would dangle once that heap drops on return).
+pub fn eval_wasm(source: &str, source_name: &str) -> Result<String, String> {
     eval_wasm_raw(source, source_name, false)
 }
 
@@ -179,8 +179,9 @@ pub fn eval_wasm(source: &str, source_name: &str) -> Result<Value, String> {
 ///
 /// Stdlib closures are bytecode and can't be called from WASM, so we
 /// compile stdlib + user source as a single unit. The implicit letrec
-/// makes all stdlib definitions visible to user code.
-pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<Value, String> {
+/// makes all stdlib definitions visible to user code. Returns the result's
+/// display form (see [`eval_wasm`]).
+pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<String, String> {
     eval_wasm_raw(source, source_name, true)
 }
 
@@ -290,7 +291,7 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     Ok((full_source, stdlib_form_count))
 }
 
-fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<Value, String> {
+fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<String, String> {
     // One heap shared by the program/eval VM and the compile context's
     // macro-expansion VM (as `RuntimeCore::bare` does). Compile-time macro
     // expansion runs on the compile context's macro VM; stdlib closures it must
@@ -397,6 +398,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
                     precached[i] = Some(host::PrecachedClosure {
                         module,
                         const_pool: standalone.const_pool,
+                        env_stack_base: standalone.env_stack_base,
                     });
                     stubbed.insert(crate::lir::ClosureId(i as u32));
                 } else {
@@ -428,7 +430,12 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         std::fs::write(WASM_DUMP_PATH, &result.wasm_bytes).ok();
     }
 
-    let mut wasm_store = store::create_store(&engine, result.const_pool, result.closure_bytecodes);
+    let mut wasm_store = store::create_store(
+        &engine,
+        result.const_pool,
+        result.closure_bytecodes,
+        result.env_stack_base,
+    );
     // This standalone eval owns its driving VM (built above); thread it to the
     // host so primitive calls build a VM-bearing `NativeCtx`.
     wasm_store.data_mut().vm = &mut vm as *mut crate::vm::VM;
@@ -465,6 +472,35 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let t4 = std::time::Instant::now();
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
     let t5 = std::time::Instant::now();
+
+    // Quiesce every io-backend the program left on the heap BEFORE it is dropped.
+    // This tier makes every region instruction a structural no-op, so a scheduler
+    // backend and the `Port`/`ProcessHandle` values of its submitted-but-unreaped
+    // ops (a POSIX signal waiter, a spawned-process waiter) are never reclaimed
+    // during execution — they strand to `RegionStore::teardown_all`, which frees
+    // regions in id order, not lifetime order. The backend's own `Drop` runs the
+    // same quiesce, but by then the free-sweep may already have dropped an op's
+    // `Port`, so the drain's semantic completion dereferences freed memory
+    // (`complete_port_op`). Draining here, while every value is still live, leaves
+    // the backend's `Drop` a no-op (pending is empty). Idempotent and a no-op for
+    // a program with nothing pending. Canonical reference:
+    // `tests/elle/posix.lisp` under `--wasm=full` (segfaults on teardown without
+    // this drain).
+    for data in heap.collect_external_data("io-backend") {
+        if let Some(backend) = data.downcast_ref::<crate::io::AnyBackend>() {
+            backend.0.quiesce();
+        }
+    }
+
+    // Materialize the result's display form NOW, while the heap is still alive.
+    // A heap-valued result (an array, a list, a string) is a pointer into this
+    // function's heap, which drops on return — so returning the `Value` would hand
+    // the caller a dangling pointer it derefs when it formats the value. The CLI
+    // discards the result (program output comes from `println` side effects during
+    // execution), but test harnesses format it; returning the owned string keeps
+    // them sound for heap results, not only immediates. Pinned by the `wasm_smoke`
+    // / `wasm_stdlib` heap-result tests (e.g. `[1 2 3]`, `(map … (list 1 2 3))`).
+    let ret = ret.map(|v| format!("{}", v));
 
     let funcs = 1 + lir_module.closures.len();
     let lir_secs = (t1 - t0).as_secs_f64();

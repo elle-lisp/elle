@@ -27,6 +27,83 @@ pub struct EmitResult {
     /// Bytecode for each closure, indexed by table index.
     /// Used by spawn to execute WASM closures in new threads.
     pub closure_bytecodes: Vec<super::host::ClosureBytecode>,
+    /// Byte offset in linear memory where this module's env stack must begin.
+    /// Sized above the module's widest args region so no call's args clobber a
+    /// live closure env (see `env_stack_base`). The host initializes
+    /// `ElleHost::env_stack_ptr` to this value.
+    pub env_stack_base: usize,
+}
+
+/// Upper bound (in 16-byte slots) on the args region a single instruction
+/// marshals at `ARGS_BASE` before a host call. The args region and the env stack
+/// share linear memory — args grow up from `ARGS_BASE`, envs up from
+/// `env_stack_base` — so the env stack must clear the widest such region or a
+/// wide call's args overwrite a live closure env (a >128-field struct literal is
+/// a >256-arg call to the `struct` primitive; `call-u16.lisp` and
+/// `wasm::tests::wasm_full_wide_call_from_closure_preserves_env` pin it).
+///
+/// A conservative over-estimate: it need not track each emitter's exact byte
+/// layout (over-reserving costs only a little linear memory), only bound every
+/// variable-length marshaling site. The fixed-arity ops (`emit_data_op1`/`2`,
+/// `emit_call_array`, …) marshal at most a handful of slots, far under the
+/// default 240-slot window, so they contribute 0 here.
+fn instr_args_slots(instr: &LirInstr) -> usize {
+    match instr {
+        // Args written one 16-byte slot each (`emit_call` / the closure-tail path).
+        LirInstr::Call { args, .. }
+        | LirInstr::SuspendingCall { args, .. }
+        | LirInstr::TailCall { args, .. } => args.len(),
+        // Elements written one slot each (`emit_data_op_n`, OP_MAKE_ARRAY).
+        LirInstr::MakeArrayMut { elements, .. } => elements.len(),
+        // Captures, then 8 fixed meta slots plus the locals-mask words. The margin
+        // covers the mask words (one per 64 captured locals) without a nested
+        // closure lookup here.
+        LirInstr::MakeClosure { captures, .. } => captures.len() + 72,
+        // `src` slot plus one per excluded key (`OP_STRUCT_REST`).
+        LirInstr::StructRest { exclude_keys, .. } => 1 + exclude_keys.len(),
+        // Each pair is written with a 32-byte stride (two 16-byte slots).
+        LirInstr::PushParamFrame { pairs } => pairs.len() * 2,
+        _ => 0,
+    }
+}
+
+/// Byte offset where `module`'s env stack must begin, given the widest args
+/// region any of its functions marshals (see `instr_args_slots`). Floored at the
+/// default `ENV_STACK_BASE` and page-aligned above the args region so a live
+/// closure env never overlaps a call's args.
+pub(super) fn env_stack_base(module: &crate::lir::LirModule) -> usize {
+    let max_slots = std::iter::once(&module.entry)
+        .chain(module.closures.iter())
+        .flat_map(|func| func.blocks.iter())
+        .flat_map(|block| block.instructions.iter())
+        .map(|si| instr_args_slots(&si.instr))
+        .max()
+        .unwrap_or(0);
+    env_stack_base_for_slots(max_slots)
+}
+
+/// Env-stack base for a single function's widest args region — the tiered
+/// per-closure path (`emit_single_closure_module`), which compiles one function
+/// with no nested closures.
+pub(super) fn env_stack_base_for_func(func: &LirFunction) -> usize {
+    let max_slots = func
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .map(|si| instr_args_slots(&si.instr))
+        .max()
+        .unwrap_or(0);
+    env_stack_base_for_slots(max_slots)
+}
+
+fn env_stack_base_for_slots(max_slots: usize) -> usize {
+    // 4096-byte aligned above the args region — tidy page-ish base, and the
+    // default `ENV_STACK_BASE` (4096) already carries a 240-slot window, so a
+    // module with only ordinary-arity calls keeps the default.
+    let needed = ARGS_BASE as usize + max_slots * 16;
+    needed
+        .next_multiple_of(4096)
+        .max(super::host::ENV_STACK_BASE)
 }
 
 /// Emit a WASM module from an LirModule.

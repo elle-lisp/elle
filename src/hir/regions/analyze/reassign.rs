@@ -184,6 +184,14 @@ pub(super) fn apply_reassign_containers(
     // of that release's cascade — enforced in `lower_call` (pinned by
     // region-mutable-reassign-param.lisp), not by this gate.
     for (b, (sites, regions)) in local_reassigns {
+        // Record the binding so the lowerer can refuse a value-route decref +
+        // nil-stamp that names this binding's stack slot. `allocate_slot` gives a
+        // fn-local reassigned mutable its own never-reused slot that holds a live
+        // value across its whole scope; a spurious immediate-valued assign region
+        // (`(assign ii (%add ii 1))`) kept by the branch below would otherwise
+        // nil-stamp that slot mid-loop and zero the counter
+        // (region-capture-cell-loop-uaf.lisp under --wasm=full).
+        info.reassigned_local_bindings.insert(*b);
         let binding_regs = inference_binding_regions
             .get(b)
             .map(|v| v.as_slice())

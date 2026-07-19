@@ -76,6 +76,122 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
     }
 }
 
+/// Install `(bits, value)` as the fiber's parked signal and, for a TERMINAL
+/// signal, take the same park-retain + record the same `fiber → signal` content
+/// edge the VM's fiber driver takes at `with_child_fiber` step 6a
+/// (`record_terminal_signal_park`). `handle_fiber_resume` drives fiber bodies
+/// outside the VM loop and would otherwise set `fiber.signal` with no
+/// bookkeeping, so the host outgoing-edge table drifts from the symmetric release
+/// `prim_fiber_resume` runs at the next resume — an over-free / unrecorded-edge
+/// panic pinned by `tests/elle/fiber-error-resume.lisp` under `--wasm=full`.
+fn install_signal(
+    caller: &mut Caller<'_, ElleHost>,
+    fiber_handle: &crate::value::FiberHandle,
+    fiber_value: Value,
+    status: crate::value::FiberStatus,
+    bits: crate::value::SignalBits,
+    value: Value,
+) {
+    fiber_handle.with_mut(|f| {
+        f.status = status;
+        f.signal = Some((bits, value));
+    });
+    let heap = unsafe { &mut *caller.data().heap_ptr() };
+    crate::vm::fiber::record_terminal_signal_park(heap, fiber_value, &Some((bits, value)));
+}
+
+/// Route a fiber body's SUSPEND (emit/yield) through the fiber's OWN mask, the
+/// way the VM's fiber driver does. Only ERROR routing changes; an ordinary yield
+/// / io suspension keeps the unchanged `:paused` + signal-0 path, so the
+/// scheduler's parked-signal io detection is untouched.
+///
+/// - A `SIG_ERROR` the fiber's mask does NOT cover → the fiber goes `:error` and
+///   the error is returned as the signal, so the resumer's body re-raises it and
+///   the RESUMER's mask is checked one level up the resume chain — the piece the
+///   WASM tier's nested-`handle_fiber_resume` recursion otherwise skipped, which
+///   left an uncaught `(emit :error …)` wrongly `:paused`.
+/// - Anything else (a covered `SIG_ERROR`, a plain yield, an io request) → the
+///   fiber pauses and the value flows back to the resumer as a normal result.
+///
+/// The fiber keeps its suspension frames either way — an `:error` fiber is
+/// resumable via the restarts system (tests/elle/fiber-error-resume.lisp).
+fn route_emit(
+    caller: &mut Caller<'_, ElleHost>,
+    fiber_handle: &crate::value::FiberHandle,
+    fiber_value: Value,
+    tag: i64,
+    payload: i64,
+    bits: crate::value::SignalBits,
+    value: Value,
+) -> (i64, i64, i64) {
+    let uncaught =
+        bits.contains(crate::value::SIG_ERROR) && !fiber_handle.with(|f| f.mask).covers(bits);
+    if uncaught {
+        install_signal(
+            caller,
+            fiber_handle,
+            fiber_value,
+            crate::value::FiberStatus::Error,
+            bits,
+            value,
+        );
+        (tag, payload, bits.raw() as i64)
+    } else {
+        install_signal(
+            caller,
+            fiber_handle,
+            fiber_value,
+            crate::value::FiberStatus::Paused,
+            bits,
+            value,
+        );
+        (tag, payload, 0)
+    }
+}
+
+/// Route an ERROR that propagated up into this fiber's body from a resumed child
+/// (the child's uncaught error re-raised through this fiber's `fiber/resume`
+/// call) through this fiber's OWN mask. A `SIG_ERROR` this mask covers is CAUGHT:
+/// the fiber pauses holding it and the value flows back as a normal result
+/// (signal 0), so the resumer continues — the WASM analogue of the VM
+/// trampoline's caught arm. Anything else keeps the prior propagate behavior:
+/// the fiber goes `:error` and `raw_signal` is re-returned to unwind further.
+fn route_error(
+    caller: &mut Caller<'_, ElleHost>,
+    fiber_handle: &crate::value::FiberHandle,
+    fiber_value: Value,
+    tag: i64,
+    payload: i64,
+    bits: crate::value::SignalBits,
+    value: Value,
+) -> (i64, i64, i64) {
+    let caught =
+        bits.contains(crate::value::SIG_ERROR) && fiber_handle.with(|f| f.mask).covers(bits);
+    if caught {
+        install_signal(
+            caller,
+            fiber_handle,
+            fiber_value,
+            crate::value::FiberStatus::Paused,
+            bits,
+            value,
+        );
+        (tag, payload, 0)
+    } else {
+        install_signal(
+            caller,
+            fiber_handle,
+            fiber_value,
+            crate::value::FiberStatus::Error,
+            bits,
+            value,
+        );
+        // The unwind signal re-returned to the caller IS this fiber's bits (the
+        // callers pass `SignalBits::new(signal)` and `signal` in lockstep).
+        (tag, payload, bits.raw() as i64)
+    }
+}
+
 /// When `fiber/resume` returns SIG_RESUME, the fiber value contains the
 /// fiber to execute. We extract it, run its WASM closure, update status.
 pub(super) fn handle_fiber_resume(
@@ -148,31 +264,48 @@ pub(super) fn handle_fiber_resume(
                         sig_bits & 512
                     );
                 }
-                fiber_handle.with_mut(|f| {
-                    f.status = FiberStatus::Paused;
-                    f.signal = Some((SignalBits::new(sig_bits), yielded));
-                });
+                let ret = route_emit(
+                    caller,
+                    &fiber_handle,
+                    fiber_value,
+                    tag,
+                    payload,
+                    SignalBits::new(sig_bits),
+                    yielded,
+                );
                 caller.data_mut().fiber_id_stack.pop();
-                (tag, payload, 0)
+                ret
             } else if signal != 0 {
                 let err_val = caller.data().wasm_to_value(tag, payload);
-                fiber_handle.with_mut(|f| {
-                    f.status = FiberStatus::Error;
-                    f.signal = Some((SignalBits::new(signal as u64), err_val));
-                });
+                let ret = route_error(
+                    caller,
+                    &fiber_handle,
+                    fiber_value,
+                    tag,
+                    payload,
+                    SignalBits::new(signal as u64),
+                    err_val,
+                );
                 caller.data_mut().fiber_id_stack.pop();
-                (tag, payload, signal)
+                ret
             } else {
                 let ret_val = caller.data().wasm_to_value(tag, payload);
-                fiber_handle.with_mut(|f| {
-                    f.status = FiberStatus::Dead;
-                    f.signal = Some((SIG_OK, ret_val));
-                });
+                install_signal(
+                    caller,
+                    &fiber_handle,
+                    fiber_value,
+                    FiberStatus::Dead,
+                    SIG_OK,
+                    ret_val,
+                );
                 caller.data_mut().fiber_id_stack.pop();
                 (tag, payload, 0)
             }
         }
-        FiberStatus::Paused => {
+        // An `:error` fiber is resumable via the restarts system (only `:dead` is
+        // terminal), and its suspension frames still live on this store — resume
+        // it exactly like a `:paused` one.
+        FiberStatus::Paused | FiberStatus::Error => {
             fiber_handle.with_mut(|f| f.status = FiberStatus::Alive);
             caller.data_mut().fiber_id_stack.push(fiber_id);
 
@@ -180,25 +313,37 @@ pub(super) fn handle_fiber_resume(
             let ret = match outcome {
                 ResumeOutcome::Yielded(t, p, sig_bits) => {
                     let yielded = caller.data().wasm_to_value(t, p);
-                    fiber_handle.with_mut(|f| {
-                        f.status = FiberStatus::Paused;
-                        f.signal = Some((SignalBits::new(sig_bits), yielded));
-                    });
-                    (t, p, 0)
+                    route_emit(
+                        caller,
+                        &fiber_handle,
+                        fiber_value,
+                        t,
+                        p,
+                        SignalBits::new(sig_bits),
+                        yielded,
+                    )
                 }
                 ResumeOutcome::Error(t, p, s) => {
                     let err_val = caller.data().wasm_to_value(t, p);
-                    fiber_handle.with_mut(|f| {
-                        f.status = FiberStatus::Error;
-                        f.signal = Some((SignalBits::new(s), err_val));
-                    });
-                    (t, p, s as i64)
+                    route_error(
+                        caller,
+                        &fiber_handle,
+                        fiber_value,
+                        t,
+                        p,
+                        SignalBits::new(s),
+                        err_val,
+                    )
                 }
                 ResumeOutcome::Dead(result_val) => {
-                    fiber_handle.with_mut(|f| {
-                        f.status = FiberStatus::Dead;
-                        f.signal = Some((SIG_OK, result_val));
-                    });
+                    install_signal(
+                        caller,
+                        &fiber_handle,
+                        fiber_value,
+                        FiberStatus::Dead,
+                        SIG_OK,
+                        result_val,
+                    );
                     let (t, p) = caller.data_mut().value_to_wasm(result_val);
                     (t, p, 0)
                 }

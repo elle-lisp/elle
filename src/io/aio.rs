@@ -212,6 +212,10 @@ impl crate::io::IoBackend for AsyncBackend {
     fn cancel(&self, id: SubmissionId) -> Result<(), String> {
         self.cancel(id)
     }
+
+    fn quiesce(&self) {
+        self.quiesce();
+    }
 }
 
 impl AsyncBackendInner {

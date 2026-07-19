@@ -229,6 +229,21 @@ pub(crate) trait IoBackend {
     fn poll(&self) -> Vec<Completion>;
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
     fn cancel(&self, id: SubmissionId) -> Result<(), String>;
+    /// Cancel and drain every in-flight kernel op so no kernel-owned buffer and
+    /// no submitted-but-unreaped completion outlives the backend. Idempotent and
+    /// a no-op once nothing is pending. The backend's own `Drop` also runs this,
+    /// but a caller tearing down a heap that STRANDS the backend (the full-module
+    /// WASM tier reclaims no region during execution — see docs/impl/wasm.md § the
+    /// posix gap) must call it BEFORE the region free-sweep: the drain's semantic
+    /// completion dereferences the op's `Port`/`ProcessHandle` heap values, which
+    /// the id-ordered sweep may already have freed. Default no-op for a backend
+    /// with no kernel state (the mock). Canonical reference:
+    /// `tests/elle/posix.lisp` under `--wasm=full`.
+    ///
+    /// Only the full-module WASM tier (which strands its backend to teardown)
+    /// calls this; other builds compile it but never invoke it.
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+    fn quiesce(&self) {}
 }
 
 /// Type-erased async I/O backend, stored as `Value::external("io-backend", ...)`.

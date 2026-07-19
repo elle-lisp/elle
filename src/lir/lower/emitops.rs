@@ -57,6 +57,19 @@ impl<'a> Lowerer<'a> {
         };
         self.current_func.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
+        // Track the slot of a fn-local reassigned mutable binding so
+        // `emit_decrefs_for` never nil-stamps it mid-scope (the reassigned-loop-
+        // counter clobber — see `reassigned_local_slots`). A `false` env_celled
+        // binding takes a plain stack slot; a captured one is a cell released by
+        // `DecrefCellRegion`, not the value route, so it need not be tracked.
+        if !env_celled
+            && self
+                .region_info
+                .reassigned_local_bindings
+                .contains(&binding)
+        {
+            self.reassigned_local_slots.insert(slot);
+        }
         if !env_celled || !self.in_lambda {
             // Initialize slot to NIL so LoadLocal finds a valid value.
             if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {

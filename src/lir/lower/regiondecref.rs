@@ -101,6 +101,38 @@ impl<'a> Lowerer<'a> {
                         }
                         continue;
                     }
+                    // A fn-local reassigned mutable binding owns this slot for its
+                    // whole scope (`allocate_slot` never reuses a slot), so the
+                    // slot holds the binding's OWN live value, not a dead value
+                    // whose region is `r`. `region_to_slot[r]` names this slot only
+                    // because `record_region_slot` recorded the binding's INIT (or
+                    // a slot-resolved assign) region against it — for an
+                    // immediate-valued counter (`(assign ii (%add ii 1))`) that
+                    // region is spurious, and the analysis placed its `decref_point`
+                    // inside the loop. Emitting the load+decref+nil-stamp zeroes the
+                    // counter before its own increment reads it, so the loop never
+                    // terminates. Skip the value route entirely. This never leaks a
+                    // real accumulated value: a heap accumulator's producer
+                    // (`(assign acc (f acc))`) is an ANF temp with its OWN let slot,
+                    // and its scope-exit `DecrefValueRegion` routes through THAT
+                    // slot — not the reassigned binding's — so it still fires
+                    // (pinned by `tests/elle/region-tailcall-arg-transfer.lisp` and
+                    // the `region-mutable-reassign-*` suite under `--wasm=full`).
+                    // Excludes captured cells (env slots, released via
+                    // `DecrefCellRegion`), which `reassigned_local_slots` never
+                    // records. Pinned by
+                    // `tests/elle/region-capture-cell-loop-uaf.lisp`.
+                    if self.reassigned_local_slots.contains(&slot)
+                        && !self.region_info.cell_release_regions.contains(&r)
+                    {
+                        if crate::config::get().has_trace("rc") {
+                            eprintln!(
+                                "[trace:rc:emit] skip_reassigned_slot_route region={:?} slot={} span={}",
+                                r, slot, self.current_span
+                            );
+                        }
+                        continue;
+                    }
                     // Load the value from its slot and release by its
                     // runtime region. The slot still holds a dangling
                     // Value after this but is never read again

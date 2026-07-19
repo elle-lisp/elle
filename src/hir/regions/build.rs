@@ -113,6 +113,7 @@ impl RegionInference {
             drop_on_overwrite_sites: rustc_hash::FxHashSet::default(),
             donated_overwrite_sites: rustc_hash::FxHashSet::default(),
             mutated_binding_value_regions: rustc_hash::FxHashSet::default(),
+            reassigned_local_bindings: rustc_hash::FxHashSet::default(),
             begin_cell_regions: self.begin_cell_regions,
             // Populated by the `regions::merge` post-pass in `analyze_regions_with`,
             // after `region_data` decref_points are final (the seed's

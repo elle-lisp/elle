@@ -123,9 +123,6 @@ pub(crate) fn kill_fiber(
         fiber.signal = signal;
         owned
     });
-    super::refcount::incref_signal_region(heap, &signal);
-    let fiber_r = crate::value::arena::region_of(heap, fiber_value);
-    let sig_r = crate::value::arena::region_of(heap, error_value);
-    heap.record_outgoing_edge(fiber_r, sig_r);
+    super::refcount::record_terminal_signal_park(heap, fiber_value, &signal);
     release_fiber_owned(heap, owned);
 }

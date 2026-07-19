@@ -51,6 +51,9 @@ impl<'a> Lowerer<'a> {
         // region could be associated with a stale slot index from
         // the inner function.
         let saved_region_to_slot = std::mem::take(&mut self.region_to_slot);
+        // Reassigned-local slots are this function's local index space (per-
+        // function, like `region_to_slot`), so reset for the new body.
+        let saved_reassigned_local_slots = std::mem::take(&mut self.reassigned_local_slots);
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
         // self-tail-calls. We save it here and restore it for the
@@ -265,6 +268,7 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = saved_discard_slot;
         self.region_to_table = saved_region_to_table;
         self.region_to_slot = saved_region_to_slot;
+        self.reassigned_local_slots = saved_reassigned_local_slots;
         self.current_self_binding = saved_self_binding;
 
         Ok(func)

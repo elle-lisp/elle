@@ -500,7 +500,10 @@ pub(in crate::wasm) fn call_precached_closure(
     let memory = instance
         .get_memory(&mut store, "__elle_memory")
         .expect("precached closure: no memory");
-    let env_base = super::super::host::ENV_STACK_BASE;
+    // Start above this standalone closure's widest args region so a wide call in
+    // its body cannot clobber its own env.
+    store.data_mut().env_stack_ptr = pc.env_stack_base;
+    let env_base = pc.env_stack_base;
     build_env_in_store(&mut store, &memory, closure, args, env_base);
 
     // Install the executing closure in this fresh store's self slot (converted into

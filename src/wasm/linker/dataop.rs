@@ -345,8 +345,13 @@ pub(super) fn read_args_from_memory(
         Some(m) => m,
         None => return Vec::new(),
     };
+    // A Call's arg count is a u16 in the front end (a >128-field struct literal
+    // is a >256-arg `struct` call), so nargs ranges over `0..=u16::MAX`. The args
+    // region cannot collide with a live closure env because the env stack begins
+    // above the module's widest args region (emit::env_stack_base); this bound is
+    // just a sanity guard against a corrupt/garbage count.
     assert!(
-        (0..=256).contains(&nargs),
+        (0..=u16::MAX as i32).contains(&nargs),
         "read_args_from_memory: invalid nargs={} args_ptr={}",
         nargs,
         args_ptr

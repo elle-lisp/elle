@@ -36,10 +36,16 @@ pub type ClosureBytecode = (
 pub struct PrecachedClosure {
     pub module: wasmtime::Module,
     pub const_pool: Vec<Value>,
+    /// Byte offset where this closure's env stack must begin — above its widest
+    /// args region so a wide call in its body cannot clobber its own env
+    /// (`emit::env_stack_base_for_func`).
+    pub env_stack_base: usize,
 }
 
-/// Base address for the env stack in linear memory.
-/// Each `call_wasm_closure` allocates a region starting from here.
+/// Default base address for the env stack in linear memory, used when a module's
+/// widest args region fits under it. A wider module raises it per
+/// `emit::env_stack_base`. Each `call_wasm_closure` allocates a region starting
+/// from the store's `env_stack_ptr`.
 pub const ENV_STACK_BASE: usize = 4096;
 
 /// Saved state for a suspended WASM closure.

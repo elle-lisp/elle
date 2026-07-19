@@ -127,8 +127,12 @@ pub fn create_store(
     engine: &Engine,
     const_pool: Vec<Value>,
     closure_bytecodes: Vec<super::host::ClosureBytecode>,
+    env_stack_base: usize,
 ) -> Store<ElleHost> {
     let mut host = ElleHost::new();
+    // Start the env stack above this module's widest args region so no call's
+    // args overwrite a live closure env (emit::env_stack_base).
+    host.env_stack_ptr = env_stack_base;
 
     // Pre-load heap constants into handle table and build a mapping from
     // const pool index → handle index. Immediate values (symbols, keywords,

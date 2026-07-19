@@ -159,4 +159,30 @@ impl RegionStore {
     pub fn generation_raw(&self, id: u32) -> u32 {
         self.generations.get(id as usize).copied().unwrap_or(0)
     }
+
+    /// Clone the `data` handle of every live `External` object whose Elle-side
+    /// type name is `type_name`, across all regions. Type-agnostic here (the
+    /// value layer never downcasts) — the caller downcasts and acts on each.
+    ///
+    /// The full-module WASM tier strands io-backend externals to teardown (it
+    /// reclaims no region during execution, so the backend and its in-flight
+    /// ops' `Port`/`ProcessHandle` values all survive to the id-ordered free
+    /// sweep). Quiescing each backend BEFORE that sweep — while every value is
+    /// still live — keeps the drain's semantic completion from dereferencing a
+    /// heap value an earlier region in the same sweep already freed
+    /// (docs/impl/wasm.md § the posix teardown gap).
+    pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
+        let mut out = Vec::new();
+        for slot in self.regions.iter() {
+            let Some(e) = slot.as_ref() else { continue };
+            for obj in e.pool.live_objects() {
+                if let crate::value::heap::HeapObject::External { obj: ext, .. } = obj {
+                    if ext.type_name == type_name {
+                        out.push(ext.data.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
 }

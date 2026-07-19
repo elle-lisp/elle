@@ -14,7 +14,7 @@ fn eval(source: &str) -> String {
         });
     });
     match elle::wasm::eval_wasm_with_stdlib(source, "<test>") {
-        Ok(result) => format!("{}", result),
+        Ok(result) => result,
         Err(e) => panic!("eval_wasm('{}') failed: {}", source, e),
     }
 }

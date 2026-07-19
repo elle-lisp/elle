@@ -52,6 +52,11 @@ use refcount::{incref_signal_region, release_discarded_signal};
 pub(crate) use refcount::{
     is_terminal_signal, release_displaced_terminal_signal, release_parked_signal,
 };
+// Re-exported for the WASM resume path (`crate::vm::fiber::record_terminal_signal_park`),
+// the only external caller; `owned::kill_fiber` reaches it by module path. Unused
+// re-export in a build without the WASM tier.
+#[cfg_attr(not(feature = "wasm"), allow(unused_imports))]
+pub(crate) use refcount::record_terminal_signal_park;
 
 pub(crate) use param::flatten_param_frames;
 #[cfg(debug_assertions)]

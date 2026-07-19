@@ -237,43 +237,75 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
-## Known gaps (full-module `--wasm=full`)
+### Debug builds compile Cranelift unoptimized (open tradeoff)
 
-The full-module tier runs the whole corpus except `eval.lisp`/`eval-env.lisp`
-(dynamic compilation is not a WASM backend feature — `WASM_SKIP` in the
-Makefile). Five corpus files still fail under `make smoke-wasm`. Each is a
-distinct backend gap; each is reproduced by running the named file under
-`--wasm=full`, which is its canonical reference.
+The `830ms cold` figure is a release build. In a **debug** build (the default
+`cargo build`, no `[profile.dev]` override), every dependency — including
+`cranelift-codegen`/`cranelift-frontend`/`regalloc2` — compiles at `opt-level =
+0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
+call-per-op. A single stdlib module then takes **~10s** to Wasmtime-compile
+(profiled: `cranelift_bitset` / `SSABuilder` self-time dominates). Use
+`--cache=<dir>` to amortize it across repeated runs (~0.016s warm).
 
-- **`call-u16` — calls with more than 256 arguments.** `read_args_from_memory`
-  asserts `nargs <= 256` (`src/wasm/linker/dataop.rs`), but the WASM calling
-  convention writes arguments to a fixed linear-memory area at `ARGS_BASE`
-  (`= 256`, `emit.rs`) and passes a `nargs` count that a u16-arity call can push
-  past the cap. Fixing it means sizing/locating the arg area for the actual arity
-  (the bytecode VM already encodes u16 call counts) rather than a fixed 256-slot
-  window.
+The obvious fix — optimizing dependencies in the dev profile — is **not
+currently applied**, because it has a JIT-tier side effect:
 
-- **`fiber-error-resume` — region outgoing-edge drift on error resume.** Panics
-  in `unrecord_outgoing` (`src/value/fiberheap/regionstore/refcount.rs`) with
-  "no recorded edge to remove". Resuming a fiber that errored leaves the region
-  ownership graph's outgoing-edge table out of sync under this tier. Start from
-  docs/impl/region/ownership.md § "The outgoing edge table" and the WASM host's
-  suspension/resume value handling (`resume.rs`, `suspend.rs`).
+```toml
+# Drops the debug WASM compile from ~10s to ~0.016s cold …
+[profile.dev.package."*"]
+opt-level = 3
+```
 
-- **`posix`, `region-env-leak` — teardown SEGV.** Both run to completion (the
-  `[wasm]` timing line prints) and then segfault during process teardown — the
-  region-reclamation Drop sweep frees something the WASM host still aliases.
-  `posix` additionally exercises POSIX signals and spawned waiters. Likely one
-  root cause in how the full-module store's host state is torn down relative to
-  the instance heap; investigate `store.rs`/`host.rs` Drop ordering against the
-  `eval_wasm_raw` heap lifetime.
+`cranelift-codegen` is shared between the WASM path (via `wasmtime`) and the
+**Cranelift JIT** (`cranelift-jit`), so optimizing it also changes the JIT
+tier's compilation. That deterministically flips
+`tests/elle/fuel-apply-fold.lisp` under the `[jit]` tier from pass to fail
+(6/6 with the override, 6/6 pass without) — a fuel-preemption regression test
+whose fold/apply state assertions are sensitive to how the JIT compiles them.
+The mechanism (a genuine JIT codegen/fuel-accounting difference vs. a
+Cranelift-version sensitivity) is not yet understood, so the override stays out
+until it is. The WASM-compile speedup and the JIT change cannot be separated by
+Cargo profile — both route through the one `cranelift-codegen`.
 
-- **`region-capture-cell-loop-uaf` — hang.** Times out (no `[wasm]` line), so it
-  stalls mid-execution — a spin or deadlock in the capture-cell loop under this
-  tier, not a compile-time failure.
+## Full-module coverage and its two teardown/lowering invariants
 
-Note the two teardown SEGVs have been observed to pass intermittently (region
-reclamation timing), so treat a green run as inconclusive; reproduce a few times.
+The full-module tier runs the whole corpus under `make smoke-wasm` except
+`eval.lisp`/`eval-env.lisp` (dynamic compilation is not a WASM backend feature —
+`WASM_SKIP` in the Makefile). Two invariants that this tier — and only this tier —
+must uphold are worth calling out, because each is invisible on the VM/JIT path
+and each is pinned by a specific corpus file run under `--wasm=full`.
+
+- **io-backend externals are quiesced before the heap's teardown free-sweep.**
+  Every region instruction is a structural no-op on this tier (§ "The
+  backend-realization frontier" in memory.md), so a scheduler I/O backend — a
+  heap `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map
+  holds `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a
+  POSIX signal waiter, a spawned-process waiter) — is never reclaimed during
+  execution. It strands to `RegionStore::teardown_all`, which frees regions in id
+  order, not lifetime order. If the backend's `Drop` ran the cancel-and-drain
+  there, `drain_cqes` → `complete_port_op` would dereference a `Port` an earlier
+  region in the same sweep already freed. So `eval_wasm_raw` drains every
+  io-backend (`FiberHeap::collect_external_data("io-backend")` →
+  `IoBackend::quiesce`) after execution returns and *before* the heap drops, when
+  every value is still live; the backend's own `Drop` then finds nothing pending.
+  The VM never hits this — its live region reclamation drops the backend while its
+  `Port`s are still valid. Canonical reference: `tests/elle/posix.lisp`.
+
+- **a fn-local reassigned mutable binding's slot is never value-route decref'd +
+  nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack
+  slot, holding a live value for the binding's whole scope. The region analysis
+  can still keep a spurious assign-value region for an immediate-valued counter
+  (`(assign ii (%add ii 1))`) whose `decref_point` lands inside the loop; the
+  lowerer's value-route release would nil-stamp that slot before the increment
+  reads it, and the emitter's inline `BinOp Add` would read `Nil` as 0, sticking
+  the counter so the loop never terminates. `emit_decrefs_for` refuses the value
+  route for any slot in `reassigned_local_slots` (fed from
+  `RegionInfo::reassigned_local_bindings`), an over-keep, never a mid-scope
+  nil-stamp. This is a lowering the VM/JIT (bytecode-derived LIR) never take. The
+  branch-result-loop nil-stamp guard is untouched — the suppression keys on the
+  slot's binding, not the branch-union region
+  (`tests/elle/region-branch-result-loop-uaf.lisp` stays green). Canonical
+  reference: `tests/elle/region-capture-cell-loop-uaf.lisp`.
 
 ## Testing
 

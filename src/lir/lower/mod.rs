@@ -251,6 +251,15 @@ pub struct Lowerer<'a> {
     /// `Let`, so the binding-slot path covers the Call result directly —
     /// no separate stash-and-reload slot at the Call site.
     region_to_slot: HashMap<crate::hir::region::Region, u16>,
+    /// Stack slots (this function's local index space) owned by a fn-local
+    /// reassigned mutable binding (`RegionInfo::reassigned_local_bindings`).
+    /// Populated in `allocate_slot_routed`, reset per function like
+    /// `region_to_slot`. `emit_decrefs_for` refuses a value-route decref +
+    /// nil-stamp whose slot is in this set: `allocate_slot` never reuses a slot,
+    /// so such a slot holds the reassigned binding's own live value for the
+    /// binding's whole scope — nil-stamping it mid-scope would zero a live value
+    /// (the reassigned-loop-counter clobber; region-capture-cell-loop-uaf.lisp).
+    reassigned_local_slots: rustc_hash::FxHashSet<u16>,
     /// Static region slots the lowerer has stamped onto at least one
     /// instruction via `emit_in_region` (i.e., regions the runtime
     /// will actually have a slot for after `alloc_in_region`).
@@ -317,6 +326,7 @@ impl<'a> Lowerer<'a> {
             active_region_ids: Vec::new(),
 
             region_to_slot: HashMap::new(),
+            reassigned_local_slots: rustc_hash::FxHashSet::default(),
             emitted_alloc_regions: rustc_hash::FxHashSet::default(),
             deferred_decref_points: rustc_hash::FxHashSet::default(),
         }
