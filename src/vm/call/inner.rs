@@ -3,6 +3,46 @@ use super::*;
 mod tail;
 
 impl VM {
+    /// Park a non-yield-suspended interpreter callee's inner frame onto `frames`.
+    ///
+    /// `execute_bytecode_saving_stack` returns a callee interrupted by a
+    /// non-yield signal (SIG_FUEL and its compounds) with its live operand stack
+    /// in `ExecResult.stack`; it does NOT park it in `fiber.suspended` — only
+    /// `handle_yield` does that, and only for SIG_YIELD. So every caller that
+    /// runs an interpreter callee through `execute_bytecode_saving_stack` and can
+    /// suspend must reconstruct that frame, or the callee's state is lost and
+    /// resume injects nil as the call's return value. Shared by the interpreter
+    /// call path (`call_inner`) and the JIT→interpreter fallback (`elle_jit_call`),
+    /// which otherwise drifted (the JIT twin dropped the frame —
+    /// `tests/elle/fuel-jit-preempt.lisp`).
+    ///
+    /// The `frames.is_empty()` guard leaves a deeper yield's already-parked chain
+    /// untouched. `push_resume_value` is false for a fuel pause (the interrupted
+    /// opcode re-executes from `ip`, injecting no extra value) and true otherwise.
+    /// The callee's region remap and owner node ride out in `result`, moved into
+    /// the frame so the remap survives the yield (docs/impl/region/owner.md).
+    pub(crate) fn park_suspended_callee_frame(
+        &mut self,
+        frames: &mut Vec<SuspendedFrame>,
+        bits: SignalBits,
+        result: crate::vm::execute::ExecResult,
+    ) {
+        if frames.is_empty() && !result.stack.is_empty() {
+            let inner = BytecodeFrame::suspend(
+                result.code,
+                result.env,
+                result.ip,
+                result.stack,
+                !bits.contains(SIG_FUEL),
+                result.activation_region_map,
+                result.activation_owner_node,
+                result.current_closure,
+                self.heap(),
+            );
+            frames.push(SuspendedFrame::Bytecode(inner));
+        }
+    }
+
     /// Shared Call/CallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions, executes closures with environment setup,
@@ -392,29 +432,10 @@ impl VM {
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
 
-                    // When the callee was interrupted mid-execution by a
-                    // non-yield signal (e.g. SIG_FUEL), the callee's inner
-                    // frame lives in result.stack — not in fiber.suspended
-                    // (only SIG_YIELD's handle_yield populates that).
-                    // Without this, the callee's state is lost and resume
-                    // injects nil as the Call's return value. Its region remap
-                    // was captured into `result.activation_region_map` by
-                    // saving_stack, its owner node (moved out the same way)
-                    // into `result.activation_owner_node`.
-                    if frames.is_empty() && !result.stack.is_empty() {
-                        let inner = BytecodeFrame::suspend(
-                            result.code,
-                            result.env,
-                            result.ip,
-                            result.stack,
-                            !bits.contains(SIG_FUEL),
-                            result.activation_region_map,
-                            result.activation_owner_node,
-                            result.current_closure,
-                            self.heap(),
-                        );
-                        frames.push(SuspendedFrame::Bytecode(inner));
-                    }
+                    // Preserve a non-yield-suspended (e.g. SIG_FUEL) callee's
+                    // inner frame — it lives in result.stack, not fiber.suspended
+                    // (see park_suspended_callee_frame).
+                    self.park_suspended_callee_frame(&mut frames, bits, result);
 
                     if self
                         .runtime_config

@@ -176,7 +176,11 @@ pub extern "C" fn elle_jit_call(
                 if let Some(tail) = vm.pending_tail_call.take() {
                     vm.pending_entry_closure = tail.closure;
                     let exec_result = vm.execute_bytecode_saving_stack(&tail.code, &tail.env);
-                    return exec_result_to_jit_value(vm, exec_result.bits);
+                    // Park the tail callee's inner frame on a fuel/signal suspend
+                    // so resume re-enters it (interp_exec_result_to_jit_value); a
+                    // tail-recursive interpreter callee (e.g. `fold`) otherwise
+                    // loses its accumulator across preemption.
+                    return interp_exec_result_to_jit_value(vm, exec_result);
                 }
             }
 
@@ -251,7 +255,11 @@ pub extern "C" fn elle_jit_call(
             }
         }
 
-        exec_result_to_jit_value(vm, bits)
+        // Route through the shared converter, which parks the callee's inner
+        // frame on a non-yield suspend (SIG_FUEL) so resume re-enters it — see
+        // interp_exec_result_to_jit_value. `bits` above already drove the squelch
+        // check; the converter re-reads it from `result`.
+        interp_exec_result_to_jit_value(vm, result)
     } else if let Some(result) = {
         // Collection-as-function call-index, routed through the shared
         // `dispatch_collection_call` so the JIT applies the same per-execution
@@ -301,7 +309,9 @@ pub extern "C" fn elle_jit_resolve_tail_call(
         // executing-closure register (see `elle_jit_call`'s sentinel arm).
         vm.pending_entry_closure = tail.closure;
         let exec_result = vm.execute_bytecode_saving_stack(&tail.code, &tail.env);
-        exec_result_to_jit_value(vm, exec_result.bits)
+        // Park the tail callee's inner frame on a fuel/signal suspend (see the
+        // sentinel arm in elle_jit_call).
+        interp_exec_result_to_jit_value(vm, exec_result)
     } else {
         panic!(
             "VM bug: TAIL_CALL_SENTINEL returned but no pending_tail_call set. \

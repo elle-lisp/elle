@@ -133,9 +133,44 @@ pub extern "C" fn elle_jit_make_closure(
 // Internal Helpers
 // =============================================================================
 
-/// Convert an ExecResult from execute_bytecode_saving_stack to a `JitValue`.
-/// Handles SIG_OK, SIG_HALT (NIL→return value, else→error propagated via signal),
-/// SIG_YIELD (returns YIELD_SENTINEL), and errors.
+/// Convert an interpreter callee's full `ExecResult` (from
+/// `execute_bytecode_saving_stack`) to a `JitValue`, parking its inner frame on
+/// a non-yield suspend (SIG_FUEL and its compounds) so resume re-enters the
+/// callee. `execute_bytecode_saving_stack` returns such a frame in
+/// `ExecResult.stack` rather than in `fiber.suspended`; dropping it loses the
+/// callee's state and resume injects nil as the call's return value
+/// (`tests/elle/fuel-jit-preempt.lisp`). The suspend arm leaves the parked frame
+/// in `fiber.suspended` and returns YIELD_SENTINEL; the compiled caller then
+/// appends its own frame via `elle_jit_yield_through_call`. Every JIT site that
+/// runs an interpreter callee through `execute_bytecode_saving_stack` — the
+/// `elle_jit_call` fallback and the tail-call sentinel resolutions — routes its
+/// result through here so the frame-preservation stays in one place.
+pub(super) fn interp_exec_result_to_jit_value(
+    vm: &mut crate::vm::VM,
+    exec: crate::vm::execute::ExecResult,
+) -> JitValue {
+    let bits = exec.bits;
+    if !bits.is_ok() && !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
+        let had_inner_stack = !exec.stack.is_empty();
+        let mut frames = vm.fiber.suspended.take().unwrap_or_default();
+        vm.park_suspended_callee_frame(&mut frames, bits, exec);
+        debug_assert!(
+            !had_inner_stack || !frames.is_empty(),
+            "JIT→interpreter fallback dropped a fuel/signal-suspended callee's \
+             inner frame; resume would inject nil for the call result \
+             (tests/elle/fuel-jit-preempt.lisp)"
+        );
+        vm.fiber.suspended = Some(frames);
+        return YIELD_SENTINEL;
+    }
+    exec_result_to_jit_value(vm, bits)
+}
+
+/// Convert an ExecResult's signal bits to a `JitValue`. Handles SIG_OK, SIG_HALT
+/// (NIL→return value, else→error propagated via signal), suspending signals
+/// (returns YIELD_SENTINEL), and errors. Callers holding the full `ExecResult`
+/// of an interpreter callee use `interp_exec_result_to_jit_value` instead, which
+/// also parks a fuel-suspended callee's inner frame.
 pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
     if bits.is_ok() {
         let (_, val) = vm.fiber.signal.take().unwrap();

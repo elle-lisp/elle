@@ -260,7 +260,15 @@ impl VM {
                     self.fiber.stack.push(Value::NIL);
                     return None;
                 } else {
-                    // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
+                    // Suspending signal (SIG_FUEL, SIG_YIELD, SIG_SWITCH, user-defined).
+                    // A non-yield suspend (fuel) leaves the tail callee's inner
+                    // frame in exec_result.stack, not fiber.suspended; park it so
+                    // resume re-enters the callee — a tail-recursive interpreter
+                    // callee (e.g. `fold`) otherwise loses its accumulator across
+                    // preemption (tests/elle/fuel-jit-preempt.lisp).
+                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
+                    self.park_suspended_callee_frame(&mut frames, eb, exec_result);
+                    self.fiber.suspended = Some(frames);
                     if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask) {
                         self.fiber.stack.push(Value::NIL);
                         return None;
