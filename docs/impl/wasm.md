@@ -237,35 +237,35 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
-### Debug builds compile Cranelift unoptimized (open tradeoff)
+### Debug builds optimize dependencies
 
-The `830ms cold` figure is a release build. In a **debug** build (the default
-`cargo build`, no `[profile.dev]` override), every dependency — including
-`cranelift-codegen`/`cranelift-frontend`/`regalloc2` — compiles at `opt-level =
-0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
-call-per-op. A single stdlib module then takes **~10s** to Wasmtime-compile
-(profiled: `cranelift_bitset` / `SSABuilder` self-time dominates). Use
-`--cache=<dir>` to amortize it across repeated runs (~0.016s warm).
-
-The obvious fix — optimizing dependencies in the dev profile — is **not
-currently applied**, because it has a JIT-tier side effect:
+The `830ms cold` figure is a release build. A **debug** build applies
 
 ```toml
-# Drops the debug WASM compile from ~10s to ~0.016s cold …
 [profile.dev.package."*"]
 opt-level = 3
 ```
 
+so every dependency — `cranelift-codegen`/`cranelift-frontend`/`regalloc2`
+included — compiles optimized while `elle` itself stays at `opt-level = 0` with
+full debug assertions. Without the override those crates build at `opt-level =
+0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
+call-per-op and a single stdlib module takes **~10s** to Wasmtime-compile
+(profiled: `cranelift_bitset` / `SSABuilder` self-time dominates); with it the
+cold compile drops to **~0.016s**. (`--cache=<dir>` amortizes either way.)
+
 `cranelift-codegen` is shared between the WASM path (via `wasmtime`) and the
-**Cranelift JIT** (`cranelift-jit`), so optimizing it also changes the JIT
-tier's compilation. That deterministically flips
-`tests/elle/fuel-apply-fold.lisp` under the `[jit]` tier from pass to fail
-(6/6 with the override, 6/6 pass without) — a fuel-preemption regression test
-whose fold/apply state assertions are sensitive to how the JIT compiles them.
-The mechanism (a genuine JIT codegen/fuel-accounting difference vs. a
-Cranelift-version sensitivity) is not yet understood, so the override stays out
-until it is. The WASM-compile speedup and the JIT change cannot be separated by
-Cargo profile — both route through the one `cranelift-codegen`.
+**Cranelift JIT** (`cranelift-jit`), so optimizing it also speeds up JIT
+compilation. The generated JIT *code* is unchanged: the JIT pins its own output
+at `opt_level = "speed"` (`src/jit/compiler.rs`) independent of how
+`cranelift-codegen` was itself built, so the tier is behaviour-identical across
+the override — only compile *latency* moves. A faster background compile does
+shift *when* a hot function crosses from the interpreter to JIT mid-execution,
+so two crossover invariants are each pinned by a test that fails if the shift
+mishandles the boundary: a fuel-suspended callee's frame survives the JIT tier
+(`tests/elle/fuel-jit-preempt.lisp`), and a value emitted from JIT-compiled code
+is retained as it escapes into `fiber.signal`, where the resumer reads it
+(`tests/elle/region-jit-emit-escape-uaf.lisp`).
 
 ## Full-module coverage and its two teardown/lowering invariants
 

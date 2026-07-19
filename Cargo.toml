@@ -60,6 +60,9 @@ jit = ["cranelift-codegen", "cranelift-frontend", "cranelift-module", "cranelift
 wasm = ["wasmtime", "wasm-encoder"]
 mlir = ["melior"]
 
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

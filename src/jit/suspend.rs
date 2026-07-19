@@ -81,7 +81,28 @@ pub extern "C" fn elle_jit_yield(
         stack.push(unsafe { *spilled_values.add(i) });
     }
 
+    // Escape retain for the emitted value — the exact mirror of the
+    // interpreter's `Emit` handler (`handle_emit`, src/vm/dispatch.rs). The
+    // yielded value escapes into `fiber.signal`, where the resumer reads it via
+    // `fiber/value`. The compiler emits a `DecrefRegion` at the emit's
+    // decref_point (fired as this activation suspends and, on resume, continues
+    // past the yield); without this incref that decref drops the value's only
+    // reference while the resumer still holds it, freeing it out from under the
+    // read (tests/elle/region-jit-emit-escape-uaf.lisp). The symmetric release
+    // is the resume path's own pending decref, `release_discarded_signal` for a
+    // fiber that never runs again, or the free-path fiber discharge — all
+    // tier-agnostic (they act on `fiber.signal`), so they balance this retain
+    // exactly as they balance `handle_emit`'s. `region_of` no-ops an immediate.
     let sig = crate::value::fiber::SignalBits::new(signal_bits);
+    {
+        let heap = unsafe { &mut *vm.heap_ptr };
+        let yielded_region = crate::value::arena::region_of(heap, yielded);
+        crate::value::arena::incref_for_escape(
+            heap,
+            yielded_region,
+            crate::value::arena::EscapeSite::EmitEscape,
+        );
+    }
     vm.fiber.signal = Some((sig, yielded));
 
     if !sig.contains(crate::value::fiber::SIG_ERROR) {
