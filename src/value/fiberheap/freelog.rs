@@ -189,12 +189,40 @@ pub(crate) fn freed_site(addr: usize) -> Option<String> {
     })
 }
 
+/// Parse the source region id out of a `cascade(N)` free-kind label.
+#[cfg(debug_assertions)]
+fn parse_cascade_src(kind: &str) -> Option<u32> {
+    kind.strip_prefix("cascade(")?
+        .strip_suffix(")")?
+        .parse()
+        .ok()
+}
+
+/// Walk a cascade chain to the root DIRECT free that triggered it. A cascade
+/// free carries `cascade(N)`, where N is the region whose own free reached it;
+/// N may itself be a cascade, so follow the chain until a `direct` free — the
+/// decref that started the whole teardown. That root's site is the actionable
+/// one: the cross-region incref that should have kept this subtree alive is
+/// missing at (or balanced against) it. Bounded to avoid a cyclic log.
+#[cfg(debug_assertions)]
+fn cascade_root<'a>(log: &'a [FreeRecord], rec: &'a FreeRecord) -> Option<&'a FreeRecord> {
+    let mut src = parse_cascade_src(&rec.kind)?;
+    for _ in 0..64 {
+        let parent = log.iter().find(|r| r.region == src)?;
+        match parse_cascade_src(&parent.kind) {
+            Some(next) => src = next,
+            None => return Some(parent),
+        }
+    }
+    None
+}
+
 /// Describe which freed region (if any) reclaimed the page containing
 /// `addr`. Returns a human-readable attribution string, or `None` when the
-/// log is empty or the address is not in any recorded freed range. Sole caller
-/// is the `deref` tag/object-mismatch panic in `arena.rs`, itself
-/// `#[cfg(debug_assertions)]`, so this is debug-only (absent — not dead — in
-/// release).
+/// log is empty or the address is not in any recorded freed range. Called by
+/// the `deref` tag/object-mismatch panic in `arena.rs` and the region-generation
+/// guard in `regionstore/pointer.rs`, both `#[cfg(debug_assertions)]`, so this
+/// is debug-only (absent — not dead — in release).
 #[cfg(debug_assertions)]
 pub(crate) fn describe(addr: usize) -> Option<String> {
     FREE_LOG.with(|log| {
@@ -221,6 +249,15 @@ pub(crate) fn describe(addr: usize) -> Option<String> {
                     "\n      free #{} region {} via {} — {}",
                     rec.seq, rec.region, rec.kind, rec.site
                 ));
+                // A cascade free has an "unknown" site (it was reached by a
+                // referrer's teardown); follow the chain to the root DIRECT free
+                // that started it — that site is the actionable one.
+                if let Some(root) = cascade_root(&log, rec) {
+                    s.push_str(&format!(
+                        "\n        ↳ cascade root: free #{} region {} (direct) — {}",
+                        root.seq, root.region, root.site
+                    ));
+                }
             }
             return Some(s);
         }

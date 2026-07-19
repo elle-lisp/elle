@@ -61,16 +61,34 @@ impl RegionStore {
                     // stale deref — the region was freed (and possibly recycled).
                     // The generation check names it at the deref.
                     let current = self.generation_raw(rid);
-                    assert!(
-                        stamp.generation == current,
-                        "stale region deref: {ptr:?} points into a page stamped \
-                         region {rid} generation {}, but generation {current} is \
-                         current — region {rid} was freed (and possibly recycled) \
-                         after this Value was created; this deref is the \
-                         use-after-free site \
-                         (docs/impl/region/generations.md § 'Region generations')",
-                        stamp.generation,
-                    );
+                    if stamp.generation != current {
+                        // Attribute the premature free: with --trace=free/freebt the
+                        // free-log lists every free that reclaimed this page, oldest
+                        // first (the first is the original over-free, with its call
+                        // site). Empty without the flag — the deref site alone still
+                        // names the region.
+                        let attribution = {
+                            #[cfg(debug_assertions)]
+                            {
+                                crate::value::fiberheap::freelog::describe(addr)
+                                    .map(|s| format!("\n  {s}"))
+                                    .unwrap_or_default()
+                            }
+                            #[cfg(not(debug_assertions))]
+                            {
+                                String::new()
+                            }
+                        };
+                        panic!(
+                            "stale region deref: {ptr:?} points into a page stamped \
+                             region {rid} generation {}, but generation {current} is \
+                             current — region {rid} was freed (and possibly recycled) \
+                             after this Value was created; this deref is the \
+                             use-after-free site \
+                             (docs/impl/region/generations.md § 'Region generations'){attribution}",
+                            stamp.generation,
+                        );
+                    }
                 }
                 // Not owned by this store: a stale own-store page, a foreign page
                 // (a worker reading a parent-heap value — the tolerated
