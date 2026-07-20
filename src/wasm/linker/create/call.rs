@@ -155,14 +155,10 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     crate::wasm::linker::run_bytecode_closure(&mut caller, closure, func_val, &args)
                 }
             } else {
-                let heap = unsafe { &mut *caller.data().heap_ptr() };
-                let ctx = crate::primitives::ctx::Alloc::new(heap);
-                let err = ctx.error(
-                    "type-error",
-                    format!("rt_call: cannot call {}", func_val.type_name()),
-                );
-                let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                (tag, payload, 1)
+                // A callable collection (struct/array/set/string/bytes indexed
+                // by a key, e.g. `(request :op)`) — or, failing that, the
+                // `cannot call` type error. See `run_collection_call`.
+                crate::wasm::linker::run_collection_call(&mut caller, func_val, &args, "rt_call")
             }
         },
     )?;

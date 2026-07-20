@@ -61,14 +61,19 @@ pub(in crate::wasm) fn handle_wasm_result(
                 if signal != 0 {
                     memory.data_mut(&mut *caller)[0..8].copy_from_slice(&0i64.to_le_bytes());
                 }
-                // If a NativeFn tail call returned SIG_IO (written to
-                // memory[0..8] by rt_prepare_tail_call), convert it to
-                // SIG_YIELD so the WASM caller does yield-through instead
-                // of treating it as an error-like early return. The I/O
-                // request is in the return value; the fiber scheduler
-                // will check fiber/bits for SIG_IO and drive the I/O.
+                // A NativeFn tail call that yielded SIG_IO (written to
+                // memory[0..8] by rt_prepare_tail_call — the tail-position path a
+                // stdlib wrapper like `tcp/connect`'s `(apply tcp/connect-ip …)`
+                // takes) must ADD SIG_YIELD, not REPLACE with it: the WASM caller
+                // keys yield-through off SIG_YIELD (bit 1), but the scheduler
+                // keys IO submission off SIG_IO (bit 9) via fiber/bits. Dropping
+                // SIG_IO here left the yielded io-request tagged as a plain yield,
+                // so the scheduler re-queued the fiber and resumed it with nil
+                // instead of submitting the IO — every tail-position IO
+                // (`tcp/connect`, and the framing built on it) then read nil for
+                // its port. Pinned by tests/elle/wasm-tail-io-in-fiber.lisp.
                 if signal as u64 & crate::signals::SIG_IO.raw() != 0 {
-                    signal = crate::value::fiber::SIG_YIELD.raw() as i64;
+                    signal |= crate::value::fiber::SIG_YIELD.raw() as i64;
                 }
 
                 if caller.data().debug {
@@ -172,10 +177,24 @@ pub fn resume_wasm_closure(
     let frame = caller.data().first_suspension_frame()?;
     let wasm_func_idx = frame.wasm_func_idx;
     let resume_state = frame.resume_state;
-    let env_base = frame.env_base;
     let env_snapshot = frame.env_snapshot.clone();
     let self_tag = frame.self_tag;
     let self_payload = frame.self_payload;
+
+    // Restore the env at the CURRENT top of the shared env stack, not the
+    // absolute base the frame occupied when it first suspended. The env stack is
+    // a bump region shared by every fiber (and the top-level driver); a fresh
+    // `call_wasm_closure` already bumps from this top. A resume must too: when an
+    // interleaved driver resumes a parked fiber from DEEPER in its own call
+    // stack than where that fiber suspended (the async scheduler resuming a
+    // joined fiber inside `complete-fiber`), the stale base sits below the
+    // driver's live env, so restoring there — and running the fiber upward from
+    // it — overwrites the driver's own locals. The env is position-independent
+    // (the function addresses its slots relative to the `env_base` it is passed),
+    // so the snapshot restores identically at any base. Pinned by
+    // tests/elle/wasm-collection-call.lisp's scheduler join and the
+    // `wasm_full_scheduler_resumes_joined_fiber` unit test.
+    let env_base = caller.data().env_stack_ptr;
 
     // Set resume value for rt_get_resume_value
     let (resume_tag, resume_pay) = caller.data_mut().value_to_wasm(resume_val);

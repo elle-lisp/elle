@@ -133,6 +133,30 @@ Tail calls use `return_call_indirect` (WASM tail-call proposal) via
 `rt_prepare_tail_call`, which resolves the target and builds the
 callee's env at the caller's env position.
 
+### Callee dispatch spectrum
+
+`rt_call` and `rt_prepare_tail_call` resolve the target value and dispatch
+on its runtime type, mirroring the interpreter's `call_inner` /
+`tail_call_inner` so every callee shape behaves identically across tiers:
+
+- **Compiled closure** (`wasm_func_idx` set) — the common case; run in the
+  module's function table (or a pre-compiled per-closure `Module`).
+- **NativeFn** / **parameter** — dispatched host-side directly.
+- **Bytecode closure** (`wasm_func_idx == None`) — `core.lisp`, the prelude,
+  and any closure the module never compiled run via the host VM
+  (`run_bytecode_closure`); only stdlib is compiled into the full module.
+- **Callable collection** — a struct/array/set/string/bytes applied as a
+  function (`(struct :k)`, `(arr i)`, `(set x)`) indexes the collection via
+  the shared `call_collection` path (`run_collection_call`). The async
+  scheduler's request dispatch relies on this: `handle-wait` reads
+  `(request :op)` / `(request :fiber)` off a struct request.
+
+The last two are the host-VM fallbacks: without them a call reaching a
+bytecode closure or a collection-as-function raises a `cannot call …` type
+error that terminates the compiled entry. Pinned by
+`tests/elle/wasm-bytecode-closure-call.lisp` and
+`tests/elle/wasm-collection-call.lisp`.
+
 ### Suspension and resume
 
 Yielding closures use a CPS-like scheme:

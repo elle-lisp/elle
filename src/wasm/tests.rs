@@ -426,6 +426,104 @@ fn wasm_full_spawn_runs_nested_closure() {
     );
 }
 
+// ── Callable collections dispatch host-side ──────────────────────────
+//
+// A struct/array/set/string/bytes applied as a function — `(struct :k)`,
+// `(arr i)`, `(set x)` — is a callable collection: the interpreter routes it
+// through `call_collection` (src/vm/call/collection.rs). Only stdlib compiles
+// into the full module, so such a call reaches the `rt_call` /
+// `rt_prepare_tail_call` host functions, which must run the same fallback
+// (`run_collection_call`) or the value falls through to a `cannot call …`
+// error. The async scheduler makes this load-bearing: `make-async-scheduler`'s
+// `handle-wait` reads `(request :op)` off the struct a fiber emits with
+// `(emit :wait request)`, so without the fallback no `ev/join` under
+// `--wasm=full` ever resumes. The corpus twin is
+// tests/elle/wasm-collection-call.lisp (VM/JIT divergence + the marker).
+
+#[test]
+fn wasm_full_calls_struct_as_function() {
+    // `(s :b)` in call position and `(m k)` in the tail position of a helper
+    // both reach the host call functions with a struct callee.
+    assert_eq!(
+        eval_with_stdlib("(let [s {:a 1 :b 2}] (s :b))"),
+        "2",
+        "a struct applied as a function must index host-side under --wasm=full"
+    );
+    assert_eq!(
+        eval_with_stdlib("(defn lookup [m k] (m k))\n(lookup {:a 1 :b 2} :a)"),
+        "1",
+        "a struct call in tail position must index via rt_prepare_tail_call"
+    );
+    assert_eq!(
+        eval_with_stdlib("(let [s {:a 1}] (s :missing 99))"),
+        "99",
+        "a struct call's 2-arg form returns the default for a missing key"
+    );
+}
+
+#[test]
+fn wasm_full_calls_array_set_string_as_function() {
+    assert_eq!(
+        eval_with_stdlib("([10 20 30] 1)"),
+        "20",
+        "an array applied as a function must index host-side"
+    );
+    assert_eq!(
+        eval_with_stdlib("(= ((set 2 4 6) 4) true)"),
+        "true",
+        "a set applied as a function must test membership host-side"
+    );
+    assert_eq!(
+        eval_with_stdlib("(= (\"hello\" 1) \"e\")"),
+        "true",
+        "a string applied as a function must index a grapheme host-side"
+    );
+}
+
+#[test]
+fn wasm_full_tail_io_in_fiber_delivers_result() {
+    // A fiber whose final action is a tail-position io (`ev/sleep`) must have
+    // the io submitted by the scheduler and complete, not be re-queued and
+    // resumed with a stale nil. `rt_prepare_tail_call` writes the native's
+    // SIG_IO to memory; `handle_wasm_result` must OR (not replace) SIG_YIELD so
+    // the scheduler still sees SIG_IO on fiber/bits. `ev/sleep` completes nil.
+    assert_eq!(
+        eval_with_stdlib("(ev/join (ev/spawn (fn [] (ev/sleep 0.001))))"),
+        "nil",
+        "a fiber ending in a tail-position io must complete under --wasm=full"
+    );
+}
+
+#[test]
+fn wasm_full_wait_via_call_resumes_continuation() {
+    // A fiber that suspends on a structured-concurrency wait THROUGH a function
+    // call (`ev/join`, whose signal narrows to SIG_WAIT without SIG_YIELD) must
+    // resume into the code after the call. The LIR must mark a SIG_WAIT call as
+    // suspending (a CPS continuation frame); keyed off SIG_YIELD alone, the
+    // continuation `(+ x 2)` was dropped and the fiber returned the wait result.
+    assert_eq!(
+        eval_with_stdlib(
+            "(ev/join (ev/spawn (fn [] (let [x (ev/join (ev/spawn (fn [] 1)))] (+ x 2)))))"
+        ),
+        "3",
+        "a wait-via-call must resume its continuation under --wasm=full"
+    );
+}
+
+#[test]
+fn wasm_full_scheduler_resumes_joined_fiber() {
+    // The motivating case: `ev/join` emits a `:wait` struct the compiled
+    // scheduler dispatches with struct application; the child's value must flow
+    // back through `handle-join` to the joiner. Before the collection fallback,
+    // `handle-wait`'s `(request :op)` errored and the join never resumed.
+    assert_eq!(
+        eval_with_stdlib("(ev/join (ev/spawn (fn () 42)))"),
+        "42",
+        "the async scheduler must resume a joined fiber under --wasm=full — its \
+         request dispatch is built on struct-as-function application"
+    );
+}
+
 // ── Top-level def semantics match the VM ─────────────────────────────
 //
 // A file's top level uses sequential shadowing, so redefining a top-level `def`

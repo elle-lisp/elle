@@ -186,14 +186,27 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 return (0, 0, 0, tag, payload, 0);
             }
 
-            let heap = unsafe { &mut *caller.data().heap_ptr() };
-            let ctx = crate::primitives::ctx::Alloc::new(heap);
-            let err = ctx.error(
-                "type-error",
-                format!("rt_prepare_tail_call: cannot call {}", func_val.type_name()),
+            // A callable collection (struct/array/set/string/bytes indexed by a
+            // key) in tail position degrades to a normal call — index it via the
+            // host VM (see `run_collection_call`) and hand the caller the result
+            // to `return` (is_wasm = 0), routing any non-zero signal through
+            // memory[0..8] exactly as the native-tail path above does. A value
+            // that is not a collection either yields the `cannot call` error.
+            let (tag, payload, signal) = crate::wasm::linker::run_collection_call(
+                &mut caller,
+                func_val,
+                &args,
+                "rt_prepare_tail_call",
             );
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (0, 0, 0, tag, payload, 1)
+            if signal != 0 {
+                if let Some(memory) = caller
+                    .get_export("__elle_memory")
+                    .and_then(|e| e.into_memory())
+                {
+                    memory.data_mut(&mut caller)[0..8].copy_from_slice(&signal.to_le_bytes());
+                }
+            }
+            (0, 0, 0, tag, payload, signal)
         },
     )?;
 

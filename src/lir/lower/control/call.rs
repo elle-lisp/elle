@@ -414,9 +414,25 @@ impl<'a> Lowerer<'a> {
                 Ok(dst)
             } else {
                 let dst = self.fresh_reg();
-                if call_signals
-                    .intersects(crate::signals::SIG_YIELD.union(crate::signals::SIG_DEBUG))
-                {
+                // A call needs the CPS suspending convention (a resumable
+                // continuation) if the callee can SUSPEND and later RESUME —
+                // every signal the fiber scheduler parks on and wakes: a plain
+                // yield, an io request, and a structured-concurrency wait. SIG_IO
+                // and SIG_WAIT matter on their own because signal narrowing can
+                // resolve an `(emit :io …)` / `(emit :wait …)` to just that bit,
+                // dropping the SIG_YIELD `emit`'s static signal carries — so a
+                // wrapper like `emit-wait` / `ev/join`, whose narrowed signal is
+                // SIG_WAIT alone, would otherwise compile to a plain Call with no
+                // continuation frame, and the code after the wait would be lost on
+                // resume (the whole async scheduler's `handle-wait` path). SIG_ERROR
+                // / SIG_HALT are excluded: they unwind or terminate, never resume.
+                // Pinned by tests/elle/wasm-wait-call-resumes.lisp.
+                if call_signals.intersects(
+                    crate::signals::SIG_YIELD
+                        .union(crate::signals::SIG_DEBUG)
+                        .union(crate::signals::SIG_IO)
+                        .union(crate::signals::SIG_WAIT),
+                ) {
                     self.emit_alloc(|region| LirInstr::SuspendingCall {
                         region,
                         dst,

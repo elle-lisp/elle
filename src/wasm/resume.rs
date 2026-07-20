@@ -17,6 +17,30 @@ fn front_frame_signal(caller: &Caller<'_, ElleHost>) -> u64 {
         .unwrap_or(crate::value::fiber::SIG_YIELD.raw())
 }
 
+/// The real signal bits a fiber's SUSPEND carries, given the `signal` word a
+/// closure call/resume returned. A closure signals a suspend by setting the
+/// SIG_YIELD bit; two shapes reach here:
+///
+/// - **Pure `SIG_YIELD`** (the `rt_yield` suspension path) — a call in the body
+///   suspended and pushed a frame; the frame carries the original signal
+///   (SIG_IO / SIG_WAIT), so read it from the front frame.
+/// - **`SIG_YIELD` set alongside another bit** — a tail-position io returned
+///   through the function epilogue (`handle_wasm_result` OR-ed SIG_YIELD onto the
+///   native's SIG_IO). No frame was pushed, so `front_frame_signal` would
+///   mis-default to SIG_YIELD; the real signal IS `signal` itself.
+///
+/// Keeping SIG_IO visible here is what lets the scheduler submit the io: a fiber
+/// whose final action is a tail `println`/`port/write` (the whole-program thunk
+/// under `ev/run` ends this way) would otherwise be mis-routed. Pinned by
+/// tests/elle/wasm-tail-io-in-fiber.lisp.
+fn yield_sig_bits(caller: &Caller<'_, ElleHost>, signal: i64) -> u64 {
+    if signal as u64 == crate::value::fiber::SIG_YIELD.raw() {
+        front_frame_signal(caller)
+    } else {
+        signal as u64
+    }
+}
+
 /// Resume outcome from drive_resume_chain.
 enum ResumeOutcome {
     Dead(Value),
@@ -52,17 +76,25 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
         let frames_before = caller.data().suspension_frame_count();
         match resume_wasm_closure(caller, result_val) {
             Some((t, p, s)) => {
-                if s == yield_signal {
-                    // After pop in resume_wasm_closure, old outer frames
-                    // are at positions 0..remaining, new frames after.
-                    // Rotate old frames to the back.
-                    let remaining_old = frames_before.saturating_sub(1);
-                    for _ in 0..remaining_old {
-                        if let Some(frame) = caller.data_mut().pop_suspension_frame() {
-                            caller.data_mut().push_suspension_frame(frame);
+                if s & yield_signal != 0 {
+                    if s == yield_signal {
+                        // Re-yield via `rt_yield`: a call in the resumed body
+                        // suspended again and pushed new frames to the back. After
+                        // pop in resume_wasm_closure, old outer frames are at
+                        // positions 0..remaining, new frames after — rotate the old
+                        // ones behind so the new inner chain resumes first.
+                        let remaining_old = frames_before.saturating_sub(1);
+                        for _ in 0..remaining_old {
+                            if let Some(frame) = caller.data_mut().pop_suspension_frame() {
+                                caller.data_mut().push_suspension_frame(frame);
+                            }
                         }
                     }
-                    let sig_bits = front_frame_signal(caller);
+                    // Otherwise SIG_YIELD rode out alongside SIG_IO on a
+                    // tail-position io returned through the epilogue: no new frame,
+                    // so no rotation, and `yield_sig_bits` reads the signal from `s`
+                    // rather than the (absent) front frame.
+                    let sig_bits = yield_sig_bits(caller, s);
                     return ResumeOutcome::Yielded(t, p, sig_bits);
                 } else if s != 0 {
                     return ResumeOutcome::Error(t, p, s as u64);
@@ -254,9 +286,9 @@ pub(super) fn handle_fiber_resume(
             let (tag, payload, signal) =
                 call_wasm_closure(caller, &closure, wasm_idx, &args, self_tag, self_payload);
 
-            if signal == yield_signal {
+            if signal & yield_signal != 0 {
                 let yielded = caller.data().wasm_to_value(tag, payload);
-                let sig_bits = front_frame_signal(caller);
+                let sig_bits = yield_sig_bits(caller, signal);
                 if caller.data().debug {
                     eprintln!(
                         "[handle_fiber_resume] New yield: sig_bits={} (SIG_IO={})",

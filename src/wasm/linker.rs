@@ -73,3 +73,53 @@ pub(crate) fn run_bytecode_closure(
     let (tag, payload) = caller.data_mut().value_to_wasm(val);
     (tag, payload, signal.raw() as i64)
 }
+
+/// Apply a **callable collection** — a struct/array/set/string/bytes indexed by
+/// a key (`(request :op)`, `(arr i)`, `(set x)`) — via the interpreter's shared
+/// `call_collection`, returning `(tag, payload, signal)` for the wasm caller.
+/// When `func_val` is not a collection either, produces the `cannot call …` type
+/// error so both dispatch sites (`rt_call`, `rt_prepare_tail_call`) share one
+/// tail. Mirrors the collection arm of the interpreter's `call_inner`.
+///
+/// Only stdlib compiles into the full module, so a compiled function routinely
+/// applies a struct as a function — the async scheduler's `handle-wait` reads
+/// `(request :op)` / `(request :fiber)` off the request struct a fiber emits via
+/// `(emit :wait request)`. Without this the call aborts with "cannot call
+/// struct" and no `ev/join`/`ev/scope`/futex wait ever resumes. Pinned by
+/// `tests/elle/wasm-collection-call.lisp` and the `wasm_full_calls_*` /
+/// `wasm_full_scheduler_resumes_joined_fiber` unit tests.
+///
+/// The full-module tier makes region instructions structural no-ops, so — like
+/// the native-fn arm of `rt_call` — this skips the interpreter's Rule-5 escape
+/// retain and mints a fresh `Alloc` only for the element/error it may build.
+pub(crate) fn run_collection_call(
+    caller: &mut Caller<'_, ElleHost>,
+    func_val: Value,
+    args: &[Value],
+    what: &str,
+) -> (i64, i64, i64) {
+    let call_result = {
+        let heap = unsafe { &mut *caller.data().heap_ptr() };
+        let mut ctx = crate::primitives::ctx::Alloc::new(heap);
+        crate::vm::call::call_collection(&func_val, args, &mut ctx)
+    };
+    let (value, signal) = match call_result {
+        Some(Ok(value)) => (value, crate::value::SIG_OK.raw() as i64),
+        Some(Err((kind, msg))) => {
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            (ctx.error(kind, msg), crate::value::SIG_ERROR.raw() as i64)
+        }
+        None => {
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            let err = ctx.error(
+                "type-error",
+                format!("{}: cannot call {}", what, func_val.type_name()),
+            );
+            (err, crate::value::SIG_ERROR.raw() as i64)
+        }
+    };
+    let (tag, payload) = caller.data_mut().value_to_wasm(value);
+    (tag, payload, signal)
+}
