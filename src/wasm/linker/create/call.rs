@@ -149,15 +149,10 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                         )
                     }
                 } else {
-                    // Bytecode closure — not supported in WASM backend
-                    let heap = unsafe { &mut *caller.data().heap_ptr() };
-                    let ctx = crate::primitives::ctx::Alloc::new(heap);
-                    let err = ctx.error(
-                        "internal-error",
-                        "rt_call: bytecode closure in WASM backend",
-                    );
-                    let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                    (tag, payload, 1)
+                    // Bytecode closure (core.lisp / prelude / a runtime closure the
+                    // module never compiled) — execute it via the host VM. See
+                    // `crate::wasm::linker::run_bytecode_closure`.
+                    crate::wasm::linker::run_bytecode_closure(&mut caller, closure, func_val, &args)
                 }
             } else {
                 let heap = unsafe { &mut *caller.data().heap_ptr() };

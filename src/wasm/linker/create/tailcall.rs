@@ -99,14 +99,27 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     );
                     return (env_base as i32, wasm_idx as i32, 1, 0, 0, 0);
                 }
-                let heap = unsafe { &mut *caller.data().heap_ptr() };
-                let ctx = crate::primitives::ctx::Alloc::new(heap);
-                let err = ctx.error(
-                    "internal-error",
-                    "rt_prepare_tail_call: bytecode closure in WASM backend",
+                // Bytecode closure (core.lisp / prelude / a runtime closure the
+                // module never compiled): a tail call to it degrades to a normal
+                // call — execute it via the host VM (see `run_bytecode_closure`)
+                // and hand the caller the result to `return` (is_wasm = 0),
+                // routing any non-zero signal through memory[0..8] exactly as the
+                // native-tail path below does.
+                let (tag, payload, signal) = crate::wasm::linker::run_bytecode_closure(
+                    &mut caller,
+                    closure,
+                    func_val,
+                    &args,
                 );
-                let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                return (0, 0, 0, tag, payload, 1);
+                if signal != 0 {
+                    if let Some(memory) = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                    {
+                        memory.data_mut(&mut caller)[0..8].copy_from_slice(&signal.to_le_bytes());
+                    }
+                }
+                return (0, 0, 0, tag, payload, signal);
             }
 
             if func_val.is_native_fn() {
