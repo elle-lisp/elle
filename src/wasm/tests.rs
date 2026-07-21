@@ -606,6 +606,20 @@ fn wasm_full_uncaught_error_fails() {
 }
 
 #[test]
+fn wasm_full_gated_skip_is_not_a_failure() {
+    // A `(gate! …)` whose condition is unmet raises a `:gated` error that the
+    // harness records as SKIP (an unbuilt plugin/feature), NOT a failure. The
+    // uncaught-error oracle must exit cleanly for it — matching the VM driver's
+    // `take_gated_exit_reason` — so gated corpus files stay exit-0 under
+    // `--wasm=full` instead of being counted as errors.
+    let r = super::eval_wasm_with_stdlib("(gate! false \"feature not built\" 1)", "<gated>");
+    assert!(
+        r.is_ok(),
+        "a gated skip must not fail under --wasm=full, got {r:?}"
+    );
+}
+
+#[test]
 fn wasm_full_caught_or_valued_error_does_not_fail() {
     // The oracle must fire only on a RAISED error: a caught error (`protect`), an
     // error-shaped VALUE returned without raising, and a caught-then-continue

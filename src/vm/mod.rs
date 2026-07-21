@@ -451,7 +451,11 @@ impl VM {
 /// reason (empty string when the `:reason` field is absent). Any other value —
 /// including ordinary errors — returns `None`, so only intentional gates are
 /// ever treated as skips. See `VM::gated_exit_reason`.
-fn gated_reason(err_value: Value) -> Option<String> {
+/// The reason string of a `(gate! …)` skip signal, or `None` for any other
+/// value. A `:gated` error is an intentional SKIP (an unbuilt plugin/feature),
+/// not a failure — both the VM driver and the WASM tier's `run_module` treat it
+/// as a clean exit rather than a runtime error.
+pub(crate) fn gated_reason(err_value: Value) -> Option<String> {
     let entries = err_value.as_struct()?;
     let mut is_gated = false;
     let mut reason = String::new();

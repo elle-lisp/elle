@@ -372,6 +372,14 @@ pub fn run_module(
         .map(|m| i64::from_le_bytes(m.data(&*store)[0..8].try_into().unwrap()))
         .unwrap_or(0);
     if terminal_signal != 0 {
+        // A `(gate! …)` skip (an unbuilt plugin/feature) raises a `:gated` error
+        // that is an intentional SKIP, not a failure — exit cleanly the way the
+        // VM driver does via `take_gated_exit_reason`, so a gated file is exit-0
+        // under `--wasm=full` too.
+        if let Some(reason) = crate::vm::gated_reason(value) {
+            eprintln!("SKIP (gated): {}", reason);
+            return Ok(value);
+        }
         return Err(wasmtime::Error::msg(format!("Runtime error: {}", value)));
     }
 
