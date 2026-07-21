@@ -48,8 +48,28 @@ use super::unwrap_callee_binding;
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirId, HirKind, IntrinsicOp};
-use crate::hir::types::TyId;
+use crate::hir::types::{TyId, TypeInterner};
+use crate::value::SymbolId;
 use std::collections::HashMap;
+
+/// The mutable container types. Used to spot the ONE cross-unit arm that must not
+/// monomorphize: a mutable in-place `del` (`%del-*-mut`), whose raw op is the still-
+/// open F5 leak (`raw-del`). Collapsing that arm would bypass the wrapper's container
+/// compensation (which DOES close it) and surface the raw leak, regressing
+/// `del-wrapper`. Every other store/remove op — including immutable `del` and the
+/// fresh-result mutable funnels `%bytes-push`/`%pop-string` — self-reclaims (the raw
+/// op reads 0), so collapsing is safe on any container mutability. Remove this
+/// exclusion when F5 (raw `%del` parity) lands.
+fn is_mutable_container(ty: TyId) -> bool {
+    matches!(
+        ty,
+        TypeInterner::MUTABLE_STRUCT
+            | TypeInterner::MUTABLE_ARRAY
+            | TypeInterner::MUTABLE_STRING
+            | TypeInterner::MUTABLE_BYTES
+            | TypeInterner::MUTABLE_SET
+    )
+}
 
 /// One container arm of a recognized dispatch wrapper: the concrete container type
 /// it selects on, the monomorphic op it routes to, and the positional map from the
@@ -69,23 +89,119 @@ struct Wrapper {
     arms: Vec<Arm>,
 }
 
+/// One arm of a wrapper summarized for the cross-unit registry: the container type
+/// it selects on and the monomorphic op it routes to, named by `SymbolId` rather
+/// than a `Binding`. A `Binding` is a per-arena index, meaningless in a later unit;
+/// the op's name and the container `TyId` (a well-known `TypeInterner` constant) are
+/// both stable, so the arm re-resolves against the consuming unit's own primitive
+/// bindings. The operand map (`Arm::arg_src`) is not carried — it was already proven
+/// to be the identity `0..arity` when the wrapper was collected, so the rewrite reuses
+/// the call's args in order.
+struct RegArm {
+    ty: TyId,
+    native_name: SymbolId,
+    /// This arm must NOT monomorphize cross-unit — it is a mutable in-place `del`
+    /// whose raw op is the open F5 leak (see `is_mutable_container`). Decided at
+    /// record time because an arm's `ty` is its fixed container type.
+    skip: bool,
+}
+
+/// A wrapper summarized by name for cross-unit reuse (see `RegArm`).
+struct RegWrapper {
+    arity: usize,
+    arms: Vec<RegArm>,
+}
+
+/// Per-instance persistent map of dispatch wrappers, keyed by wrapper NAME. Each
+/// unit's `monomorphize_dispatch_wrappers` records its locally-defined wrappers
+/// here (the stdlib's `push`/`put` land in it when `stdlib.lisp` compiles), and
+/// every later unit consults it, so a user→stdlib wrapper call monomorphizes
+/// exactly as an intra-unit one does — the F1b close, without a compensation gate.
+///
+/// This is compile-time-only state: the rewrite it drives leaves the direct op in
+/// the HIR, so nothing here reaches the runtime. It rides on `CompileCtx` (the
+/// per-instance compile context) precisely because it must outlive the single
+/// compile that defined the wrapper — never on any VM/region structure.
+#[derive(Default)]
+pub struct DispatchWrapperRegistry {
+    by_name: HashMap<SymbolId, RegWrapper>,
+}
+
+impl DispatchWrapperRegistry {
+    /// Record a locally-collected wrapper under its name. First definition wins,
+    /// so the stdlib's canonical wrapper is never clobbered by a later same-named
+    /// user binding, and re-recording across compiles is a cheap no-op.
+    fn record(
+        &mut self,
+        name: SymbolId,
+        w: &Wrapper,
+        arena: &BindingArena,
+        symbol_names: &HashMap<u32, String>,
+    ) {
+        self.by_name.entry(name).or_insert_with(|| RegWrapper {
+            arity: w.arity,
+            arms: w
+                .arms
+                .iter()
+                .map(|a| {
+                    let native_name = arena.get(a.native).name;
+                    let is_del = symbol_names
+                        .get(&native_name.0)
+                        .is_some_and(|n| n.starts_with("%del"));
+                    RegArm {
+                        ty: a.ty,
+                        native_name,
+                        skip: is_mutable_container(a.ty) && is_del,
+                    }
+                })
+                .collect(),
+        });
+    }
+}
+
 /// Rewrite every container-dispatch wrapper call whose container argument's type is a
 /// statically-proven concrete container to a direct call to the selected arm's
 /// monomorphic op. Runs after the inference fixpoint (so `hir_types` is populated) and
 /// before the intrinsic operand proofs (so the rewritten op is contract-checked).
+///
+/// Two wrapper sources are consulted. A wrapper DEFINED in this unit is matched by
+/// its `Binding` (the intra-unit path — the stdlib's own `map`→`push` calls, or a
+/// user's local wrapper). A wrapper defined in an EARLIER unit — the stdlib's
+/// `push`/`put` seen from user code — is matched through `registry`, keyed by name
+/// and gated on the callee being `is_primitive` (a `bind_primitives` stdlib-export
+/// reference; a user redefinition shadows it with a non-primitive binding and is
+/// left alone). Locally-collected wrappers are recorded into `registry` here, so
+/// each unit both populates it (for later units) and consumes it.
 pub(super) fn monomorphize_dispatch_wrappers(
     hir: &mut Hir,
     hir_types: &HashMap<HirId, TyId>,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
+    registry: &mut DispatchWrapperRegistry,
 ) {
     let mut wrappers: HashMap<Binding, Wrapper> = HashMap::new();
     collect_wrappers(hir, arena, symbol_names, typeof_aliases, &mut wrappers);
-    if wrappers.is_empty() {
+    // Persist this unit's wrappers by name so later units can reach them (the
+    // stdlib's push/put populate the instance registry on the `<stdlib>` compile).
+    for (b, w) in &wrappers {
+        registry.record(arena.get(*b).name, w, arena, symbol_names);
+    }
+    if wrappers.is_empty() && registry.by_name.is_empty() {
         return;
     }
-    rewrite(hir, hir_types, &wrappers);
+    // A name→binding map of THIS unit's primitives, so a cross-unit arm's op (stored
+    // by name) resolves to this arena's binding for it. `bind_primitives` binds each
+    // primitive/stdlib-export once, so first-wins is exact.
+    let mut prim_by_name: HashMap<SymbolId, Binding> = HashMap::new();
+    for i in 0..arena.len() as u32 {
+        let b = Binding(i);
+        let bi = arena.get(b);
+        if bi.is_primitive {
+            prim_by_name.entry(bi.name).or_insert(b);
+        }
+    }
+    rewrite(hir, hir_types, &wrappers, registry, &prim_by_name, arena);
 }
 
 /// Walk every `Let`/`Letrec`/`Define` lambda binding and record it as a dispatch
@@ -144,14 +260,22 @@ fn build_wrapper(
     symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
 ) -> Option<Wrapper> {
-    let param0 = *params.first()?;
-    // The local bound to `(first rest)`, if any — `put`'s 3-arg value operand. Maps to
-    // logical index `params.len()` (right after the fixed params).
+    // Functionalize lists the rest binding in BOTH `params` and `rest_param`. The
+    // logical fixed-param list — what an arm operand maps onto by position — excludes
+    // it, and the `(first rest)` value operand (`put`'s 3-arg case) maps to the index
+    // right AFTER the fixed params. Strip the rest binding so `fixed.len()` IS that
+    // index; leaving it in overcounts by one and disqualifies every `& rest` wrapper.
+    let fixed: Vec<Binding> = params
+        .iter()
+        .copied()
+        .filter(|p| Some(*p) != rest_param)
+        .collect();
+    let param0 = *fixed.first()?;
     let rest_first = rest_param.and_then(|rp| find_rest_first_local(body, rp, arena, symbol_names));
     let arms = find_arms(
         body,
         param0,
-        params,
+        &fixed,
         rest_first,
         arena,
         symbol_names,
@@ -330,8 +454,15 @@ fn unwrap_return(h: &Hir) -> &Hir {
 }
 
 /// Walk the tree, rewriting each qualifying wrapper call to its selected arm's op.
-fn rewrite(hir: &mut Hir, hir_types: &HashMap<HirId, TyId>, wrappers: &HashMap<Binding, Wrapper>) {
-    hir.for_each_child_mut(|c| rewrite(c, hir_types, wrappers));
+fn rewrite(
+    hir: &mut Hir,
+    hir_types: &HashMap<HirId, TyId>,
+    wrappers: &HashMap<Binding, Wrapper>,
+    registry: &DispatchWrapperRegistry,
+    prim_by_name: &HashMap<SymbolId, Binding>,
+    arena: &BindingArena,
+) {
+    hir.for_each_child_mut(|c| rewrite(c, hir_types, wrappers, registry, prim_by_name, arena));
 
     let HirKind::Call {
         func,
@@ -344,11 +475,8 @@ fn rewrite(hir: &mut Hir, hir_types: &HashMap<HirId, TyId>, wrappers: &HashMap<B
     let Some(wrapper_b) = unwrap_callee_binding(func) else {
         return;
     };
-    let Some(w) = wrappers.get(&wrapper_b) else {
-        return;
-    };
-    // Only a call whose argument count maps 1:1 onto the arms' operands (no splices).
-    if args.len() != w.arity || args.iter().any(|a| a.spliced) {
+    // Only a call whose args map 1:1 onto the arms' operands (no splices).
+    if args.iter().any(|a| a.spliced) {
         return;
     }
     let Some(container) = args.first() else {
@@ -357,8 +485,42 @@ fn rewrite(hir: &mut Hir, hir_types: &HashMap<HirId, TyId>, wrappers: &HashMap<B
     let Some(&cty) = hir_types.get(&arg_type_id(&container.expr)) else {
         return;
     };
-    let Some(arm) = w.arms.iter().find(|a| a.ty == cty) else {
-        return; // no arm selects this (dynamic, or a non-container type) — leave intact
+
+    // Select the monomorphic op (a `Binding` in THIS arena) for this container type,
+    // from the intra-unit wrapper (matched by binding) or the cross-unit registry
+    // (matched by name, gated on the callee being a `is_primitive` stdlib-export
+    // reference so a user redefinition is never mis-rewritten). No arm for `cty` —
+    // dynamic or a non-container type — leaves the call intact.
+    let native = if let Some(w) = wrappers.get(&wrapper_b) {
+        if args.len() != w.arity {
+            return;
+        }
+        match w.arms.iter().find(|a| a.ty == cty) {
+            Some(arm) => arm.native,
+            None => return,
+        }
+    } else if arena.get(wrapper_b).is_primitive {
+        // Cross-unit: collapse the wrapper to the proven arm's op, EXCEPT a mutable
+        // in-place `del` (`arm.skip`) — its raw op is the open F5 leak, so it stays on
+        // the wrapper's working container compensation (see `is_mutable_container`).
+        let Some(rw) = registry.by_name.get(&arena.get(wrapper_b).name) else {
+            return;
+        };
+        if args.len() != rw.arity {
+            return;
+        }
+        let Some(arm) = rw.arms.iter().find(|a| a.ty == cty) else {
+            return;
+        };
+        if arm.skip {
+            return;
+        }
+        match prim_by_name.get(&arm.native_name).copied() {
+            Some(b) => b,
+            None => return,
+        }
+    } else {
+        return;
     };
 
     // Build the monomorphic call: the arm's op over this call's args, in order. Fresh
@@ -366,7 +528,6 @@ fn rewrite(hir: &mut Hir, hir_types: &HashMap<HirId, TyId>, wrappers: &HashMap<B
     // with the replaced wrapper call's id. The arg nodes are reused as-is, keeping their
     // inferred types for the operand-proof check that follows.
     let is_tail = *is_tail;
-    let native = arm.native;
     let HirKind::Call { args, .. } = std::mem::replace(&mut hir.kind, HirKind::Error) else {
         unreachable!("just matched Call");
     };
@@ -388,4 +549,89 @@ fn rewrite(hir: &mut Hir, hir_types: &HashMap<HirId, TyId>, wrappers: &HashMap<B
 /// itself, or the value an ANF `(let [t EXPR] t)` names.
 fn arg_type_id(arg: &Hir) -> HirId {
     unwrap_anf_let(arg).id
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::hir::arena::BindingArena;
+    use crate::hir::expr::{Hir, HirKind};
+    use std::collections::HashMap;
+
+    /// Collect the name of every call callee (through the ANF/`Var` wrappers) in
+    /// the tree, so a test can assert which ops a source form lowered to.
+    fn callee_names(
+        h: &Hir,
+        arena: &BindingArena,
+        names: &HashMap<u32, String>,
+        out: &mut Vec<String>,
+    ) {
+        if let HirKind::Call { func, .. } = &h.kind {
+            if let Some(b) = super::unwrap_callee_binding(func) {
+                if let Some(n) = names.get(&arena.get(b).name.0) {
+                    out.push(n.clone());
+                }
+            }
+        }
+        h.for_each_child(|c| callee_names(c, arena, names, out));
+    }
+
+    /// Cross-unit dispatch-wrapper monomorphization: a user call to the stdlib
+    /// `put` wrapper on a statically-proven `:struct` must collapse to the direct
+    /// `%put-struct` op — even though `put`'s definition lives in the stdlib
+    /// compile unit, not the caller's. This is the F1b close: no surviving wrapper
+    /// means no stranded owned-param container reference (the immutable residual),
+    /// with no compensation gate. Fails before the cross-unit wrapper registry
+    /// lands (the call stays a `put` wrapper call, leaking 1 region/op —
+    /// `oracle.lisp` `native-tail-put-struct`).
+    #[test]
+    fn cross_unit_put_on_proven_struct_monomorphizes() {
+        let mut rt = crate::runtime::Runtime::new(); // stdlib loaded
+        let (_vm, symbols, cctx) = rt.parts();
+        let (hir, arena, names) =
+            crate::pipeline::compile_file_to_fhir("(put {:a 1} :b 2)", symbols, cctx, "<test>")
+                .expect("compile");
+        let mut callees = Vec::new();
+        callee_names(&hir, &arena, &names, &mut callees);
+        assert!(
+            callees.iter().any(|n| n == "%put-struct"),
+            "a `put` on a proven :struct must collapse to %put-struct; callees were {:?}",
+            callees,
+        );
+        assert!(
+            !callees.iter().any(|n| n == "put"),
+            "the polymorphic `put` wrapper call must be gone after monomorphization; \
+             callees were {:?}",
+            callees,
+        );
+    }
+
+    /// The store family beyond `put`: `push`/`add` on a proven immutable container
+    /// collapse cross-unit to their monomorphic op the same way, through the same
+    /// registry with no per-op change. Guards that the mechanism is generic over the
+    /// store wrappers, not special-cased to `put`.
+    #[test]
+    fn cross_unit_push_add_on_proven_immutable_monomorphize() {
+        let cases = [
+            ("(push [1 2] 3)", "%push-array", "push"),
+            ("(add (set 1 2) 3)", "%add-set", "add"),
+            ("(push \"ab\" \"c\")", "%string-push", "push"),
+        ];
+        for (src, want_op, wrapper) in cases {
+            let mut rt = crate::runtime::Runtime::new();
+            let (_vm, symbols, cctx) = rt.parts();
+            let (hir, arena, names) =
+                crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
+                    .expect("compile");
+            let mut callees = Vec::new();
+            callee_names(&hir, &arena, &names, &mut callees);
+            assert!(
+                callees.iter().any(|n| n == want_op),
+                "{src} must collapse to {want_op}; callees were {callees:?}",
+            );
+            assert!(
+                !callees.iter().any(|n| n == wrapper),
+                "the `{wrapper}` wrapper call must be gone in {src}; callees were {callees:?}",
+            );
+        }
+    }
 }

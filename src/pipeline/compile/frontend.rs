@@ -165,7 +165,7 @@ fn compile_syntaxes_frontend_xform_inner(
         return Err(msg);
     }
 
-    crate::hir::regularize(&mut hir, &mut arena, symbols)?;
+    crate::hir::regularize(&mut hir, &mut arena, symbols, cctx.dispatch_wrappers_mut())?;
 
     Ok((hir, arena, expander, prim_values, signal_projection))
 }

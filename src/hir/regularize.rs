@@ -7,7 +7,9 @@
 
 use crate::hir::arena::BindingArena;
 use crate::hir::expr::Hir;
-use crate::hir::typeinfer::{infer_and_rewrite, prune_typeof_match_arms, TypeInfo};
+use crate::hir::typeinfer::{
+    infer_and_rewrite, prune_typeof_match_arms, DispatchWrapperRegistry, TypeInfo,
+};
 use crate::symbol::SymbolTable;
 
 /// Mark tail calls, prune dead `(type-of x)` arms, functionalize, ANF-lift, and
@@ -26,10 +28,11 @@ pub(crate) fn regularize(
     hir: &mut Hir,
     arena: &mut BindingArena,
     symbols: &SymbolTable,
+    dispatch_wrappers: &mut DispatchWrapperRegistry,
 ) -> Result<TypeInfo, String> {
     prune_typeof_match_arms(hir, arena, symbols);
     crate::hir::tailcall::mark_tail_calls(hir);
     crate::hir::functionalize::functionalize(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
-    infer_and_rewrite(hir, arena, symbols)
+    infer_and_rewrite(hir, arena, symbols, dispatch_wrappers)
 }

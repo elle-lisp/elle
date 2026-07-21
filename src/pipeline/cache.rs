@@ -7,6 +7,7 @@
 //! instances on one thread each own their own `CompileCtx`, so instance A's stdlib
 //! exports and REPL `def`s are invisible to instance B.
 
+use crate::hir::typeinfer::DispatchWrapperRegistry;
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
@@ -43,6 +44,12 @@ pub struct CompileCtx {
     /// literal string argument. Per-instance, though projections are in fact
     /// deterministic from file content (an instance never shares one).
     projections: HashMap<String, Option<HashMap<String, Signal>>>,
+    /// Container-dispatch wrappers collected across every compile in this
+    /// instance, keyed by name. Populated when `stdlib.lisp` compiles (its
+    /// `push`/`put`), consumed by every later unit so a user→stdlib wrapper call
+    /// monomorphizes as an intra-unit one does (the F1b close, `monomorphize.rs`).
+    /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
+    dispatch_wrappers: DispatchWrapperRegistry,
 }
 
 /// core.lisp source, embedded at compile time.
@@ -97,7 +104,15 @@ impl CompileCtx {
             expander,
             meta,
             projections: HashMap::new(),
+            dispatch_wrappers: DispatchWrapperRegistry::default(),
         }
+    }
+
+    /// The instance's cross-unit dispatch-wrapper registry (`monomorphize.rs`).
+    /// Threaded into `regularize` on every compile: the `<stdlib>` compile
+    /// populates it, later user compiles consult it.
+    pub fn dispatch_wrappers_mut(&mut self) -> &mut DispatchWrapperRegistry {
+        &mut self.dispatch_wrappers
     }
 
     /// Run `f` with the macro-expansion VM (fiber reset), a clone of the
@@ -309,8 +324,16 @@ fn compile_core(
         panic!("core.lisp analysis produced {} error(s)", errors.len());
     }
 
-    crate::hir::regularize(&mut hir, &mut arena, symbols)
-        .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
+    // core.lisp defines no container-dispatch wrappers (its `concat`/`reverse` fan
+    // to helpers, not single monomorphic-op arms) and runs before the instance
+    // registry exists, so a throwaway registry is correct here.
+    crate::hir::regularize(
+        &mut hir,
+        &mut arena,
+        symbols,
+        &mut DispatchWrapperRegistry::default(),
+    )
+    .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, meta);
     let region_info =

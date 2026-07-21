@@ -28,6 +28,7 @@ mod guard;
 mod infer;
 use infer::*;
 mod monomorphize;
+pub use monomorphize::DispatchWrapperRegistry;
 mod prune;
 pub(crate) use prune::prune_typeof_match_arms;
 
@@ -49,6 +50,7 @@ pub fn infer_and_rewrite(
     hir: &mut Hir,
     arena: &BindingArena,
     symbols: &SymbolTable,
+    dispatch_wrappers: &mut DispatchWrapperRegistry,
 ) -> Result<TypeInfo, String> {
     let interner = TypeInterner::new();
     // Build name lookup: SymbolId → name string, for matching callees
@@ -147,6 +149,7 @@ pub fn infer_and_rewrite(
         arena,
         &symbol_names,
         &typeof_aliases,
+        dispatch_wrappers,
     );
 
     // The prove-or-reject gate: every call-position %-intrinsic must discharge

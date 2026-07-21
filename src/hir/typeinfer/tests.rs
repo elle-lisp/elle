@@ -18,7 +18,8 @@ fn compile_fhir(src: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
 fn inferred_types(src: &str) -> Vec<TyId> {
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info = infer_and_rewrite(&mut hir, &arena, &symbols).expect("infer");
+    let info =
+        infer_and_rewrite(&mut hir, &arena, &symbols, &mut Default::default()).expect("infer");
     info.hir_types.values().copied().collect()
 }
 
@@ -884,7 +885,7 @@ fn container_dispatch_wrapper_monomorphizes_on_proven_container() {
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
     let names = symbols.all_names();
-    infer_and_rewrite(&mut hir, &arena, &symbols).expect("infer");
+    infer_and_rewrite(&mut hir, &arena, &symbols, &mut Default::default()).expect("infer");
     assert_eq!(
         count_calls_to(&hir, &arena, &names, "myp"),
         0,
@@ -905,7 +906,7 @@ fn container_dispatch_wrapper_stays_dynamic_on_unproven_container() {
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
     let names = symbols.all_names();
-    infer_and_rewrite(&mut hir, &arena, &symbols).expect("infer");
+    infer_and_rewrite(&mut hir, &arena, &symbols, &mut Default::default()).expect("infer");
     assert!(
         count_calls_to(&hir, &arena, &names, "myp") >= 1,
         "an unproven container leaves the dispatch-wrapper call intact"

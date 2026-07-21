@@ -231,7 +231,7 @@
 # the self-reference cycle — the "mint-count" gap the pair was built to expose,
 # unmasked once the F1b container over-keep on their shared block-local `@keep`
 # accumulator closed.
-(declare-root :f4 ["capture-backedge" "recur-local-self-mint"])
+(declare-root :f4 ["recur-local-self-mint"])
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
                    "fresh-env-cell" "break-value" "break-value-used"
                    "break-value-lit" "struct-match" "arg-result"])
@@ -325,6 +325,11 @@
 
 # 3. The io-yield retain. Shrink-only: GREEN at the current rate, RED the moment
 #    it moves; a fix only LOWERS it (the residual's anatomy is at probe-io-yield).
+#    Dropped 2→1 when the scheduler pump's own completion-struct `put` began to
+#    monomorphize (the `& rest` wrapper collection fix, `monomorphize.rs`): one of
+#    the two retains was a `put`-wrapper strand, not escape imprecision. The
+#    residual 1/op is the genuine F3 Shared-completion retain, closing only as
+#    escape analysis is made branch/path-sensitive.
 (def io (measure-stable "io-yield ev/sleep" probe-io-yield 200 8 80 0.4 0.5))
 (show io)
 (check (assert (not= (get io :verdict) :contaminated)
@@ -333,9 +338,9 @@
                        " — a per-block artifact, not a per-op rate")))
 (check (assert (= (get io :verdict) :open)
                (string "io-yield not measured as leaking: " (get io :verdict))))
-(check (assert (and (< 1.5 (get io :rate)) (< (get io :rate) 2.5))
+(check (assert (and (< 0.5 (get io :rate)) (< (get io :rate) 1.5))
                (string "io-yield rate " (get io :rate)
-                       " ∉ [1.5,2.5] — shrink-only")))
+                       " ∉ [0.5,1.5] — shrink-only")))
 
 # 4. Sub-integer leak the integer slope cannot see. Tight tau/epsilon; reads
 #    :open at ≈0.33 where `slope` reported 0.
@@ -559,9 +564,11 @@
    # over-extends past the closure), so it leaks per op. The activation-owner cut
    # reclaims the INTRINSIC form of this shape (runtime::tests::ownership::
    # region_ownership_capture_back_edge_cycle_reclaims, without_stdlib /
-   # %array-push), but here the full-stdlib `push`/`length` wrappers keep the
-   # containment out of the cut's reach, so it stays on the RC baseline — a
-   # promptness residual, shrink-only.
+   # %array-push). CLOSED for the full-stdlib form too: the `(push m c)` that
+   # records the `m` contains `c` edge now monomorphizes to `%push-array-mut`
+   # cross-unit (mutable @array is a self-reclaiming op, `monomorphize.rs`), so the
+   # containment reaches the cut exactly as the intrinsic form does — no surviving
+   # wrapper to hide it. A collateral close of the store-family monomorphization.
    ["capture-backedge"
     (fn [j]
       (let [root @[]
@@ -570,7 +577,7 @@
           (push m c)
           (c)
           (push root m)
-          nil))) 3]  # The transferred returned cycle: a helper builds an a<->b cycle and hands
+          nil))) 0]  # The transferred returned cycle: a helper builds an a<->b cycle and hands
    # its root back across the return frontier; the consumer discards it.
    # Per-region RC cannot collect the cycle (the interior back-edge outlives
    # every release) and no region root can own it (the root crosses the
@@ -1031,26 +1038,85 @@
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
                    count-gauge 100 6 60 0.4 0.5) [24 32])
 
-# Dispatch-wrapper IMMUTABLE-input residual (memory.md § F1b). `put`/`del` on an
-# immutable aggregate route through the wrapper's immutable arm to a FRESH-copy funnel
-# (`%put-struct`/`%put-array`/`%del-struct`), so `coll` is used in EVERY arm (the
-# scrutinee + each arm's funnel call) with a single `decref_point` in one arm,
-# stranding the wrapper's owned-param CONTAINER reference on the other paths, PLUS the
-# wrapper's redundant tail ReturnValue retain over the fresh result (2/op). The
-# container compensation (`regions::compensate`, `funnel_container_sites`) releases the
-# owned-param reference per-arm — closing the container half (2 → 1). The remaining
-# 1/op is the fresh-result ReturnValue surplus, which is NOT suppressed for an
-# immutable funnel: unlike a `-mut` pass-through (whose result IS the caller-owned
-# container), a fresh result's ReturnValue retain is the caller's MOVE/reassign
-# reference — dropping it over-frees a result stored into a reassigned slot
-# (region-mut-container-compensation-uaf / `resource.lisp`). So the immutable residual
-# closes only when the fresh-result surplus is closed by a distinct mechanism.
+# Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
+# (memory.md § F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
+# aggregate used to route through the whole wrapper — a `(match (type-of coll) …)` that
+# used `coll` in EVERY arm with a single `decref_point` in one, stranding the owned-param
+# container reference on the other paths PLUS a redundant fresh-result retain. The
+# wrapper's definition lives in the stdlib unit, so the intra-unit monomorphize pass
+# never reached a user call and only the container half was recoverable (by compensation).
+# The cross-unit dispatch-wrapper registry now collapses `(put {…} …)` to the direct
+# `%put-struct` at the proven immutable type — the wrapper, and every strand it carried,
+# cease to exist, with no compensation gate. These are now CLOSED controls pinning that
+# collapse (the MUTABLE case stays on its container compensation — the registry fires only
+# for immutable container types, `is_immutable_container`).
 (pin (measure-core "native-tail-put-struct" (stmt-run (fn [] (put {:a 1} :b 2)))
-                   region-gauge 100 6 60 0.4 0.5) 1)
+                   region-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "native-tail-put-array" (stmt-run (fn [] (put [10 20] 0 99)))
-                   region-gauge 100 6 60 0.4 0.5) 1)
+                   region-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "native-tail-del-ctl" (stmt-run (fn [] (del {:a 1 :b 2} :a)))
-                   region-gauge 100 6 60 0.4 0.5) 1)
+                   region-gauge 100 6 60 0.4 0.5) 0)
+# The store family beyond `put`/`del`: `push`/`add` on an immutable container had the
+# SAME cross-unit wrapper strand, and leaked identically (measured 1/op for array/set,
+# 2/op for the byte-copy string push, with the cross-unit path disabled) — but the F1b
+# probe set never covered them, so the leak sat in the oracle's blind spot until the
+# same registry collapse closed it. These are CLOSED controls pinning that the store
+# family is handled generically, not just `put`.
+(pin (measure-core "native-tail-push-array" (stmt-run (fn [] (push [1 2] 3)))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "native-tail-add-set" (stmt-run (fn [] (add (set 1 2) 3)))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "native-tail-push-string" (stmt-run (fn [] (push "ab" "c")))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+# The MUTABLE fresh-result funnels — `push` on a mutable @bytes (`%bytes-push`, no
+# in-place variant, returns fresh) and `pop` on a mutable @string (`%pop-string`,
+# returns a fresh grapheme). Their raw ops reclaim (0/op direct), but the polymorphic
+# wrapper stranded the mutable container: NOT a pass-through funnel, so the container
+# compensation (which closes `%push-array-mut`/`%put-struct-mut`) never covered them.
+# A matrix-coverage gap the whole-family sweep surfaced (push/pop on every type×
+# mutability). Closed by extending cross-unit monomorphization to every self-reclaiming
+# op on any mutability — only the mutable in-place `%del-*-mut` (open F5) is held back.
+(pin (measure-core "native-tail-push-mut-bytes"
+                   (stmt-run (fn [] (push (@bytes 1 2) 3))) region-gauge 100 6
+                   60 0.4 0.5) 0)
+(pin (measure-core "native-tail-pop-mut-string"
+                   (stmt-run (fn [] (pop (@string "abc")))) region-gauge 100 6
+                   60 0.4 0.5) 0)
+
+# ── The read/copy class ───────────────────────────────────────────────
+# The container READ and single-value COPY primitives — `first`/`rest`/`get`/`has?`/
+# `length`/`last`/`->array`/`->list`/`keys`/`values`/`slice`. Every one RECLAIMS
+# (0/op): the F1a copy-scratch leak is COMPOSITIONAL — it lives in the HOF/transform
+# BODIES (`take`/`drop`/`reverse`/`concat`/`merge`/`distinct`/…, pinned in the F1a
+# suite above), never in a standalone read of a discarded result, even the tail-COPY
+# `(rest arr)`. These are CLOSED controls: the family was previously unpinned, an
+# oracle blind spot the whole-matrix sweep (the same audit that found the push/add and
+# push-mut-bytes/pop-mut-string gaps) closed. A regression that makes any read
+# primitive strand its result fails here loud.
+(pin (measure-core "read-first" (stmt-run (fn [] (first [1 2 3]))) region-gauge
+                   100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-rest" (stmt-run (fn [] (rest [1 2 3]))) region-gauge
+                   100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-last" (stmt-run (fn [] (last [1 2 3]))) region-gauge
+                   100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-get-array" (stmt-run (fn [] (get [1 2 3] 0)))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-get-struct" (stmt-run (fn [] (get {:a 1} :a)))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-has-struct" (stmt-run (fn [] (has? {:a 1} :a)))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-length" (stmt-run (fn [] (length [1 2 3])))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-toarray" (stmt-run (fn [] (->array (set 1 2))))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-tolist" (stmt-run (fn [] (->list [1 2 3])))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-keys" (stmt-run (fn [] (keys {:a 1 :b 2})))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-values" (stmt-run (fn [] (values {:a 1 :b 2})))
+                   region-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "read-slice" (stmt-run (fn [] (slice [1 2 3 4] 1 3)))
+                   region-gauge 100 6 60 0.4 0.5) 0)
 
 # Discarded tail-return: a function whose tail is a call (native pass-through
 # `first`, or a closure), invoked for effect with the result DISCARDED. The

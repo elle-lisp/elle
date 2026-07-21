@@ -89,7 +89,12 @@ fn compile_inner(
 
     // Phase 3.5: regularize the analyzed HIR — prune dead `(type-of x)` arms,
     // mark tail calls, functionalize, ANF-lift, type inference (crate::hir::regularize).
-    crate::hir::regularize(&mut analysis.hir, &mut arena, symbols)?;
+    crate::hir::regularize(
+        &mut analysis.hir,
+        &mut arena,
+        symbols,
+        cctx.dispatch_wrappers_mut(),
+    )?;
 
     // Phase 4: Lower to LIR with intrinsic specialization
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
@@ -218,7 +223,7 @@ fn compile_file_to_lir_inner(
         return Err(msg);
     }
 
-    crate::hir::regularize(&mut hir, &mut arena, symbols)?;
+    crate::hir::regularize(&mut hir, &mut arena, symbols, cctx.dispatch_wrappers_mut())?;
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
     let region_info =
