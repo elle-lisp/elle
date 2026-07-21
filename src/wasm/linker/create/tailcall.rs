@@ -153,6 +153,24 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     }
                     return (0, 0, 0, tag, payload, signal);
                 }
+                // A tail-position `(fiber/propagate …)` re-raises the child's
+                // caught signal (defer/with unwind branch). Convert it to the
+                // child's (bits, value) and route through memory[0..8] like the
+                // resume path, so the caller's epilogue observes the real error.
+                if bits.raw() & crate::value::fiber::SIG_PROPAGATE.raw() != 0 {
+                    let (tag, payload, signal) =
+                        crate::wasm::resume::handle_fiber_propagate(&mut caller, result);
+                    if signal != 0 {
+                        if let Some(memory) = caller
+                            .get_export("__elle_memory")
+                            .and_then(|e| e.into_memory())
+                        {
+                            memory.data_mut(&mut caller)[0..8]
+                                .copy_from_slice(&signal.to_le_bytes());
+                        }
+                    }
+                    return (0, 0, 0, tag, payload, signal);
+                }
                 // Write non-zero signal to memory[0..8] so handle_wasm_result
                 // picks it up. The WASM tail call dispatch returns immediately
                 // after this host call (just tag/payload/0), so no WASM code

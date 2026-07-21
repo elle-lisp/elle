@@ -75,6 +75,15 @@ pub struct WasmSuspensionFrame {
     /// suspended (not whichever ran most recently on this store's shared memory).
     pub self_tag: i64,
     pub self_payload: i64,
+    /// A child fiber this frame must RE-DRIVE before resuming its own
+    /// continuation. Set when a `(fiber/resume child)` in this frame's body
+    /// suspended because `child` emitted a scheduler wait/io its narrow mask does
+    /// not cover: the resumer parks holding that wait and the scheduler drives it,
+    /// so on resume the scheduler's value must feed a re-drive of `child` — not
+    /// this frame's continuation — until `child` completes. The WASM analogue of
+    /// the VM's `SuspendedFrame::FiberResume` (src/vm/fiber/trampoline.rs). Pinned
+    /// by tests/elle/wasm-protect-suspend.lisp.
+    pub redrive_child: Option<Value>,
 }
 
 /// Host state stored in the Wasmtime `Store<ElleHost>`.
@@ -109,6 +118,13 @@ pub struct ElleHost {
     /// popped on exit. rt_yield and rt_load_saved_reg use the top entry
     /// to find the correct fiber's frame list.
     pub fiber_id_stack: Vec<usize>,
+    /// A pending child re-drive keyed by the PARENT fiber's ID. Set by
+    /// `route_emit` when a `(fiber/resume child)` propagates `child`'s uncaught
+    /// wait/io through the parent; consumed by `rt_yield` when it pushes the
+    /// parent's continuation frame, stamping that frame's `redrive_child`. Between
+    /// the two the parent's `fiber/resume` SuspendingCall is the only host call,
+    /// so the mapping reaches exactly the right frame.
+    pub pending_redrive: std::collections::HashMap<usize, Value>,
     /// Resume value passed by the scheduler (fiber/resume). Set before
     /// re-invoking a suspended function; consumed by rt_get_resume_value.
     pub resume_value: Option<(i64, i64)>,
@@ -147,6 +163,7 @@ impl ElleHost {
             param_frames: Vec::new(),
             suspension_frames: std::collections::HashMap::new(),
             fiber_id_stack: Vec::new(),
+            pending_redrive: std::collections::HashMap::new(),
             resume_value: None,
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
@@ -215,6 +232,20 @@ impl ElleHost {
     pub fn back_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
         let id = self.current_fiber_id();
         self.suspension_frames.get_mut(&id)?.back_mut()
+    }
+
+    /// The child fiber the current fiber's FRONT frame must re-drive before
+    /// resuming, if any (see `WasmSuspensionFrame::redrive_child`).
+    pub fn first_frame_redrive_child(&self) -> Option<Value> {
+        self.first_suspension_frame().and_then(|f| f.redrive_child)
+    }
+
+    /// Clear the FRONT frame's re-drive marker — called once the child has been
+    /// driven to completion, so the frame resumes its own continuation next.
+    pub fn clear_first_frame_redrive(&mut self) {
+        if let Some(frame) = self.first_suspension_frame_mut() {
+            frame.redrive_child = None;
+        }
     }
 
     /// Check if the current fiber has any suspension frames.

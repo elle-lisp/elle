@@ -40,6 +40,12 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             }
 
             let host = caller.data_mut();
+            // A `(fiber/resume child)` in this frame's body that propagated an
+            // uncaught wait/io left the child registered for re-drive under this
+            // fiber's ID; the frame we push here is that call's continuation, so
+            // stamp it so resume re-drives the child before running the frame.
+            let fiber_id = host.current_fiber_id();
+            let redrive_child = host.pending_redrive.remove(&fiber_id);
             host.push_suspension_frame(crate::wasm::host::WasmSuspensionFrame {
                 wasm_func_idx: func_idx as u32,
                 resume_state: resume_state as u32,
@@ -49,6 +55,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 signal_bits: signal_bits as u64,
                 self_tag,
                 self_payload,
+                redrive_child,
             });
         },
     )?;

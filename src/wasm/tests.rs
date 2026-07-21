@@ -524,6 +524,106 @@ fn wasm_full_scheduler_resumes_joined_fiber() {
     );
 }
 
+#[test]
+fn wasm_full_protect_around_suspending_join_returns_value() {
+    // `protect` wraps its body in a nested fiber `f` with mask SIG_ERROR only and
+    // resumes it once. When the body suspends on a scheduler `:wait` (an inner
+    // `ev/join`), `f` emits SIG_WAIT, which `f`'s mask does not cover. The host
+    // resume path must PROPAGATE that uncaught wait through the resumer (so the
+    // scheduler catches it) and RE-DRIVE `f` on the resumer's resume, so the
+    // single `(fiber/resume f)` only returns once `f` completes. Parking `f` and
+    // returning signal 0 (the old behavior) made `protect` read the raw
+    // wait-request struct instead of the body's value.
+    assert_eq!(
+        eval_with_stdlib("(protect (ev/join (ev/spawn (fn [] (+ 10 20)))))"),
+        "[true 30]",
+        "protect around a suspending join must return [true value] under --wasm=full"
+    );
+}
+
+#[test]
+fn wasm_full_protect_around_suspending_join_captures_error() {
+    // The child errors; `ev/join` re-raises it inside `f`, whose mask catches
+    // SIG_ERROR, so `f` ends non-`:dead` holding the error. `protect` reports
+    // `[false error]`. Before the fix the wait never propagated, so `protect`
+    // returned the raw `:join` request as if it were the error payload.
+    assert_eq!(
+        eval_with_stdlib("(protect (ev/join (ev/spawn (fn [] (error {:e 1})))))"),
+        "[false {:e 1}]",
+        "protect around a suspending join must capture the child's error under --wasm=full"
+    );
+}
+
+#[test]
+fn wasm_full_protect_around_direct_error_unaffected() {
+    // Regression guard: a direct (non-suspending) error inside `protect` is
+    // caught by `f`'s mask exactly as before — the suspend-propagation fix must
+    // not disturb the already-correct error path.
+    assert_eq!(
+        eval_with_stdlib("(protect (error {:e 2}))"),
+        "[false {:e 2}]",
+        "protect around a direct error must still return [false error] under --wasm=full"
+    );
+}
+
+#[test]
+fn wasm_full_defer_around_suspending_body_runs_cleanup() {
+    // `defer` shares `protect`'s nested-fiber machinery: it resumes `f` once,
+    // then runs cleanup, then returns the body's value (or propagates its error).
+    // The cleanup must run and the suspending body's value must flow through.
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [log @[]] \
+               (let [v (defer (push log :cleaned) \
+                         (ev/join (ev/spawn (fn [] 42))))] \
+                 [v log]))"
+        ),
+        "[42 @[:cleaned]]",
+        "defer around a suspending body must return its value and run cleanup under --wasm=full"
+    );
+}
+
+#[test]
+fn wasm_full_uncaught_error_fails() {
+    // An error that reaches the top of the program — a bare `(error …)`, a failed
+    // `assert`, or `ev/run`'s re-raise of an unjoined errored fiber — must make
+    // `eval_wasm` return `Err` (the CLI then exits nonzero), the way the VM does.
+    // Returning the raised value as a normal `Ok` result made the WASM tier a weak
+    // oracle: every uncaught error was a silent exit-0 false-pass that hid real
+    // failures — including `assert`s — under `--wasm=full`.
+    for src in [
+        "(error {:e 9})",
+        "(assert false \"boom\")",
+        "(ev/join (ev/spawn (fn [] (error {:e 1}))))",
+        "(defer (fn [] nil) (ev/join (ev/spawn (fn [] (error {:e 3})))))",
+    ] {
+        let r = super::eval_wasm_with_stdlib(src, "<uncaught>");
+        assert!(
+            r.is_err(),
+            "uncaught top-level error must fail under --wasm=full, got Ok for {src:?}: {r:?}"
+        );
+    }
+}
+
+#[test]
+fn wasm_full_caught_or_valued_error_does_not_fail() {
+    // The oracle must fire only on a RAISED error: a caught error (`protect`), an
+    // error-shaped VALUE returned without raising, and a caught-then-continue
+    // program all complete normally (`Ok`). Guards the uncaught-error oracle
+    // against flagging clean runs whose result merely looks error-shaped.
+    for (src, expect) in [
+        ("(protect (error {:e 1}))", "[false {:e 1}]"),
+        ("{:error :not-raised}", "{:error :not-raised}"),
+        ("(do (protect (error {:e 1})) 42)", "42"),
+    ] {
+        assert_eq!(
+            eval_with_stdlib(src),
+            expect,
+            "a non-raising program must complete normally under --wasm=full: {src:?}"
+        );
+    }
+}
+
 // ── Top-level def semantics match the VM ─────────────────────────────
 //
 // A file's top level uses sequential shadowing, so redefining a top-level `def`

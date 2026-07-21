@@ -1,4 +1,19 @@
 //! Fiber resume chain: drive suspended WASM closures through yield-resume cycles.
+//!
+//! Beyond plain yield/resume, this module mirrors two VM fiber-driver behaviors
+//! the host must reproduce because it drives fiber bodies outside the VM loop:
+//!
+//! - **Uncaught-suspend propagation + re-drive** (`route_emit`, `redrive_child`,
+//!   `drive_resume_chain`): when a `(fiber/resume child)` sees `child` suspend on
+//!   a scheduler wait/io its mask does not cover, the wait propagates to the
+//!   resumer (so the scheduler drives it) and the resumer re-drives `child` on
+//!   its own resume. This is what makes `protect`/`defer`/`with` around a
+//!   suspending body work — the WASM analogue of the VM's FiberResume frame
+//!   (src/vm/fiber/trampoline.rs). Pinned by tests/elle/wasm-protect-suspend.lisp.
+//! - **Signal re-raise** (`handle_fiber_propagate`): `(fiber/propagate child)`
+//!   re-raises `child`'s caught signal as the caller's own — the WASM analogue of
+//!   `handle_fiber_propagate_signal` (src/vm/fiber/propagate.rs), used by
+//!   `defer`/`with` to surface a caught body error.
 
 use wasmtime::*;
 
@@ -48,6 +63,49 @@ enum ResumeOutcome {
     Error(i64, i64, u64),
 }
 
+/// Outcome of re-driving a parked child fiber (a `protect`/`defer`/`with` body
+/// that propagated an uncaught scheduler wait).
+enum RedriveOutcome {
+    /// The child completed (or caught its own error): its result value flows to
+    /// the frame that awaited it.
+    Completed(Value),
+    /// The child suspended again on another uncaught wait/io: propagate the
+    /// signal so the scheduler drives it, and re-drive the child again next time.
+    Suspended(i64, i64, u64),
+    /// The child raised an error its mask does not cover: propagate the error.
+    Errored(i64, i64, u64),
+}
+
+/// Re-drive a parked child fiber with the value the scheduler delivered.
+///
+/// Mirrors the VM's `FiberResume` arm (src/vm/fiber/resume.rs): it overwrites
+/// the child's parked wait signal with `(SIG_OK, resume_value)`, then re-enters
+/// the child via `handle_fiber_resume` and classifies the outcome by the returned
+/// signal. A nested uncaught suspension re-registers a re-drive against the
+/// CURRENT fiber; the awaiting frame already carries that child, so the duplicate
+/// pending entry is dropped here.
+fn redrive_child(
+    caller: &mut Caller<'_, ElleHost>,
+    child_value: Value,
+    resume_value: Value,
+) -> RedriveOutcome {
+    if let Some(handle) = child_value.as_fiber() {
+        handle.with_mut(|f| f.signal = Some((crate::value::fiber::SIG_OK, resume_value)));
+    }
+    let current = caller.data().current_fiber_id();
+    let (t, p, s) = handle_fiber_resume(caller, child_value);
+    caller.data_mut().pending_redrive.remove(&current);
+
+    let raw = s as u64;
+    if raw == 0 {
+        RedriveOutcome::Completed(caller.data().wasm_to_value(t, p))
+    } else if raw & crate::value::fiber::SIG_YIELD.raw() != 0 {
+        RedriveOutcome::Suspended(t, p, raw)
+    } else {
+        RedriveOutcome::Errored(t, p, raw)
+    }
+}
+
 /// Drive the resume chain to completion or next yield.
 ///
 /// Repeatedly resumes suspension frames (innermost first) until either:
@@ -67,6 +125,23 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
     loop {
         if !caller.data().has_suspension_frames() {
             return ResumeOutcome::Dead(result_val);
+        }
+        // Before resuming the front frame, honour any child re-drive it awaits: a
+        // `protect`/`defer`/`with` body that suspended uncaught on a scheduler
+        // wait must be driven to completion with the scheduler's value before its
+        // resumer's continuation runs. The WASM analogue of the VM's FiberResume
+        // frame (src/vm/fiber/trampoline.rs). Loops here until the child is done
+        // (its result becomes this frame's resume value) or re-suspends (propagate
+        // and re-drive again next time).
+        if let Some(child) = caller.data().first_frame_redrive_child() {
+            match redrive_child(caller, child, result_val) {
+                RedriveOutcome::Completed(v) => {
+                    caller.data_mut().clear_first_frame_redrive();
+                    result_val = v;
+                }
+                RedriveOutcome::Suspended(t, p, s) => return ResumeOutcome::Yielded(t, p, s),
+                RedriveOutcome::Errored(t, p, s) => return ResumeOutcome::Error(t, p, s),
+            }
         }
         // Record frame count before resume. If the resumed frame
         // re-yields, new frames are pushed to the back of the deque
@@ -133,20 +208,31 @@ fn install_signal(
 }
 
 /// Route a fiber body's SUSPEND (emit/yield) through the fiber's OWN mask, the
-/// way the VM's fiber driver does. Only ERROR routing changes; an ordinary yield
-/// / io suspension keeps the unchanged `:paused` + signal-0 path, so the
-/// scheduler's parked-signal io detection is untouched.
+/// way the VM's fiber driver does.
 ///
 /// - A `SIG_ERROR` the fiber's mask does NOT cover → the fiber goes `:error` and
 ///   the error is returned as the signal, so the resumer's body re-raises it and
 ///   the RESUMER's mask is checked one level up the resume chain — the piece the
 ///   WASM tier's nested-`handle_fiber_resume` recursion otherwise skipped, which
 ///   left an uncaught `(emit :error …)` wrongly `:paused`.
-/// - Anything else (a covered `SIG_ERROR`, a plain yield, an io request) → the
-///   fiber pauses and the value flows back to the resumer as a normal result.
+/// - A `SIG_WAIT`/`SIG_IO` suspension the fiber's mask does NOT cover → PROPAGATE
+///   it to the resumer (as `SIG_YIELD | bits`, so the resumer's `fiber/resume`
+///   SuspendingCall captures a continuation and the wait reaches the scheduler)
+///   and register a re-drive of this fiber against the parent, so the parent's
+///   next resume feeds the scheduler's value back into this fiber rather than
+///   into the parent's continuation. This is the WASM analogue of the VM
+///   trampoline's uncaught-suspend arm that builds a `FiberResume` frame on the
+///   parent (src/vm/fiber/trampoline.rs); it is what makes `protect`/`defer`/
+///   `with` around a suspending body work. Pinned by
+///   tests/elle/wasm-protect-suspend.lisp.
+/// - Anything else (a covered `SIG_ERROR`/`SIG_WAIT`/`SIG_IO`, a plain yield, a
+///   masked io request the scheduler drives explicitly) → the fiber pauses and
+///   the value flows back to the resumer as a normal result (signal 0), so the
+///   scheduler's parked-signal io detection is untouched.
 ///
-/// The fiber keeps its suspension frames either way — an `:error` fiber is
-/// resumable via the restarts system (tests/elle/fiber-error-resume.lisp).
+/// The fiber keeps its suspension frames in every case — an `:error` fiber is
+/// resumable via the restarts system (tests/elle/fiber-error-resume.lisp), and a
+/// propagated fiber must replay its frames when the parent re-drives it.
 fn route_emit(
     caller: &mut Caller<'_, ElleHost>,
     fiber_handle: &crate::value::FiberHandle,
@@ -156,9 +242,9 @@ fn route_emit(
     bits: crate::value::SignalBits,
     value: Value,
 ) -> (i64, i64, i64) {
-    let uncaught =
-        bits.contains(crate::value::SIG_ERROR) && !fiber_handle.with(|f| f.mask).covers(bits);
-    if uncaught {
+    let mask = fiber_handle.with(|f| f.mask);
+
+    if bits.contains(crate::value::SIG_ERROR) && !mask.covers(bits) {
         install_signal(
             caller,
             fiber_handle,
@@ -167,8 +253,26 @@ fn route_emit(
             bits,
             value,
         );
-        (tag, payload, bits.raw() as i64)
-    } else {
+        return (tag, payload, bits.raw() as i64);
+    }
+
+    // An uncaught scheduler suspension (wait/io the mask does not cover) must
+    // propagate to the resumer so the scheduler drives it — the resumer's mask,
+    // one level up, decides where it is finally caught. `bits` may carry the
+    // SIG_YIELD transport bit alongside the real signal (a tail-io rides out as
+    // SIG_IO|SIG_YIELD); strip it before the mask test, which speaks the emit
+    // signals the VM checks (SIG_IO / SIG_WAIT), not the tier's transport.
+    let yield_bit = crate::value::fiber::SIG_YIELD.raw();
+    let emit_raw = bits.raw() & !yield_bit;
+    let is_scheduler_suspend =
+        emit_raw & (crate::signals::SIG_IO.raw() | crate::signals::SIG_WAIT.raw()) != 0;
+    let stack_len = caller.data().fiber_id_stack.len();
+    if is_scheduler_suspend
+        && !mask.covers(crate::value::SignalBits::new(emit_raw))
+        && stack_len >= 2
+    {
+        // Park this fiber holding its wait so it stays resumable with its frames;
+        // the parent re-drives it (overwriting this signal) on resume.
         install_signal(
             caller,
             fiber_handle,
@@ -177,8 +281,27 @@ fn route_emit(
             bits,
             value,
         );
-        (tag, payload, 0)
+        // The parent is the fiber directly below us on the resume stack — the one
+        // whose `fiber/resume` call is about to observe this yield.
+        let parent_id = caller.data().fiber_id_stack[stack_len - 2];
+        caller
+            .data_mut()
+            .pending_redrive
+            .insert(parent_id, fiber_value);
+        // Set SIG_YIELD so the parent's `fiber/resume` SuspendingCall fires;
+        // carry the real emit bits so the parent's park records the wait/io.
+        return (tag, payload, (emit_raw | yield_bit) as i64);
     }
+
+    install_signal(
+        caller,
+        fiber_handle,
+        fiber_value,
+        crate::value::FiberStatus::Paused,
+        bits,
+        value,
+    );
+    (tag, payload, 0)
 }
 
 /// Route an ERROR that propagated up into this fiber's body from a resumed child
@@ -222,6 +345,40 @@ fn route_error(
         // callers pass `SignalBits::new(signal)` and `signal` in lockstep).
         (tag, payload, bits.raw() as i64)
     }
+}
+
+/// When `fiber/resume` returns SIG_PROPAGATE, re-raise the named child fiber's
+/// caught signal as this call's own signal — the WASM analogue of the VM's
+/// `handle_fiber_propagate_signal` (src/vm/fiber/propagate.rs). `defer`/`with`
+/// call `(fiber/propagate f)` in tail position of their unwind branch to surface
+/// a caught body error; the child's `(bits, value)` becomes this call's result,
+/// so the enclosing body unwinds with the real error rather than the fiber value.
+pub(super) fn handle_fiber_propagate(
+    caller: &mut Caller<'_, ElleHost>,
+    fiber_value: Value,
+) -> (i64, i64, i64) {
+    use crate::value::fiber::SIG_ERROR;
+
+    let (child_bits, child_value) = match fiber_value.as_fiber() {
+        Some(h) => h.with(|f| f.signal).unwrap_or_else(|| {
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            (
+                SIG_ERROR,
+                ctx.error("internal-error", "fiber/propagate: no signal"),
+            )
+        }),
+        None => {
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            let err = ctx.error("internal-error", "fiber/propagate: not a fiber");
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            return (tag, payload, SIG_ERROR.raw() as i64);
+        }
+    };
+
+    let (tag, payload) = caller.data_mut().value_to_wasm(child_value);
+    (tag, payload, child_bits.raw() as i64)
 }
 
 /// When `fiber/resume` returns SIG_RESUME, the fiber value contains the

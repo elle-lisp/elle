@@ -355,6 +355,26 @@ pub fn run_module(
     }
 
     let value = store.data().wasm_to_value(tag, payload);
+
+    // Surface an uncaught top-level error the way the VM does (a nonzero exit),
+    // instead of returning the raised value as if it were a normal result. The
+    // entry wraps the whole program in `ev/run`; when the program raises past
+    // every handler — a bare `(error …)`, a failed `assert`, or `ev/run`'s
+    // re-raise of an unjoined errored fiber — the entry unwinds leaving its
+    // terminal signal word (linear `memory[0]`) NON-ZERO, and `value` holds the
+    // error payload. A clean completion — including a CAUGHT error (`protect`) or
+    // an error-shaped value returned WITHOUT raising — leaves `memory[0]` zero.
+    // Without this the WASM tier is a weak oracle: every uncaught error is a
+    // silent exit-0 false-pass, hiding real failures (and `assert`s) under
+    // `--wasm=full`. Pinned by `wasm_full_uncaught_error_fails`.
+    let terminal_signal = instance
+        .get_memory(&mut *store, "__elle_memory")
+        .map(|m| i64::from_le_bytes(m.data(&*store)[0..8].try_into().unwrap()))
+        .unwrap_or(0);
+    if terminal_signal != 0 {
+        return Err(wasmtime::Error::msg(format!("Runtime error: {}", value)));
+    }
+
     Ok(value)
 }
 

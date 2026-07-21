@@ -84,6 +84,13 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 }
                 let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
 
+                // Handle SIG_PROPAGATE: fiber/propagate re-raises a child's caught
+                // signal. Convert it to the child's (bits, value) so the body
+                // unwinds with the real error (defer/with's tail unwind branch).
+                if bits.raw() & crate::value::fiber::SIG_PROPAGATE.raw() != 0 {
+                    return crate::wasm::resume::handle_fiber_propagate(&mut caller, result);
+                }
+
                 // Handle SIG_RESUME: fiber/resume returns this signal.
                 // Execute the fiber's WASM closure host-side.
                 if bits.raw() & 8 != 0 {

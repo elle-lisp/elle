@@ -134,6 +134,24 @@ consumed (Dead), a frame yields (Yielded), or a frame errors (Error).
 **`handle_fiber_resume`:** Dispatches New (call_wasm_closure) vs Paused
 (drive_resume_chain). Sets fiber status and signal on completion.
 
+**Uncaught-suspend propagation + re-drive.** A `(fiber/resume child)` whose
+`child` suspends on a scheduler wait/io its mask does not cover must PROPAGATE
+that suspension to the resumer (so the scheduler drives it), then RE-DRIVE
+`child` when the resumer is itself resumed — the WASM analogue of the VM's
+`SuspendedFrame::FiberResume`. `route_emit` parks `child`, records it under the
+parent in `pending_redrive`, and returns `SIG_YIELD | bits`; `rt_yield` stamps
+the parent's continuation frame with `redrive_child`; `drive_resume_chain`
+honours that marker (via `redrive_child`) before resuming the frame. This is
+what makes `protect`/`defer`/`with` around a suspending body work. Pinned by
+tests/elle/wasm-protect-suspend.lisp.
+
+**Signal handling in `rt_call`.** `rt_call` intercepts three fiber signals from a
+native call's return: `SIG_RESUME` (`fiber/resume` → `handle_fiber_resume`),
+`SIG_PROPAGATE` (`fiber/propagate` → `handle_fiber_propagate`, which re-raises
+the named child's caught signal as this call's own), and `SIG_IO` (via
+`maybe_execute_io`). The tail-call host (`rt_prepare_tail_call`) mirrors the
+RESUME and PROPAGATE handoffs.
+
 ## CPS state-machine transform
 
 Yielding functions become re-entrant via compile-time state machine:
