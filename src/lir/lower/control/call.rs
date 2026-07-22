@@ -1,5 +1,32 @@
 use super::*;
 
+/// Does this HIR subtree lower a **loop** (a back-edge) in the CURRENT function —
+/// a `While`/`Loop` not inside a nested lambda?
+///
+/// The bytecode VM is stack-based: a call parks each already-lowered argument on
+/// the operand stack while it lowers the next. A loop, on re-entering its head,
+/// resets the operand stack to its head-block layout — which does not include an
+/// earlier argument value parked *below* the loop's working set, so that value is
+/// dropped and the call reads whatever sits in its slot instead (a phantom-arity
+/// or wrong-value corruption at the call). `if`/`begin`/`match` are forward merges
+/// that carry the full stack across, so only a back-edge loop triggers it. When a
+/// later argument contains one, `lower_call` spills every argument to a local as
+/// it is lowered and reloads them adjacent to the call.
+///
+/// Nested lambda bodies are separate lowered functions, so their loops never touch
+/// this function's operand stack and are not counted (stop at the `Lambda`).
+fn hir_contains_loop(h: &Hir) -> bool {
+    match &h.kind {
+        HirKind::While { .. } | HirKind::Loop { .. } => true,
+        HirKind::Lambda { .. } => false,
+        _ => {
+            let mut found = false;
+            h.for_each_child(|c| found |= hir_contains_loop(c));
+            found
+        }
+    }
+}
+
 impl<'a> Lowerer<'a> {
     /// Does this tail call's callee CLOSURE die at the call node — i.e. is it a
     /// per-call local closure whose `DecrefRegion` the solver placed here, which
@@ -201,6 +228,14 @@ impl<'a> Lowerer<'a> {
             // arg instead would re-READ a cell a callee-run closure (`apply`)
             // may have reassigned, releasing the wrong value.
             let mut borrowed_arg_slots = Vec::new();
+            // If a LATER argument lowers a loop, its back-edge resets the operand
+            // stack and drops any earlier argument value parked there (see
+            // `hir_contains_loop`). Park every argument in a local as it is lowered
+            // and reload them adjacent to the call, so no argument value survives on
+            // the operand stack across the loop.
+            let spill_across_loop =
+                args.len() >= 2 && args.iter().skip(1).any(|a| hir_contains_loop(&a.expr));
+            let mut arg_spill_slots: Vec<Option<u16>> = Vec::new();
             for arg in args {
                 // For a tail call, a BORROWED arg must be handed the callee a
                 // fresh owning reference (see the move-on-tail-call comment at
@@ -246,7 +281,31 @@ impl<'a> Lowerer<'a> {
                     self.deferred_decref_points.remove(&arg.expr.id);
                     self.emit_decrefs_for(arg.expr.id, Some(reg));
                 }
+                // Park this argument off the operand stack (a `StoreLocal` auto-pops
+                // it) so a later argument's loop cannot clobber it; the value flows
+                // through the local unchanged, immediates included.
+                if spill_across_loop {
+                    let slot = self.current_func.num_locals;
+                    self.current_func.num_locals += 1;
+                    self.emit(LirInstr::StoreLocal { slot, src: reg });
+                    arg_spill_slots.push(Some(slot));
+                } else {
+                    arg_spill_slots.push(None);
+                }
                 arg_regs.push(reg);
+            }
+            // Reload the parked arguments in order, so they sit on the stack below
+            // the callee — the `[arg0..argN, func]` layout `Call` expects — freshly
+            // loaded past the loop that would otherwise have clobbered them.
+            for (i, slot) in arg_spill_slots.iter().enumerate() {
+                if let Some(slot) = *slot {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot,
+                    });
+                    arg_regs[i] = reloaded;
+                }
             }
             // Lower the callee. A self-reference here lowers to `LoadSelf` (the
             // executing closure) exactly as in value position, so the call re-enters
