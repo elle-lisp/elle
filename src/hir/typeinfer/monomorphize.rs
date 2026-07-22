@@ -9,8 +9,9 @@
 //! to a monomorphic `%`-op. The container is referenced in every arm, so the region
 //! solver places its single owned-arg release in the textually-last arm — a block the
 //! executed path never reaches, so the moved-in container argument's region is never
-//! reclaimed (one leaked region per call; `memory.md` § F1b, the dispatch-wrapper
-//! passthrough leak). A hand-collapsed single-arm wrapper does NOT leak: with one arm
+//! reclaimed (one leaked region per call — the dispatch-wrapper passthrough leak,
+//! pinned by the `native-tail-put-*` oracle controls). A hand-collapsed single-arm
+//! wrapper does NOT leak: with one arm
 //! the release lands on the executed path.
 //!
 //! ## What this pass does

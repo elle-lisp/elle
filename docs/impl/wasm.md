@@ -300,8 +300,9 @@ must uphold are worth calling out, because each is invisible on the VM/JIT path
 and each is pinned by a specific corpus file run under `--wasm=full`.
 
 - **io-backend externals are quiesced before the heap's teardown free-sweep.**
-  Every region instruction is a structural no-op on this tier (§ "The
-  backend-realization frontier" in memory.md), so a scheduler I/O backend — a
+  Every region instruction is a structural no-op on this tier (its emitter
+  lowers each to nothing — `src/wasm/instruction/dispatch.rs`), so a scheduler
+  I/O backend — a
   heap `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map
   holds `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a
   POSIX signal waiter, a spawned-process waiter) — is never reclaimed during

@@ -141,7 +141,7 @@ fn is_named_store_op(op: IntrinsicOp) -> bool {
 ///
 /// This is the store half of the container-read-escape flow: a value read back out
 /// of a container and escaped must not be adopted into the container's Owned subtree
-/// (`memory.md` § F1b; `region_container_read_escape_uaf`). The read edge marks these
+/// (pinned by `region_container_read_escape_uaf`). The read edge marks these
 /// exact contents escaping — and only when the read result itself escapes, so a
 /// container merely read/indexed with the result consumed locally keeps its contents
 /// interior (the precise gate the fixpoint gives for free).
@@ -197,7 +197,7 @@ pub(in crate::hir::escape) fn collect_flow(
     // atoms of everything stored into that container — the read-result →
     // container-contents edge. So an escaping read result pulls the container's stored
     // contents into the same facet, refusing their adoption into the container's Owned
-    // subtree (`memory.md` § F1b; `region_container_read_escape_uaf`). The edge fires
+    // subtree (pinned by `region_container_read_escape_uaf`). The edge fires
     // through the ordinary fixpoint ONLY when the read result actually escapes — a
     // container read with the result consumed locally seeds nothing, so its contents
     // stay interior (the precise gate, not the naive "every read escapes").

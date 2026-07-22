@@ -182,7 +182,7 @@
          :verdict (if (agree? a c) (get c :verdict) :contaminated))))
 
 # ── The defect / by-design split — the instrument owns the burndown headline ──
-# memory.md §4 gives every leak class a ROOT (F1a/F1b/F2/F3/F4/F5). A small fixed set
+# Every leak class has a ROOT (F1a/F1b/F2/F3/F4/F5), declared below. A small fixed set
 # of probes read open BY DESIGN — the module-level live-growth discriminator, the
 # sub-integer estimator self-test, and `push-accum` (whose residual is genuine per-op
 # `map` scratch it retains, § F1a) — and are NOT counted as defects. The open/closed
@@ -356,7 +356,7 @@
                        " ∉ [0.28,0.40] (expect 0.33)")))
 
 # ── The folded leak suite ─────────────────────────────────────────────
-# One dashboard covering every leak class (memory.md § 4), on the estimator. The
+# One dashboard covering every leak class (each declared a root below), on the estimator. The
 # shapes need different DRIVERS — one run-block per shape, all feeding the one
 # measure-core:
 #   - direct-loop (the table below): a per-op thunk run b times;
@@ -768,7 +768,7 @@
                            9) |:yield|)]
         (fiber/resume f)
         (fiber/cancel f :dead)
-        (fiber/status f))) 0]  # `fiber/abort` of a PARKED fiber (memory.md § F2). Abort injects an error
+        (fiber/status f))) 0]  # `fiber/abort` of a PARKED fiber (F2). Abort injects an error
    # and resumes the fiber for unwinding; with no in-body handler it lands `:error`,
    # which the model keeps RESUMABLE (the restarts system), so its re-parked frame
    # strands the DEAD CONTINUATION's pending value releases — the borrowed tail
@@ -908,7 +908,7 @@
 (pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
               0.5) 0)
 
-# ── Retained-closure reclamation (a self-reference cycle, memory.md § F4) ──
+# ── Retained-closure reclamation (a self-reference cycle, F4) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a
 # LOOP (0 — cell-free, reclaimed per call). These two RETAIN each returned closure in
 # a block-local @keep, so the question becomes whether the closure's own region
@@ -958,7 +958,7 @@
                    60 0.4 0.5) 0)
 
 # ── Stdlib / native-tail / discarded-tail leak classes ────────────────
-# Three more leak classes pinned in the one dashboard (memory.md §5 — leak state
+# Three more leak classes pinned in the one dashboard (leak state
 # read in one place). Each pin is the TRUE CURRENT rate, shrink-only: a fix LOWERS
 # it.
 #
@@ -985,7 +985,7 @@
 
 (println "── folded suite: stdlib / native-tail / discarded-tail canaries ──")
 
-# Stdlib per-call leak (memory.md § F1a — the transform-scratch retain). The leaked
+# Stdlib per-call leak (F1a — the transform-scratch retain). The leaked
 # objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
 # `recur-local-*` probes read 0) and NOT, mostly, cons cells. Stage 1 dissolved the
 # first/rest copy-scratch AND the per-call `go` closure: `fold`/`reduce` now
@@ -1061,7 +1061,7 @@
                    count-gauge 100 6 60 0.4 0.5) [24 32])
 
 # Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
-# (memory.md § F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
+# (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
 # aggregate used to route through the whole wrapper — a `(match (type-of coll) …)` that
 # used `coll` in EVERY arm with a single `decref_point` in one, stranding the owned-param
 # container reference on the other paths PLUS a redundant fresh-result retain. The
@@ -1171,7 +1171,7 @@
 #   with its own `DecrefValueRegion`, which balances the `moves_out` retain
 #   (`pop_with_decref`) that hands the element back.
 #
-#   F1b remove-wrapper (memory.md § F1b) — the stdlib `pop`/`del` `(match (type-of coll)
+#   F1b remove-wrapper — the stdlib `pop`/`del` `(match (type-of coll)
 #   …)` dispatch wrapper strands the container arg + fresh result on the arms the
 #   textually-last arm does not reach, exactly as the STORE wrappers (put/push/set) do.
 #   `pop` leaks (3): the leak is the multi-arm wrapper. Closes by the SAME mechanism as
@@ -1189,7 +1189,7 @@
                                (let [b (box (list 1 2))]
                                  (rebox b (list 3 4))))) count-gauge 100 6 60
                    0.4 0.5) 0)
-# F1b (memory.md § F1b) — the stdlib `add` `(match (type-of coll) …)` dispatch
+# F1b — the stdlib `add` `(match (type-of coll) …)` dispatch
 # wrapper reclaims its owned @set container AND its stored heap member (rate 0): the
 # `:@set` arm's `%add-set-mut` returns the container pass-through, and the wrapper's
 # per-arm container release (`regions::compensate`, `funnel_container_sites`) frees
@@ -1372,7 +1372,7 @@
 # that over-keep, not genuine retention (the gauge-live discriminator uses a
 # MODULE-level sink, `probe-disc`, and is unaffected). `push-accum` still leaks: its
 # residual is the per-op `map` scratch (§ F1a), which the accumulator's release does
-# not reach. `struct-outer` is the fn-local reassign-1-slot over-keep (memory.md § F5).
+# not reach. `struct-outer` is the fn-local reassign-1-slot over-keep (F5).
 # `string-outer`/`append-outer` are the `concat`/`append` per-call scratch leak
 # (§ F1a), NOT accumulator growth — flat per-iter (minus the 1 the self-reassign
 # reclaims), so they shrink when F1a closes, not when the loop ends.
@@ -1479,7 +1479,7 @@
                        (if (%lt (%rem j 2) 1) (t17-h) (t17-h2))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The raw `%array-push`/`%put` into a fresh container, discarded: the CONTROL for
-# F1b (memory.md § F1b — the dispatch-wrapper passthrough leak). The raw intrinsic
+# F1b — the dispatch-wrapper passthrough leak. The raw intrinsic
 # reclaims the container in BOTH intrinsics modes (rate 0), so the over-keep
 # `put-churn` shows below (2/op) rides the stdlib `put`/`push` type-dispatch WRAPPER,
 # not the store funnel. Direct while-statements (a thunk wrapper's return convention
@@ -1609,7 +1609,7 @@
 
 # ── The split headline — the number §1's protocol reads, printed by the tool ──
 # `open defects` is the burndown count; `by-design` is the fixed growth set; `roots` is
-# how many of memory.md §4's six roots still have an open probe (it falls to 0
+# how many of the six declared roots still have an open probe (it falls to 0
 # when the last defect closes). UNCLASSIFIED is appended only when a probe leaked
 # without a declaration — a stale ledger, gated below so it can never pass silently.
 (println "── split ──")

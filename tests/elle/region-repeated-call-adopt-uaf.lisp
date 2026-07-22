@@ -11,7 +11,7 @@
 # runtime auto-incref over the driver's env keeps it live across every call, and
 # no subtree drop frees it under the live cell.
 #
-# Two gauges pin the two properties independently (memory.md § 5):
+# Two gauges pin the two properties independently:
 #   - plain VM asserts the repeated calls do not grow live regions without
 #     bound (the activation regions ARE reclaimed);
 #   - `--trace=guardfree` asserts soundness — no region is freed while a

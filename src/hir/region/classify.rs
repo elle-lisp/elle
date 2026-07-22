@@ -86,8 +86,8 @@ pub struct CallClassification {
     /// container-contents** flow edge: a value stored into a container and then read
     /// back out and escaped must not be adopted into the container's Owned subtree
     /// (else the container's subtree drop frees a value that flows out — the
-    /// container-read-escape face, `memory.md` § F1b / the `region_container_read_escape_uaf`
-    /// pin). Populated by `PrimitiveClassification::new`.
+    /// container-read-escape face, pinned by `region_container_read_escape_uaf`).
+    /// Populated by `PrimitiveClassification::new`.
     pub container_read_funnels: FxHashSet<SymbolId>,
     /// The SymbolId of `fiber/new`, when the symbol table carries it — the
     /// transferred-returned-subtree cut (`regions::ownership::transfer`) must
