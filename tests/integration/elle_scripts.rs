@@ -170,6 +170,23 @@ fn region_map_fuse_uaf() {
     );
 }
 
+// Filter loop fusion (docs/impl/dissolution.md) dissolves `(filter p xs)` over a
+// proven immutable array into an index-walk loop with a GUARDED push: the element
+// is bound once, the predicate tested, and the element pushed into a fresh @array
+// only when it passes. Driving that path with HEAP element values (strings,
+// structs) must not free a base element under the predicate/push read, nor an
+// accumulator member before the frozen result is consumed — either over-free
+// SIGSEGVs under guardfree. The filter-of-filter case pins the guarded push of a
+// heap value through nested `if`s. Fires only on the fused shape; the plain-VM
+// run asserts the values.
+#[test]
+fn region_filter_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-filter-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

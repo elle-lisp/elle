@@ -7,8 +7,9 @@ realizes a higher-order call as its most efficient form. `(map f xs)` over an
 owned, non-escaping `xs` exposes no observable closure and no observable
 intermediate collection, so the compiler is free to realize it as a plain loop
 with `f`'s body spliced in, a JIT'd group, CPU SIMD, or a device dispatch. This
-document specifies the first realization: **map-chain loop fusion** on the VM
-substrate (`src/hir/typeinfer/fuse.rs`).
+document specifies the first realization: **HOF-chain loop fusion** on the VM
+substrate (`src/hir/typeinfer/fuse.rs`), covering the two array-producing
+higher-order ops `map` and `filter`.
 
 ## What the pass does
 
@@ -57,22 +58,61 @@ no intermediate. This is the shape a `map`-tower reduces to; the depth of the
 chain becomes the nesting depth of one element expression, not a stack of
 allocations.
 
+## Filter — the conditional push
+
+`filter` shares `map`'s scaffold — the same `(get`/`push`/`freeze)` index-walk
+over the base's array arm — and differs only in the per-element loop body. Where
+`map` pushes `f`'s *result*, `filter` pushes the *element itself*, gated by the
+predicate (mirroring `filter`'s own array arm, `src/stdlib.lisp`):
+
+```
+(filter (fn [x] PRED) [ … ])
+⇒
+  (while (< i len)
+    (push acc … )   ⟶   (let [item (get coll i)]
+                          (if (let [x item] PRED) (push acc item) nil))
+    …)
+```
+
+A `filter`-of-`filter` chain nests the guards innermost-first — the element is
+bound once and pushed only when every predicate passes:
+
+```
+(let [item (get coll i)]
+  (if (let [p item] P-BODY)
+    (if (let [q item] Q-BODY) (push acc item) nil)
+    nil))
+```
+
+The predicate closures dissolve exactly as `map`'s transform closures do, and the
+accumulator/`freeze` are identical, so the result is one frozen array of the
+survivors with no per-element closure and no `filter` dispatch.
+
+**Homogeneous chains only.** A chain fuses when every op in it is the *same* HOF
+(`map`-of-`map`, or `filter`-of-`filter`). A mixed `(map f (filter p xs))` is
+left to the general path at the outer op — the chain walk stops at the kind
+change, and the differing inner call is not a proven immutable-array base — but
+the inner homogeneous run still fuses on the pre-order recursion, so
+`(map f (filter p xs))` fuses the `filter` and leaves the `map` a plain call over
+the fused loop. Mixing `map` and `filter` in one loop is a later widening (it
+needs the unified transform/guard pipeline and the same reorder gate below).
+
 ## When it is legal — the gate
 
-Fusion preserves the program's value and, for the single-`map` case, its exact
-per-element evaluation order (the loop applies `f` to each element left to
-right, identically to `map`). The gate:
+Fusion preserves the program's value and, for a single op (`map` or `filter`),
+its exact per-element evaluation order (the loop visits each element left to
+right, applying `f`/`p` identically to the stdlib op). The gate:
 
-- **The callee is the canonical stdlib `map`.** Recognized by the callee binding
-  being `is_primitive` (every stdlib export is bound so by `bind_primitives`;
-  a user redefinition shadows it with a non-primitive binding) and named `map`.
-  A user `map` is never rewritten.
+- **The callee is the canonical stdlib `map` or `filter`.** Recognized by the
+  callee binding being `is_primitive` (every stdlib export is bound so by
+  `bind_primitives`; a user redefinition shadows it with a non-primitive binding)
+  and named `map` or `filter`. A user redefinition is never rewritten.
 - **`xs` is a proven immutable array.** One of: an array literal (`[ … ]`, which
   analyzes to a call to the `array` primitive, `RetType::Array`) or any
   `RetType::Array` primitive call at the call site; a `Var` alias whose
   initializer is such an array, followed through immutable, unmutated,
-  singly-bound `let`/`def` bindings to a fixpoint; or another fusable `map` chain
-  over such a base. The alias proof is the **same** one dead-arm pruning reads at
+  singly-bound `let`/`def` bindings to a fixpoint; or another fusable same-HOF
+  chain over such a base. The alias proof is the **same** one dead-arm pruning reads at
   this stage — the binding→concrete-`type-of`-keyword map `prune.rs` builds
   (`classify_init`/`resolve`); a base whose keyword resolves to `array` is a
   proven immutable array. Reusing that map is not incidental: an over-broad
@@ -81,30 +121,36 @@ right, identically to `map`). The gate:
   The immutable-array proof selects the frozen-result arm; a mutable `@array`
   input (keyword `@array`) is left to the stdlib `map` (its result aliases the
   input's mutability — handled by the general path, not here).
-- **`f` is a non-capturing single-parameter lambda** written directly as the
-  call's argument. No captures means `f`'s body references only its parameter
+- **`f`/`p` is a non-capturing single-parameter lambda** written directly as the
+  call's argument. No captures means the body references only its parameter
   and globals, so splicing it at the call site is always in scope; a single
   fixed parameter (no rest) means the element binds 1:1. The lambda is consumed
   by the rewrite (moved out of the call), so no other use of it can observe the
   change.
 
-For a **composition** (`map`-of-`map`), the pass additionally requires each
-lambda body to be free of **sequencing effects** — no yield, I/O, emit, FFI, or
-halt (`reorder_safe`): composition interleaves the transforms
-(`f x0; g …; f x1; g …`) rather than running all of `f` then all of `g`, so it
-reorders the per-element work. Reordering is observable only through such an
-effect, and a non-capturing lambda's only cross-element channel is one; a body
-with none reorders unobservably. `SIG_ERROR` is deliberately permitted — error
-reordering changes only *which* of several errors surfaces (each still surfaces
-as an error), and a dissolvable numeric kernel over proven data does not error;
-refusing it would forbid every arithmetic tower, the shape this fusion exists to
-collapse. A single `map` never reorders and carries no such requirement.
+For a **composition** (a chain of length ≥ 2 — `map`-of-`map` or
+`filter`-of-`filter`), the pass additionally requires each lambda body to be free
+of **sequencing effects** — no yield, I/O, emit, FFI, or halt (`reorder_safe`):
+composition interleaves the per-element work (`f x0; g …; f x1; g …`, or
+`p x0; q …; p x1; q …`) rather than running all of the first op then all of the
+second, so it reorders that work. For `filter`-of-`filter` the survivor *set* and
+its order are unchanged either way — the outer predicate still runs only on the
+inner's survivors, left to right; only the *interleaving* of the two predicates'
+calls differs, which the gate makes unobservable. Reordering is observable only
+through a sequencing effect, and a non-capturing lambda's only cross-element
+channel is one; a body with none reorders unobservably. `SIG_ERROR` is
+deliberately permitted — error reordering changes only *which* of several errors
+surfaces (each still surfaces as an error), and a dissolvable numeric kernel over
+proven data does not error; refusing it would forbid every arithmetic tower, the
+shape this fusion exists to collapse. A single op never reorders and carries no
+such requirement.
 
 Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/`+`/
-`length`/`@array`) are set to the original `map` call's signal — a sound upper
-bound (that call's signal already subsumes every op in `map`'s body) — so the
-bottom-up signal re-propagation (`hir/narrow.rs`) never under-reports the fused
-form's effects. The spliced lambda bodies keep their own signals.
+`length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
+original call's signal — a sound upper bound (that call's signal already subsumes
+every op in the stdlib op's body) — so the bottom-up signal re-propagation
+(`hir/narrow.rs`) never under-reports the fused form's effects. The spliced lambda
+bodies keep their own signals.
 
 ## Why a call-site rewrite, not a stdlib edit
 
@@ -135,12 +181,14 @@ Dissolution is a **realization** goal, not a leak goal — it is proven at the
 codegen and execution levels, not on the leak oracle. Three pins:
 
 - **Codegen (structure).** `src/hir/typeinfer/fuse.rs` `mod tests` compile a `map`
-  / `map`-of-`map` form and assert on the lowered HIR: the `map` callee is gone,
-  `f`'s body op appears inline in the loop, and the composed case has a single
-  accumulator with no intermediate. Decline pins guard the gate (user-shadowed
-  `map`, capturing lambda, unproven collection, raw-intrinsic body).
-- **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` proves the
-  consequence the mission names — *fewer allocations*. It measures
+  / `map`-of-`map` / `filter` / `filter`-of-`filter` form and assert on the lowered
+  HIR: the HOF callee is gone, the body op appears inline in the loop, the composed
+  case has a single accumulator with no intermediate, and `filter` emits the guarded
+  push (an `if`). Decline pins guard the gate (user-shadowed callee, capturing
+  lambda, unproven collection, raw-intrinsic body, mixed `map`/`filter`).
+- **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (and the
+  filter cases in `dissolution-filter-fuse.lisp`) prove the consequence the mission
+  names — *fewer allocations*. It measures
   `arena/total-allocs` (a **cumulative, monotonic** count of objects ever minted;
   `src/value/fiberheap/`) around a fused chain versus an un-fused reference
   computing the same value, and asserts the fused form mints strictly fewer, with
@@ -149,8 +197,9 @@ codegen and execution levels, not on the leak oracle. Three pins:
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
   GC-timing noise), so these are exact `<` relations.
-- **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp` (value-preserving,
-  incl. the declined shapes) and `tests/elle/region-map-fuse-uaf.lisp` (guardfree
+- **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp` and
+  `dissolution-filter-fuse.lisp` (value-preserving, incl. the declined shapes) and
+  `tests/elle/region-map-fuse-uaf.lisp` / `region-filter-fuse-uaf.lisp` (guardfree
   over heap element/base values).
 
 The leak oracle is only a non-regression check here.

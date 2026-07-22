@@ -1,41 +1,47 @@
-//! Map-chain loop fusion — the first closure dissolution (docs/impl/dissolution.md).
+//! HOF-chain loop fusion — the first closure dissolution (docs/impl/dissolution.md).
 //!
-//! At a call `(map f xs)` where `xs` is a statically-proven immutable array and
-//! `f` is a non-capturing single-parameter lambda written at the call site, this
-//! rewrites the cross-unit `map` dispatch to the index-walk loop `map`'s own
-//! array arm runs (`src/stdlib.lisp`) — but with `f`'s body **spliced inline**
-//! rather than called through a closure value. The closure ceases to exist: no
-//! per-element closure allocation, no indirect call. A composition
-//! `(map g (map f xs))` fuses to a **single** loop whose element expression
-//! nests the transforms, so the intermediate array the inner `map` would have
-//! allocated never exists.
+//! At a call `(map f xs)` / `(filter p xs)` where `xs` is a statically-proven
+//! immutable array and the lambda is a non-capturing single-parameter one written
+//! at the call site, this rewrites the cross-unit stdlib dispatch to the
+//! index-walk loop that op's own array arm runs (`src/stdlib.lisp`) — but with the
+//! lambda body **spliced inline** rather than called through a closure value. The
+//! closure ceases to exist: no per-element closure allocation, no indirect call.
+//! `map` pushes each transform's result; `filter` pushes the element itself under
+//! an `if` guard. A same-HOF composition — `(map g (map f xs))` or
+//! `(filter q (filter p xs))` — fuses to a **single** loop (the transforms nest,
+//! or the guards nest), so the intermediate array the inner op would have
+//! allocated never exists. A mixed `map`/`filter` chain fuses its inner
+//! homogeneous run only (see `validate_chain`); mixing them in one loop is a later
+//! widening.
 //!
 //! ## Why this shape, here
 //!
-//! The pass emits *surface* HIR — plain `while`/`push`/`freeze`, the same shape
-//! `map`'s body has before functionalization — and runs in `regularize`
-//! (`src/hir/regularize.rs`) **before** `functionalize`. So every downstream
-//! pass consumes the fused loop exactly as it consumes `map`'s own body: the
-//! `while` becomes a `loop`/`recur`, `push` monomorphizes to `%push-array-mut`
-//! on the proven `@array` accumulator, region inference frees the accumulator by
-//! subtree drop. The pass never hand-builds a `loop`/`recur` or a capture cell.
+//! The pass emits *surface* HIR — plain `while`/`push`/`freeze` (plus `if` for
+//! `filter`), the same shape the stdlib op's body has before functionalization —
+//! and runs in `regularize` (`src/hir/regularize.rs`) **before** `functionalize`.
+//! So every downstream pass consumes the fused loop exactly as it consumes the
+//! op's own body: the `while` becomes a `loop`/`recur`, `push` monomorphizes to
+//! `%push-array-mut` on the proven `@array` accumulator, region inference frees
+//! the accumulator by subtree drop. The pass never hand-builds a `loop`/`recur`
+//! or a capture cell.
 //!
 //! It mirrors the container-dispatch monomorphization (`monomorphize.rs`):
 //! recognize a proven-type call across the compile-unit boundary (the callee is
-//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`; a user
-//! redefinition shadows it with a non-primitive binding and is left alone) and
-//! collapse it to the direct form the proof selects.
+//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`filter`;
+//! a user redefinition shadows it with a non-primitive binding and is left alone)
+//! and collapse it to the direct form the proof selects.
 //!
 //! ## Legality
 //!
-//! Fusion preserves the program's value. A single `map` also preserves the exact
-//! per-element evaluation order (the loop applies `f` left to right, identically
-//! to `map`), so it needs no purity gate. A **composition** interleaves the
-//! transforms (`f x0; g …; f x1; g …`) rather than running all of `f` then all
-//! of `g` — a reorder observable only through sequencing effects — so each
-//! lambda body in a chain of length ≥ 2 must be free of them (`reorder_safe`):
-//! no yield/I/O/emit/FFI/halt (a non-capturing lambda's only cross-element
-//! channel is such an effect). `SIG_ERROR` is permitted; see `reorder_safe`.
+//! Fusion preserves the program's value. A single op also preserves the exact
+//! per-element evaluation order (the loop applies the lambda left to right,
+//! identically to the stdlib op), so it needs no purity gate. A **composition**
+//! interleaves the per-element work (`f x0; g …; f x1; g …`) rather than running
+//! all of the first op then all of the second — a reorder observable only through
+//! sequencing effects — so each lambda body in a chain of length ≥ 2 must be free
+//! of them (`reorder_safe`): no yield/I/O/emit/FFI/halt (a non-capturing lambda's
+//! only cross-element channel is such an effect). `SIG_ERROR` is permitted; see
+//! `reorder_safe`.
 
 use super::prune::concrete_init_keywords;
 use super::unwrap_callee_binding;
@@ -110,38 +116,100 @@ pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: 
     // base-var bindings live in enclosing `let`s that fusion never mutates, so the
     // proof stays valid as inner map calls collapse.
     let bases = concrete_init_keywords(hir, arena, &symbol_names);
-    rewrite(hir, arena, &symbol_names, &ops, &bases);
+    rewrite(hir, arena, &symbol_names, &ops, &bases, false);
 }
 
-/// Pre-order walk: try to fuse a `map` chain rooted at `hir` (consuming the whole
-/// chain, including its inner `map` calls); whether or not it fused, recurse into
-/// the resulting node's children (which fuses nested `map`s in the spliced lambda
+/// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
+/// chain, including its inner HOF calls); whether or not it fused, recurse into
+/// the resulting node's children (which fuses nested HOFs in the spliced lambda
 /// bodies or the base array's elements).
+///
+/// `suppress` blocks fusion at this node (but not the recursion). It is set for
+/// any subtree positioned **after a surviving lambda-literal argument** in the
+/// same function body: a fused loop lowers to a `block`/`loop`, and a lambda
+/// literal that is allocated *before* a loop in the same function body and then
+/// called is mis-lowered to a phantom extra parameter (an arity error at the
+/// call). The fusion consumes its own lambda, so a single/composed HOF in
+/// statement, binding, or native-argument position is always safe; the unsafe
+/// shape is a fused loop landing beside a lambda the fusion did NOT consume —
+/// e.g. the mixed `(map f (filter p xs))`, where `map`'s `f` survives and the
+/// inner `filter` would fuse. Suppression propagates through nested expressions
+/// and **resets at a `Lambda` boundary** (a nested lambda body is a separate
+/// lowered function, so an outer sibling lambda cannot clobber a loop inside it).
 fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,
     symbol_names: &HashMap<u32, String>,
     ops: &Ops,
     bases: &FxHashMap<Binding, &'static str>,
+    suppress: bool,
 ) {
-    if let Some(len) = validate_chain(hir, arena, symbol_names, bases) {
-        let sig = hir.signal;
-        let span = hir.span.clone();
-        let owned = std::mem::replace(hir, Hir::error(span.clone()));
-        let (transforms, base) = take_chain(owned, len);
-        *hir = build_loop(transforms, base, arena, ops, sig, span);
+    if !suppress {
+        if let Some((hof, len)) = validate_chain(hir, arena, symbol_names, bases) {
+            let sig = hir.signal;
+            let span = hir.span.clone();
+            let owned = std::mem::replace(hir, Hir::error(span.clone()));
+            let (transforms, base) = take_chain(owned, len);
+            *hir = build_loop(hof, transforms, base, arena, ops, sig, span);
+        }
     }
-    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases));
+    match &mut hir.kind {
+        // A lambda body is a separate lowered function: reset the unsafe context.
+        HirKind::Lambda { body, .. } => rewrite(body, arena, symbol_names, ops, bases, false),
+        // An argument after a lambda-literal sibling is unsafe (see above); the
+        // suppression carries into that argument's whole subtree.
+        HirKind::Call { func, args, .. } => {
+            rewrite(func, arena, symbol_names, ops, bases, suppress);
+            let mut after_lambda = false;
+            for a in args.iter_mut() {
+                let is_lambda = matches!(a.expr.kind, HirKind::Lambda { .. });
+                rewrite(
+                    &mut a.expr,
+                    arena,
+                    symbol_names,
+                    ops,
+                    bases,
+                    suppress || after_lambda,
+                );
+                after_lambda |= is_lambda;
+            }
+        }
+        _ => hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, suppress)),
+    }
 }
 
-/// A recognized `(map <lambda> …)` call: the lambda argument and the collection
-/// argument, both borrowed. `None` when `hir` is not a call to the canonical
-/// stdlib `map` with exactly two non-spliced arguments.
-fn fusable_map_parts<'a>(
+/// The higher-order collection op a fused chain is built from. Both take
+/// `(lambda, coll)` and run the same `(get`/`push`/`freeze)` index-walk over
+/// `coll`'s array arm; they differ only in the per-element loop body
+/// (`build_loop`): `Map` pushes the lambda's *result*, `Filter` pushes the
+/// element itself under an `if` guard.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hof {
+    Map,
+    Filter,
+}
+
+impl Hof {
+    /// The canonical stdlib name this op is recognized by.
+    fn from_name(name: &str) -> Option<Hof> {
+        match name {
+            "map" => Some(Hof::Map),
+            "filter" => Some(Hof::Filter),
+            _ => None,
+        }
+    }
+}
+
+/// A recognized `(map <lambda> …)` / `(filter <lambda> …)` call: the HOF kind,
+/// the lambda argument, and the collection argument (both borrowed). `None` when
+/// `hir` is not a call to the canonical stdlib `map`/`filter` with exactly two
+/// non-spliced arguments (a user redefinition shadows the name with a
+/// non-primitive binding and is excluded).
+fn fusable_hof_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
-) -> Option<(&'a Hir, &'a Hir)> {
+) -> Option<(Hof, &'a Hir, &'a Hir)> {
     let HirKind::Call { func, args, .. } = &hir.kind else {
         return None;
     };
@@ -150,10 +218,11 @@ fn fusable_map_parts<'a>(
     }
     let callee = unwrap_callee_binding(func)?;
     let bi = arena.get(callee);
-    if !bi.is_primitive || symbol_names.get(&bi.name.0).map(String::as_str) != Some("map") {
+    if !bi.is_primitive {
         return None;
     }
-    Some((&args[0].expr, &args[1].expr))
+    let hof = Hof::from_name(symbol_names.get(&bi.name.0)?)?;
+    Some((hof, &args[0].expr, &args[1].expr))
 }
 
 /// The parameter binding and body of a lambda that qualifies for inlining, or
@@ -208,32 +277,45 @@ fn body_disqualifies(hir: &Hir) -> bool {
     found
 }
 
-/// Validate that `hir` is a fusable `map` chain and return its length (the number
-/// of nested `map`s). The chain bottoms out at a proven immutable array; every
-/// lambda qualifies (`qualifies_lambda`); and for a composition (length ≥ 2)
-/// every lambda body is `reorder_safe` (the reordering gate — see the module doc).
+/// Validate that `hir` is a fusable **homogeneous** HOF chain and return its kind
+/// and length (the number of nested ops). The chain bottoms out at a proven
+/// immutable array; every op is the same HOF (`map`-of-`map` or
+/// `filter`-of-`filter`); every lambda qualifies (`qualifies_lambda`); and for a
+/// composition (length ≥ 2) every lambda body is `reorder_safe` (the reordering
+/// gate — see the module doc).
+///
+/// A kind change ends the chain: the walk stops and the differing call becomes the
+/// base candidate, which is not a proven immutable array, so a mixed
+/// `(map f (filter p xs))` declines at the outer op. The inner homogeneous run
+/// still fuses on the pre-order recursion (`rewrite`).
 fn validate_chain(
     hir: &Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
-) -> Option<usize> {
+) -> Option<(Hof, usize)> {
     let mut len = 0usize;
     let mut all_silent = true;
+    let mut kind: Option<Hof> = None;
     let mut cur = hir;
-    while let Some((lam, coll)) = fusable_map_parts(cur, arena, symbol_names) {
+    while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
+        if kind.is_some_and(|k| k != hof) {
+            break;
+        }
         let (_, body) = qualifies_lambda(lam, arena)?;
         all_silent &= reorder_safe(body.signal);
+        kind = Some(hof);
         len += 1;
         cur = coll;
     }
-    if len == 0 || !coll_is_immutable_array(cur, arena, symbol_names, bases) {
+    let hof = kind?;
+    if !coll_is_immutable_array(cur, arena, symbol_names, bases) {
         return None;
     }
     if len >= 2 && !all_silent {
         return None;
     }
-    Some(len)
+    Some((hof, len))
 }
 
 /// May a lambda body be safely reordered against sibling per-element work in a
@@ -285,49 +367,59 @@ fn coll_is_immutable_array(
     crate::primitives::registration::def_by_name(name).map(|d| d.ret) == Some(RetType::Array)
 }
 
-/// Consume a validated chain of `len` nested `map` calls, returning the per-
-/// element transforms in **application order** (innermost `map`'s `f` first) and
-/// the base collection expression. Validation (`validate_chain`) guarantees the
+/// Consume a validated chain of `len` nested HOF calls, returning the per-element
+/// lambdas (`(param, body)`) in **application order** (innermost op's lambda
+/// first) and the base collection expression. For `map` these are transforms; for
+/// `filter` they are predicates. Validation (`validate_chain`) guarantees the
 /// structure, so the destructuring is total.
 fn take_chain(mut expr: Hir, len: usize) -> (Vec<(Binding, Hir)>, Hir) {
-    let mut transforms = Vec::with_capacity(len);
+    let mut lambdas = Vec::with_capacity(len);
     for _ in 0..len {
         let HirKind::Call { args, .. } = expr.kind else {
-            unreachable!("validate_chain proved a map call");
+            unreachable!("validate_chain proved a HOF call");
         };
         let mut it = args.into_iter();
-        let lam = it.next().expect("map has 2 args").expr;
-        let coll = it.next().expect("map has 2 args").expr;
+        let lam = it.next().expect("HOF has 2 args").expr;
+        let coll = it.next().expect("HOF has 2 args").expr;
         let HirKind::Lambda { params, body, .. } = lam.kind else {
             unreachable!("validate_chain proved a lambda");
         };
-        transforms.push((params[0], *body));
+        lambdas.push((params[0], *body));
         expr = coll;
     }
     // Collected outer→inner; application order is inner→outer.
-    transforms.reverse();
-    (transforms, expr)
+    lambdas.reverse();
+    (lambdas, expr)
 }
 
-/// Build the fused index-walk loop from the transforms and base collection.
+/// Build the fused index-walk loop from the per-element lambdas and base
+/// collection. The `(get`/`push`/`freeze)` scaffold is shared; only the loop body
+/// differs by HOF.
 ///
+/// `map` pushes each transform's result:
 /// ```text
-/// (let [coll BASE]
-///   (let [len (length coll)]
-///     (let [acc (@array)]
-///       (define i 0)
-///       (while (< i len)
-///         (push acc (let [p0 (get coll i)] B0 … as nested lets …))
-///         (assign i (+ i 1)))
-///       (freeze acc))))
+/// (while (< i len)
+///   (push acc (let [p0 (get coll i)] B0 … as nested lets …))
+///   (assign i (+ i 1)))
 /// ```
 ///
-/// The synthesized helper calls carry `sig` (the original `map` call's signal, a
-/// sound upper bound over every op in `map`'s body); the spliced lambda bodies
-/// keep their own signals. Bottom-up re-propagation (`hir/narrow.rs`) then
-/// rebuilds the fused form's signal from these leaves without under-reporting.
+/// `filter` binds the element once and pushes it under a guard per predicate
+/// (nested innermost-first, so the first-applied filter is the outer `if`):
+/// ```text
+/// (while (< i len)
+///   (let [item (get coll i)]
+///     (if (let [p item] P0) (if (let [q item] P1) (push acc item) nil) nil))
+///   (assign i (+ i 1)))
+/// ```
+///
+/// The synthesized helper calls and `if`/`let` scaffolding carry `sig` (the
+/// original call's signal, a sound upper bound over every op in the stdlib op's
+/// body); the spliced lambda bodies keep their own signals. Bottom-up
+/// re-propagation (`hir/narrow.rs`) then rebuilds the fused form's signal from
+/// these leaves without under-reporting.
 fn build_loop(
-    transforms: Vec<(Binding, Hir)>,
+    hof: Hof,
+    lambdas: Vec<(Binding, Hir)>,
     base: Hir,
     arena: &mut BindingArena,
     ops: &Ops,
@@ -348,6 +440,7 @@ fn build_loop(
     let node = |kind: HirKind| Hir::new(kind, span.clone(), sig);
     let var = |b: Binding| Hir::new(HirKind::Var(b), span.clone(), Signal::silent());
     let int = |n: i64| Hir::new(HirKind::Int(n), span.clone(), Signal::silent());
+    let nil = || Hir::new(HirKind::Nil, span.clone(), Signal::silent());
     let call = |f: Binding, args: Vec<Hir>| {
         Hir::new(
             HirKind::Call {
@@ -365,30 +458,61 @@ fn build_loop(
             sig,
         )
     };
-
-    // The per-element expression: (get coll i) fed through each transform, each
-    // a (let [param elem] body). The parameter — no longer a lambda parameter,
-    // since the lambda is consumed — is retyped to a plain immutable local so
-    // the lowerer allocates it a local slot, not an argument slot.
-    let mut elem = call(ops.get, vec![var(coll_b), var(i_b)]);
-    for (param, body) in transforms {
+    // Each spliced lambda parameter — no longer a lambda parameter, since the
+    // lambda is consumed — is retyped to a plain immutable local so the lowerer
+    // gives it a local slot, not an argument slot.
+    let to_local = |arena: &mut BindingArena, param: Binding| {
         let pi = arena.get_mut(param);
         pi.scope = BindingScope::Local;
         pi.is_immutable = true;
-        elem = node(HirKind::Let {
-            bindings: vec![(param, elem)],
-            body: Box::new(body),
-        });
-    }
+    };
 
-    let push_stmt = call(ops.push, vec![var(acc_b), elem]);
+    let body_stmt = match hof {
+        // (push acc (let [p0 (get coll i)] B0 … nested innermost-first …))
+        Hof::Map => {
+            let mut elem = call(ops.get, vec![var(coll_b), var(i_b)]);
+            for (param, body) in lambdas {
+                to_local(arena, param);
+                elem = node(HirKind::Let {
+                    bindings: vec![(param, elem)],
+                    body: Box::new(body),
+                });
+            }
+            call(ops.push, vec![var(acc_b), elem])
+        }
+        // (let [item (get coll i)]
+        //   (if (let [p item] P0) … (push acc item) …))
+        // The element is bound once and pushed only when every predicate passes;
+        // guards nest innermost-first (the first-applied filter is the outer `if`),
+        // so fold the predicates in reverse application order around the push.
+        Hof::Filter => {
+            let item_b = local(arena);
+            let mut guarded = call(ops.push, vec![var(acc_b), var(item_b)]);
+            for (param, pred) in lambdas.into_iter().rev() {
+                to_local(arena, param);
+                let cond = node(HirKind::Let {
+                    bindings: vec![(param, var(item_b))],
+                    body: Box::new(pred),
+                });
+                guarded = node(HirKind::If {
+                    cond: Box::new(cond),
+                    then_branch: Box::new(guarded),
+                    else_branch: Box::new(nil()),
+                });
+            }
+            node(HirKind::Let {
+                bindings: vec![(item_b, call(ops.get, vec![var(coll_b), var(i_b)]))],
+                body: Box::new(guarded),
+            })
+        }
+    };
     let incr = node(HirKind::Assign {
         target: i_b,
         value: Box::new(call(ops.add, vec![var(i_b), int(1)])),
     });
     let while_loop = node(HirKind::While {
         cond: Box::new(call(ops.lt, vec![var(i_b), var(len_b)])),
-        body: Box::new(node(HirKind::Begin(vec![push_stmt, incr]))),
+        body: Box::new(node(HirKind::Begin(vec![body_stmt, incr]))),
     });
     let define_i = node(HirKind::Define {
         binding: i_b,
@@ -452,6 +576,14 @@ mod tests {
     fn count_lambdas(h: &Hir) -> usize {
         let mut n = usize::from(matches!(h.kind, HirKind::Lambda { .. }));
         h.for_each_child(|c| n += count_lambdas(c));
+        n
+    }
+
+    /// Count the `if` nodes — a fused `filter` emits one guarded push per
+    /// predicate stage; a fused `map` emits none.
+    fn count_ifs(h: &Hir) -> usize {
+        let mut n = usize::from(matches!(h.kind, HirKind::If { .. }));
+        h.for_each_child(|c| n += count_ifs(c));
         n
     }
 
@@ -551,6 +683,124 @@ mod tests {
             cs.iter().any(|n| n == "map"),
             "an unproven collection must not fuse; callees were {cs:?}",
         );
+    }
+
+    /// A single `filter` dissolves to the guarded-push index-walk: the `filter`
+    /// dispatch is gone, no closure survives, the predicate op (`>` — deliberately
+    /// absent from the loop scaffold, which uses only `<`/`+`) runs inline, and the
+    /// loop body is an `if` (the conditional push) over one frozen accumulator.
+    /// Fails before filter fusion lands: the `filter` call and the `(fn …)` closure
+    /// are both present and there is no synthesized `if`.
+    #[test]
+    fn single_filter_dissolves_to_guarded_push() {
+        let (hir, arena, names) = compile("(filter (fn [x] (> x 2)) [1 2 3 4])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "filter"),
+            "the `filter` dispatch must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == ">"),
+            "the predicate op `>` must run inline; callees were {cs:?}",
+        );
+        assert!(
+            count_ifs(&hir) >= 1,
+            "the fused filter must emit a guarded push (an `if`)",
+        );
+        assert_eq!(
+            cs.iter().filter(|n| *n == "@array").count(),
+            1,
+            "exactly one accumulator; callees were {cs:?}",
+        );
+        assert!(
+            cs.iter().any(|n| n == "freeze"),
+            "the fused loop must freeze one accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// A `filter`-of-`filter` fuses to a SINGLE loop with the guards nested: no
+    /// `filter`, both predicate ops (`even?` and `integer?`) inline, one
+    /// accumulator, and two `if`s (one per predicate). The predicates must be
+    /// reorder-safe for a length-2 composition to fuse (the reordering gate — a
+    /// variadic comparison like `>` routes through `apply` and is NOT reorder-safe,
+    /// so it fuses as a single filter but declines composition; `even?`/`integer?`
+    /// carry only `SIG_ERROR`). Fails before fusion: two `filter` calls, two closures.
+    #[test]
+    fn composed_filters_fuse_to_one_loop() {
+        let (hir, arena, names) =
+            compile("(filter (fn [y] (even? y)) (filter (fn [x] (integer? x)) [1 2 3 4 5]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "filter"),
+            "both `filter` dispatches must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "integer?"),
+            "both predicates must inline; callees were {cs:?}",
+        );
+        assert_eq!(
+            cs.iter().filter(|n| *n == "@array").count(),
+            1,
+            "one loop, one accumulator; callees were {cs:?}",
+        );
+        assert!(
+            count_ifs(&hir) >= 2,
+            "each predicate stage emits its own guard `if`",
+        );
+    }
+
+    /// A `filter` over a `Var`-bound immutable array fuses — the base-alias proof
+    /// and the guarded-push shape compose.
+    #[test]
+    fn filter_over_var_bound_immutable_array_fuses() {
+        let (hir, arena, names) = compile("(let [xs [1 2 3 4]] (filter (fn [x] (> x 2)) xs))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "filter"),
+            "a Var-bound base must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(count_ifs(&hir) >= 1, "the guarded push must be present");
+    }
+
+    /// Scope boundary: a MIXED `(map f (filter p xs))` fuses NOTHING. The outer
+    /// `map` is homogeneous-only (declines over a filter), and the inner `filter`
+    /// is suppressed because it sits after `map`'s surviving lambda argument `f` —
+    /// fusing it there would land a `loop`/`block` beside a lambda literal in the
+    /// same function body, a shape the lowerer mis-compiles to a phantom-arity
+    /// closure (`rewrite`'s `suppress`). So both HOFs are left as plain calls, and
+    /// the mixed form computes correctly un-fused (`dissolution-filter-fuse.lisp`).
+    /// Fusing them into one loop is a later widening.
+    #[test]
+    fn mixed_map_of_filter_is_not_fused() {
+        let (hir, arena, names) =
+            compile("(map (fn [x] (* x 2)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "map"),
+            "the outer `map` must not fuse over a filter; callees were {cs:?}",
+        );
+        assert!(
+            cs.iter().any(|n| n == "filter"),
+            "the inner `filter` must be suppressed beside the surviving lambda; \
+             callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a capturing predicate is left alone (it references a free variable,
+    /// so it is not the non-capturing kernel the gate admits). The `filter` call
+    /// survives.
+    #[test]
+    fn capturing_predicate_is_not_fused() {
+        let (hir, arena, names) = compile("(let [k 2] (filter (fn [x] (> x k)) [1 2 3 4]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "filter"),
+            "a capturing predicate must not fuse; callees were {cs:?}",
+        );
+        assert!(count_lambdas(&hir) >= 1, "the closure must survive");
     }
 
     /// A `map` over a `Var` whose initializer is a proven immutable array fuses:
