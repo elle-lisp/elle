@@ -105,15 +105,25 @@ enum InitKw {
     Alias(Binding),
 }
 
-/// Prune provably-dead arms of every `(match (type-of x) …)` whose scrutinee `x`
-/// has a statically-known concrete type. See the module doc.
-pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTable) {
-    let symbol_names = symbols.all_names();
-
-    // Phase 1 (read-only): record each eligible binding's initializer keyword.
+/// Map each statically-typeable binding to the concrete `type-of` keyword its
+/// initializer proves — the sound `binding → keyword` proof this module's dead-arm
+/// pruning runs on. It records every immutable, unmutated, singly-bound
+/// `let`/`letrec`/`def` binding whose initializer resolves to a concrete type
+/// (`classify_init`), following alias chains to a fixpoint (`resolve`).
+///
+/// Shared with map-chain fusion (`fuse.rs`), which reads it to prove a `map`'s
+/// base collection is an immutable array (keyword `array`). The soundness bar is
+/// identical and already enforced here: an over-broad classification would delete
+/// a live match arm (a UAF), so a base fusion accepts on this map's word is proven
+/// with the same rigor — never a value the compiler merely guesses is an array.
+pub(super) fn concrete_init_keywords(
+    hir: &Hir,
+    arena: &BindingArena,
+    symbol_names: &HashMap<u32, String>,
+) -> FxHashMap<Binding, &'static str> {
     let mut init: FxHashMap<Binding, InitKw> = FxHashMap::default();
     let mut seen: FxHashSet<Binding> = FxHashSet::default();
-    collect_inits(hir, arena, &symbol_names, &mut init, &mut seen);
+    collect_inits(hir, arena, symbol_names, &mut init, &mut seen);
 
     // Resolve alias chains to a concrete keyword (depth-bounded; the alias graph
     // is over distinct binding ids, so a small cap both terminates any accidental
@@ -124,6 +134,16 @@ pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbo
             concrete.insert(b, k);
         }
     }
+    concrete
+}
+
+/// Prune provably-dead arms of every `(match (type-of x) …)` whose scrutinee `x`
+/// has a statically-known concrete type. See the module doc.
+pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTable) {
+    let symbol_names = symbols.all_names();
+
+    // Phase 1 (read-only): the sound binding→keyword proof.
+    let concrete = concrete_init_keywords(hir, arena, &symbol_names);
     if concrete.is_empty() {
         return;
     }

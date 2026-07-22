@@ -67,11 +67,20 @@ right, identically to `map`). The gate:
   being `is_primitive` (every stdlib export is bound so by `bind_primitives`;
   a user redefinition shadows it with a non-primitive binding) and named `map`.
   A user `map` is never rewritten.
-- **`xs` is a proven immutable array.** Either an array literal (`[ … ]`, which
-  analyzes to a call to the `array` primitive, `RetType::Array`) or another
-  fusable `map` chain over such a base. The immutable-array proof selects the
-  frozen-result arm; a mutable `@array` input is left to the stdlib `map` (its
-  result aliases the input's mutability — handled by the general path, not here).
+- **`xs` is a proven immutable array.** One of: an array literal (`[ … ]`, which
+  analyzes to a call to the `array` primitive, `RetType::Array`) or any
+  `RetType::Array` primitive call at the call site; a `Var` alias whose
+  initializer is such an array, followed through immutable, unmutated,
+  singly-bound `let`/`def` bindings to a fixpoint; or another fusable `map` chain
+  over such a base. The alias proof is the **same** one dead-arm pruning reads at
+  this stage — the binding→concrete-`type-of`-keyword map `prune.rs` builds
+  (`classify_init`/`resolve`); a base whose keyword resolves to `array` is a
+  proven immutable array. Reusing that map is not incidental: an over-broad
+  classification there deletes a live match arm (a UAF), so the map already
+  carries the soundness bar fusion needs (an over-broad base is a miscompile).
+  The immutable-array proof selects the frozen-result arm; a mutable `@array`
+  input (keyword `@array`) is left to the stdlib `map` (its result aliases the
+  input's mutability — handled by the general path, not here).
 - **`f` is a non-capturing single-parameter lambda** written directly as the
   call's argument. No captures means `f`'s body references only its parameter
   and globals, so splicing it at the call site is always in scope; a single

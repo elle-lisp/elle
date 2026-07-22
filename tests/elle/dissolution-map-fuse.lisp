@@ -34,6 +34,20 @@
 (assert (= (map (fn [x] (+ x x)) [10 20 30]) [20 40 60])
         "multi-use parameter fuses correctly")
 
+# The base collection reached through a Var alias fuses just as a call-site
+# literal does (the gate follows the base through immutable, unmutated aliases to
+# the proven array). Value must be unchanged.
+(assert (= (let [xs [1 2 3]]
+             (map (fn [x] (* x 2)) xs)) [2 4 6])
+        "map over a Var-bound immutable array fuses to the same value")
+(assert (= (let [xs [1 2 3]]
+             (let [ys xs]
+               (map (fn [x] (* x 2)) ys))) [2 4 6])
+        "map over an aliased Var fuses to the same value")
+(assert (= (let [xs [1 2 3]]
+             (map (fn [x] (* x 2)) xs)) (map dbl [1 2 3]))
+        "fused Var-base agrees with the un-fused named-fn")
+
 # Composition fuses to ONE loop; the interleaved order is unobservable for these
 # pure transforms, and the value matches the staged `map`-of-`map`.
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3])) [3 5 7])

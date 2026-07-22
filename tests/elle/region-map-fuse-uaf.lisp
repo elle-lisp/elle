@@ -33,6 +33,18 @@
 (def upper (map (fn [w] (string/upcase w)) ["ab" "cd" "ef"]))
 (assert (= upper ["AB" "CD" "EF"]) "fused map over a heap-element base array")
 
+# The Var-base widening under heap values: the base array is bound to a Var (a
+# heap-element literal), then mapped. The fused loop reads `coll` — the aliased
+# base — by index; an over-free of the base under the loop's own read, or of the
+# base binding while the accumulator still holds derived heap members, faults here
+# under --trace=guardfree. The base Var is also read AFTER the map, so it must
+# survive the loop, not be consumed by it.
+(def base ["p" "q" "r"])
+(def viamap (map (fn [s] (string s s)) base))
+(assert (= viamap ["pp" "qq" "rr"]) "Var-base fused map over heap elements")
+(assert (= (get base 1) "q")
+        "the base Var survives the fused loop (not consumed)")
+
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn:
 # a stale accumulator or base region would be reused and fault on a later pass.
 (def @acc "")

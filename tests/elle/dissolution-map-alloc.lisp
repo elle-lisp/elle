@@ -14,12 +14,16 @@
 # allocation-event count sees it. The count is deterministic (independent of GC
 # timing), so these are exact `<` relations, not statistical bounds.
 #
-# Each assertion compares FUSED (inline non-capturing lambdas over a literal
-# array — the shape `fuse.rs` collapses) against an UN-FUSED reference computing
-# the identical value (named top-level fns, or an inline lambda over a Var base —
-# shapes the gate declines). Before fusion existed both sides were the same `map`
-# calls and every delta was zero, so this file is its own counterfactual: it can
-# only pass because fusion realizes the win.
+# Each assertion compares FUSED (inline non-capturing lambdas over a proven
+# immutable array — the shape `fuse.rs` collapses) against an UN-FUSED reference
+# computing the identical value (named top-level fns, or an inline lambda that
+# CAPTURES a free variable — shapes the gate declines). A capturing lambda is the
+# right un-fused reference because it still mints the per-call closure; an inline
+# lambda over a Var-bound array does NOT decline (the gate follows the base
+# through immutable aliases), so it would fuse and mint nothing to compare
+# against. Before fusion existed both sides were the same `map` calls and every
+# delta was zero, so this file is its own counterfactual: it can only pass because
+# fusion realizes the win.
 
 (defn f3 [x]
   (* x 3))
@@ -66,17 +70,35 @@
         "the saving scales with composition depth (one intermediate array per layer)")
 
 # ── Single map: the closure is gone ───────────────────────────────────
-# A single `map` over an inline lambda: fused inlines `f` (no closure minted); the
-# un-fused reference is the same inline lambda over a Var base (a shape the gate
-# declines), which mints the closure. Same value, fewer allocations.
+# A single `map` over an inline non-capturing lambda: fused inlines `f` (no closure
+# minted); the un-fused reference is a CAPTURING lambda (a shape the gate declines,
+# because splicing a capture at the call site is out of scope), which mints the
+# closure. Both compute `x*3`. Same value, fewer allocations.
 (def one-fused (allocs (fn [] (map (fn [x] (* x 3)) [0 1 2 3 4 5 6 7 8 9]))))
 (def one-unfused
   (allocs (fn []
-            (let [v [0 1 2 3 4 5 6 7 8 9]]
-              (map (fn [x] (* x 3)) v)))))
+            (let [m 3]
+              (map (fn [x] (* x m)) [0 1 2 3 4 5 6 7 8 9])))))
 (assert (< one-fused one-unfused)
         (string "fused single map must mint fewer (no closure): " one-fused
                 " vs " one-unfused))
+
+# The Var-base widening realizes the win too: a `map` over an immutable array
+# reached through a Var alias (`(let [v […]] (map f v))`) fuses exactly as the
+# literal-base form does — the base need not be written at the call site. It mints
+# the same as `one-fused` (no closure, no dispatch) and strictly fewer than the
+# capturing reference. This is the realization gauge for the new pattern: before
+# the widening this Var-base form was the un-fused reference above.
+(def var-fused
+  (allocs (fn []
+            (let [v [0 1 2 3 4 5 6 7 8 9]]
+              (map (fn [x] (* x 3)) v)))))
+(assert (= var-fused one-fused)
+        (string "Var-base map fuses identically to literal-base: " var-fused
+                " vs " one-fused))
+(assert (< var-fused one-unfused)
+        (string "Var-base map mints fewer than the capturing reference: "
+                var-fused " vs " one-unfused))
 
 (println "dissolution-map-alloc: ok (d2 saved " (- d2-unfused d2-fused)
          ", d3 saved " (- d3-unfused d3-fused) ")")

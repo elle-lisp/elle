@@ -37,6 +37,7 @@
 //! no yield/I/O/emit/FFI/halt (a non-capturing lambda's only cross-element
 //! channel is such an effect). `SIG_ERROR` is permitted; see `reorder_safe`.
 
+use super::prune::concrete_init_keywords;
 use super::unwrap_callee_binding;
 use crate::hir::arena::{BindingArena, BindingScope};
 use crate::hir::binding::Binding;
@@ -44,6 +45,7 @@ use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::primitives::def::RetType;
 use crate::signals::{Signal, SIG_ERROR};
 use crate::symbol::SymbolTable;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 /// The stdlib/primitive ops the fused loop is built from, resolved once to this
@@ -101,7 +103,14 @@ pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: 
     let Some(ops) = Ops::resolve(arena, &symbol_names) else {
         return;
     };
-    rewrite(hir, arena, &symbol_names, &ops);
+    // The sound `binding → type-of keyword` proof dead-arm pruning already
+    // computes (`prune::concrete_init_keywords`). A `map`'s base collection may be
+    // a `Var` alias of an immutable array, not only a call-site literal; this map
+    // is what proves the alias `array`. Built once over the pre-rewrite tree — the
+    // base-var bindings live in enclosing `let`s that fusion never mutates, so the
+    // proof stays valid as inner map calls collapse.
+    let bases = concrete_init_keywords(hir, arena, &symbol_names);
+    rewrite(hir, arena, &symbol_names, &ops, &bases);
 }
 
 /// Pre-order walk: try to fuse a `map` chain rooted at `hir` (consuming the whole
@@ -113,15 +122,16 @@ fn rewrite(
     arena: &mut BindingArena,
     symbol_names: &HashMap<u32, String>,
     ops: &Ops,
+    bases: &FxHashMap<Binding, &'static str>,
 ) {
-    if let Some(len) = validate_chain(hir, arena, symbol_names) {
+    if let Some(len) = validate_chain(hir, arena, symbol_names, bases) {
         let sig = hir.signal;
         let span = hir.span.clone();
         let owned = std::mem::replace(hir, Hir::error(span.clone()));
         let (transforms, base) = take_chain(owned, len);
         *hir = build_loop(transforms, base, arena, ops, sig, span);
     }
-    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops));
+    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases));
 }
 
 /// A recognized `(map <lambda> …)` call: the lambda argument and the collection
@@ -206,6 +216,7 @@ fn validate_chain(
     hir: &Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
+    bases: &FxHashMap<Binding, &'static str>,
 ) -> Option<usize> {
     let mut len = 0usize;
     let mut all_silent = true;
@@ -216,7 +227,7 @@ fn validate_chain(
         len += 1;
         cur = coll;
     }
-    if len == 0 || !coll_is_immutable_array(cur, arena, symbol_names) {
+    if len == 0 || !coll_is_immutable_array(cur, arena, symbol_names, bases) {
         return None;
     }
     if len >= 2 && !all_silent {
@@ -238,14 +249,26 @@ fn reorder_safe(sig: Signal) -> bool {
     sig.bits.subtract(SIG_ERROR).is_empty() && sig.propagates == 0
 }
 
-/// Is `expr` a statically-proven immutable array — an array literal (a call to
-/// the `array` primitive, `RetType::Array`) or an immutable-`Var` alias of one?
-/// The same proof dead-arm pruning reads at this stage (`typeinfer/prune.rs`).
+/// Is `expr` a statically-proven immutable array? Two proven forms:
+///
+/// - **A call-site immutable-array producer** — a call to a primitive whose
+///   declared `RetType` is `Array`: an array literal (`[ … ]` → the `array`
+///   primitive) or any other `RetType::Array` native (`->array`, …).
+/// - **A `Var` alias of one** — a binding whose initializer resolves through the
+///   shared init proof (`bases`, built by `prune::concrete_init_keywords`) to the
+///   `array` keyword, following immutable/unmutated/single-init alias chains to a
+///   fixpoint. This is the SAME proof dead-arm pruning trusts to delete a match
+///   arm, so accepting it here carries the identical soundness guarantee; a
+///   mutable `@array` base resolves to `@array` (not `array`) and is declined.
 fn coll_is_immutable_array(
     expr: &Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
+    bases: &FxHashMap<Binding, &'static str>,
 ) -> bool {
+    if let HirKind::Var(b) = &expr.kind {
+        return bases.get(b) == Some(&"array");
+    }
     let HirKind::Call { func, .. } = &expr.kind else {
         return false;
     };
@@ -527,6 +550,55 @@ mod tests {
         assert!(
             cs.iter().any(|n| n == "map"),
             "an unproven collection must not fuse; callees were {cs:?}",
+        );
+    }
+
+    /// A `map` over a `Var` whose initializer is a proven immutable array fuses:
+    /// the base need not be written as a literal at the call site. The proof is
+    /// the same binding→keyword map dead-arm pruning builds (`prune::classify_init`),
+    /// so `(let [xs [1 2 3]] (map f xs))` dissolves exactly as `(map f [1 2 3])`
+    /// does. Fails before the Var-base widening lands: the `map` call and closure
+    /// both survive because the base is a `Var`, not a literal `array` call.
+    #[test]
+    fn map_over_var_bound_immutable_array_fuses() {
+        let (hir, arena, names) = compile("(let [xs [1 2 3]] (map (fn [x] (* x 2)) xs))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "a Var-bound immutable array must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == "*"),
+            "`f`'s body op must inline; callees were {cs:?}",
+        );
+    }
+
+    /// The alias proof follows a chain to a fixpoint (`prune::resolve`): `ys`
+    /// aliases `xs` aliases the literal, so `(map f ys)` still fuses.
+    #[test]
+    fn map_over_aliased_var_immutable_array_fuses() {
+        let (hir, arena, names) =
+            compile("(let [xs [1 2 3]] (let [ys xs] (map (fn [x] (* x 2)) ys)))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "an aliased Var over an immutable array must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+    }
+
+    /// Safety: the widening is immutable-only. A `Var` bound to a **mutable**
+    /// array (`@[ … ]`, keyword `@array`) is left to the stdlib `map` — its result
+    /// aliases the input's mutability, which the general path handles. The proof
+    /// map resolves the base to `@array`, not `array`, so fusion declines.
+    #[test]
+    fn map_over_var_bound_mutable_array_is_not_fused() {
+        let (hir, arena, names) = compile("(let [xs @[1 2 3]] (map (fn [x] (* x 2)) xs))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "map"),
+            "a mutable `@array` base must not fuse (immutable-only); callees were {cs:?}",
         );
     }
 
