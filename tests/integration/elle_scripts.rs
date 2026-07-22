@@ -135,6 +135,24 @@ fn region_native_tail_return_uaf() {
     );
 }
 
+// Guard — a cons cell (`%pair`) storing a HEAP value keeps that value's region
+// alive for the cons's lifetime via the runtime alloc-scan/free-cascade contract
+// (`handle_list` → `incref_cross_region`; `find_object_cross_refs` Pair arm), NOT
+// a compile-time containment edge (which double-counts against the single cascade
+// decref — the same RC double-count captures avoid by recording no edge). This
+// reads a deep chain of escaping conses' heap contents back after region-id churn:
+// an under-incref of any element frees it under the reader (SIGSEGV under
+// guardfree). Pairs with the oracle's `arg-result`/`cons-store` leak pins (the
+// over-keep face of the same edge). docs/impl/region/ownership.md § "The outgoing
+// edge table"; walk/intrinsic.rs (the %pair contents).
+#[test]
+fn region_pair_heap_content_uaf() {
+    run_elle_script_with_args(
+        "region-pair-heap-content-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

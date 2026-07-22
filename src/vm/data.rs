@@ -17,8 +17,6 @@ pub(crate) fn handle_list(vm: &mut VM, region_id: RuntimeRegion) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on Pair");
-    incref_cross_region(vm, first, region_id);
-    incref_cross_region(vm, rest, region_id);
     let traits = crate::primitives::traitregistry::default_traits_for(
         unsafe { &*vm.heap_ptr },
         HeapTag::Pair,
@@ -28,24 +26,17 @@ pub(crate) fn handle_list(vm: &mut VM, region_id: RuntimeRegion) {
         rest,
         traits,
     });
+    // Containment of `first`/`rest`'s cross-region members is counted and
+    // recorded exactly once by the alloc funnel: `alloc_in_region` → `alloc_obj`
+    // → `incref_cross_region_refs` scans the object, increfs each cross-region
+    // ref, and records the outgoing edge the free-time cascade decrefs. Increffing
+    // here in addition would count each member twice against that single cascade
+    // decref — a per-op over-keep of every heap element stored into a cons
+    // (pinned by the `arg-result` and `take` oracle probes). The same
+    // alloc-funnel-only discipline `args_to_list` and every native list/array
+    // constructor uses; soundness pinned by region-pair-heap-content-uaf.lisp.
     let val = vm.heap().alloc_in_region(obj, region_id);
     vm.fiber.stack.push(val);
-}
-
-/// Incref the region of `val` if it's a heap value in a different region
-/// than `target_region`. Balances the cascade decref in `free_runtime_region_pages`.
-fn incref_cross_region(vm: &mut VM, val: Value, target_region: RuntimeRegion) {
-    let heap = unsafe { &mut *vm.heap_ptr };
-    if let Some(rid) = crate::value::arena::region_of(heap, val) {
-        // Skip a self-edge (val already lives in the container's region).
-        if rid != target_region {
-            crate::value::arena::incref_for_escape(
-                heap,
-                Some(rid),
-                crate::value::arena::EscapeSite::ImmutableContents,
-            );
-        }
-    }
 }
 
 pub(crate) fn handle_first(vm: &mut VM) {
@@ -134,9 +125,6 @@ pub(crate) fn handle_make_array(
         );
     }
     vec.reverse();
-    for elem in &vec {
-        incref_cross_region(vm, *elem, region_id);
-    }
     let traits = crate::primitives::traitregistry::default_traits_for(
         unsafe { &*vm.heap_ptr },
         HeapTag::LArrayMut,
@@ -145,6 +133,11 @@ pub(crate) fn handle_make_array(
         data: Rc::new(RefCell::new(vec)),
         traits,
     };
+    // Element containment is counted+recorded once by the alloc funnel
+    // (`alloc_in_region` → `incref_cross_region_refs`), balanced by the free-time
+    // cascade — see `handle_list` for the full note. A manual pre-incref here
+    // would double-count each cross-region element against that single cascade
+    // decref.
     let val = vm.heap().alloc_in_region(obj, region_id);
     vm.fiber.stack.push(val);
 }

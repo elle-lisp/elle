@@ -211,11 +211,11 @@
 # `rest-array-copy` is a CLOSED control (the native fresh-result invariant, not F1a
 # stdlib-body scratch) — undeclared like `slice`/`to-array`, so a regression to open
 # trips the completeness gate loudly rather than being silently absorbed as F1a.
-(declare-root :f1a ["reduce" "fold" "stdlib-fold" "take-drop" "map-while"
-                    "filter-while" "wrap-map" "zip" "distinct" "group-by"
-                    "frequencies" "merge" "concat" "pipeline" "each-list"
-                    "reverse" "string-outer" "append-outer" "concat-while"
-                    "yield-concat" "nested-closure" "stdlib-concat" "zip-tower"])
+(declare-root :f1a ["reduce" "fold" "stdlib-fold" "map-while" "filter-while"
+                    "wrap-map" "distinct" "group-by" "frequencies" "merge"
+                    "concat" "pipeline" "each-list" "reverse" "string-outer"
+                    "append-outer" "concat-while" "yield-concat"
+                    "nested-closure" "stdlib-concat" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -234,7 +234,7 @@
 (declare-root :f4 ["recur-local-self-mint"])
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
                    "fresh-env-cell" "break-value" "break-value-used"
-                   "break-value-lit" "struct-match" "arg-result"])
+                   "break-value-lit" "struct-match" "take" "drop" "zip"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -517,7 +517,16 @@
         (assign k (%add k 1)))) 0]  # collection ops
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 0]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 0]
-   ["zip" (fn [j] (zip [1 2] [3 4])) 9] ["sort" (fn [j] (sort [3 1 2])) 0]
+   # zip's F1a copy-scratch is dissolved: the `tuple-at`/output closures that
+   # CAPTURED the mutable `arrs`/`out` (a stored closure over a mutable container
+   # strands its region) are now cell-free top-level drivers threading them as
+   # params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`). The residual 4 was
+   # attributed to the cons-store gap, but the cons-store fix (`handle_list`,
+   # vm/data.rs) left it UNCHANGED: `(zip [1 2] [3 4])`'s tuples hold the input
+   # arrays' immediate INTEGERS (no region), so no cross-region containment incref
+   # ever fires. It is a distinct still-open strand — the intermediate
+   # `->array`-of-columns and the tuple/output structure — awaiting analysis.
+   ["zip" (fn [j] (zip [1 2] [3 4])) 4] ["sort" (fn [j] (sort [3 1 2])) 0]
    ["reverse" (fn [j] (reverse [1 2 3])) 2]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
@@ -530,10 +539,19 @@
    # tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
    ["distinct" (fn [j] (distinct [1 2 1 3])) 2]
-   ["take-drop"
-    (fn [j]
-      (take 2 (list 1 2 3))
-      (drop 1 (list 1 2 3))) [5 6]]
+   # `take`/`drop` were one `take-drop` composite, split into two distinct F5
+   # residuals. `take` is a first/rest walk building an accumulator BACKWARD then
+   # `(reverse acc)`. The cons-store double-incref (the `arg-result` mechanism)
+   # accounted for 1/op — each `(pair (first xs) acc)` over-increfed the prior
+   # accumulator head's region — and closed with the `handle_list` fix, dropping
+   # this 3→2. The residual 2 is the reverse-scratch: the `n` backward cons cells
+   # plus the reversal pass. A `(->array coll)` index-walk dissolves it but forces
+   # the whole input O(length) — an unacceptable regression for the take-a-prefix
+   # idiom (reverted), so this stays 2 until an in-place prefix walk lands.
+   # `drop` strands its returned input list even at n=0 (a plain `(fn [c] c)`
+   # strands 0) — the F5 arg-return pass-through, unaffected by the cons-store fix.
+   ["take" (fn [j] (take 2 (list 1 2 3))) 2]
+   ["drop" (fn [j] (drop 1 (list 1 2 3))) 3]
    ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 4]
    ["frequencies" (fn [j] (frequencies [1 2 1 3])) 3]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
@@ -597,13 +615,17 @@
    ["trim" (fn [j] (string/trim "  x  ")) 0]
    ["replace" (fn [j] (string/replace "hello" "l" "r")) 0]
    ["num-to-str" (fn [j] (number->string j)) 0] ["read" (fn [j] (read "42")) 0]
-   ["call-chain" (fn [j] (helper-f (helper-g (helper-h j)))) 0]  # A fresh closure-call result passed as an ARGUMENT into a stdlib closure
-   # call (`pair`): the arg's ReturnValue retain. Under the unified-intrinsics
-   # stdlib the callee's store funnel no longer consumes it — 1/op (it read 0,
-   # balanced, before the unification; take-drop moved 5→6 by the same class).
-   # The minimal member of the class the zip/take-drop/merge/struct-put/
-   # yield-multimut/put-churn pins carry at larger multiplicities. Shrink-only.
-   ["arg-result" (fn [j] (pair j (helper-g j))) 1]
+   ["call-chain" (fn [j] (helper-f (helper-g (helper-h j)))) 0]  # A fresh heap
+   # value (`helper-g` result) stored into a cons via `(pair … …)` — a CLOSED
+   # control for the cons-store containment accounting. The `%pair`/`list` opcode
+   # (`handle_list`) once increfed each cross-region member by hand AND let the
+   # alloc funnel (`alloc_in_region` → `incref_cross_region_refs`) incref+record it
+   # again, so each stored heap element was double-counted against the single
+   # free-time cascade decref — 1/op per heap member. Now the alloc funnel is the
+   # sole containment incref, exactly as `args_to_list` and every native
+   # list/array constructor do it (`vm/data.rs handle_list`). Soundness pinned by
+   # region-pair-heap-content-uaf.lisp; shrink-only.
+   ["arg-result" (fn [j] (pair j (helper-g j))) 0]
    ["let-chain"
     (fn [j]
       (let [a (helper-h j)]

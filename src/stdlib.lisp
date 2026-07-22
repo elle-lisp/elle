@@ -287,6 +287,12 @@
     (go 0 args)))
 (defn take [n coll]
   "Take the first n elements of a list."
+  # first/rest walk that STOPS after n (never materializes the whole coll), so
+  # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
+  # would dissolve the trailing `reverse`'s scratch but forces the entire input —
+  # an O(length) regression for the take-a-prefix idiom that dwarfs the ~1/op
+  # leak it saved. The reverse-scratch over-keep is small and closes with the F5
+  # arg-retain compiler fix (the `%pair` inline store), not a stdlib rewrite.
   (when (not (integer? n))
     (error {:error :type-error
             :message (string "take: expected integer, got " (type n))}))
@@ -785,13 +791,36 @@
 
 ## ── Collection transforms ───────────────────────────────────────────
 
+## Cell-free top-level drivers for `zip`. A per-call closure that CAPTURES the
+## mutable `arrs`/`out` container strands its region — a stored closure over a
+## mutable value holds it past the result tuples' last use — so `arrs`/`k`/`out`
+## are threaded as PARAMS to self-recursive top-level bindings instead (the
+## closure-free property fold uses; docs/impl/selfrec.md). Non-capturing walk
+## closures reclaim on their own, but a captured mutable container does not.
+## `zip-tuple-at` conses column `i`'s tuple from the last input backward, so it
+## comes out in order with no reversal pass.
+(def zip-tuple-at
+  (fn [arrs k i j acc]
+    (if (< j 0)
+      acc
+      (zip-tuple-at arrs k i (- j 1) (pair (get (get arrs j) i) acc)))))
+(def zip-build-array
+  (fn [arrs k n out i]
+    (when (< i n)
+      (push out (zip-tuple-at arrs k i (- k 1) ()))
+      (zip-build-array arrs k n out (+ i 1)))))
+(def zip-build-list
+  (fn [arrs k i acc]
+    (if (< i 0)
+      acc
+      (zip-build-list arrs k (- i 1)
+                      (pair (zip-tuple-at arrs k i (- k 1) ()) acc)))))
 (defn zip [& colls]
   "Zip collections element-wise into a collection of lists. Stops at the shortest input."
   # One index walk builds each column tuple directly, over the inputs normalized
-  # to arrays for O(1) positional access. The tuple is consed from the last input
-  # backward so it comes out in order with no reversal pass. Result family follows
-  # the first input (array-family → mutable @array, list → list), matching the
-  # per-element list tuples callers expect.
+  # to arrays for O(1) positional access. Result family follows the first input
+  # (array-family → mutable @array, list → list), matching the per-element list
+  # tuples callers expect.
   (if (empty? colls)
     ()
     (let* [carr (->array colls)
@@ -807,27 +836,12 @@
                            (if (>= j k)
                              m
                              (mn (+ j 1) (min m (length (get arrs j))))))]
-               (mn 1 (length (get arrs 0))))
-           tuple-at (fn [i]
-                      (letrec [go (fn [j acc]
-                                    (if (< j 0)
-                                      acc
-                                      (go (- j 1)
-                                      (pair (get (get arrs j) i) acc))))]
-                        (go (- k 1) ())))]
+               (mn 1 (length (get arrs 0))))]
       (if (array? (first colls))
         (let [out @[]]
-          (letrec [go (fn [i]
-                        (when (< i n)
-                          (push out (tuple-at i))
-                          (go (+ i 1))))]
-            (go 0))
+          (zip-build-array arrs k n out 0)
           out)
-        (letrec [go (fn [i acc]
-                      (if (< i 0)
-                        acc
-                        (go (- i 1) (pair (tuple-at i) acc))))]
-          (go (- n 1) ()))))))
+        (zip-build-list arrs k (- n 1) ())))))
 
 (defn flatten [coll]
   (letrec [to-list (fn (c)
