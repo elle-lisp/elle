@@ -63,14 +63,15 @@
              (filter (fn [x] (> x k)) [1 2 3 4])) [3 4])
         "capturing predicate (declined) is still correct")
 
-# A MIXED map-of-filter fuses NOTHING: the outer map is homogeneous-only, and the
-# inner filter is suppressed (it would land a loop beside map's surviving lambda,
-# a shape the lowerer mis-compiles). Left as plain stdlib calls, it must still
-# compute correctly — the soundness pin for the suppression gate (`fuse.rs`).
+# A MIXED map-of-filter fuses its INNER homogeneous run only: the outer op is
+# homogeneous-only (declines over the other HOF), but the inner op fuses on the
+# recursion, leaving the outer a plain call over the fused loop. The fused loop
+# lands beside the outer op's surviving lambda; `lower_call`'s argument spill keeps
+# that sound (call-arg-across-loop.lisp). The value must be correct either way.
 (assert (= (map (fn [x] (* x 10)) (filter (fn [x] (> x 2)) [1 2 3 4])) [30 40])
-        "mixed map-of-filter (un-fused) computes the same value")
+        "mixed map-of-filter (inner fused) computes the same value")
 (assert (= (filter (fn [x] (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
-        "mixed filter-of-map (un-fused) computes the same value")
+        "mixed filter-of-map (inner fused) computes the same value")
 
 # ── Realization: the closure is gone ──────────────────────────────────
 # A single `filter` over an inline non-capturing predicate mints no closure; the

@@ -116,66 +116,30 @@ pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: 
     // base-var bindings live in enclosing `let`s that fusion never mutates, so the
     // proof stays valid as inner map calls collapse.
     let bases = concrete_init_keywords(hir, arena, &symbol_names);
-    rewrite(hir, arena, &symbol_names, &ops, &bases, false);
+    rewrite(hir, arena, &symbol_names, &ops, &bases);
 }
 
 /// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
 /// chain, including its inner HOF calls); whether or not it fused, recurse into
 /// the resulting node's children (which fuses nested HOFs in the spliced lambda
-/// bodies or the base array's elements).
-///
-/// `suppress` blocks fusion at this node (but not the recursion). It is set for
-/// any subtree positioned **after a surviving lambda-literal argument** in the
-/// same function body: a fused loop lowers to a `block`/`loop`, and a lambda
-/// literal that is allocated *before* a loop in the same function body and then
-/// called is mis-lowered to a phantom extra parameter (an arity error at the
-/// call). The fusion consumes its own lambda, so a single/composed HOF in
-/// statement, binding, or native-argument position is always safe; the unsafe
-/// shape is a fused loop landing beside a lambda the fusion did NOT consume —
-/// e.g. the mixed `(map f (filter p xs))`, where `map`'s `f` survives and the
-/// inner `filter` would fuse. Suppression propagates through nested expressions
-/// and **resets at a `Lambda` boundary** (a nested lambda body is a separate
-/// lowered function, so an outer sibling lambda cannot clobber a loop inside it).
+/// bodies or the base array's elements). A mixed `(map f (filter p xs))` fuses its
+/// inner homogeneous run only (`validate_chain` is homogeneous-only): the outer
+/// `map` declines and the inner `filter` fuses on the recursion.
 fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,
     symbol_names: &HashMap<u32, String>,
     ops: &Ops,
     bases: &FxHashMap<Binding, &'static str>,
-    suppress: bool,
 ) {
-    if !suppress {
-        if let Some((hof, len)) = validate_chain(hir, arena, symbol_names, bases) {
-            let sig = hir.signal;
-            let span = hir.span.clone();
-            let owned = std::mem::replace(hir, Hir::error(span.clone()));
-            let (transforms, base) = take_chain(owned, len);
-            *hir = build_loop(hof, transforms, base, arena, ops, sig, span);
-        }
+    if let Some((hof, len)) = validate_chain(hir, arena, symbol_names, bases) {
+        let sig = hir.signal;
+        let span = hir.span.clone();
+        let owned = std::mem::replace(hir, Hir::error(span.clone()));
+        let (transforms, base) = take_chain(owned, len);
+        *hir = build_loop(hof, transforms, base, arena, ops, sig, span);
     }
-    match &mut hir.kind {
-        // A lambda body is a separate lowered function: reset the unsafe context.
-        HirKind::Lambda { body, .. } => rewrite(body, arena, symbol_names, ops, bases, false),
-        // An argument after a lambda-literal sibling is unsafe (see above); the
-        // suppression carries into that argument's whole subtree.
-        HirKind::Call { func, args, .. } => {
-            rewrite(func, arena, symbol_names, ops, bases, suppress);
-            let mut after_lambda = false;
-            for a in args.iter_mut() {
-                let is_lambda = matches!(a.expr.kind, HirKind::Lambda { .. });
-                rewrite(
-                    &mut a.expr,
-                    arena,
-                    symbol_names,
-                    ops,
-                    bases,
-                    suppress || after_lambda,
-                );
-                after_lambda |= is_lambda;
-            }
-        }
-        _ => hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, suppress)),
-    }
+    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases));
 }
 
 /// The higher-order collection op a fused chain is built from. Both take
@@ -765,27 +729,32 @@ mod tests {
         assert!(count_ifs(&hir) >= 1, "the guarded push must be present");
     }
 
-    /// Scope boundary: a MIXED `(map f (filter p xs))` fuses NOTHING. The outer
-    /// `map` is homogeneous-only (declines over a filter), and the inner `filter`
-    /// is suppressed because it sits after `map`'s surviving lambda argument `f` —
-    /// fusing it there would land a `loop`/`block` beside a lambda literal in the
-    /// same function body, a shape the lowerer mis-compiles to a phantom-arity
-    /// closure (`rewrite`'s `suppress`). So both HOFs are left as plain calls, and
-    /// the mixed form computes correctly un-fused (`dissolution-filter-fuse.lisp`).
-    /// Fusing them into one loop is a later widening.
+    /// Scope boundary: a MIXED `(map f (filter p xs))` fuses its inner homogeneous
+    /// run only. `validate_chain` is homogeneous-only, so the outer `map` declines
+    /// over a filter (the chain walk stops at the kind change, and a `filter` call
+    /// is not a proven immutable-array base) — but the inner `filter` still fuses on
+    /// the pre-order recursion, so the `filter` dispatch is gone and its predicate
+    /// (`>`) runs inline, leaving the outer `map` a plain call over the fused loop.
+    /// (The fused loop lands beside `map`'s surviving lambda `f`; `lower_call`'s
+    /// argument spill keeps that sound — `call-arg-across-loop.lisp`.) Fusing the two
+    /// into one loop is a later widening.
     #[test]
-    fn mixed_map_of_filter_is_not_fused() {
+    fn mixed_map_of_filter_declines_outer_fuses_inner() {
         let (hir, arena, names) =
             compile("(map (fn [x] (* x 2)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
         let cs = callees(&hir, &arena, &names);
         assert!(
             cs.iter().any(|n| n == "map"),
-            "the outer `map` must not fuse over a filter; callees were {cs:?}",
+            "the outer `map` must not fuse over a filter (homogeneous-only); \
+             callees were {cs:?}",
         );
         assert!(
-            cs.iter().any(|n| n == "filter"),
-            "the inner `filter` must be suppressed beside the surviving lambda; \
-             callees were {cs:?}",
+            !cs.iter().any(|n| n == "filter"),
+            "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
+        );
+        assert!(
+            cs.iter().any(|n| n == ">"),
+            "the inner predicate must inline; callees were {cs:?}",
         );
     }
 
