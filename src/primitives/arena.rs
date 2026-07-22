@@ -107,6 +107,15 @@ pub(crate) fn prim_arena_peak(
     (SIG_OK, Value::int(peak as i64))
 }
 
+/// (arena/total-allocs) — cumulative objects ever minted (monotonic).
+pub(crate) fn prim_arena_total_allocs(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let total = ctx.heap_mut().total_alloc_count();
+    (SIG_OK, Value::int(total as i64))
+}
+
 /// (arena/reset-peak) — reset peak to current count, return previous peak
 pub(crate) fn prim_arena_reset_peak(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -236,6 +245,15 @@ primitive! {
         category: "debug",
         example: "(debug/arena-peak)",
         aliases: &["arena/peak"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-total-allocs" => prim_arena_total_allocs {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return cumulative objects ever minted (monotonic, never decremented on free).",
+        category: "debug",
+        example: "(debug/arena-total-allocs)",
+        aliases: &["arena/total-allocs"],
         effect: RegionEffect::Immediate,
     }
     "debug/arena-reset-peak" => prim_arena_reset_peak {

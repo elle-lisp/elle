@@ -24,6 +24,8 @@ use crate::symbol::SymbolTable;
 use std::collections::HashMap;
 
 mod contract;
+mod fuse;
+pub(crate) use fuse::fuse_map_chains;
 mod guard;
 mod infer;
 use infer::*;

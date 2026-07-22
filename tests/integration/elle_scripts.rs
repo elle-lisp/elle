@@ -153,6 +153,23 @@ fn region_pair_heap_content_uaf() {
     );
 }
 
+// Guard — map-chain loop fusion (docs/impl/dissolution.md) inlines `(map f xs)`
+// / `(map g (map f xs))` over a proven immutable array into one index-walk loop
+// that mints a fresh @array accumulator, fills it, and freezes it, with the base
+// array owned by the loop's `coll` binding. Driving that path with HEAP element
+// values (strings, structs) must not free a base element under the loop's
+// `(get coll i)` read, nor an accumulator member before the frozen result is
+// consumed — either over-free SIGSEGVs under guardfree. The composed case also
+// pins that the outer result's heap members outlive the dissolved intermediate
+// array. Fires only on the fused shape; the plain-VM run asserts the values.
+#[test]
+fn region_map_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-map-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

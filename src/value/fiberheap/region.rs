@@ -33,10 +33,19 @@ impl FiberHeap {
             );
         }
         self.alloc_count += 1;
+        self.note_mint();
+        v
+    }
+
+    /// Record one mint after `alloc_count` was bumped: advance the live high-water
+    /// mark and the monotonic cumulative counter. The sole `alloc_count += 1` site
+    /// is `alloc_in_region`, so both derived counts update in lockstep with it.
+    #[inline(always)]
+    fn note_mint(&mut self) {
         if self.alloc_count > self.peak_alloc_count {
             self.peak_alloc_count = self.alloc_count;
         }
-        v
+        self.total_alloc_count += 1;
     }
 
     /// Allocate a `RegionSlice` directly into a specific region.

@@ -51,6 +51,15 @@ pub struct FiberHeap {
     alloc_count: usize,
     /// Peak number of objects allocated (high-water mark).
     peak_alloc_count: usize,
+    /// Cumulative objects ever minted — monotonic, NEVER decremented on free.
+    /// `alloc_count`/`peak_alloc_count` are live/high-water counts a reclaimed
+    /// transient cannot register in; this counts allocation *events*, so a delta
+    /// around a call reports exactly how many objects it minted regardless of
+    /// when they were freed. This is the realization gauge's instrument — it is
+    /// what distinguishes a fused `map` chain (mints one result array) from the
+    /// un-fused staged form (mints an intermediate array too, freed before the
+    /// call returns and thus invisible to every live/peak/steady-state axis).
+    total_alloc_count: u64,
     /// Stack of custom allocators. The top is active.
     custom_alloc_stack: Vec<CustomAllocState>,
     /// Maximum number of objects this fiber may allocate. `None` = unlimited.
@@ -91,6 +100,7 @@ impl FiberHeap {
             ),
             alloc_count: 0,
             peak_alloc_count: 0,
+            total_alloc_count: 0,
             custom_alloc_stack: Vec::new(),
             object_limit: None,
             alloc_error: None,
@@ -212,6 +222,12 @@ impl FiberHeap {
     /// Peak number of objects allocated (high-water mark).
     pub fn peak_alloc_count(&self) -> usize {
         self.peak_alloc_count
+    }
+
+    /// Cumulative objects ever minted (monotonic; see the field). A delta of
+    /// this around a computation is the count of allocation events it caused.
+    pub fn total_alloc_count(&self) -> u64 {
+        self.total_alloc_count
     }
 
     /// Reset peak to current count. Returns previous peak.

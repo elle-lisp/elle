@@ -8,7 +8,7 @@
 use crate::hir::arena::BindingArena;
 use crate::hir::expr::Hir;
 use crate::hir::typeinfer::{
-    infer_and_rewrite, prune_typeof_match_arms, DispatchWrapperRegistry, TypeInfo,
+    fuse_map_chains, infer_and_rewrite, prune_typeof_match_arms, DispatchWrapperRegistry, TypeInfo,
 };
 use crate::symbol::SymbolTable;
 
@@ -31,6 +31,13 @@ pub(crate) fn regularize(
     dispatch_wrappers: &mut DispatchWrapperRegistry,
 ) -> Result<TypeInfo, String> {
     prune_typeof_match_arms(hir, arena, symbols);
+    // Closure dissolution: fuse `(map f xs)` / `(map g (map f xs))` over a proven
+    // immutable array into an inlined index-walk loop, before functionalize sees
+    // the tree so the loop lowers exactly as `map`'s own body does
+    // (docs/impl/dissolution.md). Runs after pruning (which leaves map calls
+    // untouched) and before tail-call marking, so the fused loop's `freeze` tail
+    // is marked in place of the collapsed `map` call.
+    fuse_map_chains(hir, arena, symbols);
     crate::hir::tailcall::mark_tail_calls(hir);
     crate::hir::functionalize::functionalize(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
