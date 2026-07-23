@@ -32,6 +32,20 @@ pub extern "C" fn elle_jit_call(
     // result's region and free it under a freshly built cons (UAF).
     if let Some(def) = func.as_native_def() {
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
+        // Capability gate — identical to the interpreter's `call_inner`
+        // (src/vm/call/inner.rs): a native whose signal bits overlap the fiber's
+        // withheld capabilities is denied, not run. Without this the JIT would run
+        // a withheld primitive and suspend on its raw effect request instead of the
+        // denial payload (pinned by region-capability-denial-value.lisp under
+        // `--jit`).
+        let blocked = def
+            .signal
+            .bits
+            .intersection(vm.fiber.withheld)
+            .intersection(crate::signals::CAP_MASK);
+        if !blocked.is_empty() {
+            return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
+        }
         // The JIT passes the call's static region slot across the C ABI as a
         // bare `u32`; rewrap it into its `StaticRegion` newtype at the boundary.
         // The emitter only ever bakes a nonzero slot (no in-band 0), so `expect`

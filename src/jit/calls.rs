@@ -113,6 +113,40 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
     }
 }
 
+/// Capability denial for a native called from JIT-compiled code.
+///
+/// The interpreter gates every native call on the fiber's withheld capabilities
+/// (`call_inner`, src/vm/call/inner.rs: `def.signal ∩ withheld ∩ CAP_MASK`) and,
+/// when they overlap, denies the call instead of running it. The JIT native
+/// dispatch path (`elle_jit_call`) must apply the identical gate — otherwise a
+/// JIT-compiled fiber body reaches a withheld primitive (e.g. an `:io` `port/write`
+/// on an `:io`-denied fiber), runs it, and suspends on the raw effect request
+/// rather than the denial payload, so `fiber/value` reads the wrong value.
+///
+/// This mirrors the `SignalAction::Suspend` arm above: build the
+/// `{:error :capability-denied …}` payload, retain its region for the escape into
+/// `fiber.signal` (read later via `fiber/value`, after control has left this
+/// fiber — without the retain the resumer's `DecrefValueRegion` frees it under the
+/// reader), set the signal, and return `YIELD_SENTINEL` so the JIT suspend
+/// machinery parks the frame — the analogue of the interpreter's
+/// `handle_capability_denial` frame save.
+pub(crate) fn jit_capability_denial(
+    vm: &mut crate::vm::VM,
+    def: &'static crate::primitives::def::PrimitiveDef,
+    blocked: SignalBits,
+    args: &[Value],
+) -> JitValue {
+    let payload = {
+        let mut ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
+        crate::vm::VM::build_denial_payload(&mut ctx, def, blocked, args)
+    };
+    let heap = unsafe { &mut *vm.heap_ptr };
+    let r = crate::value::arena::region_of(heap, payload);
+    crate::value::arena::incref_for_escape(heap, r, crate::value::arena::EscapeSite::SuspendEscape);
+    vm.fiber.signal = Some((blocked, payload));
+    YIELD_SENTINEL
+}
+
 // =============================================================================
 // Exception Checking
 // =============================================================================

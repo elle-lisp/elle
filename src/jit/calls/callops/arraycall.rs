@@ -224,6 +224,18 @@ pub extern "C" fn elle_jit_tail_call(
     // the interpreter's `tail_call_inner` (see `VM::dispatch_native_call`).
     if let Some(def) = func.as_native_def() {
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
+        // Capability gate — identical to the interpreter's tail path
+        // (`tail_call_inner`, src/vm/call/inner/tail.rs): a native whose signal
+        // overlaps the fiber's withheld capabilities is denied, not run. Same gap
+        // and fix as `elle_jit_call`'s Call-position path.
+        let blocked = def
+            .signal
+            .bits
+            .intersection(vm.fiber.withheld)
+            .intersection(crate::signals::CAP_MASK);
+        if !blocked.is_empty() {
+            return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
+        }
         // The JIT passes the call's static region slot across the C ABI as a
         // bare `u32`; rewrap it into its `StaticRegion` newtype at the boundary.
         // The emitter only ever bakes a nonzero slot (no in-band 0), so `expect`

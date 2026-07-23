@@ -283,8 +283,10 @@ impl VM {
     ///           :primitive <name> :func <native-fn> :args <array>}`.
     /// Build the denial payload through `ctx` so every heap field (`:denied`
     /// set, `:primitive` string, `:args` array) and the struct itself are born
-    /// in the call's own region.
-    fn build_denial_payload(
+    /// in the call's own region. Shared with the JIT denial path
+    /// (`crate::jit::calls::jit_capability_denial`), which lacks the interpreter's
+    /// pre-call capability gate and reuses this builder verbatim.
+    pub(crate) fn build_denial_payload(
         ctx: &mut crate::primitives::ctx::Alloc,
         def: &'static crate::primitives::def::PrimitiveDef,
         blocked: SignalBits,
