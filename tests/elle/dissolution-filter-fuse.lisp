@@ -63,15 +63,19 @@
              (filter (fn [x] (> x k)) [1 2 3 4])) [3 4])
         "capturing predicate (declined) is still correct")
 
-# A MIXED map-of-filter fuses its INNER homogeneous run only: the outer op is
-# homogeneous-only (declines over the other HOF), but the inner op fuses on the
-# recursion, leaving the outer a plain call over the fused loop. The fused loop
-# lands beside the outer op's surviving lambda; `lower_call`'s argument spill keeps
-# that sound (call-arg-across-loop.lisp). The value must be correct either way.
+# A MIXED map/filter chain fuses to ONE loop when every stage is reorder-safe
+# (docs/impl/dissolution.md § "Mixed chains — one loop"; the full value/realization
+# gauge is dissolution-mixed-fuse.lisp). Here the predicate is a variadic `>`, which
+# routes through `apply` and is NOT reorder-safe, so the length-2 composition
+# declines and the chain falls back to fusing only its inner reorder-safe run — the
+# `filter` alone — leaving the outer `map` a plain call over the fused loop.
+# (`lower_call`'s argument spill keeps that sound — call-arg-across-loop.lisp.) The
+# VALUE is correct either way; the fallback is a realization difference, not a
+# semantic one.
 (assert (= (map (fn [x] (* x 10)) (filter (fn [x] (> x 2)) [1 2 3 4])) [30 40])
-        "mixed map-of-filter (inner fused) computes the same value")
+        "mixed map-of-filter (inner-only fallback) computes the same value")
 (assert (= (filter (fn [x] (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
-        "mixed filter-of-map (inner fused) computes the same value")
+        "mixed filter-of-map (inner-only fallback) computes the same value")
 
 # ── Realization: the closure is gone ──────────────────────────────────
 # A single `filter` over an inline non-capturing predicate mints no closure; the

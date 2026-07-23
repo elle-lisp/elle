@@ -88,14 +88,37 @@ The predicate closures dissolve exactly as `map`'s transform closures do, and th
 accumulator/`freeze` are identical, so the result is one frozen array of the
 survivors with no per-element closure and no `filter` dispatch.
 
-**Homogeneous chains only.** A chain fuses when every op in it is the *same* HOF
-(`map`-of-`map`, or `filter`-of-`filter`). A mixed `(map f (filter p xs))` is
-left to the general path at the outer op — the chain walk stops at the kind
-change, and the differing inner call is not a proven immutable-array base — but
-the inner homogeneous run still fuses on the pre-order recursion, so
-`(map f (filter p xs))` fuses the `filter` and leaves the `map` a plain call over
-the fused loop. Mixing `map` and `filter` in one loop is a later widening (it
-needs the unified transform/guard pipeline and the same reorder gate below).
+## Mixed chains — one loop
+
+A chain need not be homogeneous. `(map f (filter p xs))` and `(filter q (map g
+xs))` — any mix of `map` and `filter` over the same proven base — fuse to a
+**single** loop through one unified transform/guard pipeline. Each op in the
+chain is a *stage*: a `map` stage transforms the threaded element value; a
+`filter` stage binds the current value once and continues the pipeline only when
+its predicate passes. The stages nest in application order (innermost op first),
+bottoming out at the push. For `(map f (filter p xs))`:
+
+```
+(let [item (get coll i)]
+  (if (let [p item] P-BODY)              ; filter p — does it survive?
+    (push acc (let [x item] F-BODY))     ; map f — push the transform of the survivor
+    nil))
+```
+
+and for `(filter q (map g xs))` the map stage transforms first and the guard
+tests the transformed value:
+
+```
+(let [v (let [x (get coll i)] G-BODY)]   ; map g — the transformed value
+  (if (let [q v] Q-BODY) (push acc v) nil))
+```
+
+The intermediate array the inner op would have allocated — the survivors between
+`filter` and `map`, or the mapped values between `map` and `filter` — never
+exists, exactly as it does not for a homogeneous chain. `map`-only and
+`filter`-only chains are the two ends of this one pipeline (all-transform stages,
+or all-guard stages); the builder (`build_loop`/`Build::element`) is the same for
+all three.
 
 ## When it is legal — the gate
 
@@ -128,17 +151,22 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   by the rewrite (moved out of the call), so no other use of it can observe the
   change.
 
-For a **composition** (a chain of length ≥ 2 — `map`-of-`map` or
-`filter`-of-`filter`), the pass additionally requires each lambda body to be free
-of **sequencing effects** — no yield, I/O, emit, FFI, or halt (`reorder_safe`):
-composition interleaves the per-element work (`f x0; g …; f x1; g …`, or
-`p x0; q …; p x1; q …`) rather than running all of the first op then all of the
-second, so it reorders that work. For `filter`-of-`filter` the survivor *set* and
-its order are unchanged either way — the outer predicate still runs only on the
-inner's survivors, left to right; only the *interleaving* of the two predicates'
-calls differs, which the gate makes unobservable. Reordering is observable only
-through a sequencing effect, and a non-capturing lambda's only cross-element
-channel is one; a body with none reorders unobservably. `SIG_ERROR` is
+For a **composition** (a chain of length ≥ 2 — homogeneous *or* mixed), the pass
+additionally requires each lambda body to be free of **sequencing effects** — no
+yield, I/O, emit, FFI, or halt (`reorder_safe`): composition interleaves the
+per-element work (`f x0; g …; f x1; g …`, or `p x0; q …; p x1; q …`) rather than
+running all of the first op then all of the second, so it reorders that work. The
+*value* is unchanged either way — each stage still runs on exactly the elements it
+would have (the outer op on the inner's outputs, left to right: a `filter` on its
+predecessor's survivors/mapped values, a `map` on its predecessor's survivors);
+only the *interleaving* of the two lambdas' calls differs, which the gate makes
+unobservable. This is why a mixed chain is gated identically to a homogeneous one:
+a mixed chain is always length ≥ 2, so it always carries the reorder requirement,
+and a non-reorder-safe stage (a variadic comparison like `>`, which routes through
+`apply`) declines the whole composition — the chain then falls back to fusing only
+its inner reorder-safe run. Reordering is observable only through a sequencing
+effect, and a non-capturing lambda's only cross-element channel is one; a body
+with none reorders unobservably. `SIG_ERROR` is
 deliberately permitted — error reordering changes only *which* of several errors
 surfaces (each still surfaces as an error), and a dissolvable numeric kernel over
 proven data does not error; refusing it would forbid every arithmetic tower, the
@@ -181,25 +209,31 @@ Dissolution is a **realization** goal, not a leak goal — it is proven at the
 codegen and execution levels, not on the leak oracle. Three pins:
 
 - **Codegen (structure).** `src/hir/typeinfer/fuse.rs` `mod tests` compile a `map`
-  / `map`-of-`map` / `filter` / `filter`-of-`filter` form and assert on the lowered
-  HIR: the HOF callee is gone, the body op appears inline in the loop, the composed
-  case has a single accumulator with no intermediate, and `filter` emits the guarded
-  push (an `if`). Decline pins guard the gate (user-shadowed callee, capturing
-  lambda, unproven collection, raw-intrinsic body, mixed `map`/`filter`).
-- **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (and the
-  filter cases in `dissolution-filter-fuse.lisp`) prove the consequence the mission
-  names — *fewer allocations*. It measures
+  / `map`-of-`map` / `filter` / `filter`-of-`filter` / mixed `map`-of-`filter` /
+  mixed `filter`-of-`map` form and assert on the lowered HIR: the HOF callee is
+  gone, the body op appears inline in the loop, the composed case has a single
+  accumulator with no intermediate, `filter` emits the guarded push (an `if`), and
+  a mixed chain fuses both ops into one loop (one accumulator, both body ops
+  inline). Decline pins guard the gate (user-shadowed callee, capturing lambda,
+  unproven collection, raw-intrinsic body, and a non-reorder-safe mixed chain,
+  which declines composition and fuses its inner run only).
+- **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (the filter
+  cases in `dissolution-filter-fuse.lisp`, and the mixed cases in
+  `dissolution-mixed-fuse.lisp`) prove the consequence the mission names — *fewer
+  allocations*. It measures
   `arena/total-allocs` (a **cumulative, monotonic** count of objects ever minted;
   `src/value/fiberheap/`) around a fused chain versus an un-fused reference
   computing the same value, and asserts the fused form mints strictly fewer, with
-  the saving scaling per composition layer (one intermediate array each). The
+  the saving scaling per composition layer (one intermediate array each — for a
+  mixed chain, the survivor/mapped array between the two ops). The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
   GC-timing noise), so these are exact `<` relations.
-- **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp` and
-  `dissolution-filter-fuse.lisp` (value-preserving, incl. the declined shapes) and
-  `tests/elle/region-map-fuse-uaf.lisp` / `region-filter-fuse-uaf.lisp` (guardfree
-  over heap element/base values).
+- **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
+  `dissolution-filter-fuse.lisp`, and `dissolution-mixed-fuse.lisp`
+  (value-preserving, incl. the declined shapes and the reorder-gate fallback) and
+  `tests/elle/region-map-fuse-uaf.lisp` / `region-filter-fuse-uaf.lisp` /
+  `region-mixed-fuse-uaf.lisp` (guardfree over heap element/base values).
 
 The leak oracle is only a non-regression check here.

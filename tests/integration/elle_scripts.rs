@@ -187,6 +187,23 @@ fn region_filter_fuse_uaf() {
     );
 }
 
+// Mixed map/filter loop fusion (docs/impl/dissolution.md § "Mixed chains — one
+// loop") collapses `(map f (filter p xs))` / `(filter q (map g xs))` into ONE
+// index-walk loop where a `map` stage transforms the threaded element and a
+// `filter` stage pushes it under a guard — the intermediate array between the two
+// ops never exists. Driving that path with HEAP element values (strings, structs)
+// must not free a base element under a transform's or guard's read, nor an
+// accumulator member before the frozen result is consumed — either over-free
+// SIGSEGVs under guardfree. Fires only on the fused shape; the plain-VM run asserts
+// the values.
+#[test]
+fn region_mixed_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-mixed-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior
