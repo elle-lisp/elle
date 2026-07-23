@@ -506,14 +506,27 @@ impl<'a> Analyzer<'a> {
     /// for these bindings (same mechanism as primitive functions).
     ///
     /// `env`: map from name string to Value, from `Expander.compile_time_env`.
+    ///
+    /// `is_primitive`: mark each binding as a primitive. This is for the
+    /// **core.lisp export env** (`fold`/`reduce`/`concat`/`append`/`reverse`/…),
+    /// whose bindings here are the *canonical* definitions user code calls — they
+    /// deliberately override any earlier `meta` entry (e.g. `reverse` was once a
+    /// native, now core.lisp), so this binding must win *and* be recognizable to
+    /// passes that key on `is_primitive` (loop fusion, dispatch monomorphization),
+    /// exactly as stdlib exports are. Without the flag a core HOF is invisible to
+    /// those passes even though it is as canonical as `map`/`filter`. Passed false
+    /// for genuine compile-time / REPL envs, where a binding is a user value that
+    /// must *not* be treated as a canonical primitive.
     pub fn bind_compile_time_env(
         &mut self,
         env: &std::collections::HashMap<String, crate::value::Value>,
+        is_primitive: bool,
     ) {
         for (name, value) in env {
             let sym = self.symbols.intern(name);
             let binding = self.bind_by_sym(sym, BindingScope::Local);
             self.arena.get_mut(binding).is_immutable = true;
+            self.arena.get_mut(binding).is_primitive = is_primitive;
             self.primitive_values.insert(binding, *value);
         }
     }

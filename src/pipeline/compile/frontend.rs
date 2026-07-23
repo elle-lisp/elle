@@ -142,7 +142,7 @@ fn compile_syntaxes_frontend_xform_inner(
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
     if !expander.core_env.is_empty() {
-        analyzer.bind_compile_time_env(&expander.core_env);
+        analyzer.bind_compile_time_env(&expander.core_env, true);
     }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();

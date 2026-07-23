@@ -56,12 +56,12 @@
   b54(~) local mutated=false immutable=true needs_capture=false
   b55(~) local mutated=false immutable=true needs_capture=false
   b56(~) local mutated=false immutable=true needs_capture=false
-  b57(concat) local mutated=false immutable=true needs_capture=false
-  b58(G#1) local mutated=false immutable=true needs_capture=false
+  b57(G#1) local mutated=false immutable=true needs_capture=false
+  b58(~) local mutated=false immutable=true needs_capture=false
   b59(~) local mutated=false immutable=true needs_capture=false
   b60(~) local mutated=false immutable=true needs_capture=false
-  b61(~) local mutated=false immutable=true needs_capture=false
-  b62(G#2) local mutated=false immutable=true needs_capture=false
+  b61(G#2) local mutated=false immutable=true needs_capture=false
+  b62(~) local mutated=false immutable=true needs_capture=false
   b63(~) local mutated=false immutable=true needs_capture=false
   b64(~) local mutated=false immutable=true needs_capture=false
   b65(~) local mutated=false immutable=true needs_capture=false
@@ -70,15 +70,14 @@
   b68(~) local mutated=false immutable=true needs_capture=false
   b69(~) local mutated=false immutable=true needs_capture=false
   b70(~) local mutated=false immutable=true needs_capture=false
-  b71(~) local mutated=false immutable=true needs_capture=false
-  b72(G#3) local mutated=false immutable=true needs_capture=false
+  b71(G#3) local mutated=false immutable=true needs_capture=false
+  b72(~) local mutated=false immutable=true needs_capture=false
   b73(~) local mutated=false immutable=true needs_capture=false
   b74(~) local mutated=false immutable=true needs_capture=false
-  b75(~) local mutated=false immutable=true needs_capture=false
-  b76(G#4) local mutated=false immutable=true needs_capture=false
+  b75(G#4) local mutated=false immutable=true needs_capture=false
+  b76(~) local mutated=false immutable=true needs_capture=false
   b77(~) local mutated=false immutable=true needs_capture=false
   b78(~) local mutated=false immutable=true needs_capture=false
-  b79(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
   #1 params=[b19(thunk), b20(warm), b21(window)] captures=[]
   #61 params=[b30(a), b31(b)] captures=[]

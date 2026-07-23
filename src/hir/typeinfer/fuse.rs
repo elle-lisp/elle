@@ -644,6 +644,57 @@ mod tests {
         );
     }
 
+    /// Parity invariant the fusion recognition relies on: the canonical HOF
+    /// exports defined in **core.lisp** (`fold`/`reduce`) resolve at a call site to
+    /// an `is_primitive` binding, exactly as the **stdlib.lisp** exports
+    /// (`map`/`filter`) do. Core exports are bound twice — as a full primitive by
+    /// `bind_primitives` (from `meta`) and as the canonical override by
+    /// `bind_compile_time_env` (the core-env, which wins name resolution and
+    /// carries the correct value). The override must also be marked `is_primitive`
+    /// (`analyze::bind_compile_time_env`, `is_primitive = true` for the core env),
+    /// or a core HOF is invisible to every pass that keys on the flag — loop
+    /// fusion here, dispatch monomorphization. A user redefinition still shadows
+    /// with a non-primitive binding (the safety complement).
+    #[test]
+    fn core_lisp_hof_exports_are_primitive_like_stdlib() {
+        // The binding a `(name …)` call resolves to (the winning shadow).
+        fn callee_is_primitive(src: &str, name: &str) -> bool {
+            let (hir, arena, names) = compile(src);
+            fn find(
+                h: &Hir,
+                arena: &BindingArena,
+                names: &HashMap<u32, String>,
+                want: &str,
+            ) -> Option<bool> {
+                if let HirKind::Call { func, .. } = &h.kind {
+                    if let Some(b) = super::unwrap_callee_binding(func) {
+                        if names.get(&arena.get(b).name.0).map(String::as_str) == Some(want) {
+                            return Some(arena.get(b).is_primitive);
+                        }
+                    }
+                }
+                let mut found = None;
+                h.for_each_child(|c| found = found.or_else(|| find(c, arena, names, want)));
+                found
+            }
+            find(&hir, &arena, &names, name).expect("call to the named op is present")
+        }
+        // core.lisp exports — primitive, exactly like the stdlib map/filter.
+        assert!(
+            callee_is_primitive("(fold (fn [a x] (+ a x)) 0 [1 2 3])", "fold"),
+            "core.lisp `fold` must resolve to a primitive binding (parity with map)",
+        );
+        assert!(
+            callee_is_primitive("(reduce (fn [a x] (+ a x)) 0 [1 2 3])", "reduce"),
+            "core.lisp `reduce` must resolve to a primitive binding",
+        );
+        // Safety complement: a user redefinition shadows with a non-primitive one.
+        assert!(
+            !callee_is_primitive("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1])", "fold"),
+            "a user `fold` redefinition must NOT be primitive",
+        );
+    }
+
     /// Safety: a capturing lambda is left alone (its body references a free
     /// variable, so it is not the non-capturing kernel the gate admits). The
     /// `map` call survives.

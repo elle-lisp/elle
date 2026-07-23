@@ -38,10 +38,10 @@ pub fn eval_syntax(
     analyzer.bind_primitives(&meta);
     // Make core.lisp exports and compile-time defs visible in macro bodies.
     if !expander.core_env.is_empty() {
-        analyzer.bind_compile_time_env(&expander.core_env);
+        analyzer.bind_compile_time_env(&expander.core_env, true);
     }
     if !expander.compile_time_env.is_empty() {
-        analyzer.bind_compile_time_env(&expander.compile_time_env);
+        analyzer.bind_compile_time_env(&expander.compile_time_env, false);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
     if !analysis.errors.is_empty() {
@@ -108,7 +108,7 @@ pub fn eval(
     analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     if !expander.core_env.is_empty() {
-        analyzer.bind_compile_time_env(&expander.core_env);
+        analyzer.bind_compile_time_env(&expander.core_env, true);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
     if !analysis.errors.is_empty() {

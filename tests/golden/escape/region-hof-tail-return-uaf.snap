@@ -27,47 +27,46 @@
   b25(~) local mutated=false immutable=true needs_capture=false
   b26(~) local mutated=false immutable=true needs_capture=false
   b27(~) local mutated=false immutable=true needs_capture=false
-  b28(concat) local mutated=false immutable=true needs_capture=false
+  b28(~) local mutated=false immutable=true needs_capture=false
   b29(~) local mutated=false immutable=true needs_capture=false
   b30(~) local mutated=false immutable=true needs_capture=false
   b31(~) local mutated=false immutable=true needs_capture=false
   b32(~) local mutated=false immutable=true needs_capture=false
-  b33(~) local mutated=false immutable=true needs_capture=false
-  b34(G#0) local mutated=false immutable=true needs_capture=false
-  b35(G#1) local mutated=false immutable=true needs_capture=false
+  b33(G#0) local mutated=false immutable=true needs_capture=false
+  b34(G#1) local mutated=false immutable=true needs_capture=false
+  b35(~) local mutated=false immutable=true needs_capture=false
   b36(~) local mutated=false immutable=true needs_capture=false
-  b37(~) local mutated=false immutable=true needs_capture=false
-  b38(xs) param mutated=false immutable=true needs_capture=false
-  b39(~) local mutated=false immutable=true needs_capture=false
-  b40(a) param mutated=false immutable=true needs_capture=false
-  b41(xs) param mutated=false immutable=true needs_capture=false
-  b42(~) local mutated=false immutable=true needs_capture=false
-  b43(a) param mutated=false immutable=true needs_capture=false
+  b37(xs) param mutated=false immutable=true needs_capture=false
+  b38(~) local mutated=false immutable=true needs_capture=false
+  b39(a) param mutated=false immutable=true needs_capture=false
+  b40(xs) param mutated=false immutable=true needs_capture=false
+  b41(~) local mutated=false immutable=true needs_capture=false
+  b42(a) param mutated=false immutable=true needs_capture=false
+  b43(~) local mutated=false immutable=true needs_capture=false
   b44(~) local mutated=false immutable=true needs_capture=false
   b45(~) local mutated=false immutable=true needs_capture=false
   b46(~) local mutated=false immutable=true needs_capture=false
-  b47(~) local mutated=false immutable=true needs_capture=false
-  b48(G#2) local mutated=false immutable=true needs_capture=false
-  b49(G#3) local mutated=false immutable=true needs_capture=false
+  b47(G#2) local mutated=false immutable=true needs_capture=false
+  b48(G#3) local mutated=false immutable=true needs_capture=false
+  b49(~) local mutated=false immutable=true needs_capture=false
   b50(~) local mutated=false immutable=true needs_capture=false
   b51(~) local mutated=false immutable=true needs_capture=false
   b52(~) local mutated=false immutable=true needs_capture=false
   b53(~) local mutated=false immutable=true needs_capture=false
   b54(~) local mutated=false immutable=true needs_capture=false
-  b55(~) local mutated=false immutable=true needs_capture=false
-  b56(G#4) local mutated=false immutable=true needs_capture=false
-  b57(G#5) local mutated=false immutable=true needs_capture=false
+  b55(G#4) local mutated=false immutable=true needs_capture=false
+  b56(G#5) local mutated=false immutable=true needs_capture=false
+  b57(~) local mutated=false immutable=true needs_capture=false
   b58(~) local mutated=false immutable=true needs_capture=false
-  b59(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
   #1 params=[b17(xs)] captures=[]
   #6 params=[b20(a)] captures=[]
   #14 params=[b21(xs)] captures=[]
   #19 params=[b24(a)] captures=[]
-  #121 params=[b38(xs)] captures=[]
-  #124 params=[b40(a)] captures=[]
-  #130 params=[b41(xs)] captures=[]
-  #133 params=[b43(a)] captures=[]
+  #121 params=[b37(xs)] captures=[]
+  #124 params=[b39(a)] captures=[]
+  #130 params=[b40(xs)] captures=[]
+  #133 params=[b42(a)] captures=[]
 [return_frontier]
   [r1, r29, r32, r5, r60, r62, r63, r64, r65]
 [suppressed_decref_regions]

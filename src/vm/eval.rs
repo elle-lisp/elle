@@ -152,11 +152,11 @@ fn eval_inner(
     analyzer.bind_primitives(&meta);
     if let Some(ref exp) = vm.eval_expander {
         if !exp.core_env.is_empty() {
-            analyzer.bind_compile_time_env(&exp.core_env);
+            analyzer.bind_compile_time_env(&exp.core_env, true);
         }
     }
     if let Some(ref env_map) = env_map {
-        analyzer.bind_compile_time_env(env_map);
+        analyzer.bind_compile_time_env(env_map, false);
     }
 
     let mut analysis = analyzer

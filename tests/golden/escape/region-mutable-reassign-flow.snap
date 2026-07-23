@@ -87,17 +87,16 @@
   b85(~) local mutated=false immutable=true needs_capture=false
   b86(~) local mutated=false immutable=true needs_capture=false
   b87(~) local mutated=false immutable=true needs_capture=false
-  b88(concat) local mutated=false immutable=true needs_capture=false
+  b88(~) local mutated=false immutable=true needs_capture=false
   b89(~) local mutated=false immutable=true needs_capture=false
   b90(~) local mutated=false immutable=true needs_capture=false
   b91(~) local mutated=false immutable=true needs_capture=false
   b92(~) local mutated=false immutable=true needs_capture=false
   b93(~) local mutated=false immutable=true needs_capture=false
-  b94(~) local mutated=false immutable=true needs_capture=false
-  b95(G#16) local mutated=false immutable=true needs_capture=false
-  b96(G#17) local mutated=false immutable=true needs_capture=false
+  b94(G#16) local mutated=false immutable=true needs_capture=false
+  b95(G#17) local mutated=false immutable=true needs_capture=false
+  b96(~) local mutated=false immutable=true needs_capture=false
   b97(~) local mutated=false immutable=true needs_capture=false
-  b98(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
 [return_frontier]
   [r94]

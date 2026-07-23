@@ -81,7 +81,7 @@ fn compile_inner(
     );
     analyzer.bind_primitives(&meta);
     if !core_env.is_empty() {
-        analyzer.bind_compile_time_env(&core_env);
+        analyzer.bind_compile_time_env(&core_env, true);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
     let prim_values = analyzer.primitive_values().clone();
@@ -196,7 +196,7 @@ fn compile_file_to_lir_inner(
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
     if !core_env.is_empty() {
-        analyzer.bind_compile_time_env(&core_env);
+        analyzer.bind_compile_time_env(&core_env, true);
     }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
