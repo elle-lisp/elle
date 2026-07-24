@@ -59,7 +59,7 @@ use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::primitives::def::RetType;
 use crate::signals::{Signal, SIG_ERROR};
 use crate::symbol::SymbolTable;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
 /// The stdlib/primitive ops the fused loop is built from, resolved once to this
@@ -124,7 +124,220 @@ pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: 
     // base-var bindings live in enclosing `let`s that fusion never mutates, so the
     // proof stays valid as inner map calls collapse.
     let bases = concrete_init_keywords(hir, arena, &symbol_names);
-    rewrite(hir, arena, &symbol_names, &ops, &bases);
+    // The same-unit function templates: a `Var` naming a non-capturing lambda
+    // (a top-level `defn` or a `let`/`def`-bound `fn`) inlines like a literal
+    // (docs/impl/dissolution.md § "Named same-unit functions"). Built once over
+    // the pre-rewrite tree; each use clones a fresh copy, so the map stays valid
+    // as calls collapse.
+    let mut templates: FxHashMap<Binding, FnTemplate> = FxHashMap::default();
+    collect_inline_fns(hir, arena, &mut templates, &mut FxHashSet::default());
+    rewrite(hir, arena, &symbol_names, &ops, &bases, &templates);
+}
+
+/// A same-unit function eligible for inlining into a fused HOF: its parameters
+/// and body, held as an owned template. Because the definition persists (it stays
+/// bound and may be used as a first-class value), its body cannot be moved out;
+/// each call site clones this template with fresh bindings and HirIds (see
+/// `clone_template`/`clone_fresh`).
+struct FnTemplate {
+    params: Vec<Binding>,
+    body: Hir,
+}
+
+/// Walk every `Let`/`Letrec`/`Define` binding (the same forms `prune::collect_inits`
+/// visits) and record those bound to an inlineable lambda template. Mirrors the
+/// singly-bound/immutable/unmutated discipline of the init-keyword proof.
+fn collect_inline_fns(
+    hir: &Hir,
+    arena: &BindingArena,
+    out: &mut FxHashMap<Binding, FnTemplate>,
+    seen: &mut FxHashSet<Binding>,
+) {
+    let mut record = |b: Binding, value: &Hir, out: &mut FxHashMap<Binding, FnTemplate>| {
+        // A binding bound more than once has no single stable value — drop it.
+        if !seen.insert(b) {
+            out.remove(&b);
+            return;
+        }
+        let bi = arena.get(b);
+        if !bi.is_immutable || bi.is_mutated {
+            return;
+        }
+        if let Some(t) = fn_template(value, arena) {
+            out.insert(b, t);
+        }
+    };
+    match &hir.kind {
+        HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+            for (b, value) in bindings {
+                record(*b, value, out);
+            }
+        }
+        HirKind::Define { binding, value } => record(*binding, value, out),
+        _ => {}
+    }
+    hir.for_each_child(|c| collect_inline_fns(c, arena, out, seen));
+}
+
+/// The inlineable template of a lambda initializer, or `None`. A qualifying lambda
+/// is non-capturing, has 1 or 2 fixed parameters (a `map`/`filter` element or a
+/// `fold` accumulator+element — the use site checks the exact arity), no rest
+/// parameter, unmutated parameters, and a `clone_fresh`-admissible body
+/// (`is_inlineable_body` — only pure-expression forms, so the clone freshens the
+/// parameters and nothing else). The body is cloned into the template; each call
+/// site re-clones it with fresh bindings.
+fn fn_template(value: &Hir, arena: &BindingArena) -> Option<FnTemplate> {
+    let HirKind::Lambda {
+        params,
+        rest_param,
+        captures,
+        body,
+        ..
+    } = &value.kind
+    else {
+        return None;
+    };
+    if rest_param.is_some() || !captures.is_empty() || params.is_empty() || params.len() > 2 {
+        return None;
+    }
+    if params.iter().any(|p| arena.get(*p).is_mutated) || !is_inlineable_body(body) {
+        return None;
+    }
+    Some(FnTemplate {
+        params: params.clone(),
+        body: (**body).clone(),
+    })
+}
+
+/// Is a body admissible for the alpha-renaming clone? The whitelist covers only
+/// pure-expression forms that introduce **no bindings of their own** — so the
+/// clone freshens the parameters and rewrites their references, and leaves every
+/// other `Var` (a global) shared. A body with a `let`/`loop`/`match` binding or a
+/// nested lambda uses a form not listed here and declines: the definition's own
+/// bindings are then never duplicated (correct-by-construction). Kept in lockstep
+/// with `clone_fresh` — the same variants, one returning `bool`, one rebuilding.
+fn is_inlineable_body(h: &Hir) -> bool {
+    match &h.kind {
+        HirKind::Nil
+        | HirKind::EmptyList
+        | HirKind::Bool(_)
+        | HirKind::Int(_)
+        | HirKind::Float(_)
+        | HirKind::String(_)
+        | HirKind::Keyword(_)
+        | HirKind::Var(_) => true,
+        HirKind::Call { func, args, .. } => {
+            is_inlineable_body(func) && args.iter().all(|a| is_inlineable_body(&a.expr))
+        }
+        HirKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            is_inlineable_body(cond)
+                && is_inlineable_body(then_branch)
+                && is_inlineable_body(else_branch)
+        }
+        HirKind::Cond {
+            clauses,
+            else_branch,
+        } => {
+            clauses
+                .iter()
+                .all(|(c, b)| is_inlineable_body(c) && is_inlineable_body(b))
+                && else_branch.as_ref().is_none_or(|e| is_inlineable_body(e))
+        }
+        HirKind::Begin(v) | HirKind::And(v) | HirKind::Or(v) => v.iter().all(is_inlineable_body),
+        _ => false,
+    }
+}
+
+/// Deep-clone a whitelisted body with **fresh HirIds** (via `Hir::new` — a plain
+/// `.clone()` would duplicate the global-counter ids and collide in the region
+/// walk's per-id side tables) and **renamed parameters** (`renames`, old → fresh
+/// binding). Every non-renamed `Var` (a global) is left as-is. Returns `None` on
+/// any form `is_inlineable_body` rejects — the two are kept in lockstep, so a body
+/// that passed collection always clones.
+fn clone_fresh(h: &Hir, renames: &FxHashMap<Binding, Binding>) -> Option<Hir> {
+    let clone_vec =
+        |v: &[Hir]| -> Option<Vec<Hir>> { v.iter().map(|c| clone_fresh(c, renames)).collect() };
+    let kind = match &h.kind {
+        HirKind::Nil => HirKind::Nil,
+        HirKind::EmptyList => HirKind::EmptyList,
+        HirKind::Bool(b) => HirKind::Bool(*b),
+        HirKind::Int(n) => HirKind::Int(*n),
+        HirKind::Float(f) => HirKind::Float(*f),
+        HirKind::String(s) => HirKind::String(s.clone()),
+        HirKind::Keyword(s) => HirKind::Keyword(s.clone()),
+        HirKind::Var(b) => HirKind::Var(renames.get(b).copied().unwrap_or(*b)),
+        HirKind::Call {
+            func,
+            args,
+            is_tail,
+        } => {
+            let func = Box::new(clone_fresh(func, renames)?);
+            let mut new_args = Vec::with_capacity(args.len());
+            for a in args {
+                new_args.push(CallArg {
+                    expr: clone_fresh(&a.expr, renames)?,
+                    spliced: a.spliced,
+                });
+            }
+            HirKind::Call {
+                func,
+                args: new_args,
+                is_tail: *is_tail,
+            }
+        }
+        HirKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => HirKind::If {
+            cond: Box::new(clone_fresh(cond, renames)?),
+            then_branch: Box::new(clone_fresh(then_branch, renames)?),
+            else_branch: Box::new(clone_fresh(else_branch, renames)?),
+        },
+        HirKind::Cond {
+            clauses,
+            else_branch,
+        } => {
+            let mut cs = Vec::with_capacity(clauses.len());
+            for (c, b) in clauses {
+                cs.push((clone_fresh(c, renames)?, clone_fresh(b, renames)?));
+            }
+            let eb = match else_branch {
+                Some(e) => Some(Box::new(clone_fresh(e, renames)?)),
+                None => None,
+            };
+            HirKind::Cond {
+                clauses: cs,
+                else_branch: eb,
+            }
+        }
+        HirKind::Begin(v) => HirKind::Begin(clone_vec(v)?),
+        HirKind::And(v) => HirKind::And(clone_vec(v)?),
+        HirKind::Or(v) => HirKind::Or(clone_vec(v)?),
+        _ => return None,
+    };
+    Some(Hir::new(kind, h.span.clone(), h.signal))
+}
+
+/// Clone a function template with fresh parameter bindings (minted via `gensym`,
+/// typed immutable-local) and a fresh-id body. Returns the fresh parameters and
+/// the cloned body, ready to splice like a moved-out lambda's.
+fn clone_template(t: &FnTemplate, arena: &mut BindingArena) -> (Vec<Binding>, Hir) {
+    let mut renames: FxHashMap<Binding, Binding> = FxHashMap::default();
+    let mut params = Vec::with_capacity(t.params.len());
+    for &p in &t.params {
+        let fresh = arena.gensym();
+        arena.get_mut(fresh).is_immutable = true;
+        renames.insert(p, fresh);
+        params.push(fresh);
+    }
+    let body =
+        clone_fresh(&t.body, &renames).expect("collect_inline_fns proved the body inlineable");
+    (params, body)
 }
 
 /// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
@@ -141,15 +354,16 @@ fn rewrite(
     symbol_names: &HashMap<u32, String>,
     ops: &Ops,
     bases: &FxHashMap<Binding, &'static str>,
+    templates: &FxHashMap<Binding, FnTemplate>,
 ) {
-    if let Some(plan) = validate_chain(hir, arena, symbol_names, bases) {
+    if let Some(plan) = validate_chain(hir, arena, symbol_names, bases, templates) {
         let sig = hir.signal;
         let span = hir.span.clone();
         let owned = std::mem::replace(hir, Hir::error(span.clone()));
-        let (terminal, stages, base) = take_chain(owned, plan);
+        let (terminal, stages, base) = take_chain(owned, plan, arena, templates);
         *hir = build_loop(terminal, stages, base, arena, ops, sig, span);
     }
-    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases));
+    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, templates));
 }
 
 /// The higher-order collection op a fused chain is built from, and the kind of
@@ -292,6 +506,32 @@ fn qualifies_lambda<'a>(
     Some((params, body))
 }
 
+/// The body signal of a HOF's function argument at the given arity, or `None` if
+/// it does not qualify. The argument is one of two forms:
+///
+/// - a **lambda literal** (`qualifies_lambda`), or
+/// - a **`Var`** naming a same-unit template (`templates`) whose parameter count
+///   matches `arity` — the named-function inlining path.
+///
+/// Returns the body's top signal, which the caller feeds to the reorder gate (the
+/// two forms are gated identically). The template body qualified at collection, so
+/// only the arity is re-checked here.
+fn fn_arg_body_signal(
+    lam: &Hir,
+    arena: &BindingArena,
+    templates: &FxHashMap<Binding, FnTemplate>,
+    arity: usize,
+) -> Option<Signal> {
+    match &lam.kind {
+        HirKind::Lambda { .. } => qualifies_lambda(lam, arena, arity).map(|(_, body)| body.signal),
+        HirKind::Var(b) => {
+            let t = templates.get(b)?;
+            (t.params.len() == arity).then_some(t.body.signal)
+        }
+        _ => None,
+    }
+}
+
 /// Does a lambda body disqualify it from inlining? Two structural hazards, both
 /// detected in one walk:
 ///
@@ -347,15 +587,15 @@ fn validate_chain(
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
+    templates: &FxHashMap<Binding, FnTemplate>,
 ) -> Option<ChainPlan> {
     let mut all_silent = true;
     let mut ops = 0usize;
     let mut cur = hir;
 
-    // The optional outermost fold/reduce terminal (2-param combinator lambda).
+    // The optional outermost fold/reduce terminal (2-param combinator).
     let fold = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
-        let (_, body) = qualifies_lambda(lam, arena, 2)?;
-        all_silent &= reorder_safe(body.signal);
+        all_silent &= reorder_safe(fn_arg_body_signal(lam, arena, templates, 2)?);
         ops += 1;
         cur = coll;
         true
@@ -363,11 +603,10 @@ fn validate_chain(
         false
     };
 
-    // The inner map/filter pipeline (1-param lambdas).
+    // The inner map/filter pipeline (1-param functions).
     let mut kinds = Vec::new();
     while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
-        let (_, body) = qualifies_lambda(lam, arena, 1)?;
-        all_silent &= reorder_safe(body.signal);
+        all_silent &= reorder_safe(fn_arg_body_signal(lam, arena, templates, 1)?);
         ops += 1;
         kinds.push(hof);
         cur = coll;
@@ -472,14 +711,44 @@ fn classify_base(
     }
 }
 
-/// Consume a validated chain, returning its **terminal** (Collect or the moved-out
-/// fold combinator), its per-element `map`/`filter` **stages** (`(hof, param,
-/// body)`) in **application order** (innermost op first), and the base collection
-/// expression. `plan.fold` and `plan.kinds` are the chain's shape in outer→inner
-/// order (from `validate_chain`); the fold is peeled first (it wraps the pipeline),
-/// then the map/filter ops. Validation guarantees the structure, so every
-/// destructuring is total.
-fn take_chain(mut expr: Hir, plan: ChainPlan) -> (Terminal, Vec<(Hof, Binding, Hir)>, Hir) {
+/// Resolve a HOF's function argument to owned `(params, body)`, ready to splice:
+///
+/// - a **lambda literal** is *moved* out of the call (its parameters and body are
+///   uniquely owned by the splice thereafter);
+/// - a **`Var`** naming a same-unit template is *cloned* with fresh bindings and
+///   HirIds (`clone_template`) — the definition persists, so nothing is moved.
+///
+/// Validation (`fn_arg_body_signal`) proved one of these holds at the required
+/// arity, so the match is total.
+fn take_fn_parts(
+    lam: Hir,
+    arena: &mut BindingArena,
+    templates: &FxHashMap<Binding, FnTemplate>,
+) -> (Vec<Binding>, Hir) {
+    match lam.kind {
+        HirKind::Lambda { params, body, .. } => (params, *body),
+        HirKind::Var(b) => {
+            let t = templates.get(&b).expect("validate_chain proved a template");
+            clone_template(t, arena)
+        }
+        _ => unreachable!("validate_chain proved a lambda or a template Var"),
+    }
+}
+
+/// Consume a validated chain, returning its **terminal** (Collect or the fold
+/// combinator), its per-element `map`/`filter` **stages** (`(hof, param, body)`) in
+/// **application order** (innermost op first), and the base collection expression.
+/// `plan.fold` and `plan.kinds` are the chain's shape in outer→inner order (from
+/// `validate_chain`); the fold is peeled first (it wraps the pipeline), then the
+/// map/filter ops. Each op's function is resolved by `take_fn_parts` — moved (a
+/// lambda literal) or cloned fresh (a named template). Validation guarantees the
+/// structure, so every destructuring is total.
+fn take_chain(
+    mut expr: Hir,
+    plan: ChainPlan,
+    arena: &mut BindingArena,
+    templates: &FxHashMap<Binding, FnTemplate>,
+) -> (Terminal, Vec<(Hof, Binding, Hir)>, Hir) {
     let terminal = if plan.fold {
         let HirKind::Call { args, .. } = expr.kind else {
             unreachable!("validate_chain proved a fold call");
@@ -488,15 +757,13 @@ fn take_chain(mut expr: Hir, plan: ChainPlan) -> (Terminal, Vec<(Hof, Binding, H
         let lam = it.next().expect("fold has 3 args").expr;
         let init = it.next().expect("fold has 3 args").expr;
         let coll = it.next().expect("fold has 3 args").expr;
-        let HirKind::Lambda { params, body, .. } = lam.kind else {
-            unreachable!("validate_chain proved a 2-param lambda");
-        };
+        let (params, body) = take_fn_parts(lam, arena, templates);
         expr = coll;
         Terminal::Fold(Box::new(FoldTerminal {
             init,
             acc_param: params[0],
             elem_param: params[1],
-            body: *body,
+            body,
         }))
     } else {
         // The mutable-array arm: a mutable `@array` base returns the accumulator
@@ -515,10 +782,8 @@ fn take_chain(mut expr: Hir, plan: ChainPlan) -> (Terminal, Vec<(Hof, Binding, H
         let mut it = args.into_iter();
         let lam = it.next().expect("HOF has 2 args").expr;
         let coll = it.next().expect("HOF has 2 args").expr;
-        let HirKind::Lambda { params, body, .. } = lam.kind else {
-            unreachable!("validate_chain proved a lambda");
-        };
-        stages.push((hof, params[0], *body));
+        let (params, body) = take_fn_parts(lam, arena, templates);
+        stages.push((hof, params[0], body));
         expr = coll;
     }
     // Collected outer→inner; application order is inner→outer.
@@ -1569,6 +1834,148 @@ mod tests {
             count_callee(&hir, &arena, &names, "@array"),
             0,
             "scalar fold accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// Named same-unit function inlining (docs/impl/dissolution.md § "Named
+    /// same-unit functions"): a `map` whose function argument is a `Var` naming a
+    /// top-level `(defn dbl …)` fuses just as an inline lambda does — the `map`
+    /// dispatch is gone and `dbl`'s body is CLONED inline. The definition PERSISTS
+    /// (it is cloned, not moved), so its own `(fn …)` still stands — hence the body
+    /// op `*` now appears TWICE (the surviving definition + the inlined copy) where
+    /// before fusion it appeared once and the `map` call survived.
+    #[test]
+    fn named_map_fn_inlines() {
+        let (hir, arena, names) = compile("(defn dbl [x] (* x 2)) (map dbl [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "the `map` dispatch must be gone when the fn is a named defn; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "*"),
+            2,
+            "`dbl`'s body op appears twice — the surviving definition plus the \
+             inlined copy; callees were {cs:?}",
+        );
+        assert!(
+            cs.iter().any(|n| n == "freeze"),
+            "the fused loop freezes one accumulator; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one fused accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// A named 2-parameter combinator inlines into a fused fold: `(defn mul …)` used
+    /// as `(fold mul 1 xs)` dissolves to the scalar-accumulator loop with `mul`'s
+    /// body spliced in (so `*` appears twice — definition + inlined copy), and the
+    /// `fold` dispatch is gone. The body op is `*`, not `+`: the loop scaffold's own
+    /// `(+ i 1)` increment uses `+`, so `+` would not be a clean discriminator.
+    #[test]
+    fn named_fold_fn_inlines() {
+        let (hir, arena, names) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold"),
+            "the `fold` dispatch must be gone for a named combinator; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "*"),
+            2,
+            "`mul`'s body op appears twice (definition + inlined); callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "a fold accumulator is scalar — no `@array`; callees were {cs:?}",
+        );
+    }
+
+    /// A composition of a named function with itself fuses to ONE loop: `(map dbl
+    /// (map dbl xs))` collapses both dispatches and inlines two copies of `dbl`'s
+    /// body (so `*` appears three times — the definition plus two inlined copies)
+    /// over a single accumulator.
+    #[test]
+    fn named_fn_composition_fuses_to_one_loop() {
+        let (hir, arena, names) = compile("(defn dbl [x] (* x 2)) (map dbl (map dbl [1 2 3]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "both `map` dispatches must be gone; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "*"),
+            3,
+            "definition + two inlined copies of `dbl`; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one loop, one accumulator — the intermediate array is gone; callees were {cs:?}",
+        );
+    }
+
+    /// Decline: a named function whose body introduces its own binding (a `let`) is
+    /// NOT inlined — the clone whitelist covers only pure-expression forms, so a
+    /// binding-introducing body declines and the `map` stays a plain call (the
+    /// definition's bindings are never duplicated). A lambda *literal* with a `let`
+    /// body still fuses (it is moved, not cloned) — the asymmetry is intentional.
+    #[test]
+    fn named_fn_with_let_body_declines() {
+        let (hir, arena, names) = compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "map"),
+            "a named fn with a binding-introducing body must not inline; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a `let`-bound local function that CAPTURES a free variable is not
+    /// inlined (captures are non-empty, so the body would reference an out-of-scope
+    /// local once spliced). The `map` call survives.
+    #[test]
+    fn named_capturing_local_fn_declines() {
+        let (hir, arena, names) =
+            compile("(let [k 10] (let [g (fn [x] (+ x k))] (map g [1 2 3])))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "map"),
+            "a capturing local fn must not inline; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a `Var` argument whose binding is NOT a lambda (here an integer) is
+    /// left alone — there is no function template to inline, so fusion declines and
+    /// the `map` call survives.
+    #[test]
+    fn named_non_lambda_var_declines() {
+        let (hir, arena, names) = compile("(def h 5) (map h [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "map"),
+            "a non-lambda Var arg must not inline; callees were {cs:?}",
+        );
+    }
+
+    /// The definition survives inlining intact, so it is still usable as a
+    /// first-class value: `(map dbl xs)` fuses AND `dbl` remains callable/referable
+    /// elsewhere. The `map` is gone (fused), yet `dbl`'s lambda still stands (the
+    /// inline cloned it rather than consuming it).
+    #[test]
+    fn named_fn_inlined_and_still_first_class() {
+        let (hir, arena, names) =
+            compile("(defn dbl [x] (* x 2)) (def ys (map dbl [1 2 3])) (dbl 9)");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "the `map` must fuse; callees were {cs:?}",
+        );
+        assert!(
+            count_lambdas(&hir) >= 1,
+            "the cloned-from definition `dbl` must still stand as a lambda",
         );
     }
 }

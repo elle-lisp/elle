@@ -9,9 +9,13 @@
 # `src/hir/typeinfer/fuse.rs`; here we only assert the observable result is
 # unchanged.
 #
-# The cross-check reference is `map` applied to a NAMED function (`dbl`) — a
-# Var, not a lambda literal, so the gate leaves it a plain `map` call. Fused
-# inline-lambda and un-fused named-fn must agree.
+# `dbl`/`inc` are top-level named functions with pure bodies, so a `(map dbl xs)`
+# now ALSO fuses (docs/impl/dissolution.md § "Named same-unit functions"): the
+# function's body is cloned inline. The genuinely UN-fused cross-check oracle is
+# `dbl-let`/`inc-let` — same value, but a `let`-body declines the inline clone
+# (the whitelist covers only pure-expression forms), so it stays a plain `map`
+# call. Fused inline-lambda, fused named-fn, and the un-fused let-body oracle must
+# all agree.
 
 (defn dbl [x]
   (* x 2))
@@ -19,11 +23,30 @@
 (defn inc [x]
   (+ x 1))
 
-# Single map: fused inline lambda == un-fused named fn == literal expectation.
+# Un-fused oracles: a `let`-body declines the named-fn inline clone, so these run
+# the real stdlib `map`. Same value as `dbl`/`inc`.
+(defn dbl-let [x]
+  (let [y x]
+    (* y 2)))
+
+(defn inc-let [x]
+  (let [y x]
+    (+ y 1)))
+
+# Single map: fused inline lambda == un-fused let-body oracle == literal.
 (assert (= (map (fn [x] (* x 2)) [1 2 3]) [2 4 6])
         "single map fuses to the same value")
-(assert (= (map (fn [x] (* x 2)) [1 2 3]) (map dbl [1 2 3]))
-        "fused inline-lambda agrees with un-fused named-fn")
+(assert (= (map (fn [x] (* x 2)) [1 2 3]) (map dbl-let [1 2 3]))
+        "fused inline-lambda agrees with the un-fused let-body oracle")
+
+# Named-fn inlining: a `(map dbl xs)` fuses and agrees with the un-fused oracle.
+(assert (= (map dbl [1 2 3]) [2 4 6]) "named-fn map fuses to the same value")
+(assert (= (map dbl [1 2 3]) (map dbl-let [1 2 3]))
+        "fused named-fn agrees with the un-fused let-body oracle")
+# A named fn is still usable as a first-class value after its inline at a call
+# site (the inline clones it; the definition persists).
+(assert (= (map dbl [1 2 3]) (map (fn [x] (dbl x)) [1 2 3]))
+        "the inlined named fn is still callable as a value")
 
 # Boundary sizes.
 (assert (= (map (fn [x] (* x 2)) []) []) "empty array fuses to empty")
@@ -45,15 +68,16 @@
                (map (fn [x] (* x 2)) ys))) [2 4 6])
         "map over an aliased Var fuses to the same value")
 (assert (= (let [xs [1 2 3]]
-             (map (fn [x] (* x 2)) xs)) (map dbl [1 2 3]))
-        "fused Var-base agrees with the un-fused named-fn")
+             (map (fn [x] (* x 2)) xs)) (map dbl-let [1 2 3]))
+        "fused Var-base agrees with the un-fused let-body oracle")
 
 # Composition fuses to ONE loop; the interleaved order is unobservable for these
-# pure transforms, and the value matches the staged `map`-of-`map`.
+# pure transforms, and the value matches the staged `map`-of-`map`. The un-fused
+# oracle uses the let-body fns so it runs the real staged stdlib maps.
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3])) [3 5 7])
         "map-of-map fuses to the same value")
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3]))
-           (map inc (map dbl [1 2 3])))
+           (map inc-let (map dbl-let [1 2 3])))
         "fused composition agrees with the un-fused staged maps")
 
 # A three-deep tower — the intermediate arrays all dissolve.

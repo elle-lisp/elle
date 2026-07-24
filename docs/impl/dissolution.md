@@ -192,14 +192,18 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   mutable `@array` base (keyword `@array`, or a `RetType::MutableArray` producer
   call) selects the unfrozen-result arm under the tighter gate below (see
   "The mutable-array arm").
-- **The lambda is non-capturing with the op's fixed arity** — one parameter for
+- **The function is non-capturing with the op's fixed arity** — one parameter for
   a `map`/`filter` (the element), two for a `fold` (the accumulator and the
-  element) — written directly as the call's argument, with no rest parameter.
+  element) — with no rest parameter. It is one of two forms:
+  - a **lambda literal** written directly as the call's argument. It is consumed
+    by the rewrite (moved out of the call), so no other use can observe the
+    change, and its parameter is retyped to a loop-local in place.
+  - a **`Var` referencing a same-compile-unit function** whose initializer is such
+    a lambda (a top-level `(defn f …)` or a `let`/`def`-bound `(fn …)`) — inlined
+    by cloning, see "Named same-unit functions" below.
   No captures means the body references only its parameters and globals, so
   splicing it at the call site is always in scope; the fixed parameter count
-  means the loop's element (and, for a fold, the accumulator) bind 1:1. The lambda
-  is consumed by the rewrite (moved out of the call), so no other use of it can
-  observe the change.
+  means the loop's element (and, for a fold, the accumulator) bind 1:1.
 
 For a **composition** (a chain of length ≥ 2 — homogeneous *or* mixed), the pass
 additionally requires each lambda body to be free of **sequencing effects** — no
@@ -270,6 +274,45 @@ excluded shapes break that match:
 For an **immutable** base neither hazard exists — the base cannot be mutated — so
 `fold` and compositions fuse over it exactly as before.
 
+## Named same-unit functions
+
+A HOF's function argument need not be a call-site lambda literal. When it is a
+`Var` referencing a binding **in the same compile unit** whose initializer is a
+qualifying non-capturing lambda — a top-level `(defn f …)` (which desugars to
+`(def f (fn …))`) or any `let`/`def`-bound `(fn …)` — the function's body is
+inlined into the fused loop, exactly as a literal's would be. The map from a
+binding to its lambda template is collected by the same walk `prune.rs` uses for
+init keywords (over `Let`/`Letrec`/`Define` bindings), restricted to immutable,
+singly-bound, non-capturing lambdas with the op's arity.
+
+The one structural difference from a literal is **who owns the body**. A literal
+is consumed — moved out of the call — so its parameter and node ids belong
+uniquely to the splice. A **named** function *persists*: it stays bound and may be
+called elsewhere as a first-class value, so its body cannot be moved. It is
+**cloned with fresh bindings and fresh HirIds** per call site (an alpha-rename):
+every parameter is re-minted and its references rewritten, and every node is
+rebuilt through `Hir::new` (ids come from a global counter, and a plain `.clone()`
+would duplicate them, colliding in the region walk's per-id side tables). Globals
+the body references stay **shared** — a global is already referenced from many
+sites, so sharing its binding is the norm, not a duplication hazard; only the
+lambda's own parameters are freshened.
+
+The clone is a **whitelist** over pure-expression forms — literals, `Var`, `Call`,
+`if`, `cond`, `begin`, `and`/`or`. A body that introduces its own bindings (a
+`let`, `loop`, `match` binding, or a nested lambda) or uses any unrecognized form
+**declines**: the clone returns nothing and the HOF stays a plain call, so the
+definition's own bindings are never duplicated (correct-by-construction — an
+unhandled form is left un-optimized, never miscompiled). This is why a lambda
+*literal* with a `let` body still fuses (it is moved, not cloned) while a *named*
+function with a `let` body does not — widening the clone to freshen inner bindings
+is headroom. Cross-unit functions (a stdlib `defn` whose body is not in this
+unit's tree) are also headroom: inlining them needs the body carried across the
+compile-unit boundary like the dispatch-wrapper registry.
+
+Everything else in the gate is identical — non-capturing, fixed arity, no rest
+parameter, unmutated parameters, and the composition reorder requirement (read
+from the template body's signal).
+
 Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/`+`/
 `length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
 original call's signal — a sound upper bound (that call's signal already subsumes
@@ -318,7 +361,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   guard the gate (user-shadowed callee, capturing lambda, unproven collection,
   raw-intrinsic body, a non-reorder-safe composition — which declines and fuses
   its inner run only — and a `fold` or composition over a mutable base, which
-  declines to the innermost single op).
+  declines to the innermost single op). Named-function pins cover a `map`/`fold`
+  whose argument is a `Var` naming a same-unit `defn` (the body inlines, the
+  definition persists) and the declines (a `let`-body function, a capturing local
+  function, a non-lambda `Var`).
 - **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (the filter
   cases in `dissolution-filter-fuse.lisp`, and the mixed cases in
   `dissolution-mixed-fuse.lisp`) prove the consequence the mission names — *fewer
@@ -338,11 +384,13 @@ codegen and execution levels, not on the leak oracle. Three pins:
 - **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
   `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`, and
   `dissolution-fold-fuse.lisp`
-  (value-preserving, incl. the declined shapes, the reorder-gate fallback, and the
-  mutable-base arm — an unfrozen, in-place-mutable result) and
-  `tests/elle/region-map-fuse-uaf.lisp` / `region-filter-fuse-uaf.lisp` /
-  `region-mixed-fuse-uaf.lisp` / `region-fold-fuse-uaf.lisp` (guardfree over heap
-  element/base/accumulator values, including a mutable-base heap result mutated in
-  place).
+  (value-preserving, incl. the declined shapes, the reorder-gate fallback, the
+  mutable-base arm — an unfrozen, in-place-mutable result — and named-function
+  inlining, whose un-fused cross-check oracle is a `let`-body function that
+  declines the clone) and `tests/elle/region-map-fuse-uaf.lisp` /
+  `region-filter-fuse-uaf.lisp` / `region-mixed-fuse-uaf.lisp` /
+  `region-fold-fuse-uaf.lisp` (guardfree over heap element/base/accumulator values,
+  including a mutable-base heap result mutated in place and a cloned named-function
+  body over heap elements).
 
 The leak oracle is only a non-regression check here.

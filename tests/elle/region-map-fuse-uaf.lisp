@@ -70,4 +70,27 @@
   (assign i (+ i 1)))
 (assert (= acc "r1") "repeated fused loops stay sound under region-id churn")
 
+# Named same-unit function inlining (docs/impl/dissolution.md § "Named same-unit
+# functions"): a `(map wrap xs)` naming a top-level `defn` inlines `wrap`'s body by
+# CLONING it with fresh bindings and HirIds. Drive the cloned body with heap
+# element values (strings) read back after the loop — an over-free of a base
+# element under the cloned body's read, or of an accumulator member before the
+# result is consumed, faults here under --trace=guardfree. The definition persists
+# (it is cloned, not moved), so it is also called directly afterward.
+(defn wrap [s]
+  (string "<" s ">"))
+(def wrapped (map wrap ["a" "b" "c"]))
+(assert (= wrapped ["<a>" "<b>" "<c>"]) "named-fn inline over heap elements")
+(assert (= (get wrapped 2) "<c>")
+        "named-fn inlined heap element survives a read")
+(assert (= (wrap "z") "<z>") "the inlined definition is still callable directly")
+
+# A named 2-arg combinator inlined into a fold over heap accumulators: the fold
+# rebuilds a heap string each step, so the displaced prior must survive the read
+# that builds its successor.
+(defn joinf [acc s]
+  (string acc s))
+(def joined (fold joinf "" ["p" "q" "r"]))
+(assert (= joined "pqr") "named-combinator fold over heap accumulators")
+
 (println "region-map-fuse-uaf: ok")

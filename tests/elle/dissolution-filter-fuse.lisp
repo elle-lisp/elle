@@ -10,18 +10,22 @@
 # The codegen gauge (that the closure and dispatch are gone and the push is
 # guarded by an `if`) lives in `src/hir/typeinfer/fuse.rs`.
 #
-# The cross-check reference is `filter` applied to a NAMED predicate (`big?`) — a
-# Var, not a lambda literal, so the gate leaves it a plain `filter` call. Fused
-# inline-predicate and un-fused named-pred must agree.
+# The cross-check reference is `filter` applied to a named predicate with a
+# `let`-body (`big?`): a top-level named fn with a PURE body now inlines too
+# (docs § "Named same-unit functions"), so the `let`-body — a binding-introducing
+# form the inline-clone whitelist declines — keeps it a genuinely un-fused plain
+# `filter` call. Same survivors. Fused inline-predicate and the un-fused let-body
+# form must agree.
 
 (defn big? [x]
-  (> x 2))
+  (let [y x]
+    (> y 2)))
 
-# Single filter: fused inline predicate == un-fused named pred == literal expect.
+# Single filter: fused inline predicate == un-fused let-body pred == literal expect.
 (assert (= (filter (fn [x] (> x 2)) [1 2 3 4]) [3 4])
         "single filter fuses to the same value")
 (assert (= (filter (fn [x] (> x 2)) [1 2 3 4]) (filter big? [1 2 3 4]))
-        "fused inline-predicate agrees with un-fused named-pred")
+        "fused inline-predicate agrees with the un-fused let-body pred")
 
 # Boundary sizes and the all/none-pass extremes.
 (assert (= (filter (fn [x] (> x 0)) []) []) "empty array filters to empty")

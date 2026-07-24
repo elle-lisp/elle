@@ -12,20 +12,28 @@
 # (the HOF dispatch gone, body ops inline, scalar accumulator, one loop) lives in
 # `src/hir/typeinfer/fuse.rs`.
 #
-# The cross-check reference applies the same ops through NAMED functions (Vars, not
-# lambda literals), which the gate leaves as plain staged `fold`/`map`/`filter`
-# calls. Fused inline-lambda and un-fused named-fn must agree.
+# The cross-check reference applies the same ops through named functions with a
+# `let`-body: a top-level named fn with a PURE body now inlines too (docs § "Named
+# same-unit functions"), so to keep a genuinely UN-fused oracle these wrap the body
+# in a `let` — a binding-introducing form the inline-clone whitelist declines — so
+# they stay plain staged `fold`/`map`/`filter` calls. Same value. Fused
+# inline-lambda and the un-fused let-body form must agree.
 
 (defn addf [a x]
-  (+ a x))
+  (let [s (+ a x)]
+    s))
 (defn subf [a x]
-  (- a x))
+  (let [s (- a x)]
+    s))
 (defn t2 [x]
-  (* x 2))
+  (let [y x]
+    (* y 2)))
 (defn t3 [x]
-  (* x 3))
+  (let [y x]
+    (* y 3)))
 (defn evp [x]
-  (even? x))
+  (let [y x]
+    (even? y)))
 
 # ── single fold: the scalar accumulator ────────────────────────────────
 (assert (= (fold (fn [a x] (+ a x)) 0 [1 2 3 4]) 10)
@@ -90,9 +98,9 @@
 
 # ── Realization: the intermediate array between the prefix and the fold ─
 # `arena/total-allocs` is a cumulative, monotonic count of objects ever minted
-# (docs/impl/dissolution.md § "The gauge"). The un-fused reference (named fns —
-# declined by the gate) mints the intermediate array that the map prefix would
-# hand the fold; the fused single loop never allocates it.
+# (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the let-body
+# named fns, declined by the inline-clone whitelist) mints the intermediate array
+# that the map prefix would hand the fold; the fused single loop never allocates it.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
     (thunk)

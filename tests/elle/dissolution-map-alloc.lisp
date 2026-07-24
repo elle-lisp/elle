@@ -16,21 +16,15 @@
 #
 # Each assertion compares FUSED (inline non-capturing lambdas over a proven
 # immutable array — the shape `fuse.rs` collapses) against an UN-FUSED reference
-# computing the identical value (named top-level fns, or an inline lambda that
-# CAPTURES a free variable — shapes the gate declines). A capturing lambda is the
-# right un-fused reference because it still mints the per-call closure; an inline
-# lambda over a Var-bound array does NOT decline (the gate follows the base
-# through immutable aliases), so it would fuse and mint nothing to compare
-# against. Before fusion existed both sides were the same `map` calls and every
-# delta was zero, so this file is its own counterfactual: it can only pass because
-# fusion realizes the win.
-
-(defn f3 [x]
-  (* x 3))
-(defn g1 [y]
-  (+ y 1))
-(defn hm1 [z]
-  (- z 1))
+# computing the identical value via an inline lambda that CAPTURES a free variable
+# — a shape the gate declines (splicing a capture at the call site is out of
+# scope), so it still mints the per-call closure and, in a composition, the staged
+# intermediate array. A named top-level fn is NOT a valid un-fused reference here:
+# those now inline too (docs/impl/dissolution.md § "Named same-unit functions"). An
+# inline lambda over a Var-bound array also does NOT decline (the gate follows the
+# base through immutable aliases). Before fusion existed both sides were the same
+# `map` calls and every delta was zero, so this file is its own counterfactual: it
+# can only pass because fusion realizes the win.
 
 # Cumulative objects minted while running `thunk`.
 (defn allocs [thunk]
@@ -41,14 +35,21 @@
 (def base [0 1 2 3 4 5 6 7 8 9])
 
 # ── Composition: the intermediate collection is gone ──────────────────
-# `(map g (map f xs))` fused is one loop; the un-fused reference (named fns) mints
-# an intermediate array too. Same value, strictly fewer allocations.
+# `(map g (map f xs))` fused is one loop; the un-fused reference (capturing
+# lambdas) mints per-call closures and an intermediate array too. Same value,
+# strictly fewer allocations.
 (def d2-fused
   (allocs (fn []
             (map (fn [y] (+ y 1)) (map (fn [x] (* x 3)) [0 1 2 3 4 5 6 7 8 9])))))
-(def d2-unfused (allocs (fn [] (map g1 (map f3 [0 1 2 3 4 5 6 7 8 9])))))
+(def d2-unfused
+  (allocs (fn []
+            (let [m 3
+                  n 1]
+              (map (fn [y] (+ y n)) (map (fn [x] (* x m)) [0 1 2 3 4 5 6 7 8 9]))))))
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 3)) base))
-           (map g1 (map f3 base)))
+           (let [m 3
+                 n 1]
+             (map (fn [y] (+ y n)) (map (fn [x] (* x m)) base))))
         "fused and un-fused composition compute the same value")
 (assert (< d2-fused d2-unfused)
         (string "fused composition must mint strictly fewer objects: " d2-fused
@@ -63,7 +64,13 @@
                  (map (fn [y] (+ y 1))
                       (map (fn [x] (* x 3)) [0 1 2 3 4 5 6 7 8 9]))))))
 (def d3-unfused
-  (allocs (fn [] (map hm1 (map g1 (map f3 [0 1 2 3 4 5 6 7 8 9]))))))
+  (allocs (fn []
+            (let [m 3
+                  n 1
+                  p 1]
+              (map (fn [z] (- z p))
+                   (map (fn [y] (+ y n))
+                        (map (fn [x] (* x m)) [0 1 2 3 4 5 6 7 8 9])))))))
 (assert (< d3-fused d3-unfused)
         "fused 3-deep tower mints fewer than the un-fused tower")
 (assert (> (- d3-unfused d3-fused) (- d2-unfused d2-fused))
