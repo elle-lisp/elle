@@ -183,9 +183,9 @@ fn collect_inline_fns(
 /// is non-capturing, has 1 or 2 fixed parameters (a `map`/`filter` element or a
 /// `fold` accumulator+element — the use site checks the exact arity), no rest
 /// parameter, unmutated parameters, and a `clone_fresh`-admissible body
-/// (`is_inlineable_body` — only pure-expression forms, so the clone freshens the
-/// parameters and nothing else). The body is cloned into the template; each call
-/// site re-clones it with fresh bindings.
+/// (`is_inlineable_body` — the pure-expression forms plus `let`, so the clone
+/// freshens the parameters and any `let`-bound bindings and nothing else). The body
+/// is cloned into the template; each call site re-clones it with fresh bindings.
 fn fn_template(value: &Hir, arena: &BindingArena) -> Option<FnTemplate> {
     let HirKind::Lambda {
         params,
@@ -209,13 +209,18 @@ fn fn_template(value: &Hir, arena: &BindingArena) -> Option<FnTemplate> {
     })
 }
 
-/// Is a body admissible for the alpha-renaming clone? The whitelist covers only
-/// pure-expression forms that introduce **no bindings of their own** — so the
-/// clone freshens the parameters and rewrites their references, and leaves every
-/// other `Var` (a global) shared. A body with a `let`/`loop`/`match` binding or a
-/// nested lambda uses a form not listed here and declines: the definition's own
-/// bindings are then never duplicated (correct-by-construction). Kept in lockstep
-/// with `clone_fresh` — the same variants, one returning `bool`, one rebuilding.
+/// Is a body admissible for the alpha-renaming clone? The whitelist covers the
+/// pure-expression forms plus `let`. A pure-expression body freshens the
+/// parameters, rewrites their references, and leaves every other `Var` (a global)
+/// shared. A `let` additionally introduces bindings of its own — those are
+/// freshened too (`clone_fresh`'s `Let` arm re-mints each `let`-bound binding), so
+/// a `let` body clones without collision. `letrec` is **not** admitted (its value
+/// may reference its own binding — a forward/self reference the sequential rename
+/// cannot satisfy — and the recursive cell it builds is the shape fusion avoids); a
+/// body with a `loop`/`match` binding or a nested lambda uses a form not listed
+/// here and declines: the definition's own bindings are then never duplicated
+/// (correct-by-construction). Kept in lockstep with `clone_fresh` — the same
+/// variants, one returning `bool`, one rebuilding.
 fn is_inlineable_body(h: &Hir) -> bool {
     match &h.kind {
         HirKind::Nil
@@ -226,6 +231,9 @@ fn is_inlineable_body(h: &Hir) -> bool {
         | HirKind::String(_)
         | HirKind::Keyword(_)
         | HirKind::Var(_) => true,
+        HirKind::Let { bindings, body } => {
+            bindings.iter().all(|(_, v)| is_inlineable_body(v)) && is_inlineable_body(body)
+        }
         HirKind::Call { func, args, .. } => {
             is_inlineable_body(func) && args.iter().all(|a| is_inlineable_body(&a.expr))
         }
@@ -254,13 +262,18 @@ fn is_inlineable_body(h: &Hir) -> bool {
 
 /// Deep-clone a whitelisted body with **fresh HirIds** (via `Hir::new` — a plain
 /// `.clone()` would duplicate the global-counter ids and collide in the region
-/// walk's per-id side tables) and **renamed parameters** (`renames`, old → fresh
-/// binding). Every non-renamed `Var` (a global) is left as-is. Returns `None` on
-/// any form `is_inlineable_body` rejects — the two are kept in lockstep, so a body
-/// that passed collection always clones.
-fn clone_fresh(h: &Hir, renames: &FxHashMap<Binding, Binding>) -> Option<Hir> {
-    let clone_vec =
-        |v: &[Hir]| -> Option<Vec<Hir>> { v.iter().map(|c| clone_fresh(c, renames)).collect() };
+/// walk's per-id side tables) and **renamed bindings** (`renames`, old → fresh):
+/// the parameters (seeded by `clone_template`) plus every `let`-bound binding the
+/// body introduces (freshened in the `Let` arm as the clone descends). Every
+/// non-renamed `Var` (a global) is left as-is. `renames` is threaded `&mut` so a
+/// nested `let` can extend it, and `arena` `&mut` so a `let` binding can mint its
+/// fresh id. Returns `None` on any form `is_inlineable_body` rejects — the two are
+/// kept in lockstep, so a body that passed collection always clones.
+fn clone_fresh(
+    h: &Hir,
+    renames: &mut FxHashMap<Binding, Binding>,
+    arena: &mut BindingArena,
+) -> Option<Hir> {
     let kind = match &h.kind {
         HirKind::Nil => HirKind::Nil,
         HirKind::EmptyList => HirKind::EmptyList,
@@ -270,16 +283,42 @@ fn clone_fresh(h: &Hir, renames: &FxHashMap<Binding, Binding>) -> Option<Hir> {
         HirKind::String(s) => HirKind::String(s.clone()),
         HirKind::Keyword(s) => HirKind::Keyword(s.clone()),
         HirKind::Var(b) => HirKind::Var(renames.get(b).copied().unwrap_or(*b)),
+        // A `let` freshens its own bindings. Each value is cloned under the renames
+        // established so far — before its binding is inserted — so a sequential
+        // `let`'s later value sees the fresh id of an earlier binding, while a
+        // binding's own value never renames to itself (that is `letrec`, excluded).
+        // Each fresh binding is faithful to the source's mutability.
+        HirKind::Let { bindings, body } => {
+            let mut new_bindings = Vec::with_capacity(bindings.len());
+            for (b, value) in bindings {
+                let value = clone_fresh(value, renames, arena)?;
+                let (is_immutable, is_mutated) = {
+                    let bi = arena.get(*b);
+                    (bi.is_immutable, bi.is_mutated)
+                };
+                let fresh = arena.gensym();
+                let fi = arena.get_mut(fresh);
+                fi.is_immutable = is_immutable;
+                fi.is_mutated = is_mutated;
+                renames.insert(*b, fresh);
+                new_bindings.push((fresh, value));
+            }
+            let body = Box::new(clone_fresh(body, renames, arena)?);
+            HirKind::Let {
+                bindings: new_bindings,
+                body,
+            }
+        }
         HirKind::Call {
             func,
             args,
             is_tail,
         } => {
-            let func = Box::new(clone_fresh(func, renames)?);
+            let func = Box::new(clone_fresh(func, renames, arena)?);
             let mut new_args = Vec::with_capacity(args.len());
             for a in args {
                 new_args.push(CallArg {
-                    expr: clone_fresh(&a.expr, renames)?,
+                    expr: clone_fresh(&a.expr, renames, arena)?,
                     spliced: a.spliced,
                 });
             }
@@ -294,9 +333,9 @@ fn clone_fresh(h: &Hir, renames: &FxHashMap<Binding, Binding>) -> Option<Hir> {
             then_branch,
             else_branch,
         } => HirKind::If {
-            cond: Box::new(clone_fresh(cond, renames)?),
-            then_branch: Box::new(clone_fresh(then_branch, renames)?),
-            else_branch: Box::new(clone_fresh(else_branch, renames)?),
+            cond: Box::new(clone_fresh(cond, renames, arena)?),
+            then_branch: Box::new(clone_fresh(then_branch, renames, arena)?),
+            else_branch: Box::new(clone_fresh(else_branch, renames, arena)?),
         },
         HirKind::Cond {
             clauses,
@@ -304,10 +343,13 @@ fn clone_fresh(h: &Hir, renames: &FxHashMap<Binding, Binding>) -> Option<Hir> {
         } => {
             let mut cs = Vec::with_capacity(clauses.len());
             for (c, b) in clauses {
-                cs.push((clone_fresh(c, renames)?, clone_fresh(b, renames)?));
+                cs.push((
+                    clone_fresh(c, renames, arena)?,
+                    clone_fresh(b, renames, arena)?,
+                ));
             }
             let eb = match else_branch {
-                Some(e) => Some(Box::new(clone_fresh(e, renames)?)),
+                Some(e) => Some(Box::new(clone_fresh(e, renames, arena)?)),
                 None => None,
             };
             HirKind::Cond {
@@ -315,12 +357,22 @@ fn clone_fresh(h: &Hir, renames: &FxHashMap<Binding, Binding>) -> Option<Hir> {
                 else_branch: eb,
             }
         }
-        HirKind::Begin(v) => HirKind::Begin(clone_vec(v)?),
-        HirKind::And(v) => HirKind::And(clone_vec(v)?),
-        HirKind::Or(v) => HirKind::Or(clone_vec(v)?),
+        HirKind::Begin(v) => HirKind::Begin(clone_vec(v, renames, arena)?),
+        HirKind::And(v) => HirKind::And(clone_vec(v, renames, arena)?),
+        HirKind::Or(v) => HirKind::Or(clone_vec(v, renames, arena)?),
         _ => return None,
     };
     Some(Hir::new(kind, h.span.clone(), h.signal))
+}
+
+/// Clone a slice of whitelisted bodies (a `begin`/`and`/`or` operand list) with the
+/// same fresh-id/rename discipline as `clone_fresh`. `None` if any element rejects.
+fn clone_vec(
+    v: &[Hir],
+    renames: &mut FxHashMap<Binding, Binding>,
+    arena: &mut BindingArena,
+) -> Option<Vec<Hir>> {
+    v.iter().map(|c| clone_fresh(c, renames, arena)).collect()
 }
 
 /// Clone a function template with fresh parameter bindings (minted via `gensym`,
@@ -335,8 +387,8 @@ fn clone_template(t: &FnTemplate, arena: &mut BindingArena) -> (Vec<Binding>, Hi
         renames.insert(p, fresh);
         params.push(fresh);
     }
-    let body =
-        clone_fresh(&t.body, &renames).expect("collect_inline_fns proved the body inlineable");
+    let body = clone_fresh(&t.body, &mut renames, arena)
+        .expect("collect_inline_fns proved the body inlineable");
     (params, body)
 }
 
@@ -1918,18 +1970,75 @@ mod tests {
         );
     }
 
-    /// Decline: a named function whose body introduces its own binding (a `let`) is
-    /// NOT inlined — the clone whitelist covers only pure-expression forms, so a
-    /// binding-introducing body declines and the `map` stays a plain call (the
-    /// definition's bindings are never duplicated). A lambda *literal* with a `let`
-    /// body still fuses (it is moved, not cloned) — the asymmetry is intentional.
+    /// A named function whose body is a `let` inlines: the clone whitelist admits
+    /// `let`, freshening the let's own binding (`y`) with a fresh id per call site
+    /// exactly as it freshens the parameters. The `map` dispatch is gone, and the
+    /// body ops (`*` and `+`) appear TWICE — the surviving definition plus the
+    /// inlined copy. Fails before the let-body clone widening lands: the body
+    /// declines and the `map` call survives.
     #[test]
-    fn named_fn_with_let_body_declines() {
+    fn named_fn_with_let_body_inlines() {
         let (hir, arena, names) = compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g [1 2 3])");
         let cs = callees(&hir, &arena, &names);
         assert!(
+            !cs.iter().any(|n| n == "map"),
+            "a named fn with a `let` body must inline; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "*"),
+            2,
+            "`g`'s `*` appears twice — the surviving definition plus the inlined \
+             copy; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one fused accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// Decline: a named function whose body introduces a binding through a form the
+    /// clone whitelist does NOT cover (a `match` pattern — `let` is admitted, but a
+    /// `match` binding is not) stays a plain `map` call, so the definition's own
+    /// pattern bindings are never duplicated. The whitelist is a positive list of
+    /// pure-expression forms plus `let`; anything else declines
+    /// correct-by-construction.
+    #[test]
+    fn named_fn_with_match_body_declines() {
+        let (hir, arena, names) = compile("(defn g [x] (match x _ (* x 2))) (map g [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
             cs.iter().any(|n| n == "map"),
-            "a named fn with a binding-introducing body must not inline; callees were {cs:?}",
+            "a named fn with a `match` body must not inline; callees were {cs:?}",
+        );
+    }
+
+    /// A `let`-body named function CLONED at two call sites in one composition:
+    /// `(map g (map g xs))` where `g` has a `let` body inlines both copies into one
+    /// loop. The let's own binding is re-minted with a fresh id per copy, so the two
+    /// spliced bodies never collide in the region walk's per-id side tables — the
+    /// hazard the alpha-renaming clone exists to prevent. `g`'s body op `*` appears
+    /// THREE times (the definition plus two inlined copies) over one accumulator.
+    /// (`*` is the clean discriminator, not `+`: the loop scaffold's own `(+ i 1)`
+    /// increment also uses `+`.)
+    #[test]
+    fn named_let_body_fn_composition_fuses_to_one_loop() {
+        let (hir, arena, names) =
+            compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g (map g [1 2 3]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "both `map` dispatches must be gone; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "*"),
+            3,
+            "definition + two inlined copies of `g`'s `*`; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one loop, one accumulator — the intermediate array is gone; callees were {cs:?}",
         );
     }
 

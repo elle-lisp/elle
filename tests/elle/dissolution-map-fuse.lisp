@@ -11,11 +11,13 @@
 #
 # `dbl`/`inc` are top-level named functions with pure bodies, so a `(map dbl xs)`
 # now ALSO fuses (docs/impl/dissolution.md § "Named same-unit functions"): the
-# function's body is cloned inline. The genuinely UN-fused cross-check oracle is
-# `dbl-let`/`inc-let` — same value, but a `let`-body declines the inline clone
-# (the whitelist covers only pure-expression forms), so it stays a plain `map`
-# call. Fused inline-lambda, fused named-fn, and the un-fused let-body oracle must
-# all agree.
+# function's body is cloned inline. A `let` body fuses too (the clone whitelist
+# admits `let`, freshening the let's own bindings) — `dbl-let`/`inc-let` below are
+# such fusing let-body oracles. The genuinely UN-fused cross-check oracle is
+# `dbl-decl`/`inc-decl` — same value, but a `match` body declines the inline clone
+# (the whitelist covers pure-expression forms plus `let`, not a `match` pattern),
+# so it stays a plain `map` call. Fused inline-lambda, fused named-fn, fused
+# let-body, and the un-fused match-body oracle must all agree.
 
 (defn dbl [x]
   (* x 2))
@@ -23,30 +25,54 @@
 (defn inc [x]
   (+ x 1))
 
-# Un-fused oracles: a `let`-body declines the named-fn inline clone, so these run
-# the real stdlib `map`. Same value as `dbl`/`inc`.
+# Fusing let-body named fns: a `let`-body clones inline, its own binding freshened
+# per call site. `dbl-let` uses a single binding; `inc-let` a SEQUENTIAL two-binding
+# `let` whose second value references the first — the rename must rewrite that
+# reference to the fresh id, so the value proves the sequential-rename order.
 (defn dbl-let [x]
-  (let [y x]
-    (* y 2)))
+  (let [y (* x 2)]
+    y))
 
 (defn inc-let [x]
-  (let [y x]
-    (+ y 1)))
+  (let [a (+ x 1)]
+    (let [b (+ a 0)]
+      b)))
 
-# Single map: fused inline lambda == un-fused let-body oracle == literal.
+# Un-fused oracles: a `match` body declines the named-fn inline clone, so these run
+# the real stdlib `map`. Same value as `dbl`/`inc`.
+(defn dbl-decl [x]
+  (match x
+    _ (* x 2)))
+
+(defn inc-decl [x]
+  (match x
+    _ (+ x 1)))
+
+# Single map: fused inline lambda == un-fused match-body oracle == literal.
 (assert (= (map (fn [x] (* x 2)) [1 2 3]) [2 4 6])
         "single map fuses to the same value")
-(assert (= (map (fn [x] (* x 2)) [1 2 3]) (map dbl-let [1 2 3]))
-        "fused inline-lambda agrees with the un-fused let-body oracle")
+(assert (= (map (fn [x] (* x 2)) [1 2 3]) (map dbl-decl [1 2 3]))
+        "fused inline-lambda agrees with the un-fused match-body oracle")
 
 # Named-fn inlining: a `(map dbl xs)` fuses and agrees with the un-fused oracle.
 (assert (= (map dbl [1 2 3]) [2 4 6]) "named-fn map fuses to the same value")
-(assert (= (map dbl [1 2 3]) (map dbl-let [1 2 3]))
-        "fused named-fn agrees with the un-fused let-body oracle")
+(assert (= (map dbl [1 2 3]) (map dbl-decl [1 2 3]))
+        "fused named-fn agrees with the un-fused match-body oracle")
 # A named fn is still usable as a first-class value after its inline at a call
 # site (the inline clones it; the definition persists).
 (assert (= (map dbl [1 2 3]) (map (fn [x] (dbl x)) [1 2 3]))
         "the inlined named fn is still callable as a value")
+
+# Let-body named fns fuse (the clone whitelist admits `let`), and must agree with
+# the un-fused match-body oracle. `inc-let`'s SEQUENTIAL two-binding `let` (the
+# second value reads the first) proves the rename rewrites the cross-binding
+# reference to the fresh id.
+(assert (= (map dbl-let [1 2 3]) (map dbl-decl [1 2 3]))
+        "fused single-binding let-body agrees with the un-fused oracle")
+(assert (= (map inc-let [1 2 3]) (map inc-decl [1 2 3]))
+        "fused sequential-let-body agrees with the un-fused oracle")
+(assert (= (map inc-let [1 2 3]) [2 3 4])
+        "sequential-let-body fuses to the right value")
 
 # Boundary sizes.
 (assert (= (map (fn [x] (* x 2)) []) []) "empty array fuses to empty")
@@ -68,16 +94,16 @@
                (map (fn [x] (* x 2)) ys))) [2 4 6])
         "map over an aliased Var fuses to the same value")
 (assert (= (let [xs [1 2 3]]
-             (map (fn [x] (* x 2)) xs)) (map dbl-let [1 2 3]))
-        "fused Var-base agrees with the un-fused let-body oracle")
+             (map (fn [x] (* x 2)) xs)) (map dbl-decl [1 2 3]))
+        "fused Var-base agrees with the un-fused match-body oracle")
 
 # Composition fuses to ONE loop; the interleaved order is unobservable for these
 # pure transforms, and the value matches the staged `map`-of-`map`. The un-fused
-# oracle uses the let-body fns so it runs the real staged stdlib maps.
+# oracle uses the match-body fns so it runs the real staged stdlib maps.
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3])) [3 5 7])
         "map-of-map fuses to the same value")
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3]))
-           (map inc-let (map dbl-let [1 2 3])))
+           (map inc-decl (map dbl-decl [1 2 3])))
         "fused composition agrees with the un-fused staged maps")
 
 # A three-deep tower — the intermediate arrays all dissolve.

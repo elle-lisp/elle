@@ -298,15 +298,20 @@ sites, so sharing its binding is the norm, not a duplication hazard; only the
 lambda's own parameters are freshened.
 
 The clone is a **whitelist** over pure-expression forms — literals, `Var`, `Call`,
-`if`, `cond`, `begin`, `and`/`or`. A body that introduces its own bindings (a
-`let`, `loop`, `match` binding, or a nested lambda) or uses any unrecognized form
-**declines**: the clone returns nothing and the HOF stays a plain call, so the
-definition's own bindings are never duplicated (correct-by-construction — an
-unhandled form is left un-optimized, never miscompiled). This is why a lambda
-*literal* with a `let` body still fuses (it is moved, not cloned) while a *named*
-function with a `let` body does not — widening the clone to freshen inner bindings
-is headroom. Cross-unit functions (a stdlib `defn` whose body is not in this
-unit's tree) are also headroom: inlining them needs the body carried across the
+`if`, `cond`, `begin`, `and`/`or` — plus `let`. A `let` body is cloned with its
+**own** bindings freshened exactly as the parameters are: each `let`-bound binding
+is re-minted (faithful to the source's mutability) and added to the rename map
+before the body and any later sibling values are cloned, so a sequential `let`'s
+later value that references an earlier binding rewrites to the fresh one. `letrec`
+is **not** admitted — its value may reference its own binding (a forward/self
+reference the sequential rename order cannot satisfy), and the recursive-closure
+cell it builds is the shape this fusion exists to avoid. A body that introduces a
+binding through any **other** form (a `loop`, a `match` pattern, or a nested
+lambda) or uses any unrecognized form **declines**: the clone returns nothing and
+the HOF stays a plain call, so the definition's own bindings are never duplicated
+(correct-by-construction — an unhandled form is left un-optimized, never
+miscompiled). Cross-unit functions (a stdlib `defn` whose body is not in this
+unit's tree) are headroom: inlining them needs the body carried across the
 compile-unit boundary like the dispatch-wrapper registry.
 
 Everything else in the gate is identical — non-capturing, fixed arity, no rest
@@ -386,8 +391,9 @@ codegen and execution levels, not on the leak oracle. Three pins:
   `dissolution-fold-fuse.lisp`
   (value-preserving, incl. the declined shapes, the reorder-gate fallback, the
   mutable-base arm — an unfrozen, in-place-mutable result — and named-function
-  inlining, whose un-fused cross-check oracle is a `let`-body function that
-  declines the clone) and `tests/elle/region-map-fuse-uaf.lisp` /
+  inlining, incl. a `let`-body function that now fuses by cloning its freshened
+  inner bindings, whose un-fused cross-check oracle is a `match`-body function that
+  still declines the clone) and `tests/elle/region-map-fuse-uaf.lisp` /
   `region-filter-fuse-uaf.lisp` / `region-mixed-fuse-uaf.lisp` /
   `region-fold-fuse-uaf.lisp` (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place and a cloned named-function

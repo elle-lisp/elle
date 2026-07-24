@@ -13,27 +13,35 @@
 # `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `let`-body: a top-level named fn with a PURE body now inlines too (docs § "Named
-# same-unit functions"), so to keep a genuinely UN-fused oracle these wrap the body
-# in a `let` — a binding-introducing form the inline-clone whitelist declines — so
-# they stay plain staged `fold`/`map`/`filter` calls. Same value. Fused
-# inline-lambda and the un-fused let-body form must agree.
+# `match`-body: a top-level named fn with a PURE body now inlines, and a `let` body
+# inlines too (docs § "Named same-unit functions"), so to keep a genuinely UN-fused
+# oracle — one that still mints the intermediate array the realization gauge below
+# weighs — these wrap the body in a `match`, a binding-introducing form the
+# inline-clone whitelist declines, so they stay plain staged `fold`/`map`/`filter`
+# calls. Same value. Fused inline-lambda and the un-fused match-body form must agree.
+# `addf-let` is the fusing let-body counterpart, checked by value.
 
 (defn addf [a x]
+  (match a
+    _ (+ a x)))
+(defn subf [a x]
+  (match a
+    _ (- a x)))
+(defn t2 [x]
+  (match x
+    _ (* x 2)))
+(defn t3 [x]
+  (match x
+    _ (* x 3)))
+(defn evp [x]
+  (match x
+    _ (even? x)))
+
+# A fusing let-body combinator (the clone whitelist admits `let`); value-checked
+# against the un-fused `addf` below.
+(defn addf-let [a x]
   (let [s (+ a x)]
     s))
-(defn subf [a x]
-  (let [s (- a x)]
-    s))
-(defn t2 [x]
-  (let [y x]
-    (* y 2)))
-(defn t3 [x]
-  (let [y x]
-    (* y 3)))
-(defn evp [x]
-  (let [y x]
-    (even? y)))
 
 # ── single fold: the scalar accumulator ────────────────────────────────
 (assert (= (fold (fn [a x] (+ a x)) 0 [1 2 3 4]) 10)
@@ -54,6 +62,9 @@
         "left-fold order is preserved (non-commutative combinator)")
 (assert (= (fold (fn [a x] (- a x)) 100 [1 2 3 4]) (fold subf 100 [1 2 3 4]))
         "fused subtraction fold agrees with the un-fused named-fn form")
+# A fusing let-body combinator agrees with the un-fused match-body one.
+(assert (= (fold addf-let 0 [1 2 3 4]) (fold addf 0 [1 2 3 4]))
+        "fused let-body combinator agrees with the un-fused match-body form")
 
 # ── fold-of-map: map-reduce, one loop, no intermediate array ────────────
 (assert (= (fold (fn [a x] (+ a x)) 0 (map (fn [x] (* x 2)) [1 2 3 4])) 20)
@@ -98,7 +109,7 @@
 
 # ── Realization: the intermediate array between the prefix and the fold ─
 # `arena/total-allocs` is a cumulative, monotonic count of objects ever minted
-# (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the let-body
+# (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the match-body
 # named fns, declined by the inline-clone whitelist) mints the intermediate array
 # that the map prefix would hand the fold; the fused single loop never allocates it.
 (defn allocs [thunk]

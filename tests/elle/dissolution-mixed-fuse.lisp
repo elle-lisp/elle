@@ -13,21 +13,22 @@
 # `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `let`-body: a top-level named fn with a PURE body now inlines too (docs § "Named
-# same-unit functions"), so to keep a genuinely UN-fused oracle these wrap the body
-# in a `let` — a binding-introducing form the inline-clone whitelist declines — so
-# they stay plain staged `map`/`filter` calls. Same value. Fused inline-lambda and
-# the un-fused let-body form must agree.
+# `match`-body: a top-level named fn with a PURE body now inlines, and a `let` body
+# inlines too (docs § "Named same-unit functions"), so to keep a genuinely UN-fused
+# oracle — one that still mints the intermediate array the realization gauge below
+# weighs — these wrap the body in a `match`, a binding-introducing form the
+# inline-clone whitelist declines, so they stay plain staged `map`/`filter` calls.
+# Same value. Fused inline-lambda and the un-fused match-body form must agree.
 
 (defn t10 [x]
-  (let [y x]
-    (* y 10)))
+  (match x
+    _ (* x 10)))
 (defn t3 [x]
-  (let [y x]
-    (* y 3)))
+  (match x
+    _ (* x 3)))
 (defn evp [x]
-  (let [y x]
-    (even? y)))
+  (match x
+    _ (even? x)))
 
 # ── map-of-filter: filter first, then transform the survivors ──────────
 (assert (= (map (fn [x] (* x 10)) (filter (fn [y] (even? y)) [1 2 3 4 5 6]))
@@ -82,7 +83,7 @@
 
 # ── Realization: the intermediate array between the two ops is gone ────
 # `arena/total-allocs` is a cumulative, monotonic count of objects ever minted
-# (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the let-body
+# (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the match-body
 # named fns, declined by the inline-clone whitelist) mints the intermediate array
 # that the fused single loop never allocates; both compute the same value.
 (defn allocs [thunk]
@@ -123,8 +124,8 @@
                  (filter (fn [y] (even? y))
                          (map (fn [x] (* x 3)) [0 1 2 3 4 5 6 7 8 9]))))))
 (defn add1 [z]
-  (let [w z]
-    (+ w 1)))
+  (match z
+    _ (+ z 1)))
 (def tower-unfused
   (allocs (fn [] (map add1 (filter evp (map t3 [0 1 2 3 4 5 6 7 8 9]))))))
 (assert (= (map (fn [z] (+ z 1))

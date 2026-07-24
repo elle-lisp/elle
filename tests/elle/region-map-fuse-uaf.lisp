@@ -93,4 +93,20 @@
 (def joined (fold joinf "" ["p" "q" "r"]))
 (assert (= joined "pqr") "named-combinator fold over heap accumulators")
 
+# A named LET-body function inlined over heap element values: the clone whitelist
+# admits `let`, so `tag`'s body — a `let` binding a fresh heap string, then wrapping
+# it — is cloned inline with the let's own binding freshened per element. Driving it
+# over heap elements under --trace=guardfree faults on any over-free of the inner
+# let-bound heap value under the loop's read, or of an accumulator member before the
+# result is consumed. The definition persists (cloned, not moved), so it is also
+# called directly afterward.
+(defn tag [w]
+  (let [inner (string "[" w)]
+    (string inner "]")))
+(def tagged (map tag ["a" "b" "c"]))
+(assert (= tagged ["[a]" "[b]" "[c]"])
+        "named let-body inline over heap elements")
+(assert (= (get tagged 2) "[c]") "let-body inlined heap element survives a read")
+(assert (= (tag "z") "[z]") "the inlined let-body definition is still callable")
+
 (println "region-map-fuse-uaf: ok")
