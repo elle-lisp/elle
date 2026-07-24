@@ -45,6 +45,21 @@
 (assert (= (get base 1) "q")
         "the base Var survives the fused loop (not consumed)")
 
+# The mutable-array arm: over a @array base the fused loop returns the
+# accumulator UNFROZEN (docs/impl/dissolution.md § "The mutable-array arm").
+# Driving it with heap element values, then reading them back and mutating the
+# result in place: an over-free of a base element under the loop's own read, or of
+# an accumulator member before the result is consumed, faults here under
+# --trace=guardfree. The unfrozen result is genuinely mutable, so a later push
+# exercises the live @array on the region path.
+(def mm (map (fn [x] (string "m" x)) @[1 2 3]))
+(assert (= (mutable? mm) true)
+        "mutable-base fused map returns an unfrozen array")
+(assert (= (get mm 0) "m1") "mutable-base fused map over heap elements")
+(assert (= (get mm 2) "m3") "mutable-base fused heap element survives to a read")
+(push mm (string "m" 4))
+(assert (= (get mm 3) "m4") "the unfrozen heap result accepts an in-place push")
+
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn:
 # a stale accumulator or base region would be reused and fault on a later pass.
 (def @acc "")

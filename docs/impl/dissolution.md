@@ -188,9 +188,10 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   proven immutable array. Reusing that map is not incidental: an over-broad
   classification there deletes a live match arm (a UAF), so the map already
   carries the soundness bar fusion needs (an over-broad base is a miscompile).
-  The immutable-array proof selects the frozen-result arm; a mutable `@array`
-  input (keyword `@array`) is left to the stdlib `map` (its result aliases the
-  input's mutability — handled by the general path, not here).
+  A base whose keyword resolves to `array` selects the frozen-result arm; a
+  mutable `@array` base (keyword `@array`, or a `RetType::MutableArray` producer
+  call) selects the unfrozen-result arm under the tighter gate below (see
+  "The mutable-array arm").
 - **The lambda is non-capturing with the op's fixed arity** — one parameter for
   a `map`/`filter` (the element), two for a `fold` (the accumulator and the
   element) — written directly as the call's argument, with no rest parameter.
@@ -232,6 +233,42 @@ prefix's): the fold step interleaves with the prefix transforms per element
 reorder a mixed chain makes. A non-reorder-safe stage declines the whole
 composition, and the pass falls back to fusing the inner reorder-safe run (the
 prefix), leaving the fold a plain call over the fused loop.
+
+## The mutable-array arm
+
+`map`/`filter` are **type-preserving**: over an immutable array they return a
+frozen array, but over a **mutable** `@array` they return the accumulator
+*unfrozen* — the stdlib arm is literally `(if (mutable? coll) acc (freeze acc))`
+(`src/stdlib.lisp`). Fusion mirrors this. When the base's proof resolves to the
+`@array` keyword — a `@[ … ]` literal, a `RetType::MutableArray` producer call
+(`thaw`, …), or a `Var` alias of one — the base is **statically** known mutable
+(`freeze` never mutates in place; it copies to a *new* immutable value and leaves
+its input mutable, so a proven-`@array` binding is mutable at every use), so the
+fused loop emits the accumulator **unfrozen** instead of `(freeze acc)`. The
+loop body is otherwise identical to the immutable arm.
+
+A mutable base fuses under a **strictly tighter gate: a single `map` or `filter`
+only** — no `fold`, no composition. The reason is that the fused loop walks the
+base *live* (it reads `(get coll i)` each iteration against a `len` captured
+once), and this matches the stdlib op **exactly** for a single `map`/`filter`
+(whose own array arm captures `len` once and reads `coll` live) — so the value is
+preserved even if the lambda mutates the base through a global alias. The two
+excluded shapes break that match:
+
+- **`fold`** first snapshots its input (`(->array coll)` copies a mutable array)
+  and walks the copy; a fused fold would walk the live base, so a mutating
+  combinator would observe a divergence. A `fold` over a mutable base stays a
+  plain call.
+- **A composition** (`(map g (filter p @xs))`, …) runs each stdlib op to
+  completion over a *fresh* array before the next begins, so a later op's lambda
+  mutating the original base can no longer affect the result; the single fused
+  loop interleaves the ops against the live base, where such a mutation *would*
+  affect later reads. A composition over a mutable base declines, and the
+  pre-order recursion still fuses its innermost single `map`/`filter` (sound in
+  isolation), leaving the outer ops as plain calls over that fused loop.
+
+For an **immutable** base neither hazard exists — the base cannot be mutated — so
+`fold` and compositions fuse over it exactly as before.
 
 Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/`+`/
 `length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
@@ -276,9 +313,12 @@ codegen and execution levels, not on the leak oracle. Three pins:
   `filter` emits the guarded push (an `if`), a mixed chain fuses both ops into one
   loop (one accumulator, both body ops inline), and a fold dissolves to a scalar
   accumulator (no `@array`/`freeze`, the fold step inline) that composes with a
-  map/filter prefix into one loop. Decline pins guard the gate (user-shadowed
-  callee, capturing lambda, unproven collection, raw-intrinsic body, and a
-  non-reorder-safe composition, which declines and fuses its inner run only).
+  map/filter prefix into one loop. A mutable-`@array`-base `map`/`filter` fuses
+  with the accumulator returned **unfrozen** (no `freeze` call). Decline pins
+  guard the gate (user-shadowed callee, capturing lambda, unproven collection,
+  raw-intrinsic body, a non-reorder-safe composition — which declines and fuses
+  its inner run only — and a `fold` or composition over a mutable base, which
+  declines to the innermost single op).
 - **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (the filter
   cases in `dissolution-filter-fuse.lisp`, and the mixed cases in
   `dissolution-mixed-fuse.lisp`) prove the consequence the mission names — *fewer
@@ -298,9 +338,11 @@ codegen and execution levels, not on the leak oracle. Three pins:
 - **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
   `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`, and
   `dissolution-fold-fuse.lisp`
-  (value-preserving, incl. the declined shapes and the reorder-gate fallback) and
+  (value-preserving, incl. the declined shapes, the reorder-gate fallback, and the
+  mutable-base arm — an unfrozen, in-place-mutable result) and
   `tests/elle/region-map-fuse-uaf.lisp` / `region-filter-fuse-uaf.lisp` /
   `region-mixed-fuse-uaf.lisp` / `region-fold-fuse-uaf.lisp` (guardfree over heap
-  element/base/accumulator values).
+  element/base/accumulator values, including a mutable-base heap result mutated in
+  place).
 
 The leak oracle is only a non-regression check here.

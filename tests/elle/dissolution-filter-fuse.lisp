@@ -41,6 +41,20 @@
              (filter (fn [x] (> x 2)) xs)) [3 4])
         "filter over a Var-bound immutable array fuses to the same value")
 
+# The mutable-array arm (docs/impl/dissolution.md § "The mutable-array arm"): a
+# single `filter` over a MUTABLE @array base fuses too, returning the surviving-
+# element accumulator UNFROZEN — type-preserving, mirroring the stdlib arm. The
+# survivor set is unchanged; only the result's mutability differs.
+(let [m (filter (fn [x] (> x 2)) @[1 2 3 4])]
+  (assert (= (mutable? m) true) "mutable-base filter returns an UNFROZEN array")
+  (assert (= (length m) 2) "mutable-base filter keeps the survivors")
+  (assert (= (get m 0) 3) "mutable-base filter first survivor")
+  (assert (= (get m 1) 4) "mutable-base filter second survivor")
+  (push m 5)
+  (assert (= (get m 2) 5) "the unfrozen survivor array accepts an in-place push"))
+(assert (= (mutable? (filter (fn [x] (> x 2)) [1 2 3 4])) false)
+        "an immutable-base filter still returns a frozen array")
+
 # Composition fuses to ONE loop; the survivor set/order is unchanged and the
 # interleaving of the two reorder-safe predicates is unobservable. `integer?` and
 # `even?` are reorder-safe (they carry only SIG_ERROR); a variadic comparison like

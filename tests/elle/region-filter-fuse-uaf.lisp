@@ -45,6 +45,20 @@
 (assert (= nested ["v1" "v2" "v3"]) "filter-of-filter over heap values")
 (assert (= (get nested 0) "v1") "nested-guard heap survivor survives")
 
+# The mutable-array arm: over a @array base the fused guarded-push loop returns
+# the survivor accumulator UNFROZEN (docs/impl/dissolution.md § "The mutable-array
+# arm"). Driving it with heap element values, then mutating the result: an
+# over-free of a base element under the predicate/push read, or of a survivor
+# member before the result is consumed, faults here under --trace=guardfree.
+(def mf (filter (fn [s] (> (length s) 1)) @["a" "bb" "ccc" "d"]))
+(assert (= (mutable? mf) true)
+        "mutable-base fused filter returns an unfrozen array")
+(assert (= (get mf 0) "bb") "mutable-base fused filter heap survivor")
+(assert (= (get mf 1) "ccc") "mutable-base fused filter second heap survivor")
+(push mf "ee")
+(assert (= (get mf 2) "ee")
+        "the unfrozen survivor array accepts an in-place push")
+
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn: a
 # stale accumulator or base region would be reused and fault on a later pass.
 (def @acc "")

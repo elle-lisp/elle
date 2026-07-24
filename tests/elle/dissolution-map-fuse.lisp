@@ -71,6 +71,28 @@
 (assert (= (mutable? (map (fn [x] (* x 2)) [1 2 3])) false)
         "fused result is frozen")
 
+# The mutable-array arm (docs/impl/dissolution.md § "The mutable-array arm"): a
+# single `map` over a MUTABLE @array base fuses too, but returns the accumulator
+# UNFROZEN — type-preserving, mirroring the stdlib arm (if (mutable? coll) acc
+# (freeze acc)). The element values are unchanged; only the result's mutability
+# differs from the immutable-base arm.
+(let [m (map (fn [x] (* x 2)) @[1 2 3])]
+  (assert (= (mutable? m) true) "mutable-base map returns an UNFROZEN array")
+  (assert (= (length m) 3) "mutable-base map result has the right length")
+  (assert (= (get m 0) 2) "mutable-base map first element")
+  (assert (= (get m 2) 6) "mutable-base map last element")
+  # Genuinely mutable — a further push mutates the result in place.
+  (push m 99)
+  (assert (= (length m) 4) "the unfrozen result accepts an in-place push")
+  (assert (= (get m 3) 99) "the pushed element is present"))
+
+# The mutable arm reaches a Var-bound @array too (the same alias proof, resolving
+# to the @array keyword instead of array).
+(let [xs @[5 6 7]]
+  (let [m (map (fn [x] (+ x 1)) xs)]
+    (assert (= (mutable? m) true) "Var-bound mutable-base map is unfrozen")
+    (assert (= (get m 1) 7) "Var-bound mutable-base map value")))
+
 # A capturing lambda is NOT fused, but must still compute correctly.
 (assert (= (let [k 100]
              (map (fn [x] (+ x k)) [1 2 3])) [101 102 103])

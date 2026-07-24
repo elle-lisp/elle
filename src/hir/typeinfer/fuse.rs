@@ -180,15 +180,18 @@ impl Hof {
 /// `map`/`filter` pipeline stages are identical for both terminals; only the
 /// accumulator setup (`build_loop`) and the base case differ.
 ///
-/// - **Collect** — a `map`/`filter`-only chain: fill a fresh `@array` by `push`
-///   and `freeze` it to an immutable result array.
+/// - **Collect** — a `map`/`filter`-only chain: fill a fresh `@array` by `push`.
+///   `unfrozen` picks the result arm (the mutable-array arm): an immutable base
+///   `freeze`s the accumulator to an immutable result; a mutable `@array` base
+///   returns it unfrozen (type-preserving, mirroring the stdlib op's own
+///   `(if (mutable? coll) acc (freeze acc))`).
 /// - **Fold** — a `fold`/`reduce` at the head: a **scalar** accumulator seeded by
 ///   `init`, updated `(assign acc (f acc elem))` per surviving element, whose final
 ///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
 ///   combinator lambda, moved in whole (`acc_param`, `elem_param`, `body`). The
 ///   payload is boxed so the empty `Collect` does not inflate every `Terminal`.
 enum Terminal {
-    Collect,
+    Collect { unfrozen: bool },
     Fold(Box<FoldTerminal>),
 }
 
@@ -314,11 +317,14 @@ fn body_disqualifies(hir: &Hir) -> bool {
 }
 
 /// A validated fusable chain, ready for `take_chain`: whether the outermost op is
-/// a `fold`/`reduce` terminal (a scalar accumulator), and the inner `map`/`filter`
-/// pipeline kinds in the order the walk encounters them (OUTER→INNER).
+/// a `fold`/`reduce` terminal (a scalar accumulator), the inner `map`/`filter`
+/// pipeline kinds in the order the walk encounters them (OUTER→INNER), and whether
+/// the base is a mutable `@array` (so a Collect terminal emits the accumulator
+/// unfrozen — the mutable-array arm).
 struct ChainPlan {
     fold: bool,
     kinds: Vec<Hof>,
+    mutable_base: bool,
 }
 
 /// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
@@ -367,13 +373,29 @@ fn validate_chain(
         cur = coll;
     }
 
-    if ops == 0 || !coll_is_immutable_array(cur, arena, symbol_names, bases) {
+    if ops == 0 {
+        return None;
+    }
+    let base = classify_base(cur, arena, symbol_names, bases)?;
+    // A mutable `@array` base fuses only a single `map`/`filter`: the fused loop
+    // walks the base LIVE, which matches the stdlib op exactly for one op, but a
+    // `fold` (which snapshots via `->array`) or a composition (whose staged ops
+    // each run to completion over a fresh array) would diverge from an interleaved
+    // live walk under a mutating lambda (dissolution.md § "The mutable-array arm").
+    // The pre-order recursion still fuses the innermost single op of a declined
+    // mutable composition.
+    let mutable_base = base == BaseKind::Mutable;
+    if mutable_base && (fold || kinds.len() != 1) {
         return None;
     }
     if ops >= 2 && !all_silent {
         return None;
     }
-    Some(ChainPlan { fold, kinds })
+    Some(ChainPlan {
+        fold,
+        kinds,
+        mutable_base,
+    })
 }
 
 /// May a lambda body be safely reordered against sibling per-element work in a
@@ -389,40 +411,65 @@ fn reorder_safe(sig: Signal) -> bool {
     sig.bits.subtract(SIG_ERROR).is_empty() && sig.propagates == 0
 }
 
-/// Is `expr` a statically-proven immutable array? Two proven forms:
+/// The proven array-ness of a fused chain's base — the fact that selects the
+/// terminal's result arm (frozen vs unfrozen), mirroring the stdlib op's own
+/// `(if (mutable? coll) acc (freeze acc))`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BaseKind {
+    /// A proven immutable `array` — the result is frozen. Admits `fold` and
+    /// compositions (the base cannot be mutated, so an interleaved live walk
+    /// preserves the value).
+    Immutable,
+    /// A proven mutable `@array` — the result is the accumulator unfrozen. Fuses
+    /// only a single `map`/`filter` (see `validate_chain` and dissolution.md
+    /// § "The mutable-array arm").
+    Mutable,
+}
+
+/// Classify `expr` as a statically-proven array base, or `None`. Two proven
+/// forms, each carrying its mutability:
 ///
-/// - **A call-site immutable-array producer** — a call to a primitive whose
-///   declared `RetType` is `Array`: an array literal (`[ … ]` → the `array`
-///   primitive) or any other `RetType::Array` native (`->array`, …).
+/// - **A call-site array producer** — a call to a primitive whose declared
+///   `RetType` is `Array` (an `[ … ]` literal → the `array` primitive, `->array`,
+///   …) → `Immutable`, or `MutableArray` (a `@[ … ]` literal → `@array`, `thaw`,
+///   …) → `Mutable`.
 /// - **A `Var` alias of one** — a binding whose initializer resolves through the
 ///   shared init proof (`bases`, built by `prune::concrete_init_keywords`) to the
-///   `array` keyword, following immutable/unmutated/single-init alias chains to a
-///   fixpoint. This is the SAME proof dead-arm pruning trusts to delete a match
-///   arm, so accepting it here carries the identical soundness guarantee; a
-///   mutable `@array` base resolves to `@array` (not `array`) and is declined.
-fn coll_is_immutable_array(
+///   `array` (→ `Immutable`) or `@array` (→ `Mutable`) keyword, following
+///   immutable/unmutated/single-init alias chains to a fixpoint.
+///
+/// The alias proof is the SAME one dead-arm pruning trusts to delete a match arm,
+/// so reading it here carries the identical soundness guarantee: the keyword is
+/// the value's concrete container type, so `@array` is genuinely mutable at the
+/// call site (`freeze` copies to a new immutable value, never mutating its input
+/// in place, so a proven-`@array` binding is mutable at every use).
+fn classify_base(
     expr: &Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
-) -> bool {
+) -> Option<BaseKind> {
     if let HirKind::Var(b) = &expr.kind {
-        return bases.get(b) == Some(&"array");
+        return match bases.get(b) {
+            Some(&"array") => Some(BaseKind::Immutable),
+            Some(&"@array") => Some(BaseKind::Mutable),
+            _ => None,
+        };
     }
     let HirKind::Call { func, .. } = &expr.kind else {
-        return false;
+        return None;
     };
-    let Some(callee) = unwrap_callee_binding(func) else {
-        return false;
-    };
+    let callee = unwrap_callee_binding(func)?;
     let bi = arena.get(callee);
     if !bi.is_primitive || !bi.is_immutable || bi.is_mutated {
-        return false;
+        return None;
     }
-    let Some(name) = symbol_names.get(&bi.name.0) else {
-        return false;
-    };
-    crate::primitives::registration::def_by_name(name).map(|d| d.ret) == Some(RetType::Array)
+    let name = symbol_names.get(&bi.name.0)?;
+    match crate::primitives::registration::def_by_name(name).map(|d| d.ret) {
+        Some(RetType::Array) => Some(BaseKind::Immutable),
+        Some(RetType::MutableArray) => Some(BaseKind::Mutable),
+        _ => None,
+    }
 }
 
 /// Consume a validated chain, returning its **terminal** (Collect or the moved-out
@@ -452,7 +499,12 @@ fn take_chain(mut expr: Hir, plan: ChainPlan) -> (Terminal, Vec<(Hof, Binding, H
             body: *body,
         }))
     } else {
-        Terminal::Collect
+        // The mutable-array arm: a mutable `@array` base returns the accumulator
+        // unfrozen (validate_chain proves a mutable base is a lone map/filter, so
+        // it is always a Collect, never paired with a Fold).
+        Terminal::Collect {
+            unfrozen: plan.mutable_base,
+        }
     };
 
     let mut stages = Vec::with_capacity(plan.kinds.len());
@@ -637,6 +689,11 @@ impl Build<'_> {
 /// before the base collection — the source order of `(fold f init coll)` — even
 /// though the loop needs `coll`/`len` first. The accumulator is a reassigned
 /// scalar (mirrors the induction variable), never an `@array`.
+///
+/// The Collect terminal's `unfrozen` flag selects its result arm: an immutable
+/// base freezes the accumulator; a mutable `@array` base returns it unfrozen (the
+/// mutable-array arm — `validate_chain` proves a mutable base is a lone
+/// `map`/`filter`, so a Fold terminal is never paired with it).
 fn build_loop(
     terminal: Terminal,
     stages: Vec<(Hof, Binding, Hir)>,
@@ -661,8 +718,8 @@ fn build_loop(
     // base case (`fold` — `None` for Collect). The accumulator differs by terminal:
     // Collect fills a fresh `@array` (immutable binding, mutated in place); Fold
     // threads a reassigned scalar.
-    let (init, mut fold, acc_b) = match terminal {
-        Terminal::Collect => (None, None, b.local()),
+    let (init, mut fold, acc_b, unfrozen) = match terminal {
+        Terminal::Collect { unfrozen } => (None, None, b.local(), unfrozen),
         Terminal::Fold(f) => {
             let FoldTerminal {
                 init,
@@ -672,7 +729,7 @@ fn build_loop(
             } = *f;
             let acc = b.arena.gensym();
             b.arena.get_mut(acc).is_mutated = true;
-            (Some(init), Some((acc_param, elem_param, body)), acc)
+            (Some(init), Some((acc_param, elem_param, body)), acc, false)
         }
     };
 
@@ -694,10 +751,16 @@ fn build_loop(
     });
 
     match init {
-        // Collect — a fresh `@array` accumulator, frozen to the result.
+        // Collect — a fresh `@array` accumulator. An immutable base freezes it to
+        // the result; a mutable `@array` base returns it unfrozen (type-preserving,
+        // mirroring the stdlib arm `(if (mutable? coll) acc (freeze acc))`).
         None => {
-            let freeze = b.call(ops.freeze, vec![b.var(acc_b)]);
-            let acc_body = b.node(HirKind::Begin(vec![define_i, while_loop, freeze]));
+            let result = if unfrozen {
+                b.var(acc_b)
+            } else {
+                b.call(ops.freeze, vec![b.var(acc_b)])
+            };
+            let acc_body = b.node(HirKind::Begin(vec![define_i, while_loop, result]));
             let acc_let = b.let_(acc_b, b.call(ops.at_array, vec![]), acc_body);
             let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), acc_let);
             b.let_(coll_b, base, len_let)
@@ -1180,17 +1243,106 @@ mod tests {
         assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     }
 
-    /// Safety: the widening is immutable-only. A `Var` bound to a **mutable**
-    /// array (`@[ … ]`, keyword `@array`) is left to the stdlib `map` — its result
-    /// aliases the input's mutability, which the general path handles. The proof
-    /// map resolves the base to `@array`, not `array`, so fusion declines.
+    /// The mutable-array arm (docs/impl/dissolution.md § "The mutable-array arm"):
+    /// a single `map` over a proven **mutable** `@array` base fuses, but its result
+    /// is left **unfrozen** — mirroring the stdlib arm `(if (mutable? coll) acc
+    /// (freeze acc))`. The `map` dispatch and the closure are gone, the transform
+    /// op inlines, and — the discriminator against the immutable arm — there is NO
+    /// `freeze` call: the mutable accumulator IS the result. (The base `@[ … ]` and
+    /// the accumulator are two `@array` calls; neither is frozen.)
     #[test]
-    fn map_over_var_bound_mutable_array_is_not_fused() {
+    fn single_map_over_mutable_array_fuses_unfrozen() {
+        let (hir, arena, names) = compile("(map (fn [x] (* x 2)) @[1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "a mutable `@array` base must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == "*"),
+            "the transform op must inline; callees were {cs:?}",
+        );
+        assert!(
+            !cs.iter().any(|n| n == "freeze"),
+            "a mutable-array map returns the accumulator UNFROZEN; callees were {cs:?}",
+        );
+    }
+
+    /// The mutable arm reaches a `Var`-bound `@array` too (the alias proof resolves
+    /// the base to the `@array` keyword): `(let [xs @[ … ]] (map f xs))` fuses to
+    /// the unfrozen index-walk loop, exactly as the call-site literal does.
+    #[test]
+    fn map_over_var_bound_mutable_array_fuses_unfrozen() {
         let (hir, arena, names) = compile("(let [xs @[1 2 3]] (map (fn [x] (* x 2)) xs))");
         let cs = callees(&hir, &arena, &names);
         assert!(
-            cs.iter().any(|n| n == "map"),
-            "a mutable `@array` base must not fuse (immutable-only); callees were {cs:?}",
+            !cs.iter().any(|n| n == "map"),
+            "a Var-bound mutable `@array` base must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            !cs.iter().any(|n| n == "freeze"),
+            "the mutable result is unfrozen; callees were {cs:?}",
+        );
+    }
+
+    /// A single `filter` over a mutable `@array` fuses to the guarded-push loop
+    /// with an **unfrozen** result (the surviving-element accumulator is itself
+    /// mutable), mirroring the stdlib arm. The `filter` dispatch and closure are
+    /// gone, the predicate inlines under an `if`, and no `freeze` runs.
+    #[test]
+    fn single_filter_over_mutable_array_fuses_unfrozen() {
+        let (hir, arena, names) = compile("(filter (fn [x] (> x 2)) @[1 2 3 4])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "filter"),
+            "a mutable `@array` base must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(count_ifs(&hir) >= 1, "the guarded push must be present");
+        assert!(
+            !cs.iter().any(|n| n == "freeze"),
+            "a mutable-array filter returns the accumulator UNFROZEN; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a `fold` over a mutable `@array` base is NOT fused. `fold` first
+    /// snapshots its input (`(->array coll)` copies a mutable array) and walks the
+    /// copy; a fused fold would walk the LIVE base, so a mutating combinator would
+    /// diverge from the stdlib fold. The `fold` call survives.
+    #[test]
+    fn fold_over_mutable_array_is_not_fused() {
+        let (hir, arena, names) = compile("(fold (fn [a x] (+ a x)) 0 @[1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "fold"),
+            "a fold over a mutable base must not fuse; callees were {cs:?}",
+        );
+        assert!(count_lambdas(&hir) >= 1, "the fold closure must survive");
+    }
+
+    /// Safety: a COMPOSITION over a mutable `@array` base does not fuse into one
+    /// loop — the fused loop would interleave the ops against the LIVE base, where
+    /// a later op's lambda mutating the base could change an earlier op's reads
+    /// (the staged stdlib ops each run to completion over a fresh array first). The
+    /// outer op declines; the pre-order recursion still fuses the innermost single
+    /// `map` (sound in isolation — its result a fresh mutable array the outer op
+    /// then walks), so exactly one `map` and one closure — the outer — survive, and
+    /// the inner transform inlines.
+    #[test]
+    fn composition_over_mutable_array_fuses_inner_only() {
+        let (hir, arena, names) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) @[1 2 3]))");
+        let cs = callees(&hir, &arena, &names);
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "map"),
+            1,
+            "only the outer `map` survives a mutable-base composition; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 1, "only the outer closure survives");
+        assert!(
+            cs.iter().any(|n| n == "*"),
+            "the inner transform still inlines on the recursion; callees were {cs:?}",
         );
     }
 
