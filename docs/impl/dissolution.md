@@ -9,7 +9,8 @@ intermediate collection, so the compiler is free to realize it as a plain loop
 with `f`'s body spliced in, a JIT'd group, CPU SIMD, or a device dispatch. This
 document specifies the first realization: **HOF-chain loop fusion** on the VM
 substrate (`src/hir/typeinfer/fuse.rs`), covering the two array-producing
-higher-order ops `map` and `filter`.
+higher-order ops `map` and `filter` and the scalar-producing left-fold
+`fold`/`reduce`.
 
 ## What the pass does
 
@@ -120,16 +121,62 @@ exists, exactly as it does not for a homogeneous chain. `map`-only and
 or all-guard stages); the builder (`build_loop`/`Build::element`) is the same for
 all three.
 
+## Fold — the scalar terminal
+
+`map` and `filter` each *collect* their per-element results into a fresh
+immutable array; that array is the pipeline's **terminal**. `fold`/`reduce`
+replaces the terminal with a **scalar accumulator**. `(fold f init xs)` — `f`
+called `(f acc element)`, the same left-fold `src/core.lisp`'s `fold` runs
+(`reduce` is `(def reduce fold)`, the identical op recognized by either name) —
+dissolves to:
+
+```
+(fold (fn [acc x] STEP) INIT [ … ])
+⇒
+(let [seed INIT]
+  (let [coll [ … ]]
+    (let [len (length coll)]
+      (define acc seed)
+      (define i 0)
+      (while (< i len)
+        (assign acc (let [acc-p acc] (let [x (get coll i)] STEP)))
+        (assign i (+ i 1)))
+      acc)))
+```
+
+No `@array`, no `push`, no `freeze`: the accumulator is a reassigned scalar
+seeded by `init`, updated one left-fold step per element, and the result is its
+final value. `f`'s two parameters bind 1:1 — the accumulator param to the
+current `acc`, the element param to `(get coll i)` — and its body is spliced
+inline exactly as a `map` transform is. `init` is bound to an immutable `seed`
+**outermost**, before the base collection, so it evaluates in the source order
+of `(fold f init coll)` (init before coll) even though the loop needs `coll`
+and `len` first.
+
+Fold is always the **outermost/terminal** op — its scalar result is not a
+collection, so no `map`/`filter` chains over it. So the pipeline is unchanged
+between the two terminals; only the accumulator setup and the per-element base
+case differ. `(fold f init (map g xs))` / `(fold f init (filter p xs))` — and any
+map/filter prefix — fuse to **one** loop whose base case is the fold step instead
+of the push, with **no intermediate array** between the inner ops and the fold.
+This is map-reduce: the canonical parallel-reduction shape and the reason to prove
+this leg. `Build::element` threads the value through the map/filter stages and its
+base case is the terminal — a `push` (Collect) or a fold `assign` (Fold); the
+recursion is otherwise identical.
+
 ## When it is legal — the gate
 
 Fusion preserves the program's value and, for a single op (`map` or `filter`),
 its exact per-element evaluation order (the loop visits each element left to
 right, applying `f`/`p` identically to the stdlib op). The gate:
 
-- **The callee is the canonical stdlib `map` or `filter`.** Recognized by the
-  callee binding being `is_primitive` (every stdlib export is bound so by
-  `bind_primitives`; a user redefinition shadows it with a non-primitive binding)
-  and named `map` or `filter`. A user redefinition is never rewritten.
+- **The callee is a canonical stdlib HOF.** A pipeline op is `map` or `filter`;
+  the optional outermost terminal op is `fold` or `reduce`. Recognized by the
+  callee binding being `is_primitive` (every stdlib/core export is bound so by
+  `bind_primitives`, and the canonical core-env override is marked `is_primitive`
+  too, so `fold`/`reduce` reach the gate exactly as `map`/`filter` do; a user
+  redefinition shadows with a non-primitive binding) and named accordingly. A user
+  redefinition is never rewritten.
 - **`xs` is a proven immutable array.** One of: an array literal (`[ … ]`, which
   analyzes to a call to the `array` primitive, `RetType::Array`) or any
   `RetType::Array` primitive call at the call site; a `Var` alias whose
@@ -144,12 +191,14 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   The immutable-array proof selects the frozen-result arm; a mutable `@array`
   input (keyword `@array`) is left to the stdlib `map` (its result aliases the
   input's mutability — handled by the general path, not here).
-- **`f`/`p` is a non-capturing single-parameter lambda** written directly as the
-  call's argument. No captures means the body references only its parameter
-  and globals, so splicing it at the call site is always in scope; a single
-  fixed parameter (no rest) means the element binds 1:1. The lambda is consumed
-  by the rewrite (moved out of the call), so no other use of it can observe the
-  change.
+- **The lambda is non-capturing with the op's fixed arity** — one parameter for
+  a `map`/`filter` (the element), two for a `fold` (the accumulator and the
+  element) — written directly as the call's argument, with no rest parameter.
+  No captures means the body references only its parameters and globals, so
+  splicing it at the call site is always in scope; the fixed parameter count
+  means the loop's element (and, for a fold, the accumulator) bind 1:1. The lambda
+  is consumed by the rewrite (moved out of the call), so no other use of it can
+  observe the change.
 
 For a **composition** (a chain of length ≥ 2 — homogeneous *or* mixed), the pass
 additionally requires each lambda body to be free of **sequencing effects** — no
@@ -172,6 +221,17 @@ surfaces (each still surfaces as an error), and a dissolvable numeric kernel ove
 proven data does not error; refusing it would forbid every arithmetic tower, the
 shape this fusion exists to collapse. A single op never reorders and carries no
 such requirement.
+
+The **fold counts as an op** in the chain length. A lone `fold` (`(fold f init
+xs)`, length 1) threads its accumulator strictly in element order — exactly the
+stdlib fold — so it never reorders and needs no gate, even with a
+sequencing-effectful body. A fold *with* an inner `map`/`filter` prefix is length
+≥ 2 and carries the reorder requirement over every lambda (the fold's and the
+prefix's): the fold step interleaves with the prefix transforms per element
+(`g x0; f …; g x1; f …`) rather than running the whole prefix first, the same
+reorder a mixed chain makes. A non-reorder-safe stage declines the whole
+composition, and the pass falls back to fusing the inner reorder-safe run (the
+prefix), leaving the fold a plain call over the fused loop.
 
 Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/`+`/
 `length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
@@ -210,13 +270,15 @@ codegen and execution levels, not on the leak oracle. Three pins:
 
 - **Codegen (structure).** `src/hir/typeinfer/fuse.rs` `mod tests` compile a `map`
   / `map`-of-`map` / `filter` / `filter`-of-`filter` / mixed `map`-of-`filter` /
-  mixed `filter`-of-`map` form and assert on the lowered HIR: the HOF callee is
-  gone, the body op appears inline in the loop, the composed case has a single
-  accumulator with no intermediate, `filter` emits the guarded push (an `if`), and
-  a mixed chain fuses both ops into one loop (one accumulator, both body ops
-  inline). Decline pins guard the gate (user-shadowed callee, capturing lambda,
-  unproven collection, raw-intrinsic body, and a non-reorder-safe mixed chain,
-  which declines composition and fuses its inner run only).
+  mixed `filter`-of-`map` / `fold` / `fold`-of-`map` / `fold`-of-`filter` form and
+  assert on the lowered HIR: the HOF callee is gone, the body op appears inline in
+  the loop, the composed case has a single accumulator with no intermediate,
+  `filter` emits the guarded push (an `if`), a mixed chain fuses both ops into one
+  loop (one accumulator, both body ops inline), and a fold dissolves to a scalar
+  accumulator (no `@array`/`freeze`, the fold step inline) that composes with a
+  map/filter prefix into one loop. Decline pins guard the gate (user-shadowed
+  callee, capturing lambda, unproven collection, raw-intrinsic body, and a
+  non-reorder-safe composition, which declines and fuses its inner run only).
 - **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (the filter
   cases in `dissolution-filter-fuse.lisp`, and the mixed cases in
   `dissolution-mixed-fuse.lisp`) prove the consequence the mission names — *fewer
@@ -225,15 +287,20 @@ codegen and execution levels, not on the leak oracle. Three pins:
   `src/value/fiberheap/`) around a fused chain versus an un-fused reference
   computing the same value, and asserts the fused form mints strictly fewer, with
   the saving scaling per composition layer (one intermediate array each — for a
-  mixed chain, the survivor/mapped array between the two ops). The
+  mixed chain, the survivor/mapped array between the two ops; for a fold chain,
+  the array the map/filter prefix would have handed the fold). A lone `fold`
+  produces a scalar, so it saves no *result* array — its win appears once it
+  composes with a prefix (`dissolution-fold-fuse.lisp`). The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
   GC-timing noise), so these are exact `<` relations.
 - **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
-  `dissolution-filter-fuse.lisp`, and `dissolution-mixed-fuse.lisp`
+  `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`, and
+  `dissolution-fold-fuse.lisp`
   (value-preserving, incl. the declined shapes and the reorder-gate fallback) and
   `tests/elle/region-map-fuse-uaf.lisp` / `region-filter-fuse-uaf.lisp` /
-  `region-mixed-fuse-uaf.lisp` (guardfree over heap element/base values).
+  `region-mixed-fuse-uaf.lisp` / `region-fold-fuse-uaf.lisp` (guardfree over heap
+  element/base/accumulator values).
 
 The leak oracle is only a non-regression check here.

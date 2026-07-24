@@ -7,13 +7,20 @@
 //! lambda body **spliced inline** rather than called through a closure value. The
 //! closure ceases to exist: no per-element closure allocation, no indirect call.
 //! `map` pushes each transform's result; `filter` pushes the element itself under
-//! an `if` guard. A composition — `(map g (map f xs))`, `(filter q (filter p xs))`,
-//! or any mix like `(map f (filter p xs))` — fuses to a **single** loop through one
-//! unified transform/guard pipeline (`build_loop`/`Build::element`): each op is a
-//! *stage* (a `map` transforms the threaded value; a `filter` guards it), the
-//! stages nest in application order, and the intermediate array the inner op would
-//! have allocated never exists. `map`-only and `filter`-only chains are just the
-//! all-transform and all-guard ends of that one pipeline.
+//! an `if` guard. `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`)
+//! is the chain's optional outermost **terminal**: a scalar accumulator seeded by
+//! `init` and updated one left-fold step per element, so there is no `@array` and
+//! no `freeze` — the result is the accumulator's final value. A composition —
+//! `(map g (map f xs))`, `(filter q (filter p xs))`, any mix like `(map f (filter
+//! p xs))`, or a fold over a map/filter prefix like `(fold f init (map g xs))` —
+//! fuses to a **single** loop through one unified transform/guard pipeline
+//! (`build_loop`/`Build::element`): each `map`/`filter` op is a *stage* (a `map`
+//! transforms the threaded value; a `filter` guards it), the stages nest in
+//! application order, and the base case is the terminal (a `push` for a collect, a
+//! fold step for a fold). The intermediate array any inner op would have allocated
+//! never exists. `map`-only and `filter`-only chains are just the all-transform and
+//! all-guard ends of the collect pipeline; a fold reuses the same stages with a
+//! scalar terminal — the map-reduce shape, no array at all.
 //!
 //! ## Why this shape, here
 //!
@@ -123,9 +130,11 @@ pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: 
 /// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
 /// chain, including its inner HOF calls); whether or not it fused, recurse into
 /// the resulting node's children (which fuses nested HOFs in the spliced lambda
-/// bodies or the base array's elements). A chain of any `map`/`filter` mix over
-/// the same proven base fuses to one loop; the recursion still reaches HOFs nested
-/// inside a spliced lambda body or a declined chain's inner run.
+/// bodies or the base array's elements). A chain of any `map`/`filter` mix under
+/// an optional outermost `fold`/`reduce`, over the same proven base, fuses to one
+/// loop; the recursion still reaches HOFs nested inside a spliced lambda body or a
+/// declined chain's inner run (including a fold whose composition was declined,
+/// whose map/filter prefix then fuses on its own).
 fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,
@@ -133,12 +142,12 @@ fn rewrite(
     ops: &Ops,
     bases: &FxHashMap<Binding, &'static str>,
 ) {
-    if let Some(kinds) = validate_chain(hir, arena, symbol_names, bases) {
+    if let Some(plan) = validate_chain(hir, arena, symbol_names, bases) {
         let sig = hir.signal;
         let span = hir.span.clone();
         let owned = std::mem::replace(hir, Hir::error(span.clone()));
-        let (stages, base) = take_chain(owned, kinds);
-        *hir = build_loop(stages, base, arena, ops, sig, span);
+        let (terminal, stages, base) = take_chain(owned, plan);
+        *hir = build_loop(terminal, stages, base, arena, ops, sig, span);
     }
     hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases));
 }
@@ -166,6 +175,32 @@ impl Hof {
     }
 }
 
+/// How a fused chain collects its per-element results — the pipeline's
+/// **terminal**, realized by the innermost base case of `Build::element`. The
+/// `map`/`filter` pipeline stages are identical for both terminals; only the
+/// accumulator setup (`build_loop`) and the base case differ.
+///
+/// - **Collect** — a `map`/`filter`-only chain: fill a fresh `@array` by `push`
+///   and `freeze` it to an immutable result array.
+/// - **Fold** — a `fold`/`reduce` at the head: a **scalar** accumulator seeded by
+///   `init`, updated `(assign acc (f acc elem))` per surviving element, whose final
+///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
+///   combinator lambda, moved in whole (`acc_param`, `elem_param`, `body`). The
+///   payload is boxed so the empty `Collect` does not inflate every `Terminal`.
+enum Terminal {
+    Collect,
+    Fold(Box<FoldTerminal>),
+}
+
+/// The moved-out parts of a `fold`/`reduce` terminal (the boxed `Terminal::Fold`
+/// payload): the seed `init` and the combinator's two params + body.
+struct FoldTerminal {
+    init: Hir,
+    acc_param: Binding,
+    elem_param: Binding,
+    body: Hir,
+}
+
 /// A recognized `(map <lambda> …)` / `(filter <lambda> …)` call: the HOF kind,
 /// the lambda argument, and the collection argument (both borrowed). `None` when
 /// `hir` is not a call to the canonical stdlib `map`/`filter` with exactly two
@@ -191,14 +226,50 @@ fn fusable_hof_parts<'a>(
     Some((hof, &args[0].expr, &args[1].expr))
 }
 
-/// The parameter binding and body of a lambda that qualifies for inlining, or
-/// `None`. A qualifying `f` is a lambda literal with exactly one fixed parameter
-/// (no rest), no captures (its body references only the parameter and globals,
-/// so splicing at the call site is always in scope), an unmutated parameter, and
-/// **no nested lambda** in its body (so retyping the parameter to a plain local
-/// cannot disturb a capture of it). These bounds keep the splice a straight
-/// `(let [param elem] body)` with no substitution or cell reasoning.
-fn qualifies_lambda<'a>(lam: &'a Hir, arena: &BindingArena) -> Option<(Binding, &'a Hir)> {
+/// A recognized `(fold <lambda> <init> <coll>)` / `(reduce …)` call: the 2-param
+/// combinator lambda, the seed `init`, and the collection (all borrowed). `None`
+/// when `hir` is not a call to the canonical stdlib `fold`/`reduce` with exactly
+/// three non-spliced arguments. `reduce` is `(def reduce fold)` — the same
+/// left-fold, recognized by either name. A user redefinition shadows the name with
+/// a non-primitive binding and is excluded (the `is_primitive` gate, as for
+/// `map`/`filter`). `fold` is the only op that may be the chain's outermost
+/// terminal — its scalar result is not a collection, so nothing chains over it.
+fn fusable_fold_parts<'a>(
+    hir: &'a Hir,
+    arena: &BindingArena,
+    symbol_names: &HashMap<u32, String>,
+) -> Option<(&'a Hir, &'a Hir, &'a Hir)> {
+    let HirKind::Call { func, args, .. } = &hir.kind else {
+        return None;
+    };
+    if args.len() != 3 || args.iter().any(|a| a.spliced) {
+        return None;
+    }
+    let callee = unwrap_callee_binding(func)?;
+    let bi = arena.get(callee);
+    if !bi.is_primitive {
+        return None;
+    }
+    let name = symbol_names.get(&bi.name.0)?;
+    if name != "fold" && name != "reduce" {
+        return None;
+    }
+    Some((&args[0].expr, &args[1].expr, &args[2].expr))
+}
+
+/// The parameters and body of a lambda that qualifies for inlining, or `None`. A
+/// qualifying lambda is a literal with exactly `arity` fixed parameters (no rest)
+/// — one for a `map`/`filter` predicate, two for a `fold` combinator — no captures
+/// (its body references only the parameters and globals, so splicing at the call
+/// site is always in scope), unmutated parameters, and **no nested lambda** in its
+/// body (so retyping a parameter to a plain local cannot disturb a capture of it).
+/// These bounds keep the splice a straight `(let [param elem] body)` per parameter
+/// with no substitution or cell reasoning.
+fn qualifies_lambda<'a>(
+    lam: &'a Hir,
+    arena: &BindingArena,
+    arity: usize,
+) -> Option<(&'a [Binding], &'a Hir)> {
     let HirKind::Lambda {
         params,
         rest_param,
@@ -209,14 +280,13 @@ fn qualifies_lambda<'a>(lam: &'a Hir, arena: &BindingArena) -> Option<(Binding, 
     else {
         return None;
     };
-    if rest_param.is_some() || params.len() != 1 || !captures.is_empty() {
+    if rest_param.is_some() || params.len() != arity || !captures.is_empty() {
         return None;
     }
-    let param = params[0];
-    if arena.get(param).is_mutated || body_disqualifies(body) {
+    if params.iter().any(|p| arena.get(*p).is_mutated) || body_disqualifies(body) {
         return None;
     }
-    Some((param, body))
+    Some((params, body))
 }
 
 /// Does a lambda body disqualify it from inlining? Two structural hazards, both
@@ -243,41 +313,67 @@ fn body_disqualifies(hir: &Hir) -> bool {
     found
 }
 
-/// Validate that `hir` is a fusable HOF chain and return its per-op kinds in the
-/// order the walk encounters them (OUTER→INNER). The chain bottoms out at a proven
-/// immutable array; every op is `map` or `filter` (in any mix); every lambda
-/// qualifies (`qualifies_lambda`); and for a composition (length ≥ 2 — homogeneous
-/// or mixed) every lambda body is `reorder_safe` (the reordering gate — see the
-/// module doc). A mixed chain is always length ≥ 2, so it always carries the
-/// reorder requirement; a non-reorder-safe stage declines the whole composition,
-/// and the pre-order recursion (`rewrite`) still fuses its inner reorder-safe run.
+/// A validated fusable chain, ready for `take_chain`: whether the outermost op is
+/// a `fold`/`reduce` terminal (a scalar accumulator), and the inner `map`/`filter`
+/// pipeline kinds in the order the walk encounters them (OUTER→INNER).
+struct ChainPlan {
+    fold: bool,
+    kinds: Vec<Hof>,
+}
+
+/// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
+/// optional outermost `fold`/`reduce` (the scalar terminal) over a `map`/`filter`
+/// pipeline (in any mix) bottoming out at a proven immutable array. Every lambda
+/// qualifies (`qualifies_lambda`, arity 1 for `map`/`filter`, 2 for `fold`); and
+/// for a **composition** — total op count ≥ 2, where the fold counts as an op —
+/// every lambda body is `reorder_safe` (the reordering gate; see the module doc).
+/// A lone `fold` (or a lone `map`/`filter`) is a single op and carries no reorder
+/// requirement: a fold threads its accumulator strictly in element order, exactly
+/// the stdlib fold. A non-reorder-safe stage declines the whole composition, and
+/// the pre-order recursion (`rewrite`) still fuses its inner reorder-safe run.
 ///
-/// The walk stops at the first node that is not a fusable `map`/`filter` call; that
-/// node is the base candidate. If it is not a proven immutable array (e.g. the
-/// chain never reaches one, or a lambda failed `qualifies_lambda`), fusion declines
-/// and the recursion retries at the inner calls.
+/// The walk stops at the first node that is not a fusable HOF call; that node is
+/// the base candidate. If it is not a proven immutable array (e.g. the chain never
+/// reaches one, or a lambda failed `qualifies_lambda`), fusion declines and the
+/// recursion retries at the inner calls.
 fn validate_chain(
     hir: &Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
-) -> Option<Vec<Hof>> {
-    let mut kinds = Vec::new();
+) -> Option<ChainPlan> {
     let mut all_silent = true;
+    let mut ops = 0usize;
     let mut cur = hir;
-    while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
-        let (_, body) = qualifies_lambda(lam, arena)?;
+
+    // The optional outermost fold/reduce terminal (2-param combinator lambda).
+    let fold = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
+        let (_, body) = qualifies_lambda(lam, arena, 2)?;
         all_silent &= reorder_safe(body.signal);
+        ops += 1;
+        cur = coll;
+        true
+    } else {
+        false
+    };
+
+    // The inner map/filter pipeline (1-param lambdas).
+    let mut kinds = Vec::new();
+    while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
+        let (_, body) = qualifies_lambda(lam, arena, 1)?;
+        all_silent &= reorder_safe(body.signal);
+        ops += 1;
         kinds.push(hof);
         cur = coll;
     }
-    if kinds.is_empty() || !coll_is_immutable_array(cur, arena, symbol_names, bases) {
+
+    if ops == 0 || !coll_is_immutable_array(cur, arena, symbol_names, bases) {
         return None;
     }
-    if kinds.len() >= 2 && !all_silent {
+    if ops >= 2 && !all_silent {
         return None;
     }
-    Some(kinds)
+    Some(ChainPlan { fold, kinds })
 }
 
 /// May a lambda body be safely reordered against sibling per-element work in a
@@ -329,15 +425,38 @@ fn coll_is_immutable_array(
     crate::primitives::registration::def_by_name(name).map(|d| d.ret) == Some(RetType::Array)
 }
 
-/// Consume a validated chain, returning its per-element **stages**
-/// (`(hof, param, body)`) in **application order** (innermost op first) and the
-/// base collection expression. `kinds` is the chain's per-op kinds in outer→inner
-/// order (from `validate_chain`), zipped with the lambdas extracted in that same
-/// order. A `map` stage's body is a transform; a `filter` stage's is a predicate.
-/// Validation guarantees the structure, so the destructuring is total.
-fn take_chain(mut expr: Hir, kinds: Vec<Hof>) -> (Vec<(Hof, Binding, Hir)>, Hir) {
-    let mut stages = Vec::with_capacity(kinds.len());
-    for hof in kinds {
+/// Consume a validated chain, returning its **terminal** (Collect or the moved-out
+/// fold combinator), its per-element `map`/`filter` **stages** (`(hof, param,
+/// body)`) in **application order** (innermost op first), and the base collection
+/// expression. `plan.fold` and `plan.kinds` are the chain's shape in outer→inner
+/// order (from `validate_chain`); the fold is peeled first (it wraps the pipeline),
+/// then the map/filter ops. Validation guarantees the structure, so every
+/// destructuring is total.
+fn take_chain(mut expr: Hir, plan: ChainPlan) -> (Terminal, Vec<(Hof, Binding, Hir)>, Hir) {
+    let terminal = if plan.fold {
+        let HirKind::Call { args, .. } = expr.kind else {
+            unreachable!("validate_chain proved a fold call");
+        };
+        let mut it = args.into_iter();
+        let lam = it.next().expect("fold has 3 args").expr;
+        let init = it.next().expect("fold has 3 args").expr;
+        let coll = it.next().expect("fold has 3 args").expr;
+        let HirKind::Lambda { params, body, .. } = lam.kind else {
+            unreachable!("validate_chain proved a 2-param lambda");
+        };
+        expr = coll;
+        Terminal::Fold(Box::new(FoldTerminal {
+            init,
+            acc_param: params[0],
+            elem_param: params[1],
+            body: *body,
+        }))
+    } else {
+        Terminal::Collect
+    };
+
+    let mut stages = Vec::with_capacity(plan.kinds.len());
+    for hof in plan.kinds {
         let HirKind::Call { args, .. } = expr.kind else {
             unreachable!("validate_chain proved a HOF call");
         };
@@ -352,7 +471,7 @@ fn take_chain(mut expr: Hir, kinds: Vec<Hof>) -> (Vec<(Hof, Binding, Hir)>, Hir)
     }
     // Collected outer→inner; application order is inner→outer.
     stages.reverse();
-    (stages, expr)
+    (terminal, stages, expr)
 }
 
 /// Node factory for the synthesized loop. Bundles the span and signal every
@@ -426,31 +545,34 @@ impl Build<'_> {
     /// - a **`Filter`** stage binds the current value once (`item`, since a guard
     ///   references it twice — the test and the pass-through) and continues the
     ///   pipeline only when its predicate passes, else `nil`;
-    /// - the base case (no stages left) pushes the surviving value into `acc`.
+    /// - the base case (no stages left) hands the surviving value to the
+    ///   **terminal** (`Build::terminal`): a `push` (Collect) or a fold step (Fold).
     ///
-    /// This one recursion realizes `map`, `filter`, and any mix in a SINGLE loop:
-    /// a `map`-only chain is all `Map` stages (the transforms nest, no `if`), a
-    /// `filter`-only chain is all `Filter` stages (the element binds once, guards
-    /// nest), and a mixed chain interleaves the two — the intermediate array
-    /// between any two adjacent stages never exists.
+    /// This one recursion realizes `map`, `filter`, `fold`, and any mix in a SINGLE
+    /// loop: a `map`-only chain is all `Map` stages (the transforms nest, no `if`),
+    /// a `filter`-only chain is all `Filter` stages (the element binds once, guards
+    /// nest), a mixed chain interleaves the two, and a fold reuses the same stages
+    /// with a scalar terminal — the intermediate array between any two adjacent
+    /// stages (or between the pipeline and the fold) never exists.
     fn element(
         &mut self,
         stages: &mut std::vec::IntoIter<(Hof, Binding, Hir)>,
+        fold: &mut Option<(Binding, Binding, Hir)>,
         acc: Binding,
         cur: Hir,
     ) -> Hir {
         match stages.next() {
-            None => self.call(self.ops.push, vec![self.var(acc), cur]),
+            None => self.terminal(fold, acc, cur),
             Some((Hof::Map, param, body)) => {
                 self.localize_param(param);
                 let next = self.let_(param, cur, body);
-                self.element(stages, acc, next)
+                self.element(stages, fold, acc, next)
             }
             Some((Hof::Filter, param, pred)) => {
                 self.localize_param(param);
                 let item = self.local();
                 let cond = self.let_(param, self.var(item), pred);
-                let then = self.element(stages, acc, self.var(item));
+                let then = self.element(stages, fold, acc, self.var(item));
                 let guarded = self.node(HirKind::If {
                     cond: Box::new(cond),
                     then_branch: Box::new(then),
@@ -460,24 +582,63 @@ impl Build<'_> {
             }
         }
     }
+
+    /// The pipeline's innermost base case — how a surviving element value `cur`
+    /// enters the accumulator. Built exactly once (the base of the single element
+    /// statement), so the fold combinator (`Some`) is consumed here by `take`:
+    ///
+    /// - **Collect** (`None`): push `cur` into the `@array` accumulator.
+    /// - **Fold** (`Some((acc_param, elem_param, body))`): one left-fold step —
+    ///   rebind the combinator's two params (the current `acc`, and `cur`) and
+    ///   reassign the scalar accumulator to the body's result:
+    ///   `(assign acc (let [acc_param acc] (let [elem_param cur] body)))`.
+    fn terminal(
+        &mut self,
+        fold: &mut Option<(Binding, Binding, Hir)>,
+        acc: Binding,
+        cur: Hir,
+    ) -> Hir {
+        match fold.take() {
+            None => self.call(self.ops.push, vec![self.var(acc), cur]),
+            Some((acc_param, elem_param, body)) => {
+                self.localize_param(acc_param);
+                self.localize_param(elem_param);
+                let inner = self.let_(elem_param, cur, body);
+                let step = self.let_(acc_param, self.var(acc), inner);
+                self.node(HirKind::Assign {
+                    target: acc,
+                    value: Box::new(step),
+                })
+            }
+        }
+    }
 }
 
-/// Build the fused index-walk loop from the pipeline stages and base collection.
-/// The `(get`/`push`/`freeze)` scaffold is fixed; the per-element body is the
-/// unified transform/guard pipeline (`Build::element`), so `map`, `filter`, and
-/// any mix all collapse to one loop with one accumulator:
+/// Build the fused index-walk loop from the terminal, pipeline stages, and base
+/// collection. The `(get` + index-walk) scaffold is fixed; the per-element body is
+/// the unified transform/guard pipeline (`Build::element`) bottoming out at the
+/// terminal, so `map`, `filter`, `fold`, and any mix all collapse to one loop with
+/// one accumulator. The terminal picks the accumulator's shape and result:
 ///
 /// ```text
-/// (let [coll BASE]
-///   (let [len (length coll)]
-///     (let [acc (@array)]
-///       (define i 0)
-///       (while (< i len)
-///         <element pipeline over (get coll i)>
-///         (assign i (+ i 1)))
-///       (freeze acc))))
+/// Collect (map/filter):            Fold (fold/reduce):
+/// (let [coll BASE]                 (let [seed INIT]
+///   (let [len (length coll)]         (let [coll BASE]
+///     (let [acc (@array)]              (let [len (length coll)]
+///       (define i 0)                     (define acc seed)
+///       (while (< i len)                 (define i 0)
+///         <pipeline; push acc>           (while (< i len)
+///         (assign i (+ i 1)))              <pipeline; assign acc (f acc _)>
+///       (freeze acc))))                    (assign i (+ i 1)))
+///                                        acc)))
 /// ```
+///
+/// For a fold, `init` is bound to an immutable `seed` OUTERMOST so it evaluates
+/// before the base collection — the source order of `(fold f init coll)` — even
+/// though the loop needs `coll`/`len` first. The accumulator is a reassigned
+/// scalar (mirrors the induction variable), never an `@array`.
 fn build_loop(
+    terminal: Terminal,
     stages: Vec<(Hof, Binding, Hir)>,
     base: Hir,
     arena: &mut BindingArena,
@@ -493,13 +654,31 @@ fn build_loop(
     };
     let coll_b = b.local();
     let len_b = b.local();
-    let acc_b = b.local();
     let i_b = b.arena.gensym();
     b.arena.get_mut(i_b).is_mutated = true; // the loop induction variable
 
+    // Split the terminal into its seed (`init`, a fold only) and its per-element
+    // base case (`fold` — `None` for Collect). The accumulator differs by terminal:
+    // Collect fills a fresh `@array` (immutable binding, mutated in place); Fold
+    // threads a reassigned scalar.
+    let (init, mut fold, acc_b) = match terminal {
+        Terminal::Collect => (None, None, b.local()),
+        Terminal::Fold(f) => {
+            let FoldTerminal {
+                init,
+                acc_param,
+                elem_param,
+                body,
+            } = *f;
+            let acc = b.arena.gensym();
+            b.arena.get_mut(acc).is_mutated = true;
+            (Some(init), Some((acc_param, elem_param, body)), acc)
+        }
+    };
+
     // The per-element statement: thread (get coll i) through the pipeline.
     let elem0 = b.call(ops.get, vec![b.var(coll_b), b.var(i_b)]);
-    let body_stmt = b.element(&mut stages.into_iter(), acc_b, elem0);
+    let body_stmt = b.element(&mut stages.into_iter(), &mut fold, acc_b, elem0);
 
     let incr = b.node(HirKind::Assign {
         target: i_b,
@@ -513,12 +692,32 @@ fn build_loop(
         binding: i_b,
         value: Box::new(b.int(0)),
     });
-    let freeze = b.call(ops.freeze, vec![b.var(acc_b)]);
-    let acc_body = b.node(HirKind::Begin(vec![define_i, while_loop, freeze]));
 
-    let acc_let = b.let_(acc_b, b.call(ops.at_array, vec![]), acc_body);
-    let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), acc_let);
-    b.let_(coll_b, base, len_let)
+    match init {
+        // Collect — a fresh `@array` accumulator, frozen to the result.
+        None => {
+            let freeze = b.call(ops.freeze, vec![b.var(acc_b)]);
+            let acc_body = b.node(HirKind::Begin(vec![define_i, while_loop, freeze]));
+            let acc_let = b.let_(acc_b, b.call(ops.at_array, vec![]), acc_body);
+            let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), acc_let);
+            b.let_(coll_b, base, len_let)
+        }
+        // Fold — a scalar accumulator seeded by `init`, its final value the result.
+        Some(init) => {
+            let seed_b = b.local();
+            let define_acc = b.node(HirKind::Define {
+                binding: acc_b,
+                value: Box::new(b.var(seed_b)),
+            });
+            let result = b.var(acc_b);
+            let loop_body = b.node(HirKind::Begin(vec![
+                define_acc, define_i, while_loop, result,
+            ]));
+            let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), loop_body);
+            let coll_let = b.let_(coll_b, base, len_let);
+            b.let_(seed_b, init, coll_let)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -655,6 +854,12 @@ mod tests {
     /// or a core HOF is invisible to every pass that keys on the flag — loop
     /// fusion here, dispatch monomorphization. A user redefinition still shadows
     /// with a non-primitive binding (the safety complement).
+    ///
+    /// The probes fold over an UNPROVEN collection (a function parameter, not a
+    /// literal array) precisely so the `fold`/`reduce` call *survives* — a call
+    /// over a proven immutable array now dissolves (that is exactly what this parity
+    /// enables), leaving no callee to inspect. Declining on the unproven base keeps
+    /// the call while still resolving its binding.
     #[test]
     fn core_lisp_hof_exports_are_primitive_like_stdlib() {
         // The binding a `(name …)` call resolves to (the winning shadow).
@@ -681,11 +886,11 @@ mod tests {
         }
         // core.lisp exports — primitive, exactly like the stdlib map/filter.
         assert!(
-            callee_is_primitive("(fold (fn [a x] (+ a x)) 0 [1 2 3])", "fold"),
+            callee_is_primitive("(defn ff [xs] (fold (fn [a x] (+ a x)) 0 xs))", "fold"),
             "core.lisp `fold` must resolve to a primitive binding (parity with map)",
         );
         assert!(
-            callee_is_primitive("(reduce (fn [a x] (+ a x)) 0 [1 2 3])", "reduce"),
+            callee_is_primitive("(defn rr [xs] (reduce (fn [a x] (+ a x)) 0 xs))", "reduce"),
             "core.lisp `reduce` must resolve to a primitive binding",
         );
         // Safety complement: a user redefinition shadows with a non-primitive one.
@@ -1013,5 +1218,205 @@ mod tests {
              de-lambda'ing); callees were {cs:?}",
         );
         assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    }
+
+    /// Count the calls to a given op name in the tree.
+    fn count_callee(
+        h: &Hir,
+        arena: &BindingArena,
+        names: &HashMap<u32, String>,
+        want: &str,
+    ) -> usize {
+        callees(h, arena, names)
+            .iter()
+            .filter(|n| *n == want)
+            .count()
+    }
+
+    /// A single `(fold f init xs)` dissolves to a **scalar** accumulator loop: the
+    /// `fold` dispatch is gone, no closure survives, the fold body op (`+`) runs
+    /// inline, and — unlike `map`/`filter` — there is NO `@array` and NO `freeze`
+    /// (the accumulator is a reassigned scalar, the result is its final value).
+    /// Fails before fold fusion lands: the `fold` call and the `(fn [a x] …)`
+    /// closure are both present.
+    #[test]
+    fn single_fold_dissolves_to_scalar_accumulator() {
+        let (hir, arena, names) = compile("(fold (fn [a x] (+ a x)) 0 [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold"),
+            "the `fold` dispatch must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == "+"),
+            "the fold body op `+` must run inline; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "a fold's accumulator is a scalar — no `@array`; callees were {cs:?}",
+        );
+        assert!(
+            !cs.iter().any(|n| n == "freeze"),
+            "a scalar fold accumulator is never frozen; callees were {cs:?}",
+        );
+        // The lowered scalar loop has exactly one `if` — the loop condition.
+        assert_eq!(count_ifs(&hir), 1, "only the loop-condition `if`, no guard");
+    }
+
+    /// `(fold f init (map g xs))` fuses to ONE scalar loop — the map-reduce shape:
+    /// both `fold` and `map` dispatches gone, both body ops (`+` and `*`) inline,
+    /// and NO array anywhere (the map stage transforms the value straight into the
+    /// fold step, so the intermediate array the `map` would have built never
+    /// exists). Fails before fold fusion: a `fold` and a `map` call, two closures.
+    #[test]
+    fn fold_of_map_fuses_to_one_scalar_loop() {
+        let (hir, arena, names) =
+            compile("(fold (fn [a x] (+ a x)) 0 (map (fn [x] (* x 2)) [1 2 3]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold" || n == "map"),
+            "both the `fold` and `map` dispatches must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == "+") && cs.iter().any(|n| n == "*"),
+            "both the fold step and the map transform must inline; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "map-into-fold mints NO array — the map's result feeds the fold step; \
+             callees were {cs:?}",
+        );
+        assert!(!cs.iter().any(|n| n == "freeze"), "no array to freeze");
+        assert_eq!(count_ifs(&hir), 1, "only the loop-condition `if`, no guard");
+    }
+
+    /// `(fold f init (filter p xs))` fuses to ONE scalar loop with a guarded fold
+    /// step: both dispatches gone, both body ops (`+` and `even?`) inline, NO array
+    /// (scalar accumulator), and two `if`s — the loop condition plus the single
+    /// `filter` guard (only survivors reach the fold step). Fails before fold
+    /// fusion: a `fold` and a `filter` call, two closures.
+    #[test]
+    fn fold_of_filter_fuses_to_one_scalar_loop() {
+        let (hir, arena, names) =
+            compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [y] (even? y)) [1 2 3 4]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold" || n == "filter"),
+            "both the `fold` and `filter` dispatches must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert!(
+            cs.iter().any(|n| n == "+") && cs.iter().any(|n| n == "even?"),
+            "both the fold step and the predicate must inline; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "filter-into-fold mints NO array; callees were {cs:?}",
+        );
+        assert_eq!(count_ifs(&hir), 2, "the loop `if` plus one filter guard");
+    }
+
+    /// `reduce` is `(def reduce fold)` — the same left-fold, recognized by its own
+    /// name. `(reduce f init xs)` dissolves exactly as `fold` does.
+    #[test]
+    fn reduce_dissolves_like_fold() {
+        let (hir, arena, names) = compile("(reduce (fn [a x] (+ a x)) 0 [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "reduce" || n == "fold"),
+            "the `reduce` dispatch must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "reduce fuses to a scalar accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// The reorder gate counts the fold as an op: a lone fold (length 1) threads
+    /// its accumulator strictly in element order — exactly the stdlib fold — so it
+    /// never reorders and fuses even with a NON-reorder-safe body (`>` routes
+    /// through `apply`). The single-op path carries no reorder requirement.
+    #[test]
+    fn single_fold_with_non_reorder_safe_body_still_fuses() {
+        let (hir, arena, names) = compile("(fold (fn [a x] (if (> a x) a x)) 0 [3 1 2])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold"),
+            "a lone fold has no reorder gate and must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+    }
+
+    /// A fold composition with a NON-reorder-safe prefix stage declines the whole
+    /// composition (length ≥ 2 carries the reorder requirement) and falls back to
+    /// fusing only the inner reorder-safe run: the inner `filter` fuses on the
+    /// recursion, and the outer `fold` stays a plain call over the fused loop. (The
+    /// fused loop lands beside the fold's surviving lambda argument; `lower_call`'s
+    /// argument spill keeps that sound — `call-arg-across-loop.lisp`.)
+    #[test]
+    fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
+        let (hir, arena, names) =
+            compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "fold"),
+            "the outer `fold` must not fuse a non-reorder-safe composition; \
+             callees were {cs:?}",
+        );
+        assert!(
+            !cs.iter().any(|n| n == "filter"),
+            "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a user redefinition of `fold` shadows the core binding with a
+    /// non-primitive one, so it is never rewritten. The user's `fold` call survives.
+    #[test]
+    fn user_shadowed_fold_is_not_fused() {
+        let (hir, arena, names) = compile("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "fold"),
+            "a user `fold` must not be rewritten; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a capturing fold lambda is left alone (its body references a free
+    /// variable, so splicing it at the call site is out of scope). The `fold` call
+    /// survives.
+    #[test]
+    fn capturing_fold_lambda_is_not_fused() {
+        let (hir, arena, names) = compile("(let [k 10] (fold (fn [a x] (+ a (+ x k))) 0 [1 2 3]))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "fold"),
+            "a capturing fold lambda must not fuse; callees were {cs:?}",
+        );
+        assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    }
+
+    /// A fold over a `Var`-bound immutable array fuses — the base-alias proof and
+    /// the scalar terminal compose, exactly as they do for `map`/`filter`.
+    #[test]
+    fn fold_over_var_bound_immutable_array_fuses() {
+        let (hir, arena, names) = compile("(let [xs [1 2 3 4]] (fold (fn [a x] (+ a x)) 0 xs))");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold"),
+            "a Var-bound base must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "scalar fold accumulator; callees were {cs:?}",
+        );
     }
 }

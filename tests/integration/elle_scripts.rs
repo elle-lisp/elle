@@ -204,6 +204,24 @@ fn region_mixed_fuse_uaf() {
     );
 }
 
+// Fold/reduce loop fusion (docs/impl/dissolution.md § "Fold — the scalar
+// terminal") dissolves `(fold f init xs)` over a proven immutable array into an
+// index-walk loop with a SCALAR accumulator reassigned one left-fold step per
+// element, and fuses a map/filter prefix into the same loop with no intermediate
+// array. Driving that path with HEAP values in three roles — heap base elements,
+// a heap accumulator the fold rebuilds each step, and heap results threaded out —
+// must not free the displaced prior accumulator under the read that builds its
+// successor, nor a base element under a combinator/guard/transform read: either
+// over-free SIGSEGVs under guardfree. Fires only on the fused shape; the plain-VM
+// run asserts the values.
+#[test]
+fn region_fold_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-fold-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior
