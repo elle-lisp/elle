@@ -107,5 +107,26 @@
         (string "Var-base map mints fewer than the capturing reference: "
                 var-fused " vs " one-unfused))
 
+# ── Cross-unit named fn: the intermediate collection is gone ──────────
+# `(map dec (map dec xs))` where `dec` is a STDLIB `defn` (inlined across the
+# compile-unit boundary, docs/impl/dissolution.md § "Cross-unit named functions")
+# fuses to ONE loop — the intermediate array is gone. The un-fused reference uses
+# CAPTURING lambdas computing the same value (a shape the gate declines), so it
+# mints per-call closures AND the staged intermediate array. Same value, strictly
+# fewer allocations — the realization win reaching across the compile-unit boundary.
+(def xu-fused (allocs (fn [] (map dec (map dec [0 1 2 3 4 5 6 7 8 9])))))
+(def xu-unfused
+  (allocs (fn []
+            (let [k 1]
+              (map (fn [y] (- y k)) (map (fn [x] (- x k)) [0 1 2 3 4 5 6 7 8 9]))))))
+(assert (= (map dec (map dec base))
+           (let [k 1]
+             (map (fn [y] (- y k)) (map (fn [x] (- x k)) base))))
+        "fused cross-unit composition and the capturing reference agree")
+(assert (< xu-fused xu-unfused)
+        (string "fused cross-unit composition must mint strictly fewer objects: "
+                xu-fused " vs " xu-unfused))
+
 (println "dissolution-map-alloc: ok (d2 saved " (- d2-unfused d2-fused)
-         ", d3 saved " (- d3-unfused d3-fused) ")")
+         ", d3 saved " (- d3-unfused d3-fused) ", cross-unit saved "
+         (- xu-unfused xu-fused) ")")

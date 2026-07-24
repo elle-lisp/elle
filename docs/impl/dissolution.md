@@ -310,9 +310,46 @@ binding through any **other** form (a `loop`, a `match` pattern, or a nested
 lambda) or uses any unrecognized form **declines**: the clone returns nothing and
 the HOF stays a plain call, so the definition's own bindings are never duplicated
 (correct-by-construction — an unhandled form is left un-optimized, never
-miscompiled). Cross-unit functions (a stdlib `defn` whose body is not in this
-unit's tree) are headroom: inlining them needs the body carried across the
-compile-unit boundary like the dispatch-wrapper registry.
+miscompiled).
+
+## Cross-unit named functions
+
+A named function need not live in the unit that calls it. A **stdlib** `defn` —
+`inc`, `dec`, and any non-capturing lambda with a whitelisted body — is defined in
+the `<stdlib>` compile unit, so a later user unit that writes `(map inc xs)` has no
+body for `inc` in its own tree: `collect_inline_fns` finds nothing, and the
+same-unit path declines. The cross-unit path carries the body across the
+compile-unit boundary, mirroring the dispatch-wrapper registry
+(`monomorphize.rs`): a per-instance registry keyed by function **name**
+(`SymbolId`, stable across arenas where a `Binding` is not) is populated as each
+unit compiles — the `<stdlib>` compile records `inc` — and consulted by every later
+unit, gated on the callee being `is_primitive` (a `bind_primitives` stdlib export;
+a user redefinition shadows it with a non-primitive binding and is left alone).
+
+The registry entry carries the template body plus its **free globals**, each recorded
+by `SymbolId`. A `Binding` is a per-arena index, meaningless in the consuming unit,
+so every global the body references — the arithmetic op in `(+ x 1)`, say — is
+re-resolved by name against the consuming unit's own primitive bindings at the call
+site. If any free global fails to resolve there, the inline **declines** (the HOF
+stays a plain call) — correct-by-construction, never a mis-resolved reference.
+
+The free-global gate is what admits a stdlib body the *same-unit* gate would reject.
+When the stdlib compiles, its own exports are **not yet** `is_primitive` — `+` is a
+file-scope (`is_file_scope`) letrec sibling, so `inc`'s lambda *captures* it, and the
+non-capturing same-unit gate declines. The cross-unit collector instead admits a
+lambda whose every free variable is a genuine **global** — an `is_file_scope`
+module name or an `is_primitive` binding — and records those names for re-resolution;
+a free variable that is a plain enclosing local (a real capture of a runtime value)
+declines, exactly as the same-unit gate intends. So a stdlib `defn` referencing only
+other globals inlines, while a capturing local function never does.
+
+The clone is otherwise identical to the same-unit one (`clone_fresh`): the
+parameters and any `let`-bound bindings are freshened per call site, and every node
+is rebuilt with a fresh `HirId`. The only addition is that the free globals are
+seeded into the rename map up front — each mapped to the consuming unit's binding for
+that name — so the shared `clone_fresh` rewrites them with no further machinery. The
+same whitelist (pure-expression forms plus `let`), arity, unmutated-parameter, and
+composition-reorder gates apply.
 
 Everything else in the gate is identical — non-capturing, fixed arity, no rest
 parameter, unmutated parameters, and the composition reorder requirement (read
@@ -369,7 +406,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   declines to the innermost single op). Named-function pins cover a `map`/`fold`
   whose argument is a `Var` naming a same-unit `defn` (the body inlines, the
   definition persists) and the declines (a `let`-body function, a capturing local
-  function, a non-lambda `Var`).
+  function, a non-lambda `Var`). A **cross-unit** pin fuses `(map dec …)` where
+  `dec` is a stdlib `defn` — its body carried across the compile-unit boundary and
+  spliced exactly once (the definition stays in the stdlib unit) — beside a decline
+  for a stdlib fn whose body is not clone-whitelisted (`distinct`, a `letrec` body).
 - **Realization (execution).** `tests/elle/dissolution-map-alloc.lisp` (the filter
   cases in `dissolution-filter-fuse.lisp`, and the mixed cases in
   `dissolution-mixed-fuse.lisp`) prove the consequence the mission names — *fewer
@@ -379,7 +419,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   computing the same value, and asserts the fused form mints strictly fewer, with
   the saving scaling per composition layer (one intermediate array each — for a
   mixed chain, the survivor/mapped array between the two ops; for a fold chain,
-  the array the map/filter prefix would have handed the fold). A lone `fold`
+  the array the map/filter prefix would have handed the fold). A **cross-unit**
+  case fuses `(map dec (map dec xs))` — a stdlib `defn` inlined across the
+  compile-unit boundary — against a capturing-lambda reference, proving the
+  intermediate array vanishes across that boundary too. A lone `fold`
   produces a scalar, so it saves no *result* array — its win appears once it
   composes with a prefix (`dissolution-fold-fuse.lisp`). The
   intermediate is non-escaping and freed before the call returns, so it is
@@ -396,7 +439,8 @@ codegen and execution levels, not on the leak oracle. Three pins:
   still declines the clone) and `tests/elle/region-map-fuse-uaf.lisp` /
   `region-filter-fuse-uaf.lisp` / `region-mixed-fuse-uaf.lisp` /
   `region-fold-fuse-uaf.lisp` (guardfree over heap element/base/accumulator values,
-  including a mutable-base heap result mutated in place and a cloned named-function
-  body over heap elements).
+  including a mutable-base heap result mutated in place, a cloned same-unit
+  named-function body, and a cross-unit stdlib `defn` (`identity`) inlined over heap
+  elements).
 
 The leak oracle is only a non-regression check here.

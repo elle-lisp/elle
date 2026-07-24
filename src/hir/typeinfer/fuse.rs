@@ -59,6 +59,7 @@ use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::primitives::def::RetType;
 use crate::signals::{Signal, SIG_ERROR};
 use crate::symbol::SymbolTable;
+use crate::value::SymbolId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
@@ -111,9 +112,31 @@ impl Ops {
 }
 
 /// Fuse every qualifying `map` chain into an inlined index-walk loop. Runs on
-/// surface HIR, before functionalize (see the module doc).
-pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: &SymbolTable) {
+/// surface HIR, before functionalize (see the module doc). `registry` is the
+/// per-instance cross-unit function-inline registry: this unit's inlineable
+/// functions are recorded into it (so later units can inline them) and its earlier
+/// entries — the `<stdlib>` compile's `inc`/`dec`/… — are consulted here.
+pub(crate) fn fuse_map_chains(
+    hir: &mut Hir,
+    arena: &mut BindingArena,
+    symbols: &SymbolTable,
+    registry: &mut FnInlineRegistry,
+) {
     let symbol_names = symbols.all_names();
+    // The same-unit function templates: a `Var` naming a non-capturing lambda
+    // (a top-level `defn` or a `let`/`def`-bound `fn`) inlines like a literal
+    // (docs/impl/dissolution.md § "Named same-unit functions"). Built once over
+    // the pre-rewrite tree; each use clones a fresh copy, so the map stays valid
+    // as calls collapse.
+    let mut templates: FxHashMap<Binding, FnTemplate> = FxHashMap::default();
+    collect_inline_fns(hir, arena, &mut templates, &mut FxHashSet::default());
+    // Record this unit's cross-unit-inlineable functions by NAME so later units can
+    // reach them (docs/impl/dissolution.md § "Cross-unit named functions"). Done
+    // BEFORE `Ops::resolve` below: during the `<stdlib>` compile the loop-scaffold
+    // primitives are not yet `is_primitive`, so `Ops::resolve` fails and fusion is
+    // inert here — but the stdlib is exactly where the `inc`/`dec` templates that
+    // later units inline are defined, so the recording must not sit behind that gate.
+    record_cross_unit_fns(hir, arena, registry);
     let Some(ops) = Ops::resolve(arena, &symbol_names) else {
         return;
     };
@@ -124,14 +147,288 @@ pub(crate) fn fuse_map_chains(hir: &mut Hir, arena: &mut BindingArena, symbols: 
     // base-var bindings live in enclosing `let`s that fusion never mutates, so the
     // proof stays valid as inner map calls collapse.
     let bases = concrete_init_keywords(hir, arena, &symbol_names);
-    // The same-unit function templates: a `Var` naming a non-capturing lambda
-    // (a top-level `defn` or a `let`/`def`-bound `fn`) inlines like a literal
-    // (docs/impl/dissolution.md § "Named same-unit functions"). Built once over
-    // the pre-rewrite tree; each use clones a fresh copy, so the map stays valid
-    // as calls collapse.
-    let mut templates: FxHashMap<Binding, FnTemplate> = FxHashMap::default();
-    collect_inline_fns(hir, arena, &mut templates, &mut FxHashSet::default());
-    rewrite(hir, arena, &symbol_names, &ops, &bases, &templates);
+    // This unit's primitives by name, so a cross-unit template's free globals
+    // (recorded by name in a different arena) re-resolve to this arena's bindings.
+    // `bind_primitives` binds each primitive/stdlib-export once, so first-wins is
+    // exact — the same map `monomorphize.rs` builds for the dispatch registry.
+    let mut prim_by_name: FxHashMap<SymbolId, Binding> = FxHashMap::default();
+    for i in 0..arena.len() as u32 {
+        let b = Binding(i);
+        let bi = arena.get(b);
+        if bi.is_primitive {
+            prim_by_name.entry(bi.name).or_insert(b);
+        }
+    }
+    let fns = FnResolver {
+        templates: &templates,
+        registry,
+        prim_by_name: &prim_by_name,
+    };
+    rewrite(hir, arena, &symbol_names, &ops, &bases, &fns);
+}
+
+/// A same-unit function template summarized for the cross-unit registry: its
+/// arity, its (defining-unit) parameters and body, its free globals recorded by
+/// `SymbolId`, and its body's top signal. A `Binding` is a per-arena index,
+/// meaningless in a later unit; the clone freshens the parameters and any
+/// `let`-bound bindings per call site, and re-resolves every free global by name
+/// against the consuming unit's own primitive bindings (`clone_reg_template`). The
+/// signal feeds the composition-reorder gate exactly as a same-unit template's does.
+struct RegFnTemplate {
+    arity: usize,
+    params: Vec<Binding>,
+    body: Hir,
+    globals: Vec<(Binding, SymbolId)>,
+    signal: Signal,
+}
+
+/// Per-instance persistent map of cross-unit-inlineable function templates, keyed
+/// by function NAME (`SymbolId`). Each unit's `fuse_map_chains` records its
+/// locally-defined inlineable functions here (the `<stdlib>` compile records
+/// `inc`/`dec`/…), and every later unit consults it, so a user→stdlib `(map inc
+/// xs)` inlines the stdlib body exactly as a same-unit named fn does — the
+/// dissolution leg reaching across the compile-unit boundary
+/// (docs/impl/dissolution.md § "Cross-unit named functions").
+///
+/// Compile-time-only state: the rewrite it drives leaves the inlined body in the
+/// HIR, so nothing here reaches the runtime. It rides on `CompileCtx` (the
+/// per-instance compile context) precisely because it must outlive the single
+/// compile that defined the function — never on any VM/region structure. The
+/// pattern mirrors `monomorphize::DispatchWrapperRegistry`.
+#[derive(Default)]
+pub struct FnInlineRegistry {
+    by_name: FxHashMap<SymbolId, RegFnTemplate>,
+}
+
+impl FnInlineRegistry {
+    /// Record a locally-collected template under its name. First definition wins,
+    /// so the stdlib's canonical fn is never clobbered by a later same-named user
+    /// binding, and re-recording across compiles is a cheap no-op.
+    fn record(&mut self, name: SymbolId, t: RegFnTemplate) {
+        self.by_name.entry(name).or_insert(t);
+    }
+}
+
+/// Walk every `Let`/`Letrec`/`Define` binding (the forms `collect_inline_fns`
+/// visits) and record each cross-unit-inlineable function into `registry` by name.
+/// Unlike the same-unit collector, this admits a lambda that references module
+/// globals — a stdlib `defn` whose siblings are `is_file_scope` letrec bindings not
+/// yet `is_primitive` (`cross_unit_fn_template`) — recording those globals by name.
+fn record_cross_unit_fns(hir: &Hir, arena: &BindingArena, registry: &mut FnInlineRegistry) {
+    let record = |b: Binding, value: &Hir, registry: &mut FnInlineRegistry| {
+        let bi = arena.get(b);
+        if !bi.is_immutable || bi.is_mutated {
+            return;
+        }
+        if let Some(t) = cross_unit_fn_template(value, arena) {
+            registry.record(bi.name, t);
+        }
+    };
+    match &hir.kind {
+        HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+            for (b, value) in bindings {
+                record(*b, value, registry);
+            }
+        }
+        HirKind::Define { binding, value } => record(*binding, value, registry),
+        _ => {}
+    }
+    hir.for_each_child(|c| record_cross_unit_fns(c, arena, registry));
+}
+
+/// The cross-unit inlineable template of a lambda initializer, or `None`. Like
+/// `fn_template`, but where the same-unit gate requires **no captures at all**,
+/// this admits a lambda whose every free variable is a genuine **global** — an
+/// `is_file_scope` module name (a stdlib `defn`'s sibling reference, not yet
+/// `is_primitive` during the stdlib compile) or an `is_primitive` binding — and
+/// records those globals by name for re-resolution (`collect_globals`). A free
+/// variable that is a plain enclosing local (a real capture of a runtime value)
+/// disqualifies it, exactly as the same-unit gate intends.
+fn cross_unit_fn_template(value: &Hir, arena: &BindingArena) -> Option<RegFnTemplate> {
+    let HirKind::Lambda {
+        params,
+        rest_param,
+        body,
+        ..
+    } = &value.kind
+    else {
+        return None;
+    };
+    if rest_param.is_some() || params.is_empty() || params.len() > 2 {
+        return None;
+    }
+    if params.iter().any(|p| arena.get(*p).is_mutated) || !is_inlineable_body(body) {
+        return None;
+    }
+    let globals = collect_globals(body, params, arena)?;
+    Some(RegFnTemplate {
+        arity: params.len(),
+        params: params.clone(),
+        body: (**body).clone(),
+        globals,
+        signal: body.signal,
+    })
+}
+
+/// Collect a body's free globals — every `Var` that is neither a parameter nor a
+/// `let`-binding the body introduces — as deduplicated `(binding, name)` pairs.
+/// Returns `None` if any free variable is NOT a genuine global (an `is_file_scope`
+/// module name or an `is_primitive` binding): such a variable is a real capture of
+/// an enclosing runtime local, which cannot be re-resolved by name in a consuming
+/// unit, so the function is not cross-unit inlineable. `let` is the only
+/// binding-introducing form in the clone whitelist, so only its bindings extend the
+/// bound set.
+fn collect_globals(
+    body: &Hir,
+    params: &[Binding],
+    arena: &BindingArena,
+) -> Option<Vec<(Binding, SymbolId)>> {
+    let mut bound: FxHashSet<Binding> = params.iter().copied().collect();
+    let mut out: Vec<(Binding, SymbolId)> = Vec::new();
+    let mut seen: FxHashSet<Binding> = FxHashSet::default();
+    walk_globals(body, &mut bound, &mut out, &mut seen, arena).then_some(out)
+}
+
+/// The traversal behind `collect_globals`; returns `false` the moment a free
+/// variable is a non-global local (an unclonable capture).
+fn walk_globals(
+    h: &Hir,
+    bound: &mut FxHashSet<Binding>,
+    out: &mut Vec<(Binding, SymbolId)>,
+    seen: &mut FxHashSet<Binding>,
+    arena: &BindingArena,
+) -> bool {
+    match &h.kind {
+        HirKind::Var(b) => {
+            if bound.contains(b) {
+                return true;
+            }
+            let bi = arena.get(*b);
+            if !bi.is_file_scope && !bi.is_primitive {
+                return false;
+            }
+            if seen.insert(*b) {
+                out.push((*b, bi.name));
+            }
+            true
+        }
+        HirKind::Let { bindings, body } => {
+            for (b, value) in bindings {
+                if !walk_globals(value, bound, out, seen, arena) {
+                    return false;
+                }
+                bound.insert(*b);
+            }
+            walk_globals(body, bound, out, seen, arena)
+        }
+        _ => {
+            let mut ok = true;
+            h.for_each_child(|c| {
+                if ok {
+                    ok = walk_globals(c, bound, out, seen, arena);
+                }
+            });
+            ok
+        }
+    }
+}
+
+/// Clone a cross-unit template with fresh parameter/`let` bindings and its free
+/// globals re-resolved by name to this unit's primitive bindings, ready to splice
+/// like a moved-out lambda's. Seeds the rename map with the global remaps first —
+/// so the shared `clone_fresh` rewrites each free-global `Var` to the consuming
+/// unit's binding with no further machinery — then freshens the parameters exactly
+/// as `clone_template` does. `None` if any free global does not resolve to a
+/// primitive here (the arg declines; `FnResolver::body_signal` proves this cannot
+/// happen once a chain is validated).
+fn clone_reg_template(
+    t: &RegFnTemplate,
+    arena: &mut BindingArena,
+    prim_by_name: &FxHashMap<SymbolId, Binding>,
+) -> Option<(Vec<Binding>, Hir)> {
+    let mut renames: FxHashMap<Binding, Binding> = FxHashMap::default();
+    for (old, name) in &t.globals {
+        renames.insert(*old, *prim_by_name.get(name)?);
+    }
+    let mut params = Vec::with_capacity(t.params.len());
+    for &p in &t.params {
+        let fresh = arena.gensym();
+        arena.get_mut(fresh).is_immutable = true;
+        renames.insert(p, fresh);
+        params.push(fresh);
+    }
+    let body = clone_fresh(&t.body, &mut renames, arena)?;
+    Some((params, body))
+}
+
+/// The resolution context for a HOF's function argument: same-unit templates
+/// (matched by `Binding`, spliced within this unit) and cross-unit templates
+/// (matched by the callee's primitive NAME through the persistent registry, with
+/// free globals re-resolved through `prim_by_name`). A lambda literal, a same-unit
+/// `Var`, and a cross-unit stdlib `Var` all resolve through here.
+struct FnResolver<'a> {
+    templates: &'a FxHashMap<Binding, FnTemplate>,
+    registry: &'a FnInlineRegistry,
+    prim_by_name: &'a FxHashMap<SymbolId, Binding>,
+}
+
+impl FnResolver<'_> {
+    /// The body signal of a HOF's function argument at the given arity, or `None`
+    /// if it does not qualify — fed to the reorder gate (all forms gated
+    /// identically). A cross-unit `Var` (a `Var` naming no same-unit template but
+    /// bound to an `is_primitive` stdlib export) qualifies only when the registry
+    /// holds a matching-arity template whose every free global resolves in THIS
+    /// unit, so a validated chain is always one `take_parts` can then clone.
+    fn body_signal(&self, lam: &Hir, arena: &BindingArena, arity: usize) -> Option<Signal> {
+        match &lam.kind {
+            HirKind::Lambda { .. } => {
+                qualifies_lambda(lam, arena, arity).map(|(_, body)| body.signal)
+            }
+            HirKind::Var(b) => {
+                if let Some(t) = self.templates.get(b) {
+                    (t.params.len() == arity).then_some(t.body.signal)
+                } else if arena.get(*b).is_primitive {
+                    let t = self.registry.by_name.get(&arena.get(*b).name)?;
+                    if t.arity != arity
+                        || t.globals
+                            .iter()
+                            .any(|(_, n)| !self.prim_by_name.contains_key(n))
+                    {
+                        return None;
+                    }
+                    Some(t.signal)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve a HOF's function argument to owned `(params, body)`, ready to splice:
+    /// a **lambda literal** is *moved* out; a same-unit `Var` *clones* its template;
+    /// a cross-unit stdlib `Var` clones the registry template with its globals
+    /// re-resolved by name. `body_signal` proved one path holds at the required
+    /// arity (and, cross-unit, that the globals resolve), so the resolution is total.
+    fn take_parts(&self, lam: Hir, arena: &mut BindingArena) -> (Vec<Binding>, Hir) {
+        match lam.kind {
+            HirKind::Lambda { params, body, .. } => (params, *body),
+            HirKind::Var(b) => {
+                if let Some(t) = self.templates.get(&b) {
+                    clone_template(t, arena)
+                } else {
+                    let t = self
+                        .registry
+                        .by_name
+                        .get(&arena.get(b).name)
+                        .expect("validate_chain proved a cross-unit template");
+                    clone_reg_template(t, arena, self.prim_by_name)
+                        .expect("validate_chain proved the free globals resolve")
+                }
+            }
+            _ => unreachable!("validate_chain proved a lambda or a template Var"),
+        }
+    }
 }
 
 /// A same-unit function eligible for inlining into a fused HOF: its parameters
@@ -406,16 +703,16 @@ fn rewrite(
     symbol_names: &HashMap<u32, String>,
     ops: &Ops,
     bases: &FxHashMap<Binding, &'static str>,
-    templates: &FxHashMap<Binding, FnTemplate>,
+    fns: &FnResolver,
 ) {
-    if let Some(plan) = validate_chain(hir, arena, symbol_names, bases, templates) {
+    if let Some(plan) = validate_chain(hir, arena, symbol_names, bases, fns) {
         let sig = hir.signal;
         let span = hir.span.clone();
         let owned = std::mem::replace(hir, Hir::error(span.clone()));
-        let (terminal, stages, base) = take_chain(owned, plan, arena, templates);
+        let (terminal, stages, base) = take_chain(owned, plan, arena, fns);
         *hir = build_loop(terminal, stages, base, arena, ops, sig, span);
     }
-    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, templates));
+    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, fns));
 }
 
 /// The higher-order collection op a fused chain is built from, and the kind of
@@ -558,32 +855,6 @@ fn qualifies_lambda<'a>(
     Some((params, body))
 }
 
-/// The body signal of a HOF's function argument at the given arity, or `None` if
-/// it does not qualify. The argument is one of two forms:
-///
-/// - a **lambda literal** (`qualifies_lambda`), or
-/// - a **`Var`** naming a same-unit template (`templates`) whose parameter count
-///   matches `arity` — the named-function inlining path.
-///
-/// Returns the body's top signal, which the caller feeds to the reorder gate (the
-/// two forms are gated identically). The template body qualified at collection, so
-/// only the arity is re-checked here.
-fn fn_arg_body_signal(
-    lam: &Hir,
-    arena: &BindingArena,
-    templates: &FxHashMap<Binding, FnTemplate>,
-    arity: usize,
-) -> Option<Signal> {
-    match &lam.kind {
-        HirKind::Lambda { .. } => qualifies_lambda(lam, arena, arity).map(|(_, body)| body.signal),
-        HirKind::Var(b) => {
-            let t = templates.get(b)?;
-            (t.params.len() == arity).then_some(t.body.signal)
-        }
-        _ => None,
-    }
-}
-
 /// Does a lambda body disqualify it from inlining? Two structural hazards, both
 /// detected in one walk:
 ///
@@ -639,7 +910,7 @@ fn validate_chain(
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
-    templates: &FxHashMap<Binding, FnTemplate>,
+    fns: &FnResolver,
 ) -> Option<ChainPlan> {
     let mut all_silent = true;
     let mut ops = 0usize;
@@ -647,7 +918,7 @@ fn validate_chain(
 
     // The optional outermost fold/reduce terminal (2-param combinator).
     let fold = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
-        all_silent &= reorder_safe(fn_arg_body_signal(lam, arena, templates, 2)?);
+        all_silent &= reorder_safe(fns.body_signal(lam, arena, 2)?);
         ops += 1;
         cur = coll;
         true
@@ -658,7 +929,7 @@ fn validate_chain(
     // The inner map/filter pipeline (1-param functions).
     let mut kinds = Vec::new();
     while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
-        all_silent &= reorder_safe(fn_arg_body_signal(lam, arena, templates, 1)?);
+        all_silent &= reorder_safe(fns.body_signal(lam, arena, 1)?);
         ops += 1;
         kinds.push(hof);
         cur = coll;
@@ -763,30 +1034,6 @@ fn classify_base(
     }
 }
 
-/// Resolve a HOF's function argument to owned `(params, body)`, ready to splice:
-///
-/// - a **lambda literal** is *moved* out of the call (its parameters and body are
-///   uniquely owned by the splice thereafter);
-/// - a **`Var`** naming a same-unit template is *cloned* with fresh bindings and
-///   HirIds (`clone_template`) — the definition persists, so nothing is moved.
-///
-/// Validation (`fn_arg_body_signal`) proved one of these holds at the required
-/// arity, so the match is total.
-fn take_fn_parts(
-    lam: Hir,
-    arena: &mut BindingArena,
-    templates: &FxHashMap<Binding, FnTemplate>,
-) -> (Vec<Binding>, Hir) {
-    match lam.kind {
-        HirKind::Lambda { params, body, .. } => (params, *body),
-        HirKind::Var(b) => {
-            let t = templates.get(&b).expect("validate_chain proved a template");
-            clone_template(t, arena)
-        }
-        _ => unreachable!("validate_chain proved a lambda or a template Var"),
-    }
-}
-
 /// Consume a validated chain, returning its **terminal** (Collect or the fold
 /// combinator), its per-element `map`/`filter` **stages** (`(hof, param, body)`) in
 /// **application order** (innermost op first), and the base collection expression.
@@ -799,7 +1046,7 @@ fn take_chain(
     mut expr: Hir,
     plan: ChainPlan,
     arena: &mut BindingArena,
-    templates: &FxHashMap<Binding, FnTemplate>,
+    fns: &FnResolver,
 ) -> (Terminal, Vec<(Hof, Binding, Hir)>, Hir) {
     let terminal = if plan.fold {
         let HirKind::Call { args, .. } = expr.kind else {
@@ -809,7 +1056,7 @@ fn take_chain(
         let lam = it.next().expect("fold has 3 args").expr;
         let init = it.next().expect("fold has 3 args").expr;
         let coll = it.next().expect("fold has 3 args").expr;
-        let (params, body) = take_fn_parts(lam, arena, templates);
+        let (params, body) = fns.take_parts(lam, arena);
         expr = coll;
         Terminal::Fold(Box::new(FoldTerminal {
             init,
@@ -834,7 +1081,7 @@ fn take_chain(
         let mut it = args.into_iter();
         let lam = it.next().expect("HOF has 2 args").expr;
         let coll = it.next().expect("HOF has 2 args").expr;
-        let (params, body) = take_fn_parts(lam, arena, templates);
+        let (params, body) = fns.take_parts(lam, arena);
         stages.push((hof, params[0], body));
         expr = coll;
     }
@@ -2066,6 +2313,56 @@ mod tests {
         assert!(
             cs.iter().any(|n| n == "map"),
             "a non-lambda Var arg must not inline; callees were {cs:?}",
+        );
+    }
+
+    /// Cross-unit named-function inlining (docs/impl/dissolution.md § "Cross-unit
+    /// named functions"): `dec` is a stdlib `(defn dec [x] (- x 1))` — its body
+    /// lives in the `<stdlib>` compile unit, NOT this one. Carried across the
+    /// compile-unit boundary through the persistent registry, `(map dec [1 2 3])`
+    /// fuses: the `map` dispatch is gone and `dec`'s body op `-` is spliced into
+    /// the loop. `-` is the clean discriminator (the loop scaffold uses only `<`
+    /// and `+`) and appears exactly ONCE — unlike a same-unit named fn, the
+    /// definition does NOT persist in this unit (it is the stdlib's), so there is
+    /// no second, surviving copy. Fails before cross-unit inlining lands: `map`
+    /// survives and no `-` appears at all (dec's body is not in this tree).
+    #[test]
+    fn named_map_cross_unit_stdlib_fn_inlines() {
+        let (hir, arena, names) = compile("(map dec [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "the `map` dispatch must be gone for a cross-unit stdlib fn; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "-"),
+            1,
+            "`dec`'s body op `-` is spliced in exactly once — the definition stays in \
+             the stdlib unit, so there is no surviving copy; callees were {cs:?}",
+        );
+        assert!(
+            cs.iter().any(|n| n == "freeze"),
+            "the fused loop freezes one accumulator; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one fused accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: a stdlib fn whose body is NOT clone-whitelisted is not inlined
+    /// cross-unit either — the same `is_inlineable_body` gate applies. `distinct`
+    /// has a `letrec` body (excluded from the whitelist), so it is never recorded
+    /// as an inlineable template, and `(map distinct …)` stays a plain `map` call.
+    #[test]
+    fn cross_unit_non_inlineable_stdlib_fn_declines() {
+        let (hir, arena, names) = compile("(map distinct [[1] [2]])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            cs.iter().any(|n| n == "map"),
+            "a cross-unit fn with a non-whitelisted body must not inline; callees were {cs:?}",
         );
     }
 

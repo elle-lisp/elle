@@ -7,7 +7,7 @@
 //! instances on one thread each own their own `CompileCtx`, so instance A's stdlib
 //! exports and REPL `def`s are invisible to instance B.
 
-use crate::hir::typeinfer::DispatchWrapperRegistry;
+use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry};
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
@@ -50,6 +50,13 @@ pub struct CompileCtx {
     /// monomorphizes as an intra-unit one does (the F1b close, `monomorphize.rs`).
     /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
     dispatch_wrappers: DispatchWrapperRegistry,
+    /// Cross-unit-inlineable function templates collected across every compile in
+    /// this instance, keyed by name. Populated when `stdlib.lisp` compiles (its
+    /// `inc`/`dec`/… bodies), consumed by every later unit so a user→stdlib
+    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would (the
+    /// dissolution leg across the compile-unit boundary, `fuse.rs`). Like
+    /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
+    fn_inline: FnInlineRegistry,
 }
 
 /// core.lisp source, embedded at compile time.
@@ -105,14 +112,21 @@ impl CompileCtx {
             meta,
             projections: HashMap::new(),
             dispatch_wrappers: DispatchWrapperRegistry::default(),
+            fn_inline: FnInlineRegistry::default(),
         }
     }
 
-    /// The instance's cross-unit dispatch-wrapper registry (`monomorphize.rs`).
-    /// Threaded into `regularize` on every compile: the `<stdlib>` compile
-    /// populates it, later user compiles consult it.
-    pub fn dispatch_wrappers_mut(&mut self) -> &mut DispatchWrapperRegistry {
-        &mut self.dispatch_wrappers
+    /// The instance's two cross-unit compile registries, borrowed together (they
+    /// are disjoint fields, so one accessor yields both `&mut` without aliasing —
+    /// `regularize` needs both, and two separate accessor calls would each borrow
+    /// all of `self`). The `<stdlib>` compile populates both; later user compiles
+    /// consult them. `dispatch_wrappers` drives container-dispatch monomorphization
+    /// (`monomorphize.rs`); `fn_inline` drives cross-unit HOF-argument inlining
+    /// (`fuse.rs`).
+    pub fn compile_registries_mut(
+        &mut self,
+    ) -> (&mut DispatchWrapperRegistry, &mut FnInlineRegistry) {
+        (&mut self.dispatch_wrappers, &mut self.fn_inline)
     }
 
     /// Run `f` with the macro-expansion VM (fiber reset), a clone of the
@@ -324,14 +338,18 @@ fn compile_core(
         panic!("core.lisp analysis produced {} error(s)", errors.len());
     }
 
-    // core.lisp defines no container-dispatch wrappers (its `concat`/`reverse` fan
-    // to helpers, not single monomorphic-op arms) and runs before the instance
-    // registry exists, so a throwaway registry is correct here.
+    // core.lisp runs before the instance `CompileCtx` (and its registries) exists,
+    // during `on_vm` construction, so throwaway registries are correct here: it
+    // defines no container-dispatch wrappers (its `concat`/`reverse` fan to helpers,
+    // not single monomorphic-op arms), and its cross-unit-inlineable fns are not
+    // recorded for later units. The load-bearing cross-unit templates (`inc`/`dec`)
+    // live in `stdlib.lisp`, which compiles through the instance registries.
     crate::hir::regularize(
         &mut hir,
         &mut arena,
         symbols,
         &mut DispatchWrapperRegistry::default(),
+        &mut FnInlineRegistry::default(),
     )
     .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
 

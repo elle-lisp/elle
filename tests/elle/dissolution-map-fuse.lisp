@@ -74,6 +74,20 @@
 (assert (= (map inc-let [1 2 3]) [2 3 4])
         "sequential-let-body fuses to the right value")
 
+# Cross-unit named-fn inlining (docs/impl/dissolution.md § "Cross-unit named
+# functions"): `dec` is a stdlib `defn` NOT redefined in this file, so `(map dec
+# xs)` inlines a body carried across the compile-unit boundary. `dec-decl` is the
+# un-fused oracle — a `match` body declines the clone, so it runs the real stdlib
+# `map`; fused and un-fused must agree.
+(defn dec-decl [x]
+  (match x
+    _ (dec x)))
+(assert (= (map dec [1 2 3]) [0 1 2])
+        "cross-unit stdlib-fn map fuses to the right value")
+(assert (= (map dec [1 2 3]) (map dec-decl [1 2 3]))
+        "fused cross-unit stdlib fn agrees with the un-fused oracle")
+(assert (= (map dec []) []) "cross-unit stdlib-fn map over empty fuses to empty")
+
 # Boundary sizes.
 (assert (= (map (fn [x] (* x 2)) []) []) "empty array fuses to empty")
 (assert (= (map (fn [x] (* x 2)) [7]) [14]) "singleton array fuses")

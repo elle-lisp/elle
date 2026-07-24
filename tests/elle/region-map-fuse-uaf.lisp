@@ -109,4 +109,20 @@
 (assert (= (get tagged 2) "[c]") "let-body inlined heap element survives a read")
 (assert (= (tag "z") "[z]") "the inlined let-body definition is still callable")
 
+# Cross-unit named-function inlining (docs/impl/dissolution.md § "Cross-unit named
+# functions") over HEAP element values: `identity` is a stdlib `(defn identity [x]
+# x)`, so `(map identity xs)` inlines a body carried across the compile-unit
+# boundary. The inlined body threads the base element straight into the accumulator
+# — the result member IS the base element (aliased) — so an over-free of a base
+# element under the loop's own read, or of the base binding while the accumulator
+# still holds its aliased members, faults here under --trace=guardfree. The base is
+# also read after the loop, so it must survive (not be consumed by the fused loop).
+(def idbase ["h" "i" "j"])
+(def idmapped (map identity idbase))
+(assert (= idmapped ["h" "i" "j"])
+        "cross-unit stdlib-fn inline over heap elements")
+(assert (= (get idmapped 2) "j")
+        "cross-unit inlined heap element survives a read")
+(assert (= (get idbase 0) "h") "the base survives the cross-unit fused loop")
+
 (println "region-map-fuse-uaf: ok")
