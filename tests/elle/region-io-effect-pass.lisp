@@ -64,7 +64,7 @@
                                "2a: port/read returns a string on a text port")
                        (assert (= d "hello") "2b: port/read content")
                        (assert (heap? d)
-                               "2c: port/read is Fresh — the buffer is a heap value (region ≠ 0)"))
+                               "2c: port/read is Fresh — the buffer is a heap value, region ≠ 0"))
                      (let [rest (port/read-all p)]
                        (assert (string? rest)
                                "2d: port/read-all returns a string")
