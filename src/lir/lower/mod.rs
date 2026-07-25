@@ -282,6 +282,20 @@ pub struct Lowerer<'a> {
     /// leak. `lower_let` defers it, stores, then emits the decref against
     /// the now-populated slot.
     deferred_decref_points: rustc_hash::FxHashSet<HirId>,
+    /// Tail-call HirIds whose result a `Return` mint already covers, so
+    /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
+    /// return mint is emitted exactly once per returned value
+    /// (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
+    ///
+    /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
+    /// position — `(let [t (f …)] (return t))`, built for a tail call nested in a
+    /// `begin`/`if`/`cond`/`match` arm. There the frame HOLDS the result (the
+    /// synthetic binding) and its `decref_point` balances `lower_return`'s mint,
+    /// so the fall-through retain would be a second, unbalanced reference. A tail
+    /// call ANF leaves unnamed (a `let`/lambda body) has no binding and no
+    /// `Return`, so its fall-through retain IS the mint and is absent here.
+    /// Recorded by `lower_let`, the only lowering site that sees the wrap.
+    return_minted_calls: rustc_hash::FxHashSet<HirId>,
 }
 
 mod regiondecref;
@@ -329,6 +343,7 @@ impl<'a> Lowerer<'a> {
             reassigned_local_slots: rustc_hash::FxHashSet::default(),
             emitted_alloc_regions: rustc_hash::FxHashSet::default(),
             deferred_decref_points: rustc_hash::FxHashSet::default(),
+            return_minted_calls: rustc_hash::FxHashSet::default(),
         }
     }
 

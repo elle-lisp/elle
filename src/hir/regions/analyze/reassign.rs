@@ -134,9 +134,24 @@ pub(super) fn apply_reassign_containers(
         // (docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
         // containers"). The fn-local loop deliberately does NOT mark its
         // sites here (its assign-value decref is kept, balancing the incref).
+        //
+        // CALL-RESULT content is excluded from the donation, exactly as in the
+        // fn-local branch below. A call result carries a SECOND compile-time name
+        // for the same runtime value — the opaque placeholder region the lowerer
+        // releases by value through the ANF temp's slot (Rule 2's bound-result
+        // shape) — and the suppression below reaches only the value's own source
+        // regions, never that placeholder. So the placeholder release still fires
+        // and consumes the callee's single returned reference; donating on top of
+        // it leaves the cell holding a freed value (`region-hof-tail-return-uaf.lisp`,
+        // whose callee returns a frozen array through a `cond` arm). Taking the
+        // counted store instead balances: store incref + placeholder release = the
+        // cell's one reference, dropped at the next overwrite.
+        let donates = !regions.iter().any(|r| info.call_result_regions.contains(r));
         for &s in sites {
             info.drop_on_overwrite_sites.insert(s);
-            info.donated_overwrite_sites.insert(s);
+            if donates {
+                info.donated_overwrite_sites.insert(s);
+            }
         }
         // Suppress the compiler's ordinary decrefs for BOTH the init region
         // and every assign-value region. Each of those values ALSO carries a

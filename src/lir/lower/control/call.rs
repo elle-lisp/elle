@@ -198,6 +198,18 @@ impl<'a> Lowerer<'a> {
         dies_here && !escapes
     }
 
+    /// Does a `Return` mint already cover the tail call being lowered? True for
+    /// ANF's canonical wrap `(let [t (f …)] (return t))`, recorded by `lower_let`
+    /// — there the frame names the result and `lower_return`'s mint plus the
+    /// binding's `decref_point` carry the whole return convention, so the
+    /// post-`TailCall` fall-through retain would be a second, unbalanced
+    /// reference (docs/impl/region/mechanism.md § "The return mint is emitted
+    /// exactly once"; pinned by `region-native-tail-compound-leak.lisp`).
+    fn return_mint_covers_here(&self) -> bool {
+        self.current_hir_id
+            .is_some_and(|id| self.return_minted_calls.contains(&id))
+    }
+
     pub(in crate::lir::lower) fn lower_call(
         &mut self,
         func: &Hir,
@@ -452,7 +464,7 @@ impl<'a> Lowerer<'a> {
                 let moves_out_here = self
                     .current_hir_id
                     .is_some_and(|id| self.region_info.moves_out_release_sites.contains(&id));
-                if !container_released_here && !moves_out_here {
+                if !container_released_here && !moves_out_here && !self.return_mint_covers_here() {
                     self.emit(LirInstr::IncrefValueRegion { src: dst });
                 }
                 // Consume each borrowed-arg retain on the native-completion
@@ -608,9 +620,13 @@ impl<'a> Lowerer<'a> {
                 // fixed (region-splice-tail-return.lisp; docs/impl/region/rules.md
                 // Rules 4/5). Dead for a frame-replacing closure tail call;
                 // no-op for an immediate result. The emitter peeks the operand
-                // stack top — the native's pushed result.
+                // stack top — the native's pushed result. Stands down under the
+                // same one-mint rule as the non-splice arm when ANF named this
+                // call's result and a `Return` mints for it.
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IncrefValueRegion { src: dst });
+                if !self.return_mint_covers_here() {
+                    self.emit(LirInstr::IncrefValueRegion { src: dst });
+                }
                 Ok(dst)
             } else {
                 let dst = self.fresh_reg();

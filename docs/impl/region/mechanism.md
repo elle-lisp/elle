@@ -40,6 +40,50 @@ Each region-RC instruction names its region in one of two ways:
   `activation_region_map` to the physical region this execution minted for that
   slot. Usable only where the region is statically known.
 
+## The return mint is emitted exactly once
+
+The callee half of that convention is **one** mint per returned value: a function
+hands its caller exactly one owning reference, and the caller's single
+`DecrefValueRegion` at the result's `decref_point` consumes it. Two lowering
+sites can supply it, and which one applies is decided by whether the result is
+*named*:
+
+- **the `Return` mint** (`lower_return`, marked on the HIR by
+  `hir/return_incref.rs`) — the named path. ANF binds the tail value to a
+  synthetic slot, so the frame holds its own reference; the mint raises RC and
+  the binding's `decref_point` — extended past the mint by `return_sites` — drops
+  the frame's reference, leaving net one for the caller.
+- **the `TailCall` fall-through retain** (`lower_call`'s tail arm) — the
+  anonymous path. A *native* tail call pushes no bytecode frame, so on normal
+  completion the dispatch loop runs the post-`TailCall` block before the
+  enclosing lambda returns. In a **propagating** tail position (a `let`/`lambda`
+  body, which ANF deliberately leaves unnamed) there is no binding, hence no
+  `decref_point` to balance a `Return` mint — the fall-through retain *is* the
+  mint.
+
+They cover the same value whenever ANF *does* name a tail call's result — the
+canonical wrap `(let [t (f …)] (return t))`, which ANF builds for a tail call
+nested in a `begin`/`if`/`cond`/`match` arm. Emitting both retains the result
+twice against one release: an over-keep of one region per call, growing per
+loop iteration. So the fall-through retain **stands down** whenever a `Return`
+mint covers the same result (`return_minted_calls`), and the named path's
+mint-then-release accounting carries the convention alone. A frame-replacing
+*closure* tail call reaches neither instruction (the callee emits its own
+`Return` mint), so the rule is uniform over callee kinds.
+
+Two narrower sites already suppress the fall-through retain for the same
+"exactly one reference" reason, and are unaffected: a `-mut` pass-through
+store/remove funnel whose dispatch wrapper released the container owned-param
+reference here (`container_release_sites`), and a moves-out ∩ `PassThrough`
+native whose in-body escape retain is already the caller's reference
+(`moves_out_release_sites`).
+
+The pinning tests are `tests/elle/region-native-tail-compound-leak.lisp` (the
+per-shape region-count deltas: bare, `let`-body, `begin`-nested, `if`-nested,
+over Fresh / Funnel / pass-through natives) and `region-native-tail-return-uaf.lisp`
+/ `region-hof-tail-return-uaf.lisp` (the soundness complement — the anonymous
+path must keep its retain).
+
 ## Compile-time region selection (coalescing)
 
 Where the compiler can prove a value is a **fresh local allocation whose region

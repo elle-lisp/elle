@@ -211,10 +211,6 @@ impl<'a> Lowerer<'a> {
                 // by the first overwrite's old-decref below.
                 let old_reg = self.fresh_reg();
                 self.emit(LirInstr::LoadLocal { dst: old_reg, slot });
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: value_reg,
-                });
                 // Pin the new content as the cell's reference — UNLESS the cell
                 // already owns the producer's reference outright. A MODULE-SCOPE
                 // 1-slot container's value regions have their ordinary decref
@@ -251,6 +247,18 @@ impl<'a> Lowerer<'a> {
                         None => self.emit(LirInstr::IncrefValueRegion { src: value_reg }),
                     }
                 }
+                // The store consumes `value_reg` (`StoreLocal` auto-pops), so the
+                // retain above must precede it: `IncrefValueRegion` peeks the
+                // operand-stack top and leaves the value in place, while after the
+                // store the register is gone from the stack model and the retain
+                // would land on whatever sits there instead (the displaced prior —
+                // `nil` on the first overwrite), pinning nothing and leaving the
+                // stored value's own release unbalanced. Same retain-while-on-top
+                // discipline as `lower_call`'s borrowed-arg retain.
+                self.emit(LirInstr::StoreLocal {
+                    slot,
+                    src: value_reg,
+                });
                 // Drop the cell's reference to the displaced content (the displaced
                 // 1-slot content is a runtime fact — stays value-resolved, the
                 // dynamic boundary).

@@ -29,6 +29,15 @@ agree with which of the value's ordinary decrefs are suppressed:
   (born + store − overwrite = +1), holding every displaced prior to teardown:
   an unbounded over-keep on a module mutable reassigned in a long-running loop
   (`runtime::tests::reassign_toplevel_prior_release_is_bounded`).
+  **CALL-RESULT content is excluded from the donation** and takes the counted
+  store instead, exactly as fn-local content does. A call result carries a
+  second compile-time name for the same runtime value — the opaque placeholder
+  region the lowerer releases by value through the ANF temp's slot (rules.md
+  Rule 2's bound-result shape) — and the suppression above reaches only the
+  value's own source regions, never that placeholder. So the placeholder release
+  fires regardless and consumes the callee's one returned reference; donating on
+  top of it leaves the cell pointing at a freed value
+  (`region-reassign-callresult-store.lisp`, `region-hof-tail-return-uaf.lisp`).
 - **Fn-local (the cell takes a COUNTED reference).** The compiler suppresses
   only the init region's decref; each assign-value region's ordinary decref is
   KEPT (it is the scope-exit demise of whatever the cell last holds). The
@@ -36,6 +45,14 @@ agree with which of the value's ordinary decrefs are suppressed:
   **incref-on-store** to hold a balanced reference of its own, which
   drop-on-overwrite releases. Removing it would free the value at the producer
   decref before drop-on-overwrite loads it (a UAF).
+
+**The counted store is emitted BEFORE the slot store.** `StoreLocal` consumes
+the value register, so a retain emitted after it no longer names the stored
+value — the emitter brings the operand stack's top instead, which is the
+displaced prior (`nil` on the first overwrite). The retain then pins nothing and
+the stored value dies at its producer release. Same retain-while-on-top
+discipline as `lower_call`'s borrowed-arg retain; pinned by
+`region-reassign-callresult-store.lisp`.
 
 **The gate.** The model trades static releases for suppression plus a
 value-based store/overwrite pair, so it is sound only when the cell's claim

@@ -62,6 +62,5 @@
     block0: DecrefValueRegion v20
     block0: DecrefValueRegion v23
     block0: TailCall defer_callee_release=false
-    block0: IncrefValueRegion v28
     block0: IncrefValueRegion v29
     block0: DecrefValueRegion v30

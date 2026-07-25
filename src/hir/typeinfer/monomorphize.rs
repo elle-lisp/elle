@@ -53,14 +53,15 @@ use crate::hir::types::{TyId, TypeInterner};
 use crate::value::SymbolId;
 use std::collections::HashMap;
 
-/// The mutable container types. Used to spot the ONE cross-unit arm that must not
-/// monomorphize: a mutable in-place `del` (`%del-*-mut`), whose raw op is the still-
-/// open F5 leak (`raw-del`). Collapsing that arm would bypass the wrapper's container
-/// compensation (which DOES close it) and surface the raw leak, regressing
-/// `del-wrapper`. Every other store/remove op — including immutable `del` and the
-/// fresh-result mutable funnels `%bytes-push`/`%pop-string` — self-reclaims (the raw
-/// op reads 0), so collapsing is safe on any container mutability. Remove this
-/// exclusion when F5 (raw `%del` parity) lands.
+/// The mutable container types. Used to spot the ONE cross-unit arm this pass
+/// leaves alone: a mutable in-place `del` (`%del-*-mut`), which keeps running
+/// through the `del` wrapper's per-arm container compensation instead of
+/// collapsing to the direct op. Every other store/remove op — including immutable
+/// `del` and the fresh-result mutable funnels `%bytes-push`/`%pop-string` —
+/// collapses on any container mutability. The exclusion is conservative, not
+/// forced: the raw op self-reclaims (`raw-del` reads 0), so lifting it is a
+/// separate, measurable step, gated on `del-wrapper`/`set-del-wrapper` staying at
+/// 0 in `tests/elle/oracle.lisp`.
 fn is_mutable_container(ty: TyId) -> bool {
     matches!(
         ty,
@@ -101,9 +102,10 @@ struct Wrapper {
 struct RegArm {
     ty: TyId,
     native_name: SymbolId,
-    /// This arm must NOT monomorphize cross-unit — it is a mutable in-place `del`
-    /// whose raw op is the open F5 leak (see `is_mutable_container`). Decided at
-    /// record time because an arm's `ty` is its fixed container type.
+    /// This arm does not monomorphize cross-unit — it is a mutable in-place `del`
+    /// and stays on the wrapper's container compensation (see
+    /// `is_mutable_container`). Decided at record time because an arm's `ty` is
+    /// its fixed container type.
     skip: bool,
 }
 
@@ -502,8 +504,8 @@ fn rewrite(
         }
     } else if arena.get(wrapper_b).is_primitive {
         // Cross-unit: collapse the wrapper to the proven arm's op, EXCEPT a mutable
-        // in-place `del` (`arm.skip`) — its raw op is the open F5 leak, so it stays on
-        // the wrapper's working container compensation (see `is_mutable_container`).
+        // in-place `del` (`arm.skip`) — it stays on the wrapper's container
+        // compensation (see `is_mutable_container`).
         let Some(rw) = registry.by_name.get(&arena.get(wrapper_b).name) else {
             return;
         };

@@ -145,7 +145,6 @@
     block1: IncrefValueRegion v10
     block2: DecrefValueRegion v22
     block2: TailCall defer_callee_release=false
-    block2: IncrefValueRegion v26
     block2: DecrefValueRegion v27
     block2: DecrefValueRegion v29
     block2: IncrefValueRegion v31

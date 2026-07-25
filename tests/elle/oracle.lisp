@@ -527,7 +527,7 @@
    # ever fires. It is a distinct still-open strand — the intermediate
    # `->array`-of-columns and the tuple/output structure — awaiting analysis.
    ["zip" (fn [j] (zip [1 2] [3 4])) 4] ["sort" (fn [j] (sort [3 1 2])) 0]
-   ["reverse" (fn [j] (reverse [1 2 3])) 2]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
+   ["reverse" (fn [j] (reverse [1 2 3])) 1]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
    # `dispatch_native_call` fresh-result invariant — a fresh native result lives
@@ -553,7 +553,7 @@
    ["take" (fn [j] (take 2 (list 1 2 3))) 2]
    ["drop" (fn [j] (drop 1 (list 1 2 3))) 3]
    ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 4]
-   ["frequencies" (fn [j] (frequencies [1 2 1 3])) 3]
+   ["frequencies" (fn [j] (frequencies [1 2 1 3])) 2]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
    ["to-list" (fn [j] (->list [1 2 3])) 0]
    ["freeze" (fn [j] (freeze @[1 2 3])) 0]
@@ -563,7 +563,7 @@
     (fn [j]
       (keys {:a 1 :b 2})
       (values {:a 1 :b 2})
-      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 4]
+      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 3]
    ["struct-lit" (fn [j] {:x j :y (+ j 1)}) 0]
    ["struct-get"
     (fn [j]
@@ -609,7 +609,7 @@
         (cyc-mk)
         nil)) 0]  # string ops + realistic patterns
     ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1))) 0]
-   ["concat" (fn [j] (concat "a" "b" "c")) 5]
+   ["concat" (fn [j] (concat "a" "b" "c")) 4]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
    ["join" (fn [j] (string/join ["a" "b" "c"] ",")) 0]
    ["trim" (fn [j] (string/trim "  x  ")) 0]
@@ -649,7 +649,7 @@
     (fn [j]
       (string/join (filter (fn [x] (not= x ""))
                            (map string/trim (string/split "a , b , c" ","))) ","))
-    11]
+    10]
    ["each-list"
     (fn [j]
       (each x in (list 1 2 3)
@@ -658,12 +658,12 @@
     (fn [j]
       (map (fn [x]
              (numeric!)
-             (%add x 1)) [1 2 3])) 4]
+             (%add x 1)) [1 2 3])) 3]
    ["filter-while"
     (fn [j]
       (filter (fn [x]
                 (numeric!)
-                (%gt x 1)) [1 2 3])) 4]
+                (%gt x 1)) [1 2 3])) 3]
    ["nested-closure"
     (fn [j]
       (let [f (fn [] (fn [] j))]
@@ -674,7 +674,7 @@
     (fn [j]
       (map (fn [x]
              (numeric!)
-             (%add x 1)) [1 2 3])) 4] ["factory" (fn [j] (t13proc j)) 0]
+             (%add x 1)) [1 2 3])) 3] ["factory" (fn [j] (t13proc j)) 0]
    ["cond-factory" (fn [j] (t13cond j)) 0] ["alias" (fn [j] (make-struct j)) 0]
    ["nested-factory" (fn [j] (t13nested j)) 0]
    ["struct-field"
@@ -711,7 +711,7 @@
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
         (fiber/resume f))) 0]
-   ["concat-while" (fn [j] (concat "x" (number->string j))) 4]
+   ["concat-while" (fn [j] (concat "x" (number->string j))) 3]
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
@@ -783,7 +783,7 @@
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 5]])
+        (protect (fiber/abort f "boom")))) 4]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape
@@ -1002,7 +1002,7 @@
 # call-result regions no static slot can name. Pinned at the exact `(concat "a" "b")`
 # / 2-element `fold` shapes.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
-                   count-gauge 100 6 60 0.4 0.5) 4)
+                   count-gauge 100 6 60 0.4 0.5) 3)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
                    count-gauge 100 6 60 0.4 0.5) 1)
@@ -1070,8 +1070,8 @@
 # The cross-unit dispatch-wrapper registry now collapses `(put {…} …)` to the direct
 # `%put-struct` at the proven immutable type — the wrapper, and every strand it carried,
 # cease to exist, with no compensation gate. These are now CLOSED controls pinning that
-# collapse (the MUTABLE case stays on its container compensation — the registry fires only
-# for immutable container types, `is_immutable_container`).
+# collapse (the one arm the registry leaves alone is a MUTABLE in-place `del`, which stays
+# on its container compensation — `monomorphize.rs`, `is_mutable_container`).
 (pin (measure-core "native-tail-put-struct" (stmt-run (fn [] (put {:a 1} :b 2)))
                    region-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "native-tail-put-array" (stmt-run (fn [] (put [10 20] 0 99)))
@@ -1178,11 +1178,14 @@
 #   the store half — per-arm compensation of the container+result, or dispatch prune on a
 #   statically-typed scrutinee.
 #
-#   The raw remove-funnel residual — `%del` leaks in-place, even on an IMMEDIATE value
-#   (raw-del-immediate reads 1, raw-del reads 2 = that 1 plus the removed heap member's
-#   region): the @struct/@set remove native does not reach the balance `%pop`
-#   demonstrates. Closes by bringing `%del`'s result/removed-value accounting to
-#   `%pop`'s parity. Distinct from the F1b wrapper leak, which rides every remove op.
+#   The RAW remove funnel reclaims too (`raw-del`/`raw-del-immediate` = 0): `%del`'s
+#   in-place @struct/@set remove decrefs the removed member and its `-mut` pass-through
+#   result carries exactly one return mint. These two are the CLOSED raw-funnel controls
+#   for the remove half, the peers of `raw-pop`/`put-slot-source`. Their probe shape is
+#   deliberately a two-statement body whose tail is the funnel call — the ANF-named tail
+#   call whose result a `Return` mint covers (docs/impl/region/mechanism.md § "The return
+#   mint is emitted exactly once") — so a second, unbalanced retain there reads here as a
+#   whole stranded container plus the member it holds.
 (println "── folded suite: mutable-store funnel (remove/rebind half) ──")
 (pin (measure-core "box-rebind"
                    (stmt-run (fn []
@@ -1241,12 +1244,12 @@
                    (stmt-run (fn []
                                (let [m @{}]
                                  (%put m :k (%pair 1 2))
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 2)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "raw-del-immediate"
                    (stmt-run (fn []
                                (let [m @{}]
                                  (%put m :k 7)
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 1)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── Fiber-internal yielding loops ─────────────────────────────────────
 # The loop and the yield live inside the fiber. The run-block creates a fiber
@@ -1277,7 +1280,7 @@
            (fn [i]
              (let [f (fn [] i)]
                (f))) 0)
-(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 4)
+(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 3)
 (pin (measure-core "yield-put"
                    (fn [b]
                      (drain-block (fn [n]
@@ -1437,7 +1440,7 @@
                              (map (fn [x]
                                     (numeric!)
                                     (%add x 1)) [1 2 3]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 4)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
 (pin (measure-core "struct-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

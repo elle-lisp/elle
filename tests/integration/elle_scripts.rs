@@ -335,13 +335,27 @@ fn region_tail_move_toplevel_uaf() {
 // GREEN (regression guard) — the HOF manifestation of the native-tail-return
 // retain: a pipeline whose tail is `(map …)`/`(filter …)` (the
 // dns/parse-resolv-conf shape). The post-`TailCall` `Return` retains the
-// heap result (the native-tail ReturnValue retain, also covering splice-tail)
-// so the returned collection survives the caller's release. Passes under
-// guardfree; locks the retain against regressions.
+// heap result (exactly one mint per returned value — either the tail
+// fall-through retain or, when ANF names the result, `lower_return`'s), so the
+// returned collection survives the caller's release. Passes under guardfree;
+// locks the retain against regressions.
 #[test]
 fn region_hof_tail_return_uaf() {
     run_elle_script_with_args(
         "region-hof-tail-return-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// A reassigned mutable binding fed by a CALL RESULT must hold a COUNTED
+// reference to it (docs/impl/region/bindings.md): the call result's own
+// placeholder release fires regardless, so the 1-slot container cannot also
+// donate — and the counted store must be emitted before `StoreLocal` consumes
+// the value register, or the retain lands on the displaced prior instead.
+#[test]
+fn region_reassign_callresult_store() {
+    run_elle_script_with_args(
+        "region-reassign-callresult-store",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
