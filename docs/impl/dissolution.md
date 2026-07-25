@@ -194,7 +194,9 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   "The mutable-array arm").
 - **The function is non-capturing with the op's fixed arity** — one parameter for
   a `map`/`filter` (the element), two for a `fold` (the accumulator and the
-  element) — with no rest parameter. It is one of two forms:
+  element) — with no rest parameter, and a body free of nested lambdas and of
+  call-position `%`-intrinsics unless the function declares `(numeric!)` (see
+  "Raw `%`-intrinsic bodies" below). It is one of two forms:
   - a **lambda literal** written directly as the call's argument. It is consumed
     by the rewrite (moved out of the call), so no other use can observe the
     change, and its parameter is retyped to a loop-local in place.
@@ -362,6 +364,50 @@ every op in the stdlib op's body) — so the bottom-up signal re-propagation
 (`hir/narrow.rs`) never under-reports the fused form's effects. The spliced lambda
 bodies keep their own signals.
 
+## Raw `%`-intrinsic bodies — the declaration travels with the binding
+
+A `%`-intrinsic in call position must discharge its operand contract from the
+inferred operand types (`docs/intrinsics.md` § "The contract: prove or reject"),
+and for a numeric kernel written over a parameter — `(fn [x] (numeric!) (%mul x
+x))` — the fact that discharges it is the `(numeric!)` declaration, which floors
+every parameter of the function at Number. Fusion dissolves the function, so a
+declaration scoped to the *lambda node* would vanish with it: the spliced
+`(%mul x x)` now reads the loop's `(get coll i)` element, whose type is not
+tracked, and the site would fail to prove. That would turn a compiling program
+into a compile error — which no rewrite may do.
+
+So the declaration is recorded where it is *about*. `(numeric!)` floors the
+function's **parameter bindings** (`BindingInner::declared_numeric`), and
+inference applies that floor wherever such a binding gets its type: as a
+lambda parameter, as a parameter joined from its call sites, and as the
+`let`-bound loop local the splice turns the parameter into. Fusion carries the
+flag with the parameter — a call-site lambda literal is *moved*, so its
+(already-flagged) parameter binding travels as-is; a cloned template mints fresh
+parameters and copies the flag onto them. The fact that discharged the intrinsic
+inside the function is the same fact that discharges it inside the loop, so
+fusion leaves *whether the program compiles* unchanged.
+
+The gate is therefore the declaration, not the op: a body containing a
+call-position `%`-intrinsic is admitted **only** under `(numeric!)`. Without the
+declaration there is nothing to carry, so the body declines and the HOF stays a
+plain call — even where the intrinsic's operands are all literals and would prove
+on their own. This is the shape the fusion most wants: a raw-intrinsic kernel over
+a proven array is the numeric loop a SIMD/GPU realization tier consumes, with no
+per-element closure, no dispatch, and no wrapper call between the elements and the
+opcode.
+
+Every other proof an intrinsic body may rest on is structural and survives the
+splice unchanged — a literal operand, a diverging type guard inside the body, a
+global's inferred type. Only the parameter floor is scoped to the function, and
+only it needs carrying.
+
+`(numeric!)` carries a second, independent assertion: that the function's body is
+GPU-eligible, checked when the lambda lowers as a function
+(`src/lir/lower/lambda/expr.rs`). A fused lambda never lowers as a function, so
+that half of the declaration has nothing left to hold — true of every fused
+`(numeric!)` lambda, intrinsic body or not. The type floor is the half fusion
+carries.
+
 ## Why a call-site rewrite, not a stdlib edit
 
 Dissolution is one mechanism keyed on proven-owned-non-escaping inputs, not a
@@ -399,11 +445,15 @@ codegen and execution levels, not on the leak oracle. Three pins:
   loop (one accumulator, both body ops inline), and a fold dissolves to a scalar
   accumulator (no `@array`/`freeze`, the fold step inline) that composes with a
   map/filter prefix into one loop. A mutable-`@array`-base `map`/`filter` fuses
-  with the accumulator returned **unfrozen** (no `freeze` call). Decline pins
-  guard the gate (user-shadowed callee, capturing lambda, unproven collection,
-  raw-intrinsic body, a non-reorder-safe composition — which declines and fuses
-  its inner run only — and a `fold` or composition over a mutable base, which
-  declines to the innermost single op). Named-function pins cover a `map`/`fold`
+  with the accumulator returned **unfrozen** (no `freeze` call). A
+  `(numeric!)`-declared raw-intrinsic kernel fuses — as a `map` transform, as a
+  `filter` guard, as a `fold` combinator, as a composition, as a named same-unit
+  function, and through the div family (whose nonzero-divisor fact is a literal,
+  so it survives the splice) — with the spliced `%`-op inline in the loop. Decline pins guard the gate (user-shadowed
+  callee, capturing lambda, unproven collection, an intrinsic body with **no**
+  `(numeric!)` declaration, a non-reorder-safe composition — which declines and
+  fuses its inner run only — and a `fold` or composition over a mutable base,
+  which declines to the innermost single op). Named-function pins cover a `map`/`fold`
   whose argument is a `Var` naming a same-unit `defn` (the body inlines, the
   definition persists) and the declines (a `let`-body function, a capturing local
   function, a non-lambda `Var`). A **cross-unit** pin fuses `(map dec …)` where
@@ -436,7 +486,11 @@ codegen and execution levels, not on the leak oracle. Three pins:
   mutable-base arm — an unfrozen, in-place-mutable result — and named-function
   inlining, incl. a `let`-body function that now fuses by cloning its freshened
   inner bindings, whose un-fused cross-check oracle is a `match`-body function that
-  still declines the clone) and `tests/elle/region-map-fuse-uaf.lisp` /
+  still declines the clone). The `(numeric!)` raw-intrinsic kernel is proved
+  against an un-fused oracle of the same shape — a `match`-body function that
+  declines the clone and so runs the real stdlib op — so the carried floor is
+  shown to preserve both the value and the compile. Soundness:
+  `tests/elle/region-map-fuse-uaf.lisp` /
   `region-filter-fuse-uaf.lisp` / `region-mixed-fuse-uaf.lisp` /
   `region-fold-fuse-uaf.lisp` (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place, a cloned same-unit

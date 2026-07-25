@@ -147,7 +147,12 @@ pub(crate) fn infer_node(
                         .copied()
                         .unwrap_or(TypeInterner::BOTTOM);
                     let joined = interner.join(old, ty);
-                    binding_types.insert(*binding, joined);
+                    // A `(numeric!)`-declared binding keeps its floor here: this is
+                    // the form a kernel parameter takes once HOF fusion has spliced
+                    // its body into a loop (`(let [x (get coll i)] BODY)`), where
+                    // the init's own type carries no proof.
+                    binding_types
+                        .insert(*binding, declared_floor(*binding, joined, arena, interner));
                     // Track min_length for array constructor bindings
                     if ty == TypeInterner::MUTABLE_ARRAY || ty == TypeInterner::ARRAY {
                         if let Some(len) = unwrap_to_call(init) {
@@ -162,21 +167,18 @@ pub(crate) fn infer_node(
         }
 
         // Lambda — infer body type and track return type
-        HirKind::Lambda {
-            params,
-            assert_numeric,
-            body,
-            ..
-        } => {
-            // A `(numeric!)` assertion is the programmer's declared numeric
-            // contract for the whole body (the GPU-eligibility gate holds the
-            // lowered code to it), so it proves every parameter ⊑ Number for
-            // the operand contracts — the declared analog of a call-site join.
-            if *assert_numeric {
-                for p in params {
-                    let old = binding_types.get(p).copied().unwrap_or(TypeInterner::TOP);
-                    binding_types.insert(*p, interner.meet(old, TypeInterner::NUMBER));
-                }
+        HirKind::Lambda { params, body, .. } => {
+            // A `(numeric!)` declaration is the programmer's numeric contract for
+            // the whole body (the GPU-eligibility gate holds the lowered code to
+            // it), so it proves every parameter ⊑ Number for the operand contracts
+            // — the declared analog of a call-site join. It is read from the
+            // parameter bindings, the single place it is recorded. An undeclared
+            // parameter is left ALONE — absence from the environment is meaningful
+            // (the driver's Kleene start: an unproven parameter reads as Top, a
+            // provable one is seeded at Bottom).
+            for p in params.iter().filter(|p| arena.get(**p).declared_numeric) {
+                let old = binding_types.get(p).copied().unwrap_or(TypeInterner::TOP);
+                binding_types.insert(*p, declared_floor(*p, old, arena, interner));
             }
             let body_ty = recurse!(body);
             hir_types.insert(body.id, body_ty);

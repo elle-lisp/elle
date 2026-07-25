@@ -162,15 +162,61 @@
              (map (fn [x] (+ x k)) [1 2 3])) [101 102 103])
         "capturing lambda (declined) is still correct")
 
-# A raw call-position `%`-intrinsic body is DECLINED, not broken: `(numeric!)`
-# floors the LAMBDA PARAMETER at Number, the sole proof that discharges
-# `(%add x 1)` — a floor that cannot survive inlining (no lambda, no param). So
-# the pass must leave this a plain `map` call; it must still compile and compute
-# the same value. (Fusing it is headroom needing element-type inference through
-# `get`; the codegen decline is pinned in `src/hir/typeinfer/fuse.rs`.)
+# A raw call-position `%`-intrinsic body FUSES under a `(numeric!)` declaration
+# (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"). The declaration floors
+# the parameter at Number — the sole proof that discharges `(%add x 1)` — and it
+# is recorded on the parameter BINDING, so it survives the splice that dissolves
+# the lambda. Two things are asserted at once: the file compiles at all (an
+# uncarried floor would make the spliced `%add` unprovable — a compile error), and
+# the fused value equals the un-fused oracle's. `sq-decl` is that oracle: same
+# declaration and same opcode, but a `match` body declines the inline clone, so it
+# runs the real stdlib `map`.
+(defn sq [x]
+  (numeric!)
+  (%mul x x))
+
+(defn sq-decl [x]
+  (numeric!)
+  (match x
+    _ (%mul x x)))
+
 (assert (= (map (fn [x]
                   (numeric!)
                   (%add x 1)) [1 2 3]) [2 3 4])
-        "raw-intrinsic body (declined) still compiles and computes correctly")
+        "a numeric!-declared intrinsic kernel fuses to the right value")
+(assert (= (map sq [1 2 3]) [1 4 9])
+        "a named numeric kernel inlines to the right value")
+(assert (= (map sq [1 2 3]) (map sq-decl [1 2 3]))
+        "the fused numeric kernel agrees with the un-fused match-body oracle")
+(assert (= (map sq []) []) "numeric kernel over an empty array fuses to empty")
+
+# The div family carries a second obligation — a provably nonzero divisor — which
+# here is the literal `2`, part of the body and untouched by the splice.
+(assert (= (map (fn [x]
+                  (numeric!)
+                  (%div x 2)) [4 6 8]) [2 3 4])
+        "a %div kernel with a literal divisor fuses to the right value")
+
+# Both fold parameters carry the floor, so the spliced step proves over the
+# accumulator and the element alike.
+(assert (= (fold (fn [a x]
+                   (numeric!)
+                   (%add a x)) 0 [1 2 3]) 6)
+        "a numeric!-declared intrinsic combinator fuses to the right value")
+
+# A composed pair of kernels fuses to one loop (an intrinsic body is silent, so it
+# is reorder-safe); the value matches the staged un-fused oracle.
+(assert (= (map (fn [y]
+                  (numeric!)
+                  (%add y 1))
+                (map (fn [x]
+                       (numeric!)
+                       (%mul x 2)) [1 2 3])) [3 5 7])
+        "composed numeric kernels fuse to the same value")
+
+# Without the declaration there is no floor to carry, so an intrinsic body
+# DECLINES even when its operands are literals — and must still compute correctly.
+(assert (= (map (fn [x] (%add 1 2)) [1 2 3]) [3 3 3])
+        "an undeclared intrinsic body (declined) is still correct")
 
 (println "dissolution-map-fuse: ok")

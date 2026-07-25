@@ -50,6 +50,14 @@
 //! of them (`reorder_safe`): no yield/I/O/emit/FFI/halt (a non-capturing lambda's
 //! only cross-element channel is such an effect). `SIG_ERROR` is permitted; see
 //! `reorder_safe`.
+//!
+//! A body may hold a raw call-position `%`-intrinsic only under the function's own
+//! `(numeric!)` declaration. That declaration floors the parameters at Number —
+//! the fact that discharges the intrinsic's operand contract — and it is recorded
+//! on the parameter BINDINGS (`BindingInner::declared_numeric`), so it travels with
+//! the parameter the splice turns into a loop local and the site proves in the loop
+//! exactly as it did in the function. Fusion therefore never changes whether a
+//! program compiles (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies").
 
 use super::prune::concrete_init_keywords;
 use super::unwrap_callee_binding;
@@ -180,6 +188,11 @@ struct RegFnTemplate {
     body: Hir,
     globals: Vec<(Binding, SymbolId)>,
     signal: Signal,
+    /// The defining function's `(numeric!)` declaration, replayed onto the fresh
+    /// parameters at each call site (a `BindingInner` flag cannot be read across
+    /// arenas, so the fact travels here). It is what proves a spliced raw
+    /// `%`-intrinsic in the body — see `BindingInner::declared_numeric`.
+    declared_numeric: bool,
 }
 
 /// Per-instance persistent map of cross-unit-inlineable function templates, keyed
@@ -249,6 +262,7 @@ fn cross_unit_fn_template(value: &Hir, arena: &BindingArena) -> Option<RegFnTemp
         params,
         rest_param,
         body,
+        assert_numeric,
         ..
     } = &value.kind
     else {
@@ -257,7 +271,8 @@ fn cross_unit_fn_template(value: &Hir, arena: &BindingArena) -> Option<RegFnTemp
     if rest_param.is_some() || params.is_empty() || params.len() > 2 {
         return None;
     }
-    if params.iter().any(|p| arena.get(*p).is_mutated) || !is_inlineable_body(body) {
+    if params.iter().any(|p| arena.get(*p).is_mutated) || !is_inlineable_body(body, *assert_numeric)
+    {
         return None;
     }
     let globals = collect_globals(body, params, arena)?;
@@ -267,6 +282,7 @@ fn cross_unit_fn_template(value: &Hir, arena: &BindingArena) -> Option<RegFnTemp
         body: (**body).clone(),
         globals,
         signal: body.signal,
+        declared_numeric: *assert_numeric,
     })
 }
 
@@ -353,7 +369,9 @@ fn clone_reg_template(
     let mut params = Vec::with_capacity(t.params.len());
     for &p in &t.params {
         let fresh = arena.gensym();
-        arena.get_mut(fresh).is_immutable = true;
+        let fi = arena.get_mut(fresh);
+        fi.is_immutable = true;
+        fi.declared_numeric = t.declared_numeric;
         renames.insert(p, fresh);
         params.push(fresh);
     }
@@ -489,6 +507,7 @@ fn fn_template(value: &Hir, arena: &BindingArena) -> Option<FnTemplate> {
         rest_param,
         captures,
         body,
+        assert_numeric,
         ..
     } = &value.kind
     else {
@@ -497,7 +516,8 @@ fn fn_template(value: &Hir, arena: &BindingArena) -> Option<FnTemplate> {
     if rest_param.is_some() || !captures.is_empty() || params.is_empty() || params.len() > 2 {
         return None;
     }
-    if params.iter().any(|p| arena.get(*p).is_mutated) || !is_inlineable_body(body) {
+    if params.iter().any(|p| arena.get(*p).is_mutated) || !is_inlineable_body(body, *assert_numeric)
+    {
         return None;
     }
     Some(FnTemplate {
@@ -507,18 +527,23 @@ fn fn_template(value: &Hir, arena: &BindingArena) -> Option<FnTemplate> {
 }
 
 /// Is a body admissible for the alpha-renaming clone? The whitelist covers the
-/// pure-expression forms plus `let`. A pure-expression body freshens the
-/// parameters, rewrites their references, and leaves every other `Var` (a global)
-/// shared. A `let` additionally introduces bindings of its own — those are
-/// freshened too (`clone_fresh`'s `Let` arm re-mints each `let`-bound binding), so
-/// a `let` body clones without collision. `letrec` is **not** admitted (its value
-/// may reference its own binding — a forward/self reference the sequential rename
-/// cannot satisfy — and the recursive cell it builds is the shape fusion avoids); a
-/// body with a `loop`/`match` binding or a nested lambda uses a form not listed
-/// here and declines: the definition's own bindings are then never duplicated
-/// (correct-by-construction). Kept in lockstep with `clone_fresh` — the same
-/// variants, one returning `bool`, one rebuilding.
-fn is_inlineable_body(h: &Hir) -> bool {
+/// pure-expression forms plus `let`, and — under the function's own `(numeric!)`
+/// declaration (`declared_numeric`) — a call-position `%`-intrinsic, whose
+/// parameter proof the declaration carries onto the spliced binding
+/// (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"). A pure-expression body
+/// freshens the parameters, rewrites their references, and leaves every other
+/// `Var` (a global) shared. A `let` additionally introduces bindings of its own —
+/// those are freshened too (`clone_fresh`'s `Let` arm re-mints each `let`-bound
+/// binding), so a `let` body clones without collision. `letrec` is **not** admitted
+/// (its value may reference its own binding — a forward/self reference the
+/// sequential rename cannot satisfy — and the recursive cell it builds is the shape
+/// fusion avoids); a body with a `loop`/`match` binding or a nested lambda uses a
+/// form not listed here and declines: the definition's own bindings are then never
+/// duplicated (correct-by-construction). Kept in lockstep with `clone_fresh` — the
+/// same variants, one returning `bool`, one rebuilding.
+fn is_inlineable_body(h: &Hir, num: bool) -> bool {
+    // `num` is the function's `(numeric!)` declaration, threaded to every arm: it
+    // gates the `Intrinsic` arm alone, and is inert everywhere else.
     match &h.kind {
         HirKind::Nil
         | HirKind::EmptyList
@@ -529,19 +554,20 @@ fn is_inlineable_body(h: &Hir) -> bool {
         | HirKind::Keyword(_)
         | HirKind::Var(_) => true,
         HirKind::Let { bindings, body } => {
-            bindings.iter().all(|(_, v)| is_inlineable_body(v)) && is_inlineable_body(body)
+            bindings.iter().all(|(_, v)| is_inlineable_body(v, num))
+                && is_inlineable_body(body, num)
         }
         HirKind::Call { func, args, .. } => {
-            is_inlineable_body(func) && args.iter().all(|a| is_inlineable_body(&a.expr))
+            is_inlineable_body(func, num) && args.iter().all(|a| is_inlineable_body(&a.expr, num))
         }
         HirKind::If {
             cond,
             then_branch,
             else_branch,
         } => {
-            is_inlineable_body(cond)
-                && is_inlineable_body(then_branch)
-                && is_inlineable_body(else_branch)
+            is_inlineable_body(cond, num)
+                && is_inlineable_body(then_branch, num)
+                && is_inlineable_body(else_branch, num)
         }
         HirKind::Cond {
             clauses,
@@ -549,10 +575,15 @@ fn is_inlineable_body(h: &Hir) -> bool {
         } => {
             clauses
                 .iter()
-                .all(|(c, b)| is_inlineable_body(c) && is_inlineable_body(b))
-                && else_branch.as_ref().is_none_or(|e| is_inlineable_body(e))
+                .all(|(c, b)| is_inlineable_body(c, num) && is_inlineable_body(b, num))
+                && else_branch
+                    .as_ref()
+                    .is_none_or(|e| is_inlineable_body(e, num))
         }
-        HirKind::Begin(v) | HirKind::And(v) | HirKind::Or(v) => v.iter().all(is_inlineable_body),
+        HirKind::Begin(v) | HirKind::And(v) | HirKind::Or(v) => {
+            v.iter().all(|c| is_inlineable_body(c, num))
+        }
+        HirKind::Intrinsic { args, .. } => num && args.iter().all(|a| is_inlineable_body(a, num)),
         _ => false,
     }
 }
@@ -657,6 +688,12 @@ fn clone_fresh(
         HirKind::Begin(v) => HirKind::Begin(clone_vec(v, renames, arena)?),
         HirKind::And(v) => HirKind::And(clone_vec(v, renames, arena)?),
         HirKind::Or(v) => HirKind::Or(clone_vec(v, renames, arena)?),
+        // A raw `%`-intrinsic — admitted by `is_inlineable_body` only under the
+        // function's `(numeric!)` declaration, which the fresh parameters carry.
+        HirKind::Intrinsic { op, args } => HirKind::Intrinsic {
+            op: *op,
+            args: clone_vec(args, renames, arena)?,
+        },
         _ => return None,
     };
     Some(Hir::new(kind, h.span.clone(), h.signal))
@@ -673,14 +710,19 @@ fn clone_vec(
 }
 
 /// Clone a function template with fresh parameter bindings (minted via `gensym`,
-/// typed immutable-local) and a fresh-id body. Returns the fresh parameters and
-/// the cloned body, ready to splice like a moved-out lambda's.
+/// typed immutable-local, carrying the source parameter's `(numeric!)` declaration
+/// — the proof a spliced raw `%`-intrinsic in the body rests on) and a fresh-id
+/// body. Returns the fresh parameters and the cloned body, ready to splice like a
+/// moved-out lambda's.
 fn clone_template(t: &FnTemplate, arena: &mut BindingArena) -> (Vec<Binding>, Hir) {
     let mut renames: FxHashMap<Binding, Binding> = FxHashMap::default();
     let mut params = Vec::with_capacity(t.params.len());
     for &p in &t.params {
+        let declared_numeric = arena.get(p).declared_numeric;
         let fresh = arena.gensym();
-        arena.get_mut(fresh).is_immutable = true;
+        let fi = arena.get_mut(fresh);
+        fi.is_immutable = true;
+        fi.declared_numeric = declared_numeric;
         renames.insert(p, fresh);
         params.push(fresh);
     }
@@ -829,8 +871,10 @@ fn fusable_fold_parts<'a>(
 /// (its body references only the parameters and globals, so splicing at the call
 /// site is always in scope), unmutated parameters, and **no nested lambda** in its
 /// body (so retyping a parameter to a plain local cannot disturb a capture of it).
-/// These bounds keep the splice a straight `(let [param elem] body)` per parameter
-/// with no substitution or cell reasoning.
+/// A raw `%`-intrinsic in the body is admitted only under the lambda's own
+/// `(numeric!)` declaration (`body_disqualifies`). These bounds keep the splice a
+/// straight `(let [param elem] body)` per parameter with no substitution or cell
+/// reasoning.
 fn qualifies_lambda<'a>(
     lam: &'a Hir,
     arena: &BindingArena,
@@ -841,6 +885,7 @@ fn qualifies_lambda<'a>(
         rest_param,
         captures,
         body,
+        assert_numeric,
         ..
     } = &lam.kind
     else {
@@ -849,7 +894,7 @@ fn qualifies_lambda<'a>(
     if rest_param.is_some() || params.len() != arity || !captures.is_empty() {
         return None;
     }
-    if params.iter().any(|p| arena.get(*p).is_mutated) || body_disqualifies(body) {
+    if params.iter().any(|p| arena.get(*p).is_mutated) || body_disqualifies(body, *assert_numeric) {
         return None;
     }
     Some((params, body))
@@ -861,21 +906,23 @@ fn qualifies_lambda<'a>(
 /// - **A nested lambda** — retyping the parameter to a plain local (the splice)
 ///   could disturb a capture of it, and a per-element closure is not the kernel
 ///   this fusion targets.
-/// - **A call-position `%`-intrinsic or `(numeric!)`** — a raw intrinsic carries
-///   an operand proof obligation (`docs/intrinsics.md`) that the *lambda* context
-///   discharges: `(numeric!)` floors the lambda's parameter at Number, which is
-///   what proves a `(%add x 1)` body. Inlining de-lambdas the parameter, binding
-///   it to `(get coll i)` (whose element type is not proven at this stage), so
-///   the proof vanishes and the contract check would reject the spliced form.
-///   Ordinary numeric kernels use the stdlib wrappers (`+`/`*`), which are plain
-///   calls here and validate dynamically — so only hand-written raw-intrinsic
-///   bodies are declined, and they stay plain `map` calls.
-fn body_disqualifies(hir: &Hir) -> bool {
-    if matches!(hir.kind, HirKind::Lambda { .. } | HirKind::Intrinsic { .. }) {
+/// - **A call-position `%`-intrinsic without a `(numeric!)` declaration**
+///   (`declared_numeric == false`) — a raw intrinsic carries an operand proof
+///   obligation (`docs/intrinsics.md`) that a parameter discharges only through
+///   the declaration, which floors every parameter at Number. Under a declaration
+///   the floor is carried onto the spliced parameter binding, so the site proves
+///   in the loop exactly as it did in the function (docs/impl/dissolution.md
+///   § "Raw `%`-intrinsic bodies"); with no declaration there is nothing to carry
+///   and the body stays a plain call. Ordinary numeric kernels written with the
+///   stdlib wrappers (`+`/`*`) are plain calls here and never reach this gate.
+fn body_disqualifies(hir: &Hir, declared_numeric: bool) -> bool {
+    if matches!(hir.kind, HirKind::Lambda { .. })
+        || (!declared_numeric && matches!(hir.kind, HirKind::Intrinsic { .. }))
+    {
         return true;
     }
     let mut found = false;
-    hir.for_each_child(|c| found |= body_disqualifies(c));
+    hir.for_each_child(|c| found |= body_disqualifies(c, declared_numeric));
     found
 }
 
@@ -1910,30 +1957,167 @@ mod tests {
         );
     }
 
-    /// A lambda body with a raw call-position `%`-intrinsic is declined — and this
-    /// must be a DECLINE, not a break. `(numeric!)` floors the *lambda parameter*
-    /// at Number, which is the sole proof that discharges `(%add x 1)`'s prove-or-
-    /// reject obligation (strip `numeric!` and even the un-fused lambda fails to
-    /// compile). Inlining dissolves the lambda, so that param-scoped floor cannot
-    /// survive; fusing anyway would leave `(%add (get coll i) 1)` with an unproven
-    /// operand and turn a compiling program into a compile error. So the pass MUST
-    /// leave the `map` call intact here — the boundary is a correctness
-    /// requirement, not a missed optimization. (Fusing this shape is headroom:
-    /// it needs element-type inference through `get` to reconstruct the proof the
-    /// vanished lambda provided.) The value-side proof that the declined form still
-    /// computes correctly is `tests/elle/dissolution-map-fuse.lisp`.
+    /// Count the call-position `%`-intrinsic nodes of a given op in the tree.
+    /// A raw intrinsic is a `HirKind::Intrinsic` node, not a `Call`, so it is
+    /// invisible to `callees` — this is the discriminator for a spliced kernel.
+    fn count_intrinsic(h: &Hir, want: &str) -> usize {
+        let mut n =
+            usize::from(matches!(&h.kind, HirKind::Intrinsic { op, .. } if op.name() == want));
+        h.for_each_child(|c| n += count_intrinsic(c, want));
+        n
+    }
+
+    /// A raw call-position `%`-intrinsic body fuses under a `(numeric!)`
+    /// declaration (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"). The
+    /// declaration floors the parameter at Number — the sole proof that discharges
+    /// `(%add x 1)`'s prove-or-reject obligation — and it is recorded on the
+    /// parameter BINDING, so it survives the splice that dissolves the lambda: the
+    /// `map` dispatch is gone, no closure survives, and the `%add` opcode runs
+    /// inline in the loop over the let-bound element. That the compile still
+    /// succeeds is half the assertion — `compile` panics on a compile error, which
+    /// is exactly what an uncarried floor would produce. Fails before the carried
+    /// declaration lands: the body declines and the `map` call survives.
     #[test]
-    fn intrinsic_body_map_is_declined_not_broken() {
-        // Compiles (the whole point — fusing would make it uncompilable) …
+    fn numeric_declared_intrinsic_body_map_fuses() {
         let (hir, arena, names) = compile("(map (fn [x] (numeric!) (%add x 1)) [1 2 3])");
         let cs = callees(&hir, &arena, &names);
-        // … and is left as a plain `map` call, the closure intact.
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "a `(numeric!)`-declared intrinsic kernel must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(
+            count_intrinsic(&hir, "%add"),
+            1,
+            "the `%add` opcode must run inline in the fused loop",
+        );
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one fused accumulator; callees were {cs:?}",
+        );
+    }
+
+    /// Safety: an intrinsic body with NO `(numeric!)` declaration declines, even
+    /// when its operands are literals that prove on their own. The gate is the
+    /// declaration, not the op — without one there is no parameter floor to carry,
+    /// and admitting the body would rest on a case-by-case reading of what each
+    /// site's proof depends on. The `map` call survives.
+    #[test]
+    fn undeclared_intrinsic_body_declines() {
+        let (hir, arena, names) = compile("(map (fn [x] (%add 1 2)) [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
         assert!(
             cs.iter().any(|n| n == "map"),
-            "a raw-intrinsic body must not fuse (its param proof cannot survive \
-             de-lambda'ing); callees were {cs:?}",
+            "an intrinsic body without `(numeric!)` must not fuse; callees were {cs:?}",
         );
         assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    }
+
+    /// The div family fuses too: `%div`'s contract adds a provably-nonzero divisor
+    /// on top of the Number floor, and here that fact is the literal `2` — part of
+    /// the body, so it survives the splice untouched. The carried floor supplies
+    /// the other operand. (An unproven divisor would fail the compile, which
+    /// `compile`'s expect would surface.)
+    #[test]
+    fn numeric_declared_div_intrinsic_body_fuses() {
+        let (hir, arena, names) = compile("(map (fn [x] (numeric!) (%div x 2)) [4 6 8])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "a `%div` kernel with a literal divisor must fuse; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_intrinsic(&hir, "%div"),
+            1,
+            "the `%div` opcode inlines"
+        );
+    }
+
+    /// A `(numeric!)`-declared intrinsic combinator fuses into the scalar-terminal
+    /// fold loop: BOTH parameters carry the floor, so the spliced `(%add a x)`
+    /// proves over the accumulator and the element alike. No `@array` — a fold's
+    /// accumulator is a scalar.
+    #[test]
+    fn numeric_declared_intrinsic_fold_fuses() {
+        let (hir, arena, names) = compile("(fold (fn [a x] (numeric!) (%add a x)) 0 [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "fold"),
+            "a `(numeric!)`-declared intrinsic combinator must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(count_intrinsic(&hir, "%add"), 1, "the fold step inlines");
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            0,
+            "a fold accumulator is scalar; callees were {cs:?}",
+        );
+    }
+
+    /// The guard stage takes an intrinsic kernel too: a `(numeric!)`-declared
+    /// `%gt` predicate fuses to the guarded push, its floor discharging the
+    /// comparable-family obligation over the spliced binding.
+    #[test]
+    fn numeric_declared_intrinsic_predicate_filter_fuses() {
+        let (hir, arena, names) = compile("(filter (fn [x] (numeric!) (%gt x 2)) [1 2 3 4])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "filter"),
+            "a `(numeric!)`-declared intrinsic predicate must fuse; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(
+            count_intrinsic(&hir, "%gt"),
+            1,
+            "the predicate opcode inlines"
+        );
+        assert!(count_ifs(&hir) >= 1, "the guarded push must be present");
+    }
+
+    /// A NAMED same-unit numeric kernel inlines: the clone mints fresh parameter
+    /// bindings, so the declaration must be copied onto them — a clone that dropped
+    /// it would splice an unproven `%mul` and fail the compile. `%mul` appears
+    /// TWICE: the surviving definition plus the inlined copy.
+    #[test]
+    fn numeric_declared_intrinsic_named_fn_inlines() {
+        let (hir, arena, names) = compile("(defn sq [x] (numeric!) (%mul x x)) (map sq [1 2 3])");
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "a named numeric kernel must inline; callees were {cs:?}",
+        );
+        assert_eq!(
+            count_intrinsic(&hir, "%mul"),
+            2,
+            "`sq`'s `%mul` appears twice — the surviving definition plus the \
+             inlined copy",
+        );
+    }
+
+    /// A composition of two numeric kernels fuses to ONE loop: an intrinsic body is
+    /// silent, so it is reorder-safe and carries no composition penalty. Both
+    /// opcodes inline over a single accumulator — the intermediate array is gone.
+    #[test]
+    fn numeric_declared_intrinsic_composition_fuses_to_one_loop() {
+        let (hir, arena, names) = compile(
+            "(map (fn [y] (numeric!) (%add y 1)) \
+               (map (fn [x] (numeric!) (%mul x 2)) [1 2 3]))",
+        );
+        let cs = callees(&hir, &arena, &names);
+        assert!(
+            !cs.iter().any(|n| n == "map"),
+            "both `map` dispatches must be gone; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+        assert_eq!(count_intrinsic(&hir, "%add"), 1, "the outer kernel inlines");
+        assert_eq!(count_intrinsic(&hir, "%mul"), 1, "the inner kernel inlines");
+        assert_eq!(
+            count_callee(&hir, &arena, &names, "@array"),
+            1,
+            "one loop, one accumulator — the intermediate array is gone; \
+             callees were {cs:?}",
+        );
     }
 
     /// Count the calls to a given op name in the tree.

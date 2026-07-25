@@ -71,7 +71,10 @@ Inference discharges contracts from:
   spellings (`(%int? b)`) both count;
 - **nonzero facts** for the div family — a nonzero literal divisor, or a
   diverging zero guard: after `(when (= d 0) (error …))`, `d` is provably
-  nonzero.
+  nonzero;
+- **a `(numeric!)` declaration** — it floors *every parameter of the
+  enclosing function* at Number, so a whole numeric kernel proves at once
+  without a per-parameter guard.
 
 ```lisp
 (def half
@@ -80,12 +83,26 @@ Inference discharges contracts from:
     (when (%not (int? x)) (error {:error :type-error :message "half: int required"}))
     (%div x 2)))
 (assert (= (half 10) 5) "guard-narrowed %div lowers to the opcode")
+
+(defn sq [x]
+  "A numeric kernel: the declaration proves the parameter for the whole body."
+  (numeric!)
+  (%mul x x))
+(assert (= (sq 7) 49) "numeric!-declared %mul lowers to the opcode")
+(assert (= (map sq [1 2 3]) [1 4 9]) "and dissolves into a fused loop")
 ```
 
-A lambda parameter with no guard and no proven call sites stays unknown, so
-`(fn [x] (%mul x x))` does not compile — write `(fn [x] (* x x))` (the
-wrapper) or guard the parameter. This is the point of the design: the
-programmer states the fact once, visibly, and the compiler holds it.
+A lambda parameter with no guard, no `(numeric!)`, and no proven call sites
+stays unknown, so `(fn [x] (%mul x x))` does not compile — write
+`(fn [x] (* x x))` (the wrapper), guard the parameter, or declare
+`(numeric!)`. This is the point of the design: the programmer states the
+fact once, visibly, and the compiler holds it.
+
+The declaration is recorded on the parameter **bindings** it constrains, not
+on the function node, so it survives a rewrite that dissolves the function:
+`(map sq xs)` over a proven array splices `sq`'s body into an index-walk
+loop, and the spliced `%mul` proves against the same floor it proved against
+inside `sq` (`docs/impl/dissolution.md` § "Raw `%`-intrinsic bodies").
 
 ### Silent by construction
 

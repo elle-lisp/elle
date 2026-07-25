@@ -211,11 +211,15 @@
 # `rest-array-copy` is a CLOSED control (the native fresh-result invariant, not F1a
 # stdlib-body scratch) — undeclared like `slice`/`to-array`, so a regression to open
 # trips the completeness gate loudly rather than being silently absorbed as F1a.
-(declare-root :f1a ["reduce" "fold" "stdlib-fold" "map-while" "filter-while"
-                    "wrap-map" "distinct" "group-by" "frequencies" "merge"
-                    "concat" "pipeline" "each-list" "reverse" "string-outer"
-                    "append-outer" "concat-while" "yield-concat"
-                    "nested-closure" "stdlib-concat" "zip-tower"])
+# `map-while`/`filter-while` are undeclared for the same reason: a fusable kernel
+# dissolves, so they are CLOSED dissolution controls and a regression to open must
+# trip the gate loudly instead of being absorbed as F1a scratch that is no longer
+# there. The un-fused op's scratch keeps its F1a declaration through `wrap-map`.
+(declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct"
+                    "group-by" "frequencies" "merge" "concat" "pipeline"
+                    "each-list" "reverse" "string-outer" "append-outer"
+                    "concat-while" "yield-concat" "nested-closure"
+                    "stdlib-concat" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -654,27 +658,39 @@
     (fn [j]
       (each x in (list 1 2 3)
         {:val x})) 3]
+   # `map-while`/`filter-while` are DISSOLUTION controls: a non-capturing kernel
+   # over a proven immutable array fuses to an inlined index-walk loop
+   # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
+   # carried (the closure `map` mints for `f`, the `freeze` copy, the map-body
+   # over-keep) — ceases to exist and the rate is 0. The residual F1a scratch of
+   # the UN-fused op is gauged by `wrap-map` below, whose lambda captures.
    ["map-while"
     (fn [j]
       (map (fn [x]
              (numeric!)
-             (%add x 1)) [1 2 3])) 3]
+             (%add x 1)) [1 2 3])) 0]
    ["filter-while"
     (fn [j]
       (filter (fn [x]
                 (numeric!)
-                (%gt x 1)) [1 2 3])) 3]
+                (%gt x 1)) [1 2 3])) 0]
    ["nested-closure"
     (fn [j]
       (let [f (fn [] (fn [] j))]
         ((f)))) 2]  # user-fn calls, value flow
     ["user-struct" (fn [j] (make-struct j)) 0]
    ["user-string" (fn [j] (make-label j)) 0] ["chain" (fn [j] (process j)) 0]
+   # The F1a gauge for the UN-fused stdlib `map`: the kernel CAPTURES `k`, a shape
+   # loop fusion declines (splicing a capture at the call site is out of scope), so
+   # the real `map` runs and its per-call strands are measured — the closure `map`
+   # mints for `f` (F5 arg/closure-retain), the `freeze` copy, and the map-body
+   # over-keep. Rate flat in element count: per-call strands, not per-element copy.
    ["wrap-map"
     (fn [j]
-      (map (fn [x]
-             (numeric!)
-             (%add x 1)) [1 2 3])) 3] ["factory" (fn [j] (t13proc j)) 0]
+      (let [k 1]
+        (map (fn [x]
+               (numeric!)
+               (%add x k)) [1 2 3]))) 3] ["factory" (fn [j] (t13proc j)) 0]
    ["cond-factory" (fn [j] (t13cond j)) 0] ["alias" (fn [j] (make-struct j)) 0]
    ["nested-factory" (fn [j] (t13nested j)) 0]
    ["struct-field"
@@ -1375,7 +1391,10 @@
 # that over-keep, not genuine retention (the gauge-live discriminator uses a
 # MODULE-level sink, `probe-disc`, and is unaffected). `push-accum` still leaks: its
 # residual is the per-op `map` scratch (§ F1a), which the accumulator's release does
-# not reach. `struct-outer` is the fn-local reassign-1-slot over-keep (F5).
+# not reach. Its kernel CAPTURES `k` deliberately — a capture declines loop fusion,
+# so the real stdlib `map` runs and there is a per-op scratch to retain; a fusable
+# kernel has none, which is what the dissolution controls (`map-while`) measure.
+# `struct-outer` is the fn-local reassign-1-slot over-keep (F5).
 # `string-outer`/`append-outer` are the `concat`/`append` per-call scratch leak
 # (§ F1a), NOT accumulator growth — flat per-iter (minus the 1 the self-reassign
 # reclaims), so they shrink when F1a closes, not when the loop ends.
@@ -1435,11 +1454,12 @@
                      (when (%not (%int? b)) (error :block-not-int))
                      (def @acc @[])
                      (def @j 0)
+                     (def k 1)
                      (while (%lt j b)
                        (push acc
                              (map (fn [x]
                                     (numeric!)
-                                    (%add x 1)) [1 2 3]))
+                                    (%add x k)) [1 2 3]))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
 (pin (measure-core "struct-outer"
                    (fn [b]

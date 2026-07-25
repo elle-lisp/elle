@@ -283,8 +283,18 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Read numeric! assertion flag (will be placed on HIR Lambda)
+        // Read numeric! assertion flag (will be placed on HIR Lambda, which the
+        // lowerer holds to GPU-eligibility). Its TYPE half — every parameter is
+        // floored at Number, which is what discharges a `%`-intrinsic's operand
+        // contract in the body — is recorded on the parameter BINDINGS, so it
+        // survives a rewrite that dissolves the lambda but keeps its parameter
+        // (`typeinfer/fuse.rs`; see `BindingInner::declared_numeric`).
         let assert_numeric = self.current_numeric_assert;
+        if assert_numeric {
+            for p in &params {
+                self.arena.get_mut(*p).declared_numeric = true;
+            }
+        }
 
         // Read bound accumulators (populated by analyze_silence during body analysis)
         let param_bounds: Vec<ParamBound> = self

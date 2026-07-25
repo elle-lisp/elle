@@ -125,4 +125,26 @@
         "cross-unit inlined heap element survives a read")
 (assert (= (get idbase 0) "h") "the base survives the cross-unit fused loop")
 
+# A `(numeric!)`-declared raw-`%`-intrinsic kernel (docs/impl/dissolution.md
+# § "Raw `%`-intrinsic bodies") splices an OPCODE into the loop body in place of a
+# call, so the accumulator's mint/fill/freeze is the loop's whole region surface.
+# The result then feeds a heap-producing map, so a stale accumulator region — freed
+# before its members are consumed — faults at that read under --trace=guardfree.
+# Looped so repeated fused mints/frees churn region ids.
+(defn scale [x]
+  (numeric!)
+  (%mul x 3))
+
+(def scaled (map scale [1 2 3]))
+(assert (= scaled [3 6 9]) "numeric kernel inlines to the right value")
+(def labels (map (fn [n] (string "s" n)) scaled))
+(assert (= (get labels 2) "s9") "the fused kernel's result feeds a heap map")
+
+(def @klast 0)
+(def @k 0)
+(while (< k 50)
+  (assign klast (get (map scale [1 2 3]) 2))
+  (assign k (+ k 1)))
+(assert (= klast 9) "repeated fused numeric kernels stay sound under id churn")
+
 (println "region-map-fuse-uaf: ok")

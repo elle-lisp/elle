@@ -65,8 +65,7 @@ pub fn infer_and_rewrite(
     // Collect parameter info for lambdas: which bindings are params of which lambda
     let mut lambda_params: HashMap<Binding, Vec<Binding>> = HashMap::new();
     let mut lambda_body_type: HashMap<Binding, TyId> = HashMap::new();
-    let mut declared_numeric = std::collections::HashSet::new();
-    collect_lambda_info(hir, arena, &mut lambda_params, &mut declared_numeric);
+    collect_lambda_info(hir, arena, &mut lambda_params);
     // A parameter mutated in its body has flow the per-pass recomputation
     // cannot see; it never receives call-site proofs (guards only).
     let mutated_params = collect_mutated_bindings(hir);
@@ -128,12 +127,7 @@ pub fn infer_and_rewrite(
             if mutated_params.contains(&param) {
                 continue;
             }
-            let ty = if declared_numeric.contains(&param) {
-                interner.meet(joined, TypeInterner::NUMBER)
-            } else {
-                joined
-            };
-            binding_types.insert(param, ty);
+            binding_types.insert(param, declared_floor(param, joined, arena, &interner));
         }
         if before_hir == hir_types && before_bindings == binding_types {
             break;

@@ -127,6 +127,75 @@
         (string "fused cross-unit composition must mint strictly fewer objects: "
                 xu-fused " vs " xu-unfused))
 
+# ── Numeric intrinsic kernel: the opcode replaces the call ────────────
+# A `(numeric!)`-declared raw-`%`-intrinsic body fuses (docs/impl/dissolution.md
+# § "Raw `%`-intrinsic bodies"), so the numeric kernel — the shape a SIMD/GPU
+# realization tier consumes — becomes one index-walk loop with the opcode inline
+# and no per-element closure. The un-fused reference is the same kernel with the
+# same declaration and the same opcode, but CAPTURING its multiplier (a shape the
+# gate declines), so it still mints the per-call closure. Composed, the fused form
+# additionally sheds the intermediate array, so its saving is strictly larger —
+# the intermediate-elimination signature, not a fixed per-call constant.
+(def k1-fused
+  (allocs (fn []
+            (map (fn [x]
+                   (numeric!)
+                   (%mul x 3)) [0 1 2 3 4 5 6 7 8 9]))))
+(def k1-unfused
+  (allocs (fn []
+            (let [m 3]
+              (map (fn [x]
+                     (numeric!)
+                     (%mul x m)) [0 1 2 3 4 5 6 7 8 9])))))
+(assert (= (map (fn [x]
+                  (numeric!)
+                  (%mul x 3)) base)
+           (let [m 3]
+             (map (fn [x]
+                    (numeric!)
+                    (%mul x m)) base)))
+        "fused and un-fused numeric kernels compute the same value")
+(assert (< k1-fused k1-unfused)
+        (string "fused numeric kernel must mint strictly fewer objects: "
+                k1-fused " vs " k1-unfused))
+
+(def k2-fused
+  (allocs (fn []
+            (map (fn [y]
+                   (numeric!)
+                   (%add y 1))
+                 (map (fn [x]
+                        (numeric!)
+                        (%mul x 3)) [0 1 2 3 4 5 6 7 8 9])))))
+(def k2-unfused
+  (allocs (fn []
+            (let [m 3
+                  n 1]
+              (map (fn [y]
+                     (numeric!)
+                     (%add y n))
+                   (map (fn [x]
+                          (numeric!)
+                          (%mul x m)) [0 1 2 3 4 5 6 7 8 9]))))))
+(assert (= (map (fn [y]
+                  (numeric!)
+                  (%add y 1))
+                (map (fn [x]
+                       (numeric!)
+                       (%mul x 3)) base))
+           (let [m 3
+                 n 1]
+             (map (fn [y]
+                    (numeric!)
+                    (%add y n))
+                  (map (fn [x]
+                         (numeric!)
+                         (%mul x m)) base))))
+        "fused and un-fused composed kernels compute the same value")
+(assert (> (- k2-unfused k2-fused) (- k1-unfused k1-fused))
+        (string "the composed kernel additionally sheds the intermediate array: "
+                (- k2-unfused k2-fused) " vs " (- k1-unfused k1-fused)))
+
 (println "dissolution-map-alloc: ok (d2 saved " (- d2-unfused d2-fused)
          ", d3 saved " (- d3-unfused d3-fused) ", cross-unit saved "
          (- xu-unfused xu-fused) ")")

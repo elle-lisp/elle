@@ -69,47 +69,35 @@ pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut std::collections:
     }
 }
 
-/// Collect which bindings are lambda definitions and what their params are,
-/// plus the params covered by a `(numeric!)` declaration (their caller-join is
-/// floored at Number — the declared contract holds whatever callers pass).
+/// Collect which bindings are lambda definitions and what their params are. A
+/// `(numeric!)` declaration is NOT collected here — it lives on the parameter
+/// bindings themselves (`BindingInner::declared_numeric`, applied through
+/// `declared_floor`), so it is readable from any binding without a map.
 pub(crate) fn collect_lambda_info(
     hir: &Hir,
     _arena: &BindingArena,
     lambda_params: &mut HashMap<Binding, Vec<Binding>>,
-    declared_numeric: &mut std::collections::HashSet<Binding>,
 ) {
-    let record = |binding: &Binding,
-                  value: &Hir,
-                  lambda_params: &mut HashMap<Binding, Vec<Binding>>,
-                  declared_numeric: &mut std::collections::HashSet<Binding>| {
-        if let HirKind::Lambda {
-            params,
-            assert_numeric,
-            ..
-        } = &unwrap_make_cell(value).kind
-        {
-            lambda_params.insert(*binding, params.clone());
-            if *assert_numeric {
-                declared_numeric.extend(params.iter().copied());
+    let record =
+        |binding: &Binding, value: &Hir, lambda_params: &mut HashMap<Binding, Vec<Binding>>| {
+            if let HirKind::Lambda { params, .. } = &unwrap_make_cell(value).kind {
+                lambda_params.insert(*binding, params.clone());
             }
-        }
-    };
+        };
     match &hir.kind {
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
-                record(binding, value, lambda_params, declared_numeric);
-                collect_lambda_info(value, _arena, lambda_params, declared_numeric);
+                record(binding, value, lambda_params);
+                collect_lambda_info(value, _arena, lambda_params);
             }
-            collect_lambda_info(body, _arena, lambda_params, declared_numeric);
+            collect_lambda_info(body, _arena, lambda_params);
         }
         HirKind::Define { binding, value } => {
-            record(binding, value, lambda_params, declared_numeric);
-            collect_lambda_info(value, _arena, lambda_params, declared_numeric);
+            record(binding, value, lambda_params);
+            collect_lambda_info(value, _arena, lambda_params);
         }
         _ => {
-            hir.for_each_child(|child| {
-                collect_lambda_info(child, _arena, lambda_params, declared_numeric)
-            });
+            hir.for_each_child(|child| collect_lambda_info(child, _arena, lambda_params));
         }
     }
 }

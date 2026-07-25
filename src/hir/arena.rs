@@ -67,6 +67,18 @@ pub struct BindingInner {
     /// `(environment)`. Classification is structural — this flag — so a user
     /// binding whose spelling happens to start with `__` is not misclassified.
     pub is_synthetic: bool,
+    /// Whether a `(numeric!)` declaration floors this binding at Number. Set on
+    /// every parameter of a declaring function (the declaration is *about* its
+    /// parameters), and read by type inference wherever the binding gets a type,
+    /// so the floor discharges a `%`-intrinsic's operand contract in the body.
+    ///
+    /// It lives on the BINDING, not on the lambda node, because a rewrite may
+    /// dissolve the function while keeping its parameter: HOF loop fusion splices
+    /// a kernel body into a loop, retyping the parameter as a `let`-bound local
+    /// (`typeinfer/fuse.rs`, docs/impl/dissolution.md § "Raw `%`-intrinsic
+    /// bodies"). Carried on the binding, the declared floor survives that splice,
+    /// so the spliced intrinsic proves exactly as it did inside the function.
+    pub declared_numeric: bool,
     /// Whether this binding is a MODULE-SCOPE (file-letrec) name — a direct
     /// binding of `analyze_file_letrec` (top-level `def`/`var`/expr statement).
     /// Such a binding's lifetime is the whole module/program: its demise is the
@@ -177,6 +189,7 @@ impl BindingArena {
             prebind_fn_depth: 0,
             is_primitive: false,
             is_synthetic: false,
+            declared_numeric: false,
             is_file_scope: false,
         });
         Binding(index)

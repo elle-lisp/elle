@@ -125,4 +125,24 @@
         (string "fused filter must mint fewer (no closure): " f-fused " vs "
                 f-unfused))
 
+# A `(numeric!)`-declared raw-`%`-intrinsic predicate fuses too
+# (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"): the declaration floors
+# the parameter at Number, which discharges `%gt`'s comparable-family obligation,
+# and the floor is carried onto the spliced binding — so the guard stage holds the
+# opcode itself. The un-fused oracle carries the same declaration and opcode behind
+# a `match` body, which declines the inline clone.
+(defn big? [x]
+  (numeric!)
+  (%gt x 2))
+
+(defn big-decl? [x]
+  (numeric!)
+  (match x
+    _ (%gt x 2)))
+
+(assert (= (filter big? [1 2 3 4]) [3 4])
+        "a numeric!-declared intrinsic predicate fuses to the right survivors")
+(assert (= (filter big? [1 2 3 4]) (filter big-decl? [1 2 3 4]))
+        "the fused intrinsic predicate agrees with the un-fused oracle")
+
 (println "dissolution-filter-fuse: ok")
