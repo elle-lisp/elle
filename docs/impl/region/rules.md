@@ -83,7 +83,12 @@ is a correctness defect, not a tuning knob.
    `&named`-param prologue UAF: with every destructured binding unused,
    the collected keyword struct's only use was the prologue's Var, and the
    lowerer freed it before `StructGetOrNil` read the fields —
-   tests/elle/region-named-param-uaf.lisp). It is *per
+   tests/elle/region-named-param-uaf.lisp). Its dual is a *transferring node*:
+   a `Break` is **not** a use of its operand's regions — the value becomes the
+   enclosing block's value, and control leaves the body before any release
+   placed inside it runs, so the release is anchored where the *block's* value
+   is consumed ([mechanism.md](mechanism.md) § "`break` transfers its value").
+   It is *per
    activation*: each activation remaps its static region slots to fresh physical
    regions, so the same static `DecrefRegion` frees a different physical region
    each call. Exception, named: across a fiber **suspend/resume** the activation's

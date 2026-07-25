@@ -163,11 +163,20 @@ The emitter preserves stack state across the yield boundary via `yield_stack_sta
 `HirKind::Break` lowers to Move + Jump:
 1. Find target block's `result_reg` and `exit_label` via `block_lower_contexts`
 2. Lower value, move to `result_reg`
-3. Emit compensating `DecrefRegion` instructions for each region whose `free_at` lies between the break site and the target block (so the break path fires the same decrefs a fall-through exit would have)
-4. Jump to `exit_label`
-5. Start unreachable dead-code block
+3. Jump to `exit_label`
+4. Start unreachable dead-code block
 
-No new bytecode instructions — break compiles to existing Move + Jump + DecrefRegion.
+No new bytecode instructions — break compiles to existing Move + Jump.
+
+Break emits **no** region instruction of its own. The broken value's release is
+anchored by the analysis where the *block's* value is consumed — at the `Block`
+node itself when nothing consumes it, which the lowerer emits after the exit
+label, so it fires on both the break path and the fall-through path. See
+[docs/impl/region/mechanism.md](../../../docs/impl/region/mechanism.md)
+§ "`break` transfers its value; it does not consume it". Do not add a
+compensating release for the broken value at the break site: it would free the
+value the block is about to hand to its consumer.
+
 ## Key instructions
 
 | Instruction | Stack effect | Notes |
@@ -231,4 +240,4 @@ No new bytecode instructions — break compiles to existing Move + Jump + Decref
 - **Not emitting lbox operations**: If a binding needs an lbox, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Missing a region demise**: After lowering each HIR node, iterate `regions_demising_at(hir_id)` and emit one `DecrefRegion(rid)` per region. Forgetting to do so leaks regions.
-- **Not handling break compensation**: When emitting `break`, emit compensating `DecrefRegion` instructions for each region whose `free_at` lies between the break site and the target block
+- **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. The broken value itself is anchored at the `Block` node by the analysis (see Block/Break lowering above); any *other* region in that window is the measured `break-skipped` residue, not something to patch at the break site

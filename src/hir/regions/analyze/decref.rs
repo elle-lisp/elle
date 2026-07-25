@@ -25,6 +25,7 @@ pub(super) fn populate_decref_points(
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     return_sites: &[(HirId, Vec<Region>)],
     destructure_sites: &[(HirId, Vec<Region>)],
+    break_sites: &[(HirId, Vec<Region>)],
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let last_use = &last_use_info.per_node;
@@ -217,6 +218,41 @@ pub(super) fn populate_decref_points(
     // tests/elle/region-named-param-uaf.lisp, the lib/http2 import segv).
     for (destructure_id, regions) in destructure_sites {
         let lu = *destructure_id;
+        for &r in regions {
+            info.region_data
+                .entry(r)
+                .and_modify(|d| {
+                    if ord(lu) > ord(d.decref_point) {
+                        d.decref_point = lu;
+                    }
+                })
+                .or_insert(RegionData { decref_point: lu });
+        }
+    }
+
+    // Extend each BROKEN value's regions' `decref_point` to where the `Block`
+    // it was handed to is CONSUMED. A `Break` is the dual of the consuming nodes
+    // above: it does not use its operand, it TRANSFERS it — the value becomes
+    // the block's value, and dies wherever the block's value dies. Two things
+    // make the pin necessary rather than a nicety:
+    //
+    //  - `break` lowers to a jump to the block's exit label, so a release
+    //    anchored anywhere inside the body is emitted into the break's
+    //    unreachable fall-through and never runs at all — the value is held to
+    //    fiber teardown (the `break-value*` probes' former rate).
+    //  - the block's own exit label is not late enough on its own: the block's
+    //    value may flow straight into a consumer (`(f (block … (break v)))`),
+    //    and releasing at the exit would free it under that consumer.
+    //
+    // `last_use[block]` is exactly "the node that consumes the block's value"
+    // (its own id when nothing does), and the lowerer emits a node's decrefs
+    // after it — after the exit label for the block itself. A binding that names
+    // the block's value extends further through the ordinary binding chain,
+    // and every extension is a max, so the latest wins
+    // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
+    // consume it"; tests/elle/region-break-transfer.lisp).
+    for (block_id, regions) in break_sites {
+        let lu = last_use.get(block_id).copied().unwrap_or(*block_id);
         for &r in regions {
             info.region_data
                 .entry(r)

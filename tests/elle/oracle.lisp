@@ -236,9 +236,14 @@
 # unmasked once the F1b container over-keep on their shared block-local `@keep`
 # accumulator closed.
 (declare-root :f4 ["recur-local-self-mint"])
+# `break-value`/`break-value-used`/`break-value-lit` are CLOSED controls for the
+# break TRANSFER (undeclared, like `rest-array-copy`), so a regression to open
+# trips the completeness gate loudly instead of being absorbed as F5. What
+# remains open in the break class is `break-skipped` — a region the break jumps
+# over whose value is NOT the one carried out.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
-                   "fresh-env-cell" "break-value" "break-value-used"
-                   "break-value-lit" "struct-match" "take" "drop" "zip"])
+                   "fresh-env-cell" "break-skipped" "struct-match" "take" "drop"
+                   "zip"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -1558,6 +1563,13 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+# The three `break-value*` probes are CLOSED controls for the break TRANSFER
+# (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a
+# `break` carries out is the BLOCK's value, so its release is anchored where the
+# block's value is consumed — for a discarded block that is the block node
+# itself, emitted after the exit label and reached on both paths — instead of
+# inside the body the break jumps out of. Discarded, consumed, and heap-literal
+# placements all reclaim; RED if the transfer regresses.
 (pin (measure-core "break-value"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1565,7 +1577,7 @@
                      (while (%lt j b)
                        (block (let [x (t17-h)]
                                 (break x)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "break-value-used"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1574,7 +1586,7 @@
                        (let [r (block (let [x (t17-h)]
                                         (break x)))]
                          (get r :a))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "break-value-lit"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1582,7 +1594,31 @@
                      (while (%lt j b)
                        (block (let [x {:a j}]
                                 (break x)))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+# The OTHER face of the break-skipped over-keep (F5), still open: a region whose
+# value is NOT the one broken out, but whose `decref_point` sits between the
+# break site and the block's exit label. The transfer does not reach it — the
+# release is simply jumped over — so `x` strands whenever the break fires. Its
+# control `break-skipped-nobreak` runs the same body with the break unreachable,
+# isolating the skip from the shape.
+(pin (measure-core "break-skipped"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (block (let [x (t17-h)]
+                                (when (%lt -1 j) (break 1))
+                                (%struct? x)))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+(pin (measure-core "break-skipped-nobreak"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (block (let [x (t17-h)]
+                                (when (%lt j -1) (break 1))
+                                (%struct? x)))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── Byte-gauge ────────────────────────────────────────────────────────
 # Bump-arena bytes, not object count: a scope-dropped string must return its

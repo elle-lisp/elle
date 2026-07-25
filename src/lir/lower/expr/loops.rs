@@ -174,14 +174,18 @@ impl<'a> Lowerer<'a> {
             src: value_reg,
         });
 
-        // Break compensation: `DecrefRegion` is emitted by `lower_expr` at
-        // each region's `decref_point` HirId. Break short-circuits past those
-        // HirIds — for regions whose `decref_point` lies between the break site
-        // and the target block, the lowerer would need to fire compensating
-        // `DecrefRegion` instructions here. The required logic is non-trivial
-        // under unique-per-alloc; for now break-skipped allocations leak until
-        // fiber teardown. Tighten this once the unmerged baseline is verified
-        // against bounded-loop regressions.
+        // Break emits no region instruction of its own. The value it carries is
+        // TRANSFERRED to the block, and the solver anchors that value's release
+        // where the block's value is consumed — reached by this jump — rather
+        // than inside the body (docs/impl/region/mechanism.md § "`break`
+        // transfers its value; it does not consume it";
+        // tests/elle/region-break-transfer.lisp). A compensating release here
+        // would free the value the block is about to hand to its consumer.
+        //
+        // The entry depth is carried on the context so a future per-path release
+        // of the regions this jump does skip — those the break does NOT carry
+        // out — can walk the regions entered since (`break-skipped`, the
+        // measured residue in tests/elle/oracle.lisp).
         let _ = target_region_stack_depth;
 
         self.terminate(Terminator::Jump(target_exit_label));

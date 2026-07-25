@@ -222,6 +222,27 @@ fn region_fold_fuse_uaf() {
     );
 }
 
+// Guard — `break` TRANSFERS its value to the enclosing block
+// (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
+// consume it"). The transfer moves the broken value's release out of the block
+// body — which the break's jump to the exit label skips — and onto the `Block`
+// node, emitted after that label. That placement is correct only while the
+// block's result regions reach the binding naming it, so the binding-chain
+// `decref_point` extension carries the release past every later read. Without
+// that flow the release fires at the exit label and each read below touches
+// freed pages — SIGSEGV under guardfree. Drives the broken value's heap contents
+// through a post-block read for every placement (bare, `let`-bound, stored,
+// branched, out of a `while`, out of a nested block, forwarded into a call) with
+// a fresh subject per iteration so region ids recycle under the reader. The leak
+// face is `region-break-transfer.lisp`.
+#[test]
+fn region_break_transfer_uaf() {
+    run_elle_script_with_args(
+        "region-break-transfer-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

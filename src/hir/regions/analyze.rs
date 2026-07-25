@@ -53,6 +53,7 @@ pub fn analyze_regions_with(
     let inference_binding_regions = std::mem::take(&mut ri.binding_regions);
     let return_sites = std::mem::take(&mut ri.return_sites);
     let destructure_sites = std::mem::take(&mut ri.destructure_sites);
+    let break_sites = std::mem::take(&mut ri.break_sites);
     let top_level_reassigns = std::mem::take(&mut ri.top_level_reassigns);
     let local_reassigns = std::mem::take(&mut ri.local_reassigns);
     let captured_reassigns = std::mem::take(&mut ri.captured_reassigns);
@@ -122,8 +123,8 @@ pub fn analyze_regions_with(
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
-    // binding-chain extension, env-cell loop hoist, and the return/destructure
-    // consuming-node pins (see `decref`).
+    // binding-chain extension, env-cell loop hoist, and the return/destructure/
+    // break consuming-and-transferring-node pins (see `decref`).
     decref::populate_decref_points(
         &mut info,
         hir,
@@ -133,6 +134,7 @@ pub fn analyze_regions_with(
         &inference_binding_regions,
         &return_sites,
         &destructure_sites,
+        &break_sites,
     );
     let last_use = &last_use_info.per_node;
 

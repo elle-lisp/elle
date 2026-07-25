@@ -116,9 +116,13 @@ impl<'a> Lowerer<'a> {
         self.block_lower_contexts.pop();
 
         // Region-demise DecrefRegion is emitted by `lower_expr` at each
-        // region's `decref_point` HirId. This function emits none; it only
-        // keeps the active_region_ids bookkeeping so break compensation (if
-        // any) can still walk it.
+        // region's `decref_point` HirId — for a value a `break` carried out,
+        // that point is this Block node or later, so its release lands after
+        // the exit label below and fires on both paths
+        // (docs/impl/region/mechanism.md § "`break` transfers its value").
+        // This function emits none; it only keeps the active_region_ids
+        // bookkeeping a per-path release of the break-skipped regions would
+        // walk.
         if region_id.is_some() {
             self.active_region_ids.pop();
         }

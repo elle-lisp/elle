@@ -153,6 +153,25 @@ struct RegionInference {
     /// BlockId → enclosing region at the point the block was entered.
     /// Reserved for tooling; the region walk does not read it.
     block_regions: HashMap<super::expr::BlockId, Region>,
+    /// BlockId → the regions of every `break` value handed to that block, in
+    /// walk order. A `break` TRANSFERS its value to the block — the block's
+    /// value is its fall-through value OR any break's — so the `Block` arm
+    /// unions these into its own result regions and clears the entry
+    /// (docs/impl/region/mechanism.md § "`break` transfers its value; it does
+    /// not consume it"). Without the union, a binding named to the block's
+    /// value holds NO region, the binding-chain `decref_point` extension never
+    /// sees the broken value, and its release stays at the block's exit label —
+    /// under every later read of the result. Drained at the `Block` node into
+    /// `break_sites`.
+    block_break_regions: HashMap<super::expr::BlockId, Vec<Region>>,
+    /// `Block` node HirId → the regions every targeting `break` hands it. The
+    /// dual of `return_sites`: a `Break` is a *transferring* node, so the
+    /// post-pass extends each broken region's `decref_point` to where the
+    /// BLOCK's value is consumed (`last_use[block]` — the block itself when
+    /// nothing consumes it, whose decrefs the lowerer emits after the exit
+    /// label). A release left inside the body is jumped over and never runs
+    /// (docs/impl/region/rules.md Rule 4).
+    break_sites: Vec<(HirId, Vec<Region>)>,
     /// Next region id
     next_region: u32,
     /// Current enclosing region
@@ -222,6 +241,8 @@ impl RegionInference {
             return_sites: Vec::new(),
             destructure_sites: Vec::new(),
             block_regions: HashMap::new(),
+            block_break_regions: HashMap::new(),
+            break_sites: Vec::new(),
             next_region: 1, // 0 is the reserved sentinel — never assigned to an allocation
             current_region: Region(0),
             call_class,

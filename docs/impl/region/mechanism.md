@@ -84,6 +84,57 @@ over Fresh / Funnel / pass-through natives) and `region-native-tail-return-uaf.l
 / `region-hof-tail-return-uaf.lisp` (the soundness complement — the anonymous
 path must keep its retain).
 
+## `break` transfers its value; it does not consume it
+
+A `Return` hands a value across a *function* frontier. A `break` is the
+intra-function dual: it hands a value to the enclosing `block`, whose value is
+its fall-through value **or** the value of any `break` targeting it. No
+reference changes hands — the value stays in the same activation — so there is
+no mint. What a `break` does change is *where the value dies*, and by two
+compounding facts, neither of which the ordinary consuming-node treatment
+(Rule 4) covers:
+
+- `break` lowers to a store into the block's result slot plus a **jump to the
+  block's exit label**. Control leaves the body there, so a release the lowerer
+  placed at a `decref_point` inside the body is emitted into the break's
+  unreachable fall-through and never executes at all. Treating `Break` as a
+  consumer of its operand anchors exactly there, and the value is then held to
+  fiber teardown — one region per break.
+- The block's own exit label is not late enough either: the block's value may
+  flow straight into a consumer (`(f (block … (break v) …))`), and releasing at
+  the exit frees it under that consumer.
+
+So the transfer is stated as two facts, both over structures the solver already
+holds:
+
+- **Region flow** (`hir/regions/walk`, the `Block`/`Break` arms): a `Block`'s
+  result region set is the union of its fall-through value's regions and every
+  targeting `break`'s value regions. A binding that names the block's value
+  therefore names those regions, and the ordinary binding-chain `decref_point`
+  extension carries the release past the binding's own last use — which is what
+  keeps `(let [r (block … (break v) …)] (use r))` from freeing `v` under `use`.
+- **The break pin** (`regions/analyze/decref.rs`, the dual of `return_sites`):
+  each broken region's `decref_point` is extended to `last_use[block]` — the
+  node that consumes the block's value, or the `Block` itself when nothing does.
+  The lowerer emits a node's decrefs *after* it, and for the `Block` that is
+  after the exit label, so the one release fires on the break path and the
+  fall-through path alike. Every `decref_point` rule is a max, so a later
+  binding-chain or return extension still wins.
+
+The lowerer needs no new instruction and no compensating release at the break
+site. On a path that did not run the break, the value-route reloads a slot that
+still holds `nil` and the release no-ops — the same nil-stamp discipline the
+branch-union release relies on.
+
+A region allocated inside the body whose value is *not* the one broken out —
+its `decref_point` sits between the break site and the block exit — is still
+skipped on the break path; that residue is measured by the `break-skipped`
+probe in `tests/elle/oracle.lisp`. Pinned here:
+`tests/elle/region-break-transfer.lisp` (the reclamation), the `break-value*`
+probes (the rates), `regions::tests::blocks` (the placement, structurally), and
+`region-break-transfer-uaf.lisp` (the soundness complement — a value broken out
+and read afterwards, stored, or returned must survive).
+
 ## Compile-time region selection (coalescing)
 
 Where the compiler can prove a value is a **fresh local allocation whose region

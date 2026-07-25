@@ -131,11 +131,55 @@ impl RegionInference {
                 }
 
                 self.current_region = saved;
+
+                // The block's value is its fall-through value OR the value of
+                // any `break` targeting it, so its result regions are the union
+                // (docs/impl/region/mechanism.md § "`break` transfers its value;
+                // it does not consume it"). This is what lets a binding named to
+                // the block's value hold the broken value's regions, so the
+                // binding-chain `decref_point` extension carries the release
+                // past that binding's own reads instead of leaving it at the
+                // block's exit label. Taken, not read: the entry belongs to this
+                // block alone, and clearing it keeps an outer block from
+                // inheriting an inner block's breaks.
+                //
+                // The same regions are recorded as a `break_sites` entry against
+                // THIS node, the transferring-node dual of `return_sites`: the
+                // post-pass pins each one's `decref_point` to where this block's
+                // value is consumed, because a release left inside the body is
+                // jumped over by the break and never runs.
+                if let Some(broken) = self.block_break_regions.remove(block_id) {
+                    self.break_sites.push((hir.id, broken.clone()));
+                    last.extend(broken);
+                }
+                dedup_regions(&mut last);
                 last
             }
 
-            HirKind::Break { value, .. } => {
-                let _ = self.walk(value);
+            // A `break` yields no value of its own — control leaves through the
+            // target block's exit label — but the value it carries becomes that
+            // block's value. Record the regions against the target so the
+            // `Block` arm above can union them into its result.
+            HirKind::Break { block_id, value } => {
+                let regions = self.walk(value);
+                // Never a CALLER arg region reached inside an inline re-walk —
+                // the same filter the `Return` arm applies, for the same reason:
+                // `try_inline_call` binds the inlined callee's params to the
+                // caller's arg regions, so a `break` here can name a caller
+                // region whose release the caller owns. Outside an inline
+                // `inline_bound_regions` is empty, so the structural walk
+                // records every break unchanged.
+                let owned: Vec<Region> = regions
+                    .iter()
+                    .copied()
+                    .filter(|r| !self.inline_bound_regions.contains(r))
+                    .collect();
+                if !owned.is_empty() {
+                    self.block_break_regions
+                        .entry(*block_id)
+                        .or_default()
+                        .extend(owned);
+                }
                 Vec::new()
             }
 
