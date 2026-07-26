@@ -88,6 +88,11 @@ is a correctness defect, not a tuning knob.
    enclosing block's value, and control leaves the body before any release
    placed inside it runs, so the release is anchored where the *block's* value
    is consumed ([mechanism.md](mechanism.md) § "`break` transfers its value").
+   When the target block is the function's **tail**, that anchor is the last
+   point before the frame is handed back, so the broken value is also the
+   *returned* value and takes the return mint — including through an enclosing
+   `Loop`/`While`, which a `break` jumps past (mechanism.md § "A break out of a
+   TAIL block carries the return mint").
    A third class is a *borrowing node*: an **uncounted** container element read —
    the `%get`/`%first`/`%rest` opcodes — hands back a value that still lives
    **inside the container** (its own region for a pair's car, an interior member's

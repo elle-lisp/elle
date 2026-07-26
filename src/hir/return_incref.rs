@@ -17,11 +17,20 @@
 //! optimization by moving the call out of tail position.
 //!
 //! The traversal mirrors `mark_tail_calls` exactly so that "tail
-//! position" means the same thing in both passes.
+//! position" means the same thing in both passes. Two flags carry it and
+//! they are invalidated by different things: `in_tail` by any node whose
+//! child is not its result, `tail_blocks` — which makes a `break`
+//! targeting a tail block a returning position — only by a **function
+//! boundary**, since a break reaches its target's exit label by a jump
+//! that no enclosing construct intercepts (docs/impl/region/mechanism.md
+//! § "A break out of a TAIL block carries the return mint").
 
 use std::collections::HashSet;
 
 use super::expr::{BlockId, Hir, HirKind};
+
+#[cfg(test)]
+mod tests;
 
 /// Wrap every function body's non-tail-call tail value in `Return`.
 pub(crate) fn wrap_tail_returns(hir: &mut Hir) {
@@ -155,8 +164,21 @@ fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
     // child; recurse into every child as non-tail to reach nested
     // lambda bodies (e.g. a lambda bound in a `let` value, or an
     // argument lambda).
+    //
+    // `tail_blocks` travels through unchanged, because it and `in_tail` answer
+    // different questions and only a **function boundary** — the `Lambda` arm —
+    // invalidates the second. A `break` reaches its target block's exit label by
+    // a jump, so an enclosing node that is not itself a tail position does not
+    // sever the break's: the pervasive `(fn … (forever … (break v)))` idiom puts a
+    // `Loop` between the tail block and the break, and `v` is still the
+    // function's result. Reset the set here and that `v` is returned with no mint
+    // while the release pinned at the block's exit label still fires, so the
+    // caller reads a freed value (docs/impl/region/mechanism.md § "A break out of
+    // a TAIL block carries the return mint"). `mark_tail_calls` threads the set
+    // through every arm for the same reason, and the two passes must agree on
+    // what "tail position" means or the mint and the release disagree.
     if !handled {
-        hir.for_each_child_mut(|c| walk(c, false, &HashSet::new()));
+        hir.for_each_child_mut(|c| walk(c, false, tail_blocks));
     }
 
     // Phase 3: if this node is the value-producing leaf of a tail

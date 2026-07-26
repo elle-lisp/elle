@@ -88,10 +88,12 @@ path must keep its retain).
 
 A `Return` hands a value across a *function* frontier. A `break` is the
 intra-function dual: it hands a value to the enclosing `block`, whose value is
-its fall-through value **or** the value of any `break` targeting it. No
-reference changes hands — the value stays in the same activation — so there is
-no mint. What a `break` does change is *where the value dies*, and by two
-compounding facts, neither of which the ordinary consuming-node treatment
+its fall-through value **or** the value of any `break` targeting it. While the
+block is *interior* to the function no reference changes hands — the value stays
+in the same activation — so there is no mint; when the block is the function's
+**tail** the break's value is also the function's result and takes the ordinary
+return mint (below). What a `break` does change is *where the value dies*, and by
+two compounding facts, neither of which the ordinary consuming-node treatment
 (Rule 4) covers:
 
 - `break` lowers to a store into the block's result slot plus a **jump to the
@@ -125,6 +127,36 @@ The lowerer needs no new instruction and no compensating release at the break
 site. On a path that did not run the break, the value-route reloads a slot that
 still holds `nil` and the release no-ops — the same nil-stamp discipline the
 branch-union release relies on.
+
+### A break out of a TAIL block carries the return mint
+
+The pin above places the release at the block's exit label. When the block is the
+function's **tail**, that exit label is the last thing before the frame is handed
+back, so the value the break carried is the *returned* value and it must leave
+with one owning reference: the release at the exit consumes the callee's, and the
+caller's own `DecrefValueRegion` consumes another. Only the return mint balances
+that — the same mint any other returned value gets.
+
+Both passes that decide "tail position" must therefore agree that a `break`
+targeting a tail block is in it. `mark_tail_calls` and `wrap_tail_returns`
+(`hir/return_incref.rs`) each thread a `tail_blocks` set: a `Block` in tail
+position adds its own id, and a `Break` whose target is in that set walks its
+value as a tail value — marking a call there `is_tail` (whose callee-side retain
+propagates) or, for anything else, wrapping it in `Return` (which mints).
+
+The two flags answer different questions, and the invariant is that only a
+**function boundary** invalidates the second: `in_tail` is severed by any node
+whose child is not its result, but `tail_blocks` survives every node except a
+`Lambda`, because a `break` reaches its target's exit label by a *jump* and no
+enclosing construct can intercept it. The shape that makes this load-bearing is
+the pervasive `(fn … (forever … (break v)))`: the loop between the tail block and
+the break is not itself a tail position — the loop's fall-through value is the
+loop's, not the function's — yet `v` is the function's result. Sever the set
+there and `v` is returned with no mint while the exit-label release still fires:
+the caller reads a freed value. Pinned structurally (`return_incref::tests` — the
+mint count per break, with the interior-block control) and behaviourally
+(`region-break-transfer-uaf.lisp`'s tail-loop witnesses, whose faulting shape is
+`lib/tls.lisp`'s `tls/read`).
 
 A region allocated inside the body whose value is *not* the one broken out —
 its `decref_point` sits between the break site and the block exit — is still
