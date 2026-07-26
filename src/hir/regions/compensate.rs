@@ -74,9 +74,27 @@
 //!    frontier: it is handed back pass-through yet holds a *distinct* stranded
 //!    owned-param reference no return covers (`mut_container_regions`).
 //!
-//! `head` compensation handles only the two-armed `If` (the dominant `when`/
-//! `unless`/`and`/`or`-of-two shape). `tail` compensation handles `If` AND `Match`;
-//! `Cond`/`And`/`Or` keep the current behavior until their structure is folded in.
+//! Both routes read the **arm structure**, never the branch's arity or kind: an
+//! `If`'s two arms and a `Match`'s N arms are alike mutually exclusive, and at most
+//! one body runs per execution. Every premise above is stated over one arm and its
+//! siblings, so a `Match` arm is admitted by the identical argument (a `Match` with
+//! no matching arm runs no body at all — the compensation simply does not fire,
+//! which is the leak-preserving direction). `Cond`/`And`/`Or` are not collected as
+//! branches here, so they keep the conservative single-`decref_point` baseline until
+//! their structure is folded in.
+//!
+//! The `tail` route's same-node retain requirement is **not** a redundant belt on
+//! the placement argument, and must not be relaxed into "any arm-last-use node".
+//! Placement symmetry says only that the release lands after this arm's last *named*
+//! use; it does not say the callee's reference is the only one in existence there.
+//! An arm that USES the region can have handed out a reference the solver does not
+//! name — an uncounted borrow held by a suspended frame's activation region map is
+//! the reachable one — and a release that reaches zero then frees a region a parked
+//! fiber still resolves through its slot (the generation stamp detonates it at the
+//! resume, `docs/impl/region/generations.md` § "Uncounted-borrow check"). The retain
+//! on the node is what makes the per-arm decref provably non-zeroing, which is why
+//! a used sibling arm with no such retain keeps the baseline. The dead sibling arm
+//! needs no retain precisely because it creates no reference at all.
 
 use super::*;
 use crate::hir::region::Region;
@@ -94,10 +112,9 @@ pub(super) struct BranchComp {
 }
 
 /// A branch (`If` or `Match`) with its whole-node post-order interval and each
-/// arm's interval. `is_if` flags the two-armed `If` that `head` compensation is
-/// restricted to.
+/// arm's interval. Both compensation routes are stated over arms alone, so the two
+/// kinds are indistinguishable here — an `If` is a two-armed branch.
 struct Branch {
-    is_if: bool,
     node_lo: u32,
     node_hi: u32,
     arms: Vec<(HirId, u32, u32)>,
@@ -415,10 +432,10 @@ pub(super) fn compute_branch_compensation(
                         tail.entry(node).or_default().push(r)
                     }
                     Some(_) => {}
-                    // Dead sibling arm (no use): head release, for the two-armed
-                    // `If` only (the existing leak-tested shape).
-                    None if br.is_if => head.entry(arm_id).or_default().push(r),
-                    None => {}
+                    // Dead sibling arm (no use at all): head release. Admitted on
+                    // every arm of every branch kind — the arm creates no reference
+                    // to `r`, so the callee's own is the only one in existence here.
+                    None => head.entry(arm_id).or_default().push(r),
                 }
             }
         }
@@ -453,7 +470,6 @@ fn collect(
             ..
         } => {
             branches.push(Branch {
-                is_if: true,
                 node_lo: lo(hir.id),
                 node_hi: ord(hir.id),
                 arms: vec![
@@ -464,7 +480,6 @@ fn collect(
         }
         HirKind::Match { arms, .. } => {
             branches.push(Branch {
-                is_if: false,
                 node_lo: lo(hir.id),
                 node_hi: ord(hir.id),
                 arms: arms

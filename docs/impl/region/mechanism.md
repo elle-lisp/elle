@@ -111,6 +111,15 @@ ordinary compensation already establishes carry the soundness whole:
 - arms are mutually exclusive, so the head release and the `decref_point` release
   can never both run.
 
+Every one of those premises is stated over **one arm and its siblings** — none of
+them mentions how many arms the branch has, or whether it is an `If` or a `Match`.
+So a dead `Match` arm is admitted by the identical argument, and the dominant
+polymorphic shape is exactly a `Match`: `(match (type-of x) …)` reaches an arm that
+never touches a value the solver's single `decref_point` left in a sibling. Keying the
+admission on the branch kind instead held that whole family — every dispatch whose
+taken arm ignores a live local — to fiber teardown. A `Match` that matches *no* arm
+runs no body, so nothing fires: the leak-preserving direction, never an over-free.
+
 The dual case is an arm that carries the value out while the `decref_point` sits in
 a *sibling* arm — `(if c xs (go … xs))`, where the recursive arm's later use wins
 the `decref_point` max and the base case is left with a mint and no release. That
@@ -128,7 +137,24 @@ hand-over keeps the conservative baseline. That residual is a leak, never an
 over-free.
 
 Pinned by `tests/elle/region-return-arm-escape-leak.lisp` (both faces: the
-non-returning arm is bounded, and the returned value survives its caller's use).
+non-returning arm is bounded, and the returned value survives its caller's use), and
+for the `Match` arm by `tests/elle/region-match-dead-arm-leak.lisp` (both faces
+again, plus the return-escaping value whose dead `Match` arm hands the caller
+nothing).
+
+The **used** sibling arm is the residual, and its guard is not negotiable. A release
+there is admitted only where a retain on the same node funds it (the store, the
+`-mut` container, the return mint above). The tempting generalization — "the arm's
+last-use node is decref-safe by symmetry with the global `decref_point`, so release
+there unconditionally" — is a placement argument masquerading as a count argument.
+It says the release lands after this arm's last *named* use; it does not say the
+callee holds the only reference. An arm that used the region may have handed out one
+the solver does not name, and the reachable one is an uncounted borrow in a
+suspended frame's activation region map: a release that reaches zero frees a region
+a parked fiber still resolves through its slot, and the generation stamp detonates
+it at the resume (`generations.md` § "Uncounted-borrow check"). So an unfunded used
+sibling arm keeps the conservative baseline — an over-keep, gauged by the
+`match-used-arm` probe in `tests/elle/oracle.lisp`.
 
 ## `break` transfers its value; it does not consume it
 

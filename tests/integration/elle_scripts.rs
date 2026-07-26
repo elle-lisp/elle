@@ -720,6 +720,23 @@ fn region_return_arm_escape_uaf() {
     );
 }
 
+// Guard — branch compensation reads the ARM STRUCTURE, neither the branch's kind nor
+// its arity (docs/impl/region/mechanism.md § "The return frontier is per-path"). A `match` arm
+// that never touches a live local owes that local's release, exactly as a two-armed
+// `if`'s dead arm does. The head release is the one admitted unconditionally past
+// the return frontier, so landing it on the wrong arm frees the value under the arm
+// that reads it — or under the caller that was just handed it. The file drives every
+// arm of every shape past a priming loop and reads each result, so an over-free
+// faults deterministically here while the leak face rides the same region-count
+// deltas. Full mechanism in the file header.
+#[test]
+fn region_match_dead_arm_uaf() {
+    run_elle_script_with_args(
+        "region-match-dead-arm-leak",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — park/unpark symmetry for fiber suspension (docs/impl/region/owner.md
 // § "Park/unpark symmetry"): a parked-then-dropped / drained / cancelled /
 // aborted / denied fiber reclaims its region and parked state, the nested

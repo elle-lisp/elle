@@ -245,8 +245,12 @@
 # (undeclared, like `rest-array-copy`): all three are `letrec` walks whose base case
 # returns a heap value the recursive arm's `decref_point` was left to release, so a
 # regression must trip the completeness gate rather than be absorbed as an F5 strand.
+# `match-dead-arm` is a CLOSED control for per-arm compensation over a `Match`
+# (undeclared, like `rest-array-copy`); its open twin `match-used-arm` is the
+# residual — a used sibling arm with no retain to fund a per-arm release.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
-                   "fresh-env-cell" "break-skipped" "struct-match"])
+                   "fresh-env-cell" "break-skipped" "struct-match"
+                   "match-used-arm"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -403,6 +407,26 @@
             (assign c (%add c 1))
             c)]
     (f)))
+# The two faces of per-arm compensation over a `Match`, driven through the arm the
+# caller picks. `v` is allocated before the dispatch, so it is live-in on every arm
+# and its lone `decref_point` lands in the arm that uses it last.
+#   DEAD arm  — the taken arm has no use of `v` at all, so it creates no reference
+#               and takes the head release (`regions::compensate`).
+#   USED arm  — the taken arm uses `v` but is not the one holding the `decref_point`,
+#               and no retain on its last-use node funds a per-arm release, so it
+#               keeps the conservative baseline and strands `v` (F5).
+(defn t21-dead-arm [t]
+  (let [v (list 1 2 3)]
+    (match t
+      :use (length v)
+      :skip 0
+      _ -1)))
+(defn t21-used-arm [t]
+  (let [v (list 1 2 3)]
+    (match t
+      :a (length v)
+      :b (length v)
+      _ (length v))))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1554,6 +1578,29 @@
                        (let [s @{}]
                          (put s :k {:v j}))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+# Per-arm compensation over a `Match`, both faces. `match-dead-arm` is a CLOSED
+# control: the taken arm has no use of the pre-allocated local, so the head release
+# frees it (docs/impl/region/mechanism.md § "The return frontier is per-path" — the
+# premises are stated over arms, so the branch's arity and kind are not read).
+# `match-used-arm` is the OPEN residual (F5): the taken arm uses the local but does
+# not hold its `decref_point`, and no retain on its last-use node funds a per-arm
+# release, so the baseline strands the whole region — 3 cons cells here. Widening
+# `tail` to every arm-last-use node instead is a measured over-free, not headroom:
+# an arm that used the region may hold an uncounted borrow the solver does not name.
+(pin (measure-core "match-dead-arm"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t21-dead-arm :skip)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "match-used-arm"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t21-used-arm :a)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
 (pin (measure-core "struct-match"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

@@ -28,6 +28,20 @@ fn first_if_arms(hir: &Hir) -> Option<(HirId, HirId)> {
     found
 }
 
+/// The body HirIds of the first `Match` in the tree, in arm order.
+fn first_match_arms(hir: &Hir) -> Option<Vec<HirId>> {
+    if let HirKind::Match { arms, .. } = &hir.kind {
+        return Some(arms.iter().map(|(_p, _g, body)| body.id).collect());
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = first_match_arms(c);
+        }
+    });
+    found
+}
+
 /// Does `arm` carry a compensating release for any region the binding named
 /// `name` may point into?
 fn arm_compensates(
@@ -86,6 +100,42 @@ fn read_only_arm_keeps_its_compensation() {
     assert!(
         arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
         "the dead sibling arm of a merely-read value must still be compensated"
+    );
+}
+
+#[test]
+fn dead_match_arms_are_compensated_like_dead_if_arms() {
+    // The premises head compensation rests on are stated over ONE ARM and its
+    // siblings — never over the branch's arity or kind. `v` is allocated before the
+    // dispatch, so it is live-in on every arm, and its `decref_point` lands in the
+    // one arm that uses it. Every other arm creates no reference to it and owes the
+    // release, exactly as a two-armed `if`'s dead arm does.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (t) (let [v (list 1 2 3)] (match t :use (length v) :skip 0 _ -1)))",
+    );
+    let arms = first_match_arms(&hir).expect("a Match node");
+    assert_eq!(arms.len(), 3, "the dispatch has three arms");
+    for (i, &arm) in arms.iter().enumerate().skip(1) {
+        assert!(
+            arm_compensates(&hir, &arena, &symbols, &info, "v", arm),
+            "dead Match arm {} must release the local it never uses",
+            i
+        );
+    }
+}
+
+#[test]
+fn the_match_arm_that_uses_the_value_takes_no_head_compensation() {
+    // The over-free counterfactual for the arm route: the arm holding the
+    // `decref_point` already releases `v` at its own last use. A head release there
+    // would precede that use and free the value under it.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (t) (let [v (list 1 2 3)] (match t :use (length v) :skip 0 _ -1)))",
+    );
+    let arms = first_match_arms(&hir).expect("a Match node");
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "v", arms[0]),
+        "the arm that uses the local must not also take a head release"
     );
 }
 
