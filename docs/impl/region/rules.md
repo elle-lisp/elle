@@ -88,6 +88,22 @@ is a correctness defect, not a tuning knob.
    enclosing block's value, and control leaves the body before any release
    placed inside it runs, so the release is anchored where the *block's* value
    is consumed ([mechanism.md](mechanism.md) § "`break` transfers its value").
+   A third class is a *borrowing node*: an **uncounted** container element read —
+   the `%get`/`%first`/`%rest` opcodes — hands back a value that still lives
+   **inside the container** (its own region for a pair's car, an interior member's
+   for an `@array` element) and raises no count on it, so the container's lifetime
+   is the borrow's only protection: the container is used for as long as the read's
+   RESULT is, and its regions extend to where that result is last used, not to the
+   read. Anchored at the read, the container's free-time cascade drops the element's
+   last count and the reader derefs a freed page
+   (`region_container_read_borrow_uaf`). The **native** `get`/`first`/`rest` call is
+   not this class: its dispatch takes the Rule 5 pass-through retain, so the reader
+   holds its own reference and the container is free to die — what that retain
+   cannot survive is adoption freezing the element's RC, which the ownership cut
+   handles at admission (adopt.md § "The lifetime obligation the root carries"). A
+   *remove* is neither: `%pop` extracts the element out of the container (and out of
+   its Owned subtree, `extract_owned_region`), so the container keeps its own last
+   use.
    It is *per
    activation*: each activation remaps its static region slots to fresh physical
    regions, so the same static `DecrefRegion` frees a different physical region
@@ -99,16 +115,25 @@ is a correctness defect, not a tuning knob.
    defect.
 
    When several releases land on one `decref_point`, their emission order is a
-   **topological sort of the ownership adopt edges** — the single-owner
-   Owned-subtree forest (`owned_adopt_edges` ∪ `capture_adopt_edges`, member →
-   owner) — so a store/capture-adopted **member** is released before the release
+   **topological sort of the region's holders-before-holdee edges** — the
+   single-owner Owned-subtree forest (`owned_adopt_edges` ∪ `capture_adopt_edges`,
+   member → owner) plus each native read's alias → container edge
+   (`counted_read_aliases`) — so a store/capture-adopted **member** is released
+   before the release
    that subtree-drops its **owner**. A member's own `DecrefRegion` is a no-op only
    while the member is still `Owned`; once the owner's drop has reclaimed it that
    decref faults, so the member must come first (adopt.md § "The lifetime
-   obligation the root carries"). The forest gives each member exactly one owner,
-   so the edge graph is acyclic and a topological order always exists — including
+   obligation the root carries"). The same holds for a borrowing read's result: it
+   is released `DecrefValueRegion`-style, which resolves its runtime region by
+   reading the value's own page, so it must read before the container's release can
+   tear that page. The forest gives each member exactly one owner, so the adopt half
+   is acyclic and a topological order always exists — including
    for *nested* subtrees (member ⊂ mid ⊂ root release innermost-first), which a
-   flat members-first bucket could not order.
+   flat members-first bucket could not order. A read edge is only a *may*-alias (a
+   binding naming several alternatives makes two reads each other's container), so a
+   cycle there is not an impossible state: it is broken by re-sorting the stalled
+   regions on the adopt edges alone and then by tie-break, leaving the order
+   deterministic.
 
    Regions no adopt edge relates are tie-broken by **page-read depth** so a
    release that *reads* pages precedes a release that *frees* them: a value-gated

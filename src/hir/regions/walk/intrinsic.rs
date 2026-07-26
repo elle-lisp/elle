@@ -61,6 +61,28 @@ impl RegionInference {
         }
 
         use crate::hir::expr::IntrinsicOp;
+        // The UNCOUNTED borrowing reads (`%get`/`%first`/`%rest`): the value handed back
+        // still lives inside arg 0 — an element of the container, a pair's car/cdr — and
+        // this inline opcode raises NO count on it (the native read's dispatch takes the
+        // Rule 5 pass-through retain; an opcode has no dispatch). So arg 0's own lifetime
+        // is what keeps the borrow alive, and arg 0 is in use for as long as the read's
+        // RESULT is: record its regions so `analyze::decref` extends their `decref_point`
+        // to the read's last use (region/rules.md Rule 4, the borrowing node). This is the
+        // half a binding chain does NOT cover — ANF leaves a read in operand position
+        // unnamed, so nothing else carries arg 0's regions past the read, and the
+        // container's free-time cascade then drops the borrowed element's last count under
+        // its reader (`region_container_read_borrow_uaf`).
+        if matches!(
+            op,
+            IntrinsicOp::Get | IntrinsicOp::First | IntrinsicOp::Rest
+        ) {
+            if let Some(container_regions) = arg_regions.first() {
+                if !container_regions.is_empty() {
+                    self.uncounted_read_sites
+                        .insert(hir.id, container_regions.to_vec());
+                }
+            }
+        }
         // %get is region-transparent: it borrows an existing value
         // out of arg 0's region — no allocation, no new region. The
         // result lives in arg 0's region(s).

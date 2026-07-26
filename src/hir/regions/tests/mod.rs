@@ -24,6 +24,7 @@ use support::*;
 mod adopt;
 mod basics;
 mod blocks;
+mod borrow;
 mod cells;
 mod effects;
 mod emit;

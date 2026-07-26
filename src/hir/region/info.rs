@@ -202,6 +202,35 @@ pub struct RegionInfo {
     /// into a reassigned slot (the container's own owned-param leak still closes via
     /// `funnel_container_sites`; only the redundant-retain drop is withheld).
     pub funnel_passthrough_sites: HashMap<HirId, Vec<Region>>,
+    /// **Uncounted** container element-READ site HirId → the regions of the CONTAINER
+    /// read from (arg 0). These are the inline-opcode reads `%get`/`%first`/`%rest`: the
+    /// value handed back still lives inside the container — a pair's car in the pair's
+    /// own region, an `@array` element in a member region the container holds — and the
+    /// opcode raises NO reference count on it (unlike a native read, whose dispatch takes
+    /// the Rule 5 pass-through retain). So the container's own lifetime is the only thing
+    /// keeping the borrow alive, and the container is in use for as long as the read's
+    /// RESULT is: `analyze::decref` extends each of these regions' `decref_point` to the
+    /// read's last use — the *borrowing node* of region/rules.md Rule 4. Anchored at the
+    /// read instead, the container's free-time cascade drops the element's last count and
+    /// the reader derefs a freed page. Pinned by
+    /// `regions::tests::borrow::opcode_read_extends_container_decref_to_the_reader` and
+    /// `region_container_read_borrow_uaf`.
+    pub uncounted_read_sites: HashMap<HirId, Vec<Region>>,
+    /// **Counted** container element-READ edges `(read_call_site, alias_region,
+    /// container_region)` — a native `get`/`first`/`rest` call
+    /// (`CallClassification::container_read_funnels` minus the moves-out REMOVEs, which
+    /// extract their element rather than borrowing it). `dispatch_native_call` takes the
+    /// Rule 5 pass-through retain, so the RC baseline already keeps the element alive
+    /// across the reader and the container needs no lifetime extension — but **adoption
+    /// freezes the member's RC**, leaving that retain inert. Two consumers keep the forest
+    /// honest about it (docs/impl/region/adopt.md § "The lifetime obligation the root
+    /// carries"): `compute_adopt_edges` refuses a subtree whose root's drop does not
+    /// post-dominate the alias's own release (the alias may name any frozen member), and
+    /// the lowerer's `order_releases` sorts the alias before its container where the two
+    /// releases share a `decref_point` — the alias's `DecrefValueRegion` resolves its
+    /// region by reading the value's own page, which the container's release can tear.
+    /// Pinned by `regions::tests::borrow` and `region_container_read_borrow_uaf`.
+    pub counted_read_aliases: Vec<(HirId, Region, Region)>,
     /// Call sites of a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) — a
     /// non-fresh element REMOVED from a container and escape-retained IN-BODY
     /// (`arena::pop_with_decref` increfs the element before releasing the container;
@@ -500,6 +529,8 @@ impl RegionInfo {
             funnel_bytecopy_value_sites: HashMap::new(),
             funnel_container_sites: HashMap::new(),
             funnel_passthrough_sites: HashMap::new(),
+            uncounted_read_sites: HashMap::new(),
+            counted_read_aliases: Vec::new(),
             moves_out_release_sites: FxHashSet::default(),
             container_release_sites: FxHashSet::default(),
             cell_release_regions: FxHashSet::default(),

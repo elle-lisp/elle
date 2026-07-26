@@ -624,6 +624,27 @@ fn region_container_read_escape_uaf() {
     );
 }
 
+// Guard — the container-read BORROW, the LOCAL sibling of the escape face above: a
+// value read out of a container with `get`/`first`/`rest` still lives INSIDE that
+// container, and the two read forms are kept alive differently. An OPCODE read
+// (`%get`/`%first`/`%rest`) raises no count, so the container's lifetime is the
+// borrow's only protection and its `decref_point` extends to the reader
+// (docs/impl/region/rules.md Rule 4, the borrowing node) — this bites even with a
+// PARAM container, no ownership subtree in play. A NATIVE read takes the Rule 5
+// pass-through retain, which the RC baseline honours but ADOPTION freezes: the
+// ownership cut must refuse a subtree whose member a read alias can still name, and
+// order the alias's page-reading release ahead of the container's where the two
+// coincide. The fixture drives every face past a priming loop and then asserts
+// region-count bounded, so a regression in either direction — over-free, or a
+// stranded lifetime — is loud. Full mechanism in the fixture header.
+#[test]
+fn region_container_read_borrow_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-container-read-borrow-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — the variadic TAIL-FORWARD reference balance. Forwarding a heap value into a
 // `& rest` variadic through a tail call builds the callee env as a MOVE
 // (`own_params = false`): the caller's owning reference transfers, but a rest arg

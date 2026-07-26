@@ -125,6 +125,16 @@ struct RegionInference {
     /// the result IS the owned container; an immutable fresh result keeps its retain.
     /// See `RegionInfo::funnel_passthrough_sites`.
     funnel_passthrough_sites: HashMap<HirId, Vec<Region>>,
+    /// UNCOUNTED container element-READ site (`%get`/`%first`/`%rest`, inline opcodes
+    /// that raise no reference count) → the CONTAINER (arg0) regions the read borrows out
+    /// of. The container's own lifetime is what keeps the borrow alive, so its release
+    /// must follow the READER's (region/rules.md Rule 4, the borrowing node). See
+    /// `RegionInfo::uncounted_read_sites`.
+    uncounted_read_sites: HashMap<HirId, Vec<Region>>,
+    /// COUNTED container element-READ edges `(site, alias, container)` — a native
+    /// `get`/`first`/`rest` call, whose pass-through retain covers the borrow under RC but
+    /// is inert once adoption freezes the member. See `RegionInfo::counted_read_aliases`.
+    counted_read_aliases: Vec<(HirId, Region, Region)>,
     /// Call sites of a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) whose
     /// moved-out element is escape-retained in-body. See
     /// `RegionInfo::moves_out_release_sites`.
@@ -236,6 +246,8 @@ impl RegionInference {
             funnel_bytecopy_value_sites: HashMap::new(),
             funnel_container_sites: HashMap::new(),
             funnel_passthrough_sites: HashMap::new(),
+            uncounted_read_sites: HashMap::new(),
+            counted_read_aliases: Vec::new(),
             moves_out_release_sites: rustc_hash::FxHashSet::default(),
             cell_release_regions: rustc_hash::FxHashSet::default(),
             return_sites: Vec::new(),

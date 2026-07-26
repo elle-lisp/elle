@@ -116,6 +116,28 @@ impl RegionInference {
         }
     }
 
+    /// Is the callee a container element-READ that **borrows** — `get`/`first`/`rest`
+    /// and their `%`-op peers, under the same unshadowed-immutable-primitive condition
+    /// as `call_effect`? The moves-out REMOVEs (`pop`/`%pop*`) share the
+    /// `container_read_funnels` classification but are excluded here: a remove EXTRACTS
+    /// its element from the container (and from its Owned subtree), handing the caller
+    /// its own reference, so the container is not borrowed from and pinning its release
+    /// to the popped element's reader would only over-keep it. The walk records a
+    /// borrowing read's container so the container outlives the reader
+    /// (`RegionInfo::container_read_sites`; region/rules.md Rule 4, the borrowing node).
+    pub(super) fn is_container_read_borrow(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return false;
+            }
+            self.call_class.container_read_funnels.contains(&bi.name)
+                && !self.call_class.moves_out.contains(&bi.name)
+        } else {
+            false
+        }
+    }
+
     /// The callee's declared [`RetType`](crate::primitives::def::RetType), under
     /// the same unshadowed-immutable-primitive condition as `call_effect`.
     /// `None` for an unknown/shadowed callee or an empty classification. The

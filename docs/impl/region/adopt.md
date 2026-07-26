@@ -220,6 +220,47 @@ for the inverted-order double-free it prevents is a test, never this prose:
 `runtime::tests::ownership::region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims`
 (bounded + panic-clean).
 
+**A value read back out of the subtree is an alias the obligation must cover too.** A
+native container element READ (`get`/`first`/`rest` — the
+`CallClassification::container_read_funnels` borrow face, minus the moves-out REMOVEs)
+hands the reader a value that still lives *inside* the container: a member the root's
+subtree drop reclaims, whose own `decref_point` says nothing about when the reader is
+done. The alias is invisible to the member obligation above, because the read's result is
+a fresh **call-result** placeholder region the walk cannot statically equate with any
+member. Under the per-region RC baseline nothing is owed here — `dispatch_native_call`
+takes the Rule 5 pass-through retain, so the reader holds its own counted reference — but
+**adoption freezes the member's RC**, which makes that retain inert: the root's drop
+reclaims the element under the live reader, and the reader's own value-resolved release
+then faults resolving a freed page. So the walk records `(read site, alias, container)`
+(`RegionInfo::counted_read_aliases`) and the forest owes two things:
+
+- **Admission.** A subtree whose member a read alias can name is admitted only when the
+  root's `decref_point` post-dominates the **alias's** own release, exactly as for a
+  store-adopted member. Otherwise it refuses to Shared — where the pass-through retain is
+  live again, and the element reclaims on RC. A read whose result dies before the
+  container's release keeps its subtree (the bound is a bound, not a blanket refusal).
+  Aliasing is **transitive** — `(get (get c 0) 0)` names a value inside a member of a
+  member, and the inner alias's bound says nothing about the outer one's — so the read
+  edges are closed over the member set to a fixpoint before the check.
+- **Order.** Post-domination admits the coincident case — one consumer taking both the
+  read's result and the container lands the two releases on one node — where the intra-node
+  order decides: the alias's `DecrefValueRegion` resolves its runtime region by reading the
+  value's own page, so it must be emitted before the release that can tear it.
+  `order_releases` sorts each read's `alias → container` edge alongside the adopt edges
+  (rules.md Rule 4).
+
+An **opcode** read (`%get`/`%first`/`%rest`) is a different problem, not this one: it takes
+no retain at all, so the borrow has no RC protection with or without adoption, and what
+covers it is the container's own lifetime (rules.md Rule 4, the borrowing node) — no
+ownership decision is involved. A `%pop`-style REMOVE is excluded from both faces at the
+source: it *extracts* the element from the subtree (`extract_owned_region`), so the element
+is no longer interior and the container is not borrowed from. Pinned by
+`regions::tests::borrow` (the refusal and its admitting twin),
+`lir::lower::tests::release::container_read_alias_release_precedes_container_in_shared_bucket`,
+and the guardfree witness `region_container_read_borrow_uaf`; the sibling face — a read
+result that *escapes* — is escape's, not this pass's (docs/impl/escape.md, pinned by
+`region_container_read_escape_uaf`).
+
 ## Why this is hybrid, and where RC remains
 
 Owned subtrees reclaim structurally; **Shared** regions keep the unchanged
@@ -227,7 +268,6 @@ per-region RC and cascade. A region is Shared whenever the compiler cannot bound
 its frontier — a value genuinely escaping its fiber with no common dominating
 activation, or a may-store the solver could not resolve. The split is the endpoint,
 not a transition: the same hybrid Project Verona keeps (Owned `iso`/`mut` subtrees,
-RC'd `imm`). Adoption is gated behind `--region-ownership` until the full suite
-passes identically flag-on and flag-off under `--trace=guardfree`; with the flag off
-no region is ever `Owned`, every region stays `Counted` with empty `owned_children`,
-and every path above is inert — the per-region-RC baseline stands unchanged.
+RC'd `imm`). Adoption runs on every compile; a shape no cut admits keeps every
+region `Counted` with empty `owned_children` and every path above is inert — the
+per-region-RC baseline, always legal and always available as the fallback.

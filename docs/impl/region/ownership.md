@@ -10,13 +10,13 @@ and the interior reference cycles that the per-region RC cascade cannot collect
 (rules.md Rule 8). The compile-time analysis that classifies a region
 **Owned** (adopted, freed by subtree drop) vs **Shared** (the per-region RC
 baseline) is `regions::ownership`; the lowerer emits `AdoptRegion{parent, child}`
-for each interior edge (and `FreeRegionGroup` for a rootless co-owned cycle)
-behind `--region-ownership`. Both ops are realized on the **interpreter and the
+for each interior edge (and `FreeRegionGroup` for a rootless co-owned cycle).
+Both ops are realized on the **interpreter and the
 JIT** — the `elle_jit_adopt_region` / `elle_jit_free_region_group` helpers
 (`src/jit/dispatch/region.rs`) mirror the interpreter's `handle_adopt_region` /
 `handle_free_region_group` line-for-line, so the same program reclaims identically
-on either tier; only the MLIR/WASM realization trails (the flag forces those tiers
-off until their structural-arena handling lands). This section is the **runtime
+on either tier; only the MLIR/WASM realization trails (region instructions are
+structural no-ops there until their structural-arena handling lands). This section is the **runtime
 substrate** those emit modes drive — the `RegionStore` primitives, pinned by the
 `regionstore::tests` adoption tests and the cross-tier `runtime::tests::ownership`
 `*_under_jit` pins.

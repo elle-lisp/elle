@@ -166,9 +166,9 @@ unresolvable non-member callee (no site to key the deferred release at) likewise
 
 **All-tier, unconditional.** The merge extends the same `merged_parent` forest the
 builder seed populates and rides the same `merged_root` canonicalization and
-`merged_slots` mint-or-reuse every tier already resolves — so it adds no opcode, no
-JIT helper, and is not gated by `--region-ownership` (it lands on the flag-independent
-`compute_merges` path). Pinned by `regions::tests::merge`
+`merged_slots` mint-or-reuse every tier already resolves — so it adds no opcode and no
+JIT helper: it lands on the `compute_merges` path every compile runs. Pinned by
+`regions::tests::merge`
 (`merge_collapses_mutual_recursion_letrec_closure_cycle` — the mutual SCC + cells collapse
 onto one `merged_root`; `merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle`
 — the same collapse and binding-scope drop for a letrec that is a lambda body;

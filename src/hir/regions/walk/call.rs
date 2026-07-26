@@ -321,6 +321,28 @@ impl RegionInference {
             }
         }
 
+        // A native container element READ that BORROWS (`get`/`first`/`rest`): the value
+        // handed back still lives inside the container passed as arg0 — the funnel
+        // convention — and `call_r` (minted above) is the caller-side placeholder for it.
+        // The dispatch takes the Rule 5 pass-through retain, so under RC the reader holds
+        // its own counted reference and the container needs no lifetime extension; what
+        // that retain cannot cover is ADOPTION, which freezes the member's RC and leaves
+        // it inert. Record `(alias, container)` so the ownership cut refuses to claim a
+        // member this alias may still name, and so the lowerer orders the alias's
+        // page-reading release ahead of the container's where they share a point
+        // (region/adopt.md § "The lifetime obligation the root carries";
+        // `region_container_read_borrow_uaf`). A moves-out REMOVE extracts its element
+        // rather than borrowing it and is excluded (`is_container_read_borrow`).
+        if self.is_container_read_borrow(func) {
+            if let Some(container_regions) = arg_regions.first() {
+                for &container in container_regions {
+                    if container != call_r {
+                        self.counted_read_aliases.push((hir.id, call_r, container));
+                    }
+                }
+            }
+        }
+
         // A moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) removes a
         // pre-existing heap element from a container and escape-retains it IN-BODY
         // (`arena::pop_with_decref` increfs before releasing the container), and

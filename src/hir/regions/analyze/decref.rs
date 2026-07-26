@@ -186,6 +186,38 @@ pub(super) fn populate_decref_points(
         }
     }
 
+    // Extend each UNCOUNTED-read container's regions' `decref_point` to where the READ's
+    // result is last used. An opcode element read (`%get`/`%first`/`%rest` —
+    // `uncounted_read_sites`) hands back a value that still lives inside the container
+    // and raises no count on it, so the container's lifetime is the borrow's only
+    // protection: its last use is the READER's, not the read's. Anchored at the read, the
+    // container's free-time cascade drops the element's last count and the reader derefs
+    // a freed page. `last_use` at the read site is exactly "where the read's result is
+    // last used" — the binding chain resolves it through a named result, the enclosing
+    // consumer when ANF leaves the read unnamed in operand position, which is the case no
+    // other pass covers (docs/impl/region/rules.md Rule 4, the borrowing node).
+    //
+    // A NATIVE read is absent here on purpose: its dispatch takes the Rule 5 pass-through
+    // retain, so the reader holds its own counted reference and extending the container
+    // would be a pure over-keep. What that retain cannot survive is adoption freezing the
+    // member's RC — handled where that decision is made, in the ownership cut
+    // (`counted_read_aliases`, region/adopt.md § "The lifetime obligation the root
+    // carries"). A moves-out REMOVE is excluded from both: it extracts its element
+    // instead of borrowing it.
+    for (read_id, container_regions) in &info.uncounted_read_sites {
+        let lu = last_use.get(read_id).copied().unwrap_or(*read_id);
+        for &r in container_regions {
+            info.region_data
+                .entry(r)
+                .and_modify(|d| {
+                    if ord(lu) > ord(d.decref_point) {
+                        d.decref_point = lu;
+                    }
+                })
+                .or_insert(RegionData { decref_point: lu });
+        }
+    }
+
     // Extend each returned value's region `decref_point` to its `Return`
     // node. The lowerer emits the node's `IncrefValueRegion` before the
     // node's own `emit_decrefs_for`; pinning `decref_point` here guarantees a

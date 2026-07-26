@@ -1,41 +1,42 @@
 (elle/epoch 12)
 # tests/integration/fixtures/region-container-read-escape-uaf.lisp
 #
-# Quarantined here — NOT under tests/elle/ — because it SIGSEGVs under
+# Quarantined here — NOT under tests/elle/ — because a regression SIGSEGVs under
 # --trace=guardfree, and `make smoke` globs tests/elle/*.lisp into one shared
 # process where a segfault would take the whole harness down. Exercised by the
 # guardfree subprocess pin in tests/integration/elle_scripts.rs
-# (`region_container_read_escape_uaf`), #[ignore]'d RED until the over-free is fixed.
+# (`region_container_read_escape_uaf`).
 #
-# WHAT IT REPRODUCES — an unsound ownership ADOPTION when a heap element is READ
-# out of a LOCAL OWNED container and the read result ESCAPES.
+# WHAT IT GUARDS — the container-read ESCAPE face: a heap element READ out of a
+# LOCAL OWNED container whose read result then ESCAPES.
 #   `(%array-push a (list 1 2))` on a local `@[]` the ownership forest made Owned
 #   emits an `AdoptRegion` moving the list into `a`'s Owned subtree (the list is
 #   proven interior to `a`). But `(first a)` READS the list back out and the result
-#   is RETURNED — so the list ALSO escapes. The forest never saw that escape (the
-#   read result is a fresh value-flow node not linked back to the pushed list), so it
-#   adopted the list anyway. `a`'s scope-exit subtree drop then frees the list while
-#   the returned Value still points into it, and a later deref of the recycled page
-#   faults (state-dependent — it lands once region ids recycle, so the fixture primes
-#   id churn first).
+#   is RETURNED — so the list ALSO escapes. Escape propagates through the read
+#   (`analyze_escape`'s read-result → container-contents edge, docs/impl/escape.md):
+#   an escaping element-read marks the container's stored contents escaping, so the
+#   forest refuses to adopt them and the RC path keeps the element live across the
+#   caller's read. Without that edge `a`'s scope-exit subtree drop frees the list
+#   under the returned Value, and a later deref of the recycled page faults
+#   (state-dependent — it lands once region ids recycle, so the fixture primes id
+#   churn first).
 #
-# DISTINCT FROM `region-pop-tail-moves-out-uaf` (which is FIXED). `%pop` REMOVES the
-# element, so its funnel EXTRACTS it from the container's subtree
-# (`extract_owned_region`). A READ (`first`/`get`/`rest`) borrows — the element STAYS
-# in the container — so the fix is not an extract; it is that escape must propagate
-# through a container READ: when a read result escapes, the container's stored
-# contents escape and must not be adopted. This is the general container-read-escape
-# case; `%pop` was only one instance of it.
+# DISTINCT FROM `region-pop-tail-moves-out-uaf`. `%pop` REMOVES the element, so its
+# funnel EXTRACTS it from the container's subtree (`extract_owned_region`). A READ
+# (`first`/`get`/`rest`) borrows — the element STAYS in the container — so the fix is
+# not an extract; it is escape propagating through the read.
 #
-# THE TRIGGER IS THE RAW `%array-push`. The stdlib `push` WRAPPER is guardfree-clean:
-# the container flows through the wrapper as an opaque param, so the forest does not
-# adopt its contents. Hand-written raw `%array-push` inline is what emits the
-# (here unsound) `AdoptRegion`; the read may be the stdlib `first` and it still
-# faults, because the adoption already happened at the raw push.
+# DISTINCT FROM `region-container-read-borrow-uaf`, the LOCAL face of the same
+# borrow: there the read result never escapes, it is merely used AFTER the
+# container's own last mention, and what covers it is the container's lifetime
+# (a borrowing read extends the container's decref_point to the reader — Rule 4)
+# plus the release order at the shared point. Here the value leaves the activation
+# entirely, which no lifetime inside it can bound, so the answer is refusal.
 #
-# WHEN FIXED — escape marks the read-out-and-returned element escaping, the forest
-# refuses to adopt it, and the ordinary RC path keeps it alive across the caller's
-# read; this exits 0 under guardfree — un-#[ignore] the pin then.
+# The raw `%array-push` and the stdlib `push` wrapper reach the same adopt (the
+# wrapper monomorphizes to the raw funnel cross-unit), so both forms exercise this;
+# the raw form is written here because it needs no wrapper inlining to be the shape
+# under test.
 
 (defn stmt-run [thunk]
   (fn [b]

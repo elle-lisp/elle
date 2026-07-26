@@ -88,6 +88,13 @@ pub(in crate::hir::regions) struct AdoptEdges {
 ///    activation cut (`compute_activation_adopts` — owner = activation), and only a shape
 ///    that cut also refuses stays Shared. The check is against the root
 ///    only: every member — at any depth — frees simultaneously at the root's drop.
+///    The obligation covers one more deref the members' own points do not name: a value
+///    read back OUT of the subtree by a native `get`/`first`/`rest`
+///    (`RegionInfo::counted_read_aliases`). Its region is a fresh call-result placeholder
+///    related to no member, and its Rule 5 pass-through retain — which is what makes the
+///    read safe under RC — goes inert once adoption freezes the member. So the root's
+///    drop must post-dominate the ALIAS's release too, else the subtree refuses to
+///    Shared, where the retain is live again.
 /// 2. **No merge overlap**: a subtree touching any builder-idiom MERGE participant is
 ///    skipped — MERGE collapses those to one region; adopting them too would link a
 ///    region that no longer exists independently. The two emit modes never both fire
@@ -375,6 +382,46 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
                 || obligation_lu(m)
                     .is_some_and(|lu| pd.drop_post_dominates(root_dp_id, lu, EmitMode::Adopt))
         }) {
+            continue;
+        }
+        // The same obligation over the values read back OUT of this subtree. A native
+        // container read (`get`/`first`/`rest` — `counted_read_aliases`) hands the reader
+        // a value that still lives inside the container, under a **counted** pass-through
+        // retain (Rule 5) the RC baseline honours — but adoption FREEZES the member's RC,
+        // so that retain buys nothing and the root's drop reclaims the element under the
+        // reader (whose own value-resolved release then faults on the freed page). The
+        // alias's region is a fresh call-result placeholder no containment edge relates to
+        // any member, so nothing above sees it: check it here. A read whose alias the
+        // root's drop does not post-dominate refuses the subtree to Shared, where the
+        // retain is live again (region/adopt.md § "The lifetime obligation the root
+        // carries"; `region_container_read_borrow_uaf`).
+        //
+        // Aliasing is TRANSITIVE: reading out of an alias reaches deeper into the same
+        // subtree (`(get (get c 0) 0)` names a value inside a member of a member), and
+        // the inner alias's own bound says nothing about the outer one's. Close the read
+        // edges over the member set to a fixpoint — bounded by the alias count, since
+        // each round adds at least one region — so every value reachable from the subtree
+        // through any chain of reads is bound by the root's drop.
+        let mut reachable: FxHashSet<Region> = members.clone();
+        // Each alias's own release point — `None` where none is recorded, which bounds
+        // nothing and so refuses, exactly as an unbounded member does.
+        let mut alias_dps: Vec<Option<HirId>> = Vec::new();
+        loop {
+            let mut grew = false;
+            for &(_, alias, container) in &info.counted_read_aliases {
+                if reachable.contains(&container) && reachable.insert(alias) {
+                    grew = true;
+                    alias_dps.push(info.region_data.get(&alias).map(|d| d.decref_point));
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        if !alias_dps
+            .iter()
+            .all(|dp| dp.is_some_and(|lu| pd.drop_post_dominates(root_dp_id, lu, EmitMode::Adopt)))
+        {
             continue;
         }
         // The admitted shape's numeric shadow: post-domination implies the member's

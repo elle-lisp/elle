@@ -467,6 +467,54 @@ fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
 }
 
 #[test]
+fn container_read_alias_release_precedes_container_in_shared_bucket() {
+    // A container element READ hands back a value that still lives inside the container,
+    // and its release is value-resolved: `DecrefValueRegion` reads the value's own page
+    // to find the runtime region. The borrowing-read lifetime pin (region/rules.md Rule 4)
+    // extends the container's release to the reader, which lands both releases on ONE
+    // `decref_point` — so the intra-bucket order is what keeps the reader's page-reading
+    // release ahead of the container's demise. Inverted, the container's release frees (or
+    // subtree-drops) the page the alias's decref then reads — the subtree-drop face of
+    // `region_container_read_borrow_uaf`.
+    //
+    // The alias → container edges ride `counted_read_aliases` into the same topological
+    // sort as the adopt edges; the id-only tie-break cannot be relied on here (the alias is
+    // minted after its container, so it sorts LAST among equal-class regions). The shape
+    // hands the read's result AND the container to one consumer, which is what lands both
+    // releases on that consumer's node — the coincident case where only the order decides.
+    let (lowerer, hir) = make_lowerer(
+        "(let [c (@array) r (string \"s\")] \
+           (begin (%array-push c r) ((fn [a b] 1) (get c 0) c)))",
+    );
+    let info = &lowerer.region_info;
+    let mut saw_shared = false;
+    for &(_site, alias, container) in &info.counted_read_aliases {
+        for regions in lowerer.decrefs_by_decref_point.values() {
+            let ai = regions.iter().position(|r| *r == alias);
+            let ci = regions.iter().position(|r| *r == container);
+            if let (Some(ai), Some(ci)) = (ai, ci) {
+                saw_shared = true;
+                assert!(
+                    ai < ci,
+                    "the read alias r{} is released AFTER the container r{} it reads \
+                     out of, in a shared decref bucket ({regions:?}) — the container's \
+                     release tears the page the alias's DecrefValueRegion then reads",
+                    alias.0,
+                    container.0,
+                );
+            }
+        }
+    }
+    assert!(
+        saw_shared,
+        "expected the read alias and its container to share a decref_point bucket (the \
+         coincident case the borrow pin creates) — if region analysis changed, update the \
+         shape so this test keeps biting (hir @{})",
+        hir.id.0,
+    );
+}
+
+#[test]
 fn nested_adopt_members_release_innermost_first() {
     // A store/capture-adopted member's own `DecrefRegion` is an `Owned` no-op only
     // while the member is still `Owned`; once its owner's subtree drop reclaims it,

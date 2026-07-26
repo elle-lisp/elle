@@ -26,8 +26,8 @@ back twice — leaves it owned by its **first** adopter (whose release post-domi
 hand-off's use, every consumer being gated to discard) instead of tripping the one-owner
 adopt assert. The compiler-paired `AdoptRegion` sites keep the strict assert — their
 inference claims each member exactly once; only this consumer-facing channel absorbs
-re-delivery. Its production consumers, under `--region-ownership`, are the
-capture-back-edge cut and the transferred-returned-subtree cut (both below).
+re-delivery. Its production consumers are the capture-back-edge cut and the
+transferred-returned-subtree cut (both below).
 
 **The capture-back-edge SCC — owner = activation.** The one containment-graph shape neither
 region-rooted mode can own is the **capture-back-edge cycle**: a container captured by a
