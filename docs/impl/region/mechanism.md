@@ -200,6 +200,12 @@ site. On a path that did not run the break, the value-route reloads a slot that
 still holds `nil` and the release no-ops — the same nil-stamp discipline the
 branch-union release relies on.
 
+Pinned here: `tests/elle/region-break-transfer.lisp` (the reclamation), the
+`break-value*` probes in `tests/elle/oracle.lisp` (the rates),
+`regions::tests::blocks` (the placement, structurally), and
+`region-break-transfer-uaf.lisp` (the soundness complement — a value broken out
+and read afterwards, stored, or returned must survive).
+
 ### A break out of a TAIL block carries the return mint
 
 The pin above places the release at the block's exit label. When the block is the
@@ -230,14 +236,67 @@ mint count per break, with the interior-block control) and behaviourally
 (`region-break-transfer-uaf.lisp`'s tail-loop witnesses, whose faulting shape is
 `lib/tls.lisp`'s `tls/read`).
 
-A region allocated inside the body whose value is *not* the one broken out —
-its `decref_point` sits between the break site and the block exit — is still
-skipped on the break path; that residue is measured by the `break-skipped`
-probe in `tests/elle/oracle.lisp`. Pinned here:
-`tests/elle/region-break-transfer.lisp` (the reclamation), the `break-value*`
-probes (the rates), `regions::tests::blocks` (the placement, structurally), and
-`region-break-transfer-uaf.lisp` (the soundness complement — a value broken out
-and read afterwards, stored, or returned must survive).
+### A release the break jumps over is not a release
+
+The transfer covers the value the break *carries*. Every **other** region whose
+release sits in the same window — inside the block's body, at or after the break
+site, before the exit label — is jumped over by the identical edge, and for a
+region the break does not carry there is no consumer to hand it to: the release
+is emitted into unreachable code and the region is held to fiber teardown.
+`(block (let [x (mk)] (when c (break 1)) (use x)))` strands `x` on every
+execution that breaks.
+
+The close is the same pin, not a release at the break site. A per-path release
+at the break would need a site-list of what to free there *and* a count argument
+for each entry; the placement argument alone suffices, because a release moved
+**later** can only over-keep. So a region whose `decref_point` falls in the
+skipped window is re-anchored to `last_use[block]` — the first point both the
+break path and the fall-through path reach, and the same anchor the broken value
+takes. Carried and skipped regions then leave the block through one release
+each, and the lowerer still needs no new instruction and no new site-list.
+
+"Skipped" is read off the structural order (`compute_order`, the same index
+every `decref_point` comparison uses): a node's releases are passed over by a
+break exactly when its post-order index is **at or above** the break's — which
+covers the break node itself (its own decrefs land in the dead block after the
+jump) and every enclosing `let`/`begin` whose releases the lowerer emits after
+the body.
+
+Three boundaries bound the window. Two are about *how many times* a release runs
+rather than where:
+
+- **An iterative scope nested in the block** (`While`/`Loop`). A value allocated
+  in a loop body is re-allocated per iteration, so its release must stay
+  per-iteration: hoisting it to the block's exit would leave one release for N
+  allocations — a worse leak than the one being closed, and the same
+  re-allocation argument the `capture_loop_ext` "bound outside" guard makes. A
+  break out of a loop therefore still strands the *breaking iteration's* regions,
+  an over-keep bounded by one iteration.
+- **A `Lambda` nested in the block.** Its body's releases run in a different
+  activation, against a different frame's slots; the enclosing block's exit label
+  is not a point that activation ever reaches.
+
+The third guards the anchor itself — the hoist's premise is that the exit label
+is a point every path **reaches**:
+
+- **A frame-replacing exit in the body** (a `Return`, or a `Call` in tail
+  position, lowered as `TailCall`). That path leaves through the callee instead
+  of arriving at the exit label, so a release moved to the anchor would be dead
+  on exactly the path that used to run it — one leak traded for another. Such a
+  block declines the window whole. This is the `(fn … (forever … (break v)))`
+  tail-block idiom, where the broken value's own pin still applies (it is the
+  *returned* value, and its release is the one the return mint funds) but the
+  window's does not.
+
+All three leave the conservative baseline (the release stays where it is,
+skipped on the break path), never a mis-free.
+
+Pinned by `tests/elle/region-break-skip.lisp` (the reclamation, with all three
+boundaries driven as rows that must stay bounded on their own releases),
+`regions::tests::blocks` (the placement and the boundaries, structurally), and
+`tests/elle/region-break-skip-uaf.lisp` (the soundness complement — a value in
+the window that is read, stored, or returned after the block must survive the
+moved release).
 
 ## Compile-time region selection (coalescing)
 

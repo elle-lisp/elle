@@ -62,36 +62,21 @@ impl<'a> Lowerer<'a> {
         Ok(result_reg)
     }
 
-    pub(super) fn lower_block(
-        &mut self,
-        block_id: &BlockId,
-        body: &[Hir],
-        hir_id: HirId,
-    ) -> Result<Reg, String> {
+    /// A `block` needs no scope region of its own: nothing is stamped with it,
+    /// and every region the block's control flow affects is anchored on the
+    /// `Block` node by the solver's `decref_point`, released by `lower_expr`
+    /// after this function returns (hence after the exit label).
+    pub(super) fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let region_id = if self.region_scope_check(hir_id) {
-            self.scope_region_id(hir_id)
-        } else {
-            None
-        };
-
-        // Record active_region_ids depth before the block so breaks
-        // can emit FreeRegion for regions entered since.
-        let region_stack_depth = self.active_region_ids.len();
-
-        if let Some(rid) = region_id {
-            self.active_region_ids.push(rid);
-        }
 
         self.block_lower_contexts.push(BlockLowerContext {
             block_id: *block_id,
             result_reg,
             result_slot: block_result_slot,
             exit_label,
-            region_depth_at_entry: region_stack_depth as u32,
         });
 
         // Lower body
@@ -115,17 +100,14 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.pop();
 
-        // Region-demise DecrefRegion is emitted by `lower_expr` at each
-        // region's `decref_point` HirId — for a value a `break` carried out,
-        // that point is this Block node or later, so its release lands after
-        // the exit label below and fires on both paths
-        // (docs/impl/region/mechanism.md § "`break` transfers its value").
-        // This function emits none; it only keeps the active_region_ids
-        // bookkeeping a per-path release of the break-skipped regions would
-        // walk.
-        if region_id.is_some() {
-            self.active_region_ids.pop();
-        }
+        // Region-demise DecrefRegion is emitted by `lower_expr` at each region's
+        // `decref_point` HirId — and every region a `break` affects has this
+        // Block node or later as that point: the value it carried out
+        // (docs/impl/region/mechanism.md § "`break` transfers its value") and
+        // every release its jump passed over (§ "A release the break jumps over
+        // is not a release"). Both therefore land after the exit label below and
+        // fire on both paths, so this function emits no region instruction of
+        // its own.
 
         // Normal exit: jump to the exit label
         self.terminate(Terminator::Jump(exit_label));

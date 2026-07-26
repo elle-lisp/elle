@@ -30,7 +30,7 @@ Does NOT:
 | `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Yield` |
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
-| `BlockLowerContext` | Active block for `break` lowering (block_id, result_reg, exit_label, region_depth_at_entry) |
+| `BlockLowerContext` | Active block for `break` lowering (block_id, result_reg, result_slot, exit_label) |
 
 ## Data flow
 
@@ -156,7 +156,7 @@ The emitter preserves stack state across the yield boundary via `yield_stack_sta
 
 `HirKind::Block` lowers to a result register + exit label pattern:
 1. Allocate `result_reg` and `exit_label`
-2. Push `BlockLowerContext { block_id, result_reg, exit_label, ... }` recording the active region-demise set at entry
+2. Push `BlockLowerContext { block_id, result_reg, result_slot, exit_label }`
 3. Lower body, move result to `result_reg`
 4. Pop context, jump to `exit_label`, start new block at `exit_label`
 
@@ -168,14 +168,16 @@ The emitter preserves stack state across the yield boundary via `yield_stack_sta
 
 No new bytecode instructions — break compiles to existing Move + Jump.
 
-Break emits **no** region instruction of its own. The broken value's release is
-anchored by the analysis where the *block's* value is consumed — at the `Block`
-node itself when nothing consumes it, which the lowerer emits after the exit
-label, so it fires on both the break path and the fall-through path. See
-[docs/impl/region/mechanism.md](../../../docs/impl/region/mechanism.md)
-§ "`break` transfers its value; it does not consume it". Do not add a
-compensating release for the broken value at the break site: it would free the
-value the block is about to hand to its consumer.
+Break emits **no** region instruction of its own, and neither does Block. Every
+region the jump affects is anchored by the analysis where the *block's* value is
+consumed — at the `Block` node itself when nothing consumes it, which the lowerer
+emits after the exit label, so it fires on the break path and the fall-through
+path alike. That covers both faces: the value the break carries out
+([mechanism.md](../../../docs/impl/region/mechanism.md) § "`break` transfers its
+value; it does not consume it") and every *other* release the jump passes over
+(§ "A release the break jumps over is not a release"). Do not add a compensating
+release at the break site — for the broken value it would free what the block is
+about to hand its consumer, and for the rest there is nothing left to free.
 
 ## Key instructions
 
@@ -240,4 +242,4 @@ value the block is about to hand to its consumer.
 - **Not emitting lbox operations**: If a binding needs an lbox, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Missing a region demise**: After lowering each HIR node, iterate `regions_demising_at(hir_id)` and emit one `DecrefRegion(rid)` per region. Forgetting to do so leaks regions.
-- **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. The broken value itself is anchored at the `Block` node by the analysis (see Block/Break lowering above); any *other* region in that window is the measured `break-skipped` residue, not something to patch at the break site
+- **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. Both the broken value and every other region in that window are anchored on the `Block` node by the analysis (see Block/Break lowering above) — never patched at the break site

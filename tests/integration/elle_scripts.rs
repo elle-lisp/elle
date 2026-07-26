@@ -243,6 +243,25 @@ fn region_break_transfer_uaf() {
     );
 }
 
+// Guard — the same jump that strands the broken value strands every OTHER
+// release between the break site and the exit label, and those are re-anchored
+// to the block too (docs/impl/region/mechanism.md § "A release the break jumps
+// over is not a release"). Moving a release later can only over-keep — while it
+// still names the same value when it runs, which is what this drives: a window
+// value read after the block, stored into a container, returned, captured by a
+// closure, and reached across the two scopes the window stops at (a nested loop,
+// whose body re-allocates per iteration, and a nested lambda, whose releases
+// belong to another frame). A release hoisted out of either frees a live region
+// and every read below touches freed pages — SIGSEGV under guardfree. The leak
+// face is `region-break-skip.lisp`.
+#[test]
+fn region_break_skip_uaf() {
+    run_elle_script_with_args(
+        "region-break-skip-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

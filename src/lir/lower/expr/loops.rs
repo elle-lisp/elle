@@ -165,7 +165,6 @@ impl<'a> Lowerer<'a> {
 
         let target_result_slot = target.result_slot;
         let target_exit_label = target.exit_label;
-        let target_region_stack_depth = target.region_depth_at_entry as usize;
 
         let value_reg = self.lower_expr(value)?;
 
@@ -174,20 +173,16 @@ impl<'a> Lowerer<'a> {
             src: value_reg,
         });
 
-        // Break emits no region instruction of its own. The value it carries is
-        // TRANSFERRED to the block, and the solver anchors that value's release
-        // where the block's value is consumed — reached by this jump — rather
-        // than inside the body (docs/impl/region/mechanism.md § "`break`
-        // transfers its value; it does not consume it";
-        // tests/elle/region-break-transfer.lisp). A compensating release here
-        // would free the value the block is about to hand to its consumer.
-        //
-        // The entry depth is carried on the context so a future per-path release
-        // of the regions this jump does skip — those the break does NOT carry
-        // out — can walk the regions entered since (`break-skipped`, the
-        // measured residue in tests/elle/oracle.lisp).
-        let _ = target_region_stack_depth;
-
+        // Break emits no region instruction of its own, on either face. The
+        // value it carries is TRANSFERRED to the block, so its release is
+        // anchored where the block's value is consumed — reached by this jump —
+        // rather than inside the body (docs/impl/region/mechanism.md § "`break`
+        // transfers its value; it does not consume it"); a compensating release
+        // here would free the value the block is about to hand to its consumer.
+        // Every OTHER release this jump passes over is anchored on the block by
+        // the same solver pin (§ "A release the break jumps over is not a
+        // release"), so there is nothing to walk here either. Pinned by
+        // tests/elle/region-break-transfer.lisp and region-break-skip.lisp.
         self.terminate(Terminator::Jump(target_exit_label));
 
         let dead_label = self.fresh_label();

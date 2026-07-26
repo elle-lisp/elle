@@ -152,6 +152,16 @@ impl RegionInference {
                     self.break_sites.push((hir.id, broken.clone()));
                     last.extend(broken);
                 }
+                // The break SITES, drained the same way and for the same reason
+                // the region entry is: the window a break jumps over belongs to
+                // this block alone. Every targeting break is here, whatever it
+                // carries — a `(break 1)` carries no region yet still skips every
+                // release from its own node to the exit label
+                // (docs/impl/region/mechanism.md § "A release the break jumps over
+                // is not a release").
+                if let Some(sites) = self.block_break_nodes.remove(block_id) {
+                    self.break_skip_blocks.push((hir.id, sites));
+                }
                 dedup_regions(&mut last);
                 last
             }
@@ -162,6 +172,13 @@ impl RegionInference {
             // `Block` arm above can union them into its result.
             HirKind::Break { block_id, value } => {
                 let regions = self.walk(value);
+                // Record the site itself before the region filter below: the
+                // skipped-release window is a property of where control leaves,
+                // which every break has, including one carrying no region at all.
+                self.block_break_nodes
+                    .entry(*block_id)
+                    .or_default()
+                    .push(hir.id);
                 // Never a CALLER arg region reached inside an inline re-walk —
                 // the same filter the `Return` arm applies, for the same reason:
                 // `try_inline_call` binds the inlined callee's params to the

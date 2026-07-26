@@ -174,6 +174,20 @@ struct RegionInference {
     /// under every later read of the result. Drained at the `Block` node into
     /// `break_sites`.
     block_break_regions: HashMap<super::expr::BlockId, Vec<Region>>,
+    /// BlockId → the HirId of every `break` targeting that block, in walk order.
+    /// Recorded for EVERY break, valueless and immediate-valued ones included —
+    /// unlike `block_break_regions`, which only sees breaks that carry a region.
+    /// What the post-pass needs from a break is its *position*: the jump to the
+    /// exit label passes over every release from the break site onward, whatever
+    /// the break carries. Drained at the `Block` node into `break_skip_blocks`.
+    block_break_nodes: HashMap<super::expr::BlockId, Vec<HirId>>,
+    /// `Block` node HirId → the HirIds of the breaks targeting it. The post-pass
+    /// re-anchors every region whose `decref_point` falls in the window those
+    /// breaks jump over — from the earliest break site to the exit label — onto
+    /// the block, since a release emitted there never runs on the break path
+    /// (docs/impl/region/mechanism.md § "A release the break jumps over is not a
+    /// release").
+    break_skip_blocks: Vec<(HirId, Vec<HirId>)>,
     /// `Block` node HirId → the regions every targeting `break` hands it. The
     /// dual of `return_sites`: a `Break` is a *transferring* node, so the
     /// post-pass extends each broken region's `decref_point` to where the
@@ -254,6 +268,8 @@ impl RegionInference {
             destructure_sites: Vec::new(),
             block_regions: HashMap::new(),
             block_break_regions: HashMap::new(),
+            block_break_nodes: HashMap::new(),
+            break_skip_blocks: Vec::new(),
             break_sites: Vec::new(),
             next_region: 1, // 0 is the reserved sentinel — never assigned to an allocation
             current_region: Region(0),

@@ -36,9 +36,6 @@ impl<'a> Lowerer<'a> {
         } else {
             None
         };
-        if let Some(rid) = region_id {
-            self.active_region_ids.push(rid);
-        }
         // ANF's canonical wrap of a tail call — `(let [t (f …)] (return t))`,
         // built when the tail call sits in a `begin`/`if`/`cond`/`match` arm —
         // names the result, so `lower_return` mints the caller's reference here
@@ -128,13 +125,6 @@ impl<'a> Lowerer<'a> {
             }
         }
         let result = self.lower_expr(body)?;
-        // Pop region from active stack BEFORE deciding whether to emit
-        // FreeRegion. If the region is still in the stack, an outer scope
-        // also uses it and will emit its own FreeRegion — emitting one here
-        // would double-decref and free the region prematurely.
-        if region_id.is_some() {
-            self.active_region_ids.pop();
-        }
         if tail_scoped {
             self.pending_free_regions.pop();
         }
@@ -155,9 +145,6 @@ impl<'a> Lowerer<'a> {
         } else {
             None
         };
-        if let Some(rid) = region_id {
-            self.active_region_ids.push(rid);
-        }
 
         // First allocate all slots with nil (or cells containing nil)
         for (binding, init) in bindings.iter() {
@@ -347,11 +334,6 @@ impl<'a> Lowerer<'a> {
             }
         }
         let result = self.lower_expr(body)?;
-        // Pop first, then check if region is still in stack (shared with
-        // outer scope). See lower_let for rationale.
-        if region_id.is_some() {
-            self.active_region_ids.pop();
-        }
         if tail_scoped {
             self.pending_free_regions.pop();
         }

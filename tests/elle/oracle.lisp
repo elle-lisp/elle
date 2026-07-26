@@ -236,11 +236,12 @@
 # unmasked once the F1b container over-keep on their shared block-local `@keep`
 # accumulator closed.
 (declare-root :f4 ["recur-local-self-mint"])
-# `break-value`/`break-value-used`/`break-value-lit` are CLOSED controls for the
-# break TRANSFER (undeclared, like `rest-array-copy`), so a regression to open
-# trips the completeness gate loudly instead of being absorbed as F5. What
-# remains open in the break class is `break-skipped` — a region the break jumps
-# over whose value is NOT the one carried out.
+# The whole `break-*` family is CLOSED controls (undeclared, like
+# `rest-array-copy`), so a regression to open trips the completeness gate loudly
+# instead of being absorbed as F5: `break-value*` pin the break TRANSFER (the
+# value the break carries dies where the block's value dies) and `break-skipped`
+# pins the window the jump passes over (every OTHER release between the break
+# site and the exit label is re-anchored to the block).
 # `take`/`drop`/`zip` are CLOSED controls for the per-path return frontier
 # (undeclared, like `rest-array-copy`): all three are `letrec` walks whose base case
 # returns a heap value the recursive arm's `decref_point` was left to release, so a
@@ -249,8 +250,7 @@
 # (undeclared, like `rest-array-copy`); its open twin `match-used-arm` is the
 # residual — a used sibling arm with no retain to fund a per-arm release.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
-                   "fresh-env-cell" "break-skipped" "struct-match"
-                   "match-used-arm"])
+                   "fresh-env-cell" "struct-match" "match-used-arm"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -1518,8 +1518,9 @@
 # ── Discarded call-result + break-escape ──────────────────────────────
 # Direct while-statement run-blocks (no thunk wrapper): the discarded value is a
 # CALL-RESULT (Rule 2's discarded-result release), and a thunk's return
-# convention would reclaim the break-escape the originals leak. break carries a
-# value past the block's decref points (the accepted break-skipped over-keep).
+# convention would reclaim the break-escape on its own, hiding what the break
+# probes below are here to measure — the block, not the enclosing call, is what
+# must anchor a release the break's jump passes over.
 (println "── folded suite: call-result + break ──")
 (pin (measure-core "branch-call"
                    (fn [b]
@@ -1642,12 +1643,15 @@
                        (block (let [x {:a j}]
                                 (break x)))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The OTHER face of the break-skipped over-keep (F5), still open: a region whose
-# value is NOT the one broken out, but whose `decref_point` sits between the
-# break site and the block's exit label. The transfer does not reach it — the
-# release is simply jumped over — so `x` strands whenever the break fires. Its
-# control `break-skipped-nobreak` runs the same body with the break unreachable,
-# isolating the skip from the shape.
+# The OTHER face of the break window, also CLOSED: a region whose value is NOT
+# the one broken out, but whose `decref_point` sits between the break site and
+# the block's exit label. The transfer does not reach it — the release is simply
+# jumped over — so it is re-anchored to the block by the same pin
+# (docs/impl/region/mechanism.md § "A release the break jumps over is not a
+# release"). Its control `break-skipped-nobreak` runs the same body with the
+# break unreachable, isolating the skip from the shape; RED if the window pin
+# regresses. Both boundaries the window stops at — a loop or a lambda nested
+# inside it — are gauged by tests/elle/region-break-skip.lisp, not here.
 (pin (measure-core "break-skipped"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1656,7 +1660,7 @@
                        (block (let [x (t17-h)]
                                 (when (%lt -1 j) (break 1))
                                 (%struct? x)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "break-skipped-nobreak"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

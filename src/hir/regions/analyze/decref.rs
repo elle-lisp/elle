@@ -26,6 +26,7 @@ pub(super) fn populate_decref_points(
     return_sites: &[(HirId, Vec<Region>)],
     destructure_sites: &[(HirId, Vec<Region>)],
     break_sites: &[(HirId, Vec<Region>)],
+    break_skip_blocks: &[(HirId, Vec<HirId>)],
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let last_use = &last_use_info.per_node;
@@ -296,6 +297,145 @@ pub(super) fn populate_decref_points(
                 .or_insert(RegionData { decref_point: lu });
         }
     }
+
+    // Runs LAST: it reads each region's FINAL `decref_point` to decide whether
+    // the break jumps over it, so every extension above must already have landed.
+    pin_break_skipped_releases(info, hir, order, last_use, break_skip_blocks);
+}
+
+/// Re-anchor every release a `break` jumps over onto the block it leaves.
+///
+/// The pin above covers the value the break CARRIES. Every other region whose
+/// release sits in the same window — inside the block's body, at or after the
+/// break site, before the exit label — is passed over by the identical jump, and
+/// has no consumer to be handed to: the release is emitted into unreachable code
+/// and the region is held to fiber teardown. Re-anchoring to `last_use[block]` —
+/// the first point both the break path and the fall-through path reach, the same
+/// anchor the broken value takes — is enough, and needs no release at the break
+/// site: moving a release LATER can only over-keep (docs/impl/region/mechanism.md
+/// § "A release the break jumps over is not a release").
+///
+/// The window is read off the structural order: a node's releases are skipped
+/// exactly when its post-order index is at or above the break's. That covers the
+/// break node itself (`lower_break` terminates with the jump, so its own decrefs
+/// land in the dead block after it) and every enclosing `let`/`begin`, whose
+/// releases the lowerer emits after the body.
+///
+/// Two scopes bound the window, both because a release inside them must run a
+/// different number of times than the block's exit label is reached: a nested
+/// `While`/`Loop` (a loop-body value is re-allocated per iteration, so one
+/// release cannot cover N) and a nested `Lambda` (its releases run in another
+/// activation, against another frame's slots). Inside either, the release stays
+/// where it is — still skipped on the break path, an over-keep bounded by one
+/// iteration / one call, never a mis-free.
+///
+/// A third condition guards the anchor itself: the exit label has to be a point
+/// every path actually **reaches**. A frame-replacing exit inside the body — a
+/// `Return`, or a `Call` in tail position, which the lowerer emits as `TailCall`
+/// — leaves through the callee instead of arriving there, so a release moved to
+/// the anchor would be dead on exactly the path that used to run it (trading one
+/// leak for another). Such a block declines the window whole.
+fn pin_break_skipped_releases(
+    info: &mut RegionInfo,
+    hir: &Hir,
+    order: &HashMap<HirId, u32>,
+    last_use: &HashMap<HirId, HirId>,
+    break_skip_blocks: &[(HirId, Vec<HirId>)],
+) {
+    if break_skip_blocks.is_empty() {
+        return;
+    }
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let low = compute_subtree_low(hir, order);
+    let mut scopes = BreakWindowScopes::default();
+    collect_window_scopes(hir, order, &low, &mut scopes);
+
+    for (block_id, sites) in break_skip_blocks {
+        // The window opens at the EARLIEST targeting break: a release after it is
+        // skipped whenever that break fires, and the pin has to hold for every
+        // path through the block, not just the last one.
+        let Some(first_break) = sites.iter().map(|s| ord(*s)).min() else {
+            continue;
+        };
+        let block_lo = low.get(block_id).copied().unwrap_or(0);
+        let block_hi = ord(*block_id);
+        let anchor = last_use.get(block_id).copied().unwrap_or(*block_id);
+        let anchor_ord = ord(anchor);
+        // Only the barriers nested INSIDE this block matter: one enclosing the
+        // block encloses the anchor too, so it constrains nothing here.
+        let inner: Vec<(u32, u32)> = scopes
+            .barriers
+            .iter()
+            .copied()
+            .filter(|&(lo, hi)| block_lo <= lo && hi < block_hi)
+            .collect();
+        // Does anything in the window leave the frame before the exit label? A
+        // nested lambda's own exits belong to that lambda, not to this block.
+        let lambdas: Vec<(u32, u32)> = scopes
+            .lambdas
+            .iter()
+            .copied()
+            .filter(|&(lo, hi)| block_lo <= lo && hi < block_hi)
+            .collect();
+        if scopes.frame_exits.iter().any(|&e| {
+            e >= first_break && e <= block_hi && !lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
+        }) {
+            continue;
+        }
+        for d in info.region_data.values_mut() {
+            let dord = ord(d.decref_point);
+            // In the body (the block node's own decrefs are already at the
+            // anchor), at or after the break, and not already later than it.
+            if dord < first_break || dord < block_lo || dord >= block_hi || dord >= anchor_ord {
+                continue;
+            }
+            if inner.iter().any(|&(lo, hi)| lo <= dord && dord <= hi) {
+                continue;
+            }
+            d.decref_point = anchor;
+        }
+    }
+}
+
+/// The structural facts `pin_break_skipped_releases` reads off one compilation
+/// unit, all as post-order indices so containment is an interval test.
+#[derive(Default)]
+struct BreakWindowScopes {
+    /// Subtree intervals of the scopes a release may not be hoisted OUT of: an
+    /// iterative scope (`While`/`Loop`, whose body re-allocates per iteration)
+    /// and a `Lambda` (whose body runs in its own activation, against its own
+    /// frame's slots).
+    barriers: Vec<(u32, u32)>,
+    /// Subtree intervals of the `Lambda`s alone — the frame boundary, which says
+    /// whose exits a `frame_exits` entry belongs to.
+    lambdas: Vec<(u32, u32)>,
+    /// Nodes that leave the enclosing frame instead of falling through to it: a
+    /// `Return`, and a `Call` in tail position (lowered as a frame-replacing
+    /// `TailCall`). One in a block's window means the block's exit label is not
+    /// a point every path reaches.
+    frame_exits: Vec<u32>,
+}
+
+/// Collect [`BreakWindowScopes`] over the whole tree in one walk.
+fn collect_window_scopes(
+    hir: &Hir,
+    order: &HashMap<HirId, u32>,
+    low: &HashMap<HirId, u32>,
+    out: &mut BreakWindowScopes,
+) {
+    let lo = low.get(&hir.id).copied().unwrap_or(0);
+    let hi = order.get(&hir.id).copied().unwrap_or(0);
+    match &hir.kind {
+        HirKind::While { .. } | HirKind::Loop { .. } => out.barriers.push((lo, hi)),
+        HirKind::Lambda { .. } => {
+            out.barriers.push((lo, hi));
+            out.lambdas.push((lo, hi));
+        }
+        HirKind::Return { .. } => out.frame_exits.push(hi),
+        HirKind::Call { is_tail: true, .. } => out.frame_exits.push(hi),
+        _ => {}
+    }
+    hir.for_each_child(|c| collect_window_scopes(c, order, low, out));
 }
 
 /// Collect every iterative-scope node (`While` or `Loop` — `while` lowers to

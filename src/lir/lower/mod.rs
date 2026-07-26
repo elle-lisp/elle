@@ -70,17 +70,17 @@ struct LoopLowerContext {
 }
 
 /// Tracks an active block during lowering so `break` can find its
-/// result register and exit label.
+/// result register and exit label. A `break` emits no region instruction of its
+/// own: both the value it carries and every release its jump passes over are
+/// anchored on the BLOCK by the solver, which the lowerer emits after the exit
+/// label (docs/impl/region/mechanism.md § "`break` transfers its value" and
+/// § "A release the break jumps over is not a release").
 struct BlockLowerContext {
     block_id: BlockId,
     #[allow(dead_code)]
     result_reg: Reg,
     result_slot: u16,
     exit_label: Label,
-    /// The `region_depth` at the time this block was entered.
-    /// `break` emits `(current_region_depth - region_depth_at_entry)`
-    /// compensating `DecrefRegion` instructions before jumping to the exit.
-    region_depth_at_entry: u32,
 }
 
 /// Lowers HIR to LIR
@@ -229,9 +229,6 @@ pub struct Lowerer<'a> {
     /// Maps Region(u32) from region inference to u16 index in the
     /// function's region_table. Lazily populated by `alloc_region_id()`.
     region_to_table: HashMap<crate::hir::region::Region, StaticRegion>,
-    /// Stack of active region slots for `DecrefRegion` emission on break.
-    /// Pushed when a scope enters, popped at scope exit.
-    active_region_ids: Vec<StaticRegion>,
     /// For each allocating HIR node's region, the slot of the
     /// binding that names its result. Populated by `lower_let`,
     /// `lower_letrec`, `lower_define`, and other binding sites by
@@ -337,7 +334,6 @@ impl<'a> Lowerer<'a> {
             decrefs_by_decref_point: HashMap::new(),
             current_hir_id: None,
             region_to_table: HashMap::new(),
-            active_region_ids: Vec::new(),
 
             region_to_slot: HashMap::new(),
             reassigned_local_slots: rustc_hash::FxHashSet::default(),

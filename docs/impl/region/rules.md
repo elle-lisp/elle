@@ -92,7 +92,14 @@ is a correctness defect, not a tuning knob.
    point before the frame is handed back, so the broken value is also the
    *returned* value and takes the return mint — including through an enclosing
    `Loop`/`While`, which a `break` jumps past (mechanism.md § "A break out of a
-   TAIL block carries the return mint").
+   TAIL block carries the return mint"). The jump moves the anchor of every
+   *other* region in the same window too: a release the break passes over is
+   emitted into unreachable code, so a `decref_point` at or after a break site
+   and inside its target block is re-anchored to the block's — except across a
+   nested loop or lambda, where the release must keep running once per iteration
+   / once per activation, and except where a frame-replacing exit in the body
+   means the block's own exit label is not a point every path reaches
+   (mechanism.md § "A release the break jumps over is not a release").
    A third class is a *borrowing node*: an **uncounted** container element read —
    the `%get`/`%first`/`%rest` opcodes — hands back a value that still lives
    **inside the container** (its own region for a pair's car, an interior member's

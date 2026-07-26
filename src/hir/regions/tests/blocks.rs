@@ -127,6 +127,186 @@ fn break_value_region_outlives_a_later_read_of_the_block_result() {
     );
 }
 
+// ── the regions the break jumps OVER ─────────────────────────────────
+//
+// The same jump that strands the broken value strands every other release the
+// lowerer placed between the break site and the exit label — those regions have
+// no consumer to be handed to, so they simply never die. They are re-anchored to
+// the same point the broken value takes, `last_use[block]`, which both paths
+// reach. Three boundaries stop the hoist: a nested loop (the value is
+// re-allocated per iteration, so one release cannot cover N), a nested lambda
+// (its releases run in another activation, against another frame's slots), and a
+// frame-replacing exit in the body (which leaves the anchor unreached on the
+// fall-through path).
+// See docs/impl/region/mechanism.md § "A release the break jumps over is not a
+// release".
+
+/// The HirId of the first `While`/`Loop` node, outermost-first.
+fn first_loop(hir: &Hir) -> Option<HirId> {
+    if matches!(&hir.kind, HirKind::While { .. } | HirKind::Loop { .. }) {
+        return Some(hir.id);
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = first_loop(c);
+        }
+    });
+    found
+}
+
+/// The `decref_point` of the region allocated at the first `String` literal.
+fn first_string_decref_point(hir: &Hir, info: &RegionInfo) -> HirId {
+    let s = first_string(hir).expect("a String node");
+    let r = *info
+        .alloc_region
+        .get(&s)
+        .expect("the string literal has an alloc region");
+    info.region_data
+        .get(&r)
+        .expect("the string's region has a decref_point")
+        .decref_point
+}
+
+#[test]
+fn a_release_the_break_jumps_over_is_pinned_to_the_block() {
+    // `x` is NOT the broken value — the break carries `1` — but its release sits
+    // after the break site inside the body, so the jump to the exit label passes
+    // over it and it never runs at all.
+    let (hir, _arena, info) =
+        pipeline("(block (let [x \"s\"] (if (%int? 1) (break 1) nil) (%string? x)))");
+    let block = first_block(&hir).expect("a Block node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) >= ord(block),
+        "skipped region dies at @{} (order {}), inside the block @{} \
+         (order {}) — the break jumps over that release",
+        dp.0,
+        ord(dp),
+        block.0,
+        ord(block),
+    );
+}
+
+#[test]
+fn a_release_before_the_break_site_stays_where_it_is() {
+    // The window opens at the break site: a release the break path has ALREADY
+    // run must not be deferred to the exit label. Promptness, not soundness —
+    // but a pass that hoists the whole body has stopped being a window.
+    let (hir, _arena, info) =
+        pipeline("(block (let [x \"s\"] (%string? x)) (if (%int? 1) (break 1) nil) 0)");
+    let block = first_block(&hir).expect("a Block node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) < ord(block),
+        "region used entirely before the break dies at @{} (order {}), at or \
+         after the block @{} (order {}) — its release already ran on both paths",
+        dp.0,
+        ord(dp),
+        block.0,
+        ord(block),
+    );
+}
+
+#[test]
+fn a_block_with_no_break_leaves_its_releases_in_the_body() {
+    // The control for the pin above: with no break there is no jump and no
+    // window, so nothing moves.
+    let (hir, _arena, info) = pipeline("(block (let [x \"s\"] (%string? x)) 0)");
+    let block = first_block(&hir).expect("a Block node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) < ord(block),
+        "region in a break-free block dies at @{} (order {}), at or after the \
+         block @{} (order {}) — nothing jumps over its release",
+        dp.0,
+        ord(dp),
+        block.0,
+        ord(block),
+    );
+}
+
+#[test]
+fn a_loop_nested_in_the_block_keeps_its_per_iteration_release() {
+    // The value is re-allocated per iteration, so hoisting its release to the
+    // block's exit label would leave ONE release for N allocations — a worse
+    // leak than the skip. The window stops at the loop.
+    let (hir, _arena, info) = pipeline(
+        "(block (if (%int? 1) (break 1) nil) \
+           (while (%int? 0) (let [x \"s\"] (%string? x))) 0)",
+    );
+    let loop_id = first_loop(&hir).expect("a While node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) <= ord(loop_id),
+        "loop-body region dies at @{} (order {}), past the loop @{} \
+         (order {}) — one release cannot cover a per-iteration allocation",
+        dp.0,
+        ord(dp),
+        loop_id.0,
+        ord(loop_id),
+    );
+}
+
+#[test]
+fn a_lambda_nested_in_the_block_keeps_its_own_activations_release() {
+    // The lambda body's releases run in a different activation against a
+    // different frame's slots; the enclosing block's exit label is not a point
+    // that activation reaches.
+    let (hir, _arena, info) = pipeline(
+        "(block (if (%int? 1) (break 1) nil) \
+           (let [f (fn [] (let [x \"s\"] (%string? x)))] (f)))",
+    );
+    let block = first_block(&hir).expect("a Block node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) < ord(block),
+        "lambda-body region dies at @{} (order {}), at or after the enclosing \
+         block @{} (order {}) — that release belongs to the closure's frame",
+        dp.0,
+        ord(dp),
+        block.0,
+        ord(block),
+    );
+}
+
+#[test]
+fn a_frame_replacing_exit_in_the_body_refuses_the_window() {
+    // The hoist's premise is that the block's exit label is a point EVERY path
+    // reaches. A tail call in the body replaces the frame, so the fall-through
+    // path leaves through the callee instead of arriving at the exit label — a
+    // release moved there would be dead on exactly the path that used to run it.
+    let (hir, _arena, info) = pipeline(
+        "(defn g [n] n) \
+         (defn h [n] (block (if (%int? 1) (break 1) nil) \
+                        (let [x \"s\"] (%string? x)) \
+                        (g n)))",
+    );
+    let block = first_block(&hir).expect("a Block node");
+    let dp = first_string_decref_point(&hir, &info);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    assert!(
+        ord(dp) < ord(block),
+        "region in a body that tail-calls dies at @{} (order {}), at or after \
+         the block @{} (order {}) — the frame is gone before the exit label",
+        dp.0,
+        ord(dp),
+        block.0,
+        ord(block),
+    );
+}
+
 #[test]
 fn break_through_a_branch_anchors_both_arms_at_the_block() {
     // The floor travels with the value through the tail-transparent forms: an
