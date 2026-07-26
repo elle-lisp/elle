@@ -289,10 +289,8 @@
   "Take the first n elements of a list."
   # first/rest walk that STOPS after n (never materializes the whole coll), so
   # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
-  # would dissolve the trailing `reverse`'s scratch but forces the entire input —
-  # an O(length) regression for the take-a-prefix idiom that dwarfs the ~1/op
-  # leak it saved. The reverse-scratch over-keep is small and closes with the F5
-  # arg-retain compiler fix (the `%pair` inline store), not a stdlib rewrite.
+  # trades that for materializing the entire input — an O(length) regression for
+  # the take-a-prefix idiom, measured 4× slower on a 40 000-element list.
   (when (not (integer? n))
     (error {:error :type-error
             :message (string "take: expected integer, got " (type n))}))

@@ -84,6 +84,52 @@ over Fresh / Funnel / pass-through natives) and `region-native-tail-return-uaf.l
 / `region-hof-tail-return-uaf.lisp` (the soundness complement — the anonymous
 path must keep its retain).
 
+## The return frontier is per-path
+
+The mint above is what makes a returned region "the caller's to free", and that is
+why branch compensation excludes a return-escaping region: compensating one would
+release a reference the caller now holds.
+
+The exclusion is a property of a **path**, not of the region. Escape answers *can
+this value reach a return* — true of the whole region the moment **one** path
+returns it. Take the path that does not: the sibling arm of the branch whose other
+arm returns the value. No mint fired there, so the caller holds nothing, and the
+callee's own reference is the only reference in existence. Nothing releases it —
+the region's single `decref_point` sits in the returning arm, and the return
+frontier is covering a hand-over that did not happen. The region is held to fiber
+teardown, and with it every member its free cascade would have reclaimed, so the
+per-call cost is the whole subtree.
+
+A return-escaping region is therefore admitted to **head** compensation
+(`regions/compensate.rs`) on a sibling arm that has no use of it. The premises
+ordinary compensation already establishes carry the soundness whole:
+
+- the region's `decref_point` is inside another arm, so its last use is inside the
+  branch — nothing uses it afterwards, hence no mint for it fires after the branch
+  either;
+- this sibling arm contains no use of it, so no mint fires on this path;
+- arms are mutually exclusive, so the head release and the `decref_point` release
+  can never both run.
+
+The dual case is an arm that carries the value out while the `decref_point` sits in
+a *sibling* arm — `(if c xs (go … xs))`, where the recursive arm's later use wins
+the `decref_point` max and the base case is left with a mint and no release. That
+arm is a **used** sibling arm, so it takes the `tail` route, admitted by the same
+same-node retain guard the store / `-mut`-container compensations carry: its release
+node is the `Return` itself, and `lower_return`'s mint (emitted before the node's
+releases) is what guarantees the per-arm decref drops the callee's own reference and
+never the caller's. This is the shape every base case of a `letrec` walk over a heap
+argument has — `(letrec [go (fn [i xs] (if (= i 0) xs (go (- i 1) (rest xs))))] …)`
+strands its whole input list per call without it.
+
+Nested branches inside such an arm are covered only where the `decref_point` arm is
+a sibling of the arm holding the return: an inner branch whose own arms straddle the
+hand-over keeps the conservative baseline. That residual is a leak, never an
+over-free.
+
+Pinned by `tests/elle/region-return-arm-escape-leak.lisp` (both faces: the
+non-returning arm is bounded, and the returned value survives its caller's use).
+
 ## `break` transfers its value; it does not consume it
 
 A `Return` hands a value across a *function* frontier. A `break` is the

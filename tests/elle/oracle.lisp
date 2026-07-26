@@ -241,9 +241,12 @@
 # trips the completeness gate loudly instead of being absorbed as F5. What
 # remains open in the break class is `break-skipped` — a region the break jumps
 # over whose value is NOT the one carried out.
+# `take`/`drop`/`zip` are CLOSED controls for the per-path return frontier
+# (undeclared, like `rest-array-copy`): all three are `letrec` walks whose base case
+# returns a heap value the recursive arm's `decref_point` was left to release, so a
+# regression must trip the completeness gate rather than be absorbed as an F5 strand.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
-                   "fresh-env-cell" "break-skipped" "struct-match" "take" "drop"
-                   "zip"])
+                   "fresh-env-cell" "break-skipped" "struct-match"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -529,13 +532,13 @@
    # zip's F1a copy-scratch is dissolved: the `tuple-at`/output closures that
    # CAPTURED the mutable `arrs`/`out` (a stored closure over a mutable container
    # strands its region) are now cell-free top-level drivers threading them as
-   # params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`). The residual 4 was
-   # attributed to the cons-store gap, but the cons-store fix (`handle_list`,
-   # vm/data.rs) left it UNCHANGED: `(zip [1 2] [3 4])`'s tuples hold the input
-   # arrays' immediate INTEGERS (no region), so no cross-region containment incref
-   # ever fires. It is a distinct still-open strand — the intermediate
-   # `->array`-of-columns and the tuple/output structure — awaiting analysis.
-   ["zip" (fn [j] (zip [1 2] [3 4])) 4] ["sort" (fn [j] (sort [3 1 2])) 0]
+   # params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`). What remained was
+   # the per-path return frontier (docs/impl/region/mechanism.md § "The return
+   # frontier is per-path"): every one of those drivers is a walk whose base case
+   # returns a heap argument while the recursive arm holds the `decref_point`, so
+   # each call stranded the argument it handed back. A CLOSED control now,
+   # undeclared like `rest-array-copy` so a regression trips the completeness gate.
+   ["zip" (fn [j] (zip [1 2] [3 4])) 0] ["sort" (fn [j] (sort [3 1 2])) 0]
    ["reverse" (fn [j] (reverse [1 2 3])) 1]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
@@ -548,19 +551,16 @@
    # tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
    ["distinct" (fn [j] (distinct [1 2 1 3])) 2]
-   # `take`/`drop` were one `take-drop` composite, split into two distinct F5
-   # residuals. `take` is a first/rest walk building an accumulator BACKWARD then
-   # `(reverse acc)`. The cons-store double-incref (the `arg-result` mechanism)
-   # accounted for 1/op — each `(pair (first xs) acc)` over-increfed the prior
-   # accumulator head's region — and closed with the `handle_list` fix, dropping
-   # this 3→2. The residual 2 is the reverse-scratch: the `n` backward cons cells
-   # plus the reversal pass. A `(->array coll)` index-walk dissolves it but forces
-   # the whole input O(length) — an unacceptable regression for the take-a-prefix
-   # idiom (reverted), so this stays 2 until an in-place prefix walk lands.
-   # `drop` strands its returned input list even at n=0 (a plain `(fn [c] c)`
-   # strands 0) — the F5 arg-return pass-through, unaffected by the cons-store fix.
-   ["take" (fn [j] (take 2 (list 1 2 3))) 2]
-   ["drop" (fn [j] (drop 1 (list 1 2 3))) 3]
+   # `take`/`drop` are CLOSED controls for the PER-PATH return frontier
+   # (docs/impl/region/mechanism.md § "The return frontier is per-path";
+   # tests/elle/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
+   # base case returns a heap value while the recursive arm holds its
+   # `decref_point`, so the returning arm carried a return mint and no release and
+   # each call stranded what it handed back — `drop` its whole input list even at
+   # n=0, `take` its reverse-scratch. Undeclared, like `rest-array-copy`: a
+   # regression to open must trip the completeness gate loudly.
+   ["take" (fn [j] (take 2 (list 1 2 3))) 0]
+   ["drop" (fn [j] (drop 1 (list 1 2 3))) 0]
    ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 4]
    ["frequencies" (fn [j] (frequencies [1 2 1 3])) 2]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]

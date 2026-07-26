@@ -152,6 +152,7 @@ pub fn analyze_regions_with(
         arena,
         &order,
         last_use,
+        &return_sites,
     );
     info.branch_compensation = branch_comp.head;
     info.branch_arm_decrefs = branch_comp.tail;

@@ -125,7 +125,12 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     capture refusal is a *reachability* question the region forest answers from its own
     capture-graph, never the lexical proxy `is_captured` the solver is locked out of;
   - branch **compensation**'s escaping-exclusion (the return frontier — those
-    regions are the caller's to free, so compensating them would double-free);
+    regions are the caller's to free, so compensating them would double-free). The
+    exclusion is **per-path**: escape marks the whole region returnable as soon as
+    one path returns it, but on a sibling arm that never uses the value no mint
+    fires and the caller receives nothing, so that arm still owes the release
+    ([region/mechanism.md](region/mechanism.md) § "The return frontier is
+    per-path");
   - the reassign 1-slot-container gate's *not-returned* check
     (`binding_escapes_via_return`, per binding —
     [region/bindings.md](region/bindings.md); read per binding, never by projecting

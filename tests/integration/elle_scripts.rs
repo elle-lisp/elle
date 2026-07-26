@@ -701,6 +701,25 @@ fn region_fiber_exhume_uaf() {
     );
 }
 
+// Guard — the per-path return frontier (docs/impl/region/mechanism.md § "The return
+// frontier is per-path"). A returned region is the caller's to free only on the
+// paths that hand it over; a branch arm that leaves without it, or one that leaves
+// WITH it while a sibling arm holds the `decref_point`, still owes the callee-side
+// release. Both compensations are RC-neutral only if they land on the right path:
+// the dead-arm head release must not fire where the mint did, and the returning
+// arm's release must follow its mint. Getting either wrong frees the value under
+// the caller's read — silent on the plain tiers once the page recycles, a
+// deterministic fault here. The file drives both arms of every shape past a priming
+// loop and reads the result each time, so an over-free is loud and the leak face is
+// pinned by the same region-count deltas. Full mechanism in the file header.
+#[test]
+fn region_return_arm_escape_uaf() {
+    run_elle_script_with_args(
+        "region-return-arm-escape-leak",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — park/unpark symmetry for fiber suspension (docs/impl/region/owner.md
 // § "Park/unpark symmetry"): a parked-then-dropped / drained / cancelled /
 // aborted / denied fiber reclaims its region and parked state, the nested

@@ -26,6 +26,7 @@ mod basics;
 mod blocks;
 mod borrow;
 mod cells;
+mod compensate;
 mod effects;
 mod emit;
 mod escape;
