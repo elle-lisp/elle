@@ -119,6 +119,43 @@ solver must verify both before applying the model:
   for drop-on-overwrite/teardown. Two static owners of one reference is a
   double-free.
 
+**A loop parameter's init source is not a second holder.** `sole_held` counts
+distinct *bindings*, and functionalization gives a cell carried across a loop a
+second binding for one source name: the `while` becomes a `Loop` whose parameter
+is a fresh version of the binding, initialized from the pre-loop version
+(`(loop [last#1 last#0] …)`), with every read after the loop resolving to the
+parameter. Counting names, the init region reads as two-holder and the gate
+refuses any loop-carried cell whose init is a heap value — while a `nil` init,
+carrying no region at all, passes.
+
+The count argument says the pair holds **one** reference, not two. A plain `Var`
+read mints nothing, so the loop's init edge *forwards* the reference the pre-loop
+version held rather than adding one, and that version is dead from the loop's
+entry. Admitting the cell puts the init region in `suppressed_decref_regions`,
+which is keyed by *region*, so it cancels both names' ordinary decrefs together —
+leaving exactly one release channel (drop-on-overwrite for a displaced init, the
+content drop for one never displaced) against exactly one reference. So a holder
+that is the binding's own loop-init source does not count as an alias of it.
+
+The exclusion is that edge and nothing wider, on both sides:
+
+- It is **refused when the init source is itself a reassigned binding** — the
+  second of two loops over one cell, `(loop [last#2 last#1] …)` following
+  `(loop [last#1 last#0] …)`. There `last#1` carries a cell of its own whose
+  content drop is a release channel the region-keyed suppression does not cancel,
+  so excluding it would put two channels against one reference. Requiring the
+  source to carry no cell keeps the "one reference, one channel" accounting
+  true by construction rather than by coincidence.
+- A **genuine alias** — a *different* source name bound to the same value,
+  `(var keep last)` — is not a forwarding edge and keeps refusing, which it must:
+  the region-keyed suppression would cancel that name's own decref while it still
+  holds the value.
+
+Module scope never reaches this edge: a top-level reassigned mutable compiles to
+a capture cell, and functionalization does not promote a capture cell to a loop
+parameter (its RC lives in the cell-update opcode — see "Captured reassigned
+cells" below).
+
 Runtime-counted escapes do **not** refuse the gate, deliberately: a store
 into another container (the push/put funnel increfs at runtime), a capture
 into a closure env (alloc-scan incref, cascade decref), an opaque-call arg

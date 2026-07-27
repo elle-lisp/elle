@@ -341,6 +341,15 @@ impl RegionInference {
                     let init_regions = self.walk(init);
                     self.binding_region.insert(*b, loop_region);
                     self.binding_regions.insert(*b, init_regions);
+                    // A bare `Var` init hands the parameter the very reference the
+                    // named binding held — functionalization's split of one source
+                    // name, whose two versions the reassign gate must not count as
+                    // two holders (see `loop_forwarded_params`). Recorded here
+                    // because this is the line that copies one binding's source
+                    // regions onto the other's.
+                    if let HirKind::Var(src) = &init.kind {
+                        self.loop_forwarded_params.insert(*b, *src);
+                    }
                 }
 
                 let saved = self.current_region;

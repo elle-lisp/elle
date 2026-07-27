@@ -16,6 +16,72 @@ use super::super::*;
 use crate::hir::defuse::DefUseBuilder;
 use crate::hir::region::CellContainer;
 
+/// Binding → (assign sites, the regions of the values stored there).
+type ReassignSites = HashMap<Binding, (Vec<HirId>, Vec<Region>)>;
+
+/// Everything the walk recorded about reassigned bindings. One value rather than
+/// three parameters because no consumer wants a subset: the scope split decides
+/// which half of the 1-slot model applies, and `loop_forwarded` is only
+/// interpretable against BOTH halves — a forwarding source that carries a cell of
+/// its own is not a bare forwarding version (see `forwarded_init_aliases`).
+pub(super) struct Reassigns {
+    /// Module-scope (file-letrec) reassigns — the cell adopts the producer
+    /// reference; the final content is freed by frame teardown.
+    pub(super) top_level: ReassignSites,
+    /// Fn-local reassigns — the cell takes a counted store and needs a content
+    /// drop of its own at its scope demise.
+    pub(super) local: ReassignSites,
+    /// Loop parameter → the binding its init `Var` forwards from
+    /// (`RegionInference::loop_forwarded_params`).
+    pub(super) loop_forwarded: HashMap<Binding, Binding>,
+}
+
+impl Reassigns {
+    /// The `forwarded-from → carries-forward` map the gate's holder index folds by
+    /// (`RegionHolders::with_aliases`): one entry per loop parameter whose init
+    /// hands it the reference the pre-loop version of the same source name held.
+    ///
+    /// Functionalization splits a binding assigned inside a `while` into two — an
+    /// outer version and a `Loop` parameter initialized from it, which stands in
+    /// for the name at every later read. Both record the init's source regions, so
+    /// counting bindings reads one name as two holders and the gate refuses every
+    /// loop-carried cell whose init is a heap value. The **count** argument is
+    /// what makes folding them safe rather than merely tidy: a plain `Var` read
+    /// mints nothing, so the pair holds one reference, and admitting the cell
+    /// suppresses the init region — by REGION, so both versions' ordinary decrefs
+    /// vanish together — leaving drop-on-overwrite (or the content drop) as its
+    /// one release.
+    ///
+    /// A source that is **itself a reassigned binding** is refused, because it is
+    /// not a bare forwarding version: it carries a 1-slot cell of its own whose
+    /// content drop is a release channel the region-keyed suppression does not
+    /// cancel, so folding it would put two channels against the one reference.
+    /// That is the second of two sequential loops over one cell
+    /// (`last#2 ← last#1 ← last#0`), and it is why the fold is one step and never
+    /// chained.
+    fn forwarded_init_aliases(&self) -> HashMap<Binding, Binding> {
+        let mut aliases: HashMap<Binding, Binding> = HashMap::new();
+        let mut ambiguous: Vec<Binding> = Vec::new();
+        for (&param, &src) in &self.loop_forwarded {
+            if self.top_level.contains_key(&src) || self.local.contains_key(&src) {
+                continue;
+            }
+            // One source feeding two parameters would mean two live names sharing
+            // the reference, which is the two-holder reading the fold exists to
+            // deny. Functionalization does not produce it (each loop renames the
+            // source to its own parameter, so a later loop forwards from THAT
+            // parameter); drop the entry rather than assume it.
+            if aliases.insert(src, param).is_some() {
+                ambiguous.push(src);
+            }
+        }
+        for src in ambiguous {
+            aliases.remove(&src);
+        }
+        aliases
+    }
+}
+
 /// Apply the 1-slot-container model for reassigned mutable bindings, recording
 /// drop-on-overwrite / donation sites and decref suppressions into `info`.
 pub(super) fn apply_reassign_containers(
@@ -23,10 +89,14 @@ pub(super) fn apply_reassign_containers(
     arena: &BindingArena,
     du: &DefUseBuilder,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
-    top_level_reassigns: &HashMap<Binding, (Vec<HirId>, Vec<Region>)>,
-    local_reassigns: &HashMap<Binding, (Vec<HirId>, Vec<Region>)>,
+    reassigns: &Reassigns,
     escape_info: &crate::hir::EscapeInfo,
 ) {
+    let Reassigns {
+        top_level: top_level_reassigns,
+        local: local_reassigns,
+        ..
+    } = reassigns;
     // A holder is a real alias only if it is a USER binding that is READ:
     // exclude the write-only `__file_expr_N` statement wrapper an assign result
     // flows into (never read), and — via the shared index — the synthetic ANF
@@ -36,8 +106,12 @@ pub(super) fn apply_reassign_containers(
     // applies the universal synthetic exclusion on top, so the admitted set is
     // exactly the old `counts_as_alias` (read AND non-synthetic).
     let is_read = |b: Binding| -> bool { du.uses.get(&b).is_some_and(|u| !u.is_empty()) };
-    let mut region_holders =
-        RegionHolders::from_source_regions(inference_binding_regions, arena, &is_read);
+    let mut region_holders = RegionHolders::with_aliases(
+        inference_binding_regions,
+        arena,
+        &is_read,
+        reassigns.forwarded_init_aliases(),
+    );
     for (b, (_sites, regions)) in top_level_reassigns.iter().chain(local_reassigns.iter()) {
         if is_read(*b) {
             region_holders.add(*b, arena, regions);

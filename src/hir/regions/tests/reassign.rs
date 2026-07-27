@@ -490,6 +490,189 @@ fn letrec_wrapper_read_of_restorable_cell_is_counted() {
     }
 }
 
+/// The heap-carrying reassigned binding of a shape and its assign sites. Every
+/// loop-carried-cell shape below also reassigns an immediate loop counter, whose
+/// own gate always succeeds (it holds no region to be double-claimed); asserting
+/// over every reassign site would read the counter's verdict instead of the
+/// cell's.
+fn heap_carrying_reassign(hir: &Hir, info: &RegionInfo) -> (Binding, Vec<HirId>) {
+    let sites = find_reassign_sites(hir);
+    let b = sites
+        .iter()
+        .map(|(_, b)| *b)
+        .find(|b| {
+            info.binding_source_regions
+                .get(b)
+                .is_some_and(|rs| !rs.is_empty())
+        })
+        .expect("shape must contain a heap-carrying reassign");
+    let ids = sites
+        .iter()
+        .filter(|(_, s)| *s == b)
+        .map(|(id, _)| *id)
+        .collect();
+    (b, ids)
+}
+
+/// A loop-carried fn-local cell with a HEAP init keeps the container model
+/// (docs/impl/region/bindings.md § "The gate", "A loop parameter's init source
+/// is not a second holder"). Functionalization gives the one source name two
+/// bindings — the pre-loop version and the loop parameter its init forwards to —
+/// and both record the init region as a source, so a `sole_held` that counts
+/// bindings reads two holders where the program has one name and refuses the
+/// whole model. The count argument is that a plain `Var` read mints nothing, so
+/// the pair holds ONE reference; the region-keyed suppression then cancels both
+/// names' ordinary decrefs together, leaving drop-on-overwrite as the single
+/// channel. A `nil` init has no region to be double-counted, which is why
+/// `reassign_gate_keeps_selfref_accumulator` never exposed this.
+#[test]
+fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (begin (var last (array 0 0))\n\
+                  (var i 0)\n\
+                  (while (%lt i n)\n\
+                    (begin (assign last (array i 7))\n\
+                           (assign i (%add i 1))))\n\
+                  0)))\n\
+         (h 3)",
+    );
+    let (last, last_sites) = heap_carrying_reassign(&hir, &info);
+    assert!(
+        info.binding_source_regions[&last].len() >= 2,
+        "precondition: a heap-init cell holds its init region plus its \
+         assign-value one (got {:?})",
+        info.binding_source_regions[&last],
+    );
+    assert!(
+        info.cell_containers.contains_key(&last),
+        "a loop-carried cell with a heap init must record a container (so its \
+         final content has a demise to be dropped at)"
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "a loop-carried cell with a heap init must keep drop-on-overwrite — the \
+         channel that releases every displaced prior"
+    );
+    // The init region is the one the loop's init edge forwards: it carries no
+    // producer release of its own once the cell claims it, so it is suppressed
+    // while the assign-value region's decref (the producer's, pinned to the
+    // store) stays.
+    let regs = &info.binding_source_regions[&last];
+    assert!(
+        regs.iter()
+            .any(|r| info.suppressed_decref_regions.contains(r)),
+        "the forwarded init region's ordinary decref must be suppressed \
+         (regs={regs:?}, suppressed={:?})",
+        info.suppressed_decref_regions,
+    );
+}
+
+/// Counterfactual against over-exclusion: a GENUINE alias still refuses. `keep`
+/// is a different source name bound to the same value, not the loop's own
+/// init-forwarding edge, so the pair really is two holders of one reference —
+/// and the region-keyed suppression would cancel `keep`'s decref while `keep`
+/// still holds the value. Only the loop parameter's own init source is excluded.
+#[test]
+fn reassign_gate_refuses_loop_carried_cell_with_aliased_init() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (begin (var last (array 0 0))\n\
+                  (var keep last)\n\
+                  (var i 0)\n\
+                  (while (%lt i n)\n\
+                    (begin (assign last (array i 7))\n\
+                           (assign i (%add i 1))))\n\
+                  (%length keep))))\n\
+         (h 3)",
+    );
+    let (last, last_sites) = heap_carrying_reassign(&hir, &info);
+    for site in &last_sites {
+        assert!(
+            !info.drop_on_overwrite_sites.contains(site),
+            "an aliased init must refuse the container model at @{} — the \
+             alias holds a reference the cell would claim a second time",
+            site.0
+        );
+    }
+    let regs = &info.binding_source_regions[&last];
+    for r in regs {
+        assert!(
+            !info.suppressed_decref_regions.contains(r),
+            "an aliased init must suppress nothing (region {r:?} of {regs:?} was \
+             suppressed)",
+        );
+    }
+}
+
+/// Counterfactual against a TRANSITIVE exclusion: two sequential loops over one
+/// cell chain the forwarding (`last#2 ← last#1 ← last#0`), and the middle link
+/// carries a cell of its own. Its content drop is a release channel the
+/// region-keyed suppression does not cancel, so folding it would put two channels
+/// against the one reference the value carries — a double-free.
+///
+/// So the chain refuses at BOTH links, from the two directions the fold is
+/// narrow in. The second loop's parameter forwards from a reassigned binding,
+/// which is not a bare forwarding version. And the first loop's parameter, whose
+/// own source IS folded, still holds the init region alongside the second
+/// parameter — a holder no fold covers. Both fall back to the unsuppressed
+/// baseline, which over-keeps and never mis-frees.
+#[test]
+fn reassign_gate_refuses_loop_carried_cell_forwarded_from_a_cell() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (begin (var last (array 0 0))\n\
+                  (var i 0)\n\
+                  (while (%lt i n)\n\
+                    (begin (assign last (array i 7))\n\
+                           (assign i (%add i 1))))\n\
+                  (while (%lt i (%mul n 2))\n\
+                    (begin (assign last (array i 9))\n\
+                           (assign i (%add i 1))))\n\
+                  0)))\n\
+         (h 3)",
+    );
+    // The chain's two links are the two heap-carrying reassigned bindings; the
+    // immediate loop counter carries no region and is not one of them.
+    let sites = find_reassign_sites(&hir);
+    let links: Vec<Binding> = sites
+        .iter()
+        .map(|(_, b)| *b)
+        .filter(|b| {
+            info.binding_source_regions
+                .get(b)
+                .is_some_and(|rs| !rs.is_empty())
+        })
+        .collect();
+    assert!(
+        links.len() >= 2,
+        "precondition: two sequential loops give the cell two forwarding links \
+         (got {links:?})"
+    );
+    for (site, b) in &sites {
+        if !links.contains(b) {
+            continue;
+        }
+        assert!(
+            !info.drop_on_overwrite_sites.contains(site),
+            "a chained forwarding link must refuse the container model at @{} — \
+             the source cell's content drop already releases the reference",
+            site.0
+        );
+    }
+    for b in &links {
+        for r in &info.binding_source_regions[b] {
+            assert!(
+                !info.suppressed_decref_regions.contains(r),
+                "a chained forwarding link must suppress nothing (region {r:?} \
+                 of {b:?} was suppressed)",
+            );
+        }
+    }
+}
+
 /// Stay-GREEN control: the self-referential accumulator
 /// `(assign acc (%pair i acc))` stays gated. Its only cross-region
 /// edges are the model's own (the cell-store edge at the assign site;

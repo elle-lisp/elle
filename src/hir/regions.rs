@@ -58,6 +58,17 @@ struct RegionInference {
     /// `DecrefValueRegion`, one decref too many for the final value → the
     /// fn-local mutable-reassign double-free (`fn/cfg … :mermaid`).
     local_reassigns: HashMap<Binding, (Vec<HirId>, Vec<Region>)>,
+    /// Loop parameter → the binding its init `Var` forwards from. Functionalization
+    /// rewrites a `while` that assigns a binding into a `Loop` whose parameter is a
+    /// fresh version of that binding, initialized from the pre-loop version and
+    /// standing in for it at every later read. Both versions therefore record the
+    /// same source regions while holding ONE reference between them (a `Var` read
+    /// mints nothing), which the reassign 1-slot gate's sole-held check must not
+    /// read as two holders of one name — see `RegionHolders::with_aliases` and
+    /// docs/impl/region/bindings.md § "The gate". An entry is recorded only for an
+    /// init that is a bare `Var`; any other init expression is a real value the
+    /// parameter does not merely carry forward.
+    loop_forwarded_params: HashMap<Binding, Binding>,
     /// Begin HirId → per-binding region for each pre-allocated capture cell
     /// (mirrors `lower_begin`'s MakeCaptureCell pre-pass; one region PER CELL —
     /// see `RegionInfo::begin_cell_regions`).
@@ -247,6 +258,7 @@ impl RegionInference {
             top_level_reassigns: HashMap::new(),
             captured_reassigns: rustc_hash::FxHashSet::default(),
             local_reassigns: HashMap::new(),
+            loop_forwarded_params: HashMap::new(),
             begin_cell_regions: HashMap::new(),
             cross_region_refs: Vec::new(),
             hard_edge_sites: rustc_hash::FxHashSet::default(),

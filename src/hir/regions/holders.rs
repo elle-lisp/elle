@@ -23,6 +23,15 @@
 //!   lose nothing, and they make "more than one holder" mean "aliased by two
 //!   *distinct* bindings", which is exactly what the merge seed's `len() > 1` alias
 //!   test and `sole_held` both ask.
+//!
+//! Counting *bindings* is a proxy for counting *references*, and the two diverge
+//! wherever the canonical IR gives one source name two bindings. A consumer that
+//! can name such a pair — and argue the pair holds one reference between them —
+//! supplies it as an **alias map** to [`RegionHolders::with_aliases`], which folds
+//! the forwarded-from binding's holdings onto the binding that carries them
+//! forward before the index is queried. The argument that justifies an entry is
+//! the consumer's; the index only guarantees the fold is applied on every insert
+//! path.
 
 use super::*;
 use rustc_hash::FxHashSet;
@@ -30,6 +39,9 @@ use rustc_hash::FxHashSet;
 /// Region → the distinct user bindings that may hold a value in it.
 pub(super) struct RegionHolders {
     map: HashMap<Region, FxHashSet<Binding>>,
+    /// `forwarded-from → carries-forward`: bindings the consumer has shown to be
+    /// one name holding one reference, folded onto the second at insert time.
+    aliases: HashMap<Binding, Binding>,
 }
 
 impl RegionHolders {
@@ -41,10 +53,24 @@ impl RegionHolders {
     pub(super) fn from_source_regions(
         source_regions: &HashMap<Binding, Vec<Region>>,
         arena: &BindingArena,
+        eligible: impl FnMut(Binding) -> bool,
+    ) -> Self {
+        Self::with_aliases(source_regions, arena, eligible, HashMap::new())
+    }
+
+    /// `from_source_regions`, resolving each holder through `aliases` first — see
+    /// the module header. An alias entry makes the two bindings indistinguishable
+    /// to every query, so a consumer must own the argument that they hold one
+    /// reference between them.
+    pub(super) fn with_aliases(
+        source_regions: &HashMap<Binding, Vec<Region>>,
+        arena: &BindingArena,
         mut eligible: impl FnMut(Binding) -> bool,
+        aliases: HashMap<Binding, Binding>,
     ) -> Self {
         let mut holders = RegionHolders {
             map: HashMap::new(),
+            aliases,
         };
         for (&b, regions) in source_regions {
             if is_user_binding(b, arena) && eligible(b) {
@@ -77,6 +103,10 @@ impl RegionHolders {
     }
 
     fn insert(&mut self, b: Binding, regions: &[Region]) {
+        // Resolved ONE step, not transitively: an alias entry asserts that this
+        // pair holds a single reference, and chaining two such assertions is a
+        // different claim the consumer has not made (see `with_aliases`).
+        let b = self.aliases.get(&b).copied().unwrap_or(b);
         for &r in regions {
             self.map.entry(r).or_default().insert(b);
         }

@@ -105,6 +105,69 @@ fn add_folds_in_extra_holders_and_excludes_synthetics() {
     assert!(!hs.contains(&temp));
 }
 
+/// An alias entry folds the forwarded-from binding's holdings onto the binding
+/// that carries them forward, so the pair reads as ONE holder and each sole-holds
+/// the region. (Counterfactual: without the fold this is
+/// `two_distinct_user_holders_alias_the_region`.)
+#[test]
+fn aliased_bindings_count_as_one_holder() {
+    let mut arena = BindingArena::new();
+    let from = user(&mut arena);
+    let carries = user(&mut arena);
+    let mut src: HashMap<Binding, Vec<Region>> = HashMap::new();
+    src.insert(from, vec![Region(2)]);
+    src.insert(carries, vec![Region(2)]);
+    let aliases: HashMap<Binding, Binding> = [(from, carries)].into_iter().collect();
+
+    let holders = RegionHolders::with_aliases(&src, &arena, |_| true, aliases);
+
+    let hs = holders.holders_of(Region(2)).expect("holders recorded");
+    assert_eq!(hs.len(), 1, "the pair folds onto the carrying binding");
+    assert!(hs.contains(&carries) && !hs.contains(&from));
+    assert!(holders.sole_held(carries, Region(2)));
+}
+
+/// The fold applies on the `add` path too, so no consumer can reintroduce the
+/// forwarded-from binding as a second holder by folding reassign-site regions in
+/// after construction.
+#[test]
+fn add_applies_the_alias_fold() {
+    let mut arena = BindingArena::new();
+    let from = user(&mut arena);
+    let carries = user(&mut arena);
+    let aliases: HashMap<Binding, Binding> = [(from, carries)].into_iter().collect();
+
+    let mut holders = RegionHolders::with_aliases(&HashMap::new(), &arena, |_| true, aliases);
+    holders.add(from, &arena, &[Region(2)]);
+
+    let hs = holders.holders_of(Region(2)).expect("holders recorded");
+    assert_eq!(hs.len(), 1);
+    assert!(hs.contains(&carries));
+}
+
+/// An alias is resolved ONE step. A chain `a → b → c` states two separate
+/// one-reference claims; composing them into `a → c` is a third claim no consumer
+/// has made, so `a` folds onto `b` and stops — leaving `b`/`c` visibly aliased
+/// rather than silently collapsed onto one holder.
+#[test]
+fn alias_fold_is_one_step_not_transitive() {
+    let mut arena = BindingArena::new();
+    let a = user(&mut arena);
+    let b = user(&mut arena);
+    let c = user(&mut arena);
+    let mut src: HashMap<Binding, Vec<Region>> = HashMap::new();
+    src.insert(a, vec![Region(2)]);
+    src.insert(c, vec![Region(2)]);
+    let aliases: HashMap<Binding, Binding> = [(a, b), (b, c)].into_iter().collect();
+
+    let holders = RegionHolders::with_aliases(&src, &arena, |_| true, aliases);
+
+    let hs = holders.holders_of(Region(2)).expect("holders recorded");
+    assert_eq!(hs.len(), 2, "a folds onto b only; c stays its own holder");
+    assert!(hs.contains(&b) && hs.contains(&c));
+    assert!(!holders.sole_held(c, Region(2)));
+}
+
 /// A duplicate region in a binding's source list does not inflate the holder
 /// count — the set keeps one entry per distinct binding. This pins the
 /// invariant that lets the merge seed read `len() > 1` as a *distinct*-binding

@@ -28,6 +28,16 @@
 # Content produced by a native call and content the solver can name by slot
 # (`%pair`) are both driven: the model is one model, and a rate that moved for
 # only one of them would name the producer discipline rather than the container.
+#
+# The cell's INIT is content too, and a HEAP init is what separates the model's
+# gate from the model (docs/impl/region/bindings.md § "The gate", "A loop
+# parameter's init source is not a second holder"). Functionalization names a
+# loop-carried cell twice — the pre-loop version and the loop parameter its init
+# forwards to — so a sole-held check that counts bindings reads one name as two
+# holders and refuses the whole model. A `nil` init carries no region and so
+# never exposes it, which is why every heap-init face below is driven beside its
+# nil-init twin above: a rate that moves for one and not the other names the
+# gate, not the channels.
 
 (defn measure (thunk warm window)
   (var i 0)
@@ -143,6 +153,106 @@
     (assign i (%add i 1)))
   (length keeper))
 
+# ── the heap-init faces ───────────────────────────────────────────
+# The same loop-carried cell as `cell-loop-call`, differing only in that its
+# init is a heap value the cell must claim rather than `nil`.
+(defn heap-init (n)
+  (var last (string "init"))
+  (var i 0)
+  (while (%lt i n)
+    (assign last {:x i})
+    (assign i (%add i 1)))
+  0)
+
+# The heap init is never displaced — the loop body does not run — so the content
+# drop is the ONLY channel that can release it. Called with n=0.
+(defn heap-init-undisplaced (n)
+  (var last (string "init"))
+  (var i 0)
+  (while (%lt i n)
+    (assign last (string "v"))
+    (assign i (%add i 1)))
+  (length last))
+
+# The init is read before the loop displaces it, and the final content is read
+# after: the drop must land after both, not at the store that displaces the init.
+(defn heap-init-read (n)
+  (var last (string "init"))
+  (var i 0)
+  (var sum (length last))
+  (while (%lt i n)
+    (assign last {:x i})
+    (assign sum (+ sum (get last :x)))
+    (assign i (%add i 1)))
+  (+ sum (get last :x)))
+
+# The heap init is handed to a container that outlives the cell BEFORE the first
+# overwrite. That store is runtime-counted, so the overwrite must drop only the
+# cell's own reference and leave the keeper's holding intact.
+(defn heap-init-escapes (n keeper)
+  (var last (string "init"))
+  (push keeper last)
+  (var i 0)
+  (while (%lt i n)
+    (assign last {:x i})
+    (assign i (%add i 1)))
+  (length keeper))
+
+# The heap-init twin of `cell-fiber`: the init, the overwrites that displace it
+# and the cell's demise straddle a park, so a release aimed at the forwarded init
+# fires against a parked frame's mapping. Guardfree over a pinned corpus is
+# necessary and not sufficient — a park is where an over-wide release survives
+# every non-parking pin and dies in the corpus — so the shape the gate now admits
+# is driven across one here as well as in the leak dashboard.
+(defn heap-init-fiber (n)
+  (let [f (fiber/new (fn []
+                       (var last (string "init"))
+                       (var i 0)
+                       (yield (length last))
+                       (while (%lt i n)
+                         (assign last {:x i})
+                         (yield (get last :x))
+                         (assign i (%add i 1)))
+                       (get last :x)) |:yield|)]
+    (var sum 0)
+    (while (not= (fiber/status f) :dead)
+      (let [v (fiber/resume f)]
+        (when (int? v) (assign sum (+ sum v)))))
+    sum))
+
+# ── refusal controls: correctness only, boundedness NOT claimed ───
+# Both shapes must keep FAILING the gate, so neither is asserted bounded — the
+# fallback is the unsuppressed baseline, which over-keeps. What they pin is that
+# the exclusion stays narrow: admitting either would put two release channels
+# against the one reference the cell holds, and the reads below would see a
+# freed value.
+#
+# A genuine alias: `keep` is a DIFFERENT source name holding the same region, so
+# it is not a forwarding edge and the region-keyed suppression would cancel its
+# own decref while it still holds the value.
+(defn heap-init-aliased (n)
+  (var last (string "init"))
+  (var keep last)
+  (var i 0)
+  (while (%lt i n)
+    (assign last {:x i})
+    (assign i (%add i 1)))
+  (length keep))
+
+# Two sequential loops over one cell: the second loop's parameter forwards from
+# the first loop's parameter, which carries a cell of its own whose content drop
+# the region-keyed suppression does not cancel.
+(defn heap-init-seq2 (n)
+  (var last (string "init"))
+  (var i 0)
+  (while (%lt i n)
+    (assign last {:x i})
+    (assign i (%add i 1)))
+  (while (%lt i (%mul n 2))
+    (assign last {:x i})
+    (assign i (%add i 1)))
+  (get last :x))
+
 # ── controls: bounded already ─────────────────────────────────────
 # The module-scope 1-slot container (donation + frame teardown) and the same
 # loop with no cell at all bracket the diagnosis from the other side.
@@ -216,6 +326,39 @@
         (concat "a cell whose content is stored out strands it, delta="
                 (number->string w-esc)))
 
+# ── leak face: the heap init ──────────────────────────────────────
+# Same channels, same magnitudes: a per-iteration strand reads ~20x the
+# per-call one, so a rate here that the nil-init twin above does not show is
+# the gate refusing the model, not a channel missing from it.
+(def h-loop (measure (fn () (heap-init 20)) 200 2000))
+(def h-undisp (measure (fn () (heap-init-undisplaced 0)) 200 2000))
+(def h-read (measure (fn () (heap-init-read 20)) 200 2000))
+(def h-esc
+  (measure (fn ()
+             (let [k @[]]
+               (heap-init-escapes 20 k))) 200 2000))
+(def h-fiber (measure (fn () (heap-init-fiber 6)) 200 1000))
+(println "  heap init, loop:            " h-loop)
+(println "  heap init, never displaced: " h-undisp)
+(println "  heap init, read back:       " h-read)
+(println "  heap init, stored out:      " h-esc)
+(println "  heap init across a park:    " h-fiber)
+(assert (%lt h-loop 400)
+        (concat "a loop-carried cell with a HEAP init strands its displaced "
+                "content per iteration, delta=" (number->string h-loop)))
+(assert (%lt h-undisp 400)
+        (concat "a heap init the cell never displaces is not released at the "
+                "cell's demise, delta=" (number->string h-undisp)))
+(assert (%lt h-read 400)
+        (concat "a read-back cell with a heap init strands its content, delta="
+                (number->string h-read)))
+(assert (%lt h-esc 400)
+        (concat "a cell whose heap init is stored out strands its later content, "
+                "delta=" (number->string h-esc)))
+(assert (%lt h-fiber 400)
+        (concat "a cell with a heap init whose lifetime spans a fiber park strands "
+                "its content, delta=" (number->string h-fiber)))
+
 # ── over-free face ────────────────────────────────────────────────
 # Every value the cell held must still be readable where the program reads it.
 # Under `--trace=guardfree` a premature release detonates at the stale deref;
@@ -248,5 +391,50 @@
 (assert (%eq esc 3000)
         (concat "a value the cell stored into a longer-lived container did not "
                 "survive the cell's demise, sum=" (number->string esc)))
+
+# ── over-free face: the heap init ─────────────────────────────────
+# The heap init is the reference the loop parameter's init edge forwards, so it
+# is the one an over-wide exclusion frees twice. Read it back before the first
+# overwrite, after a loop that never displaces it, and out of a container that
+# outlives the cell.
+(var hseen 0)
+(var hk 0)
+(while (%lt hk 500)
+  (assign hseen (+ hseen (heap-init-read 4)))
+  (assign hseen (+ hseen (heap-init-undisplaced 0)))
+  (assign hseen (+ hseen (heap-init-fiber 4)))
+  (assign hk (%add hk 1)))
+# per iteration: heap-init-read (length "init")=4 + (0+1+2+3) + 3 = 13,
+# heap-init-undisplaced (length "init") = 4,
+# heap-init-fiber (length "init")=4 + (0+1+2+3) + 3 = 13
+(assert (%eq hseen 15000)
+        (concat "a cell's heap init did not survive its own reads, sum="
+                (number->string hseen)))
+
+(var hesc 0)
+(var hm 0)
+(while (%lt hm 500)
+  (let [keeper @[]]
+    (heap-init-escapes 4 keeper)
+    (assign hesc (+ hesc (length (get keeper 0)))))
+  (assign hm (%add hm 1)))
+# per iteration: the keeper's one element is the init string, (length "init") = 4
+(assert (%eq hesc 2000)
+        (concat "a heap init stored into a longer-lived container did not survive "
+                "the overwrite that displaced it, sum=" (number->string hesc)))
+
+# The refusal controls: not asserted bounded (the gate refuses them, so the
+# fallback over-keeps), but every value must still be readable — an exclusion
+# widened to either shape frees one of these under its own reader.
+(var hrefuse 0)
+(var hr 0)
+(while (%lt hr 500)
+  (assign hrefuse (+ hrefuse (heap-init-aliased 4)))
+  (assign hrefuse (+ hrefuse (heap-init-seq2 4)))
+  (assign hr (%add hr 1)))
+# per iteration: heap-init-aliased (length "init") = 4, heap-init-seq2 last i = 7
+(assert (%eq hrefuse 5500)
+        (concat "a refused shape's value did not survive its reader, sum="
+                (number->string hrefuse)))
 
 (println "region-fn-local-cell-drop-leak: ok")

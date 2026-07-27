@@ -249,15 +249,17 @@
 # `match-dead-arm` is a CLOSED control for per-arm compensation over a `Match`
 # (undeclared, like `rest-array-copy`); its open twin `match-used-arm` is the
 # residual — a used sibling arm with no retain to fund a per-arm release.
-# `struct-outer` is a CLOSED control for the fn-local 1-slot container's two
-# release channels (undeclared, like `rest-array-copy`): drop-on-overwrite for each
-# displaced prior, the content drop at the cell's demise for the final one, and the
-# producer's separate claim released at the store. `yield-reassign` is the same
-# container shape with a HEAP init, which the sole-held gate still refuses, so a
-# regression of `struct-outer` must trip the completeness gate rather than hide
-# behind its sibling.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign"
-                   "fresh-env-cell" "struct-match" "match-used-arm"])
+# `struct-outer` and `yield-reassign` are CLOSED controls for the fn-local 1-slot
+# container (undeclared, like `rest-array-copy`), and they must stay a PAIR: both
+# drive the container's two release channels — drop-on-overwrite for each displaced
+# prior, the content drop at the cell's demise for the final one, with the
+# producer's separate claim released at the store — but only `yield-reassign` has a
+# HEAP init, the shape that reaches the gate's sole-held check, where
+# functionalization's split of the cell's source name into a pre-loop version and a
+# loop parameter reads as two holders of one name. A regression of either must trip
+# the completeness gate rather than hide behind its sibling.
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell" "struct-match"
+                   "match-used-arm"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -1356,7 +1358,7 @@
                                         (assign v (string "val-" i))
                                         (yield i)
                                         (assign i (%add i 1)))) |:yield|)) b))
-                   count-gauge 100 6 60 0.4 0.5) 1)
+                   count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "yield-multimut"
                    (fn [b]
                      (drain-block (fn [n]

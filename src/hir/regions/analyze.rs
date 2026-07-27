@@ -55,8 +55,11 @@ pub fn analyze_regions_with(
     let destructure_sites = std::mem::take(&mut ri.destructure_sites);
     let break_sites = std::mem::take(&mut ri.break_sites);
     let break_skip_blocks = std::mem::take(&mut ri.break_skip_blocks);
-    let top_level_reassigns = std::mem::take(&mut ri.top_level_reassigns);
-    let local_reassigns = std::mem::take(&mut ri.local_reassigns);
+    let reassigns = reassign::Reassigns {
+        top_level: std::mem::take(&mut ri.top_level_reassigns),
+        local: std::mem::take(&mut ri.local_reassigns),
+        loop_forwarded: std::mem::take(&mut ri.loop_forwarded_params),
+    };
     let captured_reassigns = std::mem::take(&mut ri.captured_reassigns);
     let mut info = ri.build_info();
     // Mirror to the public surface so tests and downstream consumers can
@@ -112,8 +115,7 @@ pub fn analyze_regions_with(
         arena,
         &du,
         &inference_binding_regions,
-        &top_level_reassigns,
-        &local_reassigns,
+        &reassigns,
         &escape_info,
     );
 
