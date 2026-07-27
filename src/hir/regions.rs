@@ -207,6 +207,13 @@ struct RegionInference {
     /// label). A release left inside the body is jumped over and never runs
     /// (docs/impl/region/rules.md Rule 4).
     break_sites: Vec<(HirId, Vec<Region>)>,
+    /// HirIds of the tail `Call`s whose callee may be a bytecode closure — the
+    /// calls that REPLACE this frame instead of falling through. A tail call to a
+    /// native pushes no frame and is absent here. The branch-arm release window
+    /// declines any branch containing one, since its merge label is then not a
+    /// point every arm reaches (docs/impl/region/mechanism.md § "A release inside
+    /// one arm is not a release on the other arms").
+    frame_replacing_tail_calls: rustc_hash::FxHashSet<HirId>,
     /// Next region id
     next_region: u32,
     /// Current enclosing region
@@ -283,6 +290,7 @@ impl RegionInference {
             block_break_nodes: HashMap::new(),
             break_skip_blocks: Vec::new(),
             break_sites: Vec::new(),
+            frame_replacing_tail_calls: rustc_hash::FxHashSet::default(),
             next_region: 1, // 0 is the reserved sentinel — never assigned to an allocation
             current_region: Region(0),
             call_class,

@@ -217,9 +217,8 @@
 # there. The un-fused op's scratch keeps its F1a declaration through `wrap-map`.
 (declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct"
                     "group-by" "frequencies" "merge" "concat" "pipeline"
-                    "each-list" "reverse" "string-outer" "append-outer"
-                    "concat-while" "yield-concat" "nested-closure"
-                    "stdlib-concat" "zip-tower"])
+                    "each-list" "string-outer" "append-outer" "concat-while"
+                    "yield-concat" "nested-closure" "stdlib-concat" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -246,9 +245,11 @@
 # (undeclared, like `rest-array-copy`): all three are `letrec` walks whose base case
 # returns a heap value the recursive arm's `decref_point` was left to release, so a
 # regression must trip the completeness gate rather than be absorbed as an F5 strand.
-# `match-dead-arm` is a CLOSED control for per-arm compensation over a `Match`
-# (undeclared, like `rest-array-copy`); its open twin `match-used-arm` is the
-# residual — a used sibling arm with no retain to fund a per-arm release.
+# `match-dead-arm` and `match-used-arm` are CLOSED controls for the two faces of a
+# region live-in to a branch (undeclared, like `rest-array-copy`): the dead arm
+# takes per-arm compensation, and the USED arm is covered by anchoring the
+# region's one release where every arm reaches it — the branch-arm release window,
+# whose owned-parameter and `If` faces are `param-used-arm`/`param-used-arm-if`.
 # `struct-outer` and `yield-reassign` are CLOSED controls for the fn-local 1-slot
 # container (undeclared, like `rest-array-copy`), and they must stay a PAIR: both
 # drive the container's two release channels — drop-on-overwrite for each displaced
@@ -258,8 +259,7 @@
 # functionalization's split of the cell's source name into a pre-loop version and a
 # loop parameter reads as two holders of one name. A regression of either must trip
 # the completeness gate rather than hide behind its sibling.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell" "struct-match"
-                   "match-used-arm"])
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell" "struct-match"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -436,6 +436,20 @@
       :a (length v)
       :b (length v)
       _ (length v))))
+# The same arm structure over an OWNED PARAMETER rather than a fn-local — the
+# polymorphic stdlib entry point's shape, whose caller moved the argument in. The
+# region's one release is anchored where every arm reaches it, so the arm the
+# caller happens to pick does not decide whether the argument is freed
+# (docs/impl/region/mechanism.md § "A release inside one arm is not a release on
+# the other arms"). `t22-param-if` is the `If` face of the identical premise:
+# the window reads arm structure, never the branch's kind or arity.
+(defn t22-param-arm [v t]
+  (match t
+    :a (length v)
+    :b (length v)
+    _ (length v)))
+(defn t22-param-if [v c]
+  (if c (length v) (%add 1 (length v))))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -572,7 +586,14 @@
    # each call stranded the argument it handed back. A CLOSED control now,
    # undeclared like `rest-array-copy` so a regression trips the completeness gate.
    ["zip" (fn [j] (zip [1 2] [3 4])) 0] ["sort" (fn [j] (sort [3 1 2])) 0]
-   ["reverse" (fn [j] (reverse [1 2 3])) 1]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
+   # `reverse` is a CLOSED control for the branch-arm release window
+   # (docs/impl/region/mechanism.md § "A release inside one arm is not a release
+   # on the other arms"): its accumulator is named by every arm of the trailing
+   # `(match t :array (freeze r) … _ r)`, so the one release landed in the last
+   # arm and every earlier one stranded the whole accumulator. Undeclared, like
+   # `rest-array-copy`, so a regression trips the completeness gate loudly rather
+   # than being absorbed as F1a transform-scratch.
+   ["reverse" (fn [j] (reverse [1 2 3])) 0]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
    # `dispatch_native_call` fresh-result invariant — a fresh native result lives
@@ -1593,11 +1614,14 @@
 # control: the taken arm has no use of the pre-allocated local, so the head release
 # frees it (docs/impl/region/mechanism.md § "The return frontier is per-path" — the
 # premises are stated over arms, so the branch's arity and kind are not read).
-# `match-used-arm` is the OPEN residual (F5): the taken arm uses the local but does
-# not hold its `decref_point`, and no retain on its last-use node funds a per-arm
-# release, so the baseline strands the whole region — 3 cons cells here. Widening
-# `tail` to every arm-last-use node instead is a measured over-free, not headroom:
-# an arm that used the region may hold an uncounted borrow the solver does not name.
+# `match-used-arm` is the USED face, also CLOSED: the taken arm uses the local but
+# does not hold its `decref_point`, and no retain on its last-use node funds a
+# per-arm release — so instead of adding one, the region's single release is
+# anchored where every arm reaches it (§ "A release inside one arm is not a
+# release on the other arms"). Widening `tail` to every arm-last-use node is a
+# measured over-free and is NOT what closed this: an arm that used the region may
+# hold an uncounted borrow the solver does not name, which is exactly why the
+# close is a placement argument and not a count one.
 (pin (measure-core "match-dead-arm"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1611,7 +1635,29 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t21-used-arm :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+# The owned-parameter face of the same branch structure, and its `If` twin. Both
+# are CLOSED controls for the branch-arm release window: the argument's whole
+# region (3 cons cells) strands on every arm that is not the one naming it last,
+# unless the single release is anchored where every arm reaches it. Undeclared,
+# like `rest-array-copy`, so a regression trips the completeness gate loudly
+# rather than being absorbed as an F5 strand. Their counterfactual and the three
+# window boundaries are `tests/elle/region-branch-arm-window.lisp`; the soundness
+# complement is `region-branch-arm-window-uaf.lisp`.
+(pin (measure-core "param-used-arm"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-param-arm (list 1 2 3) :a)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "param-used-arm-if"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-param-if (list 1 2 3) true)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "struct-match"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

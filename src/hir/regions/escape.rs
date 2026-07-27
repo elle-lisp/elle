@@ -79,6 +79,33 @@ pub(crate) fn return_frontier_regions(
     out
 }
 
+/// Regions a value crosses the **fiber frontier** through — emitted, yielded, or
+/// sent, so another fiber can reach it. The region-level fiber facet.
+///
+/// Two consumers: the ownership Shared seed (below), and the branch-arm release
+/// window, whose anchor argument is a placement one and therefore says nothing
+/// about *other* holders — a value another fiber can reach may be borrowed
+/// uncounted by a frame that is parked when the release runs
+/// (docs/impl/region/mechanism.md § "A release inside one arm is not a release on
+/// the other arms").
+pub(crate) fn fiber_frontier_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxHashSet<Region> {
+    let mut out: FxHashSet<Region> = FxHashSet::default();
+    // Binding half: an emitted / sent binding.
+    for (&b, regions) in &info.binding_source_regions {
+        if escape.escapes_fiber(b) {
+            out.extend(regions.iter().copied());
+        }
+    }
+    // Allocation-site half: an atomless emitted / sent value
+    // (`(yield (%pair …))`, `(chan/send s (%pair …))`).
+    for (&hid, &r) in &info.alloc_region {
+        if escape.escapes_fiber_frontier(hid) {
+            out.insert(r);
+        }
+    }
+    out
+}
+
 /// The ownership **Shared-seed** set: every region a value crosses the
 /// activation/fiber frontier through — **return** ∪ **fiber** (emit + send). The
 /// *containment* facets (store, capture) are deliberately **not** seeds — they build
@@ -87,18 +114,6 @@ pub(crate) fn return_frontier_regions(
 /// it). See `ownership/seeds.rs` / `docs/impl/escape.md`.
 pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxHashSet<Region> {
     let mut out = return_frontier_regions(escape, &info.alloc_region, &info.binding_source_regions);
-    // Fiber frontier, binding half: an emitted / sent binding.
-    for (&b, regions) in &info.binding_source_regions {
-        if escape.escapes_fiber(b) {
-            out.extend(regions.iter().copied());
-        }
-    }
-    // Fiber frontier, allocation-site half: an atomless emitted / sent value
-    // (`(yield (%pair …))`, `(chan/send s (%pair …))`).
-    for (&hid, &r) in &info.alloc_region {
-        if escape.escapes_fiber_frontier(hid) {
-            out.insert(r);
-        }
-    }
+    out.extend(fiber_frontier_regions(escape, info));
     out
 }

@@ -156,6 +156,120 @@ it at the resume (`generations.md` § "Uncounted-borrow check"). So an unfunded 
 sibling arm keeps the conservative baseline — an over-keep, gauged by the
 `match-used-arm` probe in `tests/elle/oracle.lisp`.
 
+## A release inside one arm is not a release on the other arms
+
+Compensation above *adds* a release per arm, and each addition needs a count
+argument. There is a weaker question the same structure answers with a
+**placement** argument alone: where should the region's ONE release live?
+
+A region's `decref_point` is the structurally-latest of its uses. When several
+arms of a branch use it, "latest" resolves to a node inside **one** arm — and
+arms are mutually exclusive, so on every execution that takes a different arm
+the release is not early or late, it is *not emitted on that path at all*. The
+region is held to fiber teardown, and with it every member its free cascade
+would reclaim. "Structurally latest across the arms" is simply not a program
+point any single execution passes through.
+
+The point every execution does pass through is the branch's own consuming node —
+`last_use[branch]`, the node that consumes the branch's value, or the branch
+itself when nothing does — whose decrefs the lowerer emits after the merge
+label. So a `decref_point` that lands inside an arm is **re-anchored** there.
+One release per execution, on every path; the only thing that changed is that
+the region now lives to the end of the branch instead of to the end of one arm.
+This is the break window's argument — a release moved *later* can only over-keep
+— and it neither relaxes nor replaces the per-arm guard above: there is still
+exactly one release, now sitting after every arm's last use instead of after one
+arm's. What it does need, and the break window does not, is a reason to believe
+the release still has only this frame's reference to drop; the next section is
+that reason and it is the window's real gate.
+
+The shape this closes is the dominant polymorphic stdlib entry point: a
+`(match (type-of a) …)` whose owned parameter is handed to a different callee in
+each arm. `a`'s single `decref_point` lands in the textually-last arm that names
+it, so every earlier arm strands `a`'s whole region — a per-call cost equal to
+the argument's entire object graph. Where a call site proves the argument's type
+the dispatch prunes to a single arm (`typeinfer/prune.rs`) and never reaches this
+at all; the cost is what every unproven call site pays.
+
+Once a region's `decref_point` leaves the arms, `regions::compensate` no longer
+finds it inside one, so neither the head nor the tail route fires for it: the
+single anchored release is exactly what those compensating releases were
+approximating, and the arm-structure premises they rest on are unchanged for
+every region the window declines.
+
+### The admission: this frame must be the region's only holder
+
+The placement argument is enough *only* where this frame holds the region's one
+reference. On the arms the window newly covers, a release fires where none did
+before, so another holder it drops to zero is an over-free — and the reachable
+other holder is an uncounted borrow in a frame that is **parked** when the release
+runs, which the resume's uncounted-borrow check detonates on
+([generations.md](generations.md)). No premise about arm structure discharges
+that: it is a count question wearing a placement question's clothes, and it is the
+same wall the per-arm route hits.
+
+Escape answers exactly it, and is the sole authority for it
+([escape.md](../escape.md)): a value that leaves its activation by **no** facet —
+return, store, capture, fiber — is reachable only through this frame's slots. So the window is admitted for a region whose every holder binding is
+non-escaping, non-mutated and uncaptured, and which is absent from the return and
+fiber frontiers' atomless site halves (which no binding names). A region with no
+holder binding at all offers nothing to judge and is refused too. Everything else
+keeps its in-arm release and the per-arm compensation routes above, which carry a
+count argument instead — so the two mechanisms partition the obligation rather
+than overlapping on it.
+
+The **mutated** and **captured** refusals are the same ones compensation makes
+about a release *route*: a slot repointed between the arm and the anchor frees
+whatever it holds then, and a captured value is reachable through the closure env.
+
+One more separation makes the placement fact honest. The ownership and merge cuts
+admit a subtree when the root's drop **post-dominates** a member's last use — a
+*lifetime* question — and a release re-anchored onto a branch post-dominates
+everything inside it. Reading the moved anchor there would admit cuts the region's
+real lifetime does not support, and the subtree drop then frees a member under a
+live borrow. So `RegionData` carries both: `decref_point`, where the lowerer emits
+the release, and `lifetime_point`, the structural last use the cuts read. Only the
+window ever separates them.
+
+### The boundaries
+
+Three bound the window, the same three the break window carries and
+for the same reasons. Two are about *how many times* a release runs:
+
+- **An iterative scope nested in the branch** (`While`/`Loop`) holding the
+  `decref_point`. A release inside it runs per iteration; hoisting it past the
+  loop would leave one release covering N executions.
+- **A `Lambda` nested in the branch** holding it. Its body's releases run in a
+  different activation against a different frame's slots, which never reach this
+  branch's merge label.
+
+The third guards the anchor itself — the hoist's premise is that the merge label
+is a point every arm **reaches**:
+
+- **A frame-replacing tail call in the branch.** A tail call to a *closure*
+  replaces the frame, so that arm leaves through the callee and never arrives at
+  the merge; a release moved there would be dead on exactly the path that runs
+  it. A tail call to a **native** pushes no frame and falls through to the merge,
+  which is why the callee kind decides this and not the `is_tail` flag: the
+  native-tail dispatch shape is the whole point of the window. The branch
+  declines whole when any arm can leave through a callee.
+
+The region must also be **live-in** to the branch (every allocation and
+holder-definition site outside the branch's subtree) — the same premise
+compensation states — so a value born inside an arm keeps its in-arm release,
+and the window only moves releases of values the branch received.
+
+Regions whose release belongs to another mechanism are excluded exactly as in
+compensation: merge children, co-owned-group members, capture cells, the
+mutated-slot 1-slot containers, and anything already suppressed.
+
+Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with all
+three boundaries and the `If` face driven as rows), the `param-used-arm` /
+`param-used-arm-if` probes in `tests/elle/oracle.lisp` (the per-op rates), and
+`tests/elle/region-branch-arm-window-uaf.lisp` (the soundness complement — a
+value read, stored, returned, or carried across a yield after the branch must
+survive the moved release).
+
 ## `break` transfers its value; it does not consume it
 
 A `Return` hands a value across a *function* frontier. A `break` is the

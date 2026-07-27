@@ -20,6 +20,8 @@ pub(super) fn populate_decref_points(
     info: &mut RegionInfo,
     hir: &Hir,
     du: &DefUseBuilder,
+    escape: &crate::hir::EscapeInfo,
+    arena: &BindingArena,
     order: &HashMap<HirId, u32>,
     last_use_info: &LastUseInfo,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
@@ -27,6 +29,7 @@ pub(super) fn populate_decref_points(
     destructure_sites: &[(HirId, Vec<Region>)],
     break_sites: &[(HirId, Vec<Region>)],
     break_skip_blocks: &[(HirId, Vec<HirId>)],
+    frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let last_use = &last_use_info.per_node;
@@ -36,10 +39,10 @@ pub(super) fn populate_decref_points(
             .entry(region)
             .and_modify(|d| {
                 if ord(lu) > ord(d.decref_point) {
-                    d.decref_point = lu;
+                    d.extend_to(lu);
                 }
             })
-            .or_insert(RegionData { decref_point: lu });
+            .or_insert(RegionData::at(lu));
     }
     // Pre-allocated capture cells (one region per cell, keyed by the Begin's
     // HirId in `begin_cell_regions` — not in `alloc_region`, which holds one
@@ -56,10 +59,10 @@ pub(super) fn populate_decref_points(
                 .entry(region)
                 .and_modify(|d| {
                     if ord(lu) > ord(d.decref_point) {
-                        d.decref_point = lu;
+                        d.extend_to(lu);
                     }
                 })
-                .or_insert(RegionData { decref_point: lu });
+                .or_insert(RegionData::at(lu));
         }
     }
 
@@ -179,10 +182,10 @@ pub(super) fn populate_decref_points(
                         .entry(r)
                         .and_modify(|d| {
                             if ord(lu) > ord(d.decref_point) {
-                                d.decref_point = lu;
+                                d.extend_to(lu);
                             }
                         })
-                        .or_insert(RegionData { decref_point: lu });
+                        .or_insert(RegionData::at(lu));
                 }
                 // Record the binding-resolved (tight) last-use per region, for the
                 // ownership lifetime obligation. Unlike
@@ -290,10 +293,10 @@ pub(super) fn populate_decref_points(
                 .entry(r)
                 .and_modify(|d| {
                     if ord(lu) > ord(d.decref_point) {
-                        d.decref_point = lu;
+                        d.extend_to(lu);
                     }
                 })
-                .or_insert(RegionData { decref_point: lu });
+                .or_insert(RegionData::at(lu));
         }
     }
 
@@ -315,10 +318,10 @@ pub(super) fn populate_decref_points(
                 .entry(r)
                 .and_modify(|d| {
                     if ord(lu) > ord(d.decref_point) {
-                        d.decref_point = lu;
+                        d.extend_to(lu);
                     }
                 })
-                .or_insert(RegionData { decref_point: lu });
+                .or_insert(RegionData::at(lu));
         }
     }
 
@@ -337,10 +340,10 @@ pub(super) fn populate_decref_points(
                 .entry(r)
                 .and_modify(|d| {
                     if ord(lu) > ord(d.decref_point) {
-                        d.decref_point = lu;
+                        d.extend_to(lu);
                     }
                 })
-                .or_insert(RegionData { decref_point: lu });
+                .or_insert(RegionData::at(lu));
         }
     }
 
@@ -359,10 +362,10 @@ pub(super) fn populate_decref_points(
                 .entry(r)
                 .and_modify(|d| {
                     if ord(lu) > ord(d.decref_point) {
-                        d.decref_point = lu;
+                        d.extend_to(lu);
                     }
                 })
-                .or_insert(RegionData { decref_point: lu });
+                .or_insert(RegionData::at(lu));
         }
     }
 
@@ -394,16 +397,306 @@ pub(super) fn populate_decref_points(
                 .entry(r)
                 .and_modify(|d| {
                     if ord(lu) > ord(d.decref_point) {
-                        d.decref_point = lu;
+                        d.extend_to(lu);
                     }
                 })
-                .or_insert(RegionData { decref_point: lu });
+                .or_insert(RegionData::at(lu));
         }
     }
+
+    // Re-anchor every release that landed inside a branch arm onto the branch.
+    // Reads each region's FINAL `decref_point`, so it follows every extension
+    // above; it only moves a release LATER, so the break window below still sees
+    // (and can re-anchor) anything it leaves inside a block's skipped window.
+    pin_branch_arm_releases(
+        info,
+        hir,
+        du,
+        escape,
+        arena,
+        order,
+        last_use,
+        inference_binding_regions,
+        frame_replacing_tail_calls,
+    );
 
     // Runs LAST: it reads each region's FINAL `decref_point` to decide whether
     // the break jumps over it, so every extension above must already have landed.
     pin_break_skipped_releases(info, hir, order, last_use, break_skip_blocks);
+}
+
+/// Re-anchor a release that landed inside one arm of a branch onto the branch.
+///
+/// A region's `decref_point` is the structurally-latest of its uses. When several
+/// arms use it, "latest" resolves to a node inside ONE arm — and arms are
+/// mutually exclusive, so every execution taking a different arm emits no release
+/// at all and holds the whole region (plus every member its free cascade would
+/// reclaim) to fiber teardown. "Latest across the arms" is not a point any single
+/// execution passes through.
+///
+/// The point every execution does pass through is `last_use[branch]` — the node
+/// consuming the branch's value, or the branch itself when nothing does — whose
+/// decrefs the lowerer emits after the merge label. Moving the release there is a
+/// placement argument, the one the break window makes: one release still, landing
+/// later (docs/impl/region/mechanism.md § "A release inside one arm is not a
+/// release on the other arms").
+///
+/// Placement is enough only where this frame is the region's **sole holder** —
+/// the release fires on arms where none did before, and the other holder within
+/// reach is an uncounted borrow in a parked frame. That is escape's question, and
+/// the admission below is its answer; everything escape cannot clear keeps the
+/// baseline and the counted per-arm routes.
+///
+/// Once a region's `decref_point` leaves the arms, `regions::compensate` no
+/// longer finds it inside one, so neither of its per-arm routes fires for that
+/// region — the single anchored release is what they were approximating.
+///
+/// Three boundaries bound the window, the same three the break window carries.
+/// Two are about how many times a release runs: a `While`/`Loop` nested in the
+/// branch and holding the `decref_point` (its body re-allocates per iteration, so
+/// one release cannot cover N) and a `Lambda` holding it (its releases run in
+/// another activation, against another frame's slots). The third guards the
+/// anchor: a **frame-replacing** tail call in the branch means that arm leaves
+/// through the callee rather than arriving at the merge, so the branch declines
+/// whole. A tail call to a *native* pushes no frame and falls through, which is
+/// why the callee kind decides it (`frame_replacing_tail_calls`) and not
+/// `is_tail`.
+///
+/// The region must also be **live-in** — every allocation and holder-definition
+/// site outside the branch's subtree — so a value born inside an arm keeps its
+/// in-arm release and the window only moves what the branch received.
+#[allow(clippy::too_many_arguments)]
+fn pin_branch_arm_releases(
+    info: &mut RegionInfo,
+    hir: &Hir,
+    du: &DefUseBuilder,
+    escape: &crate::hir::EscapeInfo,
+    arena: &BindingArena,
+    order: &HashMap<HirId, u32>,
+    last_use: &HashMap<HirId, HirId>,
+    inference_binding_regions: &HashMap<Binding, Vec<Region>>,
+    frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
+) {
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let low = compute_subtree_low(hir, order);
+    let mut scopes = BranchWindowScopes::default();
+    collect_branch_scopes(hir, order, &low, frame_replacing_tail_calls, &mut scopes);
+    if scopes.branches.is_empty() {
+        return;
+    }
+    // Inner branches first: a release hoisted to an inner branch's anchor is
+    // still inside the enclosing arm, so the outer branch can carry it the rest
+    // of the way. Post-order indexes a child below its parent, so ascending
+    // `node_hi` is exactly innermost-outward.
+    scopes.branches.sort_by_key(|b| b.node_hi);
+
+    // Every allocation and holder-definition site of each region — the live-in
+    // premise's anchors, gathered as `regions::compensate` gathers them.
+    let mut region_anchors: HashMap<Region, Vec<u32>> = HashMap::new();
+    for (b, regions) in inference_binding_regions {
+        if let Some(&d) = du.def_site.get(b) {
+            for &r in regions {
+                region_anchors.entry(r).or_default().push(ord(d));
+            }
+        }
+    }
+    for (&alloc_id, &r) in &info.alloc_region {
+        region_anchors.entry(r).or_default().push(ord(alloc_id));
+    }
+
+    // ── The admission: the frame must be the region's only holder ────────────
+    //
+    // The anchor is a PLACEMENT argument — one release, moved later — and
+    // placement alone is enough only where this frame holds the region's only
+    // reference. On the arms the window newly covers the release fires where none
+    // did before, so any *other* holder it drops to zero is an over-free; and the
+    // reachable other holder is an uncounted borrow in a frame that is PARKED when
+    // the release runs, which the resume's uncounted-borrow check detonates on
+    // (region/generations.md). No premise about arm structure discharges that.
+    //
+    // Escape answers exactly this question, and it is the sole authority for it: a
+    // value that does not leave its activation by ANY facet — return, store,
+    // capture, fiber — is reachable only through this frame's slots, so the frame
+    // is the only holder at the merge. Every holder must be non-escaping (an
+    // aliased region is only as local as its loosest holder), the region must have
+    // one (an unheld region offers nothing to judge), and the atomless site halves
+    // of the return/fiber frontiers are refused too, since no binding names them.
+    let frontier = super::super::escape::shared_seed_regions(escape, info);
+    let mut held: rustc_hash::FxHashSet<Region> = rustc_hash::FxHashSet::default();
+    let mut escaping: rustc_hash::FxHashSet<Region> = rustc_hash::FxHashSet::default();
+    // A MUTATED or CAPTURED holder is refused for the reason `regions::compensate`
+    // refuses it as a release route: a slot repointed between the arm and the
+    // anchor frees whatever it holds THEN, not the value the arm named, and a
+    // captured value is reachable through the closure env. Both are reachability
+    // facts, read from the region capture-graph and the arena's mutation flag.
+    let captured = super::super::escape::captured_bindings(hir);
+    for (b, regions) in inference_binding_regions {
+        let bi = arena.get(*b);
+        let unsafe_holder =
+            bi.is_mutated || captured.contains(b) || escape.binding_escapes_activation(*b);
+        for &r in regions {
+            held.insert(r);
+            if unsafe_holder {
+                escaping.insert(r);
+            }
+        }
+    }
+
+    // Regions whose release belongs to another mechanism: moving their
+    // `decref_point` would move a release that mechanism, not this one, emits.
+    let excluded: rustc_hash::FxHashSet<Region> = info
+        .region_data
+        .keys()
+        .copied()
+        .filter(|&r| {
+            info.suppressed_decref_regions.contains(&r)
+                || info.owned_group_members.contains(&r)
+                || info.cell_release_regions.contains(&r)
+                || info.mutated_binding_value_regions.contains(&r)
+                || info.merged_root(r) != r
+                || !held.contains(&r)
+                || escaping.contains(&r)
+                || frontier.contains(&r)
+        })
+        .collect();
+
+    for br in &scopes.branches {
+        // A nested lambda's own frame exits belong to that lambda, not here.
+        let inner_lambdas: Vec<(u32, u32)> = scopes
+            .lambdas
+            .iter()
+            .copied()
+            .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
+            .collect();
+        if scopes.frame_exits.iter().any(|&e| {
+            e >= br.node_lo
+                && e <= br.node_hi
+                && !inner_lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
+        }) {
+            continue;
+        }
+        let anchor = last_use.get(&br.id).copied().unwrap_or(br.id);
+        let anchor_ord = ord(anchor);
+        // Only the barriers nested INSIDE this branch matter: one enclosing the
+        // branch encloses the anchor too, so it constrains nothing here.
+        let inner_barriers: Vec<(u32, u32)> = scopes
+            .barriers
+            .iter()
+            .copied()
+            .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
+            .collect();
+        for (&r, d) in info.region_data.iter_mut() {
+            if excluded.contains(&r) {
+                continue;
+            }
+            let dord = ord(d.decref_point);
+            if dord >= anchor_ord || !br.arms.iter().any(|&(lo, hi)| lo <= dord && dord <= hi) {
+                continue;
+            }
+            if inner_barriers
+                .iter()
+                .any(|&(lo, hi)| lo <= dord && dord <= hi)
+            {
+                continue;
+            }
+            let live_in = region_anchors
+                .get(&r)
+                .is_some_and(|a| a.iter().all(|&o| o < br.node_lo || o > br.node_hi));
+            if !live_in {
+                continue;
+            }
+            // The window moves only where the release is EMITTED. `lifetime_point`
+            // stays at the structural last use, so the ownership and merge cuts —
+            // whose post-dominance obligations are lifetime questions — keep
+            // reading the region's real lifetime and not this anchor
+            // (`RegionData::lifetime_point`).
+            d.decref_point = anchor;
+        }
+    }
+}
+
+/// The structural facts [`pin_branch_arm_releases`] reads off one compilation
+/// unit, all as post-order indices so containment is an interval test.
+#[derive(Default)]
+struct BranchWindowScopes {
+    /// Every `If`/`Match`, with its own and its arms' subtree intervals. An `If`
+    /// is a two-armed branch — every premise here is stated over one arm and its
+    /// siblings, never over the branch's kind or arity.
+    branches: Vec<ArmBranch>,
+    /// Subtree intervals of the scopes a release may not be hoisted OUT of: an
+    /// iterative scope (`While`/`Loop`, whose body re-allocates per iteration)
+    /// and a `Lambda` (whose body runs in its own activation, against its own
+    /// frame's slots).
+    barriers: Vec<(u32, u32)>,
+    /// Subtree intervals of the `Lambda`s alone — the frame boundary, which says
+    /// whose exits a `frame_exits` entry belongs to.
+    lambdas: Vec<(u32, u32)>,
+    /// Post-order indices of the tail calls that may replace the frame. One
+    /// inside a branch means its merge label is not a point every arm reaches.
+    ///
+    /// Narrower than [`BreakWindowScopes::frame_exits`], which counts every
+    /// `Return` and every tail `Call`: a functionalized `Return` inside an arm
+    /// stores the branch's result and jumps to the merge rather than leaving, and
+    /// a tail call to a *native* falls through to it. Only a callee that can
+    /// replace the frame actually skips the merge, and the window exists for the
+    /// native-tail dispatch arm, which the coarser rule would decline.
+    frame_exits: Vec<u32>,
+}
+
+/// One branch's post-order intervals: the whole node, and each arm's body.
+struct ArmBranch {
+    id: HirId,
+    node_lo: u32,
+    node_hi: u32,
+    arms: Vec<(u32, u32)>,
+}
+
+/// Collect [`BranchWindowScopes`] over the whole tree in one walk.
+fn collect_branch_scopes(
+    hir: &Hir,
+    order: &HashMap<HirId, u32>,
+    low: &HashMap<HirId, u32>,
+    frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
+    out: &mut BranchWindowScopes,
+) {
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
+    match &hir.kind {
+        HirKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => out.branches.push(ArmBranch {
+            id: hir.id,
+            node_lo: lo(hir.id),
+            node_hi: ord(hir.id),
+            arms: vec![
+                (lo(then_branch.id), ord(then_branch.id)),
+                (lo(else_branch.id), ord(else_branch.id)),
+            ],
+        }),
+        HirKind::Match { arms, .. } => out.branches.push(ArmBranch {
+            id: hir.id,
+            node_lo: lo(hir.id),
+            node_hi: ord(hir.id),
+            arms: arms
+                .iter()
+                .map(|(_pat, _guard, body)| (lo(body.id), ord(body.id)))
+                .collect(),
+        }),
+        HirKind::While { .. } | HirKind::Loop { .. } => {
+            out.barriers.push((lo(hir.id), ord(hir.id)))
+        }
+        HirKind::Lambda { .. } => {
+            out.barriers.push((lo(hir.id), ord(hir.id)));
+            out.lambdas.push((lo(hir.id), ord(hir.id)));
+        }
+        HirKind::Call { .. } if frame_replacing_tail_calls.contains(&hir.id) => {
+            out.frame_exits.push(ord(hir.id))
+        }
+        _ => {}
+    }
+    hir.for_each_child(|c| collect_branch_scopes(c, order, low, frame_replacing_tail_calls, out));
 }
 
 /// Re-anchor every release a `break` jumps over onto the block it leaves.

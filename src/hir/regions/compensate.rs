@@ -95,6 +95,15 @@
 //! on the node is what makes the per-arm decref provably non-zeroing, which is why
 //! a used sibling arm with no such retain keeps the baseline. The dead sibling arm
 //! needs no retain precisely because it creates no reference at all.
+//!
+//! This pass sees only the regions the **branch-arm release window** declined
+//! (`analyze/decref.rs`, docs/impl/region/mechanism.md § "A release inside one arm
+//! is not a release on the other arms"). Where that window applies it moves the
+//! region's single `decref_point` out of the arms entirely, so `arm_of_d` below
+//! finds nothing and neither route fires — one anchored release replaces the
+//! per-arm ones. The two partition the obligation: the window answers "is this
+//! frame the sole holder" with escape and needs no count argument; everything
+//! escape cannot clear arrives here, where the count argument is the retain.
 
 use super::*;
 use crate::hir::region::Region;

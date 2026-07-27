@@ -11,6 +11,14 @@
 # src/dump/escape.rs) of a set of REAL corpus files and pins it byte-for-byte, so
 # a migration step that changes escape behaviour changes a snapshot and fails here.
 #
+# The dump's last section is `[region_instrs]`, the emitted RC stream, so this
+# also fires on any change to WHERE the region solver places a retain or release —
+# a wider net than escape alone. Read a drift by section: one confined to
+# `[region_instrs]`, with the escape verdicts above it byte-identical, is a
+# region-placement change and re-blesses; one that moves `[needs_capture]`,
+# `[lambda_captures]`, `[return_frontier]` or `[suppressed_decref_regions]` is an
+# escape change and wants the migration argument this file exists to demand.
+#
 # Why these files and not the whole corpus: compile/dumps compiles each source
 # twice and leaks regions (docs/test-runner.md § CAS asset capture — it OOMs a
 # full make-smoke run, which is why the runner's own dump capture is disabled).

@@ -27,6 +27,31 @@ impl RegionInference {
         }
     }
 
+    /// Does this callee run as a **native** — an inline opcode or a registered
+    /// primitive — rather than as a bytecode closure? Under the same
+    /// unshadowed-immutable-primitive condition as `call_effect`, so a shadowed
+    /// or computed callee answers `false`.
+    ///
+    /// What reads this is the branch-arm release window: a tail call to a native
+    /// pushes no bytecode frame, so the dispatch loop falls through to the
+    /// enclosing branch's merge label, while a tail call to a closure REPLACES
+    /// the frame and never arrives there (docs/impl/region/mechanism.md § "A
+    /// release inside one arm is not a release on the other arms"). The `is_tail`
+    /// flag alone cannot tell the two apart, and the native-tail dispatch arm is
+    /// exactly the shape the window exists to cover.
+    pub(super) fn is_native_callee(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return false;
+            }
+            self.call_class.intrinsic_ops.contains(&bi.name)
+                || self.call_class.effects.contains_key(&bi.name)
+        } else {
+            false
+        }
+    }
+
     /// The callee's declared `RegionEffect` (docs/impl/region/effects.md "Native
     /// region effects"), when the callee is an immutable, unshadowed
     /// binding naming a declared primitive. `None` for unknown callees —

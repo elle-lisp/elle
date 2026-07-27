@@ -55,6 +55,7 @@ pub fn analyze_regions_with(
     let destructure_sites = std::mem::take(&mut ri.destructure_sites);
     let break_sites = std::mem::take(&mut ri.break_sites);
     let break_skip_blocks = std::mem::take(&mut ri.break_skip_blocks);
+    let frame_replacing_tail_calls = std::mem::take(&mut ri.frame_replacing_tail_calls);
     let reassigns = reassign::Reassigns {
         top_level: std::mem::take(&mut ri.top_level_reassigns),
         local: std::mem::take(&mut ri.local_reassigns),
@@ -127,12 +128,14 @@ pub fn analyze_regions_with(
 
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
-    // break consuming-and-transferring-node pins, and the break-skipped window
-    // (see `decref`).
+    // break consuming-and-transferring-node pins, and the two re-anchoring
+    // windows — branch-arm and break-skipped (see `decref`).
     decref::populate_decref_points(
         &mut info,
         hir,
         &du,
+        &escape_info,
+        arena,
         &order,
         &last_use_info,
         &inference_binding_regions,
@@ -140,10 +143,12 @@ pub fn analyze_regions_with(
         &destructure_sites,
         &break_sites,
         &break_skip_blocks,
+        &frame_replacing_tail_calls,
     );
     let last_use = &last_use_info.per_node;
 
-    // Per-path branch compensation (`regions::compensate`): a region whose single
+    // Per-path branch compensation (`regions::compensate`), the counted route for
+    // every region the branch-arm window above declined: a region whose single
     // `decref_point` sits inside a conditional arm is freed there on the used
     // path but leaks on the sibling arms; add a compensating release at each dead
     // sibling arm's head. Reads the FINAL `region_data` (the decref_point post-passes
@@ -205,10 +210,8 @@ pub fn analyze_regions_with(
         }
         info.region_data
             .entry(cm.root)
-            .and_modify(|d| d.decref_point = cm.drop_site)
-            .or_insert(RegionData {
-                decref_point: cm.drop_site,
-            });
+            .and_modify(|d| d.extend_to(cm.drop_site))
+            .or_insert(RegionData::at(cm.drop_site));
     }
 
     // Ownership forest: adopt edges, the transferred-returned-subtree cut, the

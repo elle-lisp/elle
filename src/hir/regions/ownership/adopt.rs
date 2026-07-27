@@ -239,7 +239,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         // AFTER owner assignment, because which last-use bounds a member depends on
         // whether its own decref is suppressed (capture-adopted) or live
         // (store-adopted) — see the obligation block.
-        let Some(root_dp_id) = info.region_data.get(&root).map(|d| d.decref_point) else {
+        let Some(root_dp_id) = info.region_data.get(&root).map(|d| d.lifetime_point) else {
             continue;
         };
         // No merge overlap: a region collapsed by a builder-idiom MERGE is owned by that
@@ -364,9 +364,9 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
                 info.binding_last_use
                     .get(&m)
                     .copied()
-                    .or_else(|| info.region_data.get(&m).map(|d| d.decref_point))
+                    .or_else(|| info.region_data.get(&m).map(|d| d.lifetime_point))
             } else {
-                info.region_data.get(&m).map(|d| d.decref_point)
+                info.region_data.get(&m).map(|d| d.lifetime_point)
             }
         };
         // The root's single decref must post-dominate every member's relevant last
@@ -411,7 +411,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
             for &(_, alias, container) in &info.counted_read_aliases {
                 if reachable.contains(&container) && reachable.insert(alias) {
                     grew = true;
-                    alias_dps.push(info.region_data.get(&alias).map(|d| d.decref_point));
+                    alias_dps.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
                 }
             }
             if !grew {

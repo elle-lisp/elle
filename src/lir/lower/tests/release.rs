@@ -537,12 +537,8 @@ fn nested_adopt_members_release_innermost_first() {
     let site = crate::hir::HirId(9_000_002);
     let (lowerer, _hir) = make_lowerer_with("42", |info, _hir| {
         for r in [inner, mid, root] {
-            info.region_data.insert(
-                r,
-                crate::hir::region::RegionData {
-                    decref_point: point,
-                },
-            );
+            info.region_data
+                .insert(r, crate::hir::region::RegionData::at(point));
         }
         info.owned_adopt_edges
             .insert(site, vec![(inner, mid), (mid, root)]);

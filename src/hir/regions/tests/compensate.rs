@@ -63,11 +63,59 @@ fn arm_compensates(
         .is_some_and(|comp| regions.iter().any(|r| comp.contains(r)))
 }
 
+/// Does every region the binding named `name` may point into carry its release
+/// OUTSIDE `arms` — i.e. at a node every arm reaches?
+///
+/// This is the branch-arm release window's signature (docs/impl/region/
+/// mechanism.md § "A release inside one arm is not a release on the other
+/// arms"): the region's one `decref_point` is re-anchored onto the branch, so no
+/// arm holds it and none needs a compensating one.
+fn release_clears_the_arms(
+    hir: &Hir,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+    info: &RegionInfo,
+    name: &str,
+    arms: &[HirId],
+) -> bool {
+    let b = find_binding_by_name(hir, name, arena, symbols)
+        .unwrap_or_else(|| panic!("no binding named {}", name));
+    let regions = match info.binding_source_regions.get(&b) {
+        Some(rs) => rs,
+        None => return false,
+    };
+    let order = compute_order(hir);
+    let low = compute_subtree_low(hir, &order);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    regions.iter().all(|r| match info.region_data.get(r) {
+        Some(d) => {
+            let o = ord(d.decref_point);
+            !arms
+                .iter()
+                .any(|&a| low.get(&a).copied().unwrap_or(0) <= o && o <= ord(a))
+        }
+        None => false,
+    })
+}
+
+// ── The obligation, and the two routes that discharge it ─────────────
+//
+// No path may leave a branch without releasing a region that was live-in to it.
+// Two mechanisms discharge that one obligation, and the routing is a property of
+// the region and the branch together. The window moves the region's single
+// release to a point every arm reaches — admitted only where escape proves the
+// frame is the region's sole holder, and only where the branch's merge label is
+// reached by every arm. Everything else keeps the in-arm release plus the per-arm
+// compensation routes, which carry a count argument instead. The tests below pin
+// each route on the shape that selects it.
+
 #[test]
 fn returned_param_is_released_on_the_arm_that_does_not_return_it() {
     // `(if (%eq i 0) xs 7)` — `xs` leaves through the THEN arm, so its
     // `decref_point` lands there. The ELSE arm hands the caller an immediate: no
-    // mint, no caller reference, and nothing else releases the param.
+    // mint, no caller reference, and nothing else releases the param. `xs` crosses
+    // the return frontier, so the window declines it (its caller is a second
+    // holder the anchor argument says nothing about) and compensation is the route.
     let (hir, arena, symbols, info) = analyze_with_class("(fn (i xs) (if (%eq i 0) xs 7))");
     let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
     assert!(
@@ -90,38 +138,63 @@ fn returned_param_compensation_follows_the_arms() {
 }
 
 #[test]
-fn read_only_arm_keeps_its_compensation() {
-    // Control: when no arm carries `xs` across the return frontier the ordinary
-    // dead-arm compensation already applies. Guards against a change that admits
-    // the returned shape by dropping the baseline.
+fn read_only_arm_release_clears_the_arms() {
+    // Control: when no arm carries `xs` across the return frontier the same
+    // anchoring applies. Guards against a change that treats the returned shape
+    // specially by dropping the baseline.
     let (hir, arena, symbols, info) =
         analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) 7))");
-    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
     assert!(
-        arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
-        "the dead sibling arm of a merely-read value must still be compensated"
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a merely-read param's release must sit where both arms reach it"
     );
 }
 
 #[test]
-fn dead_match_arms_are_compensated_like_dead_if_arms() {
-    // The premises head compensation rests on are stated over ONE ARM and its
-    // siblings — never over the branch's arity or kind. `v` is allocated before the
-    // dispatch, so it is live-in on every arm, and its `decref_point` lands in the
-    // one arm that uses it. Every other arm creates no reference to it and owes the
-    // release, exactly as a two-armed `if`'s dead arm does.
+fn match_arms_are_treated_like_if_arms() {
+    // Every premise here is stated over ONE ARM and its siblings — never over the
+    // branch's arity or kind. `v` is allocated before the dispatch, so it is
+    // live-in on every arm and no arm may hold its only release.
     let (hir, arena, symbols, info) = analyze_with_class(
         "(fn (t) (let [v (list 1 2 3)] (match t :use (length v) :skip 0 _ -1)))",
     );
     let arms = first_match_arms(&hir).expect("a Match node");
     assert_eq!(arms.len(), 3, "the dispatch has three arms");
-    for (i, &arm) in arms.iter().enumerate().skip(1) {
-        assert!(
-            arm_compensates(&hir, &arena, &symbols, &info, "v", arm),
-            "dead Match arm {} must release the local it never uses",
-            i
-        );
-    }
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "v", &arms),
+        "a Match's live-in local must be released where every arm reaches it"
+    );
+}
+
+#[test]
+fn a_frame_replacing_arm_keeps_the_per_arm_compensation() {
+    // The window's third boundary selects the other route: `(g 7)` in tail
+    // position replaces the frame, so the ELSE arm never arrives at the merge and
+    // a release anchored there would be dead on exactly that path. The branch
+    // declines the window, and the dead sibling arm takes its head release —
+    // which is what keeps `xs` from stranding on the path that returns it.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) (g 7)))");
+    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
+        "a branch the window declines must still compensate its dead sibling arm"
+    );
+}
+
+#[test]
+fn a_native_tail_arm_does_not_decline_the_window() {
+    // The counterfactual for the boundary above: a tail call to a NATIVE pushes
+    // no frame and falls through to the merge, so the same shape over `length`
+    // keeps the window — the distinction is the callee kind, not `is_tail`.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) (length xs)))");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a native tail call in an arm must not decline the window"
+    );
 }
 
 #[test]

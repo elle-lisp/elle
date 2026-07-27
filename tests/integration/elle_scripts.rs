@@ -262,6 +262,26 @@ fn region_break_skip_uaf() {
     );
 }
 
+// Guard — a region live-in to a branch has ONE release, and it is anchored where
+// every arm reaches it rather than inside the arm that happens to name it last
+// (docs/impl/region/mechanism.md § "A release inside one arm is not a release on
+// the other arms"). The release moves later, which can only over-keep — while it
+// still drops the frame's own reference and no other, which is what this drives:
+// an arm that stores the value into a container, hands it to a closure, returns
+// it to its caller, and parks a fiber that resolves it through its own
+// activation map after the branch; plus the three scopes the window stops at (a
+// nested loop, whose body re-allocates per iteration, a nested lambda, whose
+// releases belong to another frame, and a frame-replacing tail call, which never
+// reaches the merge). Freeing a live region there faults on the read below —
+// SIGSEGV under guardfree. The leak face is `region-branch-arm-window.lisp`.
+#[test]
+fn region_branch_arm_window_uaf() {
+    run_elle_script_with_args(
+        "region-branch-arm-window-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

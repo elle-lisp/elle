@@ -158,8 +158,8 @@ pub(crate) fn compute_merges(
         //     death (the aliased / mutable-accumulator shape) is sequenced after the
         //     parent's free and is refused.
         let (Some(cd), Some(pd)) = (
-            info.region_data.get(&child).map(|d| d.decref_point),
-            info.region_data.get(&parent).map(|d| d.decref_point),
+            info.region_data.get(&child).map(|d| d.lifetime_point),
+            info.region_data.get(&parent).map(|d| d.lifetime_point),
         ) else {
             continue;
         };

@@ -2,9 +2,26 @@ use super::*;
 
 impl RegionInference {
     pub(super) fn walk_call(&mut self, hir: &Hir) -> Vec<Region> {
-        let HirKind::Call { func, args, .. } = &hir.kind else {
+        let HirKind::Call {
+            func,
+            args,
+            is_tail,
+            ..
+        } = &hir.kind
+        else {
             unreachable!("walk_call: non-Call HIR kind")
         };
+        // A tail call to a bytecode CLOSURE replaces this frame, so control never
+        // arrives at the enclosing branch's merge label; a tail call to a native
+        // pushes no frame and falls through to it. The branch-arm release window
+        // needs that distinction to know whether its anchor is a point every arm
+        // reaches (docs/impl/region/mechanism.md § "A release inside one arm is
+        // not a release on the other arms"). Recorded before the inline attempt
+        // below, which returns early for a known lambda callee — itself a
+        // frame-replacing one.
+        if *is_tail && !self.is_native_callee(func) {
+            self.frame_replacing_tail_calls.insert(hir.id);
+        }
         let _ = self.walk(func);
         let arg_regions: Vec<Vec<Region>> = args.iter().map(|a| self.walk(&a.expr)).collect();
 
