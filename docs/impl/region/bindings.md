@@ -30,7 +30,7 @@ agree with which of the value's ordinary decrefs are suppressed:
   an unbounded over-keep on a module mutable reassigned in a long-running loop
   (`runtime::tests::reassign_toplevel_prior_release_is_bounded`).
   **CALL-RESULT content is excluded from the donation** and takes the counted
-  store instead, exactly as fn-local content does. A call result carries a
+  store instead, as all fn-local content does. A call result carries a
   second compile-time name for the same runtime value — the opaque placeholder
   region the lowerer releases by value through the ANF temp's slot (rules.md
   Rule 2's bound-result shape) — and the suppression above reaches only the
@@ -38,13 +38,63 @@ agree with which of the value's ordinary decrefs are suppressed:
   fires regardless and consumes the callee's one returned reference; donating on
   top of it leaves the cell pointing at a freed value
   (`region-reassign-callresult-store.lisp`, `region-hof-tail-return-uaf.lisp`).
-- **Fn-local (the cell takes a COUNTED reference).** The compiler suppresses
-  only the init region's decref; each assign-value region's ordinary decref is
-  KEPT (it is the scope-exit demise of whatever the cell last holds). The
-  producer reference is thus still released on its own, so the cell must
-  **incref-on-store** to hold a balanced reference of its own, which
-  drop-on-overwrite releases. Removing it would free the value at the producer
-  decref before drop-on-overwrite loads it (a UAF).
+- **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
+  *exits*, so its final content has no teardown to fall back on and the cell
+  needs a release of its own — which means a reference of its own. The compiler
+  therefore suppresses only the init region's decref (the init is stored
+  uncounted at the define, so drop-on-overwrite is its release) and the lowerer
+  **increfs on store** for every assign, whatever produced the value. That one
+  reference is released by drop-on-overwrite for each displaced prior and by the
+  **content drop** for the final one — the two channels a container's holding
+  needs, recorded per binding in `RegionInfo::cell_containers`.
+
+  The producer's reference is a *separate* claim, and it is dead at the store:
+  from there on the cell's own reference keeps the value alive. So each stored
+  value's region is released at its **store site**, pinned there exactly as a
+  returned value's is pinned to its `Return`. Two things make the pin necessary
+  rather than a nicety. ANF names the stored value in a `let` nested inside the
+  assign, so the structural last use is *before* `lower_assign` increfs and
+  stores it. And the binding-chain extension would otherwise carry the release
+  out to the cell's last use — one release for a region that, in a loop, names a
+  different runtime value every iteration, so every value but the last keeps a
+  reference nobody drops.
+
+  Because no release does double duty, the accounting is per-value in every
+  shape: born `+1`, store `+1`, then either the overwrite or the content drop
+  `−1` and the store-site producer release `−1`.
+
+The two halves claim *different* references, so a binding must land in exactly one
+of them. Landing in both suppresses the assign-value region's ordinary decref (the
+module-scope half) while still emitting the counted store (the fn-local half): the
+producer's reference then has no release channel and the cell strands one region per
+assignment. **The scope split is therefore structural** — module-scope vs fn-local is
+read off the walk's lambda depth at the reassignment site, so every visit to that
+site must agree on the depth. The solver re-walks an inlinable callee's body at the
+call site to discover the cross-region edges buried inside it (`try_inline_call`);
+that re-walk enters a `Lambda`'s body directly, so it carries **that lambda's** depth
+for its duration and reads the same classification the structural walk reads. The
+same depth gates the compiled-capture-cell mints (`Begin`/`Let`/`Letrec` emit a
+`MakeCaptureCell` only outside a lambda), which is why the depth — rather than a
+per-recording re-walk guard — is where the fact belongs.
+
+**Where the content drop lands.** It is a value route through the cell's own
+slot — which value the cell holds at that point is a runtime fact, and loading
+the slot reads exactly that (`nil` for a cell never written, whose release is a
+no-op). This is the one place a reassigned binding's slot *is* a release route,
+precisely because the release names the slot's **current** occupant rather than
+some earlier value whose region the compiler picked; a release aimed at a
+specific region must still refuse the slot ("a mutated slot is not a release
+route", below).
+
+The point is the cell's last access — the latest of its reads and its writes —
+with one hoist. A cell **carried across a loop** is re-pointed every iteration,
+so a drop inside the body would free what the next iteration reads. Such a cell
+is a loop *parameter*: its scope node is the loop itself, so hoisting to that
+node puts the one drop after the loop, where the lowerer emits the loop's own
+releases. A cell bound **inside** a loop body has a body scope node instead, so
+it is not hoisted and drops once per iteration — matching its per-iteration
+mint. The hoist is a max rather than a move because a loop's parameters stay
+readable past the loop (`(while … (assign acc …)) acc`).
 
 **The counted store is emitted BEFORE the slot store.** `StoreLocal` consumes
 the value register, so a retain emitted after it no longer names the stored

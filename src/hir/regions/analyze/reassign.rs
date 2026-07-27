@@ -14,6 +14,7 @@
 use super::super::holders::RegionHolders;
 use super::super::*;
 use crate::hir::defuse::DefUseBuilder;
+use crate::hir::region::CellContainer;
 
 /// Apply the 1-slot-container model for reassigned mutable bindings, recording
 /// drop-on-overwrite / donation sites and decref suppressions into `info`.
@@ -167,28 +168,19 @@ pub(super) fn apply_reassign_containers(
     }
 
     // ── Fn-local (in-lambda) reassigned mutables ───────────────────────────
-    // Same 1-slot-container model as the top-level loop above — the cell takes
-    // a counted reference via `lower_assign`'s drop-on-overwrite (incref the
-    // new content on store, decref the displaced prior on overwrite). ONE
-    // difference: a fn-local cell's final value is NOT a program-lifetime root
-    // (top-level cells are); the binding's scope exits and its `decref_point`
-    // frees whatever the cell last held. So we KEEP the assign-value regions'
-    // decrefs — they ARE the cell's scope-exit demise (and, for a returned
-    // binding, the callee's one release balanced by the return mint) — and
-    // suppress the binding's OTHER regions (`binding_regs \ regions`). (Top-level
-    // suppresses the assign-value regions too because there the final value lives
-    // forever; doing that here would drop the cell's scope-exit decref and leak
-    // the final value.)
-    //
-    // The defect this fixes: without the incref-on-store the cell slot holds an
-    // UNCOUNTED reference (plain `StoreLocal`) yet still receives that
-    // scope-exit `DecrefValueRegion` — one decref too many for the final value,
-    // whose producer temp already owns the lone reference (rc=1). The second
-    // decref frees an already-freed region and, once its physical id recycles,
-    // double-frees a live one (the `regionstore.rs` phantom-region panic;
-    // `fn/cfg … :mermaid`). The init value is released by the first assign's
-    // drop-on-overwrite, so its ordinary decref (suppressed here) is the
-    // duplicate. SOLE-HELD gates this, as for the top-level path.
+    // Same 1-slot-container model as the top-level loop above — the cell takes a
+    // COUNTED reference via `lower_assign`'s incref-on-store, released by
+    // drop-on-overwrite for each displaced prior. ONE difference: a fn-local
+    // cell's final content is NOT a program-lifetime root (a module-scope cell's
+    // is, freed by the file-letrec frame teardown), so the cell needs a second
+    // release channel of its own — the CONTENT DROP at the cell's scope demise,
+    // recorded in `cell_containers` and emitted by the lowerer at the enclosing
+    // scope node's exit. The producer's separate claim on each stored value is
+    // dead once the cell holds its own reference, so it is pinned to the store
+    // site (`decref::populate_decref_points` reads `cell_containers` for both).
+    // Two references, two channels each: no release does double duty, so the
+    // accounting holds for a cell written once and for one re-minted every
+    // iteration of a loop alike.
     //
     // The gate is sole-held (BOTH not-returned and returned — see the split
     // below and docs/impl/region/bindings.md "Reassigned mutable bindings are
@@ -222,32 +214,21 @@ pub(super) fn apply_reassign_containers(
 
         if sole {
             if !returned {
-                // Not returned (and sole-held): the cell's final value dies at
-                // scope exit. The first overwrite is the init value's owning
-                // demise, so drop-on-overwrite is its release channel.
+                // Not returned (and sole-held): the cell's content dies at the
+                // overwrite (priors) and at the cell's scope demise (the final
+                // value). The first overwrite is the init value's owning demise,
+                // so drop-on-overwrite is its release channel too.
                 for &s in sites {
                     info.drop_on_overwrite_sites.insert(s);
                 }
-                // Static-alloc content (a slot-resolved fresh allocation — a
-                // `%pair` in the assign) DONATES its birth reference to the
-                // cell, exactly like the module-scope container: the
-                // drop-on-overwrite releases each displaced prior at its
-                // overwrite, and the kept scope-exit slot `DecrefRegion`
-                // releases the final (current) mint — per-value balance even
-                // when a loop re-mints the slot's region every iteration. An
-                // incref-on-store would strand every displaced prior at rc 1
-                // (born + store − overwrite = +1). Call-result content keeps
-                // the counted store: its producer claim is released by its own
-                // value-resolved `DecrefValueRegion`, so the donation there
-                // would over-free. All-or-nothing per binding, like the gate.
-                let all_static = !regions.is_empty()
-                    && regions
-                        .iter()
-                        .all(|r| !info.call_result_regions.contains(r));
-                if all_static {
-                    for &s in sites {
-                        info.donated_overwrite_sites.insert(s);
-                    }
+                // The demise is seeded with the last store — the earliest point
+                // that is after every write — and `decref::populate_decref_points`
+                // moves it out to the cell's last read and past any loop the
+                // cell is carried across, both of which need the structural
+                // order this pass runs before.
+                if let Some(&seed) = sites.last() {
+                    info.cell_containers
+                        .insert(*b, CellContainer::new(sites.clone(), regions.clone(), seed));
                 }
             }
             // KEEP the assign-value regions' (`regions`) decrefs and suppress
@@ -256,10 +237,13 @@ pub(super) fn apply_reassign_containers(
             // loop-carried binding region that aliases whatever value the slot
             // currently holds).
             //
-            // Not returned: the kept assign-value decref IS the cell's
-            // scope-exit demise of the final value; suppressing the init's
-            // ordinary decref is safe because drop-on-overwrite (above) is its
-            // release.
+            // Not returned: the kept assign-value decref is the PRODUCER's
+            // release of each stored value (pinned to the store site, where the
+            // cell's counted reference takes over); the cell's own reference is
+            // released by drop-on-overwrite and the content drop above. The
+            // init value is donated — it is stored uncounted at the define, so
+            // suppressing its ordinary decref leaves drop-on-overwrite (or the
+            // content drop, if it is never displaced) as its one release.
             //
             // Returned: the binding's value is minted for the caller at the
             // `Return` (`lower_return`'s `IncrefValueRegion`). A loop over the

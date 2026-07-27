@@ -107,39 +107,37 @@
     block15: DecrefValueRegion v177
     block15: IncrefValueRegion v179
     block15: DecrefValueRegion v180
-    block15: IncrefRegion s16
     block15: DecrefValueRegion v182
     block15: DecrefValueRegion v187
-    block14: DecrefRegion s17
+    block14: DecrefRegion s16
     block20: DecrefValueRegion v220
+    block20: DecrefRegion s17
     block20: DecrefRegion s18
-    block20: DecrefRegion s19
     block22: DecrefValueRegion v224
     block21: DecrefValueRegion v226
+    block26: DecrefRegion s19
     block26: DecrefRegion s20
     block26: DecrefRegion s21
     block26: DecrefRegion s22
-    block26: DecrefRegion s23
     block26: DecrefValueRegion v252
     block26: DecrefValueRegion v254
     block26: DecrefValueRegion v259
     block26: IncrefValueRegion v261
     block26: DecrefValueRegion v262
-    block26: IncrefRegion s24
     block26: DecrefValueRegion v264
     block26: DecrefValueRegion v269
-    block25: DecrefRegion s25
+    block25: DecrefRegion s23
     block31: DecrefValueRegion v302
-    block31: DecrefRegion s26
-    block31: DecrefRegion s27
+    block31: DecrefRegion s24
+    block31: DecrefRegion s25
     block33: DecrefValueRegion v306
     block32: DecrefValueRegion v308
-    block32: DecrefRegion s28
+    block32: DecrefRegion s26
     block32: IncrefValueRegion v313
     block32: DecrefValueRegion v314
   ; closure[0] <anon>
     block0: DecrefValueRegion v8
-    block0: DecrefRegion s29
+    block0: DecrefRegion s27
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v12
     block0: DecrefValueRegion v13
@@ -149,7 +147,7 @@
     block0: DecrefValueRegion v2
   ; closure[2] <anon>
     block0: DecrefValueRegion v8
-    block0: DecrefRegion s30
+    block0: DecrefRegion s28
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v12
     block0: DecrefValueRegion v13
@@ -161,7 +159,7 @@
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7
-    block0: DecrefRegion s31
+    block0: DecrefRegion s29
   ; closure[5] <anon>
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2
@@ -169,7 +167,7 @@
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v6
     block0: DecrefValueRegion v7
-    block0: DecrefRegion s32
+    block0: DecrefRegion s30
   ; closure[7] <anon>
     block0: IncrefValueRegion v1
     block0: DecrefValueRegion v2

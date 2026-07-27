@@ -76,10 +76,74 @@ pub(super) fn populate_decref_points(
     // extend region_data[r].decref_point for every region r in the
     // inference's binding_regions[b].
     let binding_uses = &du.uses;
+
+    // ── The fn-local 1-slot container's content drop ──────────────────────
+    // The cell's own reference to its current content dies at its last access —
+    // the latest of its reads and its writes — with one hoist: a cell CARRIED
+    // ACROSS a loop is re-pointed every iteration, so a drop inside the body
+    // would free the content the next iteration reads. Such a cell is a loop
+    // PARAMETER, i.e. its scope node is the loop itself, so hoisting to that
+    // node lands the one drop after the loop — where the lowerer emits the
+    // loop's own releases. A cell bound INSIDE a loop body has a body scope
+    // node instead, so it is not hoisted and drops once per iteration, matching
+    // its per-iteration mint. And a loop's parameters stay readable past the
+    // loop (the `(while … (assign acc …)) acc` idiom), which is why the hoist
+    // is a max and not a move.
+    if !info.cell_containers.is_empty() {
+        let low = compute_subtree_low(hir, order);
+        let mut loops: Vec<(HirId, u32, u32)> = Vec::new();
+        collect_iter_scopes(hir, order, &low, &mut loops);
+        let loop_ids: rustc_hash::FxHashSet<HirId> = loops.iter().map(|&(id, _, _)| id).collect();
+        // Each scope node by the region it introduces, so a binding's scope node
+        // is one lookup through `binding_region`.
+        let scope_of_region: HashMap<Region, HirId> =
+            info.scope_region.iter().map(|(&id, &r)| (r, id)).collect();
+        let carried_loop: HashMap<Binding, HirId> = info
+            .cell_containers
+            .keys()
+            .filter_map(|&b| {
+                let scope = *info.binding_region.get(&b)?;
+                let node = *scope_of_region.get(&scope)?;
+                loop_ids.contains(&node).then_some((b, node))
+            })
+            .collect();
+        for (b, c) in info.cell_containers.iter_mut() {
+            let latest = du
+                .uses
+                .get(b)
+                .into_iter()
+                .flat_map(|v| v.iter())
+                .map(|use_id| last_use.get(use_id).copied().unwrap_or(*use_id))
+                .chain(c.stores.iter().copied())
+                .chain(carried_loop.get(b).copied())
+                .max_by_key(|id| ord(*id));
+            if let Some(lu) = latest {
+                c.demise = lu;
+            }
+        }
+    }
+
+    // Snapshot both cell views before the passes below start mutating
+    // `region_data`: the value regions to hold back from the binding chain, and
+    // the store-site pins that replace them.
+    let cell_value_regions: HashMap<Binding, rustc_hash::FxHashSet<Region>> = info
+        .cell_containers
+        .iter()
+        .map(|(&b, c)| (b, c.value_regions.iter().copied().collect()))
+        .collect();
+    let cell_store_pins: Vec<(HirId, Vec<Region>)> = info
+        .cell_containers
+        .values()
+        .filter_map(|c| {
+            let store = c.stores.iter().copied().max_by_key(|id| ord(*id))?;
+            Some((store, c.value_regions.clone()))
+        })
+        .collect();
     for (b, regions) in inference_binding_regions {
         if regions.is_empty() {
             continue;
         }
+        let held_as_cell = cell_value_regions.get(b);
         let mut max_use = binding_uses
             .get(b)
             .into_iter()
@@ -98,14 +162,28 @@ pub(super) fn populate_decref_points(
         }
         if let Some(lu) = max_use {
             for &r in regions {
-                info.region_data
-                    .entry(r)
-                    .and_modify(|d| {
-                        if ord(lu) > ord(d.decref_point) {
-                            d.decref_point = lu;
-                        }
-                    })
-                    .or_insert(RegionData { decref_point: lu });
+                // A fn-local 1-slot container's stored values do NOT ride the
+                // CELL binding's uses: the binding names the slot, not any one
+                // value, so extending here would put one release at the cell's
+                // last use — which, in a loop that re-mints the content every
+                // iteration, can only reach whichever value the producer slot
+                // happens to hold last. The cell's own counted reference covers
+                // the value from the store onward, so the producer's claim is
+                // dead AT the store and is pinned there below. An ANF producer
+                // temp that also holds the region still extends normally, which
+                // is what keeps the release after the allocation it names
+                // (docs/impl/region/bindings.md § "Reassigned mutable bindings
+                // are 1-slot containers").
+                if !held_as_cell.is_some_and(|vs| vs.contains(&r)) {
+                    info.region_data
+                        .entry(r)
+                        .and_modify(|d| {
+                            if ord(lu) > ord(d.decref_point) {
+                                d.decref_point = lu;
+                            }
+                        })
+                        .or_insert(RegionData { decref_point: lu });
+                }
                 // Record the binding-resolved (tight) last-use per region, for the
                 // ownership lifetime obligation. Unlike
                 // `region_data` above this is NOT max'd with the structural
@@ -208,6 +286,31 @@ pub(super) fn populate_decref_points(
     for (read_id, container_regions) in &info.uncounted_read_sites {
         let lu = last_use.get(read_id).copied().unwrap_or(*read_id);
         for &r in container_regions {
+            info.region_data
+                .entry(r)
+                .and_modify(|d| {
+                    if ord(lu) > ord(d.decref_point) {
+                        d.decref_point = lu;
+                    }
+                })
+                .or_insert(RegionData { decref_point: lu });
+        }
+    }
+
+    // Pin each value stored into a fn-local 1-slot container to its STORE site.
+    // The store is a consuming node in the same sense a `Return` is: it takes a
+    // counted reference of its own, so the producer's claim is discharged there
+    // and nowhere later. The pin has to be explicit rather than left to the
+    // structural last use, because ANF names the stored value in a `let` NESTED
+    // inside the assign — releasing at that inner node would free the value
+    // before `lower_assign` increfs and stores it. The lowerer emits a node's
+    // decrefs after the node, so at the assign the release lands behind both the
+    // store's retain and the displaced prior's drop
+    // (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
+    // containers").
+    for (lu, value_regions) in &cell_store_pins {
+        let lu = *lu;
+        for &r in value_regions {
             info.region_data
                 .entry(r)
                 .and_modify(|d| {

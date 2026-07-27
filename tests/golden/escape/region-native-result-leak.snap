@@ -39,8 +39,10 @@
     block4: DecrefRegion s5
     block4: DecrefRegion s6
     block4: DecrefValueRegion v22
+    block4: IncrefValueRegion v26
     block4: DecrefValueRegion v27
     block3: DecrefValueRegion v32
-    block1: DecrefValueRegion v40
+    block3: DecrefValueRegion v34
     block1: DecrefValueRegion v42
-    block1: IncrefValueRegion v39
+    block1: DecrefValueRegion v44
+    block1: IncrefValueRegion v41

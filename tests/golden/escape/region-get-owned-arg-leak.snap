@@ -157,15 +157,19 @@
     block19: DecrefRegion s30
   ; closure[0] <anon>
     block4: DecrefValueRegion v20
+    block4: IncrefValueRegion v24
     block4: DecrefValueRegion v25
     block3: DecrefValueRegion v30
-    block11: DecrefValueRegion v49
-    block11: DecrefValueRegion v54
-    block10: DecrefValueRegion v59
+    block3: DecrefValueRegion v32
+    block11: DecrefValueRegion v51
+    block11: IncrefValueRegion v55
+    block11: DecrefValueRegion v56
     block10: DecrefValueRegion v61
-    block8: DecrefValueRegion v69
-    block8: DecrefValueRegion v71
-    block8: IncrefValueRegion v68
+    block10: DecrefValueRegion v63
+    block10: DecrefValueRegion v65
+    block8: DecrefValueRegion v73
+    block8: DecrefValueRegion v75
+    block8: IncrefValueRegion v72
   ; closure[1] <anon>
     block0: DecrefValueRegion v7
     block0: DecrefValueRegion v15

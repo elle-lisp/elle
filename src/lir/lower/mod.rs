@@ -223,6 +223,11 @@ pub struct Lowerer<'a> {
     /// `emit_decrefs_for` is an O(1) lookup (then a small per-call
     /// tail-region filter) rather than scanning all regions per node.
     decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>>,
+    /// `RegionInfo::cell_containers` indexed by demise node — the fn-local
+    /// 1-slot containers whose current content is dropped when that scope
+    /// exits (docs/impl/region/bindings.md § "Reassigned mutable bindings are
+    /// 1-slot containers"). Empty when the unit has no such cell.
+    cell_drops_by_demise: HashMap<HirId, Vec<Binding>>,
     /// Current HIR node being lowered. Set at the top of `lower_expr`.
     /// Used by `alloc_region_id()` to look up the region for allocations.
     current_hir_id: Option<HirId>,
@@ -332,6 +337,7 @@ impl<'a> Lowerer<'a> {
             escape_info: EscapeInfo::empty(),
             increfs_by_site: HashMap::new(),
             decrefs_by_decref_point: HashMap::new(),
+            cell_drops_by_demise: HashMap::new(),
             current_hir_id: None,
             region_to_table: HashMap::new(),
 
@@ -441,8 +447,19 @@ impl<'a> Lowerer<'a> {
         for regions in decrefs_by_decref_point.values_mut() {
             Self::order_releases(regions, &adopt_owner, &read_alias, &info);
         }
+        // The fn-local 1-slot containers whose content drop lands at each scope
+        // node, indexed the same way and for the same reason as the two above.
+        let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();
+        for (&b, c) in &info.cell_containers {
+            cell_drops_by_demise.entry(c.demise).or_default().push(b);
+        }
+        // Deterministic emission order across runs (the map's iteration is not).
+        for bindings in cell_drops_by_demise.values_mut() {
+            bindings.sort_unstable_by_key(|b| b.0);
+        }
         self.increfs_by_site = increfs_by_site;
         self.decrefs_by_decref_point = decrefs_by_decref_point;
+        self.cell_drops_by_demise = cell_drops_by_demise;
         self.region_info = info;
         self
     }

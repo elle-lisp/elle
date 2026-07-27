@@ -739,6 +739,24 @@ fn region_return_arm_escape_uaf() {
     );
 }
 
+// Guard — a fn-local 1-slot container's content needs BOTH of the cell's release
+// channels (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
+// containers"): drop-on-overwrite for each displaced prior, the content drop at the
+// cell's demise for the final one, with the producer's separate claim released at the
+// store. Leak faces assert bounded region growth across a loop-carried cell, a cell
+// bound inside the loop body, and a cell written once. The over-free faces read the
+// content back inside the loop, after it, and out of a container that outlives the
+// cell — so a demise that fires early, or a producer release that frees what the cell
+// still holds, faults here rather than recycling silently. Full mechanism in the
+// fixture header.
+#[test]
+fn region_fn_local_cell_drop_uaf() {
+    run_elle_script_with_args(
+        "region-fn-local-cell-drop-leak",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — branch compensation reads the ARM STRUCTURE, neither the branch's kind nor
 // its arity (docs/impl/region/mechanism.md § "The return frontier is per-path"). A `match` arm
 // that never touches a live local owes that local's release, exactly as a two-armed

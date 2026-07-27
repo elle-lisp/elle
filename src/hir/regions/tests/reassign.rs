@@ -281,52 +281,90 @@ fn donated_overwrite_marks_module_scope_reassign() {
     );
 }
 
-/// The fn-local donation split runs on the CONTENT's producer discipline:
+/// A fn-local 1-slot container takes a COUNTED store and gets its own content
+/// drop, whatever produced the stored value (docs/impl/region/bindings.md §
+/// "Reassigned mutable bindings are 1-slot containers"). Donation is the
+/// module-scope discipline alone: there the cell's reference outlives every
+/// program point and the file-letrec frame teardown reclaims it, so handing the
+/// producer's single reference to the cell is enough. A fn-local cell's scope
+/// exits, so it needs a release of its own — which means it must hold a
+/// reference of its own, which means the store is counted.
 ///
-/// - STATIC-ALLOC content (`(assign x (%pair 3 4))` — a slot-resolved fresh
-///   mint) is DONATED: its birth reference becomes the cell's reference,
-///   released by drop-on-overwrite (each displaced prior at its overwrite)
-///   and by the kept scope-exit slot `DecrefRegion` (the final mint). An
-///   incref-on-store would strand every displaced prior at rc 1 — one
-///   region per loop iteration (`(assign acc (%pair i i))` in a loop leaks
-///   its whole history without the donation).
-/// - CALL-RESULT content (`(assign x (array 3 4))`) keeps the counted
-///   incref-on-store: its producer claim is released by its own
-///   value-resolved `DecrefValueRegion`, so donating (skipping the store
-///   incref) would free the value before drop-on-overwrite loads it (UAF).
+/// Both content producers are checked because donating either one strands or
+/// over-frees: the cell would hold an uncounted reference that the producer's
+/// release (pinned to the store) drops out from under it.
 ///
 /// The conditional keeps the Assign alive through functionalization (a
 /// straight-line fn-local reassign is rewritten to a shadowing let and never
 /// reaches the gate).
 #[test]
-fn donated_overwrite_splits_fn_local_reassign_by_content_producer() {
-    // Static-alloc content: donated.
-    let (hir, _, info) = pipeline(
-        "(def @h (fn (c)\n\
-           (begin (var x (%pair 1 2))\n\
-                  (%array-push @[] x)\n\
-                  (if c (assign x (%pair 3 4)) nil)\n\
-                  nil)))\n\
-         (h 1)",
-    );
-    let sites = find_reassign_sites(&hir);
-    assert!(!sites.is_empty(), "shape must contain a reassign of x");
-    assert!(
-        sites
+fn fn_local_cell_counts_its_store_for_either_content_producer() {
+    for content in ["(%pair 1 2)|(%pair 3 4)", "(array 1 2)|(array 3 4)"] {
+        let (init, next) = content.split_once('|').unwrap();
+        let (hir, _, info) = pipeline(&format!(
+            "(def @h (fn (c)\n\
+               (begin (var x {init})\n\
+                      (%array-push @[] x)\n\
+                      (if c (assign x {next}) nil)\n\
+                      nil)))\n\
+             (h 1)"
+        ));
+        let sites = find_reassign_sites(&hir);
+        assert!(!sites.is_empty(), "shape must contain a reassign of x");
+        assert!(
+            sites
+                .iter()
+                .any(|(site, _)| info.drop_on_overwrite_sites.contains(site)),
+            "precondition ({content}): the fn-local container store keeps the gate"
+        );
+        for (site, _) in &sites {
+            assert!(
+                !info.donated_overwrite_sites.contains(site),
+                "fn-local content ({content}) must keep the counted incref-on-store \
+                 — the cell needs a reference of its own to drop at its demise \
+                 (site @{})",
+                site.0
+            );
+        }
+        // The other half of the pair: the cell's reference has a demise to be
+        // released at, so the final (never-overwritten) content is not stranded.
+        let x = sites
             .iter()
-            .any(|(site, _)| info.drop_on_overwrite_sites.contains(site)),
-        "precondition: the fn-local container store keeps the gate (drop-on-overwrite)"
-    );
-    assert!(
-        sites
-            .iter()
-            .any(|(site, _)| info.donated_overwrite_sites.contains(site)),
-        "static-alloc content donates its birth reference to the fn-local cell"
-    );
+            .map(|(_, b)| *b)
+            .find(|b| info.cell_containers.contains_key(b))
+            .unwrap_or_else(|| panic!("fn-local cell ({content}) must record a container"));
+        let c = &info.cell_containers[&x];
+        assert!(
+            !c.value_regions.is_empty(),
+            "the container ({content}) must name the regions it may hold"
+        );
+    }
+}
 
-    // Call-result content: counted store, never donated.
+/// The scope split is STRUCTURAL (docs/impl/region/bindings.md § "Reassigned
+/// mutable bindings are 1-slot containers"). A fn-local reassigned mutable living
+/// in an INLINABLE callee — an immutable `def` bound to a lambda, which
+/// `try_inline_call` re-walks at the call site to discover the callee's buried
+/// cross-region edges — is fn-local no matter which context re-walks it. The two
+/// halves of the model claim different references, so the binding must land in
+/// exactly one: the module-scope half suppresses the assign-value region's
+/// ordinary decref (donating the producer reference to the cell), the fn-local
+/// half keeps it and takes a counted store. Both at once leaves the producer
+/// reference with no release at all.
+///
+/// `mutated_binding_value_regions` is the observable that separates them: the
+/// module-scope half records every region the cell may hold there
+/// unconditionally, the fn-local half deliberately records none (its final
+/// value's release IS a legitimate scope-exit slot route). So a fn-local cell
+/// whose regions appear in that set was classified module-scope.
+#[test]
+fn reassign_scope_split_is_structural_under_inline_rewalk() {
+    // `h` is immutable and lambda-bound, so the call at top level re-walks its
+    // body; `x` is a genuine fn-local mutable inside it. The conditional keeps the
+    // Assign alive through functionalization (a straight-line fn-local reassign is
+    // rewritten into a shadowing let and never reaches the gate).
     let (hir, _, info) = pipeline(
-        "(def @h (fn (c)\n\
+        "(def h (fn (c)\n\
            (begin (var x (array 1 2))\n\
                   (%array-push @[] x)\n\
                   (if c (assign x (array 3 4)) nil)\n\
@@ -334,16 +372,37 @@ fn donated_overwrite_splits_fn_local_reassign_by_content_producer() {
          (h 1)",
     );
     let sites = find_reassign_sites(&hir);
-    assert!(!sites.is_empty(), "shape must contain a reassign of x");
-    for (site, _) in &sites {
+    let x = sites
+        .iter()
+        .map(|(_, b)| *b)
+        .find(|b| {
+            info.binding_source_regions
+                .get(b)
+                .is_some_and(|rs| !rs.is_empty())
+        })
+        .expect("shape must contain a heap-carrying reassign of x");
+    let x_regs = info.binding_source_regions[&x].clone();
+    for r in &x_regs {
         assert!(
-            !info.donated_overwrite_sites.contains(site),
-            "call-result content keeps the counted incref-on-store — donating \
-             would free it at its own producer decref before drop-on-overwrite \
-             (site @{})",
-            site.0
+            !info.mutated_binding_value_regions.contains(r),
+            "fn-local cell region {:?} landed in the module-scope backstop set — the \
+             inline re-walk classified a fn-local reassign as module-scope \
+             (regs={:?}, backstop={:?})",
+            r,
+            x_regs,
+            info.mutated_binding_value_regions,
         );
     }
+    // The fn-local half's own obligation: the assign-value region keeps its
+    // ordinary decref, so the cell's producer reference still has a release.
+    assert!(
+        x_regs
+            .iter()
+            .any(|r| !info.suppressed_decref_regions.contains(r)),
+        "a fn-local 1-slot container must keep at least one region's ordinary \
+         decref (regs={:?} were all suppressed)",
+        x_regs,
+    );
 }
 
 /// Facet A of the captured-mutable read mis-coalesce

@@ -80,59 +80,11 @@
     block1: IncrefValueRegion v33
   ; closure[2] <anon>
     block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s16
-    block0: IncrefRegion s17
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s16
-    block0: IncrefRegion s17
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s16
-    block0: IncrefRegion s17
-    block0: IncrefRegion s12
-    block0: IncrefRegion s13
-    block0: IncrefRegion s14
-    block0: IncrefRegion s15
-    block0: IncrefRegion s16
-    block0: IncrefRegion s17
-    block0: IncrefRegion s18
-    block0: DecrefRegion s18
+    block0: DecrefRegion s12
   ; closure[3] <anon>
-    block4: IncrefRegion s19
+    block4: IncrefRegion s13
     block4: DecrefValueRegion v18
-    block4: DecrefRegion s20
+    block4: DecrefRegion s14
     block3: DecrefValueRegion v25
     block3: DecrefCellRegion v27
     block1: DecrefValueRegion v34

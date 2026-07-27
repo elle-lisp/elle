@@ -335,14 +335,17 @@ impl<'a> Lowerer<'a> {
             Some(edges) => edges.clone(),
             None => return,
         };
-        // A donated 1-slot-container store site holds its content UNCOUNTED:
-        // the producer's birth reference is the cell's reference, released by
-        // drop-on-overwrite (priors) and the container's own demise (final
-        // value). The recorded content edge must not add a count here — in a
-        // loop each iteration's slot-resolved `IncrefRegion` would strand one
-        // region per displaced prior (the only release is the once-per-scope
-        // slot decref). Pinned by `reassign_toplevel_prior_release_is_bounded`.
-        if self.region_info.donated_overwrite_sites.contains(&hir_id) {
+        // A 1-slot container OWNS the count on its content: the cell holds
+        // exactly one reference, taken by `lower_define`'s incref-on-store (or
+        // donated outright from the producer), and released by drop-on-overwrite
+        // for each displaced prior. The `cell ⊇ content` edge recorded at the
+        // store names that same reference, so counting it here is the second
+        // count of one holding — and the edge's own balancing decref is the
+        // TARGET's free-time cascade, which fires once per scope while a loop
+        // stores every iteration. Pinned by
+        // `reassign_toplevel_prior_release_is_bounded` and the fn-local leak
+        // faces in `region-fn-local-cell-drop-leak.lisp`.
+        if self.region_info.drop_on_overwrite_sites.contains(&hir_id) {
             return;
         }
         let hard_site = self.region_info.hard_edge_sites.contains(&hir_id);

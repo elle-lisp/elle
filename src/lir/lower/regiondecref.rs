@@ -268,6 +268,7 @@ impl<'a> Lowerer<'a> {
             let rid = self.static_slot(r);
             self.emit_decref_region(rid);
         }
+        self.emit_cell_content_drops(hir_id);
         // The ownership forest's co-owned-cycle cut: at the group's drop
         // site — the latest member `decref_point`, i.e. this node — free the whole member
         // set as one unit, replacing the members' individual decrefs (skipped above).
@@ -291,6 +292,52 @@ impl<'a> Lowerer<'a> {
             self.emit_adopt_into_activation(&members);
         }
     }
+    /// Drop the current content of every fn-local 1-slot container whose scope
+    /// demise is this node (docs/impl/region/bindings.md § "Reassigned mutable
+    /// bindings are 1-slot containers").
+    ///
+    /// The cell holds ONE counted reference to whatever it points at. For every
+    /// value the cell displaces, that reference dies at the overwrite
+    /// (`lower_define`'s drop-on-overwrite, where the slot still names it); for
+    /// the final, never-overwritten content there is no overwrite, so the
+    /// reference dies here, where the binding's scope does. The value route is
+    /// the only correct one: which value the cell holds at scope exit is a
+    /// runtime fact, and loading the slot reads exactly that (`nil` when the
+    /// cell was never written, whose release is a no-op).
+    ///
+    /// This is the one place the reassigned binding's slot IS a release route —
+    /// precisely because the release names the slot's CURRENT occupant rather
+    /// than some earlier value whose region the compiler picked (the mis-target
+    /// `emit_decrefs_for` refuses above). The nil-stamp keeps a later reuse of
+    /// the slot from being mistaken for the freed value.
+    fn emit_cell_content_drops(&mut self, hir_id: HirId) {
+        let bindings = match self.cell_drops_by_demise.get(&hir_id) {
+            Some(bs) => bs.clone(),
+            None => return,
+        };
+        for b in bindings {
+            // An env-celled binding is absent by construction (the walk excludes
+            // `needs_capture` from both container maps — the capture cell's
+            // update opcode owns its RC), so a missing slot means this binding
+            // was never lowered in this function; skip rather than guess.
+            let Some(&slot) = self.binding_to_slot.get(&b) else {
+                continue;
+            };
+            let val_reg = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+            self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+            if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
+                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+            }
+            if crate::config::get().has_trace("rc") {
+                eprintln!(
+                    "[trace:rc:emit] cell_content_drop binding={:?} local_slot={} demise={:?} span={}",
+                    b, slot, hir_id, self.current_span
+                );
+            }
+        }
+    }
+
     /// Emit `FreeRegionGroup` for a co-owned region group: load every member's value
     /// from its binding slot to drive
     /// the value-resolved free, then emit the one instruction that frees the whole set

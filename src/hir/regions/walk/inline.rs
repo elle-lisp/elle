@@ -75,9 +75,21 @@ impl RegionInference {
                 }
             }
         }
+        // The body being walked is a LAMBDA's body, so the walk is inside that
+        // lambda's activation — enter it at the callee's lambda depth, not the
+        // caller's. Every `in_lambda()` reader asks "is this node inside a lambda
+        // body", a structural fact of the node and not of who reached it: the
+        // reassign gate's module-scope-vs-fn-local split
+        // (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
+        // containers" — the split is structural) and the `Begin`/`Let`/`Letrec`
+        // compiled-capture-cell mints, which the lowerer emits only outside a
+        // lambda. Bypassing the `Lambda` arm's own bump would answer each of them
+        // with the call site's nesting.
+        self.in_lambda_depth += 1;
         self.inline_depth += 1;
         let result = self.walk(body);
         self.inline_depth -= 1;
+        self.in_lambda_depth -= 1;
         for r in newly_bound {
             self.inline_bound_regions.remove(&r);
         }

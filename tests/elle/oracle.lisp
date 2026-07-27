@@ -249,7 +249,14 @@
 # `match-dead-arm` is a CLOSED control for per-arm compensation over a `Match`
 # (undeclared, like `rest-array-copy`); its open twin `match-used-arm` is the
 # residual — a used sibling arm with no retain to fund a per-arm release.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
+# `struct-outer` is a CLOSED control for the fn-local 1-slot container's two
+# release channels (undeclared, like `rest-array-copy`): drop-on-overwrite for each
+# displaced prior, the content drop at the cell's demise for the final one, and the
+# producer's separate claim released at the store. `yield-reassign` is the same
+# container shape with a HEAP init, which the sole-held gate still refuses, so a
+# regression of `struct-outer` must trip the completeness gate rather than hide
+# behind its sibling.
+(declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign"
                    "fresh-env-cell" "struct-match" "match-used-arm"])
 
 (def @n-defects 0)
@@ -1423,7 +1430,8 @@
 # not reach. Its kernel CAPTURES `k` deliberately — a capture declines loop fusion,
 # so the real stdlib `map` runs and there is a per-op scratch to retain; a fusable
 # kernel has none, which is what the dissolution controls (`map-while`) measure.
-# `struct-outer` is the fn-local reassign-1-slot over-keep (F5).
+# `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
+# content is re-minted every iteration, bounded by the overwrite + demise pair (F5).
 # `string-outer`/`append-outer` are the `concat`/`append` per-call scratch leak
 # (§ F1a), NOT accumulator growth — flat per-iter (minus the 1 the self-reassign
 # reclaims), so they shrink when F1a closes, not when the loop ends.
@@ -1497,7 +1505,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign last {:x j})
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "string-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))

@@ -10,6 +10,36 @@ use super::{Region, RegionData, RegionStats};
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
 
+/// A fn-local reassigned mutable that took the 1-slot-container gate
+/// (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
+/// containers"). The cell holds exactly ONE counted reference to its current
+/// content, and that reference needs both of its release channels named:
+/// drop-on-overwrite at each `store` for the displaced prior, and the content
+/// drop at `demise` for the final, never-overwritten value. The producer's
+/// separate claim on each stored value dies at the store, which is why
+/// `value_regions` are pinned to the store sites instead of riding the cell
+/// binding's uses (a cell binding names the slot, not any one value).
+pub struct CellContainer {
+    /// The `Assign`/`SetCell` sites that store into the cell.
+    pub stores: Vec<HirId>,
+    /// The regions of the values stored there.
+    pub value_regions: Vec<Region>,
+    /// The node whose exit is the cell's scope demise — the enclosing scope
+    /// node, so a loop-carried cell drops once after the loop and a cell bound
+    /// inside a loop body drops once per iteration.
+    pub demise: HirId,
+}
+
+impl CellContainer {
+    pub fn new(stores: Vec<HirId>, value_regions: Vec<Region>, demise: HirId) -> Self {
+        Self {
+            stores,
+            value_regions,
+            demise,
+        }
+    }
+}
+
 /// Results of region inference for a compilation unit.
 ///
 /// Every allocation site has a solved region in `alloc_region`.
@@ -306,10 +336,9 @@ pub struct RegionInfo {
     /// hold every displaced prior to frame teardown — the unbounded per-iteration
     /// over-keep of a reassign-in-loop (docs/impl/region/bindings.md "Reassigned
     /// mutable bindings are 1-slot containers"). FN-LOCAL
-    /// drop-on-overwrite sites are absent here: their assign-value decref is KEPT
-    /// (the scope-exit demise), so they take a counted incref-on-store that the
-    /// kept decref balances — removing it would free the value before the
-    /// drop-on-overwrite loads it.
+    /// drop-on-overwrite sites are absent here: a fn-local cell's scope EXITS, so
+    /// it needs a release of its own ([`CellContainer`]'s content drop) and
+    /// therefore a reference of its own — the counted incref-on-store.
     pub donated_overwrite_sites: FxHashSet<HirId>,
     /// Init + assign-value regions of every reassigned TOP-LEVEL (file-letrec)
     /// slot binding, recorded unconditionally — independent of the suppression
@@ -341,6 +370,12 @@ pub struct RegionInfo {
     /// counter before the increment reads it (pinned by
     /// `tests/elle/region-capture-cell-loop-uaf.lisp` under `--wasm=full`).
     pub reassigned_local_bindings: FxHashSet<Binding>,
+    /// The fn-local reassigned mutables that took the 1-slot-container gate, by
+    /// binding. Carries the two release channels the cell's own counted
+    /// reference needs (see [`CellContainer`]); the module-scope half is absent
+    /// because there the producer's reference is donated to the cell and the
+    /// final content is freed by the file-letrec frame teardown.
+    pub cell_containers: HashMap<Binding, CellContainer>,
     /// Begin HirId → per-binding region for each pre-allocated capture cell
     /// (`lower_begin`'s MakeCaptureCell pre-pass), in `collect_preallocate_
     /// bindings` order. One region PER CELL — emitting every cell against the
@@ -540,6 +575,7 @@ impl RegionInfo {
             donated_overwrite_sites: FxHashSet::default(),
             mutated_binding_value_regions: FxHashSet::default(),
             reassigned_local_bindings: FxHashSet::default(),
+            cell_containers: HashMap::new(),
             begin_cell_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),
