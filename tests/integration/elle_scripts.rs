@@ -282,6 +282,27 @@ fn region_branch_arm_window_uaf() {
     );
 }
 
+// Guard — everything the lowerer emits after a `TailCall` runs only on the NATIVE
+// fall-through, so a release landing there is carried back ahead of the call
+// (docs/impl/region/mechanism.md § "A release past a frame-replacing tail call is
+// not a release"). This is the one release the region system moves EARLIER, and
+// its legality is entirely the exemption: only a region the call itself cannot
+// reach may move. This drives what the call CAN reach — an argument moved into
+// the callee, a moved argument beside a hoisted sibling, the per-call callee
+// closure the new activation takes over, a value the callee reads through its
+// captured environment, a mutable accumulator the callee fills, a value already
+// stored into a longer-lived container, a value returned through the callee, and
+// an argument a parked frame resolves after the resume. Releasing any of them
+// early faults on the read below — SIGSEGV under guardfree. The leak face is
+// `region-tail-frame-exit.lisp`.
+#[test]
+fn region_tail_frame_exit_uaf() {
+    run_elle_script_with_args(
+        "region-tail-frame-exit-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

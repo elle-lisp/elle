@@ -412,6 +412,93 @@ boundaries driven as rows that must stay bounded on their own releases),
 the window that is read, stored, or returned after the block must survive the
 moved release).
 
+## A release past a frame-replacing tail call is not a release
+
+A tail call whose callee turns out to be a *closure* replaces the frame. Every
+instruction the lowerer emits after the `TailCall` therefore belongs to the
+**native fall-through**: a native pushes no bytecode frame, so on normal
+completion the dispatch loop continues into that block (`tail_call_inner`,
+src/vm/call/inner/tail.rs) and runs it. A closure callee never arrives there.
+
+For a region the call's own **arguments** name, that is precisely the intent, and
+it is the ownership transfer the calling convention rests on (rules.md Rule 5,
+move-on-tail-call): the caller does not incref a moved argument, and the release
+it never runs *is* the reference the callee's owned-param release consumes. The
+callee's own region has the same story through a different channel — the new
+activation takes over its release (`defer_callee_release`, `deferred_release_slot`).
+
+Every **other** release in that block has no such story. A parameter whose only
+use is inside a closure the body builds, a parameter used nowhere at all, a scope
+region the body allocated — each has its release emitted where control provably
+never arrives, and the frame's own reference is stranded. The cost is one region
+per call plus everything its free cascade would have reclaimed, so the dominant
+witness is the stdlib helper whose body ends in a call to a local walker:
+`(fn [dst src] (let [n (length src)] (letrec [go (fn [i] …)] (go 0))))` strands
+both `dst` and `src` on every call, once per heap parameter the walker captures.
+
+The close is the one case where a release moves *earlier*: the same single release
+the solver placed is emitted immediately **before** the `TailCall` instead of
+after it. The scope-region half of this is already unconditional — `lower_call`
+emits the pending `DecrefRegion`s before every `TailCall` for the same reason.
+
+**Relocating an instruction is not by itself free of obligation.** It is tempting
+to argue that nothing is added and nothing duplicated, so no count argument is
+owed. That is false, and it is the same category error the per-arm route makes
+(§ "A release inside one arm…"): on the closure path the release did not run
+before and now does, so at runtime this *is* a new release, and it owes exactly
+what any new release owes — a reason to believe the frame holds the region's one
+reference.
+
+Two readings are therefore both required.
+
+**What the call can reach** — the exemption, read off the call itself: every
+region the callee, any argument subtree, the call's own result, or its deferred
+channels (`deferred_release_slot`) name keeps its place in the dead fall-through,
+where the ownership move and the deferred callee release own it. Read
+syntactically over `alloc_region` and `binding_source_regions`, and again over the
+emitted instructions, because ANF is free to rewrite an operand into a synthetic
+binding the syntax walk does not connect back to the call.
+
+**Whether the frame is the sole holder** — the admission, and escape is its sole
+authority. The exemption above is a statement about *arguments*, and arguments are
+not the only path into a callee: a tail callee reaches its **captured environment**
+too, which no argument names and no callee region describes. `push-all`'s walker
+is exactly that shape — `(letrec [go (fn [i] … dst)] (go 0))` names `dst` only
+through `go`'s env — so an exemption read off the argument list alone releases the
+accumulator before the callee that hands it back has run. Rather than enumerate
+capture paths, the release is admitted only for a region whose every holder
+binding is non-escaping, non-mutated and **uncaptured**
+(`RegionInfo::sole_frame_held_regions`, the same predicate the branch-arm window
+applies). A captured holder keeps the baseline.
+
+That admission is what bounds this close to the narrow case it actually covers: a
+parameter or local no closure captures, whose release lands at the body's scope
+exit. The captured walker — the shape with the most to gain — is the **residual**.
+
+### The boundary: the release must be in the tail call's own block
+
+The hoist relocates an already-emitted instruction, so it reaches only a release
+the lowerer emits into the tail call's **own basic block**. That is exactly the
+condition under which the tail call is that block's single exit, which is what
+makes the relocation a move rather than a duplication. A release emitted after
+the block closed — an enclosing scope's, where the tail call sat inside a branch
+arm — is reached by paths the tail call is not on, so hoisting it into the arm
+would delete the release on the sibling arms, and replicating it into every arm
+would be a per-arm release owing the count argument placement does not supply
+(§ "A release inside one arm is not a release on the other arms"). A branch whose
+arms end in frame-replacing tail calls therefore keeps the baseline, and the
+enclosing scope's releases stay stranded: the residual of this close.
+
+Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
+argument-move and callee exemptions, the branch boundary, and the captured-holder
+residual driven as rows), the `tail-frame-exit-unused` / `tail-frame-exit-moved`
+probes in `tests/elle/oracle.lisp` (the per-op rates), and
+`tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value
+moved into the tail callee, reached through its captured environment, handed back
+out through it, or read after the call must survive the moved release; the
+accumulator-returned-through-a-captured-walker witness is the one that fails
+without the sole-holder admission).
+
 ## Compile-time region selection (coalescing)
 
 Where the compiler can prove a value is a **fresh local allocation whose region

@@ -141,6 +141,24 @@ other is structural ownership-location, NOT escape:
   non-escape (`EscapeInfo::lambda_escapes_definition`/
   `binding_escapes_activation` — the escape half, replacing the old
   region-level proxy).
+- `emitops.rs::open_tail_exit_hoist` / `with_tail_exit_hoist` — the callee's
+  region is not the only one stranded past a `TailCall`: everything the
+  lowerer emits after it runs only on the native fall-through, so a
+  parameter used only inside a closure the body builds, a parameter used
+  nowhere, or an env cell has its release emitted where a closure callee
+  never arrives. The wrapper RELOCATES that already-emitted release ahead of
+  the `TailCall` (pinned by `tests::release`'s two placement tests). The
+  relocation does NOT waive the count argument — on the closure path the
+  release did not run before and now does — so two gates apply. What may not
+  move is what the call can still reach: the regions its callee, arguments,
+  result and `deferred_release_slot` channel name, plus any run that reloads
+  an operand's slot or reads a register defined outside it
+  (`hoistable_run`). And the region must be sole-frame-held
+  (`RegionInfo::sole_frame_held_regions`), because a tail callee also reaches
+  its CAPTURED environment, which no argument names. Bounded to the tail
+  call's own block, which is where it is that block's single exit
+  (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
+  call is not a release").
 
 ## Yield as terminator
 

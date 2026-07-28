@@ -188,7 +188,12 @@ is a correctness defect, not a tuning knob.
    - *borrowed tail-call argument* — a tail-call arg is pure-moved into the
      owned-param callee (the caller's dead post-`TailCall` release *is* the
      transfer), so an arg the frame does NOT own is handed one fresh owning
-     reference, consumed by the callee's owned-param release. Two borrow
+     reference, consumed by the callee's owned-param release. The transfer is
+     what makes that block's deadness load-bearing for **arguments only**: a
+     release landing there for anything the call does not name has no such
+     story and is carried back ahead of the `TailCall`
+     ([mechanism.md](mechanism.md) § "A release past a frame-replacing tail
+     call is not a release"). Two borrow
      routes: a captured upvalue (owned by the closure env's capture-incref)
      and a compile-time-constant heap value (`immutable_values` — a stdlib
      export closure, a `begin-for-syntax` value — owned by the env that

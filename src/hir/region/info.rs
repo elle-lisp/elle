@@ -427,6 +427,18 @@ pub struct RegionInfo {
     /// recorded here. Empty when no cycle merged (or every merged cycle's body
     /// tail-calls only members). Populated from `ClosureCycleMerge::tail_release_sites`.
     pub cycle_tail_release: HashMap<HirId, Region>,
+    /// Regions whose every holder binding leaves this activation by NO facet —
+    /// non-mutated, uncaptured, non-escaping, off the return/fiber frontiers — so
+    /// the frame holds the region's one reference.
+    ///
+    /// This is escape's answer to the **count** question, projected onto regions,
+    /// and it is the admission any mechanism owes when it makes a release fire
+    /// where none fired before. The lowerer reads it for the frame-exit release at
+    /// a tail call (docs/impl/region/mechanism.md § "A release past a
+    /// frame-replacing tail call is not a release"), which converts a release the
+    /// closure path never ran into one it does; the branch-arm release window
+    /// applies the same predicate inline for the same reason.
+    pub sole_frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Ownership forest (docs/impl/region/ownership.md § "Adoption and subtree
     /// drop"), populated by the ownership pass; empty when the shape stays Shared,
     /// so the lowerer's emission is then the per-region-RC baseline. Store-site HirId → the interior
@@ -551,6 +563,7 @@ impl RegionInfo {
             binding_region: HashMap::new(),
             binding_source_regions: HashMap::new(),
             captured_reassigned_bindings: FxHashSet::default(),
+            sole_frame_held_regions: FxHashSet::default(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),
             region_data: HashMap::new(),

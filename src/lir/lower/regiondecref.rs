@@ -38,12 +38,54 @@ impl<'a> Lowerer<'a> {
             .cloned()
             .unwrap_or_default();
         for r in regions {
+            // Each region's release is relocated ahead of a frame-replacing tail
+            // call that already closed this block, unless the call itself names
+            // the region (docs/impl/region/mechanism.md § "A release past a
+            // frame-replacing tail call is not a release"). Without an open
+            // relocation point this is exactly the direct emission it wraps.
+            self.with_tail_exit_hoist(r, |s| s.emit_decref_for_region(r, hir_id, result_reg));
+        }
+        self.emit_cell_content_drops(hir_id);
+        // The ownership forest's co-owned-cycle cut: at the group's drop
+        // site — the latest member `decref_point`, i.e. this node — free the whole member
+        // set as one unit, replacing the members' individual decrefs (skipped above).
+        // `owned_region_groups` is empty when no co-owned cycle is present, so this is
+        // then inert.
+        if let Some(members) = self.region_info.owned_region_groups.get(&hir_id).cloned() {
+            self.emit_free_region_group(&members);
+        }
+        // The activation-owner cut: adopt each capture-back-edge SCC member into
+        // the executing activation's owner node at the SCC's enclosing-scope site
+        // (this node). The adopt transfers ownership only — the free is the
+        // node's release at the activation's completion
+        // (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge
+        // SCC"). Empty when no such SCC is present, so then inert.
+        if let Some(members) = self
+            .region_info
+            .activation_adopt_sites
+            .get(&hir_id)
+            .cloned()
+        {
+            self.emit_adopt_into_activation(&members);
+        }
+    }
+
+    /// Emit the demise instructions for ONE region at `hir_id`'s `decref_point`,
+    /// routed by the region's class (see [`Self::emit_decrefs_for`], which owns
+    /// the per-node sequencing and the relocation wrapper).
+    fn emit_decref_for_region(
+        &mut self,
+        r: crate::hir::region::Region,
+        hir_id: HirId,
+        result_reg: Option<Reg>,
+    ) {
+        {
             // A reassigned top-level binding's assign-value regions are released
             // by the store path (drop-on-overwrite for priors; the kept init-
             // region decref for the reaching value), so their ordinary slot-load
             // decref here is suppressed. See `analyze_regions_with`.
             if self.region_info.suppressed_decref_regions.contains(&r) {
-                continue;
+                return;
             }
             // A self-recursive `def` binding's cell-free closure region: its
             // compiler-emitted `DecrefRegion` is stranded — the runtime adopt at the
@@ -51,14 +93,14 @@ impl<'a> Lowerer<'a> {
             // region before the tail call re-enters the closure living in it (a
             // use-after-free). Empty unless a self-recursive `def` was lowered.
             if self.suppressed_self_regions.contains(&r) {
-                continue;
+                return;
             }
             // A co-owned-cycle member is freed
             // by the single `FreeRegionGroup` emitted below at the group's drop site, not
             // by an individual decref — skip its own release. Empty without the flag, so
             // this is inert on the baseline path.
             if self.region_info.owned_group_members.contains(&r) {
-                continue;
+                return;
             }
             // A builder-idiom merge child (a non-root region) carries no demise of
             // its own: its region is the merged root's, freed by the SINGLE
@@ -71,7 +113,7 @@ impl<'a> Lowerer<'a> {
             // the root emits (`merged_root(root) == root`). With no merge,
             // `merged_root` is the identity and this never fires.
             if self.region_info.merged_root(r) != r {
-                continue;
+                return;
             }
             if self.region_info.call_result_regions.contains(&r) {
                 if let Some(&slot) = self.region_to_slot.get(&r) {
@@ -99,7 +141,7 @@ impl<'a> Lowerer<'a> {
                                 r, slot, self.current_span
                             );
                         }
-                        continue;
+                        return;
                     }
                     // A fn-local reassigned mutable binding owns this slot for its
                     // whole scope (`allocate_slot` never reuses a slot), so the
@@ -131,7 +173,7 @@ impl<'a> Lowerer<'a> {
                                 r, slot, self.current_span
                             );
                         }
-                        continue;
+                        return;
                     }
                     // Load the value from its slot and release by its
                     // runtime region. The slot still holds a dangling
@@ -161,7 +203,7 @@ impl<'a> Lowerer<'a> {
                                 hir_id, slot, self.current_span
                             );
                         }
-                        continue;
+                        return;
                     }
                     self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
                     // A transferred-returned-subtree consumer site: the release
@@ -263,35 +305,13 @@ impl<'a> Lowerer<'a> {
                         );
                     }
                 }
-                continue;
+                return;
             }
             let rid = self.static_slot(r);
             self.emit_decref_region(rid);
         }
-        self.emit_cell_content_drops(hir_id);
-        // The ownership forest's co-owned-cycle cut: at the group's drop
-        // site — the latest member `decref_point`, i.e. this node — free the whole member
-        // set as one unit, replacing the members' individual decrefs (skipped above).
-        // `owned_region_groups` is empty when no co-owned cycle is present, so this is
-        // then inert.
-        if let Some(members) = self.region_info.owned_region_groups.get(&hir_id).cloned() {
-            self.emit_free_region_group(&members);
-        }
-        // The activation-owner cut: adopt each capture-back-edge SCC member into
-        // the executing activation's owner node at the SCC's enclosing-scope site
-        // (this node). The adopt transfers ownership only — the free is the
-        // node's release at the activation's completion
-        // (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge
-        // SCC"). Empty when no such SCC is present, so then inert.
-        if let Some(members) = self
-            .region_info
-            .activation_adopt_sites
-            .get(&hir_id)
-            .cloned()
-        {
-            self.emit_adopt_into_activation(&members);
-        }
     }
+
     /// Drop the current content of every fn-local 1-slot container whose scope
     /// demise is this node (docs/impl/region/bindings.md § "Reassigned mutable
     /// bindings are 1-slot containers").

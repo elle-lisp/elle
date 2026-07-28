@@ -286,8 +286,206 @@ impl<'a> Lowerer<'a> {
     }
 
     pub(super) fn finish_block(&mut self) {
+        // The relocation point dies with its block: a release emitted from here
+        // on is reached by paths this tail call is not on
+        // (docs/impl/region/mechanism.md § "The boundary").
+        self.tail_exit_hoist = None;
         let block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
         self.current_func.blocks.push(block);
+    }
+
+    /// Open the relocation point a frame-replacing tail call leaves behind: the
+    /// `TailCall` was just emitted as the last instruction of `current_block`,
+    /// and every release the lowerer emits after it into this block runs only on
+    /// the native fall-through (docs/impl/region/mechanism.md § "A release past a
+    /// frame-replacing tail call is not a release").
+    ///
+    /// `exempt` is read off the call itself — the regions the callee, an argument
+    /// subtree, or the call's own result placeholder name — because those are
+    /// exactly the ones the tail call can still reach, and their releases are
+    /// owed to the ownership move, to the activation that takes over the callee's
+    /// region, and to the caller that consumes the result.
+    pub(super) fn open_tail_exit_hoist(
+        &mut self,
+        call_id: HirId,
+        func: &Hir,
+        args: &[crate::hir::CallArg],
+        operands: &[Reg],
+    ) {
+        // Which slots the operands now on the stack came from. Read off the
+        // emitted instructions rather than the HIR, because ANF may have bound an
+        // operand to a synthetic binding whose region the syntax walk below does
+        // not connect back to this call — but the load that put it on the stack
+        // is right here either way.
+        let mut operand_locals = rustc_hash::FxHashSet::default();
+        let mut operand_captures = rustc_hash::FxHashSet::default();
+        for i in &self.current_block.instructions {
+            match &i.instr {
+                LirInstr::LoadLocal { dst, slot } if operands.contains(dst) => {
+                    operand_locals.insert(*slot);
+                }
+                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index }
+                    if operands.contains(dst) =>
+                {
+                    operand_captures.insert(*index);
+                }
+                _ => {}
+            }
+        }
+        let mut exempt = rustc_hash::FxHashSet::default();
+        if let Some(&r) = self.region_info.alloc_region.get(&call_id) {
+            exempt.insert(self.region_info.merged_root(r));
+        }
+        // The merged arena a letrec body's tail call hands to the runtime's
+        // deferred release (`TailCall::deferred_release_slot`,
+        // docs/impl/region/letrec.md): its binding-scope `DecrefRegion` is dead
+        // past the frame replacement BY DESIGN, and the deferred channel supplies
+        // it. Hoisting it would make both fire.
+        if let Some(&root) = self.region_info.cycle_tail_release.get(&call_id) {
+            exempt.insert(self.region_info.merged_root(root));
+        }
+        self.collect_subtree_regions(func, &mut exempt);
+        for a in args {
+            self.collect_subtree_regions(&a.expr, &mut exempt);
+        }
+        self.tail_exit_hoist = Some(super::TailExitHoist {
+            at: self.current_block.instructions.len() - 1,
+            label: self.current_block.label,
+            operand_locals,
+            operand_captures,
+            exempt,
+        });
+    }
+
+    /// Every region a HIR subtree names: an allocating node's own region, and
+    /// every source region of a `Var`'s binding. Canonicalized through the merge
+    /// forest so a merged child and its root are one entry — the release side
+    /// only ever emits at the root.
+    fn collect_subtree_regions(
+        &self,
+        h: &Hir,
+        out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
+    ) {
+        if let Some(&r) = self.region_info.alloc_region.get(&h.id) {
+            out.insert(self.region_info.merged_root(r));
+        }
+        if let HirKind::Var(b) = &h.kind {
+            for &r in self
+                .region_info
+                .binding_source_regions
+                .get(b)
+                .into_iter()
+                .flatten()
+            {
+                out.insert(self.region_info.merged_root(r));
+            }
+        }
+        h.for_each_child(|c| self.collect_subtree_regions(c, out));
+    }
+
+    /// Emit `f`'s instructions for `region`, relocating them ahead of the
+    /// frame-replacing tail call that already closed this block when the region
+    /// is one that call cannot reach.
+    ///
+    /// The relocation is a MOVE — the instructions are emitted exactly once
+    /// either way — so it owes no count argument; what it needs is that the one
+    /// instruction it steps over, the `TailCall`, does not name the region. Two
+    /// readings answer that, and both are needed because ANF is free to rewrite
+    /// how an operand is spelled: `TailExitHoist::exempt`, over the regions the
+    /// call's callee, arguments, result and deferred channels name in the HIR,
+    /// and [`Self::hoistable_run`], over what the emitted instructions
+    /// themselves reload.
+    ///
+    /// The emitted sequences are all stack-neutral — each `LoadLocal` push is
+    /// consumed by the release that follows it — so splicing them between the
+    /// pushed arguments and the call leaves the tail call's operand layout
+    /// intact.
+    pub(super) fn with_tail_exit_hoist<R>(
+        &mut self,
+        region: crate::hir::region::Region,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let root = self.region_info.merged_root(region);
+        // The admission, and it is not optional: on the closure path this release
+        // fires where none did before, so it needs a reason to believe the frame
+        // holds the region's ONE reference. Escape answers exactly that, and no
+        // premise about instruction placement can — a value the tail callee reaches
+        // through its captured environment is named by no argument and by no
+        // callee region, yet the call reads it (region/mechanism.md § "The
+        // admission").
+        if !self.region_info.sole_frame_held_regions.contains(&root) {
+            return f(self);
+        }
+        let at = match &self.tail_exit_hoist {
+            Some(h) if h.label == self.current_block.label && !h.exempt.contains(&root) => h.at,
+            _ => return f(self),
+        };
+        let start = self.current_block.instructions.len();
+        let out = f(self);
+        let moved: Vec<_> = self.current_block.instructions.drain(start..).collect();
+        let n = moved.len();
+        if n == 0 || !self.hoistable_run(&moved) {
+            self.current_block.instructions.extend(moved);
+            return out;
+        }
+        self.current_block.instructions.splice(at..at, moved);
+        if let Some(h) = self.tail_exit_hoist.as_mut() {
+            h.at += n;
+        }
+        out
+    }
+
+    /// May this just-emitted release run ahead of the tail call?
+    ///
+    /// Two refusals, both about what the instructions themselves name rather than
+    /// what the HIR said:
+    ///
+    /// - **It reloads an operand's slot.** The value now on the operand stack came
+    ///   from that slot, so this release is the ownership move the callee's
+    ///   owned-param release consumes — running it here drops the callee's
+    ///   reference (`TailExitHoist::operand_locals`).
+    /// - **It reads a register defined outside the run.** The only such register a
+    ///   release names is the enclosing node's just-lowered value, which for a node
+    ///   whose subtree ends in the tail call is produced BY that call — a
+    ///   definition the hoist point precedes. (This is the discarded-result route
+    ///   of `emit_decrefs_for`.)
+    fn hoistable_run(&self, run: &[SpannedInstr]) -> bool {
+        let Some(h) = self.tail_exit_hoist.as_ref() else {
+            return false;
+        };
+        let mut defined: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
+        for i in run {
+            match &i.instr {
+                LirInstr::LoadLocal { dst, slot } => {
+                    if h.operand_locals.contains(slot) {
+                        return false;
+                    }
+                    defined.insert(*dst);
+                }
+                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index } => {
+                    if h.operand_captures.contains(index) {
+                        return false;
+                    }
+                    defined.insert(*dst);
+                }
+                LirInstr::Const { dst, .. } => {
+                    defined.insert(*dst);
+                }
+                LirInstr::StoreLocal { src, .. }
+                | LirInstr::DecrefValueRegion { src }
+                | LirInstr::DecrefCellRegion { src }
+                | LirInstr::AdoptIntoActivation { child: src } => {
+                    if !defined.contains(src) {
+                        return false;
+                    }
+                }
+                LirInstr::DecrefRegion { .. } => {}
+                // Anything else is outside the release vocabulary this wrapper
+                // was written for; leave it where the lowerer put it.
+                _ => return false,
+            }
+        }
+        true
     }
 
     /// Allocate a new basic block label.

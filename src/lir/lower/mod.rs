@@ -83,6 +83,42 @@ struct BlockLowerContext {
     exit_label: Label,
 }
 
+/// The relocation point a frame-replacing tail call opens in its own block
+/// (docs/impl/region/mechanism.md § "A release past a frame-replacing tail call
+/// is not a release").
+///
+/// Everything the lowerer emits after a `TailCall` runs only on the NATIVE
+/// fall-through — a native pushes no bytecode frame, so the dispatch loop
+/// continues into that block, while a closure callee replaces the frame and
+/// never arrives. A release landing there is therefore emitted where control may
+/// never reach, and the frame's own reference is stranded once per call. Moving
+/// that one release to just before the `TailCall` costs no count argument (it is
+/// the same single release, relocated), and is legal for every region the call
+/// itself cannot reach.
+struct TailExitHoist {
+    /// Index of the `TailCall` in its block's instruction list. A hoisted
+    /// release is spliced in here, ahead of the frame replacement, and the index
+    /// advances so successive hoists keep their emission order.
+    at: usize,
+    /// The block the `TailCall` sits in. A release emitted once that block has
+    /// closed belongs to a merge this tail call's path is not the only one
+    /// reaching, so it keeps the baseline (§ "The boundary").
+    label: Label,
+    /// The local slots and capture indices the call's operands were loaded from.
+    /// A release that reloads one of these reloads the very value now sitting on
+    /// the operand stack, so it IS the ownership move however ANF spelled the
+    /// argument — the reading `exempt` cannot give, since ANF is free to rewrite
+    /// an operand into a synthetic binding whose region the syntax walk does not
+    /// connect back to the call.
+    operand_locals: rustc_hash::FxHashSet<u16>,
+    operand_captures: rustc_hash::FxHashSet<u16>,
+    /// Regions the callee or an argument subtree names, canonicalized through
+    /// the merge forest. These releases must STAY in the dead block: an
+    /// argument's is the ownership move the calling convention rests on, and the
+    /// callee's belongs to the activation that takes it over.
+    exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
+}
+
 /// Lowers HIR to LIR
 pub struct Lowerer<'a> {
     arena: &'a BindingArena,
@@ -298,6 +334,11 @@ pub struct Lowerer<'a> {
     /// `Return`, so its fall-through retain IS the mint and is absent here.
     /// Recorded by `lower_let`, the only lowering site that sees the wrap.
     return_minted_calls: rustc_hash::FxHashSet<HirId>,
+    /// The frame-replacing tail call that closed the current block's live range,
+    /// if one has been emitted into it (see [`TailExitHoist`]). Set by
+    /// `lower_call`'s tail arm, cleared when the block closes, and saved/restored
+    /// across lambda boundaries like every other per-function slot map.
+    tail_exit_hoist: Option<TailExitHoist>,
 }
 
 mod regiondecref;
@@ -346,6 +387,7 @@ impl<'a> Lowerer<'a> {
             emitted_alloc_regions: rustc_hash::FxHashSet::default(),
             deferred_decref_points: rustc_hash::FxHashSet::default(),
             return_minted_calls: rustc_hash::FxHashSet::default(),
+            tail_exit_hoist: None,
         }
     }
 

@@ -117,3 +117,51 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
     out.extend(fiber_frontier_regions(escape, info));
     out
 }
+
+/// The regions whose every holder binding leaves this activation by **no** facet:
+/// non-mutated, uncaptured, non-escaping, and absent from the return/fiber
+/// frontiers' atomless site halves. A region with no holder binding at all offers
+/// nothing to judge and is refused too.
+///
+/// This is the **count** question a *placement* argument cannot answer, and the one
+/// admission every mechanism that makes a release fire where none fired before must
+/// clear: if the frame is the region's only holder, the new release drops the
+/// frame's own reference and nothing else; if it is not, the other holder may be an
+/// uncounted borrow in a parked frame, and the release frees a region that frame
+/// still resolves through its slot (region/generations.md § "Uncounted-borrow
+/// check"). Escape is the sole authority for it (docs/impl/escape.md).
+///
+/// Two consumers, deliberately sharing one predicate: the branch-arm release window
+/// (`regions::analyze::decref`) and the frame-exit release the lowerer performs at a
+/// tail call (`RegionInfo::sole_frame_held_regions`, region/mechanism.md § "A
+/// release past a frame-replacing tail call is not a release").
+pub(super) fn sole_frame_held_regions(
+    hir: &Hir,
+    escape: &crate::hir::EscapeInfo,
+    arena: &crate::hir::arena::BindingArena,
+    info: &RegionInfo,
+    binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
+) -> FxHashSet<Region> {
+    let frontier = shared_seed_regions(escape, info);
+    let captured = captured_bindings(hir);
+    let mut held: FxHashSet<Region> = FxHashSet::default();
+    let mut refused: FxHashSet<Region> = FxHashSet::default();
+    for (b, regions) in binding_regions {
+        // A MUTATED or CAPTURED holder is refused for the reason compensation
+        // refuses it as a release route: a slot repointed before the release frees
+        // whatever it holds THEN, and a captured value is reachable through the
+        // closure env — including the env of the very callee a tail call installs.
+        let unsafe_holder = arena.get(*b).is_mutated
+            || captured.contains(b)
+            || escape.binding_escapes_activation(*b);
+        for &r in regions {
+            held.insert(r);
+            if unsafe_holder {
+                refused.insert(r);
+            }
+        }
+    }
+    held.into_iter()
+        .filter(|r| !refused.contains(r) && !frontier.contains(r))
+        .collect()
+}

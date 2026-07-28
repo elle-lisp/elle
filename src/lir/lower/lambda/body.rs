@@ -51,6 +51,11 @@ impl<'a> Lowerer<'a> {
         // region could be associated with a stale slot index from
         // the inner function.
         let saved_region_to_slot = std::mem::take(&mut self.region_to_slot);
+        // The tail-exit relocation point names an index into ONE block's
+        // instruction list, and a fresh body starts at `Label(0)` exactly as the
+        // enclosing one may have — so the enclosing point must be put away rather
+        // than left to be matched by a colliding label.
+        let saved_tail_exit_hoist = self.tail_exit_hoist.take();
         // Reassigned-local slots are this function's local index space (per-
         // function, like `region_to_slot`), so reset for the new body.
         let saved_reassigned_local_slots = std::mem::take(&mut self.reassigned_local_slots);
@@ -213,29 +218,38 @@ impl<'a> Lowerer<'a> {
         // Fallback release for UNUSED non-captured params. A used param's
         // placeholder region gets a `decref_point` (from its uses) and is
         // released by `emit_decrefs_for`; an unused param has no `region_data`
-        // entry, so without this its moved-in arg would leak. Release it here,
-        // on the normal-return path (a tail-call exit replaces the frame before
-        // reaching this `Return`, so its params are released by the tail
-        // callee, not here — naturally excluded). The retain ordering note in
-        // `lower_return` does not apply: an unused param is never the return
-        // value, so no `IncrefValueRegion` precedes this.
-        let unused_param_slots: Vec<u16> = params
+        // entry, so without this its moved-in arg would leak. The retain
+        // ordering note in `lower_return` does not apply: an unused param is
+        // never the return value, so no `IncrefValueRegion` precedes this.
+        //
+        // A param the body's tail call MOVES is released by the callee instead,
+        // and that is why the release goes through the relocation wrapper rather
+        // than straight out: when the body ends in a frame-replacing tail call
+        // this emission point is dead, so the release is carried back ahead of
+        // the `TailCall` for every param the call does not name — an unused param
+        // is by definition not one of its arguments, but the exemption is what
+        // keeps a param used ONLY as such an argument out of the hoist
+        // (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
+        // call is not a release").
+        let unused_params: Vec<(u16, crate::hir::region::Region)> = params
             .iter()
             .filter(|p| !self.arena.get(**p).needs_capture())
             .filter_map(|p| {
                 let slot = *self.binding_to_slot.get(p)?;
                 let regions = self.region_info.binding_source_regions.get(p)?;
-                let any_unreleased = regions.iter().any(|r| {
+                let unreleased = regions.iter().copied().find(|r| {
                     self.region_info.call_result_regions.contains(r)
                         && !self.region_info.region_data.contains_key(r)
-                });
-                any_unreleased.then_some(slot)
+                })?;
+                Some((slot, unreleased))
             })
             .collect();
-        for slot in unused_param_slots {
-            let val_reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-            self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+        for (slot, region) in unused_params {
+            self.with_tail_exit_hoist(region, |s| {
+                let val_reg = s.fresh_reg();
+                s.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+                s.emit(LirInstr::DecrefValueRegion { src: val_reg });
+            });
         }
 
         self.terminate(Terminator::Return(result_reg));
@@ -270,6 +284,7 @@ impl<'a> Lowerer<'a> {
         self.region_to_slot = saved_region_to_slot;
         self.reassigned_local_slots = saved_reassigned_local_slots;
         self.current_self_binding = saved_self_binding;
+        self.tail_exit_hoist = saved_tail_exit_hoist;
 
         Ok(func)
     }

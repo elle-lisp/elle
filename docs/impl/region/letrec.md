@@ -130,7 +130,11 @@ and lets exactly one fire.
   `deferred_release_region = region_of(callee)` — the merged arena, because a member lives in it.
 
 - **A tail call to a NON-member** (a native `%add`, a redefined operator `+`, a
-  foreign closure `g`) rides an explicit slot instead. The analysis records the tail
+  foreign closure `g`) rides an explicit slot instead. The arena is therefore
+  exempt from the frame-exit hoist (mechanism.md § "A release past a
+  frame-replacing tail call is not a release"): its binding-scope `DecrefRegion`
+  is dead past the frame replacement *by design*, and hoisting it ahead of the
+  `TailCall` would make both channels fire. The analysis records the tail
   site in `RegionInfo::cycle_tail_release` (site HirId → the merged root region), the
   lowerer sets the `TailCall`'s `deferred_release_slot` to the root's static slot
   (`compute_closure_cycle_merges` → `ClosureCycleMerge::tail_release_sites`), and the

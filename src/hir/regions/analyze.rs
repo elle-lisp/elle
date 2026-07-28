@@ -126,6 +126,21 @@ pub fn analyze_regions_with(
     let order = compute_order(hir);
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
+    // Escape's answer to the COUNT question, projected onto regions: which
+    // regions this frame is the sole holder of. Recorded once here because two
+    // mechanisms owe exactly this admission — the branch-arm release window below
+    // and the lowerer's frame-exit release at a tail call — and both of them make
+    // a release fire on a path where none fired before (region/mechanism.md).
+    // Computed before the decref passes so it reads the escape facts, not any
+    // placement they go on to change.
+    info.sole_frame_held_regions = super::escape::sole_frame_held_regions(
+        hir,
+        &escape_info,
+        arena,
+        &info,
+        &inference_binding_regions,
+    );
+
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
     // break consuming-and-transferring-node pins, and the two re-anchoring

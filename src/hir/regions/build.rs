@@ -88,6 +88,7 @@ impl RegionInference {
             binding_region: self.binding_region,
             binding_source_regions: HashMap::new(),
             captured_reassigned_bindings: rustc_hash::FxHashSet::default(),
+            sole_frame_held_regions: rustc_hash::FxHashSet::default(),
             live_regions,
             cross_region_refs,
             region_data: HashMap::new(),

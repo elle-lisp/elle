@@ -521,26 +521,20 @@ fn pin_branch_arm_releases(
     // aliased region is only as local as its loosest holder), the region must have
     // one (an unheld region offers nothing to judge), and the atomless site halves
     // of the return/fiber frontiers are refused too, since no binding names them.
-    let frontier = super::super::escape::shared_seed_regions(escape, info);
-    let mut held: rustc_hash::FxHashSet<Region> = rustc_hash::FxHashSet::default();
-    let mut escaping: rustc_hash::FxHashSet<Region> = rustc_hash::FxHashSet::default();
-    // A MUTATED or CAPTURED holder is refused for the reason `regions::compensate`
-    // refuses it as a release route: a slot repointed between the arm and the
-    // anchor frees whatever it holds THEN, not the value the arm named, and a
-    // captured value is reachable through the closure env. Both are reachability
-    // facts, read from the region capture-graph and the arena's mutation flag.
-    let captured = super::super::escape::captured_bindings(hir);
-    for (b, regions) in inference_binding_regions {
-        let bi = arena.get(*b);
-        let unsafe_holder =
-            bi.is_mutated || captured.contains(b) || escape.binding_escapes_activation(*b);
-        for &r in regions {
-            held.insert(r);
-            if unsafe_holder {
-                escaping.insert(r);
-            }
-        }
-    }
+    // One predicate, shared with the lowerer's frame-exit release
+    // (`RegionInfo::sole_frame_held_regions`): both mechanisms make a release fire
+    // where none fired before, so both owe escape the same count argument. A
+    // MUTATED or CAPTURED holder is refused for the reason `regions::compensate`
+    // refuses it as a release route — a slot repointed between the arm and the
+    // anchor frees whatever it holds THEN, and a captured value is reachable
+    // through the closure env.
+    let sole_held = super::super::escape::sole_frame_held_regions(
+        hir,
+        escape,
+        arena,
+        info,
+        inference_binding_regions,
+    );
 
     // Regions whose release belongs to another mechanism: moving their
     // `decref_point` would move a release that mechanism, not this one, emits.
@@ -554,9 +548,7 @@ fn pin_branch_arm_releases(
                 || info.cell_release_regions.contains(&r)
                 || info.mutated_binding_value_regions.contains(&r)
                 || info.merged_root(r) != r
-                || !held.contains(&r)
-                || escaping.contains(&r)
-                || frontier.contains(&r)
+                || !sole_held.contains(&r)
         })
         .collect();
 

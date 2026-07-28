@@ -616,3 +616,70 @@ fn letrec_init_release_fires_after_cell_store() {
         check(c);
     }
 }
+
+// ── The frame-exit release ───────────────────────────────────────
+// Everything the lowerer emits after a `TailCall` runs only on the NATIVE
+// fall-through — a native pushes no bytecode frame and the dispatch loop
+// continues into that block, while a closure callee replaces the frame and never
+// arrives. For the call's own arguments that is the ownership move; for anything
+// else it strands the frame's reference, so the release is carried back ahead of
+// the `TailCall` (docs/impl/region/mechanism.md § "A release past a
+// frame-replacing tail call is not a release"). These pin the PLACEMENT: the
+// counts are unchanged either way, so only position can tell the two apart.
+
+/// Position of the first `TailCall` in the function that contains one, with the
+/// indices of that block's `DecrefValueRegion`s. `None` if no block has a
+/// `TailCall`.
+fn tail_call_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    for f in funcs {
+        for b in &f.blocks {
+            let Some(at) = b
+                .instructions
+                .iter()
+                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+            else {
+                continue;
+            };
+            let releases = b
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefValueRegion { .. }))
+                .map(|(idx, _)| idx)
+                .collect();
+            return Some((at, releases));
+        }
+    }
+    None
+}
+
+#[test]
+fn stranded_param_release_precedes_the_frame_replacing_tail_call() {
+    // `x` is used nowhere, so its release is the unused-parameter fallback the
+    // lowerer emits at the end of the body — the dead block. It must be carried
+    // back ahead of the `TailCall`, or the moved-in argument is stranded once per
+    // call (the `tail-frame-exit-unused` probe).
+    let module = compile_to_lir("(begin (def s (fn () 0)) (def f (fn (x) (s))) (f (list 1 2)))");
+    let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().any(|&r| r < at),
+        "the unused parameter's release is still emitted after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path",
+    );
+}
+
+#[test]
+fn moved_argument_release_stays_after_the_tail_call() {
+    // The exemption, and the over-free face of the same placement: `x` IS the
+    // tail call's argument, so its never-executed release is the transfer the
+    // callee's owned-param release consumes. Hoisting it would drop the
+    // reference the callee now owns.
+    let module = compile_to_lir("(begin (def s (fn (a) a)) (def f (fn (x) (s x))) (f (list 1 2)))");
+    let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        !releases.is_empty() && releases.iter().all(|&r| r > at),
+        "a moved argument's release was hoisted ahead of the TailCall \
+         (at={at}, releases={releases:?}) — that release IS the ownership move",
+    );
+}

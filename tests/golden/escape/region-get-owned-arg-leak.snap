@@ -179,11 +179,11 @@
     block0: DecrefValueRegion v22
     block0: DecrefValueRegion v24
   ; closure[2] <anon>
+    block0: DecrefValueRegion v9
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v5
     block0: DecrefValueRegion v6
     block0: DecrefValueRegion v7
-    block0: DecrefValueRegion v9
   ; closure[3] <anon>
     block0: DecrefValueRegion v7
     block0: DecrefValueRegion v10

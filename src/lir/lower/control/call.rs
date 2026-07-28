@@ -402,6 +402,9 @@ impl<'a> Lowerer<'a> {
                     .current_hir_id
                     .and_then(|id| self.region_info.cycle_tail_release.get(&id).copied())
                     .map(|root| self.static_slot(root));
+                // The values the call is about to consume, in the registers that
+                // hold them — what the relocation point below must not release.
+                let operands: Vec<Reg> = arg_regs.iter().copied().chain([func_reg]).collect();
                 self.emit_alloc(|region| LirInstr::TailCall {
                     region,
                     dst,
@@ -411,6 +414,21 @@ impl<'a> Lowerer<'a> {
                     defer_callee_release,
                     deferred_release_slot,
                 });
+                // From here the block runs only on the NATIVE fall-through: a
+                // native pushes no bytecode frame and the dispatch loop continues
+                // into it, while a closure callee replaces the frame and never
+                // arrives. The two instructions this arm emits next belong to that
+                // path by design (the ReturnValue retain balances the native's
+                // pass-through, and each borrowed-arg release consumes a retain the
+                // callee's owned-param release would otherwise have taken). Every
+                // release the ENCLOSING scopes emit into this block afterwards does
+                // not: it is the frame's own reference, stranded once per call.
+                // Open the relocation point that carries those releases back ahead
+                // of the frame replacement (docs/impl/region/mechanism.md § "A
+                // release past a frame-replacing tail call is not a release").
+                if let Some(call_id) = self.current_hir_id {
+                    self.open_tail_exit_hoist(call_id, func, args, &operands);
+                }
                 // ReturnValue retain on the native-completion fall-through, the
                 // tail-position mirror of `lower_return`'s `IncrefValueRegion`.
                 // A native/collection tail call pushes NO bytecode frame: on

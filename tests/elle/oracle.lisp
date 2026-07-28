@@ -450,6 +450,20 @@
     _ (length v)))
 (defn t22-param-if [v c]
   (if c (length v) (%add 1 (length v))))
+# The frame-exit release (docs/impl/region/mechanism.md § "A release past a
+# frame-replacing tail call is not a release"). `t23-unused`'s parameter is used
+# nowhere, so its release is the unused-parameter fallback the lowerer emits at the
+# end of the body — the block a CLOSURE callee never reaches — and escape clears it
+# as sole-held. `t23-moved` is the exemption: its parameter IS the tail call's
+# argument, so its release is the ownership move and must stay put.
+(defn t23-sink []
+  0)
+(defn t23-unused [x]
+  (t23-sink))
+(defn t23-take [a]
+  (length a))
+(defn t23-moved [x]
+  (t23-take x))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1667,6 +1681,36 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+# The frame-exit release, two CLOSED controls. A frame-replacing tail call means
+# everything the lowerer emits after it runs only on the NATIVE fall-through, so a
+# release landing there is emitted where control may never arrive; the close moves
+# that one release ahead of the `TailCall` — admitted where escape proves the frame
+# is the region's sole holder, since on the closure path it fires where none fired
+# before (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
+# call is not a release"). `tail-frame-exit-unused` is the unused-parameter
+# fallback through that dead block; `tail-frame-exit-moved` is the exemption face,
+# already 0, which reads GROWTH if the hoist ever releases an argument the callee
+# now owns. Undeclared, like `param-used-arm`, so a regression trips the
+# completeness gate loudly rather than being absorbed as F1a scratch. The CAPTURED
+# holder — the stdlib walker, whose tail callee reaches its parameters through its
+# environment — keeps the baseline and is the residual, driven as a row in
+# `tests/elle/region-tail-frame-exit.lisp` rather than pinned here. That file is
+# also the counterfactual; the soundness complement is
+# `region-tail-frame-exit-uaf.lisp`.
+(pin (measure-core "tail-frame-exit-unused"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-unused (list 1 2 3))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-moved"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-moved (list 1 2 3))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a
 # `break` carries out is the BLOCK's value, so its release is anchored where the
