@@ -155,8 +155,17 @@ other is structural ownership-location, NOT escape:
   an operand's slot or reads a register defined outside it
   (`hoistable_run`). And the region must be sole-frame-held
   (`RegionInfo::sole_frame_held_regions`), because a tail callee also reaches
-  its CAPTURED environment, which no argument names. Bounded to the tail
-  call's own block, which is where it is that block's single exit
+  its CAPTURED environment, which no argument names.
+- `emitops.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
+  merge is reached only through arms the lowerer closes one at a time, so it
+  INHERITS their relocation points and a release emitted past the merge is
+  emitted there AND replicated ahead of each arm's `TailCall`. What makes
+  that count once per path is `self_cancelling_run`: a value-routed release
+  nil-stamps the slot it read, so the copy a path reaches second loads `nil`
+  and no-ops. A run without that stamp (`DecrefRegion` by id,
+  `DecrefCellRegion`, the transfer adopt) keeps the baseline, and every other
+  block boundary clears the points — a replica in a point the emission
+  position is unreachable from is a release added where none was owed
   (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
   call is not a release").
 

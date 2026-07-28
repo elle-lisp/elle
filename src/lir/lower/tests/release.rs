@@ -683,3 +683,98 @@ fn moved_argument_release_stays_after_the_tail_call() {
          (at={at}, releases={releases:?}) — that release IS the ownership move",
     );
 }
+
+/// For the first function with two `TailCall`-bearing blocks — a branch whose
+/// arms each make one — the local slots each block releases BEFORE its call and
+/// those it releases after.
+///
+/// Reading by SLOT rather than by instruction count is what makes these pins
+/// specific: an arm carries the replicated release of *every* region the merge
+/// releases, so "some release precedes the call" says nothing about which.
+fn branch_arm_release_slots(module: &crate::lir::LirModule) -> Vec<(Vec<u16>, Vec<u16>)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    for f in funcs {
+        let mut arms = Vec::new();
+        for b in &f.blocks {
+            let Some(at) = b
+                .instructions
+                .iter()
+                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+            else {
+                continue;
+            };
+            let mut from_slot: std::collections::HashMap<Reg, u16> =
+                std::collections::HashMap::new();
+            let (mut before, mut after) = (Vec::new(), Vec::new());
+            for (idx, i) in b.instructions.iter().enumerate() {
+                match &i.instr {
+                    LirInstr::LoadLocal { dst, slot } => {
+                        from_slot.insert(*dst, *slot);
+                    }
+                    LirInstr::DecrefValueRegion { src } => {
+                        if let Some(&slot) = from_slot.get(src) {
+                            if idx < at {
+                                before.push(slot);
+                            } else {
+                                after.push(slot);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            arms.push((before, after));
+        }
+        if arms.len() >= 2 {
+            return arms;
+        }
+    }
+    Vec::new()
+}
+
+#[test]
+fn stranded_param_release_is_replicated_into_every_branch_arm() {
+    // The release lands past the MERGE, which each arm leaves through a
+    // frame-replacing tail call — so the merge copy alone reaches neither path.
+    // The merge's inherited relocation points put a copy ahead of each arm's
+    // `TailCall` (docs/impl/region/mechanism.md § "The relocation point outlives
+    // the block"; the `tail-frame-exit-arms` probe). `x` is the first parameter,
+    // hence local slot 0.
+    let module = compile_to_lir(
+        "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
+         (def f (fn (x t) (if t (s) (s2)))) (f (list 1 2) true))",
+    );
+    let arms = branch_arm_release_slots(&module);
+    assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
+    for (before, after) in &arms {
+        assert!(
+            before.contains(&0),
+            "an arm's copy of the stranded parameter's release is missing \
+             (before={before:?}, after={after:?}) — dead on that arm's closure path",
+        );
+    }
+}
+
+#[test]
+fn moved_argument_release_stays_after_its_own_arm_tail_call() {
+    // The exemption is read PER point: `x` (local slot 0) is the then-arm call's
+    // argument, so that arm keeps its release in the dead block — even though the
+    // same arm does take a replica of `t`'s release, and even though the merge's
+    // other point is free to take one of `x`'s.
+    let module = compile_to_lir(
+        "(begin (def s (fn (a) a)) (def s2 (fn () 1)) \
+         (def f (fn (x t) (if t (s x) (s2)))) (f (list 1 2) true))",
+    );
+    let arms = branch_arm_release_slots(&module);
+    assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
+    let (before, after) = &arms[0];
+    assert!(
+        !before.contains(&0),
+        "the moved argument's release was replicated ahead of the arm's TailCall \
+         (before={before:?}) — that release IS the ownership move",
+    );
+    assert!(
+        after.contains(&0),
+        "the moved argument's release left the dead block entirely (after={after:?})",
+    );
+}

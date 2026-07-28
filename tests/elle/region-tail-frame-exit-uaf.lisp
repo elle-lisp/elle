@@ -121,6 +121,39 @@
   (let [fb (fiber/new (fn () (h-yielder (list (string "h" i) i))) |:yield|)]
     (fiber/resume fb)))
 
+# ── the per-arm face: a branch merge inherits its arms' relocation points ─────
+# A release emitted past the merge is replicated ahead of each arm's `TailCall`
+# and still emitted at the merge, so both obligations are re-asked per point and
+# a third appears: the two copies must act exactly ONCE on a path that reaches
+# both.
+
+# (i) the argument is moved into ONE arm's tail call and read there. The
+# exemption is per point, so that arm must keep its release in the dead block
+# even though its sibling is free to take a copy.
+(defn i-arm-moved (v t)
+  (if t (a-callee v) 0))
+(defn i-arm (i)
+  (i-arm-moved (list (string "i" i) i) true))
+
+# (j) the arm's tail callee reaches the value through its CAPTURED environment —
+# the admission, now asked of a replica rather than of an in-block move.
+(defn j-arm-captured (v t)
+  (let [g (fn () (length (first v)))]
+    (if t (g) 0)))
+(defn j-arm (i)
+  (j-arm-captured (list (string "j" i) i) true))
+
+# (k) the arm's tail call is to a NATIVE, which pushes no frame and falls
+# through to the merge — so this path reaches the replica AND the merge copy.
+# Acting twice drops the reference the CALLER still holds, freeing `x` under its
+# read. This is the row the self-cancelling requirement exists for.
+(defn k-arm-native (v w t)
+  (if t (length w) 0))
+(defn k-arm (i)
+  (let [x (list (string "k" i) i)]
+    (k-arm-native x (string "w" i) true)
+    (length (first x))))
+
 # ── controls: the same reads with a NATIVE tail call — correct now ────────────
 (defn c-plain (i)
   (let [x (list (string "p" i) i)]
@@ -137,6 +170,9 @@
 (var f 0)
 (var g 0)
 (var h 0)
+(var ai 0)
+(var aj 0)
+(var ak 0)
 (var k 0)
 (while (%lt i 3000)
   (assign a (a-moved i))
@@ -148,6 +184,9 @@
   (assign f (f-read i))
   (assign g (g-return i))
   (assign h (h-fiber i))
+  (assign ai (i-arm i))
+  (assign aj (j-arm i))
+  (assign ak (k-arm i))
   (assign k (c-plain i))
   # The sink is a module-level container by design (witness f stores into it);
   # drain it so the driver's own retention stays flat.
@@ -165,5 +204,10 @@
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")
 (assert (> h 0) "argument freed under a parked frame's resume")
+
+(assert (%gt ai 0) "argument freed under the arm's callee that owns it")
+(assert (%gt aj 0) "captured value freed under the arm callee's read")
+(assert (%gt ak 0)
+        "value released twice where the arm falls through to the merge")
 
 (println "region-tail-frame-exit-uaf: ok")

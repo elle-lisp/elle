@@ -20,6 +20,13 @@
 # named by no argument and by no callee region, yet the call reads it, so a
 # captured holder keeps the baseline.
 #
+# A release emitted once the block has CLOSED is placed the other way (§ "The
+# relocation point outlives the block"): a branch merge inherits the relocation
+# points of the arms that reach it, so the release is emitted at the merge AND
+# replicated ahead of each arm's `TailCall`. That counts once per path because a
+# value-routed release nil-stamps the slot it read, so the copy a path reaches
+# second loads `nil` and no-ops.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each subject, and for the exemptions and the boundary,
 # whose releases must stay exactly where they are. The soundness complement is
@@ -54,6 +61,38 @@
 (defn unused-two (x y)
   (tail-sink))
 
+# (d) the tail call sits in a branch ARM, so the release lands past the merge
+# label — a block the arm's closure path never reaches. A branch merge inherits
+# its arms' relocation points, so the release is emitted there AND replicated
+# ahead of each arm's `TailCall`; a value-routed release nil-stamps the slot it
+# read, so whichever copy a path reaches first does the work and any later one
+# no-ops. Both arms, both nestings, and every branch kind that merges through
+# arms alone.
+(defn tail-sink2 ()
+  1)
+(defn arm-unused (x t)
+  (if t (tail-sink) (tail-sink2)))
+(defn arm-two (x y t)
+  (if t (tail-sink) (tail-sink2)))
+(defn arm-cond (x t)
+  (cond
+    (%eq t 0) (tail-sink)
+    (%eq t 1) (tail-sink2)
+    (tail-sink)))
+(defn arm-match (x t)
+  (match t
+    :a (tail-sink)
+    _ (tail-sink2)))
+(defn arm-nested (x a t)
+  (if a (if t (tail-sink) (tail-sink2)) (tail-sink)))
+
+# (d2) only ONE arm leaves through a frame-replacing tail call; the other falls
+# through to the merge and needs the release that is still emitted there. No arm
+# has to be proven to tail-call for the accounting to hold — the nil-stamp is
+# what makes the two copies act once.
+(defn arm-partial (x t)
+  (if t (tail-sink) 5))
+
 # exemptions ───────────────────────────────────────────────────────────────────
 # The releases that must STAY in the dead fall-through. Each is already bounded;
 # hoisting one would release a reference the callee now owns, so these rows are
@@ -76,6 +115,12 @@
   (let [g (fn (a) (length a))]
     (g x)))
 
+# (h) the argument is moved into ONE arm's tail call. The exemption is read per
+# relocation point, so that arm keeps its release in the dead block while the
+# sibling arm is free to take a copy.
+(defn arm-moved (x t)
+  (if t (take-one x) (tail-sink2)))
+
 # controls ─────────────────────────────────────────────────────────────────────
 # Shapes with no dead block at all: a native tail call keeps the frame and falls
 # through, and a non-tail call returns to the live scope exit.
@@ -87,10 +132,10 @@
   0)
 
 # boundary ─────────────────────────────────────────────────────────────────────
-# The tail call sits inside a branch arm, so the enclosing scope's releases are
-# emitted after the merge — a different block, reached by paths this tail call is
-# not on. The hoist declines and the baseline stands: this row must not
-# over-free, and must not regress the arm that already released.
+# The arm that already released must keep releasing exactly once. `x`'s own
+# `decref_point` sits in the else arm here, so the then arm's release is the
+# dead-arm compensation at its head — emitted before the tail call, and never
+# doubled by a replica.
 
 (defn branch-tail (x t)
   (if t (tail-sink) (length x)))
@@ -118,11 +163,28 @@
 (defn captured-param (x)
   (let [g (fn () (length x))]
     (g)))
+(defn arm-captured (x t)
+  (let [g (fn () (length x))]
+    (if t (g) (tail-sink2))))
 
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def unused-param-d (measure (fn () (unused-param [1 2])) 200 window))
 (def unused-two-d (measure (fn () (unused-two [1 2] [3 4])) 200 window))
 (def captured-param-d (measure (fn () (captured-param [1 2])) 200 window))
+(def arm-captured-d (measure (fn () (arm-captured [1 2] true)) 200 window))
+(def arm-unused-t-d (measure (fn () (arm-unused [1 2] true)) 200 window))
+(def arm-unused-f-d (measure (fn () (arm-unused [1 2] false)) 200 window))
+(def arm-two-d (measure (fn () (arm-two [1 2] [3 4] true)) 200 window))
+(def arm-cond-0-d (measure (fn () (arm-cond [1 2] 0)) 200 window))
+(def arm-cond-2-d (measure (fn () (arm-cond [1 2] 2)) 200 window))
+(def arm-match-a-d (measure (fn () (arm-match [1 2] :a)) 200 window))
+(def arm-match-z-d (measure (fn () (arm-match [1 2] :z)) 200 window))
+(def arm-nested-t-d (measure (fn () (arm-nested [1 2] true true)) 200 window))
+(def arm-nested-f-d (measure (fn () (arm-nested [1 2] false true)) 200 window))
+(def arm-partial-t-d (measure (fn () (arm-partial [1 2] true)) 200 window))
+(def arm-partial-f-d (measure (fn () (arm-partial [1 2] false)) 200 window))
+(def arm-moved-t-d (measure (fn () (arm-moved [1 2] true)) 200 window))
+(def arm-moved-f-d (measure (fn () (arm-moved [1 2] false)) 200 window))
 (def moved-arg-d (measure (fn () (moved-arg [1 2])) 200 window))
 (def moved-and-stranded-d
   (measure (fn () (moved-and-stranded [1 2] [3 4])) 200 window))
@@ -130,14 +192,22 @@
 (def native-tail-d (measure (fn () (native-tail [1 2] [3 4])) 200 window))
 (def non-tail-d (measure (fn () (non-tail [1 2] [3 4])) 200 window))
 (def branch-false-d (measure (fn () (branch-tail [1 2] false)) 200 window))
+(def branch-true-d (measure (fn () (branch-tail [1 2] true)) 200 window))
 
 (println "region-tail-frame-exit deltas over " window " iters:")
 (println "  walk " walk-d "  unused " unused-param-d "  unused-two "
-         unused-two-d "  captured " captured-param-d)
+         unused-two-d "  captured " captured-param-d "  arm-captured "
+         arm-captured-d)
+(println "  arms: unused " arm-unused-t-d "/" arm-unused-f-d "  two " arm-two-d
+         "  cond " arm-cond-0-d "/" arm-cond-2-d "  match " arm-match-a-d "/"
+         arm-match-z-d)
+(println "  arms: nested " arm-nested-t-d "/" arm-nested-f-d "  partial "
+         arm-partial-t-d "/" arm-partial-f-d)
 (println "  exemptions: moved " moved-arg-d "  moved+stranded "
-         moved-and-stranded-d "  callee-local " callee-local-d)
+         moved-and-stranded-d "  callee-local " callee-local-d "  arm-moved "
+         arm-moved-t-d "/" arm-moved-f-d)
 (println "  controls: native " native-tail-d "  non-tail " non-tail-d)
-(println "  boundary: branch-false " branch-false-d)
+(println "  boundary: branch " branch-true-d "/" branch-false-d)
 
 # Every leak in this class is at least one whole region per call, so a surviving
 # strand reads >=2000 over the window. 100 is slack for the one-time intercept.
@@ -148,17 +218,37 @@
 (bounded? non-tail-d "control: non-tail call returns to the live scope exit")
 (bounded? moved-arg-d "exemption: the moved argument's release is the transfer")
 (bounded? callee-local-d "exemption: the callee's release is the activation's")
+(bounded? arm-moved-t-d "exemption: the arm that moved its argument")
+(bounded? arm-moved-f-d "exemption: the sibling of the arm that moved")
 (bounded? branch-false-d "boundary: the arm that released must still release")
+(bounded? branch-true-d "boundary: the compensated arm must not double-release")
 
 (bounded? unused-param-d "unused parameter past a frame-replacing tail call")
 (bounded? unused-two-d "two unused parameters past one tail call")
 (bounded? moved-and-stranded-d "stranded parameter beside a moved one")
+
+(bounded? arm-unused-t-d
+          "release past a merge both arms leave through a tail call")
+(bounded? arm-unused-f-d "the sibling arm of the same merge")
+# Two parameters strand two regions per call, so the surviving-strand floor is
+# 2x the window; `bounded?`'s slack covers the one-time intercept either way.
+(bounded? arm-two-d "two parameters past a merge both arms leave through")
+(bounded? arm-cond-0-d "a cond clause body leaving through a tail call")
+(bounded? arm-cond-2-d "a cond else body leaving through a tail call")
+(bounded? arm-match-a-d "a match arm leaving through a tail call")
+(bounded? arm-match-z-d "the match catch-all arm leaving through a tail call")
+(bounded? arm-nested-t-d "an inner branch's arm inside an outer arm")
+(bounded? arm-nested-f-d "the outer arm beside a branch that inherited points")
+(bounded? arm-partial-t-d
+          "the tail-calling arm of a partly falling-through branch")
+(bounded? arm-partial-f-d "the falling-through arm keeps the merge release")
 
 # The residual rows are NOT asserted bounded — a captured holder keeps the
 # baseline by design. What is asserted is that they still compute correctly:
 # a strand is an over-keep, and must never become a mis-free.
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
 (assert (= (captured-param [1 2]) 2) "captured-param result lost")
+(assert (= (arm-captured [1 2] true) 2) "arm-captured result lost")
 
 # Value preservation: relocating a release must not change what runs.
 (assert (= (unused-param [1 2]) 0) "unused-param result lost")
@@ -167,5 +257,12 @@
 (assert (= (native-tail [1 2] [3 4]) 2) "native-tail result lost")
 (assert (= (branch-tail [1 2] false) 2) "branch else-arm result lost")
 (assert (= (branch-tail [1 2] true) 0) "branch then-arm result lost")
+(assert (= (arm-unused [1 2] true) 0) "arm-unused then result lost")
+(assert (= (arm-unused [1 2] false) 1) "arm-unused else result lost")
+(assert (= (arm-cond [1 2] 2) 0) "arm-cond else result lost")
+(assert (= (arm-match [1 2] :z) 1) "arm-match catch-all result lost")
+(assert (= (arm-nested [1 2] true true) 0) "arm-nested inner result lost")
+(assert (= (arm-partial [1 2] false) 5) "arm-partial fall-through result lost")
+(assert (= (arm-moved [1 2] true) 2) "arm-moved result lost")
 
 (println "region-tail-frame-exit: ok")

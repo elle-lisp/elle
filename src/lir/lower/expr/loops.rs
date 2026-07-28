@@ -217,6 +217,13 @@ impl<'a> Lowerer<'a> {
         }
         let else_label = self.fresh_label();
 
+        // Every path into the done block leaves through a clause body or the
+        // else block, so each seals its relocation points for the merge to
+        // inherit (docs/impl/region/mechanism.md § "The relocation point outlives
+        // the block"). A `cond` with no `else` contributes an empty-handed nil
+        // path, which simply carries no point.
+        let saved_arm_hoists = self.begin_branch_arms();
+
         // Process each clause
         for (i, (test, body)) in clauses.iter().enumerate() {
             let (body_label, _) = clause_labels[i];
@@ -247,6 +254,7 @@ impl<'a> Lowerer<'a> {
                 src: body_reg,
             });
             self.terminate(Terminator::Jump(done_label));
+            self.seal_arm_hoists();
             self.finish_block();
 
             // Start next test block (if not last clause)
@@ -271,10 +279,12 @@ impl<'a> Lowerer<'a> {
             });
         }
         self.terminate(Terminator::Jump(done_label));
+        self.seal_arm_hoists();
         self.finish_block();
 
         // Done block (continue here)
         self.current_block = BasicBlock::new(done_label);
+        self.open_branch_merge(saved_arm_hoists);
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
             slot: cond_result_slot,

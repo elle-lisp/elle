@@ -32,6 +32,12 @@ impl<'a> Lowerer<'a> {
         });
         self.finish_block();
 
+        // Each arm seals whatever relocation point it ends on, so a release
+        // emitted past the merge can be replicated back into the arms that leave
+        // through a frame-replacing tail call (docs/impl/region/mechanism.md
+        // § "The relocation point outlives the block").
+        let saved_arm_hoists = self.begin_branch_arms();
+
         // Then block: store result to slot, jump to merge
         self.current_block = BasicBlock::new(then_label);
         let then_reg = self.lower_expr(then_branch)?;
@@ -40,6 +46,7 @@ impl<'a> Lowerer<'a> {
             src: then_reg,
         });
         self.terminate(Terminator::Jump(merge_label));
+        self.seal_arm_hoists();
         self.finish_block();
 
         // Else block: store result to slot, jump to merge
@@ -50,10 +57,12 @@ impl<'a> Lowerer<'a> {
             src: else_reg,
         });
         self.terminate(Terminator::Jump(merge_label));
+        self.seal_arm_hoists();
         self.finish_block();
 
         // Merge block: load result from slot
         self.current_block = BasicBlock::new(merge_label);
+        self.open_branch_merge(saved_arm_hoists);
         self.emit(LirInstr::LoadLocal {
             dst: result_reg,
             slot: result_slot,

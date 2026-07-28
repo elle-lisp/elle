@@ -464,6 +464,16 @@
   (length a))
 (defn t23-moved [x]
   (t23-take x))
+# `t23-arms` puts the same stranded release past a MERGE: both arms leave through
+# a frame-replacing tail call, so the block the release lands in is reached on
+# neither path. A branch merge inherits its arms' relocation points, so the
+# release is replicated ahead of each arm's `TailCall` as well as emitted at the
+# merge — sound because a value-routed release nil-stamps the slot it read, so
+# the copy a path reaches second no-ops.
+(defn t23-sink2 []
+  1)
+(defn t23-arms [x t]
+  (if t (t23-sink) (t23-sink2)))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1688,7 +1698,9 @@
 # is the region's sole holder, since on the closure path it fires where none fired
 # before (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
 # call is not a release"). `tail-frame-exit-unused` is the unused-parameter
-# fallback through that dead block; `tail-frame-exit-moved` is the exemption face,
+# fallback through that dead block; `tail-frame-exit-arms` is the same strand one
+# block further out, where the tail calls sit in the arms of a branch and the
+# release lands past the merge; `tail-frame-exit-moved` is the exemption face,
 # already 0, which reads GROWTH if the hoist ever releases an argument the callee
 # now owns. Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as F1a scratch. The CAPTURED
@@ -1703,6 +1715,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-unused (list 1 2 3))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-arms"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-arms (list 1 2 3) true)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "tail-frame-exit-moved"
                    (fn [b]

@@ -95,15 +95,19 @@ struct BlockLowerContext {
 /// that one release to just before the `TailCall` costs no count argument (it is
 /// the same single release, relocated), and is legal for every region the call
 /// itself cannot reach.
+///
+/// A branch merge inherits the points of the arms that reach it, so a point also
+/// outlives its own block (§ "The relocation point outlives the block"). There
+/// the release is emitted at the merge *and* replicated at each point, which is
+/// sound only for a self-cancelling run — one that nil-stamps the slot it read,
+/// so the copy a path reaches second no-ops.
 struct TailExitHoist {
     /// Index of the `TailCall` in its block's instruction list. A hoisted
     /// release is spliced in here, ahead of the frame replacement, and the index
     /// advances so successive hoists keep their emission order.
     at: usize,
-    /// The block the `TailCall` sits in. A release emitted once that block has
-    /// closed belongs to a merge this tail call's path is not the only one
-    /// reaching, so it keeps the baseline (§ "The boundary").
-    label: Label,
+    /// The block the `TailCall` sits in.
+    block: HoistBlock,
     /// The local slots and capture indices the call's operands were loaded from.
     /// A release that reloads one of these reloads the very value now sitting on
     /// the operand stack, so it IS the ownership move however ANF spelled the
@@ -117,6 +121,19 @@ struct TailExitHoist {
     /// argument's is the ownership move the calling convention rests on, and the
     /// callee's belongs to the activation that takes it over.
     exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
+}
+
+/// Where a relocation point lives, and with it which of the two placements
+/// applies: a MOVE within the block still being filled, or a REPLICA spliced
+/// into an arm that has already closed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HoistBlock {
+    /// The block the lowerer is filling. Its label validates the point — a
+    /// stale one names an instruction list this block no longer is.
+    Current(Label),
+    /// A branch arm already pushed onto `LirFunction::blocks`, by index. Blocks
+    /// are only ever appended, so the index stays valid for the function's life.
+    Finished(usize),
 }
 
 /// Lowers HIR to LIR
@@ -334,11 +351,20 @@ pub struct Lowerer<'a> {
     /// `Return`, so its fall-through retain IS the mint and is absent here.
     /// Recorded by `lower_let`, the only lowering site that sees the wrap.
     return_minted_calls: rustc_hash::FxHashSet<HirId>,
-    /// The frame-replacing tail call that closed the current block's live range,
-    /// if one has been emitted into it (see [`TailExitHoist`]). Set by
-    /// `lower_call`'s tail arm, cleared when the block closes, and saved/restored
-    /// across lambda boundaries like every other per-function slot map.
-    tail_exit_hoist: Option<TailExitHoist>,
+    /// The relocation points covering every path that reaches the current
+    /// emission position (see [`TailExitHoist`]). Either a single
+    /// [`HoistBlock::Current`] entry — a frame-replacing tail call emitted into
+    /// this very block, which dominates everything after it — or the
+    /// [`HoistBlock::Finished`] points a branch merge inherited from its arms.
+    /// Set by `lower_call`'s tail arm and by the branch lowerings, cleared at
+    /// every other block boundary, and saved/restored across lambda boundaries
+    /// like every other per-function slot map.
+    tail_exit_hoist: Vec<TailExitHoist>,
+    /// Points sealed from the arms of the branch currently being lowered, which
+    /// `open_branch_merge` hands to its merge block. Saved and restored around
+    /// each branch (and each lambda), so a nested branch's arms never leak into
+    /// the enclosing one's collection.
+    arm_exit_hoists: Vec<TailExitHoist>,
 }
 
 mod regiondecref;
@@ -387,7 +413,8 @@ impl<'a> Lowerer<'a> {
             emitted_alloc_regions: rustc_hash::FxHashSet::default(),
             deferred_decref_points: rustc_hash::FxHashSet::default(),
             return_minted_calls: rustc_hash::FxHashSet::default(),
-            tail_exit_hoist: None,
+            tail_exit_hoist: Vec::new(),
+            arm_exit_hoists: Vec::new(),
         }
     }
 

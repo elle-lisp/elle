@@ -475,24 +475,63 @@ That admission is what bounds this close to the narrow case it actually covers: 
 parameter or local no closure captures, whose release lands at the body's scope
 exit. The captured walker — the shape with the most to gain — is the **residual**.
 
-### The boundary: the release must be in the tail call's own block
+### The relocation point outlives the block, and a branch merge inherits it
 
-The hoist relocates an already-emitted instruction, so it reaches only a release
-the lowerer emits into the tail call's **own basic block**. That is exactly the
-condition under which the tail call is that block's single exit, which is what
-makes the relocation a move rather than a duplication. A release emitted after
-the block closed — an enclosing scope's, where the tail call sat inside a branch
-arm — is reached by paths the tail call is not on, so hoisting it into the arm
-would delete the release on the sibling arms, and replicating it into every arm
-would be a per-arm release owing the count argument placement does not supply
-(§ "A release inside one arm is not a release on the other arms"). A branch whose
-arms end in frame-replacing tail calls therefore keeps the baseline, and the
-enclosing scope's releases stay stranded: the residual of this close.
+Inside the tail call's own block the relocation is a **move**: the instruction is
+lifted from after the `TailCall` to before it, so it runs once on the closure path
+and once on the native fall-through, and nothing is left behind.
+
+A release the lowerer emits once that block has closed cannot be moved that way. A
+branch arm's tail call is the shape that matters — the arm leaves through the
+callee, so the enclosing scope's releases, emitted after the merge label, are
+reached on every path except the ones that most need them. Moving such a release
+into the arm would delete it on the sibling arms; leaving it alone strands it.
+
+What resolves this is not a stronger placement claim but a property of the release
+itself. A value-routed release is **self-cancelling**: it loads the holder slot,
+releases that value's region, and stamps the slot `nil` — the same discipline that
+lets a branch's per-arm compensations coexist with its `decref_point`
+(`emit_branch_compensation`). Two copies of a self-cancelling run on one path
+therefore act exactly once: whichever the path reaches first does the work, and
+any later copy loads `nil`, whose release is a no-op. So the release is emitted at
+the merge **and** replicated ahead of each arm's `TailCall`:
+
+- an arm that leaves through the callee runs its own copy and never reaches the
+  merge;
+- an arm that falls through — natively, or because it makes no tail call at all —
+  reaches the merge, where its copy either does the work or no-ops against the
+  stamp the arm already left.
+
+Every path releases exactly once, and no arm needs to be proven to tail-call for
+the accounting to hold. The obligations are unchanged and are read **per point**:
+a region an arm's own call names keeps its place there (that arm's copy is the
+ownership move), and escape's sole-holder admission gates the whole thing, because
+each replica still fires on a closure path where none fired before.
+
+Self-cancelling is a real restriction, not a formality. A release by region id
+(`DecrefRegion`), a capture cell's `DecrefCellRegion`, and the transfer adopt
+leave no stamp behind and would count twice on a native fall-through, so a run
+that is not exactly load / release-by-value / nil-stamp keeps the baseline. Scope
+regions need nothing here anyway — `lower_call` already frees them before every
+`TailCall`.
+
+**Which merges inherit the points.** `if`, `cond` and `match` merges are reached
+only through arms the lowerer closes one at a time, so each arm's points are
+sealed onto its finished block and the merge starts life owning the union. Every
+other block boundary clears them: a block that closes for any other reason is
+followed by one the tail call's path may not be a predecessor of at all, and a
+release replicated into an unreachable point is a release added on a path that
+never owed it.
+
+The residual is unchanged in kind and is where the leak still lives: a **captured**
+holder, refused by the admission because the tail callee reaches its environment.
+`push-all` is that shape.
 
 Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
-argument-move and callee exemptions, the branch boundary, and the captured-holder
-residual driven as rows), the `tail-frame-exit-unused` / `tail-frame-exit-moved`
-probes in `tests/elle/oracle.lisp` (the per-op rates), and
+argument-move and callee exemptions, the per-arm faces, the non-self-cancelling
+boundary, and the captured-holder residual driven as rows), the
+`tail-frame-exit-unused` / `tail-frame-exit-moved` / `tail-frame-exit-arms` probes
+in `tests/elle/oracle.lisp` (the per-op rates), and
 `tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value
 moved into the tail callee, reached through its captured environment, handed back
 out through it, or read after the call must survive the moved release; the

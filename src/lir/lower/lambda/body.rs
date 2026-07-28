@@ -51,11 +51,13 @@ impl<'a> Lowerer<'a> {
         // region could be associated with a stale slot index from
         // the inner function.
         let saved_region_to_slot = std::mem::take(&mut self.region_to_slot);
-        // The tail-exit relocation point names an index into ONE block's
-        // instruction list, and a fresh body starts at `Label(0)` exactly as the
-        // enclosing one may have — so the enclosing point must be put away rather
-        // than left to be matched by a colliding label.
-        let saved_tail_exit_hoist = self.tail_exit_hoist.take();
+        // A tail-exit relocation point names an index into ONE block's
+        // instruction list of ONE function, and a fresh body starts at `Label(0)`
+        // and block 0 exactly as the enclosing one did — so the enclosing points,
+        // and the arm collection a branch mid-lowering is filling, must be put
+        // away rather than left to be matched by a colliding label or index.
+        let saved_tail_exit_hoist = std::mem::take(&mut self.tail_exit_hoist);
+        let saved_arm_exit_hoists = std::mem::take(&mut self.arm_exit_hoists);
         // Reassigned-local slots are this function's local index space (per-
         // function, like `region_to_slot`), so reset for the new body.
         let saved_reassigned_local_slots = std::mem::take(&mut self.reassigned_local_slots);
@@ -231,6 +233,12 @@ impl<'a> Lowerer<'a> {
         // keeps a param used ONLY as such an argument out of the hoist
         // (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
         // call is not a release").
+        //
+        // The nil stamp is what makes the release SELF-CANCELLING, and with it
+        // replicable into the arms of a branch the body ends in: whichever copy a
+        // path reaches first blanks the slot, so a later copy loads `nil` and
+        // no-ops. Blanking is free here — the param is used nowhere, so nothing
+        // reads the slot again.
         let unused_params: Vec<(u16, crate::hir::region::Region)> = params
             .iter()
             .filter(|p| !self.arena.get(**p).needs_capture())
@@ -249,6 +257,9 @@ impl<'a> Lowerer<'a> {
                 let val_reg = s.fresh_reg();
                 s.emit(LirInstr::LoadLocal { dst: val_reg, slot });
                 s.emit(LirInstr::DecrefValueRegion { src: val_reg });
+                if let Ok(nil_reg) = s.emit_const(crate::lir::LirConst::Nil) {
+                    s.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                }
             });
         }
 
@@ -285,6 +296,7 @@ impl<'a> Lowerer<'a> {
         self.reassigned_local_slots = saved_reassigned_local_slots;
         self.current_self_binding = saved_self_binding;
         self.tail_exit_hoist = saved_tail_exit_hoist;
+        self.arm_exit_hoists = saved_arm_exit_hoists;
 
         Ok(func)
     }
