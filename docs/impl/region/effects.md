@@ -106,9 +106,8 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   that returns an opaque result but stores nothing.
 - **`Mixed`** — examined, and the native stores arguments *uncounted*
   (the property the arg clique exists to cover) — and/or returns a result
-  that is neither always-fresh nor always-pass-through (`string`'s
-  identity-on-string path, trait-dispatching primitives that may run user
-  closures). A positive declaration — "we read it; this is the honest
+  that is neither always-fresh nor always-pass-through (a trait-dispatching
+  primitive that may run a user closure). A positive declaration — "we read it; this is the honest
   worst case." A primitive that stores nothing but merely returns a
   non-fresh result is **`Opaque`** (above), not `Mixed` — the clique is
   keyed on the *store*, so a non-storing native must not carry it.
@@ -170,6 +169,28 @@ placeholder and value-gated `DecrefValueRegion` release (Rule 2) remain the
 machinery for every heap-returning effect; `Immediate` calls contribute no
 result regions to the walk (the solver's `call_returns_immediate` check,
 keyed on this declaration).
+
+What the result side *does* derive is an **alias** fact for the ownership
+forest. `Fresh`, `Stores` and `Sends` each claim a heap result in the call's
+own minted region — the claim the declaration oracle below checks — and
+`Immediate` claims no region at all, so none of the four can hand back a value
+living inside an *argument*. Every other effect can (`PassThrough` by
+definition, `Funnel`'s in-place container return, `Opaque`, `Mixed`,
+`Unknown`), and a non-primitive callee is under no claim whatsoever. For those
+the walk records `result ⊒ each argument`
+(`RegionInfo::opaque_result_aliases`), so a subtree whose member such a result
+may name is bound by the root's drop or refuses to Shared — the result-side
+analogue of the arg clique, and the reason `Fresh` is worth declaring even for
+a primitive that stores nothing ([adopt.md](adopt.md) § "The lifetime
+obligation the root carries").
+
+`Funnel` is the one middle case: its result is arg0 in place or a fresh copy of
+arg0 — the container either way, never an element interior to it — so it needs
+no bound, only the reachability that a read out of that result is a read out of
+arg0 (`RegionInfo::funnel_result_containers`). The container READS
+(`get`/`first`/`rest`) declare `Funnel` as well but are excluded from both
+relations: their result *is* the interior element, and the borrow face's own
+edge records it against the tighter container.
 
 **Hard edges: how a may-store edge is emitted.** An edge's compile-time
 incref is keyed by the *source* region. For a region minted by an alloc

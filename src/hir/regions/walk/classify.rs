@@ -163,6 +163,30 @@ impl RegionInference {
         }
     }
 
+    /// May this callee's heap result BE one of its arguments, or a value living inside
+    /// one? Only a declaration that the result lives in the call's OWN minted region
+    /// answers no: [`Fresh`](crate::primitives::def::RegionEffect::Fresh),
+    /// [`Stores`](crate::primitives::def::RegionEffect::Stores) and
+    /// [`Sends`](crate::primitives::def::RegionEffect::Sends) all carry that claim, and
+    /// the declaration oracle checks it after every native call in a debug build
+    /// (docs/impl/region/effects.md § "The declaration oracle"). `Immediate` returns no
+    /// region at all — excluded by `call_returns_immediate` at the recording site, so it
+    /// is not repeated here.
+    ///
+    /// Everything else can: `PassThrough` by definition, `Funnel`'s in-place container
+    /// return, `Opaque`'s live-anywhere result, `Mixed`/`Unknown`'s unexamined one, and
+    /// every non-primitive callee — which is under no claim whatsoever, and which
+    /// `call_effect` reports as `None` alongside a shadowed or computed callee. The
+    /// ownership forest must treat such a result as an alias into the argument's subtree
+    /// (region/adopt.md § "The lifetime obligation the root carries").
+    pub(super) fn result_may_alias_args(&self, func: &Hir) -> bool {
+        use crate::primitives::def::RegionEffect;
+        !matches!(
+            self.call_effect(func),
+            Some(RegionEffect::Fresh | RegionEffect::Stores { .. } | RegionEffect::Sends { .. })
+        )
+    }
+
     /// The callee's declared [`RetType`](crate::primitives::def::RetType), under
     /// the same unshadowed-immutable-primitive condition as `call_effect`.
     /// `None` for an unknown/shadowed callee or an empty classification. The

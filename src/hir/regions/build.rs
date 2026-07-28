@@ -106,6 +106,8 @@ impl RegionInference {
             funnel_passthrough_sites: self.funnel_passthrough_sites,
             uncounted_read_sites: self.uncounted_read_sites,
             counted_read_aliases: self.counted_read_aliases,
+            opaque_result_aliases: self.opaque_result_aliases,
+            funnel_result_containers: self.funnel_result_containers,
             moves_out_release_sites: self.moves_out_release_sites,
             // Populated by the branch-compensation pass in `analyze_regions_with`
             // (the `-mut` sites where locus A released a container). Empty here.

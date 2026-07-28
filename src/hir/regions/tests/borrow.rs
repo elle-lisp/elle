@@ -221,6 +221,205 @@ fn nested_read_alias_refuses_the_adopt_transitively() {
     );
 }
 
+// ── The opaque-call result alias ─────────────────────────────────────────────────
+//
+// The read edges above are recorded where the walk can SEE the container. A call hides
+// it: a callee may hand back an argument itself, or a value it read out of one, and the
+// caller's call-result placeholder then names a region inside the argument's subtree
+// while relating to no member statically. Only a declaration that the heap result lives
+// in the call's OWN region rules that out (`Fresh`/`Stores`/`Sends`, checked by the
+// effects oracle) or that it is an immediate. A `Funnel` is the middle case: its result is
+// arg0 in place or a fresh copy, so it propagates a read on into arg0's subtree while
+// owing no bound of its own — which makes reachability and boundedness two properties, not
+// one. These pins are written from that rule; the runtime witness is
+// `region_call_result_alias_uaf`.
+
+/// The `(result, argument)` pairs recorded for the opaque call at `site`.
+fn result_aliases(info: &RegionInfo, site: HirId) -> Vec<(Region, Region)> {
+    info.opaque_result_aliases
+        .iter()
+        .filter(|&&(s, _, _)| s == site)
+        .map(|&(_, result, arg)| (result, arg))
+        .collect()
+}
+
+#[test]
+fn opaque_call_result_refuses_the_adopt() {
+    // `(h c)` where `h` is a PARAMETER: the callee is unknown, so nothing inlines and no
+    // declaration constrains the result. It may be `c` itself, or a value `h` read out of
+    // `c` — the pushed element `c`'s subtree drop reclaims. The result outlives `c`'s own
+    // last mention, so the root's drop cannot bound it and the subtree must stay Shared,
+    // where the pass-through retain is live again.
+    //
+    // Counterfactual: with the alias set closed only over READS, the opaque call is
+    // invisible — every member's own `decref_point` sits before `c`'s release and the
+    // adopt is emitted, so `c`'s release subtree-drops the element the result still names
+    // (the call face of `region_call_result_alias_uaf`). This assertion was RED before the
+    // opaque-result alias.
+    let (_, info, edges) = adopt_edges(
+        "(fn [h] (let [c (@array) r (string \"s\")] \
+           (begin (%array-push c r) (let [x (h c)] (length x)))))",
+    );
+    assert!(
+        !info.opaque_result_aliases.is_empty(),
+        "precondition: the shape records an opaque call-result alias; got none",
+    );
+    let adopts: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
+    assert!(
+        adopts.is_empty(),
+        "a subtree whose member an opaque call's result may name past the root's drop \
+         must stay Shared; got adopts {:?}",
+        adopts,
+    );
+}
+
+#[test]
+fn read_out_of_an_opaque_call_result_refuses_the_adopt() {
+    // The composed face: `(first (h c))`. The opaque result may BE `c`, so the native
+    // `first` read out of it is a read out of `c` — and its alias names the element `c`'s
+    // drop reclaims. Neither relation alone sees this: the read edge's container is the
+    // call's placeholder (no member), and the call's own result dies at the read. The two
+    // must close together over the member set.
+    //
+    // Counterfactual: closing the read edges without the call edge leaves the read's
+    // container unreachable from the members, so the subtree is admitted and the read
+    // result is freed under its reader — the minimal form of the stdlib
+    // `(first (concat a @[1 2]))` witness.
+    let (_, info, edges) = adopt_edges(
+        "(fn [h] (let [c (@array) r (string \"s\")] \
+           (begin (%array-push c r) (let [x (first (h c))] (length x)))))",
+    );
+    assert!(
+        !info.opaque_result_aliases.is_empty() && !info.counted_read_aliases.is_empty(),
+        "precondition: the shape records both an opaque call alias and a read alias",
+    );
+    let adopts: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
+    assert!(
+        adopts.is_empty(),
+        "a subtree reached by a READ out of an opaque call's result must stay Shared; \
+         got adopts {:?}",
+        adopts,
+    );
+}
+
+#[test]
+fn opaque_call_result_bounded_by_the_container_keeps_the_adopt() {
+    // The alias is a bound, not a blanket refusal. Here the opaque result dies before the
+    // container's own release — `c` is mentioned again after it — so the root's drop
+    // post-dominates the alias and the element still reclaims by subtree drop. Without
+    // this pin the call edge could be written as "any opaque call over a member refuses"
+    // and nothing would notice the reclamation it traded away.
+    let (_, info, edges) = adopt_edges(
+        "(fn [h] (let [c (@array) r (string \"s\")] \
+           (begin (%array-push c r) (let [n (length (h c))] (%add n (length c))))))",
+    );
+    assert!(
+        !info.opaque_result_aliases.is_empty(),
+        "precondition: the shape records an opaque call-result alias; got none",
+    );
+    let adopts: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
+    assert!(
+        !adopts.is_empty(),
+        "an opaque result that dies before the container's release must leave the \
+         subtree adopted; got no adopt edges",
+    );
+}
+
+#[test]
+fn fresh_call_result_records_no_alias() {
+    // The declaration is the whole gate. `(string "s" c)` is `Fresh`: its heap result
+    // lives in the call's own minted region — the claim the effects oracle checks on
+    // every debug run — so it can hand back neither `c` nor anything inside it, and no
+    // alias edge is recorded. A `Fresh` native that references an argument declares that
+    // separately (`embeds` → a containment edge), which is a different relation.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(let [c (@array) r (string \"s\")] \
+           (begin (%array-push c r) (length (string \"t\" c))))",
+    );
+    let sites = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    assert!(
+        !sites.is_empty(),
+        "precondition: the shape has `string` calls to check; if the classification \
+         route changed, update it",
+    );
+    for site in sites {
+        assert!(
+            result_aliases(&info, site).is_empty(),
+            "a `Fresh` callee's result cannot be an argument, so the site at @{} must \
+             record no opaque-result alias; got {:?}",
+            site.0,
+            result_aliases(&info, site),
+        );
+    }
+}
+
+#[test]
+fn read_out_of_a_funnel_result_refuses_the_adopt() {
+    // A `Funnel` result is arg0 in place or a fresh copy of it, so it needs no lifetime
+    // bound of its own — bounding it would refuse every mutable-store subtree over its
+    // own trailing discarded store result. What it still carries is REACHABILITY: `(get
+    // (%put a :j 5) :k)` reads out of the funnel's result, which IS `a`, so the read's
+    // alias names the element `a`'s drop reclaims even though its recorded container is
+    // the funnel's placeholder.
+    //
+    // Counterfactual: with the funnel result left out of the closure entirely, the
+    // read's container is reachable from no member and the subtree is admitted — the
+    // funnel face of `region_call_result_alias_uaf`. And with reachability allowed to
+    // CONSUME the read's own bound (one set instead of two), the funnel edge claims the
+    // alias first and the read's bound is never recorded, which admits it just the same.
+    let (_, info, edges) = adopt_edges(
+        "(let [a (@struct) r (string \"s\")] \
+           (begin (%put a :k r) (length (get (%put a :j 5) :k))))",
+    );
+    assert!(
+        !info.funnel_result_containers.is_empty() && !info.counted_read_aliases.is_empty(),
+        "precondition: the shape records a funnel result and a read alias; got {:?} / {:?}",
+        info.funnel_result_containers,
+        info.counted_read_aliases,
+    );
+    let adopts: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
+    assert!(
+        adopts.is_empty(),
+        "a subtree reached by a READ out of a funnel's pass-through result must stay \
+         Shared; got adopts {:?}",
+        adopts,
+    );
+}
+
+#[test]
+fn container_read_is_not_recorded_as_a_result_alias() {
+    // `get`/`first`/`rest` declare `Funnel`, but their result is an ELEMENT of arg0, not
+    // the container — the one reading under which the funnel exemption would be plainly
+    // wrong. They are excluded from both result-alias relations at the recording site;
+    // the read edge carries them instead, with the tighter container and its own bound.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(let [c (@array) r (string \"s\")] \
+           (begin (%array-push c r) (let [x (get c 0)] (length x))))",
+    );
+    let sites = find_calls_to_primitive(&hir, "get", &arena, &symbols);
+    assert!(
+        !sites.is_empty(),
+        "precondition: the shape has a `get` call; if the stdlib route changed, update it",
+    );
+    for site in sites {
+        assert!(
+            result_aliases(&info, site).is_empty()
+                && !info
+                    .funnel_result_containers
+                    .iter()
+                    .any(|&(s, _, _)| s == site),
+            "the container read at @{} must be carried by the read edge alone, not by a \
+             result-alias relation that would call its element the container",
+            site.0,
+        );
+        assert!(
+            !counted_aliases(&info, site).is_empty(),
+            "the container read at @{} must still record its read edge",
+            site.0,
+        );
+    }
+}
+
 #[test]
 fn read_bounded_by_the_container_keeps_the_adopt() {
     // The alias obligation is a bound, not a blanket refusal: when the read's result dies

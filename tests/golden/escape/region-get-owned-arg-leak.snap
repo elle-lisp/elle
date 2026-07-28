@@ -176,8 +176,8 @@
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v19
     block0: DecrefValueRegion v20
-    block0: DecrefValueRegion v22
-    block0: DecrefValueRegion v24
+    block0: DecrefValueRegion v21
+    block0: DecrefValueRegion v23
   ; closure[2] <anon>
     block0: DecrefValueRegion v9
     block0: TailCall defer_callee_release=false
@@ -202,29 +202,29 @@
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
-    block0: DecrefValueRegion v16
-    block0: DecrefValueRegion v18
+    block0: DecrefValueRegion v15
+    block0: DecrefValueRegion v17
   ; closure[6] <anon>
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
-    block0: DecrefValueRegion v16
-    block0: DecrefValueRegion v18
+    block0: DecrefValueRegion v15
+    block0: DecrefValueRegion v17
   ; closure[7] <anon>
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
-    block0: DecrefValueRegion v16
-    block0: DecrefValueRegion v18
+    block0: DecrefValueRegion v15
+    block0: DecrefValueRegion v17
   ; closure[8] <anon>
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
-    block0: DecrefValueRegion v16
-    block0: DecrefValueRegion v18
+    block0: DecrefValueRegion v15
+    block0: DecrefValueRegion v17
   ; closure[9] <anon>
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v13
     block0: DecrefValueRegion v14
-    block0: DecrefValueRegion v16
-    block0: DecrefValueRegion v18
+    block0: DecrefValueRegion v15
+    block0: DecrefValueRegion v17

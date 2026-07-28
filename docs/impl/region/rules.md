@@ -129,16 +129,21 @@ is a correctness defect, not a tuning knob.
    When several releases land on one `decref_point`, their emission order is a
    **topological sort of the region's holders-before-holdee edges** — the
    single-owner Owned-subtree forest (`owned_adopt_edges` ∪ `capture_adopt_edges`,
-   member → owner) plus each native read's alias → container edge
-   (`counted_read_aliases`) — so a store/capture-adopted **member** is released
+   member → owner) plus every alias → source edge (`counted_read_aliases`,
+   `opaque_result_aliases`, `funnel_result_containers`) — so a store/capture-adopted
+   **member** is released
    before the release
    that subtree-drops its **owner**. A member's own `DecrefRegion` is a no-op only
    while the member is still `Owned`; once the owner's drop has reclaimed it that
    decref faults, so the member must come first (adopt.md § "The lifetime
-   obligation the root carries"). The same holds for a borrowing read's result: it
-   is released `DecrefValueRegion`-style, which resolves its runtime region by
-   reading the value's own page, so it must read before the container's release can
-   tear that page. The forest gives each member exactly one owner, so the adopt half
+   obligation the root carries"). The same holds for a value that may BE, or live
+   inside, another — a borrowing read's result, an opaque call's result, a funnel's
+   pass-through result: each is released `DecrefValueRegion`-style, which resolves
+   its runtime region by reading the value's own page, so it must read before the
+   other's release can tear that page. The alias edges compose transitively through
+   the same sort, which is what orders a read out of a CALL's result — whose
+   recorded container is the call's placeholder, not the region that frees the page
+   — ahead of that region. The forest gives each member exactly one owner, so the adopt half
    is acyclic and a topological order always exists — including
    for *nested* subtrees (member ⊂ mid ⊂ root release innermost-first), which a
    flat members-first bucket could not order. A read edge is only a *may*-alias (a

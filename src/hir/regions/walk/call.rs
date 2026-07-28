@@ -338,6 +338,57 @@ impl RegionInference {
             }
         }
 
+        // The result side's analogue of the may-store clique above, split by how much the
+        // callee's declaration pins down WHERE its result lives. Both feed the ownership
+        // cut's alias obligation and the lowerer's release ORDER at a shared point, never
+        // an `IncrefRegion` — so the baseline RC stream is unchanged. A
+        // container-READ borrow is excluded from both: its result is an ELEMENT of arg0,
+        // which the read edge below records with the tighter container and the same
+        // bound — the `Funnel` reading here would otherwise be plainly wrong for it
+        // (`get`/`first`/`rest` declare `Funnel`, and their result is emphatically not
+        // the container).
+        if !self.call_returns_immediate(func)
+            && self.result_may_alias_args(func)
+            && !self.is_container_read_borrow(func)
+        {
+            if matches!(self.call_effect(func), Some(RegionEffect::Funnel)) {
+                // A `Funnel` says the result is arg0 in place or a fresh copy of it
+                // (region/effects.md § `Funnel`) — the CONTAINER either way, never an
+                // element interior to it. So the result is not a new region for the
+                // lifetime obligation to bound: on the in-place path it resolves to arg0
+                // and holds arg0's own counted pass-through reference, and where arg0 is
+                // itself an adopted member its decref lands on the frozen region and
+                // no-ops (region/adopt.md § "The lifetime obligation the root carries",
+                // the emit-order paragraph). What it still carries is REACHABILITY — a
+                // read out of the funnel's result is a read out of arg0 — so record the
+                // identity with the container alone.
+                if let Some(container_regions) = arg_regions.first() {
+                    for &v in container_regions {
+                        if v != call_r {
+                            self.funnel_result_containers.push((hir.id, call_r, v));
+                        }
+                    }
+                }
+            } else {
+                // Every other alias-capable callee is under no such claim: it may hand
+                // back an argument itself (`concat` extends a mutable first argument in
+                // place and returns it) or a value it read OUT of one (`last`), so
+                // `call_r` — a placeholder relating to no member statically — can name a
+                // frozen member. Adoption leaves the result's pass-through retain inert,
+                // exactly as for a container read, so the root's drop must bound this
+                // release too (`region_call_result_alias_uaf`). Reached only on the
+                // opaque path: an INLINED callee returned above with the regions its body
+                // really yields, which need no alias edge at all.
+                for vs in &arg_regions {
+                    for &v in vs {
+                        if v != call_r {
+                            self.opaque_result_aliases.push((hir.id, call_r, v));
+                        }
+                    }
+                }
+            }
+        }
+
         // A native container element READ that BORROWS (`get`/`first`/`rest`): the value
         // handed back still lives inside the container passed as arg0 — the funnel
         // convention — and `call_r` (minted above) is the caller-side placeholder for it.

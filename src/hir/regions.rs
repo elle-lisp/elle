@@ -146,6 +146,16 @@ struct RegionInference {
     /// `get`/`first`/`rest` call, whose pass-through retain covers the borrow under RC but
     /// is inert once adoption freezes the member. See `RegionInfo::counted_read_aliases`.
     counted_read_aliases: Vec<(HirId, Region, Region)>,
+    /// Call-result alias edges `(site, result, argument)` for a callee under no
+    /// declaration that its heap result lives in the call's own region — so the result
+    /// may BE an argument, or a value inside one. See
+    /// `RegionInfo::opaque_result_aliases`.
+    opaque_result_aliases: Vec<(HirId, Region, Region)>,
+    /// Funnel-result identity edges `(site, result, container)` — a `Funnel`'s result is
+    /// arg0 in place or a fresh copy of it, so it propagates reachability into arg0's
+    /// subtree without needing a lifetime bound of its own. See
+    /// `RegionInfo::funnel_result_containers`.
+    funnel_result_containers: Vec<(HirId, Region, Region)>,
     /// Call sites of a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) whose
     /// moved-out element is escape-retained in-body. See
     /// `RegionInfo::moves_out_release_sites`.
@@ -281,6 +291,8 @@ impl RegionInference {
             funnel_passthrough_sites: HashMap::new(),
             uncounted_read_sites: HashMap::new(),
             counted_read_aliases: Vec::new(),
+            opaque_result_aliases: Vec::new(),
+            funnel_result_containers: Vec::new(),
             moves_out_release_sites: rustc_hash::FxHashSet::default(),
             cell_release_regions: rustc_hash::FxHashSet::default(),
             return_sites: Vec::new(),

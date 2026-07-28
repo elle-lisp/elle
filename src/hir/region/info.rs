@@ -261,6 +261,50 @@ pub struct RegionInfo {
     /// region by reading the value's own page, which the container's release can tear.
     /// Pinned by `regions::tests::borrow` and `region_container_read_borrow_uaf`.
     pub counted_read_aliases: Vec<(HirId, Region, Region)>,
+    /// Call-result alias edges `(call_site, result_region, argument_region)` — the
+    /// result side's analogue of the may-store arg clique. A callee may hand back an
+    /// argument itself (`concat` extends a mutable first argument in place and returns
+    /// it) or a value it read out of one (`last`), and either way the caller's
+    /// call-result placeholder names a region *inside* that argument's subtree while
+    /// relating to no member statically. Only a declaration that the heap result lives
+    /// in the call's OWN minted region rules that out —
+    /// [`Fresh`](crate::primitives::def::RegionEffect::Fresh),
+    /// [`Stores`](crate::primitives::def::RegionEffect::Stores) and
+    /// [`Sends`](crate::primitives::def::RegionEffect::Sends), whose result claim the
+    /// declaration oracle checks on every debug run (region/effects.md) — plus
+    /// `Immediate`, which returns no region at all. Every other callee, a non-primitive
+    /// one included, records an edge per heap argument.
+    ///
+    /// `compute_adopt_edges` closes these edges together with `counted_read_aliases`
+    /// over a subtree's member set: a result reachable from a member must itself be
+    /// bounded by the root's drop (it may BE a member), and a read out of it reaches on
+    /// into the subtree (it may be the CONTAINER). An INLINED callee records nothing —
+    /// the walk re-walks its body with the caller's argument regions bound to the
+    /// parameters, so the regions it returns are the real ones. Read by the ownership
+    /// inference and by the lowerer's release order, never by its incref/decref emission;
+    /// the baseline RC stream is unchanged. Pinned by `regions::tests::borrow` and
+    /// `region_call_result_alias_uaf`.
+    pub opaque_result_aliases: Vec<(HirId, Region, Region)>,
+    /// Funnel-result identity edges `(funnel_call_site, result_region,
+    /// container_region)` — the same relation as `opaque_result_aliases` minus its
+    /// bound. A [`Funnel`](crate::primitives::def::RegionEffect::Funnel) declares that
+    /// its result is arg0 in place or a fresh copy of arg0 (region/effects.md
+    /// § `Funnel`): the CONTAINER either way, never an element interior to it. So the
+    /// result needs no lifetime bound of its own — on the in-place path it resolves to
+    /// arg0 and carries arg0's own counted pass-through reference (the discarded store
+    /// result that co-owns a mutable-store subtree's root), and where arg0 is itself an
+    /// adopted member the decref lands on the frozen region and no-ops, which the emit
+    /// order already guarantees (region/adopt.md § "The lifetime obligation the root
+    /// carries"). What it does carry is REACHABILITY: a read out of the funnel's result
+    /// is a read out of arg0, so `compute_adopt_edges` propagates through these edges
+    /// while bounding only what the read and opaque-call edges reach — the two are
+    /// tracked as separate sets there, so a region this relation reached first still owes
+    /// whatever bound another asks of it. The lowerer's `order_releases` reads all three
+    /// relations alike (`alias → source`), which is what composes the ordering across a
+    /// call standing between a read and the container whose release frees the page.
+    /// Container READS declare `Funnel` too but are absent here — their result is the
+    /// interior element, recorded by `counted_read_aliases` against its true container.
+    pub funnel_result_containers: Vec<(HirId, Region, Region)>,
     /// Call sites of a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) — a
     /// non-fresh element REMOVED from a container and escape-retained IN-BODY
     /// (`arena::pop_with_decref` increfs the element before releasing the container;
@@ -579,6 +623,8 @@ impl RegionInfo {
             funnel_passthrough_sites: HashMap::new(),
             uncounted_read_sites: HashMap::new(),
             counted_read_aliases: Vec::new(),
+            opaque_result_aliases: Vec::new(),
+            funnel_result_containers: Vec::new(),
             moves_out_release_sites: FxHashSet::default(),
             container_release_sites: FxHashSet::default(),
             cell_release_regions: FxHashSet::default(),

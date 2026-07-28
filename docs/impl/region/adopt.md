@@ -246,8 +246,52 @@ then faults resolving a freed page. So the walk records `(read site, alias, cont
   read's result and the container lands the two releases on one node — where the intra-node
   order decides: the alias's `DecrefValueRegion` resolves its runtime region by reading the
   value's own page, so it must be emitted before the release that can tear it.
-  `order_releases` sorts each read's `alias → container` edge alongside the adopt edges
-  (rules.md Rule 4).
+  `order_releases` sorts each `alias → source` edge alongside the adopt edges (rules.md
+  Rule 4), over all three alias relations — the read edges and the two result relations
+  below — so the ordering composes transitively where a call stands between the read and
+  the container that frees the page.
+
+**An opaque call's result is not provably distinct from its arguments.** The read edges
+above are recorded where the walk can *see* the container — a native read whose arg0 is a
+member's own region. A **call** hides both endpoints: a callee may hand back an argument
+itself (`concat` extends a mutable first argument in place and returns it) or a value it
+read out of one (`last`), and either way the caller's call-result placeholder names a
+region *inside* an argument's subtree while relating to no member statically. Only a
+declaration that the heap result lives in the call's **own** minted region rules that out —
+`Fresh`, `Stores` and `Sends`, whose result claim the effects oracle checks on every debug
+run ([effects.md](effects.md) § "The declaration oracle") — plus `Immediate`, which returns
+no region at all. So the walk records `(call site, result, argument)` for every other
+callee (`RegionInfo::opaque_result_aliases`), and the closure above treats such a result as
+reachable whenever the argument is. Two obligations follow from the one edge: the result's
+**own** release must be bounded by the root's drop, because the result may *be* a member;
+and reads out of the result reach on into the subtree through the read edges, because the
+result may be the *container*. An **inlined** callee records nothing here — the walk re-walks
+its body with the caller's argument regions bound to the parameters, so the regions it
+returns are the real ones and the read edges name the true container. This is the same
+conservatism the may-store clique applies to what a callee *stores*, applied to what it
+*returns*.
+
+**Reachability is not boundedness, and a `Funnel` needs only the first.** A `Funnel`
+declares its result to be arg0 in place or a fresh copy of arg0 (effects.md § `Funnel`) —
+the container either way, never an element interior to it. So its result owes no bound: on
+the in-place path it resolves to arg0 and carries arg0's own counted pass-through
+reference (it *is* the discarded store result that co-owns a mutable-store subtree's root,
+above), and where arg0 is itself an adopted member the decref lands on the frozen region
+and no-ops. Bounding it would refuse every builder over its own trailing store. What it
+must still do is carry reachability — a read out of the funnel's result is a read out of
+arg0 — so those edges ride a separate relation (`RegionInfo::funnel_result_containers`)
+that the closure propagates through without recording a release point. Because the two
+properties are distinct, the closure tracks them in **two** sets: a region a funnel edge
+reached first still owes whatever bound a read or opaque-call edge asks of it. The
+container READS are excluded from both result relations at the recording site — they
+declare `Funnel` too, yet their result is precisely the element the exemption would be
+wrong about — and the read edge carries them instead, with the tighter container.
+
+Pinned by `regions::tests::borrow::{opaque_call_result_refuses_the_adopt,
+read_out_of_an_opaque_call_result_refuses_the_adopt,
+read_out_of_a_funnel_result_refuses_the_adopt, container_read_is_not_recorded_as_a_result_alias,
+fresh_call_result_records_no_alias}` with their admitting twin, and by the guardfree
+witness `region_call_result_alias_uaf`.
 
 An **opcode** read (`%get`/`%first`/`%rest`) is a different problem, not this one: it takes
 no retain at all, so the borrow has no RC protection with or without adoption, and what

@@ -450,14 +450,22 @@ impl<'a> Lowerer<'a> {
         //   store site → `(member, owner)`) and `capture_adopt_edges` (capture-adopted,
         //   each closure site → `(captured, closure)`), disjoint per member — a member is
         //   adopted by its single owner through exactly one map (region/info.rs).
-        // - **The container-read borrow.** A native read's result region
-        //   (`counted_read_aliases`) is released `DecrefValueRegion`-style, resolving its
-        //   runtime region by READING the value's own page — a page inside the container.
-        //   Where the two releases land on one point (a discarded read, whose alias dies
-        //   exactly where the container does), the alias must be ordered ahead of the
-        //   container whose release can tear that page. An opcode read mints no region of
-        //   its own and contributes no edge; its borrow is covered by the container's
-        //   extended lifetime instead (region/rules.md Rule 4).
+        // - **Value aliasing.** A region that may be — or live inside — another is
+        //   released `DecrefValueRegion`-style, resolving its runtime region by READING
+        //   the value's own page, which the other's release can tear. Where the two land
+        //   on one point (a discarded read, whose alias dies exactly where its container
+        //   does), the alias must be ordered ahead. The same three relations the ownership
+        //   cut's alias obligation closes over supply these edges, oriented
+        //   `alias → source` throughout (region/adopt.md § "The lifetime obligation the
+        //   root carries"): a native read's result and the container it read from
+        //   (`counted_read_aliases`), an opaque call's result and its arguments
+        //   (`opaque_result_aliases`), and a `Funnel`'s result and its container
+        //   (`funnel_result_containers`). They compose transitively through the sort, so a
+        //   read out of a CALL's result — whose recorded container is the call's
+        //   placeholder, not the container the call handed back — is still ordered ahead
+        //   of the container that frees the page. An opcode read mints no region of its
+        //   own and contributes no edge; its borrow is covered by the container's extended
+        //   lifetime instead (region/rules.md Rule 4).
         //
         // `order_releases` topologically sorts the result (holder before holdee, nested
         // subtrees innermost-first); a single flat priority class cannot express a
@@ -481,13 +489,18 @@ impl<'a> Lowerer<'a> {
         {
             adopt_owner.entry(member).or_default().push(owner);
         }
-        let mut read_alias: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
+        let mut value_alias: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
             HashMap::new();
-        for &(_site, alias, container) in &info.counted_read_aliases {
-            read_alias.entry(alias).or_default().push(container);
+        for &(_site, alias, source) in info
+            .counted_read_aliases
+            .iter()
+            .chain(info.opaque_result_aliases.iter())
+            .chain(info.funnel_result_containers.iter())
+        {
+            value_alias.entry(alias).or_default().push(source);
         }
         for regions in decrefs_by_decref_point.values_mut() {
-            Self::order_releases(regions, &adopt_owner, &read_alias, &info);
+            Self::order_releases(regions, &adopt_owner, &value_alias, &info);
         }
         // The fn-local 1-slot containers whose content drop lands at each scope
         // node, indexed the same way and for the same reason as the two above.
@@ -509,14 +522,16 @@ impl<'a> Lowerer<'a> {
     /// Order the releases sharing one `decref_point` (docs/impl/region/rules.md Rule 4).
     ///
     /// A topological sort of the **holder-before-holdee** edges — `adopt_owner`
-    /// (`member → owner`, the single-owner Owned-subtree forest) and `read_alias`
-    /// (`alias → container`, each borrowing read) — so every store/capture-adopted
-    /// member's own `DecrefRegion` — a no-op only while the member is still `Owned` — and
-    /// every read alias's page-reading `DecrefValueRegion` are emitted before the release
-    /// that frees (or subtree-drops) what they name (region/adopt.md § "The lifetime
-    /// obligation the root carries"). Nested subtrees release innermost-first by
-    /// construction — a single flat priority class cannot express a transitive
-    /// member-before-owner chain.
+    /// (`member → owner`, the single-owner Owned-subtree forest) and `value_alias`
+    /// (`alias → source`, every region that may be or live inside another: a borrowing
+    /// read's result, an opaque call's result, a funnel's pass-through result) — so every
+    /// store/capture-adopted member's own `DecrefRegion` — a no-op only while the member
+    /// is still `Owned` — and every alias's page-reading `DecrefValueRegion` are emitted
+    /// before the release that frees (or subtree-drops) what they name (region/adopt.md
+    /// § "The lifetime obligation the root carries"). Both nested subtrees and chained
+    /// aliases resolve innermost-first by construction — a single flat priority class
+    /// cannot express a transitive member-before-owner chain, nor a read whose container
+    /// is a call's placeholder for the region that actually frees the page.
     ///
     /// Regions no such edge relates are tie-broken by page-read depth: a value-gated
     /// `DecrefValueRegion` that unwraps a cell to the inner value reads deepest and sorts
@@ -537,7 +552,7 @@ impl<'a> Lowerer<'a> {
     fn order_releases(
         regions: &mut Vec<crate::hir::region::Region>,
         adopt_owner: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
-        read_alias: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
+        value_alias: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
         info: &RegionInfo,
     ) {
         use crate::hir::region::Region;
@@ -609,7 +624,7 @@ impl<'a> Lowerer<'a> {
             (out, residue)
         };
 
-        let (mut out, residue) = kahn(regions, &[adopt_owner, read_alias]);
+        let (mut out, residue) = kahn(regions, &[adopt_owner, value_alias]);
         if !residue.is_empty() {
             // A may-alias read cycle: drop the read edges over the stalled residue and
             // order it on the adopt forest alone.

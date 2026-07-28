@@ -705,6 +705,28 @@ fn region_container_read_borrow_uaf() {
     );
 }
 
+// Guard — the opaque CALL between a container and the value read out of it. A funnel
+// adopt freezes its member's RC, so the forest owes a bound on every alias that can name
+// the member; it reads those bounds off a native read whose container argument IS the
+// container. A call hides that: `(concat a @[1 2])` on a MUTABLE first argument returns
+// `a` itself, so reading out of the call's result is reading out of `a` under a
+// placeholder that relates to no member; and `(last a)` hands back the adopted element
+// directly. Only `Fresh`/`Stores`/`Sends` (a result in the call's own minted region — the
+// claim the effects oracle checks) or `Immediate` rule the aliasing out. The fixture
+// drives both faces past a priming loop, then samples each shape's per-op region growth:
+// the returned member must read bounded (the refusal puts it back on an RC baseline that
+// still reclaims it), and the concat shapes are pinned shrink-only over the per-call
+// residue a mutable-first-argument `concat` carries on its own. So a regression in either
+// direction — over-free, or a subtree traded for a leak — is loud. Full mechanism in the
+// fixture header.
+#[test]
+fn region_call_result_alias_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-call-result-alias-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — the variadic TAIL-FORWARD reference balance. Forwarding a heap value into a
 // `& rest` variadic through a tail call builds the callee env as a MOVE
 // (`own_params = false`): the caller's owning reference transfers, but a rest arg

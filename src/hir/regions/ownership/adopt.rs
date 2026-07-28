@@ -94,7 +94,10 @@ pub(in crate::hir::regions) struct AdoptEdges {
 ///    related to no member, and its Rule 5 pass-through retain — which is what makes the
 ///    read safe under RC — goes inert once adoption freezes the member. So the root's
 ///    drop must post-dominate the ALIAS's release too, else the subtree refuses to
-///    Shared, where the retain is live again.
+///    Shared, where the retain is live again. An opaque CALL over a member
+///    (`RegionInfo::opaque_result_aliases`) is the same deref reached one step further
+///    out: its result may BE a member or the container, so it is closed into the same
+///    alias set and bounded the same way.
 /// 2. **No merge overlap**: a subtree touching any builder-idiom MERGE participant is
 ///    skipped — MERGE collapses those to one region; adopting them too would link a
 ///    region that no longer exists independently. The two emit modes never both fire
@@ -402,16 +405,50 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         // edges over the member set to a fixpoint — bounded by the alias count, since
         // each round adds at least one region — so every value reachable from the subtree
         // through any chain of reads is bound by the root's drop.
+        //
+        // An opaque CALL closes in the same fixpoint (`opaque_result_aliases`). Its
+        // result is under no declaration that it lives in the call's own region, so it
+        // may BE an argument (`concat` returns a mutable first argument in place) or a
+        // value read out of one (`last`) — one edge covering both, because both make the
+        // result a region inside the argument's subtree. Reaching it therefore bounds its
+        // own release (it may be a member) AND lets the read edges reach on through it
+        // (it may be the container), which no single-relation closure would give.
+        //
+        // A `Funnel`'s result (`funnel_result_containers`) reaches just as far and needs
+        // no bound: the declaration pins it to arg0 in place or a fresh copy — the
+        // container, never an interior element — so it carries arg0's own counted
+        // reference where it is the root, and no-ops on the frozen region where arg0 is
+        // itself a member (the emit-order paragraph in region/adopt.md). Bounding it
+        // would refuse every mutable-store subtree over its own trailing discarded store
+        // result.
+        //
+        // Reachability and boundedness are tracked SEPARATELY: a region can be reachable
+        // without needing a bound (a funnel result), and one relation must not consume
+        // the other's obligation — a read alias that a funnel edge happened to make
+        // reachable first still owes its own bound.
         let mut reachable: FxHashSet<Region> = members.clone();
+        let mut bounded: FxHashSet<Region> = FxHashSet::default();
         // Each alias's own release point — `None` where none is recorded, which bounds
         // nothing and so refuses, exactly as an unbounded member does.
         let mut alias_dps: Vec<Option<HirId>> = Vec::new();
+        let bounded_edges = info
+            .counted_read_aliases
+            .iter()
+            .chain(info.opaque_result_aliases.iter());
         loop {
             let mut grew = false;
-            for &(_, alias, container) in &info.counted_read_aliases {
-                if reachable.contains(&container) && reachable.insert(alias) {
-                    grew = true;
+            for &(_, alias, source) in bounded_edges.clone() {
+                if !reachable.contains(&source) {
+                    continue;
+                }
+                grew |= reachable.insert(alias);
+                if bounded.insert(alias) {
                     alias_dps.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
+                }
+            }
+            for &(_, result, container) in &info.funnel_result_containers {
+                if reachable.contains(&container) {
+                    grew |= reachable.insert(result);
                 }
             }
             if !grew {
