@@ -15,10 +15,13 @@
 # instruction is not by itself free of obligation: on the closure path the
 # release now fires where none fired before, so it owes the same count argument
 # any such mechanism owes, and escape supplies it — the frame must be the
-# region's SOLE holder. That is why the walker rows below are residual and not
-# subjects: a value the tail callee reaches through its CAPTURED environment is
-# named by no argument and by no callee region, yet the call reads it, so a
-# captured holder keeps the baseline.
+# region's SOLE holder. A value the tail callee reaches through its CAPTURED
+# environment is named by no argument and by no callee region, yet the call reads
+# it — and it is admitted anyway, because the funnel counted the closure's hold
+# when the env was built, so the frame's release is still the only reference it
+# drops. What keeps the walker row residual is the other facet: it hands its
+# accumulator BACK, so the return frontier holds that release to the caller's
+# mint.
 #
 # A release emitted once the block has CLOSED is placed the other way (§ "The
 # relocation point outlives the block"): a branch merge inherits the relocation
@@ -93,6 +96,38 @@
 (defn arm-partial (x t)
   (if t (tail-sink) 5))
 
+# (d3) the tail callee reaches the parameter through its CAPTURED environment.
+# No argument names it, so the exemption cannot see it — and it does not need to:
+# building `g`'s env took a counted reference through the allocation funnel, so
+# the frame's own release is the only one it drops.
+(defn captured-param (x)
+  (let [g (fn () (length x))]
+    (g)))
+
+# (d4) the same, one block further out: the capturing closure is the callee of a
+# branch ARM, so the release is the merge's replica rather than an in-block move.
+(defn arm-captured (x t)
+  (let [g (fn () (length x))]
+    (if t (g) (tail-sink2))))
+
+# (d5) a walker that fills its captured accumulator in place and returns
+# something else. Both parameters are reached only through `go`'s environment and
+# neither leaves the activation, so both reclaim — the walker shape minus the
+# hand-back.
+(defn walk-fill (dst src)
+  (let [n (length src)]
+    (letrec [go (fn [i]
+                  (if (%lt i n)
+                    (begin
+                      (push dst (get src i))
+                      (go (%add i 1)))
+                    n))]
+      (go 0))))
+(defn drive-fill (src)
+  (let [acc (@array)]
+    (walk-fill acc src)
+    (length acc)))
+
 # exemptions ───────────────────────────────────────────────────────────────────
 # The releases that must STAY in the dead fall-through. Each is already bounded;
 # hoisting one would release a reference the callee now owns, so these rows are
@@ -140,12 +175,24 @@
 (defn branch-tail (x t)
   (if t (tail-sink) (length x)))
 
+# boundary: the capturing closure ESCAPES ──────────────────────────────────────
+# A closure that leaves the activation carries its captures with it, and escape's
+# capture facet says so — so the holder is refused and the release stays in the
+# dead block beside the sibling arm's tail call. Driven for its VALUE, not its
+# delta: it strands by design, and what must hold is that the escaped closure can
+# still read what it captured.
+
+(defn escaping-capture (x t)
+  (let [g (fn () (length x))]
+    (if t g (tail-sink))))
+
 # residual ─────────────────────────────────────────────────────────────────────
-# A CAPTURED holder keeps the baseline, because the tail callee reaches it
-# through its environment and no reading of the call's arguments can see that.
-# These two still strand, and they are driven here so the residual is measured
-# rather than asserted away: what must hold is that they do not FAULT, and the
-# values they compute are correct.
+# The walker hands its accumulator BACK through the tail callee, so `dst` crosses
+# the return frontier: the caller's owning reference is minted after the relocated
+# release would have run, and the admission refuses it. That one region still
+# strands per call, and the row is driven here so the residual is measured rather
+# than asserted away — what must hold is that it does not FAULT and computes
+# correctly.
 
 (defn walk-all (dst src)
   (let [n (length src)]
@@ -160,18 +207,13 @@
   (let [acc (@array)]
     (walk-all acc src)
     (length acc)))
-(defn captured-param (x)
-  (let [g (fn () (length x))]
-    (g)))
-(defn arm-captured (x t)
-  (let [g (fn () (length x))]
-    (if t (g) (tail-sink2))))
 
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def unused-param-d (measure (fn () (unused-param [1 2])) 200 window))
 (def unused-two-d (measure (fn () (unused-two [1 2] [3 4])) 200 window))
 (def captured-param-d (measure (fn () (captured-param [1 2])) 200 window))
 (def arm-captured-d (measure (fn () (arm-captured [1 2] true)) 200 window))
+(def walk-fill-d (measure (fn () (drive-fill [1 2 3])) 200 window))
 (def arm-unused-t-d (measure (fn () (arm-unused [1 2] true)) 200 window))
 (def arm-unused-f-d (measure (fn () (arm-unused [1 2] false)) 200 window))
 (def arm-two-d (measure (fn () (arm-two [1 2] [3 4] true)) 200 window))
@@ -198,6 +240,7 @@
 (println "  walk " walk-d "  unused " unused-param-d "  unused-two "
          unused-two-d "  captured " captured-param-d "  arm-captured "
          arm-captured-d)
+(println "  walk-fill " walk-fill-d)
 (println "  arms: unused " arm-unused-t-d "/" arm-unused-f-d "  two " arm-two-d
          "  cond " arm-cond-0-d "/" arm-cond-2-d "  match " arm-match-a-d "/"
          arm-match-z-d)
@@ -243,12 +286,23 @@
           "the tail-calling arm of a partly falling-through branch")
 (bounded? arm-partial-f-d "the falling-through arm keeps the merge release")
 
-# The residual rows are NOT asserted bounded — a captured holder keeps the
-# baseline by design. What is asserted is that they still compute correctly:
-# a strand is an over-keep, and must never become a mis-free.
+(bounded? captured-param-d
+          "parameter the tail callee reaches through its captured environment")
+(bounded? arm-captured-d
+          "the same capture reached through a branch arm's callee")
+(bounded? walk-fill-d
+          "a walker's captured parameters, neither of which it hands back")
+
+# The residual row is NOT asserted bounded — the walker hands its accumulator back
+# through the tail callee, so the return frontier refuses that one release by
+# design. What is asserted is that it still computes correctly: a strand is an
+# over-keep, and must never become a mis-free.
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
 (assert (= (captured-param [1 2]) 2) "captured-param result lost")
 (assert (= (arm-captured [1 2] true) 2) "arm-captured result lost")
+(assert (= (drive-fill [1 2 3]) 3) "walk-fill result lost")
+(assert (= ((escaping-capture [1 2] true)) 2) "escaping-capture result lost")
+(assert (= (escaping-capture [1 2] false) 0) "escaping-capture sibling arm lost")
 
 # Value preservation: relocating a release must not change what runs.
 (assert (= (unused-param [1 2]) 0) "unused-param result lost")

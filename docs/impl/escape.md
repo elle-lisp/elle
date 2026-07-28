@@ -135,7 +135,17 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     (`binding_escapes_via_return`, per binding —
     [region/bindings.md](region/bindings.md); read per binding, never by projecting
     a returned region onto a cell, since `binding_source_regions` is "where the
-    value points," not "where it lives").
+    value points," not "where it lives");
+  - the **sole-holder admission** (`regions::escape::sole_frame_held_regions`) the
+    branch-arm release window and the lowerer's frame-exit release share: both make
+    a release fire on a path where none fired before, so both must know this frame
+    holds the region's one reference. It reads `binding_escapes_activation` per
+    holder plus the frontiers' atomless site halves — and, unlike the merge gate
+    above, it does **not** consult the structural capture-graph, because a closure's
+    hold on what it captures is a counted (or owning) edge rather than an uncounted
+    borrow; capture by a closure that *escapes* is already an escape facet
+    ([region/mechanism.md](region/mechanism.md) § "Lexical capture is not a second
+    holder to fear").
 - **The lowerer** (`lir/lower`) reads `lambda_escapes_definition` /
   `binding_escapes_activation` in `control/call.rs::tail_callee_defers_release`, the
   escape half of the per-call adopt decision (a per-call callee closure that dies

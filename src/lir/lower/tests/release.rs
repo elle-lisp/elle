@@ -684,6 +684,39 @@ fn moved_argument_release_stays_after_the_tail_call() {
     );
 }
 
+#[test]
+fn captured_param_release_precedes_the_frame_replacing_tail_call() {
+    // The tail callee reaches `x` through its CAPTURED environment, which no
+    // argument names — and the release is hoisted anyway, because building the
+    // env took a counted reference through the allocation funnel, so the frame's
+    // own is still the only one this drops (docs/impl/region/mechanism.md §
+    // "Lexical capture is not a second holder to fear"; the
+    // `tail-frame-exit-captured` probe).
+    let module =
+        compile_to_lir("(begin (def f (fn (x) (let [g (fn () (%int? x))] (g)))) (f (list 1 2)))");
+    let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().any(|&r| r < at),
+        "the captured parameter's release is still emitted after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path",
+    );
+}
+
+#[test]
+fn capture_handed_back_by_the_callee_stays_after_the_tail_call() {
+    // The decline face, and the documented residual: the tail callee hands `x`
+    // BACK, so `x` crosses the return frontier and the caller's owning reference
+    // is minted after this release would have run. Capture is admitted; the
+    // return facet is what refuses this one — the stdlib walker's accumulator.
+    let module = compile_to_lir("(begin (def f (fn (x) (let [g (fn () x)] (g)))) (f (list 1 2)))");
+    let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().all(|&r| r > at),
+        "a release was hoisted for a value the tail callee returns \
+         (at={at}, releases={releases:?}) — the caller's mint comes after it",
+    );
+}
+
 /// For the first function with two `TailCall`-bearing blocks — a branch whose
 /// arms each make one — the local slots each block releases BEFORE its call and
 /// those it releases after.

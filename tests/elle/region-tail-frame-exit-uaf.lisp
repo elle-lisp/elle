@@ -12,7 +12,10 @@
 # be dropped before the frame it replaces runs. The **admission** — escape
 # proving the frame is the region's sole holder — covers the path the exemption
 # cannot see: a tail callee also reaches its CAPTURED environment, which no
-# argument names. Witness (e2) is the one that fails without it.
+# argument names — but the env's hold is the funnel's counted edge, so that path
+# is admitted rather than refused, and (e3) is the row that proves the count
+# stands. What the admission does refuse is a holder escape marks: a value the
+# callee hands back (e2) or a closure that leaves carrying it (e4).
 #
 # Every witness reads the subject's HEAP contents on the far side of the tail
 # call, through a chain long enough that an over-early free faults rather than
@@ -87,6 +90,35 @@
 (defn e2-walker (i)
   (let [acc (@array)]
     (length (first (e2-fill acc (list (string "x" i) i))))))
+
+# (e3) the walker fills its captured accumulator in place and returns something
+# ELSE, so nothing holds `dst` back from the relocated release and it does fire
+# ahead of the tail call. What must stand is the count the funnel took when `go`'s
+# environment was built: the caller reads `acc`'s contents after the call, and a
+# release that reached zero would have recycled those pages.
+(defn e3-fill (dst src)
+  (let [n (length src)]
+    (letrec [go (fn (k)
+                  (if (%lt k n)
+                    (begin
+                      (push dst (get src k))
+                      (go (%add k 1)))
+                    n))]
+      (go 0))))
+(defn e3-walker (i)
+  (let [acc (@array)]
+    (e3-fill acc (list (string "y" i) i))
+    (length (first acc))))
+
+# (e4) the capturing closure ESCAPES — it is returned, so it outlives the frame
+# and carries `x` with it. Escape's capture facet refuses the holder, and the
+# release must stay in the dead block; the caller invokes the closure afterwards
+# and reads through it.
+(defn e4-escaping (i)
+  (let [x (list (string "n" i) i)]
+    (fn () (length (first x)))))
+(defn e4-read (i)
+  ((e4-escaping i)))
 
 # (f) the stranded value ESCAPES into a container that outlives the frame before
 # the tail call. The store's incref is what the hoisted release must leave
@@ -167,6 +199,8 @@
 (var d 0)
 (var e 0)
 (var e2 0)
+(var e3 0)
+(var e4 0)
 (var f 0)
 (var g 0)
 (var h 0)
@@ -181,6 +215,8 @@
   (assign d (d-captured i))
   (assign e (e-walker i))
   (assign e2 (e2-walker i))
+  (assign e3 (e3-walker i))
+  (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
   (assign h (h-fiber i))
@@ -201,6 +237,8 @@
 (assert (%gt d 0) "captured value freed under the tail callee's read")
 (assert (%gt e 0) "mutable accumulator freed under the walker that fills it")
 (assert (%gt e2 0) "accumulator freed before the captured callee handed it back")
+(assert (%gt e3 0) "accumulator freed under the caller's read of what it holds")
+(assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")
 (assert (> h 0) "argument freed under a parked frame's resume")

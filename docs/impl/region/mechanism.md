@@ -210,17 +210,40 @@ same wall the per-arm route hits.
 
 Escape answers exactly it, and is the sole authority for it
 ([escape.md](../escape.md)): a value that leaves its activation by **no** facet —
-return, store, capture, fiber — is reachable only through this frame's slots. So the window is admitted for a region whose every holder binding is
-non-escaping, non-mutated and uncaptured, and which is absent from the return and
-fiber frontiers' atomless site halves (which no binding names). A region with no
-holder binding at all offers nothing to judge and is refused too. Everything else
-keeps its in-arm release and the per-arm compensation routes above, which carry a
-count argument instead — so the two mechanisms partition the obligation rather
-than overlapping on it.
+return, store, capture, fiber — is reachable only through this frame's slots. So
+the window is admitted for a region whose every holder binding is non-escaping and
+non-mutated, and which is absent from the return and fiber frontiers' atomless
+site halves (which no binding names). A region with no holder binding at all
+offers nothing to judge and is refused too. Everything else keeps its in-arm
+release and the per-arm compensation routes above, which carry a count argument
+instead — so the two mechanisms partition the obligation rather than overlapping
+on it.
 
-The **mutated** and **captured** refusals are the same ones compensation makes
-about a release *route*: a slot repointed between the arm and the anchor frees
-whatever it holds then, and a captured value is reachable through the closure env.
+The **mutated** refusal is the one compensation makes about a release *route*: a
+slot repointed between the arm and the anchor frees whatever it holds then.
+
+#### Lexical capture is not a second holder to fear
+
+Reachability through a closure's environment looks like the counter-example to
+every one of these admissions, and it is not, because the funnel already paid for
+it. A by-value capture becomes scannable content of the `Closure` env, so the
+allocation funnel's cross-region scan increfs the captured region when the closure
+is built and the closure region's free-time cascade decrefs it again; a capture
+materialized through a cell takes the same count at the cell store. Where the
+ownership forest admits the containment instead, the capture lowers to
+`AdoptRegion`/`AdoptCellRegion` and the member's RC is *frozen* — a decref against
+an `Owned` region is a structural no-op ([ownership.md](ownership.md) § "The
+runtime: a reclamation typestate"). Either way the closure's hold is a counted or
+an owning edge, never the uncounted borrow this admission exists to protect, so a
+release of the frame's own reference cannot be the one that reaches zero.
+
+What *is* refused is capture by a closure that **escapes**: there the closure
+outlives this activation, and escape's capture facet already marks every binding
+such a closure captures. That is a flow fact. The structural capture-graph
+(`regions::escape::captured_bindings`) marks every captured binding whether or not
+its closure ever leaves — the right conservatism for the **merge** gate, which
+asks where a value may *live* and so needs raw reachability, and the wrong one
+here, where the question is who holds a count.
 
 One more separation makes the placement fact honest. The ownership and merge cuts
 admit a subtree when the root's drop **post-dominates** a member's last use — a
@@ -264,11 +287,11 @@ compensation: merge children, co-owned-group members, capture cells, the
 mutated-slot 1-slot containers, and anything already suppressed.
 
 Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with all
-three boundaries and the `If` face driven as rows), the `param-used-arm` /
-`param-used-arm-if` probes in `tests/elle/oracle.lisp` (the per-op rates), and
-`tests/elle/region-branch-arm-window-uaf.lisp` (the soundness complement — a
-value read, stored, returned, or carried across a yield after the branch must
-survive the moved release).
+three boundaries, the `If` face and the captured-holder face driven as rows), the
+`param-used-arm` / `param-used-arm-if` probes in `tests/elle/oracle.lisp` (the
+per-op rates), and `tests/elle/region-branch-arm-window-uaf.lisp` (the soundness
+complement — a value read, stored, returned, carried across a yield, or reached
+through a closure's environment after the branch must survive the moved release).
 
 ## `break` transfers its value; it does not consume it
 
@@ -464,16 +487,21 @@ authority. The exemption above is a statement about *arguments*, and arguments a
 not the only path into a callee: a tail callee reaches its **captured environment**
 too, which no argument names and no callee region describes. `push-all`'s walker
 is exactly that shape — `(letrec [go (fn [i] … dst)] (go 0))` names `dst` only
-through `go`'s env — so an exemption read off the argument list alone releases the
-accumulator before the callee that hands it back has run. Rather than enumerate
-capture paths, the release is admitted only for a region whose every holder
-binding is non-escaping, non-mutated and **uncaptured**
-(`RegionInfo::sole_frame_held_regions`, the same predicate the branch-arm window
-applies). A captured holder keeps the baseline.
+through `go`'s env. That path needs no enumeration and no refusal of its own,
+because the env's hold is a counted (or owning) edge the funnel took when the
+closure was built (§ "Lexical capture is not a second holder to fear"): a release
+of the frame's reference leaves the callee's standing. What refuses `dst` in that
+walker is something else — the walker hands it **back**, so it crosses the return
+frontier and the caller's owning reference is minted after this release would have
+run. The predicate is one and the same for both mechanisms
+(`RegionInfo::sole_frame_held_regions`): every holder binding non-escaping and
+non-mutated, and the region absent from the return/fiber frontiers' atomless site
+halves.
 
-That admission is what bounds this close to the narrow case it actually covers: a
-parameter or local no closure captures, whose release lands at the body's scope
-exit. The captured walker — the shape with the most to gain — is the **residual**.
+So this close covers a parameter or local the frame alone owns — captured by a
+locally-called closure or not — whose release lands at the body's scope exit. The
+**residual** is the value the callee hands back out: `push-all`'s accumulator,
+held to the caller's mint by the return facet.
 
 ### The relocation point outlives the block, and a branch merge inherits it
 
@@ -523,20 +551,23 @@ followed by one the tail call's path may not be a predecessor of at all, and a
 release replicated into an unreachable point is a release added on a path that
 never owed it.
 
-The residual is unchanged in kind and is where the leak still lives: a **captured**
-holder, refused by the admission because the tail callee reaches its environment.
-`push-all` is that shape.
+The residual is unchanged in kind: a holder escape marks, most sharply the value
+the tail callee **hands back**. `push-all` strands its accumulator for that reason
+and not for the capture — the walker's other parameter, captured the same way but
+returned by nobody, reclaims here.
 
 Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
-argument-move and callee exemptions, the per-arm faces, the non-self-cancelling
-boundary, and the captured-holder residual driven as rows), the
-`tail-frame-exit-unused` / `tail-frame-exit-moved` / `tail-frame-exit-arms` probes
-in `tests/elle/oracle.lisp` (the per-op rates), and
+argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
+the non-self-cancelling boundary, and the returned-through-the-callee residual
+driven as rows), the `tail-frame-exit-unused` / `tail-frame-exit-moved` /
+`tail-frame-exit-arms` / `tail-frame-exit-captured` probes in
+`tests/elle/oracle.lisp` (the per-op rates), and
 `tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value
-moved into the tail callee, reached through its captured environment, handed back
-out through it, or read after the call must survive the moved release; the
+moved into the tail callee, reached through its captured environment, filled in
+place by it, handed back out through it, captured by a closure that escapes, or
+read after the call must survive the moved release; the
 accumulator-returned-through-a-captured-walker witness is the one that fails
-without the sole-holder admission).
+without the return facet's half of the admission).
 
 ## Compile-time region selection (coalescing)
 

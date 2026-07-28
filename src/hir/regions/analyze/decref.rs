@@ -524,12 +524,13 @@ fn pin_branch_arm_releases(
     // One predicate, shared with the lowerer's frame-exit release
     // (`RegionInfo::sole_frame_held_regions`): both mechanisms make a release fire
     // where none fired before, so both owe escape the same count argument. A
-    // MUTATED or CAPTURED holder is refused for the reason `regions::compensate`
-    // refuses it as a release route — a slot repointed between the arm and the
-    // anchor frees whatever it holds THEN, and a captured value is reachable
-    // through the closure env.
+    // MUTATED holder is refused for the reason `regions::compensate` refuses it as
+    // a release route — a slot repointed between the arm and the anchor frees
+    // whatever it holds THEN. Lexical capture is NOT refused: a closure's hold on
+    // what it captures is the funnel's counted (or the forest's owning) edge, never
+    // the uncounted borrow this admission guards against, and capture by a closure
+    // that *escapes* is already one of escape's facets.
     let sole_held = super::super::escape::sole_frame_held_regions(
-        hir,
         escape,
         arena,
         info,

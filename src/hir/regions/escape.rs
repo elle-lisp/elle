@@ -119,9 +119,9 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 }
 
 /// The regions whose every holder binding leaves this activation by **no** facet:
-/// non-mutated, uncaptured, non-escaping, and absent from the return/fiber
-/// frontiers' atomless site halves. A region with no holder binding at all offers
-/// nothing to judge and is refused too.
+/// non-mutated, non-escaping, and absent from the return/fiber frontiers' atomless
+/// site halves. A region with no holder binding at all offers nothing to judge and
+/// is refused too.
 ///
 /// This is the **count** question a *placement* argument cannot answer, and the one
 /// admission every mechanism that makes a release fire where none fired before must
@@ -131,29 +131,40 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// still resolves through its slot (region/generations.md § "Uncounted-borrow
 /// check"). Escape is the sole authority for it (docs/impl/escape.md).
 ///
+/// **Lexical capture is deliberately not a refusal** (region/mechanism.md §
+/// "Lexical capture is not a second holder to fear"). A closure's environment does
+/// reach what it captures, but that hold is paid for at the moment the env is
+/// built: the allocation funnel's cross-region scan increfs a by-value capture's
+/// region (balanced by the closure region's free-time cascade), a capture through a
+/// cell takes the same count at the cell store, and where the ownership forest
+/// admits the containment instead the capture becomes an adopt under which the
+/// member's RC is frozen and every decref is a structural no-op. A counted or
+/// owning edge is not the uncounted borrow this predicate exists to protect, so
+/// the frame's own release still drops the only reference it owns. Capture by a
+/// closure that *escapes* is a different matter and is already covered:
+/// `binding_escapes_activation` folds in escape's capture facet, which propagates
+/// an escaping closure's verdict to every binding it captures. Contrast
+/// [`captured_bindings`], the structural graph the *merge* gate reads — merging
+/// changes where a value lives, so it needs raw reachability rather than a count.
+///
 /// Two consumers, deliberately sharing one predicate: the branch-arm release window
 /// (`regions::analyze::decref`) and the frame-exit release the lowerer performs at a
 /// tail call (`RegionInfo::sole_frame_held_regions`, region/mechanism.md § "A
 /// release past a frame-replacing tail call is not a release").
 pub(super) fn sole_frame_held_regions(
-    hir: &Hir,
     escape: &crate::hir::EscapeInfo,
     arena: &crate::hir::arena::BindingArena,
     info: &RegionInfo,
     binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
 ) -> FxHashSet<Region> {
     let frontier = shared_seed_regions(escape, info);
-    let captured = captured_bindings(hir);
     let mut held: FxHashSet<Region> = FxHashSet::default();
     let mut refused: FxHashSet<Region> = FxHashSet::default();
     for (b, regions) in binding_regions {
-        // A MUTATED or CAPTURED holder is refused for the reason compensation
-        // refuses it as a release route: a slot repointed before the release frees
-        // whatever it holds THEN, and a captured value is reachable through the
-        // closure env — including the env of the very callee a tail call installs.
-        let unsafe_holder = arena.get(*b).is_mutated
-            || captured.contains(b)
-            || escape.binding_escapes_activation(*b);
+        // A MUTATED holder is refused for the reason compensation refuses it as a
+        // release route: a slot repointed before the release frees whatever it
+        // holds THEN, not what the solver named here.
+        let unsafe_holder = arena.get(*b).is_mutated || escape.binding_escapes_activation(*b);
         for &r in regions {
             held.insert(r);
             if unsafe_holder {

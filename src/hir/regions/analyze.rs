@@ -134,7 +134,6 @@ pub fn analyze_regions_with(
     // Computed before the decref passes so it reads the escape facts, not any
     // placement they go on to change.
     info.sole_frame_held_regions = super::escape::sole_frame_held_regions(
-        hir,
         &escape_info,
         arena,
         &info,

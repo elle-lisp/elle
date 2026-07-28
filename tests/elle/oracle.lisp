@@ -474,6 +474,15 @@
   1)
 (defn t23-arms [x t]
   (if t (t23-sink) (t23-sink2)))
+# `t23-captured`'s parameter is reached by the tail callee through its CAPTURED
+# environment — the path no argument names and no callee region describes. It is
+# admitted all the same: the funnel counted the closure's hold when the env was
+# built, so the relocated release drops the frame's own reference and leaves the
+# callee's standing (docs/impl/region/mechanism.md § "Lexical capture is not a
+# second holder to fear").
+(defn t23-captured [x]
+  (let [g (fn [] (length x))]
+    (g)))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1121,12 +1130,11 @@
 # debt; it closes when a towered composition reclaims to the same floor as the hand-fused
 # form — NOT by hand-rewriting each composition, which is the programmer bridging a gap the
 # compiler should close. (The production `zip` WAS so rewritten, for the RSS win; this probe
-# is the standing record of what that rewrite worked around.) Shrink-only, pinned as a
-# CROSS-TIER RANGE [25 32]: the layers' arg-position closure-call results ride the
-# now-unconsumed ReturnValue retain (the `arg-result` class, § F5) at composition depth on
-# the VM (32), but the JIT does not hold that retain (25) — a genuine VM/JIT span, so the
-# pin is the [lo hi] range that greens both tiers. Both bounds are shrink-only: a fix lowers
-# them (and collapses the range once the arg-retain gap closes and the tiers reconverge).
+# is the standing record of what that rewrite worked around.) Shrink-only, and a SCALAR
+# again: the pin was a cross-tier [lo hi] range while the layers' arg-position closure-call
+# results rode a ReturnValue retain the VM held and the JIT did not. Both tiers now measure
+# the same rate, so the range collapses; re-open it as `[lo hi]` only if a tier span
+# reappears.
 (defn zip-tower [& colls]
   (letrec [to-list (fn (c)
                      (cond
@@ -1157,7 +1165,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) [24 32])
+                   count-gauge 100 6 60 0.4 0.5) 22)
 
 # Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
 # (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
@@ -1700,12 +1708,14 @@
 # call is not a release"). `tail-frame-exit-unused` is the unused-parameter
 # fallback through that dead block; `tail-frame-exit-arms` is the same strand one
 # block further out, where the tail calls sit in the arms of a branch and the
-# release lands past the merge; `tail-frame-exit-moved` is the exemption face,
-# already 0, which reads GROWTH if the hoist ever releases an argument the callee
-# now owns. Undeclared, like `param-used-arm`, so a regression trips the
-# completeness gate loudly rather than being absorbed as F1a scratch. The CAPTURED
-# holder — the stdlib walker, whose tail callee reaches its parameters through its
-# environment — keeps the baseline and is the residual, driven as a row in
+# release lands past the merge; `tail-frame-exit-captured` is the holder the tail
+# callee reaches through its CAPTURED environment, admitted because the funnel
+# counted that hold; `tail-frame-exit-moved` is the exemption face, already 0,
+# which reads GROWTH if the hoist ever releases an argument the callee now owns.
+# Undeclared, like `param-used-arm`, so a regression trips the completeness gate
+# loudly rather than being absorbed as F1a scratch. The value a tail callee hands
+# BACK — the stdlib walker's accumulator, which the return facet holds to the
+# caller's mint — is the residual, driven as a row in
 # `tests/elle/region-tail-frame-exit.lisp` rather than pinned here. That file is
 # also the counterfactual; the soundness complement is
 # `region-tail-frame-exit-uaf.lisp`.
@@ -1722,6 +1732,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-arms (list 1 2 3) true)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-captured"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-captured (list 1 2 3))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "tail-frame-exit-moved"
                    (fn [b]

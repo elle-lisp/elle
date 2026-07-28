@@ -20,9 +20,11 @@
 # Moving a release later is a PLACEMENT argument, and placement is enough only
 # where the frame holds the region's one reference — so the re-anchoring is
 # admitted only for a region escape proves does not leave its activation. Every
-# subject below is such a region; a region that escapes keeps the in-arm release
-# and the per-arm compensation routes, and that decline is what the store /
-# return / capture witnesses of region-branch-arm-window-uaf.lisp drive.
+# subject below is such a region — including the one the arms reach only through a
+# locally-called closure's environment, whose hold the allocation funnel counted.
+# A region that escapes keeps the in-arm release and the per-arm compensation
+# routes, and that decline is what the store / return / escaping-closure witnesses
+# of region-branch-arm-window-uaf.lisp drive.
 #
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the three boundary shapes, whose
@@ -88,6 +90,21 @@
       :a (length v)
       :b (length v)
       _ (length v))))
+
+# (f) the parameter the arms strand is also held by a locally-called CLOSURE's
+# environment. That second holder is not one to fear: building the env took a
+# counted reference through the allocation funnel, so the re-anchored release
+# still drops only the frame's own (docs/impl/region/mechanism.md § "Lexical
+# capture is not a second holder to fear"). The closure is called OUTSIDE the
+# branch, so no arm leaves through a frame-replacing callee and the window's third
+# boundary does not fire.
+(defn used-captured (v t)
+  (let [f (fn () (length v))]
+    (%add (f)
+          (match t
+            :a (length v)
+            :b (length v)
+            _ (length v)))))
 
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
@@ -156,6 +173,8 @@
   (measure (fn () (dispatch-ref (list 1 2 3) "x")) 200 window))
 (def used-two-d (measure (fn () (used-two (list 1 2) (list 3 4) :a)) 200 window))
 (def used-local-d (measure (fn () (used-local :a)) 200 window))
+(def used-captured-d
+  (measure (fn () (used-captured (list 1 2 3) :a)) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
 (def bound-tailcall-d
@@ -166,7 +185,8 @@
 (println "region-branch-arm-window deltas over " window " iters:")
 (println "  param " used-param-d "  if " used-param-if-d "  type-dispatch "
          type-dispatch-d)
-(println "  two " used-two-d "  local " used-local-d)
+(println "  two " used-two-d "  local " used-local-d "  captured "
+         used-captured-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d
          "  tailcall " bound-tailcall-d)
 (println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
@@ -184,6 +204,8 @@
 (bounded? type-dispatch-d "type dispatch over an unproven argument")
 (bounded? used-two-d "two parameters stranded by one arm")
 (bounded? used-local-d "fn-local live-in to the branch")
+(bounded? used-captured-d
+          "parameter the arms reach through a locally-called closure's env")
 
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
@@ -198,6 +220,7 @@
 (assert (= (dispatch-ref "ab" "c") "abc") "type dispatch string arm lost")
 (assert (= (used-two (list 1 2) (list 3 4) :a) 4) "two-param arm result lost")
 (assert (= (used-local :b) 3) "local arm result lost")
+(assert (= (used-captured (list 1 2 3) :b) 6) "captured arm result lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
 (assert (= (bound-tailcall (list 1 2 3) :b) 3)

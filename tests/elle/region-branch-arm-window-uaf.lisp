@@ -7,9 +7,11 @@
 # not a release on the other arms"). Moving a release LATER can only over-keep —
 # but only while the frame is the region's sole holder when it runs, and only
 # while the anchor is a point the arm actually reaches. The ways that fails all
-# fault here, and each is a shape the admission must DECLINE or a boundary must
-# stop: the arm handed the value to a container / a closure / its caller, so a
-# second holder exists; the arm re-allocates per iteration of a nested loop, so
+# fault here, and each is a shape the admission must DECLINE, a boundary must
+# stop, or a counted edge must survive: the arm handed the value to a container /
+# a closure / its caller, so a second holder exists the moved release must leave
+# standing — and where that holder ESCAPES, the admission refuses the window
+# outright; the arm re-allocates per iteration of a nested loop, so
 # one release cannot cover N; the arm's releases belong to another frame; the arm
 # parked a fiber that resolves the region through its own activation map after the
 # branch; and the arm leaves through a frame-replacing callee that never reaches
@@ -55,8 +57,10 @@
 (defn w-return (v t)
   (length (first (w-return-inner v t))))
 
-# (d) the arm hands the subject to a CLOSURE that outlives the branch; the
-# capture's incref must outlive the moved release.
+# (d) the arm hands the subject to a CLOSURE that is called in place. The window
+# admits the holder — the funnel counted the env's hold when the closure was built
+# — so the release does move to the merge, and what must stand is that count: the
+# closure reads through `v` after it.
 (defn w-capture (v t)
   (let [f (match t
             :a
@@ -65,6 +69,20 @@
               (fn () (length (first v)))
             _ (fn () 0))]
     (f)))
+
+# (d2) the same capture, by a closure that ESCAPES — it is returned, so it
+# outlives this activation and carries `v` with it. Escape's capture facet refuses
+# the holder, the in-arm release stands, and the caller's later invocation reads
+# through it.
+(defn w-escaping (v t)
+  (match t
+    :a
+      (fn () (length (first v)))
+    :b
+      (fn () (length (first v)))
+    _ (fn () 0)))
+(defn w-escaping-read (v t)
+  ((w-escaping v t)))
 
 # (e) a nested LOOP inside the arm: each iteration allocates its own value and
 # reads it. Releasing those at the branch's merge instead would free one region
@@ -145,11 +163,13 @@
 (var h 0)
 (var j 0)
 (var k 0)
+(var m 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
   (assign c (w-return (list (string "c" i) i) :a))
   (assign d (w-capture (list (string "d" i) i) :a))
+  (assign m (w-escaping-read (list (string "n" i) i) :a))
   (assign e (w-loop i :a))
   (assign f (w-lambda i :a))
   (assign g (w-park (list (string "g" i) i) :a))
@@ -167,6 +187,7 @@
 (assert (%gt b 0) "arm value freed after being stored into a container")
 (assert (%gt c 0) "arm value freed under the caller's read of the return")
 (assert (> d 0) "arm value freed under the closure that captured it")
+(assert (> m 0) "arm value freed under a closure that escaped holding it")
 (assert (%gt e 0) "loop-body value freed under a later iteration's read")
 (assert (%gt f 0) "lambda-body value released from the enclosing frame")
 (assert (> g 0) "parked fiber's borrow freed by the moved release")

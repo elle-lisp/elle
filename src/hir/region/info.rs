@@ -472,8 +472,8 @@ pub struct RegionInfo {
     /// tail-calls only members). Populated from `ClosureCycleMerge::tail_release_sites`.
     pub cycle_tail_release: HashMap<HirId, Region>,
     /// Regions whose every holder binding leaves this activation by NO facet —
-    /// non-mutated, uncaptured, non-escaping, off the return/fiber frontiers — so
-    /// the frame holds the region's one reference.
+    /// non-mutated, non-escaping, off the return/fiber frontiers — so the frame
+    /// holds the region's one reference.
     ///
     /// This is escape's answer to the **count** question, projected onto regions,
     /// and it is the admission any mechanism owes when it makes a release fire
@@ -482,6 +482,11 @@ pub struct RegionInfo {
     /// frame-replacing tail call is not a release"), which converts a release the
     /// closure path never ran into one it does; the branch-arm release window
     /// applies the same predicate inline for the same reason.
+    ///
+    /// Lexical capture is deliberately not one of the refusals: a closure's hold on
+    /// what it captures is counted (or owning), never an uncounted borrow, and
+    /// capture by an *escaping* closure is already an escape facet
+    /// (`regions::escape::sole_frame_held_regions`).
     pub sole_frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Ownership forest (docs/impl/region/ownership.md § "Adoption and subtree
     /// drop"), populated by the ownership pass; empty when the shape stays Shared,
