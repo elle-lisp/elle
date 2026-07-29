@@ -293,6 +293,52 @@ per-op rates), and `tests/elle/region-branch-arm-window-uaf.lisp` (the soundness
 complement — a value read, stored, returned, carried across a yield, or reached
 through a closure's environment after the branch must survive the moved release).
 
+## Every binder records its scope
+
+A `Var` read inside a `While`/`Loop` is extended to the loop node when the binding
+it names is bound **outside** that loop: the body re-reads it on every iteration,
+so its region has to outlive the loop (`hir/liveness/lastuse`). The premise is a
+containment test — is the binding's **scope node** a descendant of the loop? — and
+it is only as good as the scope map is complete. A binder the walk does not record
+has no scope node at all, and an absent scope is read as *bound outside*.
+
+Both answers to that question are consequential, in opposite directions. Read as
+bound **inside** when it is not, the release fires per iteration and the next
+iteration reads a freed region — a use-after-free. Read as bound **outside** when
+it is not, the release is hoisted past a loop whose body re-allocates the value
+every iteration, so one release covers N allocations and N−1 regions are held to
+fiber teardown — an unbounded leak. Neither direction is a safe default, which is
+why the answer must come from a recorded fact rather than from absence.
+
+So every binding form records its scope: `Define`, `Let`, `Letrec`, `Loop`,
+`Destructure`, and a `Match` arm's **pattern**. The pattern is the one whose names
+carry a region they did not allocate: a projection out of the scrutinee is an
+uncounted read ([rules.md](rules.md) Rule 4's borrowing node), so it resolves to
+the *scrutinee's* region, and the binding-chain extension carries the scrutinee's
+release out to wherever the projection is last used. Unrecorded, an arm that reads
+a name its pattern bound hoists the whole scrutinee's release past the enclosing
+loop — every object the scrutinee holds, stranded once per iteration, on the arm
+that runs and equally on one that never does (the extension is structural, so a
+read in an arm no execution takes strands the scrutinee just the same).
+
+A `Match` pattern records only its scope, not the init registration `Destructure`
+also makes, and the difference is where the bound names are readable. A
+`Destructure`'s names are read by *later siblings*, so the destructured value's own
+last use must be extended to cover them. A `Match` arm's names are readable
+strictly inside the `Match` node's subtree, and the scrutinee's last use is the
+`Match` node itself — the branch consumes it — which already post-dates every read
+of a projection in any arm. Registering an init would also expose the scrutinee to
+the unused-binding narrowing (`compute_last_use`'s first phase pulls an init's last
+use back to the init itself when no bound name is read), shrinking a lifetime the
+`Match` node already states correctly.
+
+Pinned by `tests/elle/region-match-bind-loop.lisp` (the reclamation, with the
+arm-taken, arm-not-taken, nested-loop and guard faces driven as rows) and the
+`struct-match` probe in `tests/elle/oracle.lisp` (the per-op rate), with
+`tests/elle/region-match-bind-loop-uaf.lisp` as the soundness complement — a
+pattern-bound projection stored, returned, broken out of the loop, captured, or
+carried across a yield must survive the per-iteration release.
+
 ## `break` transfers its value; it does not consume it
 
 A `Return` hands a value across a *function* frontier. A `break` is the

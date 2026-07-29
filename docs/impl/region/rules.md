@@ -115,7 +115,9 @@ is a correctness defect, not a tuning knob.
    handles at admission (adopt.md § "The lifetime obligation the root carries"). A
    *remove* is neither: `%pop` extracts the element out of the container (and out of
    its Owned subtree, `extract_owned_region`), so the container keeps its own last
-   use.
+   use. A `Match` arm's pattern binding is a borrowing read of the **scrutinee**, so
+   where its release lands is decided by the loop-containment test every binder's
+   scope node feeds (mechanism.md § "Every binder records its scope").
    It is *per
    activation*: each activation remaps its static region slots to fresh physical
    regions, so the same static `DecrefRegion` frees a different physical region

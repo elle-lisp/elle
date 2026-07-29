@@ -282,6 +282,27 @@ fn region_branch_arm_window_uaf() {
     );
 }
 
+// Guard — a `match` arm's pattern binding records its scope, so a read of it
+// inside a loop no longer reads as a read of a loop-external binding and the
+// scrutinee's release stays in the body that allocates it (docs/impl/region/
+// mechanism.md § "Every binder records its scope"). The release moves EARLIER —
+// from after the loop to once per iteration — so what it must not do is drop a
+// projection someone else still holds. This drives every hand-off out of the
+// iteration: the arm stores the projection into a fn-local cell, into a
+// module-level container, captures it in a closure called after the loop, breaks
+// out of the loop with it, yields it across the fiber frontier, reads an inner
+// loop's projection from the outer body, reads into a nested container
+// projection, and feeds it back into the next iteration's scrutinee. Freeing any
+// of them at the iteration's end faults on the read — SIGSEGV under guardfree.
+// The leak face is `region-match-bind-loop.lisp`.
+#[test]
+fn region_match_bind_loop_uaf() {
+    run_elle_script_with_args(
+        "region-match-bind-loop-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — everything the lowerer emits after a `TailCall` runs only on the NATIVE
 // fall-through, so a release landing there is carried back ahead of the call
 // (docs/impl/region/mechanism.md § "A release past a frame-replacing tail call is

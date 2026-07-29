@@ -19,16 +19,28 @@ pub(super) struct LastUseBuilder<'a> {
     /// via analyze_file_letrec), so this is a Vec rather than a single
     /// id; compute_last_use extends last_use for every init.
     pub(super) binding_init: HashMap<Binding, Vec<HirId>>,
-    /// For each binding, the HirIds of the enclosing binding forms
-    /// (Let/Letrec/Loop hir.id, or the Define's hir.id). Parallel to
-    /// `binding_init`: index N of this vec is the scope id for the
-    /// N-th entry of `binding_init`. Used by the iter-scope Var
-    /// extension to ask "was this binding bound outside the current
-    /// loop?" — answered by comparing the scope's execution-order index
-    /// to the loop's (`order[scope] > order[loop]` means the scope
-    /// encloses the loop, i.e. bound outside). NOT a `HirId` magnitude
-    /// comparison: ANF appends synthetic bindings with large ids, so
-    /// magnitude is meaningless — see `compute_order`.
+    /// For each binding, the HirIds of the enclosing binding forms — the
+    /// `Let`/`Letrec`/`Loop`/`Destructure`/`Match` node, or the `Define`'s
+    /// own id. Used by the iter-scope Var extension to ask "was this
+    /// binding bound outside the current loop?", answered as a
+    /// subtree-containment test over execution-order indices (see
+    /// `in_subtree`) and NOT a `HirId` magnitude comparison: ANF appends
+    /// synthetic bindings with large ids, so magnitude is meaningless —
+    /// see `compute_order`.
+    ///
+    /// Every binder that can be bound INSIDE a loop body records here,
+    /// because an absent scope is read as bound-outside and hoists the
+    /// binding's region's release past the loop (docs/impl/region/
+    /// mechanism.md § "Every binder records its scope"). A lambda's
+    /// parameters are the one binder deliberately left unrecorded: the
+    /// iter-scope stack is cleared at the lambda boundary, so the only
+    /// loops in scope are inside the body and a parameter is bound
+    /// outside every one of them — the same answer the absent-scope
+    /// default gives.
+    ///
+    /// A binding may have a scope entry without a `binding_init` one (a
+    /// `Match` pattern binds a projection, not the scrutinee), so the two
+    /// maps are not index-parallel.
     pub(super) binding_scope: HashMap<Binding, Vec<HirId>>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked. Outermost-first. Used to extend `last_use` for `Var`
@@ -234,6 +246,22 @@ impl LastUseBuilder<'_> {
                 }
             }
             HirKind::Match { value, arms } => {
+                // A pattern's names are bound HERE, and recording that is what
+                // keeps the `Var` arm's iter-scope extension from reading them
+                // as loop-external. A projection out of the scrutinee is an
+                // uncounted read, so it resolves to the scrutinee's region — an
+                // unrecorded scope makes a read of it in any arm hoist a whole
+                // fresh scrutinee's release past the enclosing loop, once per
+                // iteration (docs/impl/region/mechanism.md § "Every binder
+                // records its scope"). Unlike `Destructure` this registers no
+                // `binding_init`: the names are readable only inside this node's
+                // subtree, and the scrutinee's own last use is this node, which
+                // already post-dates every arm.
+                for (pat, _guard, _body) in arms {
+                    for b in pat.bindings().bindings {
+                        self.binding_scope.entry(b).or_default().push(hir.id);
+                    }
+                }
                 self.walk(value, true, hir.id);
                 for (_pat, guard, body) in arms {
                     if let Some(g) = guard {

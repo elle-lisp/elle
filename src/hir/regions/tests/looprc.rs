@@ -232,6 +232,112 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     );
 }
 
+/// Counter-factual for the unrecorded-binder hoist
+/// (tests/elle/region-match-bind-loop.lisp). A `match` arm's pattern binds a
+/// projection out of the scrutinee by an UNCOUNTED read, so the projection
+/// resolves to the scrutinee's own region and the binding-chain extension carries
+/// the scrutinee's release out to wherever the projection is last used. Inside a
+/// loop, that read is put through the iter-scope extension, which asks whether the
+/// binding is bound OUTSIDE the loop — a containment test over the binding's
+/// recorded scope node. A pattern that records no scope has none, absence reads as
+/// bound-outside, and the release is hoisted to the loop node: one release for N
+/// per-iteration scrutinees, N−1 held to fiber teardown
+/// (docs/impl/region/mechanism.md § "Every binder records its scope").
+///
+/// Region-analysis invariant: the scrutinee's region is allocated in the loop
+/// body, so its `decref_point` must stay STRICTLY inside the loop's subtree —
+/// landing on the loop node itself is the hoist this pins against.
+#[test]
+fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
+    use crate::hir::expr::IntrinsicOp;
+    use crate::symbol::SymbolTable;
+
+    // No-prelude file pipeline (intrinsics + special forms only). The scrutinee is
+    // a fresh `%pair` per iteration and the taken arm READS the name its pattern
+    // bound — the read is what places the scrutinee's release, so an arm that
+    // ignored its binding would not exercise this at all.
+    let source = "(defn go [] \
+                     (def @i 0) \
+                     (while (%lt i 3) \
+                       (match (%pair i i) (x . y) x _ 0) \
+                       (assign i (%add i 1))) \
+                     i)";
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let info = analyze_regions(&hir, &arena);
+
+    // Every iter-scope node (While OR Loop — `while` may lower to either).
+    fn find_iter_scopes(hir: &Hir, out: &mut Vec<HirId>) {
+        if matches!(&hir.kind, HirKind::While { .. } | HirKind::Loop { .. }) {
+            out.push(hir.id);
+        }
+        hir.for_each_child(|c| find_iter_scopes(c, out));
+    }
+    let mut loops = Vec::new();
+    find_iter_scopes(&hir, &mut loops);
+    assert!(
+        !loops.is_empty(),
+        "repro must contain an iter-scope (While/Loop)"
+    );
+
+    // The scrutinee: the `%pair` the loop body allocates each iteration.
+    fn find_pair(hir: &Hir, out: &mut Option<HirId>) {
+        if out.is_none() {
+            if let HirKind::Intrinsic {
+                op: IntrinsicOp::Pair,
+                ..
+            } = &hir.kind
+            {
+                *out = Some(hir.id);
+                return;
+            }
+            hir.for_each_child(|c| find_pair(c, out));
+        }
+    }
+    let mut pair_id = None;
+    find_pair(&hir, &mut pair_id);
+    let pair_id = pair_id.expect("the loop body must allocate a %pair scrutinee");
+    let scrutinee_region = info
+        .alloc_region
+        .get(&pair_id)
+        .copied()
+        .expect("the %pair scrutinee must have an alloc_region");
+
+    let order = crate::hir::liveness::compute_order(&hir);
+    let low = crate::hir::liveness::compute_subtree_low(&hir, &order);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let decref = info
+        .region_data
+        .get(&scrutinee_region)
+        .map(|d| d.decref_point)
+        .expect("the scrutinee's region must have RegionData populated");
+    let dord = ord(decref);
+
+    // The allocation is per iteration, so the release must be too: strictly
+    // inside the loop's subtree, never AT the loop node (the post-loop emission
+    // point, where one release would cover every iteration) nor past it.
+    let enclosing = loops.iter().copied().find(|&l| {
+        let lo = low.get(&l).copied().unwrap_or(0);
+        let alloc = ord(pair_id);
+        alloc >= lo && alloc <= ord(l)
+    });
+    let enclosing = enclosing.expect("the %pair must sit inside a loop body");
+    let lo = low.get(&enclosing).copied().unwrap_or(0);
+    assert!(
+        dord >= lo && dord < ord(enclosing),
+        "the scrutinee's region r{} (allocated by the %pair @{} inside the loop \
+         @{}) must be released per iteration — its decref_point must lie strictly \
+         inside the loop's subtree [{}, {}), got @{} (index {})",
+        scrutinee_region.0,
+        pair_id.0,
+        enclosing.0,
+        lo,
+        ord(enclosing),
+        decref.0,
+        dord,
+    );
+}
+
 /// Counter-factual for the loop-local-closure tail UAF
 /// (tests/elle/region-loop-local-closure-tail-uaf.lisp).
 /// A closure created INSIDE a loop, called in place, whose body's tail is a

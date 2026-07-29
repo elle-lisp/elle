@@ -259,7 +259,11 @@
 # functionalization's split of the cell's source name into a pre-loop version and a
 # loop parameter reads as two holders of one name. A regression of either must trip
 # the completeness gate rather than hide behind its sibling.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell" "struct-match"])
+# `struct-match` is a CLOSED control for the scope map's completeness (undeclared,
+# like `rest-array-copy`): a `match` arm's pattern binding records its scope, so a
+# read of it inside a loop is no longer read as a read of a loop-external binding
+# and the scrutinee's release stays in the body that allocates it.
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -306,12 +310,15 @@
   {:x j :y 2})
 
 # The io-yield target: ev/sleep, the clean probe (portless, nil result). Pins the
-# per-op net-object residual of a yielding io op. The residual is NOT an io-local
-# mechanism: it is a general escape-imprecision leak the scheduler pump hits each
-# op — the completion struct held Shared because escape analysis cannot see
-# ev/sleep's resume value is nil, so `(get c :value)` flowing into `fiber/resume`
-# marks the struct escaping; this shrinks only as escape analysis is made
-# branch/path-sensitive. (The IN-LAMBDA self-recursive letrec closure `+`/`<` build over
+# per-op net-object residual of a yielding io op — a residual the scheduler pump
+# pays each op, not an io-local mechanism. It is NOT escape imprecision: with the
+# real `fiber/resume` consuming `(get c :value)`, the completion struct measures
+# `escapes_activation = false`, and `io/wait` declares `RegionEffect::Fresh`
+# (oracle-checked), so nothing here is over-marked as escaping. The residual is
+# therefore a region/runtime-RC one, and the two mechanisms in reach of it are
+# already named: the may-store clique (`fiber/resume` is `Mixed`, so its dispatch
+# takes a per-arg retain that need not balance when no store happens) and prompt
+# reclamation of a `Fresh` call result. (The IN-LAMBDA self-recursive letrec closure `+`/`<` build over
 # their varargs is cell-free — its self-reference resolves to the executing closure, no
 # cell↔closure cycle — reclaimed per call by ordinary RC / the tail-call deferred release,
 # docs/impl/selfrec.md; that class is pinned directly by the `recur-local-self` probe
@@ -1710,6 +1717,17 @@
                      (while (%lt j b)
                        (t22-param-if (list 1 2 3) true)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+# The scope-map face of the same `Match`: the arm READS a name its pattern bound,
+# and that read is a borrowing read of the SCRUTINEE (rules.md Rule 4), so it is
+# what places a whole fresh struct's release. A pattern whose scope goes
+# unrecorded reads as bound outside this loop, hoisting that release past the loop
+# and stranding every iteration's scrutinee but the last
+# (docs/impl/region/mechanism.md § "Every binder records its scope"). CLOSED
+# control — undeclared, like `param-used-arm`, so a regression trips the
+# completeness gate loudly rather than being absorbed as an F5 strand. The
+# per-shape rows and the arm-not-taken / guard / nested-loop faces are
+# `tests/elle/region-match-bind-loop.lisp`; the soundness complement is
+# `region-match-bind-loop-uaf.lisp`.
 (pin (measure-core "struct-match"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1718,7 +1736,7 @@
                        (match {:type :a :v j}
                          {:type :a :v v} v
                          _ 0)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The frame-exit release, five CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
