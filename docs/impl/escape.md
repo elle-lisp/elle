@@ -182,6 +182,17 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
   stays a region fact: `EscapeInfo` cannot express it, and only a per-call region
   may be adopted.
 
+  A **stranded recursive** callee takes a narrower question in the same predicate:
+  `escapes_fiber` alone. Its region has no other release channel at all, so the full
+  activation escape would re-strand it — the store and capture facets are containment
+  relations, and a closure a local container holds dies *with* the activation. The
+  return facet is admitted too, and unlike the frame-exit release's return-funded
+  admission it needs no funding edge: this release runs at the recursion's completion,
+  *after* the callee's return mint, so there is no gap to span
+  ([selfrec.md](selfrec.md) § "The deferral's escape gate is the fiber frontier
+  alone"). Only the fiber facet hands the closure to a holder the compiler did not
+  place, so only it refuses.
+
 Two lowerer/HIR decisions deliberately **do not** read this analysis, because the
 question they answer is *ownership-location / mutation-sharing*, which is
 structural lexical capture, not true-escape:

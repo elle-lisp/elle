@@ -381,6 +381,22 @@ fn region_selfrec_captured_tail_release() {
     );
 }
 
+// Guard — a stranded recursive closure the recursion RETURNS keeps its tail-call
+// deferred release, and that release must drop only the FRAME's reference. The
+// caller's is minted by the callee's `Return`, which runs before `trampoline_loop`
+// breaks and fires the deferred decref (docs/impl/selfrec.md § the deferral's escape
+// gate). If the count is wrong, the returned handle's region is recycled and the
+// self-call re-dispatch — which reads the executing closure out of that very region —
+// derefs a foreign page. Covers all three stranding routes (`letrec` self, `def` self,
+// merged mutual SCC) with allocation churn between the release and the re-entry.
+#[test]
+fn region_selfrec_return_release() {
+    run_elle_script_with_args(
+        "region-selfrec-return-release",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a local mutual-recursion clique (`ev`/`od`) whose `letrec` body ends in a
 // tail call to a NON-member (a native `%add`, the redefined-closure operator `+`, a
 // foreign fn `g`, and a MIXED member+non-member `if`) must reclaim its merged arena

@@ -78,6 +78,58 @@ pub(super) fn steady_region_growth(src: &str) -> i64 {
     rt.heap().active_region_count() as i64 - baseline
 }
 
+/// Growth of `gauge` across 200 executions of `body`, sampled **mid-run by the
+/// program** — after 50 warm-up iterations and again after 250 — and returned as
+/// the raw delta the program computes.
+///
+/// The mid-run sampling is what makes this a per-call gauge rather than a
+/// per-program one: a shape whose release is hoisted out of the driving loop
+/// fires once and reads 0 either way, while a genuine per-call strand shows as
+/// ~200. `rt` chooses the stdlib (a full runtime churns regions of its own; an
+/// isolated one keeps the reading to the shape under test), and `gauge` chooses
+/// the heap dimension — `arena/region-count` for whole regions,
+/// `arena/count` for objects, since a shape can strand a region without growing
+/// the object count and vice versa.
+///
+/// Every reading is void without a live-growth discriminator beside it: pair the
+/// subject with a shape that legitimately retains (the self-referential
+/// accumulator `(assign acc (%pair n acc))`) and assert that one grows.
+///
+/// The gauge natives are opaque to inference, so the closing subtraction is a
+/// `%sub` under a `match` dispatch that proves both samples `:integer` — which
+/// also keeps the harness working on a runtime with no stdlib `-`.
+pub(super) fn mid_run_growth(mut rt: Runtime, prelude: &str, body: &str, gauge: &str) -> i64 {
+    use crate::pipeline::compile_file_repl;
+    let src = format!(
+        "{prelude} (var n 0) \
+         (while (%lt n 50) {body} (assign n (%add n 1))) \
+         (def c50 ({gauge})) \
+         (while (%lt n 250) {body} (assign n (%add n 1))) \
+         (def c250 ({gauge})) \
+         (match (type-of c250) :integer \
+           (match (type-of c50) :integer (%sub c250 c50) _ -1) _ -1)"
+    );
+    let result = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(&src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        .expect("runs")
+        .as_int()
+        .expect("program returns the gauge delta as an int")
+}
+
+/// The live-growth discriminator for [`mid_run_growth`]: a self-referential
+/// accumulator retains every prior by reference, so both heap dimensions must
+/// grow ~1 per iteration. A subject reading near zero is real reclamation only
+/// beside a large reading here.
+pub(super) fn mid_run_discriminator(rt: Runtime, gauge: &str) -> i64 {
+    mid_run_growth(rt, "(def @acc nil)", "(assign acc (%pair n acc))", gauge)
+}
+
 /// The built-in live-growth discriminator now that the ownership forest is
 /// unconditional and every reclaimable cycle below reads bounded: a single mutable
 /// `@array` that holds ITSELF (`a ⊇ a`). This is the degenerate mutable self-cycle —

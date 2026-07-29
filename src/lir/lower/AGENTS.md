@@ -140,7 +140,11 @@ other is structural ownership-location, NOT escape:
   `suppressed_decref_regions`, which `EscapeInfo` cannot express) AND
   non-escape (`EscapeInfo::lambda_escapes_definition`/
   `binding_escapes_activation` — the escape half, replacing the old
-  region-level proxy).
+  region-level proxy). A **stranded recursive** callee takes a narrower
+  escape question, `escapes_fiber` alone, because this deferral is its
+  region's only release channel: store/capture are containment, and the
+  return facet is funded by the callee's own return mint, which precedes
+  the deferred decref (docs/impl/selfrec.md).
 - `emitops.rs::open_tail_exit_hoist` / `with_tail_exit_hoist` — the callee's
   region is not the only one stranded past a `TailCall`: everything the
   lowerer emits after it runs only on the native fall-through, so a

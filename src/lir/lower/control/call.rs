@@ -129,12 +129,21 @@ impl<'a> Lowerer<'a> {
         // `stranded_self_bindings` (a tail-call body) — not merely self-recursive — is
         // load-bearing: a non-tail body's release fires LIVE, and deferring it too would
         // free the region twice (the executing-closure re-dispatch then reads a
-        // recycled page). Gated additionally on the GENUINE frontier escape — return ∪
-        // fiber, not the full `binding_escapes_activation`: the latter folds in
-        // store/capture CONTAINMENT (a self-recursive closure held by a local container
-        // dies WITH the activation, so its release must still be deferred), which would
-        // over-conservatively re-strand the release into a leak. Only a closure
-        // actually returned or sent to a fiber outlives the activation.
+        // recycled page).
+        //
+        // The escape gate is the FIBER frontier alone (`escapes_fiber`), neither the
+        // full `binding_escapes_activation` nor the return facet. The full activation
+        // escape folds in store/capture CONTAINMENT — a closure held by a local
+        // container dies WITH the activation, so its release must still be deferred —
+        // and would re-strand that release into a leak. The RETURN facet is funded by
+        // the callee's own `Return` mint, which runs before `trampoline_loop` breaks
+        // and fires the deferred decref: the caller's reference is already standing
+        // when the deferral drops the frame's own, and on a path that returns something
+        // else no one else holds the region, so the frame's is correctly the last. Only
+        // a fiber crossing hands the closure to a holder the compiler did not place —
+        // a parked frame may borrow it uncounted — so only that facet refuses
+        // (docs/impl/selfrec.md § "The deferral's escape gate is the fiber frontier
+        // alone").
         if let HirKind::Var(b) = &func.kind {
             if self.stranded_self_bindings.contains(b) {
                 // Invariant: a stranded self-recursive binding is CELL-FREE
@@ -152,9 +161,7 @@ impl<'a> Lowerer<'a> {
                      cell already releases the closure region, so a tail-call deferred release would \
                      double-free it (see docs/impl/selfrec.md § the cell-free gate)"
                 );
-                let frontier_escapes = self.escape_info.binding_escapes_via_return(*b)
-                    || self.escape_info.escapes_fiber(*b);
-                return !frontier_escapes;
+                return !self.escape_info.escapes_fiber(*b);
             }
             // A letrec closure-cycle merge member the enclosing letrec's BODY
             // tail-calls: the merged arena's binding-scope DecrefRegion is dead
@@ -164,8 +171,15 @@ impl<'a> Lowerer<'a> {
             // NON-upvalue reference: in the letrec's own function the binding is
             // a plain stack-slot local, while a nested closure reads it as an
             // upvalue — and a nested closure's activation completes before later
-            // uses of the arena, so deferring there would free it early. Gated on
-            // the genuine frontier escape exactly as the self path is.
+            // uses of the arena, so deferring there would free it early. The frontier
+            // check here is a redundant guard rather than the deciding gate — unlike
+            // the self path above, which needs the return-mint argument to admit a
+            // returned closure. A member only reaches this marking through an ADMITTED
+            // merge, and the merge's own non-escape gate is that same frontier
+            // (`compute_closure_cycle_merges` reads `compute_shared_seeds`), so an SCC
+            // with a frontier-crossing member is refused to Shared before it can be
+            // stranded. Kept whole so a future widening of the merge gate cannot
+            // silently inherit an admission no one argued for.
             if self.stranded_cycle_bindings.contains(b) && !self.upvalue_bindings.contains(b) {
                 let frontier_escapes = self.escape_info.binding_escapes_via_return(*b)
                     || self.escape_info.escapes_fiber(*b);

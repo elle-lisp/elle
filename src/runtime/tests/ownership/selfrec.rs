@@ -173,43 +173,18 @@ fn region_ownership_reclaims_self_recursion_closure_cycle() {
 /// a near-zero delta for the letrec call is real reclamation, not a dead gauge.
 #[test]
 fn closure_cycle_nested_letrec_reclaims_per_call() {
-    use crate::pipeline::compile_file_repl;
-
-    // Run `body` 50 then 250 times in a single program, sampling `arena/region-count`
-    // at each point, and return the raw count delta (c250 − c50) the program computes.
-    fn region_growth(prelude: &str, body: &str) -> i64 {
-        let mut rt = Runtime::new();
-        let src = format!(
-            "{prelude} (var n 0) \
-             (while (%lt n 50) {body} (assign n (%add n 1))) \
-             (def c50 (arena/region-count)) \
-             (while (%lt n 250) {body} (assign n (%add n 1))) \
-             (def c250 (arena/region-count)) \
-             (- c250 c50)"
-        );
-        let result = {
-            let (_vm, symbols, cctx) = rt.parts();
-            compile_file_repl(&src, symbols, cctx, "<embed>")
-                .expect("compiles")
-                .0
-        };
-        let (vm, symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs")
-            .as_int()
-            .expect("program returns the region-count delta as an int")
-    }
-
     // Subject: `f` wraps a self-recursive letrec closure; each `(f 3)` builds and discards
     // one cell↔closure cycle, which must be reclaimed per call.
-    let call_growth = region_growth(
+    let call_growth = mid_run_growth(
+        Runtime::new(),
         "(def f (fn [k] \
             (letrec [loop (fn [m] (if (%lt m 1) :done (loop (%sub m 1))))] \
               (loop k))))",
         "(f 3)",
+        "arena/region-count",
     );
     // Discriminator: the self-referential accumulator legitimately retains every prior.
-    let live_chain_growth = region_growth("(def @acc nil)", "(assign acc (%pair n acc))");
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
 
     assert!(
         live_chain_growth > 150,
@@ -245,33 +220,6 @@ fn closure_cycle_nested_letrec_reclaims_per_call() {
 /// accumulator discriminator whose growth proves the gauge is live.
 #[test]
 fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
-    use crate::pipeline::compile_file_repl;
-
-    // Run `body` 50 then 250 times in one program, sampling `arena/region-count` at
-    // each point; returns c250 − c50.
-    fn region_growth(prelude: &str, body: &str) -> i64 {
-        let mut rt = Runtime::new();
-        let src = format!(
-            "{prelude} (var n 0) \
-             (while (%lt n 50) {body} (assign n (%add n 1))) \
-             (def c50 (arena/region-count)) \
-             (while (%lt n 250) {body} (assign n (%add n 1))) \
-             (def c250 (arena/region-count)) \
-             (- c250 c50)"
-        );
-        let result = {
-            let (_vm, symbols, cctx) = rt.parts();
-            compile_file_repl(&src, symbols, cctx, "<embed>")
-                .expect("compiles")
-                .0
-        };
-        let (vm, symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs")
-            .as_int()
-            .expect("program returns the region-count delta as an int")
-    }
-
     let prelude = "(def f (fn [k] \
         (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                  od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
@@ -279,7 +227,7 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
 
     // Discriminator: the self-referential accumulator legitimately retains every
     // prior, proving the gauge detects per-iteration region growth.
-    let live_chain_growth = region_growth("(def @acc nil)", "(assign acc (%pair n acc))");
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
     assert!(
         live_chain_growth > 150,
         "precondition: the live accumulator retains every prior, so region growth \
@@ -287,7 +235,7 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
          small, the gauge is dead and the assertions below are vacuous",
     );
 
-    let rotating = region_growth(prelude, "(f 3)");
+    let rotating = mid_run_growth(Runtime::new(), prelude, "(f 3)", "arena/region-count");
     assert!(
         rotating < 50,
         "an in-lambda mutual letrec cycle must be reclaimed per call by the \
@@ -295,7 +243,7 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
          must be near zero, got {rotating} (each call's merged arena leaks if the \
          cycle is refused or the stranded binding-scope drop is never supplied)",
     );
-    let base_case = region_growth(prelude, "(f 0)");
+    let base_case = mid_run_growth(Runtime::new(), prelude, "(f 0)", "arena/region-count");
     assert!(
         base_case < 50,
         "the base-case-only path (`(f 0)` — no sibling rotation) must also reclaim: \
@@ -350,6 +298,78 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
          growth over 10 discarded closures must be ~0, got {delta} — its per-call region \
          leaks if the tail-call deferred release does not supply the tail-call-stranded scope-end \
          DecrefRegion",
+    );
+}
+
+/// Per-call reclamation of a stranded recursive closure the recursion **RETURNS** —
+/// the return-funded admission (docs/impl/selfrec.md § "The deferral's escape gate is
+/// the fiber frontier alone"). Each subject's letrec/def body is a frame-replacing tail
+/// call, so the closure region's scope-end `DecrefRegion` is dead (or suppressed) and
+/// the tail-call deferred release is the region's only release channel. Returning the
+/// closure does not withdraw that channel: the callee's `Return` mints the caller's
+/// reference *before* `trampoline_loop` breaks and runs the deferred decref, so the
+/// count between the two is the caller's and the deferral drops only the frame's own.
+///
+/// Two shapes, one per stranding route — a `letrec` self-loop (dead scope-end drop)
+/// and a `def` self-loop (`suppressed_self_regions`). Each result is DISCARDED at the
+/// call site, so nothing legitimately retains it and the whole per-call region must
+/// come back. Boolean-only bodies keep them on `Runtime::without_stdlib()`, where no
+/// trait dispatch churns the region count.
+///
+/// A returned member of a MUTUAL SCC is deliberately not here: a member on the return
+/// frontier fails the closure-cycle merge's own non-escape gate, so that shape has no
+/// merged arena to defer and leaks as a refused cycle instead — a different mechanism,
+/// gauged by the `recur-local-mutual-ret` probe in `tests/elle/oracle.lisp` against its
+/// reclaimed `recur-local-mutual` control.
+///
+/// Counterfactual: each reads ~200 (one stranded region per call, closure + env
+/// together) while the return facet blanket-refuses the deferral; ~0 once the refusal
+/// narrows to the fiber frontier. The live accumulator beside them proves the gauge
+/// sees per-call region growth at all.
+#[test]
+fn recursive_returned_closure_reclaims_per_call() {
+    let growth = |prelude: &str, body: &str| {
+        mid_run_growth(
+            Runtime::without_stdlib(),
+            prelude,
+            body,
+            "arena/region-count",
+        )
+    };
+
+    let live = mid_run_discriminator(Runtime::without_stdlib(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    // `letrec` self-loop: the scope-end DecrefRegion is emitted past the `(loop k)`
+    // TailCall (dead code), so the deferral is the sole channel.
+    let letrec_self = growth(
+        "(def frec (fn [k] (letrec [loop (fn [m] (if m loop (loop true)))] (loop k))))",
+        "(frec false)",
+    );
+    assert!(
+        letrec_self < 50,
+        "a returned cell-free self-recursive `letrec` closure must still be reclaimed \
+         per call — its caller's reference is the `Return` mint, and the deferred \
+         release drops only the frame's own: region growth over 200 discarded calls \
+         must be ~0, got {letrec_self}",
+    );
+
+    // `def` self-loop: the would-be-live DecrefRegion is suppressed instead of dead,
+    // reproducing the letrec accounting through the other stranding route.
+    let define_self = growth(
+        "(def fdef (fn [k] (def loop (fn [m] (if m loop (loop true)))) (loop k)))",
+        "(fdef false)",
+    );
+    assert!(
+        define_self < 50,
+        "a returned cell-free self-recursive `def` closure must be reclaimed per call \
+         (its release is suppressed, so the deferral is the only channel): region \
+         growth over 200 discarded calls must be ~0, got {define_self}",
     );
 }
 
@@ -416,46 +436,20 @@ fn tail_or_short_circuit_returns_owned_param_no_uaf() {
 /// premature-decref-suppression fix; runs clean and bounded after.
 #[test]
 fn self_recursive_define_with_arith_reclaims_per_call() {
-    use crate::pipeline::compile_file_repl;
-
-    // Run `body` 50 then 250 times in one program, sampling `arena/region-count` at each
-    // point, and return the raw count delta (c250 − c50) the program computes. Mirrors
-    // `closure_cycle_nested_letrec_reclaims_per_call`'s gauge — a crash inside the run
-    // panics here (the RED counterfactual); a leak grows the returned delta.
-    fn region_growth(prelude: &str, body: &str) -> i64 {
-        let mut rt = Runtime::new();
-        let src = format!(
-            "{prelude} (var n 0) \
-             (while (%lt n 50) {body} (assign n (%add n 1))) \
-             (def c50 (arena/region-count)) \
-             (while (%lt n 250) {body} (assign n (%add n 1))) \
-             (def c250 (arena/region-count)) \
-             (- c250 c50)"
-        );
-        let result = {
-            let (_vm, symbols, cctx) = rt.parts();
-            compile_file_repl(&src, symbols, cctx, "<embed>")
-                .expect("compiles")
-                .0
-        };
-        let (vm, symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs")
-            .as_int()
-            .expect("program returns the region-count delta as an int")
-    }
-
     // Subject: a self-recursive `def` (not `letrec`) nested in a lambda, recursing with
     // heap-allocating stdlib `<`/`-` so a freed `R_cell` page is recycled mid-recursion.
-    let call_growth = region_growth(
+    // A crash inside the run panics here (the RED counterfactual); a leak grows the delta.
+    let call_growth = mid_run_growth(
+        Runtime::new(),
         "(def f (fn [k] \
             (def loop (fn [m] (if (< m 1) :done (loop (- m 1))))) \
             (loop k)))",
         "(f 3)",
+        "arena/region-count",
     );
     // Discriminator: the self-referential accumulator legitimately retains every prior, so
     // the gauge MUST see large growth here — else the bounded assertion below is vacuous.
-    let live_chain_growth = region_growth("(def @acc nil)", "(assign acc (%pair n acc))");
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
 
     assert!(
         live_chain_growth > 150,

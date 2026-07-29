@@ -193,36 +193,9 @@ fn region_ownership_reclaims_bare_cycle_group_under_jit() {
 /// `arena/count` tracks per-call allocation (else every reading is void).
 #[test]
 fn self_recursive_loop_is_cell_free() {
-    use crate::pipeline::compile_file_repl;
-
-    // Growth of `gauge` over 200 executions of the retaining `body`, sampled
-    // mid-run after 50 then 250 iterations; returns c250 - c50 (the per-200-call
-    // delta the program computes). The gauge results are opaque to inference; the
-    // match-arm dispatch proves them :integer for the closing `%sub` (no stdlib
-    // `-` on this runtime).
-    fn retained_growth(prelude: &str, body: &str, gauge: &str) -> i64 {
-        let mut rt = Runtime::without_stdlib();
-        let src = format!(
-            "{prelude} (var n 0) \
-             (while (%lt n 50) {body} (assign n (%add n 1))) \
-             (def c50 ({gauge})) \
-             (while (%lt n 250) {body} (assign n (%add n 1))) \
-             (def c250 ({gauge})) \
-             (match (type-of c250) :integer \
-               (match (type-of c50) :integer (%sub c250 c50) _ -1) _ -1)"
-        );
-        let result = {
-            let (_vm, symbols, cctx) = rt.parts();
-            compile_file_repl(&src, symbols, cctx, "<embed>")
-                .expect("compiles")
-                .0
-        };
-        let (vm, symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs")
-            .as_int()
-            .expect("program returns the gauge delta as an int")
-    }
+    let retained_growth = |prelude: &str, body: &str, gauge: &str| {
+        mid_run_growth(Runtime::without_stdlib(), prelude, body, gauge)
+    };
 
     // Subject: a self-recursive in-lambda `loop`. Its initializer references only
     // itself, a self-edge that does not mark it captured, so `loop` is cell-free —
@@ -246,11 +219,7 @@ fn self_recursive_loop_is_cell_free() {
     // closures above, for the same reason: the `%array-push` funnel store-adopts
     // the pushed region, and an Owned member leaves the active accounting
     // `arena/count` sums — retained values, invisible objects.
-    let pair_obj = retained_growth(
-        "(def @acc nil)",
-        "(assign acc (%pair n acc))",
-        "arena/count",
-    );
+    let pair_obj = mid_run_discriminator(Runtime::without_stdlib(), "arena/count");
     let rec_reg = retained_growth(rec_prelude, rec_body, "arena/region-count");
     let for_reg = retained_growth(for_prelude, for_body, "arena/region-count");
 

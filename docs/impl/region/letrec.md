@@ -128,6 +128,14 @@ and lets exactly one fire.
   (read through a **non-upvalue** reference only, so a nested closure in the body can
   never free the arena out from under a later use), and the `TailCall` carries
   `deferred_release_region = region_of(callee)` — the merged arena, because a member lives in it.
+  That consumer also refuses a callee crossing the return or fiber frontier, which is a
+  redundant guard rather than a live gate: the marking is keyed on
+  `closure_cycle_members`, so only a member of an **admitted** merge ever reaches it, and
+  admission already asks the same frontier question (the non-escape gate above). The
+  self-recursive deferral's return facet, by contrast, is genuinely admitted and funded by
+  the callee's own `Return` mint ([selfrec.md](../selfrec.md) § "The deferral's escape gate
+  is the fiber frontier alone") — the two gates read differently because one sits behind
+  the merge's refusal and the other does not.
 
 - **A tail call to a NON-member** (a native `%add`, a redefined operator `+`, a
   foreign closure `g`) rides an explicit slot instead. The arena is therefore

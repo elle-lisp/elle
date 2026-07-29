@@ -117,38 +117,63 @@ cell-free case.
 
 In both stranded cases the runtime **deferred release** supplies it.
 `tail_callee_defers_release` (`lir/lower/control/call.rs`) returns true for a tail call to a
-`stranded_self_bindings` callee that does not cross a frontier; the `TailCall` then carries
-`deferred_release_region = region_of(callee)`, and `trampoline_loop` (`vm/execute.rs`) decrefs each
-deferred region exactly once on the recursion's **normal completion** (deduped — a
+`stranded_self_bindings` callee that does not cross the fiber frontier; the `TailCall` then
+carries `deferred_release_region = region_of(callee)`, and `trampoline_loop` (`vm/execute.rs`)
+decrefs each deferred region exactly once on the recursion's **normal completion** (deduped — a
 tail-recursive `loop` re-enters with the same closure each iteration but carries one
 stranded decref).
 
-### The deferral's escape gate is the frontier escape, not the full activation escape
+### The deferral's escape gate is the fiber frontier alone
 
-The deferred release for a stranded self-recursive binding is gated on the **frontier** escape —
-`binding_escapes_via_return ∪ escapes_fiber` (return ∪ fiber) — not
-`binding_escapes_activation`. The full activation escape additionally folds in the store
+The deferred release for a stranded self-recursive binding is gated on **`escapes_fiber`** —
+neither the full activation escape nor the return facet.
+
+The full activation escape (`binding_escapes_activation`) additionally folds in the store
 and capture facets — **containment** relations that keep a closure inside the activation's
 owned subtree (it dies WITH the activation), not frontier crossings. A cell-free
-self-recursive closure held by a local container would then read as escaping (the store
-facet is a containment relation, not a frontier crossing) and falsely block the deferral,
-re-stranding the decref into a leak. Only a closure actually returned or sent to a fiber
-outlives the activation and must not be freed by the new activation, so those two facets —
-and only those — block the deferral. (The *capture* facet never applies to a binding that
-reaches this gate: a sibling capture would make the binding `needs_capture`, so it is not
-cell-free, so the § cell-free gate never strands it — its forward cell's cascade owns the
-release instead of the deferral.)
+self-recursive closure held by a local container would then read as escaping and falsely
+block the deferral, re-stranding the decref into a leak. (The *capture* facet never applies
+to a binding that reaches this gate: a sibling capture would make the binding
+`needs_capture`, so it is not cell-free, so the § cell-free gate never strands it — its
+forward cell's cascade owns the release instead of the deferral.)
 
-**The residual: a cell-free self-recursive closure that is itself RETURNED.** The two
-rows of the table above are exclusive by construction — a stranded binding's release is
-the deferral's — so a binding the frontier gate refuses has *neither*: its scope-end
-`DecrefRegion` still sits past the `TailCall`, and no deferred channel supplies it. The
-frame's own reference to the closure region strands once per call, closure and env
-together. The frame-exit relocation does not reach it either: the region is the tail
-call's own **callee**, and a release moved ahead of the call would free the closure the
-call is about to enter. Measured by the `recur-local-self-mint` probe in
-`tests/elle/oracle.lisp` (2 objects/call, beside the non-recursive
-`recur-local-foreign-mint` control at 0).
+**The return facet is funded by the callee's own `Return` mint.** Read as a count question,
+a returned closure is not a reason to withhold the release — the deferral is a *decref*, not
+a free, and frees only if it takes the count to zero. Three references are in play over one
+call:
+
+- the **frame's own**, taken where the closure is allocated. This is the one the strand
+  loses and the only one the deferral is there to supply.
+- the **caller's**, minted by the `Return` that hands the closure out — `LoadSelf` in
+  return position takes `lower_return`'s `IncrefValueRegion` exactly as any other returned
+  value does.
+- any **container's**, taken by the store funnel when the closure is stored on the way out
+  — the store facet, which never refused.
+
+The deferral runs at the recursion's **normal completion**: `trampoline_loop` breaks only
+once the final body has returned, so every `Return` mint on the taken path has already
+executed. The order over one call is: frame reference taken, callee mint, deferred release,
+caller's release — and between the mint and the caller's release the standing reference is
+the caller's. On a path that returns something *else* no mint fired and no one else holds
+the region, so the deferral's decref is the last reference and freeing there is exactly
+right.
+
+This is the same "the retain on this node funds this release" argument the frame-exit
+relocation makes for a returned region ([region/mechanism.md](region/mechanism.md) § "The
+callee's return mint, and the edge that funds the gap"), with the ordering the other way
+round and therefore nothing to bridge: that relocation moves a release *ahead* of the call
+and so needs a captured edge to hold the region off zero until the mint lands; the deferral
+runs *after* the mint and needs none.
+
+**The fiber frontier still refuses.** A closure emitted or sent crosses to a resumer or
+receiver whose hold the compiler did not place, and a parked frame may borrow it uncounted
+— the refusal every return-funded admission keeps. So the **residual** is a cell-free
+self-recursive closure that crosses the fiber frontier: the two rows of the table above are
+exclusive by construction, so a binding this gate refuses has *neither* release — its
+scope-end `DecrefRegion` still sits past the `TailCall` and no deferred channel supplies it,
+stranding closure and env once per call. The frame-exit relocation does not reach it either:
+the region is the tail call's own **callee**, and a release moved ahead of the call would
+free the closure the call is about to enter. That is a leak, never an over-free.
 
 ## Per-call cost, and the irreducible deferred release
 
@@ -195,5 +220,11 @@ neither forks the other.
   (the strand + suppress frees the closure region exactly once).
 - `…::closure_cycle_nested_letrec_reclaims_per_call` — the full-stdlib per-call reclamation
   gauge for a nested self-recursive letrec loop.
+- `…::recursive_returned_closure_reclaims_per_call` — the return-funded admission: a
+  RETURNED cell-free self-recursive closure still reclaims per call, through both
+  stranding routes (`letrec`'s dead scope-end drop and `def`'s suppressed one).
+- `tests/elle/region-selfrec-return-release.lisp` — the soundness half of the same
+  admission under the UAF oracle: every returned handle is RE-ENTERED after the
+  deferred release, across allocation churn that recycles a prematurely freed page.
 - `tests/elle/oracle.lisp` — `recur-local-self` (leak rate 0), `recur-local-self-mint`
-  (2 objects/call, cell-free).
+  (0, a returned self-recursive closure reclaims) beside `recur-local-foreign-mint`.
