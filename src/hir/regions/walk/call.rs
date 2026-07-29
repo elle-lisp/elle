@@ -1,4 +1,5 @@
 use super::*;
+use crate::hir::regions::walk::inline::Inlined;
 
 impl RegionInference {
     pub(super) fn walk_call(&mut self, hir: &Hir) -> Vec<Region> {
@@ -79,8 +80,23 @@ impl RegionInference {
         // inside the body produce the right edges at this
         // call site. Inlining only runs when the callee binds
         // a known immutable Lambda.
-        if let Some(result) = self.try_inline_call(func, &arg_regions, hir.id) {
-            return result;
+        //
+        // The inline is a device for collecting edges, not a splice: only what its
+        // walk RECORDED crosses back, plus the `Inlined` verdict on whether the
+        // callee yields a heap value at all — the body's own regions are the
+        // CALLEE's, so the caller names `call_r` for the result exactly as it does
+        // for an opaque callee. Otherwise the caller becomes a nominal holder of a
+        // region it never allocates, and the `decref_point` machinery places that
+        // region's one release by the caller's uses of it
+        // (docs/impl/region/mechanism.md § "A call's result is named by the call's
+        // own region"). The argument-side half of the same rule is
+        // `inline_bound_regions`.
+        match self.try_inline_call(func, &arg_regions, hir.id) {
+            // The body-derived answer to the question `call_returns_immediate`
+            // asks of a native below: nothing heap comes back, so nothing to name.
+            Inlined::Immediate => return Vec::new(),
+            Inlined::Heap => return vec![call_r],
+            Inlined::No => {}
         }
 
         // Opaque fallback, keyed on the callee's declared

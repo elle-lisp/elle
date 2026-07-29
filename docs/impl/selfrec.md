@@ -139,6 +139,17 @@ reaches this gate: a sibling capture would make the binding `needs_capture`, so 
 cell-free, so the § cell-free gate never strands it — its forward cell's cascade owns the
 release instead of the deferral.)
 
+**The residual: a cell-free self-recursive closure that is itself RETURNED.** The two
+rows of the table above are exclusive by construction — a stranded binding's release is
+the deferral's — so a binding the frontier gate refuses has *neither*: its scope-end
+`DecrefRegion` still sits past the `TailCall`, and no deferred channel supplies it. The
+frame's own reference to the closure region strands once per call, closure and env
+together. The frame-exit relocation does not reach it either: the region is the tail
+call's own **callee**, and a release moved ahead of the call would free the closure the
+call is about to enter. Measured by the `recur-local-self-mint` probe in
+`tests/elle/oracle.lisp` (2 objects/call, beside the non-recursive
+`recur-local-foreign-mint` control at 0).
+
 ## Per-call cost, and the irreducible deferred release
 
 A retained self-recursive closure mints exactly **2 objects/call** — the closure and its env

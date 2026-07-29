@@ -171,16 +171,26 @@ fn region_ownership_reclaims_bare_cycle_group_under_jit() {
 ///
 /// This gauges that cell-free baseline so any regression that reintroduces a per-call
 /// cell for pure self-recursion is a visible, loud failure. Made observable by
-/// RETAINING every closure in a program-lifetime `@keep` — each pinned closure keeps
-/// its region alive — then reading object-count growth (`arena/count`) across 200
-/// retained builds, sampled mid-run by the program exactly as
-/// `reassign_toplevel_prior_release_is_bounded` samples its gauge. The returned
+/// RETAINING every closure in a program-lifetime `%pair` CHAIN — each new pair links
+/// the last, so every closure stays reachable — then reading object-count growth
+/// (`arena/count`) across 200 retained builds, sampled mid-run by the program exactly
+/// as `reassign_toplevel_prior_release_is_bounded` samples its gauge. The returned
 /// closure escapes via return, so it is the caller that holds it.
 ///
-/// Object count, not region count, is the gauge (the closure and its env share one
-/// region in both shapes, so region growth is identical — asserted below). A
-/// fresh-pair retain is the live-growth discriminator: it must grow ~1 object/call,
-/// proving `arena/count` tracks per-call allocation (else every reading is void).
+/// The retain route is load-bearing and must stay a chain rather than a push into a
+/// container. A `%pair` records a COUNTED cross-region edge to the closure, so the
+/// closure's region stays in the active accounting `arena/count` sums. A container
+/// store instead lets the ownership forest ADOPT the stored region as a member of the
+/// container's subtree, and an Owned member carries no count — it leaves the sums
+/// entirely (retained values, invisible objects). A control retained that way reads
+/// as *shrinking*, and the gap below stops measuring cells at all.
+///
+/// Each retained build therefore pins THREE objects per call — the closure, its
+/// one-entry env, and the linking pair — and TWO regions (the closure's and the
+/// pair's). What the gap pins is that both shapes pay the same: a per-call forward
+/// cell would add a fourth object to the self-recursive shape alone. A fresh-pair
+/// retain is also the live-growth discriminator: it must grow ~1 object/call, proving
+/// `arena/count` tracks per-call allocation (else every reading is void).
 #[test]
 fn self_recursive_loop_is_cell_free() {
     use crate::pipeline::compile_file_repl;
@@ -218,44 +228,31 @@ fn self_recursive_loop_is_cell_free() {
     // itself, a self-edge that does not mark it captured, so `loop` is cell-free —
     // its self-reference resolves to the executing closure. `(frec false)` recurses
     // to the base case and RETURNS the `loop` closure (escaping), which `@keep` pins.
-    let rec_prelude = "(def @keep @[]) \
+    let rec_prelude = "(def @keep nil) \
         (def frec (fn [k] (letrec [loop (fn [m] (if m loop (loop true)))] (loop k))))";
     // Cell-free analog of equal capture arity: `h` captures one upvalue (the
     // immediate `k`), not itself — likewise a closure + one-entry env, no cell. With
     // self-recursion also cell-free, the only structural difference is gone.
-    let for_prelude = "(def @keep @[]) \
+    let for_prelude = "(def @keep nil) \
         (def ffor (fn [k] (let [h (fn [m] (if m k k))] h)))";
+    let rec_body = "(assign keep (%pair (frec false) keep))";
+    let for_body = "(assign keep (%pair (ffor false) keep))";
 
-    let rec_obj = retained_growth(
-        rec_prelude,
-        "(%array-push keep (frec false))",
-        "arena/count",
-    );
-    let for_obj = retained_growth(
-        for_prelude,
-        "(%array-push keep (ffor false))",
-        "arena/count",
-    );
+    let rec_obj = retained_growth(rec_prelude, rec_body, "arena/count");
+    let for_obj = retained_growth(for_prelude, for_body, "arena/count");
     // Gauge-live discriminator: the chain accumulator retains every prior pair by
     // REFERENCE (each new pair links the last), so the object count must grow ~1
-    // per call. A pushed fresh pair cannot serve here: the `%array-push` funnel
-    // store-adopts the pair's region, and an Owned member leaves the active
-    // accounting `arena/count` sums — retained values, invisible objects.
+    // per call. A pushed fresh pair cannot serve here — nor can it retain the
+    // closures above, for the same reason: the `%array-push` funnel store-adopts
+    // the pushed region, and an Owned member leaves the active accounting
+    // `arena/count` sums — retained values, invisible objects.
     let pair_obj = retained_growth(
         "(def @acc nil)",
         "(assign acc (%pair n acc))",
         "arena/count",
     );
-    let rec_reg = retained_growth(
-        rec_prelude,
-        "(%array-push keep (frec false))",
-        "arena/region-count",
-    );
-    let for_reg = retained_growth(
-        for_prelude,
-        "(%array-push keep (ffor false))",
-        "arena/region-count",
-    );
+    let rec_reg = retained_growth(rec_prelude, rec_body, "arena/region-count");
+    let for_reg = retained_growth(for_prelude, for_body, "arena/region-count");
 
     // If the discriminator reads small, `arena/count` is not tracking per-call
     // allocation and every assertion below is vacuous.
@@ -278,21 +275,23 @@ fn self_recursive_loop_is_cell_free() {
          ~0 (a gap near 200 means a per-call cell was reintroduced)",
     );
 
-    // The absolute baseline: a retained self-recursive closure pins ~2 objects per
-    // call (closure + one-entry env ~= 400/200), the same as the foreign-capture
-    // control — no forward cell.
+    // The absolute baseline: each retained build pins ~3 objects per call — the
+    // closure, its one-entry env, and the pair linking it into the chain (~600/200) —
+    // the same as the foreign-capture control. A forward cell would make it ~4/call.
     assert!(
-        (300..=500).contains(&rec_obj),
-        "cell-free baseline: 200 retained self-recursive `loop` closures pin ~400 \
-         objects (2/call: closure + env, no forward cell), got {rec_obj}",
+        (450..=750).contains(&rec_obj),
+        "cell-free baseline: 200 retained self-recursive `loop` closures pin ~600 \
+         objects (3/call: closure + env + the retaining pair, no forward cell), \
+         got {rec_obj}",
     );
 
-    // Region count grows identically in both shapes (closure + env share one region),
-    // so object count is the necessary gauge for the per-call cell.
+    // Region growth matches between the shapes too (the closure and its env share one
+    // region, and the retaining pair adds one), so a per-call cell would show as an
+    // extra REGION as well as an extra object.
     assert!(
         (rec_reg - for_reg).abs() < 50,
         "region growth must match between the self-recursive and foreign-capture \
-         shapes (closure + env share one region): self-recursive {rec_reg} vs \
-         foreign-capture {for_reg}",
+         shapes (closure + env share one region, plus the retaining pair): \
+         self-recursive {rec_reg} vs foreign-capture {for_reg}",
     );
 }

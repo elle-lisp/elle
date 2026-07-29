@@ -218,7 +218,7 @@
 (declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct"
                     "group-by" "frequencies" "merge" "concat" "pipeline"
                     "each-list" "string-outer" "append-outer" "concat-while"
-                    "yield-concat" "nested-closure" "stdlib-concat" "zip-tower"])
+                    "yield-concat" "stdlib-concat" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -227,14 +227,10 @@
                    "yield-multimut" "protect-while" "denied-discard"
                    "cancel-discard" "abort-discard"])
 (declare-root :f3 ["io-yield ev/sleep"])
-# `recur-local-self-mint` is F4 (cyclic refusal-to-Shared): a self-recursive local
-# closure that RETURNS ITSELF is a genuine reference cycle RC cannot collect, so it
-# stays Shared when its holder frees. Its acyclic control `recur-local-foreign-mint`
-# (captures an immediate, not itself) now reclaims to 0, isolating the residual to
-# the self-reference cycle — the "mint-count" gap the pair was built to expose,
-# unmasked once the F1b container over-keep on their shared block-local `@keep`
-# accumulator closed.
-(declare-root :f4 ["recur-local-self-mint"])
+# F4 (cyclic refusal-to-Shared) has no pinned probe: `recur-local-self-mint` was
+# filed there and measured NOT to be a refused cycle — it records no region cycle
+# and is cell-free — so it is declared under F5 below with the mechanism its
+# emitted code shows.
 # The whole `break-*` family is CLOSED controls (undeclared, like
 # `rest-array-copy`), so a regression to open trips the completeness gate loudly
 # instead of being absorbed as F5: `break-value*` pin the break TRANSFER (the
@@ -263,7 +259,16 @@
 # like `rest-array-copy`): a `match` arm's pattern binding records its scope, so a
 # read of it inside a loop is no longer read as a read of a loop-external binding
 # and the scrutinee's release stays in the body that allocates it.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
+# `recur-local-self-mint` is the stranded self-recursive closure region: a
+# cell-free self-recursive closure's own region is a per-call allocation whose
+# scope-end `DecrefRegion` the lowerer emits PAST the letrec body's frame-replacing
+# tail call, and the runtime deferred release that normally supplies it is refused
+# for a closure crossing the RETURN frontier (docs/impl/selfrec.md § "The
+# deferral's escape gate is the frontier escape"). A RETURNED self-recursive
+# closure therefore has no release at all and strands its closure + env. Its
+# control `recur-local-foreign-mint` is not self-recursive, so nothing strands it.
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"
+                   "recur-local-self-mint"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -803,11 +808,19 @@
       (filter (fn [x]
                 (numeric!)
                 (%gt x 1)) [1 2 3])) 0]
+   # A CLOSED control for the call-result naming rule (undeclared, like
+   # `rest-array-copy`), so a regression to open trips the completeness gate
+   # loudly instead of being absorbed as F1a scratch. The walk inlines `f`'s
+   # body, and the regions that walk yields — here the one the inner lambda's
+   # closure+env live in — name the CALLEE's activation; the caller's temp holds
+   # the call's own region instead (docs/impl/region/mechanism.md § "A call's
+   # result is named by the call's own region"). Adopting them made the caller a
+   # second, nominal holder and dragged the region's one release onto a node the
+   # allocating path never reaches.
    ["nested-closure"
     (fn [j]
       (let [f (fn [] (fn [] j))]
-        ((f)))) 2]  # user-fn calls, value flow
-    ["user-struct" (fn [j] (make-struct j)) 0]
+        ((f)))) 0] ["user-struct" (fn [j] (make-struct j)) 0]
    ["user-string" (fn [j] (make-label j)) 0] ["chain" (fn [j] (process j)) 0]
    # The F1a gauge for the UN-fused stdlib `map`: the kernel CAPTURES `k`, a shape
    # loop fusion declines (splicing a capture at the call site is out of scope), so
@@ -1053,22 +1066,23 @@
 (pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
               0.5) 0)
 
-# ── Retained-closure reclamation (a self-reference cycle, F4) ──
+# ── Retained-closure reclamation (the stranded self-recursive closure region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a
 # LOOP (0 — cell-free, reclaimed per call). These two RETAIN each returned closure in
 # a block-local @keep, so the question becomes whether the closure's own region
 # reclaims when @keep is freed at the block's return.
 #
-# The foreign-capture CONTROL (`lcl-foreign-ret` captures the immediate n, not itself)
-# is acyclic and reclaims to 0: its closure+env free with @keep. The self-returning
-# closure (`lcl-self-ret` returns `go`, which references itself) is a genuine reference
-# cycle — `go`'s reachability includes `go` — so RC cannot collect it and it stays
-# Shared even after @keep frees (F4 cyclic refusal-to-Shared), pinning its closure+env
-# at 2/op. The gap (self 2, foreign 0) isolates the self-reference cycle; it was masked
-# while the F1b `push` over-keep held @keep itself alive across the block, reading both
-# at 2. Object growth, not region growth, is the gauge (closure + env share one region).
-# The self-recursive LOOP being cell-free is a distinct property, pinned deterministically
-# by runtime::tests::ownership::self_recursive_loop_is_cell_free.
+# `lcl-self-ret`'s `go` is cell-free and self-recursive, so the lowerer strands its
+# scope-end `DecrefRegion` past the letrec body's frame-replacing tail call and the
+# runtime deferred release is the only thing that would free it — refused here,
+# because `go` crosses the RETURN frontier (docs/impl/selfrec.md § "The deferral's
+# escape gate is the frontier escape"). With no release on any path its closure+env
+# strand at 2/op. The CONTROL `lcl-foreign-ret` is not self-recursive: nothing
+# strands its release, so it reclaims to 0 and the gap isolates the strand rather
+# than the retain. Object growth, not region growth, is the gauge (closure + env
+# share one region). The self-recursive LOOP being cell-free is a distinct property,
+# pinned deterministically by
+# runtime::tests::ownership::self_recursive_loop_is_cell_free.
 (defn lcl-self-ret [n]
   "Self-recursive local closure that RETURNS itself (so a retain pins its region)."
   # go is returned (value position), which disables call-site param joins, so a

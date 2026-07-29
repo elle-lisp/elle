@@ -40,6 +40,47 @@ Each region-RC instruction names its region in one of two ways:
   `activation_region_map` to the physical region this execution minted for that
   slot. Usable only where the region is statically known.
 
+## A call's result is named by the call's own region
+
+Nothing of the callee's *interior* naming crosses the call boundary. Every call node
+mints one `call_r` — the caller-side name for "whatever region the returned value
+turns out to live in" — and its release is the value-resolved route above, so a
+static region of the callee is never named in the caller.
+
+That holds however much of the callee this compilation can see. The walk **inlines**
+a resolvable lambda callee's body (`regions::walk::inline`) so the intrinsics buried
+inside it record their cross-region edges at *this* call site — the whole reason the
+inline exists. The regions that walk yields are the callee's, minted against the
+callee's own nodes and remapped to fresh physical regions per activation, so they are
+discarded: the caller's binding for the result holds `call_r`, exactly as it does for
+an opaque callee.
+
+Letting them through instead makes the caller a nominal holder of a region it never
+allocates, and the `decref_point` machinery reads that fiction as fact:
+
+- the holder's uses **extend the region's `decref_point`** into the caller. Where the
+  caller's use sits in a branch arm mutually exclusive with the arm that does allocate
+  the region — the base case of `(if p (mk …) (go …))`, whose recursive call inlines
+  the same body and so yields the base arm's own result region — the region's one
+  release is emitted on the only path that never mints it, and the allocating path
+  emits none at all. The value route loads a slot holding `nil` there, so the release
+  is inert as well as misplaced and the region is held to fiber teardown;
+- the region gains a **second holder binding**, which disqualifies it from the
+  single-holder value route `regions::compensate` needs, so the per-arm compensation
+  that would otherwise cover the allocating arm declines as well.
+
+This is the result-side half of one rule. The argument-side half is
+`inline_bound_regions`, which keeps a `Return`/`Break` reached *inside* an inline from
+extending a **caller** region's `decref_point` onto a callee node. Both say the same
+thing: an inline is a device for collecting edges, not a splice, and the two
+activations' namings must not mix.
+
+Pinned by `regions::tests::inline::*`, the leak face
+`tests/elle/region-inline-result-naming.lisp`, and the soundness complement
+`region-inline-result-naming-uaf.lisp` — the caller holds exactly one release for the
+result, so everything the callee hands back that is not freshly its own must ride a
+counted edge.
+
 ## The return mint is emitted exactly once
 
 The callee half of that convention is **one** mint per returned value: a function

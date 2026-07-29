@@ -282,6 +282,27 @@ fn region_branch_arm_window_uaf() {
     );
 }
 
+// Guard — an inlined callee's body regions name the CALLEE's activation, so the
+// caller names the call's own region for the result (docs/impl/region/mechanism.md
+// § "A call's result is named by the call's own region"). The result therefore
+// carries exactly one caller-side release, so what the callee hands back that is
+// not freshly its own has no second caller-side holding and must ride a counted
+// edge instead. This drives each such
+// hand-off: an argument returned unchanged, one of two arguments picked per path,
+// an element read out of an argument, a result stored into a module-level
+// container, captured by a closure called later, yielded across the fiber
+// frontier, fed forward as the next call's argument, read past a branch merge, and
+// allocated in a self-recursive walk's base case. Freeing any of them early faults
+// on the read below — SIGSEGV under guardfree. The leak face is
+// `region-inline-result-naming.lisp`.
+#[test]
+fn region_inline_result_naming_uaf() {
+    run_elle_script_with_args(
+        "region-inline-result-naming-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `match` arm's pattern binding records its scope, so a read of it
 // inside a loop no longer reads as a read of a loop-external binding and the
 // scrutinee's release stays in the body that allocates it (docs/impl/region/

@@ -1,8 +1,32 @@
 //! Callee inlining for the region walk: temporarily bind a Var-callee Lambda's
 //! params to the caller's arg regions and re-walk its body so intrinsics buried
 //! inside the callee emit their cross-region edges at the call site.
+//!
+//! What crosses back is only what the walk RECORDED, plus the one summary fact
+//! [`Inlined`] carries. The regions the walk yields name the callee's activation,
+//! so the caller names the call's own region for the result
+//! (docs/impl/region/mechanism.md § "A call's result is named by the call's own
+//! region").
 
 use super::*;
+
+/// What an inlined callee's body walk tells its CALL SITE.
+///
+/// Not the body's regions — those name the callee's activation and are remapped to
+/// fresh physical regions per call, so handing them to the caller would make it a
+/// nominal holder of a region it never allocates (§ the module doc). What does
+/// cross back is the one fact the caller cannot read off the callee's declaration:
+/// whether the call yields a heap value at all. That is the same question
+/// `call_returns_immediate` answers for a native, asked of a body this compilation
+/// can see, and it decides whether the call names its own region or names none.
+pub(super) enum Inlined {
+    /// No resolvable lambda body here — fall back to opaque-call handling.
+    No,
+    /// Body walked; its result is an immediate, so the call names no region.
+    Immediate,
+    /// Body walked; its result is a heap value, named by the call's own region.
+    Heap,
+}
 
 impl RegionInference {
     /// Try to inline a Call's callee Lambda body for region analysis.
@@ -14,28 +38,31 @@ impl RegionInference {
     /// `%array-push` inside `push`) and emit the corresponding
     /// cross-region edges at the call site.
     ///
-    /// Returns `Some(result_regions)` when inlining succeeded;
-    /// `None` to fall back to opaque-call handling.
+    /// Returns [`Inlined`]: whether the body was walked, and — when it was — the
+    /// one summary fact that crosses back to the call site. The body's own regions
+    /// do not (see [`Inlined`]).
     pub(super) fn try_inline_call(
         &mut self,
         func: &Hir,
         arg_regions: &[Vec<Region>],
         _call_id: HirId,
-    ) -> Option<Vec<Region>> {
+    ) -> Inlined {
         // Only inline Var callees.
         let binding = match &func.kind {
             HirKind::Var(b) => *b,
-            _ => return None,
+            _ => return Inlined::No,
         };
         // Must be immutable and have a known Lambda body.
         let bi = self.arena().get(binding);
         if !bi.is_immutable || bi.is_mutated {
-            return None;
+            return Inlined::No;
         }
-        let lambda_ptr = *self.binding_lambda.get(&binding)?;
+        let Some(&lambda_ptr) = self.binding_lambda.get(&binding) else {
+            return Inlined::No;
+        };
         // Guard against infinite recursion (max 4 levels).
         if self.inline_depth >= 4 {
-            return None;
+            return Inlined::No;
         }
         // SAFETY: lambda_ptr points into the HIR tree which outlives
         // the RegionInference (both live for the analyze_regions call).
@@ -47,7 +74,7 @@ impl RegionInference {
                 body,
                 ..
             } => (params, rest_param, body),
-            _ => return None,
+            _ => return Inlined::No,
         };
         // Save and bind params to caller's arg regions.
         let mut saved: Vec<(Binding, Option<Vec<Region>>)> = Vec::new();
@@ -87,7 +114,11 @@ impl RegionInference {
         // with the call site's nesting.
         self.in_lambda_depth += 1;
         self.inline_depth += 1;
-        let result = self.walk(body);
+        // The walk is run for its RECORDING side effects — the edges, sites and
+        // classifications the body's intrinsics contribute at this call site. Of its
+        // result regions only the EMPTINESS crosses back (§ [`Inlined`]); the
+        // regions themselves are the callee's own and are discarded.
+        let yields_heap = !self.walk(body).is_empty();
         self.inline_depth -= 1;
         self.in_lambda_depth -= 1;
         for r in newly_bound {
@@ -104,6 +135,10 @@ impl RegionInference {
                 }
             }
         }
-        Some(result)
+        if yields_heap {
+            Inlined::Heap
+        } else {
+            Inlined::Immediate
+        }
     }
 }

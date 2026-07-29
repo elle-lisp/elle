@@ -9,25 +9,6 @@ use super::*;
 // See docs/impl/region/mechanism.md § "The return frontier is per-path" and the
 // end-to-end pin tests/elle/region-return-arm-escape-leak.lisp.
 
-/// The `(then_id, else_id)` body HirIds of the first `If` in the tree.
-fn first_if_arms(hir: &Hir) -> Option<(HirId, HirId)> {
-    if let HirKind::If {
-        then_branch,
-        else_branch,
-        ..
-    } = &hir.kind
-    {
-        return Some((then_branch.id, else_branch.id));
-    }
-    let mut found = None;
-    hir.for_each_child(|c| {
-        if found.is_none() {
-            found = first_if_arms(c);
-        }
-    });
-    found
-}
-
 /// The body HirIds of the first `Match` in the tree, in arm order.
 fn first_match_arms(hir: &Hir) -> Option<Vec<HirId>> {
     if let HirKind::Match { arms, .. } = &hir.kind {

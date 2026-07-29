@@ -30,6 +30,7 @@ mod compensate;
 mod effects;
 mod emit;
 mod escape;
+mod inline;
 mod looprc;
 mod merge;
 mod owned;

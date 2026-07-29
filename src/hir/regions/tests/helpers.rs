@@ -324,6 +324,25 @@ pub(super) fn find_binding_by_name(
     walk(hir, name, arena, symbols)
 }
 
+/// The `(then_id, else_id)` body HirIds of the first `If` in the tree.
+pub(super) fn first_if_arms(hir: &Hir) -> Option<(HirId, HirId)> {
+    if let HirKind::If {
+        then_branch,
+        else_branch,
+        ..
+    } = &hir.kind
+    {
+        return Some((then_branch.id, else_branch.id));
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = first_if_arms(c);
+        }
+    });
+    found
+}
+
 pub(super) fn find_first<F>(hir: &Hir, pred: F) -> Option<HirId>
 where
     F: Fn(&Hir) -> bool + Copy,
