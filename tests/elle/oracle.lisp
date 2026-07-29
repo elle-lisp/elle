@@ -227,16 +227,19 @@
                    "yield-multimut" "protect-while" "denied-discard"
                    "cancel-discard" "abort-discard"])
 (declare-root :f3 ["io-yield ev/sleep"])
-# F4's pinned member is `recur-local-mutual-ret` — the ESCAPING closure cycle, the
-# shape the class names: an ev/od SCC one of whose members is returned, which puts it
-# on the merge's non-escape gate and leaves the whole cycle Shared, uncollectable by
-# per-region RC. It is a refused cycle by direct observation, not by resemblance: its
-# region dump differs from the reclaimed `recur-local-mutual` control only in the
-# merge forest, and it leaks on DISCARD, which a stranded release would not.
+# F4's pinned member is `recur-local-mutual-ret-foreign` — a returned ev/od SCC whose
+# letrec body tail-calls a NON-member, so the merged arena's release would land on the
+# live scope-exit drop (before the `Return` mint) and the merge refuses the return facet,
+# leaving the cycle Shared and uncollectable by per-region RC. Its boundary control
+# `recur-local-mutual-ret` is the SAME cycle one body-tail apart (a MEMBER tail call,
+# whose deferral runs after the mint) and is CLOSED at 0 — undeclared, like
+# `rest-array-copy`, so a regression there trips the completeness gate loudly instead of
+# being absorbed as F4. The class's other named shape (the ambiguous-owner /
+# unemittable-edge subtree — `compute_adopt_edges` refusals) still has no probe.
 # `recur-local-self-mint` is NOT a member of this class despite the resemblance: the
 # returned self-recursive closure records no region cycle at all and is cell-free, so
 # it belongs to the deferred-release mechanism instead and is a control below.
-(declare-root :f4 ["recur-local-mutual-ret"])
+(declare-root :f4 ["recur-local-mutual-ret-foreign"])
 # The whole `break-*` family is CLOSED controls (undeclared, like
 # `rest-array-copy`), so a regression to open trips the completeness gate loudly
 # instead of being absorbed as F5: `break-value*` pin the break TRANSFER (the
@@ -1071,17 +1074,19 @@
 (pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
               0.5) 0)
 
-# ESCAPING closure cycle — the refused-cycle probe (F4). The same ev/od SCC as
-# `recur-local-mutual` above, one base case apart: it returns the MEMBER `ev` instead
-# of a keyword. That single change puts a member on the return frontier, which is the
-# closure-cycle merge's non-escape gate (`compute_closure_cycle_merges` reads
-# `compute_shared_seeds`), so the SCC is refused to Shared — and per-region RC cannot
-# collect a cycle, so all four regions (two closures, two forward cells) and their six
-# objects stay live. The pair is the whole diagnosis: the two shapes' region dumps are
-# identical but for the merge forest, which the control populates and this one leaves
-# empty. The result is DISCARDED at the call site, so nothing retains it and the leak
-# is the cycle itself rather than a held reference — the property that separates F4
-# (an uncollectable cycle) from a stranded release, which would reclaim on discard.
+# RETURNED closure cycle — the return-funded merge admission (rate 0). The same ev/od
+# SCC as `recur-local-mutual` above, one base case apart: it returns the MEMBER `ev`
+# instead of a keyword, putting a member on the return frontier. The merge admits it
+# anyway, because the merge's release is a decref rather than a free and the returned
+# member lives IN the merged arena, so the callee's `Return` mint raises the arena's own
+# count — and the letrec body's tail is a call to the MEMBER `ev`, whose deferral runs at
+# the recursion's normal completion, AFTER that mint. So the deferral drops only the
+# frame's reference while the caller's stands, and the discard at the call site takes the
+# arena to zero and subtree-drops the cycle (docs/impl/region/letrec.md § The frontier
+# gate). The FIBER half of the frontier still refuses outright, and a returned cycle
+# whose letrec body does not exit through a member tail call keeps the Shared baseline —
+# its live scope-exit drop would fire before the mint. Refusing the whole return facet
+# instead holds this cycle's four regions — two closures, two forward cells — per call.
 (defn lcl-mutual-ret [n]
   # `ev` is returned (a value use), which disables call-site param joins, so a local
   # diverging guard proves the %lt/%sub operands.
@@ -1093,7 +1098,31 @@
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     (ev n)))
 (pin (measure "recur-local-mutual-ret" (fn [j] (lcl-mutual-ret 3)) 100 6 60 0.4
-              0.5) 6)
+              0.5) 0)
+
+# The RESIDUAL of that admission, and F4's pinned member. The identical returned ev/od
+# cycle, one body-tail apart: it tail-calls a NON-member (`lcl-ident`) rather than the
+# member `ev`. The non-member release channel exists precisely BECAUSE the compiler
+# cannot classify the callee, so its native fall-through is the LIVE scope-exit drop —
+# which fires while the frame still owns the returned member, before the `Return` mint
+# that would fund the caller's reference. The merge therefore refuses the return facet
+# here, the cycle stays Shared, and per-region RC cannot collect a cycle: two closures
+# and two forward cells stay live per call. This is the boundary control for
+# `recur-local-mutual-ret` above — the two differ only in the body tail — so the pair
+# reads the admission's gate directly rather than by resemblance. Its close needs a
+# release channel that runs after the mint on the native fall-through too.
+(defn lcl-ident [x]
+  x)
+(defn lcl-mutual-ret-foreign [n]
+  (letrec [ev (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (od (%sub m 1))))
+           od (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (ev (%sub m 1))))]
+    (lcl-ident (ev n))))
+(pin (measure "recur-local-mutual-ret-foreign"
+              (fn [j] (lcl-mutual-ret-foreign 3)) 100 6 60 0.4 0.5) 6)
 
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a

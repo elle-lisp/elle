@@ -58,13 +58,15 @@
           "re-entering the returned `def` closure must not read a recycled region"))
 
 # ── (3) mutual SCC that returns a member ─────────────────────────────────
-# The soundness peer of the two above rather than a third instance of them: a
-# returned member puts the SCC on the closure-cycle merge's non-escape gate, so
-# the cycle is refused to Shared and never reaches the deferral at all — both
-# closures and both forward cells keep independent RC. What must hold here is
-# that the refusal stays the always-legal baseline: the handle is still live and
-# re-enterable after the same churn, and no release fires on the arena the merge
-# declined to build (docs/impl/region/letrec.md § the non-escape gate).
+# The soundness peer of the two above rather than a third instance of them: the
+# cycle MERGES, and its arena rides the member-callee tail deferral — the mutual
+# twin of the self-recursive channel these two shapes drive. The merge admits the
+# returned member on the same return-mint argument: the member lives in the arena,
+# so the callee's `Return` raises the arena's own count before the deferral drops
+# the frame's (docs/impl/region/letrec.md § The frontier gate). What must hold here
+# is that the handle is still live and re-enterable after the same churn.
+# `region-letrec-return-cycle-uaf.lisp` drives that admission's own faces; this is
+# its cross-check from the self-recursive side.
 (defn make-mutual [n]
   (letrec [ev (fn [m]
                 (when (%not (%int? m)) (error :m))

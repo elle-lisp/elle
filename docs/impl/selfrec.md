@@ -201,6 +201,15 @@ admission in the merge collapses that retained cell into the closure's region
 (`merge_collapses_self_and_sibling_captured_member_cell`). The two mechanisms compose;
 neither forks the other.
 
+They also share the **return-funded** reading of the frontier above. The merge admits a
+returned cycle on the same argument — the returned member lives in the merged arena, so the
+`Return` mint raises the arena's count, and the member-callee tail deferral runs after it
+([region/letrec.md](region/letrec.md) § The frontier gate). The difference is only in what
+each has to prove about *placement*: this deferral is the cell-free binding's sole channel
+by construction (the two rows of the § table are exclusive), while the merge must first
+establish that every tail exit of the letrec body is a member call — otherwise the arena's
+live scope-exit drop is reachable and would fire ahead of the mint.
+
 ## Pinning tests
 
 - `runtime::tests::selfrec::*` — self-recursion correct across value position, nested-lambda

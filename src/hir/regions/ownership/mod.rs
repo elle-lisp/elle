@@ -146,17 +146,18 @@ pub(in crate::hir::regions) use adopt::compute_adopt_edges;
 pub(in crate::hir::regions) use inputs::ownership_inputs;
 pub(in crate::hir::regions) use subtree::compute_owned_region_groups;
 pub(in crate::hir::regions) use transfer::compute_transfer_adopts;
-// The Shared-seed set (frontier crossings: return / emit / send — NOT capture) is the
-// closure-cycle merge's non-escape gate: a captured-but-not-frontier-crossing closure
-// is mergeable, which `lambda_escapes_definition` (which also folds in the capture facet
-// — a value captured by an escaping closure, propagated around the SCC's mutual captures)
-// would wrongly refuse.
-pub(super) use seeds::compute_shared_seeds;
-
 // The remaining stages are exercised directly by the `regions::tests` harness; the
 // re-export keeps their `ownership::NAME` path stable for it without dangling in a
 // normal build (each is reached internally via its own submodule path).
+//
+// `compute_shared_seeds` (frontier crossings: return / emit / send — NOT capture) is one
+// of them: it reaches a shipping build through `ownership_inputs`, and the harness pins
+// the projection itself (`shared_seed_*`). The closure-cycle merge deliberately does NOT
+// read the combined set — it reads the two halves separately, because it admits the
+// return facet and refuses only the fiber one (docs/impl/region/letrec.md § The frontier
+// gate).
 #[cfg(test)]
 pub(super) use {
-    adopt::AdoptEdges, capture::capture_containment_edges, subtree::compute_owned_subtrees,
+    adopt::AdoptEdges, capture::capture_containment_edges, seeds::compute_shared_seeds,
+    subtree::compute_owned_subtrees,
 };

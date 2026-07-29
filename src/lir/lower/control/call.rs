@@ -171,19 +171,21 @@ impl<'a> Lowerer<'a> {
             // NON-upvalue reference: in the letrec's own function the binding is
             // a plain stack-slot local, while a nested closure reads it as an
             // upvalue — and a nested closure's activation completes before later
-            // uses of the arena, so deferring there would free it early. The frontier
-            // check here is a redundant guard rather than the deciding gate — unlike
-            // the self path above, which needs the return-mint argument to admit a
-            // returned closure. A member only reaches this marking through an ADMITTED
-            // merge, and the merge's own non-escape gate is that same frontier
-            // (`compute_closure_cycle_merges` reads `compute_shared_seeds`), so an SCC
-            // with a frontier-crossing member is refused to Shared before it can be
-            // stranded. Kept whole so a future widening of the merge gate cannot
-            // silently inherit an admission no one argued for.
+            // uses of the arena, so deferring there would free it early.
+            //
+            // The escape gate is the FIBER frontier alone, for the same reason and by
+            // the same argument as the self path above: this deferral also runs at the
+            // recursion's normal completion, after the `Return` mint that funds the
+            // caller's reference — and the merge collapses a returned member's region
+            // onto the arena, so that mint raises the arena's own count. The merge
+            // admits a returned cycle only where every tail exit of the letrec body is
+            // a member call, which is what makes this deferral the arena's sole release
+            // (docs/impl/region/letrec.md § The frontier gate). A member reaches this
+            // marking only through an ADMITTED merge, so the gate never re-argues
+            // admission; it is kept whole so both ends of the channel state the same
+            // premise.
             if self.stranded_cycle_bindings.contains(b) && !self.upvalue_bindings.contains(b) {
-                let frontier_escapes = self.escape_info.binding_escapes_via_return(*b)
-                    || self.escape_info.escapes_fiber(*b);
-                return !frontier_escapes;
+                return !self.escape_info.escapes_fiber(*b);
             }
         }
         // Any other reference to a closure-cycle merge member never defers: the

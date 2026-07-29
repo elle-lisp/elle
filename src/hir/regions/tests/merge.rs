@@ -758,24 +758,32 @@ fn merge_refuses_member_passed_by_move_to_foreign_tail() {
 }
 
 #[test]
-fn merge_refuses_escaping_letrec_closure() {
-    // The letrec closure is the program's tail → escapes via return. An escaping
-    // closure outlives the activation, so the merge must refuse it (collapsing then
-    // freeing at the enclosing scope would reclaim it while the caller holds it) —
-    // it stays Shared (the always-legal baseline; reclaiming an escaping closure
-    // cycle awaits the owner = activation/fiber cut). `loop` is used in value
-    // position (returned), so call-site forwarding cannot prove `n` — the
-    // diverging guard does.
+fn merge_refuses_returned_cell_free_self_recursive_closure() {
+    // A RETURNED purely self-recursive letrec closure is not the merge's business at
+    // all, and the gate that refuses it is CELL-FREEDOM, not the frontier: the
+    // self-edge does not mark `loop` captured (`hir/analyze/scopes.rs`), so it mints no
+    // forward cell, and `cell_of` has nothing to pair in. Its release is the cell-free
+    // stranded-self deferral instead (docs/impl/selfrec.md), which admits the return
+    // facet on its own argument — so this refusal must NOT be read as "returned ⇒
+    // refused": a returned MUTUAL cycle, which does have cells, merges
+    // (`merge_admits_returned_member_cycle_on_member_tail`). `loop` is used in value
+    // position (returned), so call-site forwarding cannot prove `n` — the diverging
+    // guard does.
     let (hir, _, info) = pipeline(
         "(letrec [loop (fn [n] (when (%not (%int? n)) (error :n)) \
                          (if (%lt n 1) :done (loop (%sub n 1))))] loop)",
     );
     let (closures, cells) = letrec_cycle_members(&hir, &info);
     assert_eq!(closures.len(), 1, "one closure; got {closures:?}");
+    assert!(
+        cells.is_empty(),
+        "the gate under test: a purely self-recursive `loop` mints NO forward cell, \
+         so the merge has no cell to pair in; got cells {cells:?}",
+    );
     for &r in closures.iter().chain(cells.iter()) {
         assert!(
             !info.merged_parent.contains_key(&r) && !info.merged_parent.values().any(|&p| p == r),
-            "an escaping (returned) letrec closure/cell r{} must not be merged; \
+            "a cell-free self-recursive letrec closure r{} must not be merged; \
              merged_parent={:?}",
             r.0,
             info.merged_parent,
@@ -854,6 +862,167 @@ fn merge_self_edge_refuses_clique() {
              self-edge; merged_parent={:?}",
             src.0,
             dst.0,
+            info.merged_parent,
+        );
+    }
+}
+
+#[test]
+fn merge_admits_returned_member_cycle_on_member_tail() {
+    // THE RETURN-FUNDED ADMISSION (docs/impl/region/letrec.md § The frontier gate).
+    // The ev/od SCC with a member RETURNED: `ev`'s base case hands back `ev` itself,
+    // so `ev`'s region carries escape's return facet. The cycle must still MERGE.
+    //
+    // Why the return facet is not a reason to refuse: the merge collapses `ev`'s
+    // region onto the arena, so the value handed out lives IN the arena and the
+    // callee's `Return` mint raises the arena's own count. The release the merge owns
+    // is the frame's, and the letrec body's tail is a call to the MEMBER `ev` — so the
+    // binding-scope `DecrefRegion` is dead past that frame-replacing `TailCall` and the
+    // release rides the member deferral, which `trampoline_loop` runs at the recursion's
+    // NORMAL COMPLETION, after every `Return` mint on the taken path. The caller's
+    // reference is standing when the frame's is dropped. This is the mutual twin of the
+    // cell-free self-recursive deferral's return admission (docs/impl/selfrec.md § "The
+    // deferral's escape gate is the fiber frontier alone").
+    //
+    // `ev` is used in value position (returned), which disables call-site param joins,
+    // so the diverging guards prove the `%lt`/`%sub` operands — as in the oracle's
+    // `recur-local-mutual-ret` probe, whose 4 regions / 6 objects per call this closes.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(def f (fn [k] \
+           (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) ev (od (%sub m 1)))) \
+                    od (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) ev (ev (%sub m 1))))] \
+             (ev k)))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "a RETURNED member's cycle must merge onto ONE arena — the member-callee tail \
+         deferral runs after the Return mint; cells={cells:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+}
+
+#[test]
+fn merge_refuses_returned_cycle_on_non_member_tail() {
+    // THE RESIDUAL BOUNDARY, non-member half. The same returned-member cycle, but the
+    // letrec body tail-calls a NON-member `g`. The non-member channel
+    // (`cycle_tail_release` → `TailCall::deferred_release_slot`) exists precisely
+    // BECAUSE the compiler cannot classify the callee: if `g` resolves to a native the
+    // frame is not replaced and the LIVE scope-exit `DecrefRegion` fires — while the
+    // frame still owns the returned member, taking the arena to zero and handing the
+    // caller a freed closure. So the return facet is refused here and the cycle stays
+    // Shared (the always-legal baseline). Contrast
+    // `merge_admits_returned_member_cycle_on_member_tail`, whose member tail has the
+    // one channel that provably runs after the mint.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] \
+           (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) ev (od (%sub m 1)))) \
+                    od (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) ev (ev (%sub m 1))))] \
+             (g (ev k))))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    for &c in &cells {
+        assert!(
+            !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
+            "a returned cycle whose body tail-calls a NON-member must NOT merge (its \
+             native fall-through is the live scope-exit drop, which runs BEFORE the \
+             return mint); cell r{} merged_parent={:?}",
+            c.0,
+            info.merged_parent,
+        );
+    }
+}
+
+#[test]
+fn merge_refuses_returned_cycle_on_value_tail() {
+    // THE RESIDUAL BOUNDARY, no-tail-call half. The letrec body's tail is the bare
+    // member value `ev` — there is no tail call at all, so nothing strands the
+    // binding-scope `DecrefRegion` and it fires LIVE at the letrec scope exit, before
+    // `f` hands `ev` to its caller. Merging would free the arena under the returned
+    // closure. The cycle must stay Shared.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(def f (fn [k] \
+           (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) ev (od (%sub m 1)))) \
+                    od (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) ev (ev (%sub m 1))))] \
+             ev))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    for &c in &cells {
+        assert!(
+            !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
+            "a returned cycle whose letrec body has NO tail call must NOT merge (the \
+             live scope-exit drop runs before the return mint); cell r{} \
+             merged_parent={:?}",
+            c.0,
+            info.merged_parent,
+        );
+    }
+}
+
+#[test]
+fn merge_refuses_fiber_crossing_letrec_cycle() {
+    // THE FIBER HALF of the frontier gate still refuses, and it is the half that
+    // cannot be return-funded: a YIELDED member crosses to a resumer whose hold the
+    // compiler did not place, and a parked frame may borrow it uncounted — no mint
+    // funds that, so no ordering argument admits it. The letrec body's tail is the
+    // member call `(ev 3)`, so the TAIL shape passes and the fiber facet is the only
+    // gate left to bite (making this the live pin for that half).
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(fiber/new (fn () \
+           (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) :even (od (%sub m 1)))) \
+                    od (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) :odd (ev (%sub m 1))))] \
+             (begin (yield ev) (ev 3)))) \
+           |:yield|)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    for &c in &cells {
+        assert!(
+            !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
+            "a cycle with a YIELDED member must NOT merge — the fiber frontier is \
+             refused outright; cell r{} merged_parent={:?}",
+            c.0,
             info.merged_parent,
         );
     }

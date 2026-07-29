@@ -88,9 +88,11 @@ struct TailCallSite {
 /// size-1 SCC the self-edge admits, whose cell the merge then collapses into the
 /// closure (`merge_collapses_self_and_sibling_captured_member_cell`). The **cells** are
 /// coincident-lifetime members, each paired in from its binding's `begin_cell_regions`
-/// cell. A cycle is mergeable only when every closure is **non-escaping**
-/// (`lambda_escapes_definition` false — a returned closure outlives the activation),
-/// every member is **sole-held**, and every closure has a **static-slot cell**. The
+/// cell. A cycle is mergeable only when every member is **sole-held**, every closure has
+/// a **static-slot cell**, and every closure clears the **frontier gate**: the FIBER half
+/// (emit / send) refuses outright, while the RETURN half is admitted where the arena's
+/// release provably runs after the callee's `Return` mint — the tail-shape gate below
+/// (docs/impl/region/letrec.md § The frontier gate). The
 /// cell requirement is met in every position: an immutable, lambda-initialized letrec
 /// binding's forward cell is a compiled `MakeCaptureCell` at top level AND inside a
 /// lambda body (`BindingInner::letrec_compiled_cell`). A mutated/reassigned in-lambda
@@ -113,7 +115,9 @@ struct TailCallSite {
 /// (`(g od)`): the member's own move/return machinery would decref the arena a second
 /// time, colliding with the deferred release (a double-free). A member merely STORED into a fresh
 /// aggregate then passed is RC-counted and safe, and after ANF is a temp argument, not
-/// a member reference, so it is admitted. The result extends the same `merged_parent`
+/// a member reference, so it is admitted. When a member carries the return facet the tail
+/// shape is read once more and more strictly: every tail EXIT of the body must be a
+/// MEMBER call, since only that deferral runs after the mint. The result extends the same `merged_parent`
 /// forest the builder-idiom seed populates and rides the same `merged_root`
 /// canonicalization, unconditionally (not flag-gated) and on every tier.
 pub(crate) fn compute_closure_cycle_merges(
@@ -133,15 +137,28 @@ pub(crate) fn compute_closure_cycle_merges(
     }
     let closure_regs: FxHashSet<Region> = lambda_of.keys().copied().collect();
 
-    // The non-escape gate. A closure escapes its activation only by crossing a
-    // FRONTIER (return / emit / send) — the Shared-seed set, which deliberately
-    // EXCLUDES the capture facet (a captured-but-not-returned closure stays inside its
-    // subtree). `lambda_escapes_definition` is the wrong gate here: it additionally
-    // folds in the capture facet (a value captured by an escaping closure), a
+    // The frontier gate (docs/impl/region/letrec.md § The frontier gate), read as its
+    // two halves rather than the combined Shared-seed set. A closure escapes its
+    // activation only by crossing a FRONTIER (return / emit / send); the capture facet
+    // is deliberately excluded, because `lambda_escapes_definition` folds in a
     // CONTAINMENT relation — and a `letrec` SCC's closures capture each other, so one
     // member crossing a frontier would propagate "escaping" around the whole cycle and
-    // over-refuse a mergeable one. The frontier question is exactly `compute_shared_seeds`.
-    let shared = super::super::ownership::compute_shared_seeds(info, escape);
+    // over-refuse a mergeable one.
+    //
+    // The halves are then admitted differently, because the merge's release is a
+    // decref, not a free. The FIBER half refuses outright: an emitted or sent member
+    // reaches a holder the compiler did not place, and a parked frame may borrow it
+    // uncounted, so no ordering argument funds it. The RETURN half is **return-funded**
+    // — the merge collapses the returned member's region onto the arena, so the value
+    // handed out lives in the arena and the callee's `Return` mint raises the arena's
+    // own count — but only where the arena's release provably runs AFTER that mint,
+    // which is the tail-shape gate further down.
+    let fiber = super::super::escape::fiber_frontier_regions(escape, info);
+    let returned = super::super::escape::return_frontier_regions(
+        escape,
+        &info.alloc_region,
+        &info.binding_source_regions,
+    );
 
     // closure ⊇ closure capture edges (self-edges KEPT), restricted to closure regions:
     // the cycle a `letrec` forms lives entirely among the closure regions.
@@ -183,7 +200,7 @@ pub(crate) fn compute_closure_cycle_merges(
     // (an interval test `[low, order]` over the drop-site letrec), and each
     // letrec's body tail callees, for the tail gate. Both built once.
     let low = compute_subtree_low(hir, order);
-    let mut letrec_tail: FxHashMap<HirId, Vec<TailCallSite>> = FxHashMap::default();
+    let mut letrec_tail: FxHashMap<HirId, LetrecTail> = FxHashMap::default();
     collect_letrec_tail_callees(hir, &mut letrec_tail);
 
     // Transitive reach over the capture graph (a set closure, so a cycle terminates).
@@ -229,23 +246,24 @@ pub(crate) fn compute_closure_cycle_merges(
         for &c in &scc {
             claimed.insert(c);
         }
-        // Gate every closure: non-escaping, sole-held, with a sole-held static-slot
-        // cell. Any failure refuses the whole SCC to Shared (the always-legal baseline).
+        // Gate every closure: off the fiber frontier, sole-held, with a sole-held
+        // static-slot cell. Any failure refuses the whole SCC to Shared (the
+        // always-legal baseline). A member on the RETURN frontier does not refuse here;
+        // it raises `return_facet`, which the tail-shape gate below then has to fund.
         let mut members: Vec<Region> = Vec::with_capacity(scc.len() * 2);
         let mut ok = true;
+        let mut return_facet = false;
         for &c in &scc {
             let Some(&cell_r) = cell_of.get(&c) else {
                 ok = false;
                 break;
             };
-            if shared.contains(&c)
-                || shared.contains(&cell_r)
-                || !sole_held(c)
-                || !sole_held(cell_r)
+            if fiber.contains(&c) || fiber.contains(&cell_r) || !sole_held(c) || !sole_held(cell_r)
             {
                 ok = false;
                 break;
             }
+            return_facet |= returned.contains(&c) || returned.contains(&cell_r);
             members.push(c);
             members.push(cell_r);
         }
@@ -311,7 +329,7 @@ pub(crate) fn compute_closure_cycle_merges(
         // aggregate then passed is RC-counted and (after ANF) a temp argument, so it
         // is admitted. Any tail call failing both channels refuses the cycle to
         // Shared (the always-legal baseline).
-        let sites = letrec_tail.get(&drop_site);
+        let sites = letrec_tail.get(&drop_site).map(|t| &t.sites);
         let is_member = |b: crate::hir::Binding| -> bool {
             info.binding_source_regions
                 .get(&b)
@@ -328,6 +346,39 @@ pub(crate) fn compute_closure_cycle_merges(
         });
         if strands {
             continue;
+        }
+        // The RETURN-FUNDED admission's funding requirement (docs/impl/region/letrec.md
+        // § The frontier gate). A returned member's arena may be released only AFTER
+        // the callee's `Return` mint has raised its count, and exactly one of the
+        // merge's channels has that order: the member-callee tail deferral, which
+        // `trampoline_loop` runs at the recursion's normal completion. So every tail
+        // EXIT of the letrec body must be a tail call to a MEMBER — the callee is then
+        // one of this letrec's own immutable, lambda-initialized bindings (the cell
+        // requirement above), so the frame is replaced on every path, the binding-scope
+        // `DecrefRegion` is dead, and the deferral is the arena's sole release.
+        //
+        // Every other exit reaches the LIVE scope-exit drop — a bare member value or no
+        // tail call at all reaches it directly, and the non-member channel's native
+        // fall-through IS that drop — which fires while the frame still owns the
+        // returned value, freeing the arena under the caller's reference. Those keep
+        // the Shared baseline: the residual this admission names.
+        if return_facet {
+            let exit_calls = letrec_tail
+                .get(&drop_site)
+                .and_then(|t| t.exit_calls.as_ref());
+            let funded = exit_calls.is_some_and(|exits| {
+                !exits.is_empty()
+                    && exits.iter().all(|id| {
+                        sites.is_some_and(|sites| {
+                            sites
+                                .iter()
+                                .any(|s| s.hir_id == *id && s.callee.is_some_and(is_member))
+                        })
+                    })
+            });
+            if !funded {
+                continue;
+            }
         }
         // Every non-member-callee body tail is an admitted adopt site (a member
         // callee stays on its own channel and is excluded). Keyed to the root below.
@@ -416,18 +467,81 @@ fn collect_closure_capture_edges(
     hir.for_each_child(|c| collect_closure_capture_edges(c, info, closure_regs, succ));
 }
 
-/// For every `Letrec` node, one [`TailCallSite`] per tail call in its BODY. Feeds
-/// the closure-cycle merge's tail gate: a body tail call replaces the frame,
-/// stranding the binding-scope drop, so each must supply a release channel (a
-/// member callee's stranded-cycle adopt, or a non-member callee's explicit arena
-/// adopt) and must not pass a cycle member in by-move.
-fn collect_letrec_tail_callees(hir: &Hir, out: &mut FxHashMap<HirId, Vec<TailCallSite>>) {
+/// What one `Letrec`'s BODY looks like at its tail, as the merge's two tail gates
+/// read it.
+struct LetrecTail {
+    /// One [`TailCallSite`] per tail call in the body — the release-channel gate's
+    /// input. A body tail call replaces the frame, stranding the binding-scope drop,
+    /// so each must supply a release channel (a member callee's stranded-cycle
+    /// deferral, or a non-member callee's explicit arena adopt) and must not pass a
+    /// cycle member in by-move.
+    sites: Vec<TailCallSite>,
+    /// `Some(ids)` when EVERY tail exit of the body is a tail `Call` (those calls'
+    /// ids), `None` when any exit is something else. The **return-funded** admission
+    /// needs this stronger reading than `sites`: a body can hold a tail call on one
+    /// path and hand back a bare member value on another, and only the former strands
+    /// the binding-scope drop — so `sites` alone cannot tell whether the live
+    /// scope-exit drop is reachable.
+    exit_calls: Option<Vec<HirId>>,
+}
+
+/// For every `Letrec` node, how its BODY exits at the tail ([`LetrecTail`]).
+fn collect_letrec_tail_callees(hir: &Hir, out: &mut FxHashMap<HirId, LetrecTail>) {
     if let HirKind::Letrec { body, .. } = &hir.kind {
         let mut sites = Vec::new();
         body_tail_callees(body, &mut sites);
-        out.insert(hir.id, sites);
+        out.insert(
+            hir.id,
+            LetrecTail {
+                sites,
+                exit_calls: body_tail_exit_calls(body),
+            },
+        );
     }
     hir.for_each_child(|c| collect_letrec_tail_callees(c, out));
+}
+
+/// The tail-call ids of every tail EXIT of a letrec body, or `None` when some exit
+/// is not a tail call.
+///
+/// Descends only the tail position of the pure control forms, and deliberately
+/// answers `None` for everything it does not recognise: the consumer (the
+/// return-funded admission) uses this to prove the LIVE scope-exit `DecrefRegion` is
+/// unreachable, so an unrecognised exit must read as reachable. A bare value tail
+/// (`(letrec [ev …] ev)`), a loop, a short-circuit `And`/`Or`, and a `Cond` with no
+/// else arm all fall through to the scope exit and so all answer `None`.
+fn body_tail_exit_calls(hir: &Hir) -> Option<Vec<HirId>> {
+    match &hir.kind {
+        HirKind::Call { is_tail: true, .. } => Some(vec![hir.id]),
+        HirKind::Return { value } => body_tail_exit_calls(value),
+        HirKind::Let { body, .. }
+        | HirKind::Letrec { body, .. }
+        | HirKind::Parameterize { body, .. } => body_tail_exit_calls(body),
+        HirKind::Begin(exprs) | HirKind::Block { body: exprs, .. } => {
+            body_tail_exit_calls(exprs.last()?)
+        }
+        HirKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let mut out = body_tail_exit_calls(then_branch)?;
+            out.extend(body_tail_exit_calls(else_branch)?);
+            Some(out)
+        }
+        HirKind::Cond {
+            clauses,
+            else_branch,
+        } => {
+            // No else arm means an implicit nil fall-through — a non-call exit.
+            let mut out = body_tail_exit_calls(else_branch.as_ref()?)?;
+            for (_, b) in clauses {
+                out.extend(body_tail_exit_calls(b)?);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
 }
 
 /// The [`TailCallSite`]s within one letrec body. Never descends into a `Lambda`

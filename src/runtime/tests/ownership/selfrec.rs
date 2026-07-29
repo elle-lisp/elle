@@ -316,11 +316,10 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
 /// come back. Boolean-only bodies keep them on `Runtime::without_stdlib()`, where no
 /// trait dispatch churns the region count.
 ///
-/// A returned member of a MUTUAL SCC is deliberately not here: a member on the return
-/// frontier fails the closure-cycle merge's own non-escape gate, so that shape has no
-/// merged arena to defer and leaks as a refused cycle instead — a different mechanism,
-/// gauged by the `recur-local-mutual-ret` probe in `tests/elle/oracle.lisp` against its
-/// reclaimed `recur-local-mutual` control.
+/// A returned member of a MUTUAL SCC is deliberately not here: it is not cell-free, so
+/// its release is the closure-cycle merge's arena rather than this stranded-self channel.
+/// The merge admits it on the same return-mint argument (region/letrec.md § The frontier
+/// gate) and `region_ownership_reclaims_returned_mutual_cycle_per_call` is its gauge.
 ///
 /// Counterfactual: each reads ~200 (one stranded region per call, closure + env
 /// together) while the return facet blanket-refuses the deferral; ~0 once the refusal
@@ -530,5 +529,51 @@ fn self_recursive_and_sibling_captured_no_double_free() {
     assert!(
         v.is_keyword(),
         "the sibling-captured recursive `def` returns the :done keyword, got {v:?}"
+    );
+}
+
+/// The closure-cycle merge's **return-funded admission**
+/// (docs/impl/region/letrec.md § The frontier gate): the ev/od cycle with a member
+/// RETURNED still reclaims per call. One base case apart from
+/// `region_ownership_reclaims_mutual_recursion_closure_cycle`, `ev` hands back `ev`
+/// itself, so `ev`'s region carries escape's return facet — which used to refuse the
+/// whole SCC to Shared, where per-region RC cannot collect a cycle and both closures
+/// and both forward cells stayed live once per call.
+///
+/// The facet is not a reason to refuse: the merge collapses the returned member's
+/// region onto the arena, so the value handed out lives IN the arena and the callee's
+/// `Return` mint raises the arena's own count. The letrec body's tail is a call to the
+/// MEMBER `ev`, so the binding-scope `DecrefRegion` is dead past that frame-replacing
+/// `TailCall` and the release rides the member deferral, which runs at the recursion's
+/// normal completion — after the mint. The caller then discards the result and the
+/// arena reaches zero.
+///
+/// Same bounded-vs-discriminator counterfactual as the non-returning case: the merge is
+/// unconditional, so the pin is per-run region growth beside the leaking bare-@array
+/// cycle, whose slope proves the gauge is live.
+#[test]
+fn region_ownership_reclaims_returned_mutual_cycle_per_call() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertion below is vacuous",
+    );
+    // `ev` is RETURNED (a value use), which disables call-site param joins — the
+    // diverging guards prove the `%lt`/`%sub` operands. The result is discarded.
+    let src = "(def f (fn [k] \
+                 (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                               (if (%lt m 1) ev (od (%sub m 1)))) \
+                          od (fn [m] (when (%not (%int? m)) (error :m)) \
+                               (if (%lt m 1) ev (ev (%sub m 1))))] \
+                   (ev k)))) \
+               (begin (f 3) nil)";
+    let growth = steady_region_growth(src);
+    assert!(
+        growth <= 0,
+        "a RETURNED member's ev/od cycle must be reclaimed by the return-funded merge \
+         admission — per-run live-region growth {growth} must be <= 0 (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
     );
 }

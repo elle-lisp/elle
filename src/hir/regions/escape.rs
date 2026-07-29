@@ -5,7 +5,9 @@
 //! sees a region. This module maps that verdict into the region domain using the
 //! solver's own `alloc_region` / `binding_source_regions` maps, the coordinate
 //! transform the region consumers (the ownership Shared-seed `compute_shared_seeds`,
-//! the merge gate's not-returned check, branch compensation's exclusion) need. It is
+//! the closure-cycle merge's frontier gate — which reads the return and fiber halves
+//! separately, docs/impl/region/letrec.md § The frontier gate — branch
+//! compensation's exclusion) need. It is
 //! the **only** place escape facts meet regions — escape holds no region plumbing,
 //! the solver holds no escape logic.
 //!

@@ -416,6 +416,26 @@ fn region_native_tail_mutual_cycle_uaf() {
     );
 }
 
+// Guard — a local mutual-recursion clique (`ev`/`od`) one of whose members is RETURNED
+// must keep that handle live and re-enterable after its merged arena's release runs. The
+// merge admits the return facet because the returned member lives IN the arena, so the
+// callee's `Return` mint raises the arena's own count, and the member-callee tail
+// deferral runs at the recursion's normal completion — after that mint — dropping only
+// the frame's own reference. Were the ordering the other way (or the deferral the last
+// reference), the caller would hold a closure whose env sits in a freed arena: a
+// generation panic on the plain VM, a SIGSEGV under `--trace=guardfree`. Every returned
+// handle is re-entered after the release across allocation churn that recycles a freed
+// page, including handles held live across many later mint/free cycles, plus the refused
+// residual (a non-member body tail) which must still run correctly.
+// docs/impl/region/letrec.md § The frontier gate.
+#[test]
+fn region_letrec_return_cycle_uaf() {
+    run_elle_script_with_args(
+        "region-letrec-return-cycle-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a fresh `%pair` pushed into a fresh, let-bound `@[]` whose push result is
 // DISCARDED, in a loop, must reclaim its Owned subtree without a double-free. The pair
 // is a store-adopted member whose own slot-resolved `DecrefRegion` is a no-op only
