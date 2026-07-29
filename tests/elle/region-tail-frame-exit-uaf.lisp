@@ -14,8 +14,12 @@
 # cannot see: a tail callee also reaches its CAPTURED environment, which no
 # argument names — but the env's hold is the funnel's counted edge, so that path
 # is admitted rather than refused, and (e3) is the row that proves the count
-# stands. What the admission does refuse is a holder escape marks: a value the
-# callee hands back (e2) or a closure that leaves carrying it (e4).
+# stands. A value the callee hands BACK rides that same edge one step further —
+# the callee's `Return` mints the caller's reference after the relocated release
+# has run, and the env edge is what holds the region off zero in between, which
+# (e2), (e5) and (e6) drive. What the admission still refuses is a holder escape
+# marks by a facet no edge at the point replaces: a closure that leaves carrying
+# it (e4), a store into a longer-lived container (f), a fiber crossing (h).
 #
 # Every witness reads the subject's HEAP contents on the far side of the tail
 # call, through a chain long enough that an over-early free faults rather than
@@ -110,6 +114,26 @@
     (e3-fill acc (list (string "y" i) i))
     (length (first acc))))
 
+# (e5) the same hand-back, with this frame holding the ONLY other reference: the
+# accumulator is minted at the call site and MOVED into the walker by a tail call,
+# so the caller kept nothing. The counted edge `go`'s environment took is then the
+# single thing between the relocated release and the `Return` that mints the
+# caller's reference — a release that reached zero recycles the very pages read
+# here.
+(defn e5-drive (i)
+  (e2-fill (@array) (list (string "m" i) i)))
+(defn e5-read (i)
+  (length (first (e5-drive i))))
+
+# (e6) the hand-back reached through a branch ARM, so the release is the merge's
+# replica ahead of the arm's `TailCall` rather than an in-block move, and the
+# funding edge is read at that arm's own relocation point.
+(defn e6-arm (v t)
+  (let [g (fn () v)]
+    (if t (g) 0)))
+(defn e6-read (i)
+  (length (first (e6-arm (list (string "o" i) i) true))))
+
 # (e4) the capturing closure ESCAPES — it is returned, so it outlives the frame
 # and carries `x` with it. Escape's capture facet refuses the holder, and the
 # release must stay in the dead block; the caller invokes the closure afterwards
@@ -200,6 +224,8 @@
 (var e 0)
 (var e2 0)
 (var e3 0)
+(var e5 0)
+(var e6 0)
 (var e4 0)
 (var f 0)
 (var g 0)
@@ -216,6 +242,8 @@
   (assign e (e-walker i))
   (assign e2 (e2-walker i))
   (assign e3 (e3-walker i))
+  (assign e5 (e5-read i))
+  (assign e6 (e6-read i))
   (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
@@ -238,6 +266,8 @@
 (assert (%gt e 0) "mutable accumulator freed under the walker that fills it")
 (assert (%gt e2 0) "accumulator freed before the captured callee handed it back")
 (assert (%gt e3 0) "accumulator freed under the caller's read of what it holds")
+(assert (%gt e5 0) "moved-in accumulator freed before the callee minted for it")
+(assert (%gt e6 0) "arm hand-back freed before the arm's callee minted for it")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")

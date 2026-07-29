@@ -727,6 +727,23 @@ fn region_call_result_alias_uaf() {
     );
 }
 
+// Guard — the tail-call move is one reference per OCCURRENCE, not one per call
+// (docs/impl/region/rules.md Rule 5). A tail call pure-moves its arguments, and the
+// frame holds ONE reference to a region while the callee releases once per PARAMETER,
+// so an argument list naming the same region twice — `concat`'s
+// `(concat-seq a rest a false)`, or two aliased bindings — hands over one reference
+// against two releases and the second zeroes it under the caller's live value. Only the
+// first owned occurrence is funded by the move; later ones are minted as a borrowed
+// argument is, and the fixture also samples steady-state growth so a mint that is never
+// consumed reads as a leak rather than passing. Full mechanism in the fixture header.
+#[test]
+fn region_tail_repeated_arg_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-tail-repeated-arg-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — the variadic TAIL-FORWARD reference balance. Forwarding a heap value into a
 // `& rest` variadic through a tail call builds the callee env as a MOVE
 // (`own_params = false`): the caller's owning reference transfers, but a rest arg

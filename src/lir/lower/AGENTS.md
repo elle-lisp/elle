@@ -155,7 +155,12 @@ other is structural ownership-location, NOT escape:
   an operand's slot or reads a register defined outside it
   (`hoistable_run`). And the region must be sole-frame-held
   (`RegionInfo::sole_frame_held_regions`), because a tail callee also reaches
-  its CAPTURED environment, which no argument names.
+  its CAPTURED environment, which no argument names. A region escaping by the
+  RETURN facet alone (`RegionInfo::return_frame_held_regions`) is admitted at a
+  point whose callee captures one of its holders
+  (`TailCalleeFacts::capture_funded`): the caller's reference is minted
+  by the callee's own `Return`, after the relocated release, and that captured
+  edge is the count holding the region off zero in between.
 - `emitops.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
   merge is reached only through arms the lowerer closes one at a time, so it
   INHERITS their relocation points and a release emitted past the merge is

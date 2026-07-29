@@ -19,9 +19,15 @@
 # environment is named by no argument and by no callee region, yet the call reads
 # it — and it is admitted anyway, because the funnel counted the closure's hold
 # when the env was built, so the frame's release is still the only reference it
-# drops. What keeps the walker row residual is the other facet: it hands its
-# accumulator BACK, so the return frontier holds that release to the caller's
-# mint.
+# drops.
+#
+# A value the callee hands BACK is that same counted edge carrying one step
+# further. The caller's owning reference is minted by the CALLEE's `Return`, after
+# the relocated release has run, so the region must not reach zero in between —
+# and the env edge, dropped only with the closure region at the callee's
+# completion, is what stops it. So a region whose only escape facet is the return
+# one is admitted at a relocation point whose callee captures one of its holders,
+# and nowhere else.
 #
 # A release emitted once the block has CLOSED is placed the other way (§ "The
 # relocation point outlives the block"): a branch merge inherits the relocation
@@ -128,6 +134,42 @@
     (walk-fill acc src)
     (length acc)))
 
+# (d6) the same walker HANDING THE ACCUMULATOR BACK — the stdlib `push-all` shape.
+# `dst` crosses the return frontier, so the caller's owning reference is minted by
+# `go`'s `Return`, after the relocated release has already run. What holds the
+# region off zero in between is the counted edge the funnel took when `go`'s
+# environment was built, and that edge falls away only with the closure region, at
+# the callee's completion (docs/impl/region/mechanism.md § "The callee's return
+# mint, and the edge that funds the gap").
+(defn walk-all (dst src)
+  (let [n (length src)]
+    (letrec [go (fn [i]
+                  (if (%lt i n)
+                    (begin
+                      (push dst (get src i))
+                      (go (%add i 1)))
+                    dst))]
+      (go 0))))
+(defn drive-walk (src)
+  (let [acc (@array)]
+    (walk-all acc src)
+    (length acc)))
+
+# (d7) the same hand-back where this frame holds the ONLY other reference: the
+# accumulator is minted at the call site and MOVED into the walker by a tail call,
+# so the captured edge is the single thing standing between the relocated release
+# and the callee's mint. Bounded here and faulting in the uaf complement are the
+# two halves of one claim about that edge.
+(defn drive-walk-moved (src)
+  (walk-all (@array) src))
+
+# (d8) the hand-back reached through a branch ARM, so the release is the merge's
+# replica rather than an in-block move, and the funding edge is read at the arm's
+# own relocation point.
+(defn arm-handback (v t)
+  (let [g (fn () v)]
+    (if t (g) 0)))
+
 # exemptions ───────────────────────────────────────────────────────────────────
 # The releases that must STAY in the dead fall-through. Each is already bounded;
 # hoisting one would release a reference the callee now owns, so these rows are
@@ -187,28 +229,20 @@
     (if t g (tail-sink))))
 
 # residual ─────────────────────────────────────────────────────────────────────
-# The walker hands its accumulator BACK through the tail callee, so `dst` crosses
-# the return frontier: the caller's owning reference is minted after the relocated
-# release would have run, and the admission refuses it. That one region still
-# strands per call, and the row is driven here so the residual is measured rather
-# than asserted away — what must hold is that it does not FAULT and computes
-# correctly.
+# A returned holder the tail callee does NOT capture. `v` reaches a return through
+# the OTHER arm, so no environment edge stands at this arm's relocation point to
+# fund the release, and it keeps its place in the dead block. Driven for its
+# VALUE, not its delta: it strands by design, and what must hold is that both arms
+# still compute correctly.
 
-(defn walk-all (dst src)
-  (let [n (length src)]
-    (letrec [go (fn [i]
-                  (if (%lt i n)
-                    (begin
-                      (push dst (get src i))
-                      (go (%add i 1)))
-                    dst))]
-      (go 0))))
-(defn drive-walk (src)
-  (let [acc (@array)]
-    (walk-all acc src)
-    (length acc)))
+(defn handback-unfunded (v t)
+  (if t v (tail-sink)))
 
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
+(def walk-moved-d
+  (measure (fn () (length (drive-walk-moved [1 2 3]))) 200 window))
+(def arm-handback-d
+  (measure (fn () (length (arm-handback [1 2 3] true))) 200 window))
 (def unused-param-d (measure (fn () (unused-param [1 2])) 200 window))
 (def unused-two-d (measure (fn () (unused-two [1 2] [3 4])) 200 window))
 (def captured-param-d (measure (fn () (captured-param [1 2])) 200 window))
@@ -240,7 +274,8 @@
 (println "  walk " walk-d "  unused " unused-param-d "  unused-two "
          unused-two-d "  captured " captured-param-d "  arm-captured "
          arm-captured-d)
-(println "  walk-fill " walk-fill-d)
+(println "  walk-fill " walk-fill-d "  walk-moved " walk-moved-d
+         "  arm-handback " arm-handback-d)
 (println "  arms: unused " arm-unused-t-d "/" arm-unused-f-d "  two " arm-two-d
          "  cond " arm-cond-0-d "/" arm-cond-2-d "  match " arm-match-a-d "/"
          arm-match-z-d)
@@ -292,12 +327,19 @@
           "the same capture reached through a branch arm's callee")
 (bounded? walk-fill-d
           "a walker's captured parameters, neither of which it hands back")
+(bounded? walk-d "the accumulator a captured walker hands back")
+(bounded? walk-moved-d
+          "the hand-back where the captured edge is the only other reference")
+(bounded? arm-handback-d "the hand-back reached through a branch arm's callee")
 
-# The residual row is NOT asserted bounded — the walker hands its accumulator back
-# through the tail callee, so the return frontier refuses that one release by
-# design. What is asserted is that it still computes correctly: a strand is an
-# over-keep, and must never become a mis-free.
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
+(assert (= (length (drive-walk-moved [1 2 3])) 3) "moved-in walker result lost")
+(assert (= (length (arm-handback [1 2 3] true)) 3) "arm hand-back result lost")
+(assert (= (arm-handback [1 2 3] false) 0) "arm hand-back sibling arm lost")
+(assert (= (length (handback-unfunded [1 2 3] true)) 3)
+        "unfunded hand-back result lost")
+(assert (= (handback-unfunded [1 2 3] false) 0)
+        "unfunded hand-back sibling arm lost")
 (assert (= (captured-param [1 2]) 2) "captured-param result lost")
 (assert (= (arm-captured [1 2] true) 2) "arm-captured result lost")
 (assert (= (drive-fill [1 2 3]) 3) "walk-fill result lost")

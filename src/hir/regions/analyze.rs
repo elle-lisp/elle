@@ -132,13 +132,17 @@ pub fn analyze_regions_with(
     // and the lowerer's frame-exit release at a tail call — and both of them make
     // a release fire on a path where none fired before (region/mechanism.md).
     // Computed before the decref passes so it reads the escape facts, not any
-    // placement they go on to change.
-    info.sole_frame_held_regions = super::escape::sole_frame_held_regions(
+    // placement they go on to change. The second set relaxes exactly the RETURN
+    // facet's refusal; it is a precondition rather than an admission, and the
+    // lowerer completes it with the per-point funding map below.
+    let frame_held = super::escape::sole_frame_held_regions(
         &escape_info,
         arena,
         &info,
         &inference_binding_regions,
     );
+    info.sole_frame_held_regions = frame_held.sole;
+    info.return_frame_held_regions = frame_held.return_funded;
 
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
@@ -227,6 +231,18 @@ pub fn analyze_regions_with(
             .and_modify(|d| d.extend_to(cm.drop_site))
             .or_insert(RegionData::at(cm.drop_site));
     }
+
+    // What each frame-replacing tail call's own callee settles: the captured-holder
+    // edge that funds the return-facet admission, and how many arguments become
+    // owned parameters. Runs after the merge post-passes because the regions are
+    // canonicalized through the merge forest, which the lowerer's lookup resolves
+    // against.
+    info.tail_callee_facts = super::escape::tail_callee_facts(
+        hir,
+        &info,
+        &frame_replacing_tail_calls,
+        &inference_binding_regions,
+    );
 
     // Ownership forest: adopt edges, the transferred-returned-subtree cut, the
     // co-owned-cycle cut, and the activation-owner cut. Runs LAST, after the

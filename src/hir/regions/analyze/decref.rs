@@ -530,12 +530,15 @@ fn pin_branch_arm_releases(
     // what it captures is the funnel's counted (or the forest's owning) edge, never
     // the uncounted borrow this admission guards against, and capture by a closure
     // that *escapes* is already one of escape's facets.
+    // Only the `sole` half: this window has no callee to supply the return facet's
+    // funding edge, so a region the caller will read keeps its in-arm release.
     let sole_held = super::super::escape::sole_frame_held_regions(
         escape,
         arena,
         info,
         inference_binding_regions,
-    );
+    )
+    .sole;
 
     // Regions whose release belongs to another mechanism: moving their
     // `decref_point` would move a release that mechanism, not this one, emits.

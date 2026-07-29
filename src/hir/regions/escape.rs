@@ -118,10 +118,12 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
     out
 }
 
-/// The regions whose every holder binding leaves this activation by **no** facet:
-/// non-mutated, non-escaping, and absent from the return/fiber frontiers' atomless
-/// site halves. A region with no holder binding at all offers nothing to judge and
-/// is refused too.
+/// The two frame-held sets ([`FrameHeld`]), split on whether the **return** facet
+/// counts as a refusal: `sole` is the regions whose every holder binding leaves
+/// this activation by **no** facet — non-mutated, non-escaping, and absent from
+/// the return/fiber frontiers' atomless site halves — and `return_funded` is the
+/// same reading with the return facet alone allowed. A region with no holder
+/// binding at all offers nothing to judge and is refused by both.
 ///
 /// This is the **count** question a *placement* argument cannot answer, and the one
 /// admission every mechanism that makes a release fire where none fired before must
@@ -156,23 +158,173 @@ pub(super) fn sole_frame_held_regions(
     arena: &crate::hir::arena::BindingArena,
     info: &RegionInfo,
     binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
-) -> FxHashSet<Region> {
-    let frontier = shared_seed_regions(escape, info);
+) -> FrameHeld {
+    let all = shared_seed_regions(escape, info);
+    let fiber_only = fiber_frontier_regions(escape, info);
     let mut held: FxHashSet<Region> = FxHashSet::default();
     let mut refused: FxHashSet<Region> = FxHashSet::default();
+    let mut refused_beyond_return: FxHashSet<Region> = FxHashSet::default();
     for (b, regions) in binding_regions {
         // A MUTATED holder is refused for the reason compensation refuses it as a
         // release route: a slot repointed before the release frees whatever it
         // holds THEN, not what the solver named here.
-        let unsafe_holder = arena.get(*b).is_mutated || escape.binding_escapes_activation(*b);
+        let mutated = arena.get(*b).is_mutated;
+        let unsafe_holder = mutated || escape.binding_escapes_activation(*b);
+        let unsafe_beyond_return = mutated || escape.binding_escapes_beyond_return(*b);
         for &r in regions {
             held.insert(r);
             if unsafe_holder {
                 refused.insert(r);
             }
+            if unsafe_beyond_return {
+                refused_beyond_return.insert(r);
+            }
         }
     }
-    held.into_iter()
-        .filter(|r| !refused.contains(r) && !frontier.contains(r))
-        .collect()
+    FrameHeld {
+        sole: held
+            .iter()
+            .copied()
+            .filter(|r| !refused.contains(r) && !all.contains(r))
+            .collect(),
+        return_funded: held
+            .into_iter()
+            .filter(|r| !refused_beyond_return.contains(r) && !fiber_only.contains(r))
+            .collect(),
+    }
+}
+
+/// The two frame-held sets, computed together because they differ only in whether
+/// the **return** facet counts as a refusal.
+pub(super) struct FrameHeld {
+    /// No facet at all: the frame holds the region's one reference and nothing
+    /// reads it once the frame is gone, so a release needs no funding.
+    pub(super) sole: FxHashSet<Region>,
+    /// The return facet and no other. Something DOES read the region after the
+    /// frame — the caller, through a reference the callee's `Return` mints — so
+    /// this set is a precondition, never an admission on its own: its consumer
+    /// pairs it with the tail callee's captured-holder edge at each relocation
+    /// point, which is the count standing between the frame's release and that
+    /// mint (region/mechanism.md § "The callee's return mint, and the edge that
+    /// funds the gap"). A superset of `sole`.
+    pub(super) return_funded: FxHashSet<Region>,
+}
+
+/// What a frame-replacing tail call's own callee tells the lowerer about the
+/// releases and mints around it ([`crate::hir::region::TailCalleeFacts`]).
+///
+/// Both facts are per CALL rather than per region or per function, because both
+/// are claims about *this* callee: that it keeps a region alive across its own
+/// return mint (which a sibling arm's callee, capturing nothing, does not), and
+/// how many of the arguments it turns into owned parameters.
+///
+/// Only a callee this compilation can see qualifies: a `Var` naming a
+/// `Let`/`Letrec`/`Define`-bound lambda in this unit. An unresolvable callee is
+/// simply absent, and every consumer takes its conservative branch there.
+pub(super) fn tail_callee_facts(
+    hir: &Hir,
+    info: &RegionInfo,
+    frame_replacing_tail_calls: &FxHashSet<HirId>,
+    binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
+) -> HashMap<HirId, crate::hir::region::TailCalleeFacts> {
+    let mut lambda_of: HashMap<Binding, LambdaFacts> = HashMap::new();
+    collect_lambda_facts(hir, &mut lambda_of);
+    let mut out = HashMap::new();
+    collect_call_facts(
+        hir,
+        info,
+        frame_replacing_tail_calls,
+        binding_regions,
+        &lambda_of,
+        &mut out,
+    );
+    out
+}
+
+/// What a lambda-bound binding's lambda contributes at a call to it.
+struct LambdaFacts {
+    captures: Vec<Binding>,
+    /// Parameters that take one argument each — `params` less the rest parameter,
+    /// which collects the overflow into a fresh list instead.
+    fixed_params: usize,
+}
+
+/// Binding → the facts of the lambda it is bound to. A binding bound to anything
+/// but a lambda contributes nothing; a binding bound twice keeps the first, since
+/// an ambiguous callee is one this pass must not claim to resolve.
+fn collect_lambda_facts(h: &Hir, out: &mut HashMap<Binding, LambdaFacts>) {
+    let mut record = |b: Binding, init: &Hir| {
+        if let HirKind::Lambda {
+            captures,
+            params,
+            rest_param,
+            ..
+        } = &init.kind
+        {
+            out.entry(b).or_insert_with(|| LambdaFacts {
+                captures: captures.iter().map(|c| c.binding).collect(),
+                fixed_params: params.len() - usize::from(rest_param.is_some()),
+            });
+        }
+    };
+    match &h.kind {
+        HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+            for (b, init) in bindings {
+                record(*b, init);
+            }
+        }
+        HirKind::Define { binding, value, .. } => record(*binding, value),
+        _ => {}
+    }
+    h.for_each_child(|c| collect_lambda_facts(c, out));
+}
+
+fn collect_call_facts(
+    h: &Hir,
+    info: &RegionInfo,
+    frame_replacing_tail_calls: &FxHashSet<HirId>,
+    binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
+    lambda_of: &HashMap<Binding, LambdaFacts>,
+    out: &mut HashMap<HirId, crate::hir::region::TailCalleeFacts>,
+) {
+    if let HirKind::Call { func, .. } = &h.kind {
+        if frame_replacing_tail_calls.contains(&h.id) {
+            if let Some(facts) = callee_binding(func).and_then(|b| lambda_of.get(&b)) {
+                out.insert(
+                    h.id,
+                    crate::hir::region::TailCalleeFacts {
+                        capture_funded: facts
+                            .captures
+                            .iter()
+                            .flat_map(|c| binding_regions.get(c).into_iter().flatten())
+                            .map(|&r| info.merged_root(r))
+                            .collect(),
+                        fixed_params: facts.fixed_params,
+                    },
+                );
+            }
+        }
+    }
+    h.for_each_child(|c| {
+        collect_call_facts(
+            c,
+            info,
+            frame_replacing_tail_calls,
+            binding_regions,
+            lambda_of,
+            out,
+        )
+    });
+}
+
+/// The binding a callee position names, looking through the `DerefCell` wrapper
+/// `functionalize` puts around a read of a `needs_capture` binding — which every
+/// mutually-visible top-level `defn` is, so matching the bare `Var` alone would
+/// resolve almost no real call.
+fn callee_binding(func: &Hir) -> Option<Binding> {
+    match &func.kind {
+        HirKind::Var(b) => Some(*b),
+        HirKind::DerefCell { cell } => callee_binding(cell),
+        _ => None,
+    }
 }

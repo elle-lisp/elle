@@ -397,6 +397,12 @@ impl<'a> Lowerer<'a> {
         for a in args {
             self.collect_subtree_regions(&a.expr, &mut exempt);
         }
+        let capture_funded = self
+            .region_info
+            .tail_callee_facts
+            .get(&call_id)
+            .map(|f| f.capture_funded.clone())
+            .unwrap_or_default();
         // This call dominates every position after it in the block, so it alone
         // covers them — any points a merge left here name arms that reach this
         // call, not the releases that follow it.
@@ -407,6 +413,7 @@ impl<'a> Lowerer<'a> {
             operand_locals,
             operand_captures,
             exempt,
+            capture_funded,
         });
     }
 
@@ -451,11 +458,15 @@ impl<'a> Lowerer<'a> {
     ///   ([`Self::self_cancelling_run`]); a run without that stamp keeps the
     ///   baseline.
     ///
-    /// Neither placement waives the obligations. `sole_frame_held_regions` is the
-    /// count argument — on a closure path the release fires where none did before,
-    /// and no premise about instruction placement can supply it: a value the tail
-    /// callee reaches through its captured environment is named by no argument and
-    /// by no callee region, yet the call reads it. `TailExitHoist::exempt` and
+    /// Neither placement waives the obligations. Escape supplies the count
+    /// argument — on a closure path the release fires where none did before, and no
+    /// premise about instruction placement can supply it: a value the tail callee
+    /// reaches through its captured environment is named by no argument and by no
+    /// callee region, yet the call reads it. `sole_frame_held_regions` is that
+    /// argument for a region nobody reads once the frame is gone;
+    /// `return_frame_held_regions` plus the point's own `capture_funded` edge is
+    /// the argument for one the CALLEE hands back, where the caller's reference is
+    /// minted after this release runs. `TailExitHoist::exempt` and
     /// [`Self::hoistable_run`] are the two readings of what each call itself names
     /// — both needed, because ANF is free to rewrite how an operand is spelled —
     /// and they are asked per point, so one arm's ownership move does not hold back
@@ -470,12 +481,23 @@ impl<'a> Lowerer<'a> {
         mut f: impl FnMut(&mut Self),
     ) {
         let root = self.region_info.merged_root(region);
+        // Two admissions, and which one applies decides whether the point's own
+        // funding is consulted. A SOLE-held region is read by nobody once the
+        // frame is gone, so any point may take it. A region held by the return
+        // facet alone IS read afterwards — by the caller, through the reference
+        // the tail callee's `Return` mints after this release would run — so it
+        // needs the callee's captured-holder edge to span the gap, which is a fact
+        // about the point rather than the region.
+        let sole = self.region_info.sole_frame_held_regions.contains(&root);
         if self.tail_exit_hoist.is_empty()
-            || !self.region_info.sole_frame_held_regions.contains(&root)
+            || !(sole || self.region_info.return_frame_held_regions.contains(&root))
         {
             f(self);
             return;
         }
+        let admitted = |h: &super::TailExitHoist| {
+            !h.exempt.contains(&root) && (sole || h.capture_funded.contains(&root))
+        };
         // The two placements never mix: a tail call emitted into this block
         // dominates every position after it, so `open_tail_exit_hoist` drops the
         // merge's points in favour of its own single one.
@@ -490,7 +512,7 @@ impl<'a> Lowerer<'a> {
         if let super::HoistBlock::Current(label) = self.tail_exit_hoist[0].block {
             // A tail call in this very block dominates everything after it, so it
             // is the only point and the placement is the move.
-            if label != self.current_block.label || self.tail_exit_hoist[0].exempt.contains(&root) {
+            if label != self.current_block.label || !admitted(&self.tail_exit_hoist[0]) {
                 f(self);
                 return;
             }
@@ -518,7 +540,7 @@ impl<'a> Lowerer<'a> {
             let super::HoistBlock::Finished(block) = self.tail_exit_hoist[i].block else {
                 continue;
             };
-            if self.tail_exit_hoist[i].exempt.contains(&root) {
+            if !admitted(&self.tail_exit_hoist[i]) {
                 continue;
             }
             // Re-run rather than clone the emitted run: each replica then names

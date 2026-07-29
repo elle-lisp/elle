@@ -127,6 +127,71 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// The regions a tail argument's value-producing leaves may name — the
+    /// coordinate the move is accounted in.
+    ///
+    /// A tail call moves ONE reference per region, because that is all the frame
+    /// holds, while the callee releases once per owned parameter. So an argument
+    /// list must be read for repetition, and repetition is a fact about regions
+    /// rather than about syntax: `(f x y)` after `(let [y x] …)` names one region
+    /// through two bindings, and a check keyed on binding identity misses it
+    /// (docs/impl/region/rules.md Rule 5, `region-tail-repeated-arg-uaf.lisp`).
+    ///
+    /// Walks the same value-producing leaves as [`Self::arg_leaf_is_borrowed`],
+    /// for the same reason: a branch/phi compound hands the callee whichever leaf
+    /// runs. An allocating leaf contributes nothing — a fresh region per
+    /// evaluation cannot be an earlier argument's.
+    fn arg_leaf_regions(
+        &self,
+        arg: &Hir,
+        out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
+    ) {
+        match &arg.kind {
+            HirKind::DerefCell { cell } => self.arg_leaf_regions(cell, out),
+            HirKind::Var(binding) => {
+                for &r in self
+                    .region_info
+                    .binding_source_regions
+                    .get(binding)
+                    .into_iter()
+                    .flatten()
+                {
+                    out.insert(self.region_info.merged_root(r));
+                }
+            }
+            HirKind::Or(exprs) | HirKind::And(exprs) => {
+                for e in exprs {
+                    self.arg_leaf_regions(e, out);
+                }
+            }
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.arg_leaf_regions(then_branch, out);
+                self.arg_leaf_regions(else_branch, out);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (_, body) in clauses {
+                    self.arg_leaf_regions(body, out);
+                }
+                if let Some(e) = else_branch {
+                    self.arg_leaf_regions(e, out);
+                }
+            }
+            HirKind::Match { arms, .. } => {
+                for (_, _, body) in arms {
+                    self.arg_leaf_regions(body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Try to lower a call as an intrinsic operation.
     ///
     /// Returns `Some(result_reg)` if the call was specialized, `None` to

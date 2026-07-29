@@ -248,7 +248,24 @@ impl<'a> Lowerer<'a> {
             let spill_across_loop =
                 args.len() >= 2 && args.iter().skip(1).any(|a| hir_contains_loop(&a.expr));
             let mut arg_spill_slots: Vec<Option<u16>> = Vec::new();
-            for arg in args {
+            // Regions an earlier argument of this tail call already MOVED. The
+            // frame holds one reference per region and the callee releases once
+            // per owned parameter, so only the first occurrence is funded by the
+            // move; a later one must be minted exactly as a borrowed argument is
+            // (docs/impl/region/rules.md Rule 5).
+            let mut moved_arg_regions: rustc_hash::FxHashSet<crate::hir::region::Region> =
+                rustc_hash::FxHashSet::default();
+            // An argument past the callee's fixed parameters is collected into the
+            // rest parameter's fresh list instead of becoming an owned param, and
+            // that list's own allocation scan and surplus release balance it
+            // without a mint — so a repeat landing there must NOT take one. Only a
+            // callee this compilation resolved says so; anything else keeps the
+            // mint, which is the leak-preserving direction.
+            let rest_from = self
+                .current_hir_id
+                .and_then(|id| self.region_info.tail_callee_facts.get(&id))
+                .map(|f| f.fixed_params);
+            for (index, arg) in args.iter().enumerate() {
                 // For a tail call, a BORROWED arg must be handed the callee a
                 // fresh owning reference (see the move-on-tail-call comment at
                 // the `is_tail` block below for the ownership argument). The
@@ -260,7 +277,26 @@ impl<'a> Lowerer<'a> {
                 // mutable-param double-release UAF, region-mutable-reassign-param.lisp).
                 // So defer this node's decrefs, emit the retain, then emit the
                 // deferred decrefs — the retain now precedes the cell's cascade-free.
-                let borrowed = is_tail && self.tail_arg_is_borrowed(&arg.expr);
+                //
+                // A REPEATED owned argument takes the same treatment for a
+                // different reason: the move handed over one reference and this
+                // occurrence is a second owned parameter to release. Only an owned
+                // occupant of a fixed parameter both consumes the move and can be
+                // starved by an earlier one — a borrowed argument mints for itself,
+                // and a rest position is balanced by the collected list.
+                let mut leaf_regions = rustc_hash::FxHashSet::default();
+                if is_tail {
+                    self.arg_leaf_regions(&arg.expr, &mut leaf_regions);
+                }
+                let borrowed_leaf = is_tail && self.tail_arg_is_borrowed(&arg.expr);
+                let takes_the_move =
+                    is_tail && !borrowed_leaf && rest_from.is_none_or(|n| index < n);
+                let repeated =
+                    takes_the_move && leaf_regions.iter().any(|r| moved_arg_regions.contains(r));
+                if takes_the_move && !repeated {
+                    moved_arg_regions.extend(leaf_regions);
+                }
+                let borrowed = borrowed_leaf || repeated;
                 if borrowed {
                     self.deferred_decref_points.insert(arg.expr.id);
                 }

@@ -203,7 +203,18 @@ is a correctness defect, not a tuning knob.
      and a compile-time-constant heap value (`immutable_values` — a stdlib
      export closure, a `begin-for-syntax` value — owned by the env that
      seeded it; never captured, so the frame holds no reference at all).
-     `tail_arg_is_borrowed`, src/lir/lower/control.rs;
+     `tail_arg_is_borrowed`, src/lir/lower/control.rs.
+     The move is **one reference per occurrence, not one per call**. The frame
+     holds a single reference to a region, while the callee's owned-param
+     releases fire once per parameter, so an argument list naming the same
+     region twice — `(concat-seq a rest a false)`, or two aliased bindings —
+     hands over one reference against two releases, and the second reaches
+     zero under a value the caller is still using. Only the FIRST owned
+     occurrence is funded by the move; every later one is minted exactly as a
+     borrowed argument is. Repetition is read over the arguments'
+     value-producing leaves and the regions they may name, not over syntax,
+     because two distinct bindings can name one region
+     (`region-tail-repeated-arg-uaf.lisp`);
    - *reassigned mutable binding cell* — a reassigned binding is a 1-slot
      mutable container (see
      [bindings.md](bindings.md)): the store increfs the new

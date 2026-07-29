@@ -483,6 +483,26 @@
 (defn t23-captured [x]
   (let [g (fn [] (length x))]
     (g)))
+# `t23-handback` is the same capture carrying one step further: the tail callee
+# RETURNS the parameter, so the caller's owning reference is minted inside the
+# callee — after the relocated release has run. The env's counted edge is what
+# holds the region off zero in between, and it falls away only with the closure
+# region, at the callee's completion (docs/impl/region/mechanism.md § "The callee's
+# return mint, and the edge that funds the gap"). This is the stdlib `push-all`
+# shape, and the strand it carried is what held the `concat`/`append` family.
+(defn t23-handback [dst src]
+  (let [n (length src)]
+    (letrec [go (fn [i]
+                  (if (%lt i n)
+                    (begin
+                      (push dst (get src i))
+                      (go (%add i 1)))
+                    dst))]
+      (go 0))))
+(defn t23-drive-handback [src]
+  (let [acc (@array)]
+    (t23-handback acc src)
+    (length acc)))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1576,7 +1596,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign acc (append acc [j]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 2)
 
 # ── Discarded call-result + break-escape ──────────────────────────────
 # Direct while-statement run-blocks (no thunk wrapper): the discarded value is a
@@ -1699,7 +1719,7 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
-# The frame-exit release, two CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, five CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
@@ -1710,14 +1730,15 @@
 # block further out, where the tail calls sit in the arms of a branch and the
 # release lands past the merge; `tail-frame-exit-captured` is the holder the tail
 # callee reaches through its CAPTURED environment, admitted because the funnel
-# counted that hold; `tail-frame-exit-moved` is the exemption face, already 0,
-# which reads GROWTH if the hoist ever releases an argument the callee now owns.
-# Undeclared, like `param-used-arm`, so a regression trips the completeness gate
-# loudly rather than being absorbed as F1a scratch. The value a tail callee hands
-# BACK — the stdlib walker's accumulator, which the return facet holds to the
-# caller's mint — is the residual, driven as a row in
-# `tests/elle/region-tail-frame-exit.lisp` rather than pinned here. That file is
-# also the counterfactual; the soundness complement is
+# counted that hold; `tail-frame-exit-handback` is that same edge carrying one step
+# further — the callee RETURNS the parameter, so the caller's reference is minted
+# inside it, after the relocated release has run, and the env edge is what holds
+# the region off zero in between; `tail-frame-exit-moved` is the exemption face,
+# already 0, which reads GROWTH if the hoist ever releases an argument the callee
+# now owns. Undeclared, like `param-used-arm`, so a regression trips the
+# completeness gate loudly rather than being absorbed as F1a scratch. The
+# counterfactual and the boundary rows live in
+# `tests/elle/region-tail-frame-exit.lisp`; the soundness complement is
 # `region-tail-frame-exit-uaf.lisp`.
 (pin (measure-core "tail-frame-exit-unused"
                    (fn [b]
@@ -1739,6 +1760,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-captured (list 1 2 3))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-handback"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-drive-handback (list 1 2 3))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "tail-frame-exit-moved"
                    (fn [b]

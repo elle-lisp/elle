@@ -21,7 +21,7 @@ mod stats;
 pub use classify::CallClassification;
 pub use data::{OutlivesConstraint, Region, RegionData};
 pub use id::{MappedRegion, RuntimeRegion, StaticRegion};
-pub use info::{CellContainer, RegionInfo};
+pub use info::{CellContainer, RegionInfo, TailCalleeFacts};
 pub use stats::RegionStats;
 
 #[cfg(test)]

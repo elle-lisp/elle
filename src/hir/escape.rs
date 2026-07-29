@@ -17,6 +17,11 @@
 //! - **per lambda** — does the closure *escape its definition*?
 //!   (`lambda_escapes_definition`)
 //!
+//! plus a complementary pair that splits the per-binding answer on the **return**
+//! facet — `binding_escapes_via_return` and `binding_escapes_beyond_return` — so a
+//! consumer can ask "by the return facet and no other", which neither the full set
+//! nor either half can express alone.
+//!
 //! ## The four escape facets
 //!
 //! Escape is a value-flow over the atoms (binding / lambda) the region solver's
@@ -211,6 +216,26 @@ pub struct EscapeInfo {
     /// *points at* a region some function returns without itself flowing to a tail
     /// (the value genuinely is not returned).
     binding_returns: FxHashSet<Binding>,
+    /// Bindings whose value escapes by some facet **other than** return — store,
+    /// capture, or fiber. The complement of `binding_returns` within the full set,
+    /// and the two together are what let a consumer ask "does this value escape by
+    /// the return facet *and no other*". `binding_escapes` alone cannot answer
+    /// that: a value both returned and yielded is in it once, indistinguishable
+    /// from one that is only returned.
+    ///
+    /// Unlike `binding_returns` this DOES propagate through capture edges, because
+    /// the facets it carries are the ones a closure's escape genuinely transmits.
+    /// A closure that leaves only by being *returned* seeds nothing here, which is
+    /// the reading its consumer needs: that closure's hold on its captures is the
+    /// funnel's counted edge, and whatever it carries out is the return facet's
+    /// business.
+    ///
+    /// Read by the frame-exit release's return-funded admission
+    /// (docs/impl/region/mechanism.md § "The callee's return mint, and the edge
+    /// that funds the gap"), which replaces the return facet's refusal with the
+    /// tail callee's own counted edge and must therefore know no other facet is
+    /// also refusing.
+    binding_escapes_beyond: FxHashSet<Binding>,
     /// Allocation-site `HirId`s a value reaches a **tail/return** through — the
     /// region-level half of the return facet, naming the *atomless* escapes
     /// `binding_returns` cannot (a bare `(%pair …)` / `(@array …)` / call result /
@@ -258,6 +283,14 @@ impl EscapeInfo {
     /// check reads this directly, per binding (see the field doc).
     pub fn binding_escapes_via_return(&self, b: Binding) -> bool {
         self.binding_returns.contains(&b)
+    }
+
+    /// Does this binding's value escape by a facet **other than** return — store,
+    /// capture, or fiber? The complement of `binding_escapes_via_return`; together
+    /// they express "escapes by the return facet and no other", which neither the
+    /// full set nor the return-only set can say alone (see the field doc).
+    pub fn binding_escapes_beyond_return(&self, b: Binding) -> bool {
+        self.binding_escapes_beyond.contains(&b)
     }
 
     /// Does an allocation at this `HirId` reach a **tail/return** (the region-level
@@ -381,6 +414,13 @@ pub fn analyze_escape(
     // *returned*. The binding-level half of the return frontier; the reassign gate
     // and the solver's return-frontier projection read it.
     let returns = propagate(&return_seeds, &edges, None);
+    // Beyond-return: every facet EXCEPT return, propagated through both edge kinds.
+    // The complement that makes "returned and nothing else" expressible; a closure
+    // escaping only by return seeds nothing here, so its captures are not pulled in
+    // (see `binding_escapes_beyond`).
+    let mut beyond_seeds = fiber_seeds.clone();
+    beyond_seeds.extend(other_seeds.iter().copied());
+    let beyond = propagate(&beyond_seeds, &edges, Some(&lambda_captures));
     // Full escape: every facet's seeds, propagated through binding-definition AND
     // capture edges (a value captured by an escaping closure escapes too,
     // transitively).
@@ -405,6 +445,11 @@ pub fn analyze_escape(
     for a in returns {
         if let Atom::Binding(b) = a {
             info.binding_returns.insert(b);
+        }
+    }
+    for a in beyond {
+        if let Atom::Binding(b) = a {
+            info.binding_escapes_beyond.insert(b);
         }
     }
     // Fiber-frontier bindings: the directly emitted/sent binding seeds. No backward

@@ -28,13 +28,23 @@ private sets, so the representation can change without touching call sites.
 - **per lambda** — does the closure *escape its definition*?
   `lambda_escapes_definition(id)`. Absence = `false`.
 
-A third, narrower query exists for one consumer:
+Two narrower queries split the full set by whether the **return** facet is the
+reason for the verdict:
 
 - **per binding, return facet only** — does the value escape *specifically by
-  flowing to a tail/return*? `binding_escapes_via_return(b)`. This is a strict
+  flowing to a tail/return*? `binding_escapes_via_return(b)`. A strict
   sub-question of the full set (a value stored into a container or captured by a
   closure escapes its activation but is **not** returned), read by the reassign
   1-slot-container gate (below).
+- **per binding, every facet but return** — does the value escape by a route
+  *other* than flowing to a tail/return? `binding_escapes_beyond_return(b)`. The
+  complement, and the two together are what let a consumer say "this facet and no
+  other": the full set alone cannot, because a binding on both the return and the
+  fiber frontiers answers `true` to both of the queries above. Read by the
+  frame-exit release, whose whole question is whether the return facet is the sole
+  refusal and can therefore be replaced by the tail callee's own counted edge
+  ([region/mechanism.md](region/mechanism.md) § "The callee's return mint, and the
+  edge that funds the gap").
 
 ## The four facets
 
@@ -84,7 +94,12 @@ lambda pulls in every binding it captures). So an alias of an escaping value, an
 a value captured by an escaping closure, escape too. The return-only set
 (`binding_escapes_via_return`) is the same propagation seeded with the return
 facet alone and following binding-definition edges but **not** capture edges (a
-captured value is not itself *returned*).
+captured value is not itself *returned*). Its complement
+(`binding_escapes_beyond_return`) is the same propagation seeded with every facet
+*except* return, following both edge kinds — so a closure that leaves only by
+being returned propagates nothing there, which is the precise reading its consumer
+needs: that closure's hold on its captures is a counted edge, and the value it
+carries out is the return facet's business, not another facet's.
 
 ## Interprocedural return transparency
 
@@ -145,7 +160,15 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     hold on what it captures is a counted (or owning) edge rather than an uncounted
     borrow; capture by a closure that *escapes* is already an escape facet
     ([region/mechanism.md](region/mechanism.md) § "Lexical capture is not a second
-    holder to fear").
+    holder to fear");
+  - the **return-funded admission** (`regions::escape::return_frame_held_regions`)
+    the frame-exit release adds on top of it, for a region whose *only* refusal is
+    the return facet (`binding_escapes_beyond_return` per holder, plus the fiber
+    frontier's atomless half). It is not sufficient on its own: the lowerer pairs
+    it with the tail callee's captured-holder edge at each relocation point, which
+    is the counted reference standing between the frame's release and the callee's
+    return mint ([region/mechanism.md](region/mechanism.md) § "The callee's return
+    mint, and the edge that funds the gap").
 - **The lowerer** (`lir/lower`) reads `lambda_escapes_definition` /
   `binding_escapes_activation` in `control/call.rs::tail_callee_defers_release`, the
   escape half of the per-call adopt decision (a per-call callee closure that dies

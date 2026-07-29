@@ -40,6 +40,32 @@ impl CellContainer {
     }
 }
 
+/// What a frame-replacing tail call's own callee settles about the RC traffic the
+/// lowerer emits around it. Both fields are claims about *this* callee, which is
+/// why they are recorded per call rather than per region or per function.
+pub struct TailCalleeFacts {
+    /// Regions the callee holds through its **captured environment** — the
+    /// allocation funnel's counted (or, under the forest, owning) edge, taken when
+    /// the closure was built and dropped only by the closure region's free-time
+    /// cascade at the callee's completion. It therefore spans the gap between a
+    /// release relocated ahead of the `TailCall` and the callee's return mint,
+    /// which is what admits a region escaping by the return facet alone
+    /// (docs/impl/region/mechanism.md § "The callee's return mint, and the edge
+    /// that funds the gap"). A sibling arm's callee, capturing nothing, funds
+    /// nothing — hence per call.
+    pub capture_funded: rustc_hash::FxHashSet<Region>,
+    /// How many arguments this callee turns into **owned parameters**, each of
+    /// which releases once. Arguments past this index are collected into the rest
+    /// parameter's fresh list, whose own allocation scan and surplus release
+    /// balance them without help.
+    ///
+    /// The tail-call move hands over one reference per REGION, so a repeated
+    /// argument needs a mint for every occurrence after the first — but only where
+    /// the occurrence lands in a fixed parameter (rules.md Rule 5). Minting into a
+    /// rest position instead strands one region per call.
+    pub fixed_params: usize,
+}
+
 /// Results of region inference for a compilation unit.
 ///
 /// Every allocation site has a solved region in `alloc_region`.
@@ -488,6 +514,24 @@ pub struct RegionInfo {
     /// capture by an *escaping* closure is already an escape facet
     /// (`regions::escape::sole_frame_held_regions`).
     pub sole_frame_held_regions: rustc_hash::FxHashSet<Region>,
+    /// Regions whose every holder binding leaves this activation by the **return**
+    /// facet and no other — non-mutated, off the fiber frontier, and escaping
+    /// nowhere but a tail. A superset of `sole_frame_held_regions`.
+    ///
+    /// Not an admission on its own: something *does* read such a region after the
+    /// frame, namely the caller, through a reference the tail callee's own
+    /// `Return` mints — and that mint fires after a relocated release would have
+    /// run. So the lowerer pairs this with `TailCalleeFacts::capture_funded` at each
+    /// relocation point, and the pair is the count argument
+    /// (docs/impl/region/mechanism.md § "The callee's return mint, and the edge
+    /// that funds the gap").
+    pub return_frame_held_regions: rustc_hash::FxHashSet<Region>,
+    /// Frame-replacing tail-call HirId → what that call's own callee tells the
+    /// lowerer about the releases and mints around it ([`TailCalleeFacts`]).
+    /// Populated only where the callee resolves to a lambda this compilation can
+    /// see — a `Var` naming a `Let`/`Letrec`/`Define`-bound lambda in this unit;
+    /// every consumer takes its conservative branch when a call is absent.
+    pub tail_callee_facts: HashMap<HirId, TailCalleeFacts>,
     /// Ownership forest (docs/impl/region/ownership.md § "Adoption and subtree
     /// drop"), populated by the ownership pass; empty when the shape stays Shared,
     /// so the lowerer's emission is then the per-region-RC baseline. Store-site HirId → the interior
@@ -613,6 +657,8 @@ impl RegionInfo {
             binding_source_regions: HashMap::new(),
             captured_reassigned_bindings: FxHashSet::default(),
             sole_frame_held_regions: FxHashSet::default(),
+            return_frame_held_regions: FxHashSet::default(),
+            tail_callee_facts: HashMap::new(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),
             region_data: HashMap::new(),

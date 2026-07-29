@@ -703,17 +703,38 @@ fn captured_param_release_precedes_the_frame_replacing_tail_call() {
 }
 
 #[test]
-fn capture_handed_back_by_the_callee_stays_after_the_tail_call() {
-    // The decline face, and the documented residual: the tail callee hands `x`
-    // BACK, so `x` crosses the return frontier and the caller's owning reference
-    // is minted after this release would have run. Capture is admitted; the
-    // return facet is what refuses this one — the stdlib walker's accumulator.
+fn capture_handed_back_by_the_callee_precedes_the_tail_call() {
+    // The tail callee hands `x` BACK, so the caller's owning reference is minted
+    // by the CALLEE's `Return`, after this release runs. The release is hoisted
+    // anyway, because the same capture that lets `g` read `x` is a counted edge
+    // that outlives the mint — it falls away only with `g`'s region, at the
+    // callee's completion (docs/impl/region/mechanism.md § "The callee's return
+    // mint, and the edge that funds the gap"; the `tail-frame-exit-handback`
+    // probe). This is the stdlib walker's accumulator.
     let module = compile_to_lir("(begin (def f (fn (x) (let [g (fn () x)] (g)))) (f (list 1 2)))");
     let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
     assert!(
+        releases.iter().any(|&r| r < at),
+        "the handed-back capture's release is still emitted after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path",
+    );
+}
+
+#[test]
+fn handback_the_callee_does_not_capture_stays_after_the_tail_call() {
+    // The decline face, and the residual the admission leaves. `x` reaches a
+    // return through the OTHER arm, so it is on the return frontier — but the arm
+    // that leaves through a frame-replacing callee calls one that captures
+    // nothing, so no counted edge stands at that point to span the gap to a mint.
+    // The release keeps its place in the dead block: a leak, never an over-free.
+    let module = compile_to_lir(
+        "(begin (def s (fn () (list 3))) (def f (fn (x c) (if c x (s)))) (f (list 1 2) false))",
+    );
+    let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
         releases.iter().all(|&r| r > at),
-        "a release was hoisted for a value the tail callee returns \
-         (at={at}, releases={releases:?}) — the caller's mint comes after it",
+        "a release was hoisted at a point whose callee captures nothing \
+         (at={at}, releases={releases:?}) — no edge funds the caller's mint",
     );
 }
 
