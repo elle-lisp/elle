@@ -512,11 +512,17 @@ pub struct RegionInfo {
     /// Lexical capture is deliberately not one of the refusals: a closure's hold on
     /// what it captures is counted (or owning), never an uncounted borrow, and
     /// capture by an *escaping* closure is already an escape facet
-    /// (`regions::escape::sole_frame_held_regions`).
+    /// (`regions::escape::sole_frame_held_regions`). The mutated refusal is not an
+    /// escape fact but compensation's release-route one, so it is asked per region
+    /// rather than per holder: a `cell_release_regions` member names the cell BOX,
+    /// which no `assign` repoints, and keeps its mutated holder
+    /// (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
+    /// not its cell box").
     pub sole_frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Regions whose every holder binding leaves this activation by the **return**
-    /// facet and no other — non-mutated, off the fiber frontier, and escaping
-    /// nowhere but a tail. A superset of `sole_frame_held_regions`.
+    /// facet and no other — off the fiber frontier, escaping nowhere but a tail,
+    /// and with the same mutated-holder reading as `sole_frame_held_regions`. A
+    /// superset of it.
     ///
     /// Not an admission on its own: something *does* read such a region after the
     /// frame, namely the caller, through a reference the tail callee's own

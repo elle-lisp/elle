@@ -344,6 +344,17 @@ iteration, so its release must stay per-iteration — which is exactly why the
 cells are the exception that guard does not cover, because their allocation is
 loop-independent.
 
+The same "the box is not the slot" fact carries the cell's release past the other
+placement rule it meets. A frame that ends in a closure tail call runs nothing the
+lowerer emits after the `TailCall`, so a `DecrefCellRegion` landing there is
+carried back ahead of the call under the sole-holder admission
+([mechanism.md](mechanism.md) § "A release past a frame-replacing tail call is not
+a release"). That admission refuses a **mutated** holder — but only because a
+value-routed release reads the holder's slot, and this release reads the box,
+which no `assign` repoints (mechanism.md § "A mutated holder poisons its value
+route, not its cell box"). So the env cell of a *reassigned* capture relocates
+exactly as an unreassigned one does; refusing it strands one box per activation.
+
 Named, tolerated edge (not specific to binding cells — true of every mutable
 container): a read consumed *within the same expression* that also removes or
 overwrites the value (`(list x (begin (assign x nil) 1))`) can observe the

@@ -417,6 +417,16 @@
   (string "item-" i))
 (defn t19-store [c v]
   (put c :x v))
+# The `fresh-env-cell` / `shared-env-cell` pair drives one env cell each, split on
+# where the cell is minted. `c` is a captured, REASSIGNED local, so `populate_env`
+# mints its cell box once per activation — a fresh region per call — and the frame
+# ends in a closure tail call, which puts the box's `DecrefCellRegion` in the dead
+# post-`TailCall` block. Relocating it there is the sole-holder admission's
+# business, and the holder's mutation does not refuse it: the release names the
+# BOX, which no `assign` repoints (docs/impl/region/mechanism.md § "A mutated
+# holder poisons its value route, not its cell box"). `shared-env-cell`'s cell is
+# module-level, minted once for the file, so it measures the same closure call with
+# no per-op box at all.
 (defn t20-make-cell []
   (def @c 0)
   (let [f (fn []
@@ -831,7 +841,7 @@
                (let [b {:a j}]
                  (break))))) 0]
    ["store-wrapper" (fn [j] (t19-store t19s (string "v" j))) 0]
-   ["fresh-env-cell" (fn [j] (t20-make-cell)) 1]
+   ["fresh-env-cell" (fn [j] (t20-make-cell)) 0]
    ["shared-env-cell"
     (fn [j]
       (let [f (fn []

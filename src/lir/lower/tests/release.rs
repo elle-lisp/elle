@@ -738,6 +738,77 @@ fn handback_the_callee_does_not_capture_stays_after_the_tail_call() {
     );
 }
 
+/// Position of the first `TailCall` in the function that contains one, with the
+/// indices of that block's `DecrefCellRegion`s — the env-cell twin of
+/// [`tail_call_release_layout`], which reads the value route.
+fn tail_call_cell_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    for f in funcs {
+        for b in &f.blocks {
+            let Some(at) = b
+                .instructions
+                .iter()
+                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+            else {
+                continue;
+            };
+            let releases = b
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
+                .map(|(idx, _)| idx)
+                .collect();
+            return Some((at, releases));
+        }
+    }
+    None
+}
+
+#[test]
+fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
+    // `c` is a captured local, so `populate_env` mints its cell box once per
+    // activation and the box's `DecrefCellRegion` lands in the dead block. It is
+    // hoisted even though `c` is REASSIGNED: the mutated refusal is compensation's
+    // release-ROUTE one, and this release names the box (`LoadCaptureRaw`), which
+    // an `assign` never repoints — it writes the cell's content
+    // (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
+    // not its cell box"; the `fresh-env-cell` probe).
+    let module = compile_to_lir(
+        "(begin (def f (fn () (def @c 0) \
+         (let [g (fn () (assign c (%add c 1)) c)] (g)))) (f))",
+    );
+    let (at, releases) =
+        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().any(|&r| r < at),
+        "the reassigned env cell's release is still emitted after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path, one box \
+         stranded per activation",
+    );
+}
+
+#[test]
+fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
+    // The decline face: the closure holding the cell is RETURNED by the sibling
+    // arm, so escape's capture facet marks `c` escaping and the sole-holder
+    // admission refuses the box. Only the mutated refusal is scoped to the value
+    // route; every escape facet still refuses, and the release keeps its place in
+    // the dead block.
+    let module = compile_to_lir(
+        "(begin (def s (fn () 0)) \
+         (def f (fn (t) (def @c 0) \
+         (let [g (fn () (assign c (%add c 1)) c)] (if t g (s))))) (f false))",
+    );
+    let (at, releases) =
+        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().all(|&r| r > at),
+        "an escaping holder's env cell was hoisted ahead of the TailCall \
+         (at={at}, releases={releases:?}) — the closure leaves carrying the cell",
+    );
+}
+
 /// For the first function with two `TailCall`-bearing blocks — a branch whose
 /// arms each make one — the local slots each block releases BEFORE its call and
 /// those it releases after.

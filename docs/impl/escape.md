@@ -160,7 +160,12 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     hold on what it captures is a counted (or owning) edge rather than an uncounted
     borrow; capture by a closure that *escapes* is already an escape facet
     ([region/mechanism.md](region/mechanism.md) § "Lexical capture is not a second
-    holder to fear");
+    holder to fear"). It also refuses a **mutated** holder, which is not an escape
+    fact at all but the release-route one compensation makes — so it is scoped to
+    the releases that read the mutated slot, and an env cell's `DecrefCellRegion`,
+    which names the box no `assign` repoints, is exempt
+    ([region/mechanism.md](region/mechanism.md) § "A mutated holder poisons its
+    value route, not its cell box");
   - the **return-funded admission** (`regions::escape::return_frame_held_regions`)
     the frame-exit release adds on top of it, for a region whose *only* refusal is
     the return facet (`binding_escapes_beyond_return` per holder, plus the fiber

@@ -245,6 +245,33 @@ its closure ever leaves — the right conservatism for the **merge** gate, which
 asks where a value may *live* and so needs raw reachability, and the wrong one
 here, where the question is who holds a count.
 
+#### A mutated holder poisons its value route, not its cell box
+
+The mutated refusal is a claim about a *route*, so it reaches exactly as far as
+the route does. A value-routed release loads the holder's slot and frees whatever
+region the value it finds there lives in — which is why a slot the program
+repoints cannot carry one, and why the release is skipped for such a slot
+entirely ([bindings.md](bindings.md), "a mutated slot is not a release route").
+
+An **env cell**'s release is a different instruction against a different object.
+`LoadCaptureRaw` + `DecrefCellRegion` names the cell **box**, and the box is
+minted once per activation by `populate_env` and never repointed: an `assign`
+writes the cell's *content* (`StoreCapture`, which increfs the new content's
+region and drops the displaced prior), leaving the box exactly where it was. A
+reassignment therefore cannot make this release name a value the solver did not
+mean, and a `cell_release_regions` member is admitted with its holder mutated —
+the same exclusion the emitter already states at both of its mutated-slot
+backstops (`emit_decref_for_region`), read one step earlier at the admission
+those backstops build on.
+
+What the cell region still owes is the count argument, unchanged. The frame's
+reference is the box's allocation reference; a capturing closure's is the
+funnel's counted edge (above); and a closure that *escapes* carries escape's
+capture facet onto the binding, which refuses the holder as it refuses any other
+escaping one. The leak this closes is the env cell of a reassigned capture whose
+frame ends in a closure tail call, where the release would otherwise sit in the
+dead fall-through and strand one box per activation.
+
 One more separation makes the placement fact honest. The ownership and merge cuts
 admit a subtree when the root's drop **post-dominates** a member's last use — a
 *lifetime* question — and a release re-anchored onto a branch post-dominates
@@ -538,13 +565,16 @@ because the env's hold is a counted (or owning) edge the funnel took when the
 closure was built (§ "Lexical capture is not a second holder to fear"): a release
 of the frame's reference leaves the callee's standing. The predicate is one and
 the same for both mechanisms (`RegionInfo::sole_frame_held_regions`): every holder
-binding non-escaping and non-mutated, and the region absent from the return/fiber
-frontiers' atomless site halves.
+binding non-escaping, no holder mutated except where the release names a cell box
+rather than the mutated slot (§ "A mutated holder poisons its value route, not its
+cell box"), and the region absent from the return/fiber frontiers' atomless site
+halves.
 
 So this close covers a parameter or local the frame alone owns — captured by a
-locally-called closure or not — whose release lands at the body's scope exit. The
-value the callee hands **back** is a separate question with a separate funding
-argument, below.
+locally-called closure or not — whose release lands at the body's scope exit, and
+with it the **env cell** of a captured local, whose `DecrefCellRegion` lands in
+the same dead block. The value the callee hands **back** is a separate question
+with a separate funding argument, below.
 
 ### The callee's return mint, and the edge that funds the gap
 
@@ -581,7 +611,9 @@ needs no funding because no one reads it after the frame.
 
 Every other facet still refuses, and each for the reason it always did: a holder
 that crosses the **fiber** frontier may be borrowed uncounted by a parked frame; a
-**mutated** holder is a release route that frees whatever the slot holds then; a
+**mutated** holder is a release route that frees whatever the slot holds then,
+except where the release names the cell box the mutation leaves alone (§ "A
+mutated holder poisons its value route, not its cell box"); a
 holder captured by a closure that **escapes** leaves with it. What is dropped is
 only the return facet's blanket refusal, and only where the callee's edge replaces
 it — which is why escape must be able to say "*this* facet and no other"
@@ -647,15 +679,17 @@ the point replaces.
 
 Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
 argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
-the non-self-cancelling boundary, and the handed-back-through-the-callee faces
-driven as rows), the `tail-frame-exit-unused` / `tail-frame-exit-moved` /
-`tail-frame-exit-arms` / `tail-frame-exit-captured` / `tail-frame-exit-handback`
-probes in `tests/elle/oracle.lisp` (the per-op rates), and
+the non-self-cancelling boundary, the env-cell faces, and the
+handed-back-through-the-callee faces driven as rows), the `tail-frame-exit-unused` /
+`tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
+`tail-frame-exit-handback` / `fresh-env-cell`
+probes in `tests/elle/oracle.lisp` (the per-op rates), the placement pins in
+`lir::lower::tests::release`, and
 `tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value
 moved into the tail callee, reached through its captured environment, filled in
 place by it, handed back out through it, handed back when the frame holds the only
-other reference, captured by a closure that escapes, or read after the call must
-survive the moved release).
+other reference, held in an env cell the callee rewrites, captured by a closure
+that escapes, or read after the call must survive the moved release).
 
 ## Compile-time region selection (coalescing)
 

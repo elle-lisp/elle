@@ -170,6 +170,44 @@
   (let [g (fn () v)]
     (if t (g) 0)))
 
+# (d9) a captured local's ENV CELL. `populate_env` mints the cell box once per
+# activation, and its `DecrefCellRegion` lands in the same dead block — so a frame
+# that ends in a closure tail call strands one box per call unless the release
+# relocates too. The reassigned face is the one the sole-holder admission has to
+# read correctly: a mutated holder refuses a release routed through its SLOT, and
+# this release names the BOX, which no `assign` repoints
+# (docs/impl/region/mechanism.md § "A mutated holder poisons its value route, not
+# its cell box").
+(defn cell-immutable (n)
+  (def @c n)
+  (let [g (fn () c)]
+    (g)))
+(defn cell-reassigned (n)
+  (def @c n)
+  (let [g (fn ()
+            (assign c (%add c 1))
+            c)]
+    (g)))
+
+# (d10) the same box with a HEAP init the caller owns, reassigned away inside the
+# callee: the cell's content accounting is the caller's, so the box is the only
+# per-call region and the row reads it alone.
+(defn cell-heap (s)
+  (def @c s)
+  (let [g (fn ()
+            (assign c (length c))
+            c)]
+    (g)))
+
+# (d11) the reassigned cell where the tail call sits in a branch ARM, so the box's
+# release is relocated at that arm's own point.
+(defn arm-cell (n t)
+  (def @c n)
+  (let [g (fn ()
+            (assign c (%add c 1))
+            c)]
+    (if t (g) 0)))
+
 # exemptions ───────────────────────────────────────────────────────────────────
 # The releases that must STAY in the dead fall-through. Each is already bounded;
 # hoisting one would release a reference the callee now owns, so these rows are
@@ -228,6 +266,17 @@
   (let [g (fn () (length x))]
     (if t g (tail-sink))))
 
+# The same for a reassigned capture: the escaping closure carries the CELL, so the
+# holder is refused and the box stays in the dead block. Driven for its VALUE — it
+# strands by design, and what must hold is that the escaped closure can still read
+# and rewrite the cell it captured.
+(defn escaping-cell (n t)
+  (def @c n)
+  (let [g (fn ()
+            (assign c (%add c 1))
+            c)]
+    (if t g (tail-sink))))
+
 # residual ─────────────────────────────────────────────────────────────────────
 # A returned holder the tail callee does NOT capture. `v` reaches a return through
 # the OTHER arm, so no environment edge stands at this arm's relocation point to
@@ -238,11 +287,33 @@
 (defn handback-unfunded (v t)
   (if t v (tail-sink)))
 
+# residual: an env cell whose branch has a FALLING-THROUGH arm ─────────────────
+# `arm-cell` above relocates its box at the tail-calling arm's own point, which is
+# where the box's only `DecrefCellRegion` sits — so the sibling arm, which reaches
+# the merge instead, releases nothing. The branch-arm release window is what
+# anchors a single release where every arm reaches it, and it excludes cell
+# regions: re-anchoring the box to the merge would take it back out of the arm it
+# relocates in, and the merge's replica placement needs a self-cancelling run,
+# which `LoadCaptureRaw` + `DecrefCellRegion` is not (it leaves the holder as it
+# was, so a second copy would count twice). The strand is per env cell, not per
+# reassignment — `arm-cell-ro` is the immutable face of the same shape. Driven for
+# VALUE: both arms must still compute correctly.
+
+(defn arm-cell-ro (n t)
+  (def @c n)
+  (let [g (fn () c)]
+    (if t (g) 0)))
+
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def walk-moved-d
   (measure (fn () (length (drive-walk-moved [1 2 3]))) 200 window))
 (def arm-handback-d
   (measure (fn () (length (arm-handback [1 2 3] true))) 200 window))
+(def cell-src [1 2 3])
+(def cell-immutable-d (measure (fn () (cell-immutable 1)) 200 window))
+(def cell-reassigned-d (measure (fn () (cell-reassigned 1)) 200 window))
+(def cell-heap-d (measure (fn () (cell-heap cell-src)) 200 window))
+(def arm-cell-t-d (measure (fn () (arm-cell 1 true)) 200 window))
 (def unused-param-d (measure (fn () (unused-param [1 2])) 200 window))
 (def unused-two-d (measure (fn () (unused-two [1 2] [3 4])) 200 window))
 (def captured-param-d (measure (fn () (captured-param [1 2])) 200 window))
@@ -284,6 +355,8 @@
 (println "  exemptions: moved " moved-arg-d "  moved+stranded "
          moved-and-stranded-d "  callee-local " callee-local-d "  arm-moved "
          arm-moved-t-d "/" arm-moved-f-d)
+(println "  cells: immutable " cell-immutable-d "  reassigned "
+         cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d)
 (println "  controls: native " native-tail-d "  non-tail " non-tail-d)
 (println "  boundary: branch " branch-true-d "/" branch-false-d)
 
@@ -332,6 +405,12 @@
           "the hand-back where the captured edge is the only other reference")
 (bounded? arm-handback-d "the hand-back reached through a branch arm's callee")
 
+(bounded? cell-immutable-d "the env cell of a captured local")
+(bounded? cell-reassigned-d "the env cell of a REASSIGNED captured local")
+(bounded? cell-heap-d "the env cell of a reassigned capture with a heap init")
+(bounded? arm-cell-t-d
+          "the reassigned cell relocated at a branch arm's tail call")
+
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
 (assert (= (length (drive-walk-moved [1 2 3])) 3) "moved-in walker result lost")
 (assert (= (length (arm-handback [1 2 3] true)) 3) "arm hand-back result lost")
@@ -345,6 +424,18 @@
 (assert (= (drive-fill [1 2 3]) 3) "walk-fill result lost")
 (assert (= ((escaping-capture [1 2] true)) 2) "escaping-capture result lost")
 (assert (= (escaping-capture [1 2] false) 0) "escaping-capture sibling arm lost")
+(assert (= (cell-immutable 7) 7) "immutable cell result lost")
+(assert (= (cell-reassigned 7) 8) "reassigned cell result lost")
+(assert (= (cell-heap cell-src) 3) "heap-init cell result lost")
+(assert (= (arm-cell 7 true) 8) "arm reassigned cell result lost")
+(assert (= (arm-cell 7 false) 0) "arm reassigned cell sibling arm lost")
+(assert (= (arm-cell-ro 7 true) 7) "residual: arm immutable cell result lost")
+(assert (= (arm-cell-ro 7 false) 0)
+        "residual: arm immutable cell sibling arm lost")
+(let [g (escaping-cell 7 true)]
+  (assert (= (g) 8) "escaping cell first read lost")
+  (assert (= (g) 9) "escaping cell rewrite lost"))
+(assert (= (escaping-cell 7 false) 0) "escaping-cell sibling arm lost")
 
 # Value preservation: relocating a release must not change what runs.
 (assert (= (unused-param [1 2]) 0) "unused-param result lost")

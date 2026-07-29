@@ -17,9 +17,13 @@
 # stands. A value the callee hands BACK rides that same edge one step further —
 # the callee's `Return` mints the caller's reference after the relocated release
 # has run, and the env edge is what holds the region off zero in between, which
-# (e2), (e5) and (e6) drive. What the admission still refuses is a holder escape
-# marks by a facet no edge at the point replaces: a closure that leaves carrying
-# it (e4), a store into a longer-lived container (f), a fiber crossing (h).
+# (e2), (e5) and (e6) drive. (e7) and (e8) drive the same admission for an ENV
+# CELL's `DecrefCellRegion`, whose holder is REASSIGNED: that refusal is about a
+# release routed through the holder's slot, and this one names the cell box no
+# `assign` repoints. What the admission still refuses is a holder escape marks by a
+# facet no edge at the point replaces: a closure that leaves carrying it (e4, and
+# e9 for the cell), a store into a longer-lived container (f), a fiber crossing
+# (h).
 #
 # Every witness reads the subject's HEAP contents on the far side of the tail
 # call, through a chain long enough that an over-early free faults rather than
@@ -134,6 +138,48 @@
 (defn e6-read (i)
   (length (first (e6-arm (list (string "o" i) i) true))))
 
+# (e7) the relocated release is an ENV CELL's `DecrefCellRegion`, and the tail
+# callee is the very closure that captured the cell — it rewrites the cell and
+# reads it back. The release names the cell BOX, whose only other reference is the
+# counted edge the funnel took when `g`'s environment was built; if it reached zero
+# the callee's `StoreCapture` would rebind a freed cell and the caller's read would
+# tear. The holder is REASSIGNED, which is exactly the refusal that must be scoped
+# to slot-routed releases and not to this one.
+(defn e7-cell (i)
+  (def @c (list (string "q" i) i))
+  (let [g (fn ()
+            (assign c (first c))
+            (length c))]
+    (g)))
+(defn e7-read (i)
+  (e7-cell i))
+
+# (e8) the same cell reached through a branch ARM, so the release is the merge's
+# replica ahead of the arm's `TailCall`.
+(defn e8-arm (v t)
+  (def @c v)
+  (let [g (fn ()
+            (assign c (first c))
+            (length c))]
+    (if t (g) 0)))
+(defn e8-read (i)
+  (e8-arm (list (string "s" i) i) true))
+
+# (e9) the closure holding the reassigned cell ESCAPES, so escape's capture facet
+# refuses the holder and the box must stay in the dead block: the returned closure
+# rewrites and reads its cell after the frame is gone.
+(defn tail-zero ()
+  0)
+(defn e9-escaping (v t)
+  (def @c v)
+  (let [g (fn ()
+            (assign c (first c))
+            (length c))]
+    (if t g (tail-zero))))
+(defn e9-read (i)
+  (let [g (e9-escaping (list (string "t" i) i) true)]
+    (g)))
+
 # (e4) the capturing closure ESCAPES — it is returned, so it outlives the frame
 # and carries `x` with it. Escape's capture facet refuses the holder, and the
 # release must stay in the dead block; the caller invokes the closure afterwards
@@ -226,6 +272,9 @@
 (var e3 0)
 (var e5 0)
 (var e6 0)
+(var e7 0)
+(var e8 0)
+(var e9 0)
 (var e4 0)
 (var f 0)
 (var g 0)
@@ -244,6 +293,9 @@
   (assign e3 (e3-walker i))
   (assign e5 (e5-read i))
   (assign e6 (e6-read i))
+  (assign e7 (e7-read i))
+  (assign e8 (e8-read i))
+  (assign e9 (e9-read i))
   (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
@@ -268,6 +320,9 @@
 (assert (%gt e3 0) "accumulator freed under the caller's read of what it holds")
 (assert (%gt e5 0) "moved-in accumulator freed before the callee minted for it")
 (assert (%gt e6 0) "arm hand-back freed before the arm's callee minted for it")
+(assert (%gt e7 0) "env cell freed under the callee that rewrites it")
+(assert (%gt e8 0) "env cell freed under the arm's callee that rewrites it")
+(assert (> e9 0) "env cell freed under a closure that escaped holding it")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")

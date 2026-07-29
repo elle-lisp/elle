@@ -120,10 +120,12 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 
 /// The two frame-held sets ([`FrameHeld`]), split on whether the **return** facet
 /// counts as a refusal: `sole` is the regions whose every holder binding leaves
-/// this activation by **no** facet — non-mutated, non-escaping, and absent from
-/// the return/fiber frontiers' atomless site halves — and `return_funded` is the
-/// same reading with the return facet alone allowed. A region with no holder
-/// binding at all offers nothing to judge and is refused by both.
+/// this activation by **no** facet — non-escaping, with no mutated holder unless
+/// the region is released through a cell box rather than that holder's slot, and
+/// absent from the return/fiber frontiers' atomless site halves — and
+/// `return_funded` is the same reading with the return facet alone allowed. A
+/// region with no holder binding at all offers nothing to judge and is refused by
+/// both.
 ///
 /// This is the **count** question a *placement* argument cannot answer, and the one
 /// admission every mechanism that makes a release fire where none fired before must
@@ -149,6 +151,18 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// [`captured_bindings`], the structural graph the *merge* gate reads — merging
 /// changes where a value lives, so it needs raw reachability rather than a count.
 ///
+/// **A mutated holder is refused for its value ROUTE, so the refusal reaches only
+/// as far as that route** (region/mechanism.md § "A mutated holder poisons its
+/// value route, not its cell box"). A value-routed release loads the holder's slot
+/// and frees the region of whatever it finds there, which a repointed slot makes
+/// unanswerable. An env cell's release names the cell BOX instead
+/// (`LoadCaptureRaw` + `DecrefCellRegion`), and the box is minted once per
+/// activation by `populate_env` and never repointed — an `assign` writes the
+/// cell's *content*. So a `cell_release_regions` member keeps the holder's
+/// mutation and owes only the count argument, which the facets above still ask.
+/// The emitter states the same exclusion at its two mutated-slot backstops
+/// (`lir::lower::regiondecref::emit_decref_for_region`).
+///
 /// Two consumers, deliberately sharing one predicate: the branch-arm release window
 /// (`regions::analyze::decref`) and the frame-exit release the lowerer performs at a
 /// tail call (`RegionInfo::sole_frame_held_regions`, region/mechanism.md § "A
@@ -165,18 +179,23 @@ pub(super) fn sole_frame_held_regions(
     let mut refused: FxHashSet<Region> = FxHashSet::default();
     let mut refused_beyond_return: FxHashSet<Region> = FxHashSet::default();
     for (b, regions) in binding_regions {
-        // A MUTATED holder is refused for the reason compensation refuses it as a
-        // release route: a slot repointed before the release frees whatever it
-        // holds THEN, not what the solver named here.
         let mutated = arena.get(*b).is_mutated;
-        let unsafe_holder = mutated || escape.binding_escapes_activation(*b);
-        let unsafe_beyond_return = mutated || escape.binding_escapes_beyond_return(*b);
+        let escapes = escape.binding_escapes_activation(*b);
+        let escapes_beyond_return = escape.binding_escapes_beyond_return(*b);
         for &r in regions {
             held.insert(r);
-            if unsafe_holder {
+            // A MUTATED holder is refused for the reason compensation refuses it as
+            // a release route: a slot repointed before the release frees whatever it
+            // holds THEN, not what the solver named here. That is a claim about the
+            // release, not about the holder, so it is asked per region: an env
+            // cell's release names the cell BOX, which `populate_env` mints once per
+            // activation and no `assign` repoints, and is untouched by the
+            // mutation.
+            let route_poisoned = mutated && !info.cell_release_regions.contains(&r);
+            if route_poisoned || escapes {
                 refused.insert(r);
             }
-            if unsafe_beyond_return {
+            if route_poisoned || escapes_beyond_return {
                 refused_beyond_return.insert(r);
             }
         }
