@@ -351,12 +351,11 @@ Elle uses Semantic Versioning: `MAJOR.MINOR.PATCH`
 ### Release Process
 
 1. Update version in `Cargo.toml`
-2. Update `CHANGELOG.md`
-3. Create `release/vX.Y.Z` branch
-4. Create PR to `main`
-5. After merge, tag: `git tag -a vX.Y.Z`
-6. Push tag: `git push origin vX.Y.Z`
-7. Publish to crates.io: `cargo publish`
+2. Create `release/vX.Y.Z` branch
+3. Create PR to `main`
+4. After merge, tag: `git tag -a vX.Y.Z`
+5. Push tag: `git push origin vX.Y.Z`
+6. Publish to crates.io: `cargo publish`
 
 ---
 

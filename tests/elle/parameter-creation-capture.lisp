@@ -18,8 +18,8 @@
 ## tier (vm + jit) without accumulating region state, so it pins the SEMANTICS
 ## cleanly. Accumulating several failing parameterize+fiber assertions in one
 ## file additionally trips a separate cumulative region use-after-free (the
-## arena tag/object-mismatch abort — see DEVLOG and the full parameters.lisp
-## run); that is a distinct defect and is NOT what this file is for.
+## arena tag/object-mismatch abort, reachable via the full parameters.lisp run);
+## that is a distinct defect and is NOT what this file is for.
 
 (def p1 (parameter :default))
 (let [f (parameterize ((p1 :inside))

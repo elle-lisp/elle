@@ -95,11 +95,9 @@ make smoke                 # run all tests (~30s)
 
 | File | Content |
 |------|---------|
-| [plugins](docs/plugins.md) | 29 shipped plugins |
+| [plugins](docs/plugins.md) | Rust plugins and `std/` modules |
 | [stdlib](docs/stdlib.md) | Standard library and prelude |
 | [intrinsics](docs/intrinsics.md) | %-intrinsics (silent bytecode ops) |
 | [testing](docs/analysis/testing.md) | Test patterns, make smoke/test |
 | [debugging](docs/analysis/debugging.md) | Debugging and introspection |
 | [cookbook](docs/cookbook/index.md) | Recipes for cross-cutting changes |
-| [DEVLOG](DEVLOG.md) | Per-PR development log (generated from diffs) |
-| [CHANGELOG](CHANGELOG.md) | Changelog by subsystem arc (agent-optimized) |
