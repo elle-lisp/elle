@@ -312,12 +312,63 @@
 (defn n2-read (i)
   ((n2-fwd i) 0))
 
+# ── the operand-value face: what an argument's evaluation merely USED ─────────
+# The exemption reads an operand's VALUE, not its syntax (docs/impl/region/mechanism.md
+# § "What an operand names is its VALUE, not its syntax"), so a region reached only
+# inside an argument's own nested call is no longer exempt and its release does fire
+# ahead of the `TailCall`. Three ways the value can still live in such a region, each
+# with a different reference standing between the relocated release and the callee's
+# read.
+
+# (o) the argument's nested call HANDS BACK one of its own arguments, so the value
+# moved into the tail call lives in the region the release just dropped. The
+# callee's `Return` minted for it, and that mint is what must stand.
+(defn o-ident (v)
+  v)
+(defn o-passthrough (v)
+  (a-callee (o-ident v)))
+(defn o-read (i)
+  (o-passthrough (list (string "o1" i) i)))
+
+# (p) the argument's nested call is a native container READ, whose result is a
+# borrow living INSIDE the container. The pass-through retain the native took is
+# the reference the relocated release must leave standing.
+(defn p-callee (s)
+  (%add 1 (length s)))
+(defn p-read-elem (v)
+  (p-callee (first v)))
+(defn p-read (i)
+  (p-read-elem (list (string "p1" i) i)))
+
+# (q) the argument is an inline `%`-opcode read — which mints no region, so its
+# result lives in the operand's region with no reference of its own. That is why the
+# container's own release is extended to the reader (Rule 4) and lands in the dead
+# block: the operand is the value-producing leaf and stays exempt, because hoisting
+# the container's release would free the page the callee is handed.
+(defn q-read (i)
+  (let [v (%pair (string "q1" i) nil)]
+    (p-callee (%first v))))
+
+# (r) the argument is a fresh LAMBDA capturing a local, so the closure region is
+# the moved value and stays exempt while the capture's own counted edge is what
+# keeps the captured value alive under the callee's call.
+(defn r-call-thunk (g)
+  (length (first (g))))
+(defn r-lambda-arg (i)
+  (let [x (list (string "r1" i) i)]
+    (r-call-thunk (fn () x))))
+
 # ── controls: the same reads with a NATIVE tail call — correct now ────────────
 (defn c-plain (i)
   (let [x (list (string "p" i) i)]
     (length (first x))))
 
 # ── drive: fresh subject each iteration; an over-early free faults on the read ─
+# The iteration count is a PAGE budget, not a confidence knob: `--trace=guardfree`
+# leaks every freed page `mprotect(PROT_NONE)`'d, so witnesses × iterations is
+# bounded by the process's map count and an added witness has to be paid for out of
+# the loop bound. A freed region is recycled within a handful of iterations, which is
+# what the pin actually rests on — so the bound is set for headroom, not for reach.
 (var i 0)
 (var a 0)
 (var b 0)
@@ -342,7 +393,11 @@
 (var l 0)
 (var m2 0)
 (var n2 0)
-(while (%lt i 3000)
+(var o1 0)
+(var p1 0)
+(var q1 0)
+(var r1 0)
+(while (%lt i 1500)
   (assign a (a-moved i))
   (assign b (b-moved-beside i))
   (assign c (c-callee-local i))
@@ -365,6 +420,10 @@
   (assign l (l-read i))
   (assign m2 (m2-read i))
   (assign n2 (n2-read i))
+  (assign o1 (o-read i))
+  (assign p1 (p-read i))
+  (assign q1 (q-read i))
+  (assign r1 (r-lambda-arg i))
   (assign k (c-plain i))
   # The sink is a module-level container by design (witness f stores into it);
   # drain it so the driver's own retention stays flat.
@@ -399,5 +458,11 @@
         "forward cell freed under the deref that dispatches its sibling")
 (assert (%gt m2 0) "forward cell freed before the handed-back capturer drove it")
 (assert (> n2 0) "sibling freed under the caller that received it from its cell")
+
+(assert (%gt o1 0)
+        "argument freed under the callee its own nested call handed it to")
+(assert (%gt p1 0) "container freed under the element read out of it")
+(assert (%gt q1 0) "container freed under an opcode read's borrow")
+(assert (%gt r1 0) "capture freed under the lambda argument that holds it")
 
 (println "region-tail-frame-exit-uaf: ok")

@@ -589,12 +589,43 @@ reference.
 Two readings are therefore both required.
 
 **What the call can reach** — the exemption, read off the call itself: every
-region the callee, any argument subtree, the call's own result, or its deferred
+region the callee, an operand's own value, the call's own result, or its deferred
 channels (`deferred_release_slot`) name keeps its place in the dead fall-through,
-where the ownership move and the deferred callee release own it. Read
-syntactically over `alloc_region` and `binding_source_regions`, and again over the
-emitted instructions, because ANF is free to rewrite an operand into a synthetic
-binding the syntax walk does not connect back to the call.
+where the ownership move and the deferred callee release own it. Read over
+`alloc_region` and `binding_source_regions`, and again over the emitted
+instructions, because ANF is free to rewrite an operand into a synthetic binding
+the syntax walk does not connect back to the call.
+
+**What an operand names is its VALUE, not its syntax.** The reading descends the
+value-transparent wrappers — a `Let`/`Letrec` body, a `Begin`/`Block` tail, a
+branch arm, an `And`/`Or`, a `DerefCell`, a `Return` — and stops where the value is
+produced, recording that node's own region because that region *is* the value
+handed over. It does **not** descend a `Call`'s callee or arguments, nor a
+`Lambda`'s captures: a region reached only in there is one the operand's own
+evaluation used and finished with before the tail call was made, and exempting it
+leaves a release the frame still owes emitted where control never arrives.
+`(f (g x))` hands the callee `g`'s **result**; `g`'s own closure region is not
+reachable from the call at all. What the produced value does still hold, it holds by
+a **counted** (or owning) edge in each case: a call's result carries exactly one
+minted reference (§ "The return mint is emitted exactly once"), and a closure's env
+took the funnel's count when it was built (§ "Lexical capture is not a second holder
+to fear") — so the frame's own release remains the only reference it drops. An
+inline `%`-opcode is not such a node: it mints no region and its heap result
+(`%first`/`%rest`/`%get`) is an uncounted borrow living *in* its operand's region,
+so the operand is the value-producing leaf and the descent continues through it.
+This is the same reading the closure-cycle merge's by-move boundary makes of the
+same question (letrec.md § "What the non-member tail still refuses"), for the same
+reason.
+
+Producing a value is not the same as producing a *fresh* one — a callee may hand
+back an argument itself or a value it read out of one (adopt.md § "The lifetime
+obligation the root carries") — and that costs the reading nothing, because the
+mint is per *value*, not per freshness: whichever region the result turns out to
+live in, the callee raised **that** region's count by exactly one on the way out (§
+"The return mint is emitted exactly once"). So the frame's own release still drops
+only the frame's reference, and the moved value survives it. The one node with no
+such count is the inline `%`-opcode above, which is why the descent passes through
+it to the operand that owns the page.
 
 **Whether the frame is the sole holder** — the admission, and escape is its sole
 authority. The exemption above is a statement about *arguments*, and arguments are

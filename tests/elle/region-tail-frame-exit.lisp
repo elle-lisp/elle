@@ -259,6 +259,40 @@
                 (if (%lt m 1) helper (go (helper m))))]
     (go n)))
 
+# (d16) the exemption reads an operand's VALUE, not its syntax
+# (docs/impl/region/mechanism.md § "What an operand names is its VALUE, not its
+# syntax"). Here the letrec body's tail call names `go` nowhere — its ARGUMENT is a
+# call to `go`, so what the callee is handed is that call's RESULT, and `go`'s own
+# closure region was read and finished with before the tail call was made. Its
+# release sits at the letrec's scope end, past the frame-replacing `TailCall`, and
+# the relocation is what carries it back: a self-recursive member is the tail
+# callee's own region only when the body tail-calls IT (docs/impl/selfrec.md § the
+# placement table). Three faces of the same reading: a sibling callee, a top-level
+# callee and a top-level callee.
+(defn arg-call-selfrec (n)
+  (letrec [helper (fn (x) (%sub x 1))
+           go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (helper (go n))))
+(defn top-sub (x)
+  (%sub x 1))
+(defn arg-call-toplevel (n)
+  (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (top-sub (go n))))
+
+# (d17) the same reading's over-free face, in the leak direction: the operand's
+# value-producing leaf IS an allocation, so its region stays exempt. A fresh lambda
+# handed to the tail call is the callee's owned parameter, and the closure region
+# the argument's `%pair` builds is the moved value itself — hoisting either would
+# drop the reference the callee now owns. Bounded here and correct-valued in the
+# uaf complement are the two halves of one claim.
+(defn call-thunk (g)
+  (g))
+(defn lambda-arg (n)
+  (call-thunk (fn () n)))
+(defn aggregate-arg (n)
+  (let [xs (list n n)]
+    (top-sub (length (%pair xs nil)))))
+
 # exemptions ───────────────────────────────────────────────────────────────────
 # The releases that must STAY in the dead fall-through. Each is already bounded;
 # hoisting one would release a reference the callee now owns, so these rows are
@@ -355,24 +389,42 @@
   (let [g (fn () c)]
     (if t (g) 0)))
 
-# residual: the letrec body tail-calls a member it does NOT capture ────────────
+# residual: a sibling captures the self-recursive member ───────────────────────
 # `fwd-cell-sib` inverts (d12): the SIBLING captures the self-recursive member, and
 # the body tail-calls the sibling. Both regions strand — the merged arena (`go`'s
 # closure, its env, and the forward cell the merge collapsed into it) and the
 # sibling's own closure and env. Both channels ARE wired at that call (the arena's
 # `deferred_release_slot` and the callee's `defer_callee_release` both appear in the
 # emitted bytecode), so what is open here is not an analysis refusal.
-# `fwd-cell-unheld` is the narrower face: the tail callee is a member nothing
-# captures, so its own region is exempt from the relocation by design and no
-# deferral claims it either. Driven for their DELTAS, printed rather than asserted,
-# so a future session reads the measured rate off a test instead of prose.
+#
+# `def-arg-call` is (d16)'s `def` face, and the residual of the placement table
+# (docs/impl/selfrec.md): a `def`-bound self-recursive closure has its release
+# SUPPRESSED rather than emitted at a scope end, so where the enclosing body
+# tail-calls something else there is no instruction for the relocation to move and
+# no deferral claiming it either.
+#
+# `callee-letrec-member` is the CALLEE-side gap. `helper` is captured by its sibling,
+# so it is allocated per call rather than seeded as a constant, and the letrec's body
+# tail-calls it. Its own region is exempt from the relocation by design — moving that
+# release ahead of the call would free the closure the call is about to enter — and
+# the deferral does not claim it either, because `tail_callee_defers_release` reads a
+# demise landing at the CALL node while the lowerer placed this one at the letrec's
+# scope end. Neither channel a letrec body's tail callee can ride fits the shape: a
+# one-way sibling capture is neither self-recursion (`stranded_self_bindings`) nor an
+# SCC (`stranded_cycle_bindings`).
+#
+# Driven for their DELTAS, printed rather than asserted, so a future session reads
+# the measured rate off a test instead of prose.
 (defn fwd-cell-sib (n)
   (letrec [go (fn (m) (if (%lt m 1) :done (go (%sub m 1))))
            outer (fn (m) (go m))]
     (outer n)))
-(defn fwd-cell-unheld (n)
+(defn def-arg-call (n)
+  (def go (fn (m) (if (%lt m 1) 0 (go (%sub m 1)))))
+  (top-sub (go n)))
+(defn callee-letrec-member (n)
   (letrec [helper (fn (x) (%sub x 1))
-           go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+           go (fn (m) (helper m))]
     (helper (go n))))
 
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
@@ -390,7 +442,13 @@
 (def fwd-cell-ret-d (measure (fn () (fwd-cell-ret 3)) 200 window))
 (def fwd-cell-ret-sib-d (measure (fn () (fwd-cell-ret-sib 3)) 200 window))
 (def fwd-cell-sib-d (measure (fn () (fwd-cell-sib 3)) 200 window))
-(def fwd-cell-unheld-d (measure (fn () (fwd-cell-unheld 3)) 200 window))
+(def def-arg-call-d (measure (fn () (def-arg-call 3)) 200 window))
+(def arg-call-selfrec-d (measure (fn () (arg-call-selfrec 3)) 200 window))
+(def arg-call-toplevel-d (measure (fn () (arg-call-toplevel 3)) 200 window))
+(def callee-letrec-member-d
+  (measure (fn () (callee-letrec-member 3)) 200 window))
+(def lambda-arg-d (measure (fn () (lambda-arg 3)) 200 window))
+(def aggregate-arg-d (measure (fn () (aggregate-arg 3)) 200 window))
 (def unused-param-d (measure (fn () (unused-param [1 2])) 200 window))
 (def unused-two-d (measure (fn () (unused-two [1 2] [3 4])) 200 window))
 (def captured-param-d (measure (fn () (captured-param [1 2])) 200 window))
@@ -436,8 +494,12 @@
          cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d)
 (println "  fwd cells: plain " fwd-cell-plain-d "  selfrec-control " fwd-cell-d
          "  returned " fwd-cell-ret-d "/" fwd-cell-ret-sib-d)
+(println "  operand value: selfrec " arg-call-selfrec-d "  toplevel "
+         arg-call-toplevel-d "  lambda " lambda-arg-d "  aggregate "
+         aggregate-arg-d)
 (println "  residual: sibling-captures-member " fwd-cell-sib-d
-         "  uncaptured-tail-member " fwd-cell-unheld-d)
+         "  def-suppressed " def-arg-call-d "  callee-letrec-member "
+         callee-letrec-member-d)
 (println "  controls: native " native-tail-d "  non-tail " non-tail-d)
 (println "  boundary: branch " branch-true-d "/" branch-false-d)
 
@@ -499,6 +561,12 @@
 (bounded? fwd-cell-ret-d "the forward cell of a capturer the frame hands back")
 (bounded? fwd-cell-ret-sib-d "the forward cell whose own content is handed back")
 
+(bounded? arg-call-selfrec-d
+          "a self-recursive member the tail call's ARGUMENT calls")
+(bounded? arg-call-toplevel-d "the same under a top-level tail callee")
+(bounded? lambda-arg-d "a fresh lambda handed to the tail call as its argument")
+(bounded? aggregate-arg-d "the aggregate an argument builds around a local")
+
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
 (assert (= (length (drive-walk-moved [1 2 3])) 3) "moved-in walker result lost")
 (assert (= (length (arm-handback [1 2 3] true)) 3) "arm hand-back result lost")
@@ -523,8 +591,13 @@
 (assert (= (fwd-cell 3) :done) "forward-cell walker result lost")
 (assert (= (fwd-cell-sib 3) :done)
         "residual: sibling-captures-member result lost")
-(assert (= (fwd-cell-unheld 3) -1)
-        "residual: uncaptured-tail-member result lost")
+(assert (= (def-arg-call 3) -1) "residual: def-suppressed result lost")
+(assert (= (arg-call-selfrec 3) -1) "operand-value selfrec result lost")
+(assert (= (arg-call-toplevel 3) -1) "operand-value toplevel result lost")
+(assert (= (callee-letrec-member 3) 1)
+        "residual: callee-letrec-member result lost")
+(assert (= (lambda-arg 3) 3) "lambda argument result lost")
+(assert (= (aggregate-arg 3) 0) "aggregate argument result lost")
 (assert (= (fwd-cell-plain 3) 2) "plain forward-cell result lost")
 # The returned capturer's base case hands back `go` itself, so driving it re-enters
 # the recursion — every step derefs the cell to reach `helper`, after the defining

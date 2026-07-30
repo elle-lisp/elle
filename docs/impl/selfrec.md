@@ -83,15 +83,34 @@ whether the binding's body is a tail call:
 
 | binding shape | closure `DecrefRegion` placement | who frees the region once |
 |---|---|---|
-| `letrec`, tail-call body | scope end — dead code past the `TailCall` | the tail-call **deferred release** |
+| `letrec`, tail-call body to the binding | scope end — dead code past the `TailCall` | the tail-call **deferred release** |
+| `letrec`, tail-call body to another callee | scope end — dead code past the `TailCall` | the **frame-exit relocation** |
 | `letrec`, non-tail body | fires live at scope end | the live `DecrefRegion` |
-| `def`, tail-call body | suppressed (`suppressed_self_regions`) | the tail-call **deferred release** |
+| `def`, tail-call body to the binding | suppressed (`suppressed_self_regions`) | the tail-call **deferred release** |
 | `def`, non-tail body | fires live at last use | the live `DecrefRegion` |
 
-The two tail-call rows are the load-bearing case (the dominant self-recursive helper is a
+The tail-call rows are the load-bearing case (the dominant self-recursive helper is a
 tail loop). There the closure's release must not run before the recursion completes,
 because the recursion re-enters the closure living in that region; freeing it there is a
 use-after-free of the closure's own env — the self-call re-dispatch reads a recycled page.
+
+Which channel carries the release turns on **who the body tail-calls**, and the two are
+exclusive by construction. A body that tail-calls the binding itself makes the closure
+region the call's own **callee**, which the frame-exit relocation exempts by design —
+moving that release ahead of the call would free the closure the call is about to enter —
+so the deferral is its channel. A body that tail-calls anything else has finished with the
+closure before the call is made: the recursion has already completed, nothing the call
+reaches names the region, and the relocation carries the scope-end release back ahead of
+the `TailCall` under its own sole-holder admission
+([region/mechanism.md](region/mechanism.md) § "A release past a frame-replacing tail call
+is not a release"). The dominant shape is a helper pair —
+`(letrec [helper …  go …] (helper (go n)))` — where `go`'s recursion produces the
+argument and a sibling consumes it.
+
+The `def` shape has no second row, and that is its **residual**: `lower_define`
+suppresses the release outright, so where the enclosing body tail-calls something other
+than the binding there is no instruction for the relocation to move and no deferral
+claiming it. That is a leak, never an over-free.
 
 - For `letrec`, the region analysis already places the closure region's demise at the
   letrec scope end, which the lowerer emits **after** the body's frame-replacing
@@ -102,7 +121,9 @@ use-after-free of the closure's own env — the self-call re-dispatch reads a re
   func-load of the `(loop …)` recursive call — which the lowerer would emit as a **live**
   `DecrefRegion` immediately before that call. `lower_define` therefore SUPPRESSES it
   (`suppressed_self_regions`, checked in `emit_decrefs_for`) and marks the binding
-  `stranded_self_bindings`, reproducing the `letrec` path's runtime accounting exactly.
+  `stranded_self_bindings`, reproducing the `letrec` path's runtime accounting for a body
+  that tail-calls the binding — and leaving the residual named above for one that does
+  not.
 
 Both markings are gated on **cell-freedom** (`!needs_capture()`): the strand+deferral is the
 release route *only* for a self-recursive binding with no forward cell. A member that is

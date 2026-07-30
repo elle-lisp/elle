@@ -349,8 +349,8 @@ impl<'a> Lowerer<'a> {
     /// the native fall-through (docs/impl/region/mechanism.md § "A release past a
     /// frame-replacing tail call is not a release").
     ///
-    /// `exempt` is read off the call itself — the regions the callee, an argument
-    /// subtree, or the call's own result placeholder name — because those are
+    /// `exempt` is read off the call itself — the regions the callee, an operand's
+    /// own VALUE, or the call's own result placeholder name — because those are
     /// exactly the ones the tail call can still reach, and their releases are
     /// owed to the ownership move, to the activation that takes over the callee's
     /// region, and to the caller that consumes the result.
@@ -393,9 +393,9 @@ impl<'a> Lowerer<'a> {
         if let Some(&root) = self.region_info.cycle_tail_release.get(&call_id) {
             exempt.insert(self.region_info.merged_root(root));
         }
-        self.collect_subtree_regions(func, &mut exempt);
+        self.collect_operand_regions(func, &mut exempt);
         for a in args {
-            self.collect_subtree_regions(&a.expr, &mut exempt);
+            self.collect_operand_regions(&a.expr, &mut exempt);
         }
         let capture_funded = self
             .region_info
@@ -417,11 +417,36 @@ impl<'a> Lowerer<'a> {
         });
     }
 
-    /// Every region a HIR subtree names: an allocating node's own region, and
-    /// every source region of a `Var`'s binding. Canonicalized through the merge
-    /// forest so a merged child and its root are one entry — the release side
-    /// only ever emits at the root.
-    fn collect_subtree_regions(
+    /// Every region one tail-call OPERAND — the callee, or an argument — may hand
+    /// the call: the regions the value it produces names, never the regions its
+    /// evaluation merely used along the way (docs/impl/region/mechanism.md § "What
+    /// an operand names is its VALUE, not its syntax").
+    ///
+    /// Each node in a value-producing position contributes its own `alloc_region`
+    /// and, for a `Var`, its binding's source regions, canonicalized through the
+    /// merge forest so a merged child and its root are one entry (the release side
+    /// only ever emits at the root). The descent then stops at the two nodes whose
+    /// value carries a **count of its own**:
+    ///
+    /// - a `Call`, whose result is handed over with exactly one minted reference no
+    ///   matter which region it turns out to live in (§ "The return mint is emitted
+    ///   exactly once"), so the callee's own closure region — read and finished with
+    ///   before this call was made — is not reachable from here;
+    /// - a `Lambda`, whose closure region IS the value, and whose captures the
+    ///   funnel counted when the env was built (§ "Lexical capture is not a second
+    ///   holder to fear").
+    ///
+    /// Everything else is descended, including an inline `%`-`Intrinsic`: it mints no
+    /// region, so a heap result of one (`%first`/`%rest`/`%get`) is an uncounted
+    /// borrow living in its operand's region, and the operand is the value-producing
+    /// leaf. Descending an unrecognised node over-approximates, which is the
+    /// leak-preserving direction.
+    ///
+    /// The closure-cycle merge's by-move boundary asks the same question of the same
+    /// expressions and answers it the same way (region/letrec.md § "What the
+    /// non-member tail still refuses"); the two differ only in what they return —
+    /// bindings there, regions here.
+    fn collect_operand_regions(
         &self,
         h: &Hir,
         out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
@@ -440,7 +465,10 @@ impl<'a> Lowerer<'a> {
                 out.insert(self.region_info.merged_root(r));
             }
         }
-        h.for_each_child(|c| self.collect_subtree_regions(c, out));
+        if matches!(h.kind, HirKind::Call { .. } | HirKind::Lambda { .. }) {
+            return;
+        }
+        h.for_each_child(|c| self.collect_operand_regions(c, out));
     }
 
     /// Emit `f`'s instructions for `region`, placed so that every path runs the

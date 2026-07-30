@@ -154,10 +154,15 @@ other is structural ownership-location, NOT escape:
   the `TailCall` (pinned by `tests::release`'s two placement tests). The
   relocation does NOT waive the count argument — on the closure path the
   release did not run before and now does — so two gates apply. What may not
-  move is what the call can still reach: the regions its callee, arguments,
+  move is what the call can still reach: the regions its callee, operands,
   result and `deferred_release_slot` channel name, plus any run that reloads
   an operand's slot or reads a register defined outside it
-  (`hoistable_run`). And the region must be sole-frame-held
+  (`hoistable_run`). An operand names its VALUE, not its syntax — the walk
+  stops at a `Call`/`Lambda` and records that node's own region, then closes
+  the set under the three alias relations, so a region an inner call merely
+  used is not exempt while one its result may live inside still is
+  (docs/impl/region/mechanism.md § "What an operand names is its VALUE").
+  And the region must be sole-frame-held
   (`RegionInfo::sole_frame_held_regions`), because a tail callee also reaches
   its CAPTURED environment, which no argument names. A region escaping by the
   RETURN facet alone (`RegionInfo::return_frame_held_regions`) is admitted at a

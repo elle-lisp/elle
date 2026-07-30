@@ -558,6 +558,19 @@
                 (when (%not (%int? m)) (error :m))
                 (if (%lt m 1) go (go (helper m))))]
     (go n)))
+# `t23-operand-value`'s tail call names `go` NOWHERE — its ARGUMENT calls `go`, so
+# what the callee is handed is that call's result and `go`'s own closure region was
+# read and finished with before the call was made. The exemption reads an operand's
+# VALUE rather than its syntax, so the region an argument's own nested call merely
+# used is not exempt and its scope-end release relocates like any other
+# (docs/impl/region/mechanism.md § "What an operand names is its VALUE, not its
+# syntax"). RED if the exemption widens back to the syntax walk, which strands one
+# closure per call for every stdlib helper whose tail call consumes a local walker's
+# result.
+(defn t23-operand-value [n]
+  (letrec [helper (fn [x] (%sub x 1))
+           go (fn [m] (if (%lt m 1) 0 (go (%sub m 1))))]
+    (helper (go n))))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1890,7 +1903,7 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The frame-exit release, seven CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, eight CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
@@ -1909,6 +1922,9 @@
 # now owns. The two `tail-frame-exit-fwd-cell*` probes are the region no holder
 # binding NAMES — a prebound forward cell, which carries its binding's verdict one
 # indirection out, on the sole-held half and on the return-funded half in turn.
+# `tail-frame-exit-operand-value` is the reading of what the call itself names: a
+# region the tail call reaches through no operand's VALUE, only through an argument's
+# own nested call, is not exempt.
 # Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as F1a scratch. The
 # counterfactual and the boundary rows live in
@@ -1962,6 +1978,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-fwd-cell-ret 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-operand-value"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-operand-value 3)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a

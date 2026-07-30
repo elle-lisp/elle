@@ -739,6 +739,123 @@ fn handback_the_callee_does_not_capture_stays_after_the_tail_call() {
 }
 
 /// Position of the first `TailCall` in the function that contains one, with the
+/// indices of that block's `DecrefRegion`s — the slot-resolved twin of
+/// [`tail_call_release_layout`], which reads the value route. A self-recursive
+/// closure's region is released by id, so only this reading sees it.
+fn tail_call_region_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    for f in funcs {
+        for b in &f.blocks {
+            let Some(at) = b
+                .instructions
+                .iter()
+                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+            else {
+                continue;
+            };
+            let releases = b
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefRegion { .. }))
+                .map(|(idx, _)| idx)
+                .collect();
+            return Some((at, releases));
+        }
+    }
+    None
+}
+
+#[test]
+fn region_an_argument_only_called_is_released_before_the_tail_call() {
+    // The exemption reads an operand's VALUE, not its syntax
+    // (docs/impl/region/mechanism.md § "What an operand names is its VALUE, not its
+    // syntax"). `go` is named nowhere in the tail call — its ARGUMENT calls `go`,
+    // so what `helper` is handed is that call's RESULT, and `go`'s own closure
+    // region was read and finished with beforehand. Its release sits at the
+    // letrec's scope end, past the `TailCall`, and must be carried back.
+    let module = compile_to_lir(
+        "(begin (def f (fn (n) \
+         (letrec [helper (fn (x) (%sub x 1)) \
+                   go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
+           (helper (go n))))) (f 3))",
+    );
+    let (at, releases) =
+        tail_call_region_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().any(|&r| r < at),
+        "the region an argument's own call named is still released after the \
+         TailCall (at={at}, releases={releases:?}) — dead on the closure path",
+    );
+}
+
+#[test]
+fn container_of_an_opcode_read_argument_stays_after_the_tail_call() {
+    // The over-free face of the same reading. An inline `%`-opcode mints no region
+    // of its own, so `(%first v)` hands the callee a borrow living IN `v`'s region —
+    // which is why Rule 4 extends `v`'s own release to the reader, landing it in the
+    // dead block. The descent passes THROUGH the opcode to `v`, so `v` stays exempt;
+    // hoisting its release would free the pair the callee is handed.
+    let module = compile_to_lir(
+        "(begin (def p (fn (s) (%add 1 (length s)))) \
+         (def q (fn (n) (let [v (%pair (string \"ab\" n) nil)] (p (%first v))))) \
+         (q 1))",
+    );
+    // Named by the pair's OWN slot: the block legitimately releases other regions
+    // ahead of the call (the materialized string's), so "some release precedes it"
+    // says nothing about which.
+    let (at, releases) = tail_call_slot_release_layout(&module, |i| match i {
+        LirInstr::List { region, .. } => Some(*region),
+        _ => None,
+    })
+    .expect("the body lowers to a TailCall over a cons cell");
+    assert!(
+        releases.iter().all(|&r| r > at),
+        "the container of an opcode read's borrow was hoisted ahead of the \
+         TailCall (at={at}, releases={releases:?}) — the moved value lives in it",
+    );
+}
+
+/// Position of the first `TailCall` in the function that contains one, with the
+/// indices of that block's `DecrefRegion`s naming the region `of` picks out of the
+/// same block's allocating instructions.
+///
+/// Reading by REGION rather than by instruction count is what makes a decline pin
+/// specific: a block releases several regions around its tail call, so "some
+/// release precedes it" says nothing about which one did.
+fn tail_call_slot_release_layout(
+    module: &crate::lir::LirModule,
+    of: impl Fn(&LirInstr) -> Option<StaticRegion>,
+) -> Option<(usize, Vec<usize>)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    for f in funcs {
+        for b in &f.blocks {
+            let Some(at) = b
+                .instructions
+                .iter()
+                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+            else {
+                continue;
+            };
+            let Some(want) = b.instructions.iter().find_map(|i| of(&i.instr)) else {
+                continue;
+            };
+            let releases = b
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| {
+                    matches!(i.instr, LirInstr::DecrefRegion { region_id } if region_id == want)
+                })
+                .map(|(idx, _)| idx)
+                .collect();
+            return Some((at, releases));
+        }
+    }
+    None
+}
+
+/// Position of the first `TailCall` in the function that contains one, with the
 /// indices of that block's `DecrefCellRegion`s — the env-cell twin of
 /// [`tail_call_release_layout`], which reads the value route.
 fn tail_call_cell_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
