@@ -816,6 +816,55 @@ fn container_of_an_opcode_read_argument_stays_after_the_tail_call() {
     );
 }
 
+/// Every `TailCall`'s `defer_callee_release` flag across the module, in emission
+/// order. Reading the flag rather than a release position is what makes the
+/// deferral pins specific: the release this channel supplies is emitted by the
+/// RUNTIME at the callee's completion, so no instruction in the caller records it.
+fn tail_call_deferrals(module: &crate::lir::LirModule) -> Vec<bool> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    funcs
+        .flat_map(|f| f.blocks.iter())
+        .flat_map(|b| b.instructions.iter())
+        .filter_map(|i| match &i.instr {
+            LirInstr::TailCall {
+                defer_callee_release,
+                ..
+            } => Some(*defer_callee_release),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_letrec_member_the_body_tail_calls_defers_its_own_release() {
+    // `helper` is captured by `go`, so it is allocated per call and its uses span
+    // the whole letrec — which puts its demise at the letrec's SCOPE END, not at
+    // the call node the dies-here reading looks at. The relocation must leave that
+    // release alone (the call is about to enter the closure it would free), so the
+    // exemption's premise that the new activation takes it over holds only if this
+    // channel runs it (docs/impl/region/mechanism.md § "What the exemption keeps, a
+    // channel must still run"; the `tail-frame-exit-callee-member` probe).
+    //
+    // EXACTLY one deferral is the other half of the pin. `go`'s own body tail-calls
+    // `helper` too, and a second deferral there would drop the frame's one
+    // reference twice — which the marking's placement after the inits and the
+    // non-upvalue guard each rule out on their own.
+    let module = compile_to_lir(
+        "(begin (def f (fn (n) \
+         (letrec [helper (fn (x) (%sub x 1)) \
+                   go (fn (m) (helper m))] \
+           (helper (go n))))) (f 3))",
+    );
+    let deferrals = tail_call_deferrals(&module);
+    assert_eq!(
+        deferrals.iter().filter(|d| **d).count(),
+        1,
+        "the letrec member the body tail-calls must defer its release exactly \
+         once (deferrals={deferrals:?}) — none strands one closure per call, two \
+         drop the frame's single reference twice",
+    );
+}
+
 /// Position of the first `TailCall` in the function that contains one, with the
 /// indices of that block's `DecrefRegion`s naming the region `of` picks out of the
 /// same block's allocating instructions.

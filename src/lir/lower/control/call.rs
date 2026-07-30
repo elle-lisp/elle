@@ -187,6 +187,27 @@ impl<'a> Lowerer<'a> {
             if self.stranded_cycle_bindings.contains(b) && !self.upvalue_bindings.contains(b) {
                 return !self.escape_info.escapes_fiber(*b);
             }
+            // A member of the enclosing letrec whose OWN closure region the solver
+            // releases at that letrec's scope end (`stranded_member_bindings`): a
+            // sibling captures it, so its uses span the letrec and `dies_here`
+            // above — which reads a demise landing at THIS node — never sees it.
+            // The relocation must leave that release where it is, the call being
+            // about to enter the very closure it would free, so the exemption's
+            // premise that the new activation takes it over is only true if this
+            // channel runs it (docs/impl/region/mechanism.md § "What the exemption
+            // keeps, a channel must still run").
+            //
+            // The escape gate is the FIBER frontier alone, by the same ordering
+            // argument the two channels above make: this deferral is a decref that
+            // runs at the callee's normal completion, AFTER the `Return` mint that
+            // funds the caller's reference, so the return facet needs no bridge.
+            // Only a fiber crossing hands the closure to a holder the compiler did
+            // not place. The non-upvalue guard is the cycle channel's: a nested
+            // closure that captures the member completes its own activation before
+            // the enclosing letrec's later uses, so deferring there frees early.
+            if self.stranded_member_bindings.contains(b) && !self.upvalue_bindings.contains(b) {
+                return !self.escape_info.escapes_fiber(*b);
+            }
         }
         // Any other reference to a closure-cycle merge member never defers: the
         // merged arena is released exactly once by the merge's own channel (the

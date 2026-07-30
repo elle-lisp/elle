@@ -598,7 +598,9 @@ it is the ownership transfer the calling convention rests on (rules.md Rule 5,
 move-on-tail-call): the caller does not incref a moved argument, and the release
 it never runs *is* the reference the callee's owned-param release consumes. The
 callee's own region has the same story through a different channel — the new
-activation takes over its release (`defer_callee_release`, `deferred_release_slot`).
+activation takes over its release (`defer_callee_release`, `deferred_release_slot`),
+which holds only where that channel reaches the release (§ "What the exemption
+keeps, a channel must still run").
 
 Every **other** release in that block has no such story. A parameter whose only
 use is inside a closure the body builds, a parameter used nowhere at all, a scope
@@ -782,6 +784,50 @@ reassigned capture: that one is a `cell_release_regions` member whose release na
 the box through `LoadCaptureRaw` + `DecrefCellRegion`, and it is already frame-held
 because the binding names its own region (§ "A mutated holder poisons its value
 route, not its cell box").
+
+### What the exemption keeps, a channel must still run
+
+The exemption states its reason positively: the callee's own region keeps its place
+in the dead block because the new activation takes the release over
+(`defer_callee_release`). That is a claim about a *channel*, and it holds only where
+the channel reaches the release in question. The deferral recognises a callee whose
+region **demises at the call node** — the per-call local closure a body builds and
+immediately calls, whose one use is the call. A letrec **member** the body tail-calls
+does not fit that description: a sibling captures it, so its uses span the whole
+letrec and the solver places its demise at the letrec's own scope end. The release
+lands after the body — the same dead block the exemption is keeping it in — and no
+channel runs it. The member's closure region strands once per call, and its
+environment and captures strand behind it. The everyday shape is the mirror of the
+forward-cell pair above:
+`(letrec [helper (fn [x] …) go (fn [m] (helper m))] (helper (go n)))`, where the body
+tail-calls the **captured sibling** rather than the capturer.
+
+So the deferral reads the release's **placement**, not the call node alone: a tail
+callee whose release the enclosing letrec emits at its scope end rides the same
+channel, run once at the callee's normal completion.
+
+The count argument is the ordering one, and it has nothing to bridge. The deferral is
+a decref, not a free, and it runs *after* the callee's `Return` mint — the same
+argument the cell-free self-recursive deferral makes for its own return admission
+(selfrec.md § "The deferral's escape gate is the fiber frontier alone"), where the
+frame-exit relocation has to move a release *ahead* of the call and fund the gap. The
+return facet is therefore funded, and only the **fiber** facet refuses, a parked frame
+being free to hold an uncounted borrow the compiler never placed.
+
+What the placement reading must still exclude is a release the frame does not own. A
+**suppressed** decref belongs to the store or capture-adopt path that claimed the
+region — deferring it decrements a count the frame never raised — which is the same
+exclusion the demise reading makes through `suppressed_decref_regions`. A **closure-
+cycle member** is released by the merge's own channel, which already covers every
+stranding tail path of an admitted cycle (letrec.md § "The frontier gate"). And the
+marking is honoured only through a **non-upvalue** reference, for the reason the arena
+channel is: a nested closure that captures the member completes its own activation
+before the enclosing letrec's later uses, so deferring there frees the region early.
+
+The sibling's forward **cell** is not the callee's own region, so it relocates like
+any other holder and its cascade drops the `cell ⊇ closure` edge ahead of the call.
+What the deferral drops afterwards is the frame's own slot reference, the last one
+standing.
 
 ### The relocation point outlives the block, and a branch merge inherits it
 

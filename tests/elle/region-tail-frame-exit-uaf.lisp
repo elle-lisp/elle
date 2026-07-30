@@ -332,6 +332,24 @@
 (defn s-read (i)
   (s-sib i))
 
+# (t) the letrec body tail-calls the CAPTURED sibling rather than the capturer, so
+# the callee's own region is the one the relocation must leave alone and the
+# deferral is what runs its release — at the callee's normal completion, never
+# before the frame it replaces has run (docs/impl/region/mechanism.md § "What the
+# exemption keeps, a channel must still run"). `helper` reads a heap value through
+# its OWN environment on the far side of the frame replacement, so a release that
+# fired ahead of the `TailCall` recycles the pages that read resolves through, and
+# one that ran twice recycles them under the caller.
+(defn t-member (i)
+  (let [src (list (string "t" i) i)]
+    (letrec [helper (fn (k)
+                      (when (%not (%int? k)) (error :k))
+                      (%add k (length (first src))))
+             go (fn (k) (helper k))]
+      (helper (go 0)))))
+(defn t-read (i)
+  (t-member i))
+
 # ── the operand-value face: what an argument's evaluation merely USED ─────────
 # The exemption reads an operand's VALUE, not its syntax (docs/impl/region/mechanism.md
 # § "What an operand names is its VALUE, not its syntax"), so a region reached only
@@ -414,6 +432,7 @@
 (var m2 0)
 (var n2 0)
 (var s1 0)
+(var t1 0)
 (var o1 0)
 (var p1 0)
 (var q1 0)
@@ -442,6 +461,7 @@
   (assign m2 (m2-read i))
   (assign n2 (n2-read i))
   (assign s1 (s-read i))
+  (assign t1 (t-read i))
   (assign o1 (o-read i))
   (assign p1 (p-read i))
   (assign q1 (q-read i))
@@ -482,6 +502,7 @@
 (assert (> n2 0) "sibling freed under the caller that received it from its cell")
 (assert (%gt s1 0)
         "arena freed under the sibling callee stranded by the same tail call")
+(assert (%gt t1 0) "letrec member freed under the tail call that entered it")
 
 (assert (%gt o1 0)
         "argument freed under the callee its own nested call handed it to")

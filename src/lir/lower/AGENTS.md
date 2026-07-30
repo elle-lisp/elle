@@ -144,7 +144,13 @@ other is structural ownership-location, NOT escape:
   escape question, `escapes_fiber` alone, because this deferral is its
   region's only release channel: store/capture are containment, and the
   return facet is funded by the callee's own return mint, which precedes
-  the deferred decref (docs/impl/selfrec.md).
+  the deferred decref (docs/impl/selfrec.md). A letrec **member** the body
+  tail-calls takes the same narrower question through
+  `stranded_member_bindings`: a sibling captures it, so its demise lands at
+  the letrec's scope end and region-locality never sees it, while the
+  relocation must leave that release alone — the call is about to enter the
+  closure it would free (docs/impl/region/mechanism.md § "What the exemption
+  keeps, a channel must still run").
 - `emitops.rs::open_tail_exit_hoist` / `with_tail_exit_hoist` — the callee's
   region is not the only one stranded past a `TailCall`: everything the
   lowerer emits after it runs only on the native fall-through, so a

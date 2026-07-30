@@ -242,6 +242,20 @@ pub struct Lowerer<'a> {
     /// captures the binding must not free the arena out from under a later use
     /// in the enclosing activation).
     stranded_cycle_bindings: rustc_hash::FxHashSet<Binding>,
+    /// Letrec bindings the enclosing letrec's BODY tail-calls whose OWN closure
+    /// region the solver releases at that letrec's scope end — the release the
+    /// frame-replacing `TailCall` strands, and the one the relocation must leave
+    /// where it is because the callee is about to enter that closure
+    /// (docs/impl/region/mechanism.md § "What the exemption keeps, a channel must
+    /// still run"). A member captured by a sibling has uses spanning the whole
+    /// letrec, so its demise lands at the scope end rather than at the call node
+    /// and `tail_callee_defers_release`'s dies-here reading never sees it. Marked
+    /// by `lower_letrec` after the inits are lowered, and honoured only through a
+    /// non-upvalue reference, for the reasons `stranded_cycle_bindings` is; a
+    /// suppressed release (owned by the store or capture-adopt path) and a
+    /// closure-cycle member (released by the merge's own channel) are excluded at
+    /// the marking, so the three channels never name one region twice.
+    stranded_member_bindings: rustc_hash::FxHashSet<Binding>,
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
     current_function_params: Option<Vec<Binding>>,
@@ -395,6 +409,7 @@ impl<'a> Lowerer<'a> {
             self_recursive_bindings: rustc_hash::FxHashSet::default(),
             stranded_self_bindings: rustc_hash::FxHashSet::default(),
             stranded_cycle_bindings: rustc_hash::FxHashSet::default(),
+            stranded_member_bindings: rustc_hash::FxHashSet::default(),
             region_info: RegionInfo::empty(),
             escape_info: EscapeInfo::empty(),
             increfs_by_site: HashMap::new(),

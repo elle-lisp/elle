@@ -316,20 +316,43 @@ impl<'a> Lowerer<'a> {
         // `RegionInfo::cycle_tail_release`), NOT this binding-keyed marking — the two
         // channels are disjoint, so every admitted cycle's stranding tail paths are
         // covered exactly once (`compute_closure_cycle_merges`).
+        //
+        // The same body tail call strands a second, disjoint release: the callee's
+        // OWN closure region, where the callee is a member of THIS letrec whose
+        // uses span it — a member a sibling captures is allocated per call and its
+        // demise lands at this scope end rather than at the call node, so the
+        // dies-here reading never claims it. The exemption keeps that release in
+        // the dead block on the premise that the new activation takes it over, so
+        // the deferral has to reach a release placed here (mechanism.md § "What the
+        // exemption keeps, a channel must still run"). Two exclusions keep the
+        // three channels naming disjoint regions: a `closure_cycle_members` region
+        // is the merge's to release, and a SUPPRESSED release belongs to the store
+        // or capture-adopt path that claimed the region — deferring either
+        // decrements a count this frame never raised.
         {
             let mut tail_callees: Vec<Binding> = Vec::new();
             Self::collect_body_tail_callees(body, &mut tail_callees);
+            let scope_end_releases: Vec<crate::hir::region::Region> = self
+                .decrefs_by_decref_point
+                .get(&hir_id)
+                .cloned()
+                .unwrap_or_default();
             for b in tail_callees {
-                if self
-                    .region_info
-                    .binding_source_regions
-                    .get(&b)
-                    .is_some_and(|rs| {
-                        rs.iter()
-                            .any(|r| self.region_info.closure_cycle_members.contains(r))
-                    })
+                let Some(sources) = self.region_info.binding_source_regions.get(&b) else {
+                    continue;
+                };
+                if sources
+                    .iter()
+                    .any(|r| self.region_info.closure_cycle_members.contains(r))
                 {
                     self.stranded_cycle_bindings.insert(b);
+                    continue;
+                }
+                if sources.iter().any(|r| {
+                    scope_end_releases.contains(r)
+                        && !self.region_info.suppressed_decref_regions.contains(r)
+                }) {
+                    self.stranded_member_bindings.insert(b);
                 }
             }
         }

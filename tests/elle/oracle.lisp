@@ -584,6 +584,20 @@
   (letrec [helper (fn [x] (%sub x 1))
            go (fn [m] (if (%lt m 1) 0 (go (%sub m 1))))]
     (helper (go n))))
+# `t23-callee-member` swaps `t23-operand-value`'s capturer for a plain one, so the
+# body tail-calls the CAPTURED sibling: `helper` is allocated per call and its uses
+# span the letrec, which puts its demise at the letrec's scope end rather than at
+# the call node. Its own region is exempt from the relocation because the new
+# activation takes the release over, so the deferral has to reach a release placed
+# at that scope end and not only one demising at the call node
+# (docs/impl/region/mechanism.md § "What the exemption keeps, a channel must still
+# run"). RED if the deferral narrows back to the call node, which strands one
+# closure plus its environment per call for every helper pair whose body dispatches
+# the captured member.
+(defn t23-callee-member [n]
+  (letrec [helper (fn [x] (%sub x 1))
+           go (fn [m] (helper m))]
+    (helper (go n))))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1916,7 +1930,7 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The frame-exit release, nine CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, ten CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
@@ -1940,7 +1954,10 @@
 # that neither substitute for one another nor name the same region.
 # `tail-frame-exit-operand-value` is the reading of what the call itself names: a
 # region the tail call reaches through no operand's VALUE, only through an argument's
-# own nested call, is not exempt.
+# own nested call, is not exempt. `tail-frame-exit-callee-member` is the other side
+# of the exemption: what it keeps in the dead block, a channel must still run, so a
+# tail callee whose release the enclosing letrec places at its SCOPE END rides the
+# deferral exactly as one demising at the call node does.
 # Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as F1a scratch. The
 # counterfactual and the boundary rows live in
@@ -2008,6 +2025,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-operand-value 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-callee-member"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-callee-member 3)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a
