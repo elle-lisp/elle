@@ -208,6 +208,57 @@
             c)]
     (if t (g) 0)))
 
+# (d12) a sibling's compiled FORWARD CELL. A one-way sibling capture is not a
+# cycle — `go` calls `helper` and `helper` does not call back — so no SCC forms and
+# the closure-cycle merge never sees the cell; per-region RC is what reclaims both.
+# The cell's own release is the binding-scope `DecrefRegion` the lowerer emits after
+# the letrec body, which this body's frame-replacing tail call leaves dead. Its
+# count argument cannot come from a holder binding, because a binding names the
+# closure region its cell points AT, never the cell's own — so the cell rides its
+# binding's verdict, its holders being that binding's holders one indirection out
+# (docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
+# its binding is"). Stranding the cell strands the closure with it: the cell's
+# reference is what holds that closure's region off zero.
+(defn fwd-cell-plain (n)
+  (letrec [helper (fn (x) (%sub x 1))
+           go (fn (m) (helper m))]
+    (go n)))
+
+# (d13) the same shape with a SELF-RECURSIVE capturer, a closed control that bounds
+# what the projection is responsible for. Here the ownership forest's capture adopt
+# claims the cell into `go`'s closure region and suppresses its own decref, so `go`'s
+# stranded-self deferral reclaims the pair and the relocation never has to reach the
+# cell at all. It must stay bounded either way.
+(defn fwd-cell (n)
+  (letrec [helper (fn (x) (%sub x 1))
+           go (fn (m) (if (%lt m 1) :done (go (helper m))))]
+    (go n)))
+
+# (d14) the RETURN half: `go` is handed back, so escape's capture facet marks
+# `helper` escaping and the sole-held admission refuses. What admits the cell is the
+# tail callee's own counted edge — and a `needs_capture` binding is captured THROUGH
+# its cell, so the funding edge is `closure ⊇ cell` and must name the cell region as
+# well as the closure it points at.
+(defn fwd-cell-ret (n)
+  (letrec [helper (fn (x)
+                    (when (%not (%int? x)) (error :x))
+                    (%sub x 1))
+           go (fn (m)
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) go (go (helper m))))]
+    (go n)))
+
+# (d15) the same, returning the SIBLING rather than the capturer: the cell's own
+# content is what leaves, so the projection must carry the verdict either way round.
+(defn fwd-cell-ret-sib (n)
+  (letrec [helper (fn (x)
+                    (when (%not (%int? x)) (error :x))
+                    (%sub x 1))
+           go (fn (m)
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) helper (go (helper m))))]
+    (go n)))
+
 # exemptions ───────────────────────────────────────────────────────────────────
 # The releases that must STAY in the dead fall-through. Each is already bounded;
 # hoisting one would release a reference the callee now owns, so these rows are
@@ -304,6 +355,26 @@
   (let [g (fn () c)]
     (if t (g) 0)))
 
+# residual: the letrec body tail-calls a member it does NOT capture ────────────
+# `fwd-cell-sib` inverts (d12): the SIBLING captures the self-recursive member, and
+# the body tail-calls the sibling. Both regions strand — the merged arena (`go`'s
+# closure, its env, and the forward cell the merge collapsed into it) and the
+# sibling's own closure and env. Both channels ARE wired at that call (the arena's
+# `deferred_release_slot` and the callee's `defer_callee_release` both appear in the
+# emitted bytecode), so what is open here is not an analysis refusal.
+# `fwd-cell-unheld` is the narrower face: the tail callee is a member nothing
+# captures, so its own region is exempt from the relocation by design and no
+# deferral claims it either. Driven for their DELTAS, printed rather than asserted,
+# so a future session reads the measured rate off a test instead of prose.
+(defn fwd-cell-sib (n)
+  (letrec [go (fn (m) (if (%lt m 1) :done (go (%sub m 1))))
+           outer (fn (m) (go m))]
+    (outer n)))
+(defn fwd-cell-unheld (n)
+  (letrec [helper (fn (x) (%sub x 1))
+           go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (helper (go n))))
+
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def walk-moved-d
   (measure (fn () (length (drive-walk-moved [1 2 3]))) 200 window))
@@ -314,6 +385,12 @@
 (def cell-reassigned-d (measure (fn () (cell-reassigned 1)) 200 window))
 (def cell-heap-d (measure (fn () (cell-heap cell-src)) 200 window))
 (def arm-cell-t-d (measure (fn () (arm-cell 1 true)) 200 window))
+(def fwd-cell-d (measure (fn () (fwd-cell 3)) 200 window))
+(def fwd-cell-plain-d (measure (fn () (fwd-cell-plain 3)) 200 window))
+(def fwd-cell-ret-d (measure (fn () (fwd-cell-ret 3)) 200 window))
+(def fwd-cell-ret-sib-d (measure (fn () (fwd-cell-ret-sib 3)) 200 window))
+(def fwd-cell-sib-d (measure (fn () (fwd-cell-sib 3)) 200 window))
+(def fwd-cell-unheld-d (measure (fn () (fwd-cell-unheld 3)) 200 window))
 (def unused-param-d (measure (fn () (unused-param [1 2])) 200 window))
 (def unused-two-d (measure (fn () (unused-two [1 2] [3 4])) 200 window))
 (def captured-param-d (measure (fn () (captured-param [1 2])) 200 window))
@@ -357,6 +434,10 @@
          arm-moved-t-d "/" arm-moved-f-d)
 (println "  cells: immutable " cell-immutable-d "  reassigned "
          cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d)
+(println "  fwd cells: plain " fwd-cell-plain-d "  selfrec-control " fwd-cell-d
+         "  returned " fwd-cell-ret-d "/" fwd-cell-ret-sib-d)
+(println "  residual: sibling-captures-member " fwd-cell-sib-d
+         "  uncaptured-tail-member " fwd-cell-unheld-d)
 (println "  controls: native " native-tail-d "  non-tail " non-tail-d)
 (println "  boundary: branch " branch-true-d "/" branch-false-d)
 
@@ -411,6 +492,13 @@
 (bounded? arm-cell-t-d
           "the reassigned cell relocated at a branch arm's tail call")
 
+(bounded? fwd-cell-plain-d
+          "a sibling's forward cell past a frame-replacing body")
+(bounded? fwd-cell-d
+          "control: the same cell where the capture adopt already claims it")
+(bounded? fwd-cell-ret-d "the forward cell of a capturer the frame hands back")
+(bounded? fwd-cell-ret-sib-d "the forward cell whose own content is handed back")
+
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
 (assert (= (length (drive-walk-moved [1 2 3])) 3) "moved-in walker result lost")
 (assert (= (length (arm-handback [1 2 3] true)) 3) "arm hand-back result lost")
@@ -432,6 +520,19 @@
 (assert (= (arm-cell-ro 7 true) 7) "residual: arm immutable cell result lost")
 (assert (= (arm-cell-ro 7 false) 0)
         "residual: arm immutable cell sibling arm lost")
+(assert (= (fwd-cell 3) :done) "forward-cell walker result lost")
+(assert (= (fwd-cell-sib 3) :done)
+        "residual: sibling-captures-member result lost")
+(assert (= (fwd-cell-unheld 3) -1)
+        "residual: uncaptured-tail-member result lost")
+(assert (= (fwd-cell-plain 3) 2) "plain forward-cell result lost")
+# The returned capturer's base case hands back `go` itself, so driving it re-enters
+# the recursion — every step derefs the cell to reach `helper`, after the defining
+# frame is gone.
+(assert (not (nil? ((fwd-cell-ret 3) 3)))
+        "returned capturer must still be callable after its cell's release")
+(assert (= ((fwd-cell-ret-sib 3) 9) 8)
+        "returned sibling must still be callable after its cell's release")
 (let [g (escaping-cell 7 true)]
   (assert (= (g) 8) "escaping cell first read lost")
   (assert (= (g) 9) "escaping cell rewrite lost"))

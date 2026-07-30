@@ -127,7 +127,10 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// absent from the return/fiber frontiers' atomless site halves — and
 /// `return_funded` is the same reading with the return facet alone allowed. A
 /// region with no holder binding at all offers nothing to judge and is refused by
-/// both.
+/// both — except a binding's compiled forward CELL, whose holders are that
+/// binding's one indirection out and which therefore carries its verdict, projected
+/// alongside the binding's own regions below (region/mechanism.md § "A compiled
+/// capture cell is frame-held exactly as its binding is").
 ///
 /// This is the **count** question a *placement* argument cannot answer, and the one
 /// admission every mechanism that makes a release fire where none fired before must
@@ -184,7 +187,19 @@ pub(super) fn sole_frame_held_regions(
         let mutated = arena.get(*b).is_mutated;
         let escapes = escape.binding_escapes_activation(*b);
         let escapes_beyond_return = escape.binding_escapes_beyond_return(*b);
-        for &r in regions {
+        // The binding's compiled forward CELL rides its binding's verdict. A binding
+        // names the closure region its cell points AT, never the cell's own, so a
+        // cell region has no holder here and would be refused by both sets for want
+        // of anything to judge — while its holders are in fact this binding's
+        // holders one indirection out: the frame's own slot, plus one counted
+        // `closure ⊇ cell` edge per capturer. No route reaches the cell that does
+        // not reach the binding (a `DerefCell` read goes THROUGH the cell), so
+        // reading it under the same facets and the same mutated-route test asserts
+        // nothing new; it names a region the predicate could not see. An ambiguous
+        // multi-cell binding yields `None` and stays refused, keeping this in step
+        // with the `AdoptCellRegion` emit.
+        let cell = info.single_cell_region_of(*b);
+        for &r in regions.iter().chain(cell.iter()) {
             held.insert(r);
             // A MUTATED holder is refused for the reason compensation refuses it as
             // a release route: a slot repointed before the release frees whatever it
@@ -314,11 +329,24 @@ fn collect_call_facts(
                 out.insert(
                     h.id,
                     crate::hir::region::TailCalleeFacts {
+                        // A `needs_capture` binding is captured THROUGH its cell, so
+                        // the counted edge this callee holds is `closure ⊇ cell` and
+                        // names the cell region as well as the closure region the
+                        // cell points at. Without the cell the return half admits
+                        // the captured closure and strands the cell holding it — one
+                        // region short of the cascade.
                         capture_funded: facts
                             .captures
                             .iter()
-                            .flat_map(|c| binding_regions.get(c).into_iter().flatten())
-                            .map(|&r| info.merged_root(r))
+                            .flat_map(|c| {
+                                binding_regions
+                                    .get(c)
+                                    .into_iter()
+                                    .flatten()
+                                    .copied()
+                                    .chain(info.single_cell_region_of(*c))
+                            })
+                            .map(|r| info.merged_root(r))
                             .collect(),
                         fixed_params: facts.fixed_params,
                     },

@@ -43,6 +43,7 @@ impl CellContainer {
 /// What a frame-replacing tail call's own callee settles about the RC traffic the
 /// lowerer emits around it. Both fields are claims about *this* callee, which is
 /// why they are recorded per call rather than per region or per function.
+#[derive(Debug)]
 pub struct TailCalleeFacts {
     /// Regions the callee holds through its **captured environment** — the
     /// allocation funnel's counted (or, under the forest, owning) edge, taken when

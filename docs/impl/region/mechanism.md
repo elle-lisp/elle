@@ -665,6 +665,57 @@ The **residual** is a returned region the tail callee does not capture: some oth
 path of this frame returns it, so no env edge funds the point and the release
 keeps its place in the dead block. That is a leak, never an over-free.
 
+### A compiled capture cell is frame-held exactly as its binding is
+
+Both admissions read the frame's holders through `binding_source_regions`, so a
+region **no binding names** offers nothing to judge and both refuse. A compiled
+**capture cell** (`begin_cell_regions`) is exactly such a region: it is minted at
+the scope that prebinds it — the `Letrec` of a binding some *sibling* closure
+captures (letrec.md § the static-slot cell requirement) — and the binding names the
+closure region the cell points *at*, never the cell's own. So the cell's
+`DecrefRegion`, which the solver places at that binding scope, is stranded whenever
+the scope's body ends in a frame-replacing tail call, and it takes the closure down
+with it: the cell's reference is what keeps that closure's region off zero, so the
+closure leaks *behind* the cell even where its own release relocated cleanly. The
+everyday shape is a pair of local helpers where one calls the other and the body
+tail-calls the caller —
+`(letrec [helper (fn [x] …) go (fn [m] (helper m))] (go n))`. Where that caller is
+also **self-recursive** the projection is not what reclaims the cell: the ownership
+forest's capture adopt claims it into the capturer's closure region and suppresses
+its own decref (`capture_adopt_edges`), so the capturer's stranded-self deferral
+takes the pair down together. Both are pinned, so neither channel can quietly
+become the other's.
+
+The fact that settles it is that the cell's holders are its binding's holders, one
+indirection out. The frame holds the cell through its own static slot; every other
+holder is a closure that captures the binding, and that hold is the counted (or
+owning) edge the funnel takes at the cell store (§ "Lexical capture is not a second
+holder to fear"). No route reaches the cell that does not reach the binding — a
+`DerefCell` read goes *through* the cell to get at the closure — so whatever escape
+says about the binding's regions it says about the cell's, by both facets and by
+the mutated-holder reading alike. Projecting each binding's single compiled cell
+region (`RegionInfo::single_cell_region_of`) alongside its `binding_source_regions`
+therefore asserts no admission the predicate was not already making; it names a
+region the predicate could not see.
+
+The funding side owes the same projection. A closure captures a `needs_capture`
+binding **through its cell**, so the counted edge the tail callee holds is
+`closure ⊇ cell`, and `TailCalleeFacts::capture_funded` names the cell region as
+well as the closure region the cell points at. Without it the return half admits
+the captured closure and strands the cell holding it — one region short of the
+cascade, so the helper pair leaks whole.
+
+A binding with more than one compiled cell — a file-body/nested-`begin`
+double-declare — is refused: `single_cell_region_of` yields `None`, so the
+admission agrees with the `AdoptCellRegion` emit to refuse rather than guess which
+physical cell a given closure holds.
+
+This is the cell of a **prebound forward reference**, not the env cell of a
+reassigned capture: that one is a `cell_release_regions` member whose release names
+the box through `LoadCaptureRaw` + `DecrefCellRegion`, and it is already frame-held
+because the binding names its own region (§ "A mutated holder poisons its value
+route, not its cell box").
+
 ### The relocation point outlives the block, and a branch merge inherits it
 
 Inside the tail call's own block the relocation is a **move**: the instruction is
@@ -721,15 +772,22 @@ the point replaces.
 Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
 argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
 the non-self-cancelling boundary, the env-cell faces, and the
-handed-back-through-the-callee faces driven as rows), the `tail-frame-exit-unused` /
+handed-back-through-the-callee faces, and the forward-cell faces driven as rows),
+the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
-`tail-frame-exit-handback` / `fresh-env-cell`
-probes in `tests/elle/oracle.lisp` (the per-op rates), the placement pins in
+`tail-frame-exit-handback` / `tail-frame-exit-fwd-cell` /
+`tail-frame-exit-fwd-cell-ret` / `fresh-env-cell`
+probes in `tests/elle/oracle.lisp` (the per-op rates), the analysis-level
+projection pins in `regions::tests::cells`
+(`frame_held_names_a_sibling_captured_forward_cell`,
+`capture_funded_names_the_captured_binding_forward_cell`, and their
+escaping-holder counterfactual), the placement pins in
 `lir::lower::tests::release`, and
 `tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value
 moved into the tail callee, reached through its captured environment, filled in
 place by it, handed back out through it, handed back when the frame holds the only
-other reference, held in an env cell the callee rewrites, captured by a closure
+other reference, held in an env cell the callee rewrites, held in a sibling's
+forward cell the callee reads on every recursion, captured by a closure
 that escapes, or read after the call must survive the moved release).
 
 ## Compile-time region selection (coalescing)

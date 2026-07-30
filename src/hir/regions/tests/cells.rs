@@ -243,6 +243,172 @@ fn capture_edge_points_at_cell_region_not_content() {
     );
 }
 
+// ── The forward cell's frame-held projection ──────────────────────────
+//
+// docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
+// its binding is". The frame-exit relocation's count question is asked over the
+// frame's holder BINDINGS, and a binding names the closure region its forward cell
+// points at — never the cell's own. So without the projection below the cell region
+// has no holder at all, both admissions refuse it, and its binding-scope
+// `DecrefRegion` stays in the block a frame-replacing letrec-body tail call never
+// reaches — taking the closure the cell holds with it. These three pins read the
+// projection directly, on both halves and on the facet that must still refuse.
+
+/// Every compiled capture cell in `hir`, as (binding, cell region).
+fn compiled_cells(info: &RegionInfo) -> Vec<(Binding, Region)> {
+    info.begin_cell_regions
+        .values()
+        .flatten()
+        .copied()
+        .collect()
+}
+
+#[test]
+fn frame_held_names_a_sibling_captured_forward_cell() {
+    // The everyday non-cycle sibling capture: `go` calls `helper`, `helper` does not
+    // call back, so there is no SCC and no merge — `helper` simply keeps a forward
+    // cell for `go`'s benefit. Nothing here leaves the frame, so the cell must clear
+    // the SOLE-held half under `helper`'s own verdict: its holders are `helper`'s
+    // holders one indirection out (this frame's slot, plus the counted `closure ⊇
+    // cell` edge `go`'s env took).
+    //
+    // Neither member is recursive, which is what makes the projection load-bearing
+    // here: a SELF-recursive capturer's cell is claimed by the ownership forest's
+    // capture adopt instead (`capture_adopt_edges`, its own decref suppressed), so
+    // the relocation never has to reach it.
+    let (_hir, _arena, info) = pipeline(
+        "(defn h [n] \
+           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
+                    go (fn [m] (when (%not (%int? m)) (error :m)) (helper m))] \
+             (go n)))",
+    );
+    let cells = compiled_cells(&info);
+    assert_eq!(
+        cells.len(),
+        1,
+        "precondition: exactly one compiled cell — `helper`'s forward cell, kept \
+         because sibling `go` captures it; got {cells:?}",
+    );
+    let (helper, cell) = cells[0];
+    let content = info
+        .binding_source_regions
+        .get(&helper)
+        .cloned()
+        .unwrap_or_default();
+    for r in &content {
+        assert!(
+            info.sole_frame_held_regions.contains(r),
+            "anchor: the binding's own closure region r{} is sole-frame-held (nothing \
+             leaves the frame), so the cell's refusal cannot be blamed on the verdict; \
+             sole_frame_held={:?}",
+            r.0,
+            info.sole_frame_held_regions,
+        );
+    }
+    assert!(
+        info.sole_frame_held_regions.contains(&cell),
+        "the forward cell r{} must be frame-held exactly as its binding {helper:?} is — \
+         no route reaches the cell that does not reach the binding; sole_frame_held={:?}",
+        cell.0,
+        info.sole_frame_held_regions,
+    );
+}
+
+#[test]
+fn capture_funded_names_the_captured_binding_forward_cell() {
+    // The RETURN half. `go` is handed back, so escape's capture facet marks `helper`
+    // escaping and the sole-held admission rightly refuses the cell. What admits it is
+    // the tail callee's own counted edge — and that edge is `closure ⊇ CELL`, because a
+    // `needs_capture` binding is captured THROUGH its cell. So the cell must appear in
+    // `return_frame_held_regions` (the return facet and no other) and in the funding map
+    // of the letrec body's tail call, or the return half admits the closure and strands
+    // the cell that holds it — one region short of the cascade.
+    let (_hir, _arena, info) = pipeline(
+        "(defn h [n] \
+           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
+                    go (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) go (go (helper m))))] \
+             (go n)))",
+    );
+    let cells = compiled_cells(&info);
+    assert_eq!(
+        cells.len(),
+        1,
+        "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
+    );
+    let (_helper, cell) = cells[0];
+    assert!(
+        !info.sole_frame_held_regions.contains(&cell),
+        "anchor: the returned `go` carries `helper` out by the capture facet, so the \
+         SOLE half must refuse the cell r{} — this pin is about the return half; \
+         sole_frame_held={:?}",
+        cell.0,
+        info.sole_frame_held_regions,
+    );
+    assert!(
+        info.return_frame_held_regions.contains(&cell),
+        "the forward cell r{} leaves by the RETURN facet and no other, exactly as its \
+         binding does, so it must clear the return-funded precondition; \
+         return_frame_held={:?}",
+        cell.0,
+        info.return_frame_held_regions,
+    );
+    let funded: Vec<_> = info
+        .tail_callee_facts
+        .iter()
+        .filter(|(_, f)| f.capture_funded.contains(&cell))
+        .map(|(id, _)| id.0)
+        .collect();
+    assert!(
+        !funded.is_empty(),
+        "some frame-replacing tail call's callee must be recorded as funding the cell \
+         r{} — `go` captures `helper` THROUGH the cell, so that edge is the one holding \
+         the region off zero between the relocated release and the callee's mint; \
+         tail_callee_facts={:?}",
+        cell.0,
+        info.tail_callee_facts,
+    );
+}
+
+#[test]
+fn frame_held_refuses_a_forward_cell_whose_binding_crosses_the_fiber_frontier() {
+    // The counterfactual: the projection carries the binding's verdict, so it must
+    // carry a REFUSAL too. `go` is YIELDED, so escape's capture facet marks `helper`
+    // escaping beyond return — a resumer holds the closure through a hold the compiler
+    // did not place, and a parked frame may borrow the cell uncounted. No mint funds
+    // that, so the cell must be in NEITHER set and its release must keep the baseline.
+    let mut symbols = SymbolTable::new();
+    let meta = crate::primitives::build_primitive_meta(&mut symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let (hir, arena, _) = compile_fhir(
+        "(fiber/new (fn () \
+           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
+                    go (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) :done (go (helper m))))] \
+             (begin (yield go) (go 3)))) \
+           |:yield|)",
+        &mut symbols,
+    );
+    let info = analyze_regions_with(&hir, &arena, pc.call_classification);
+    let cells = compiled_cells(&info);
+    assert_eq!(
+        cells.len(),
+        1,
+        "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
+    );
+    let (_helper, cell) = cells[0];
+    assert!(
+        !info.sole_frame_held_regions.contains(&cell)
+            && !info.return_frame_held_regions.contains(&cell),
+        "a forward cell r{} whose binding crosses the FIBER frontier must clear neither \
+         admission — the projection carries the binding's refusal as it carries its \
+         verdict; sole_frame_held={:?} return_frame_held={:?}",
+        cell.0,
+        info.sole_frame_held_regions,
+        info.return_frame_held_regions,
+    );
+}
+
 /// Counter-factual for the destructure-binding-regions overwrite bug.
 ///
 /// At top level, `(begin (def (a & r) (list 1 2 3)) (length r))` lowers

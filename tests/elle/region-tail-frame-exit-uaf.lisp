@@ -256,6 +256,62 @@
     (k-arm-native x (string "w" i) true)
     (length (first x))))
 
+# ── the forward-cell face: a region no binding names ──────────────────────────
+# A prebound FORWARD CELL is reached through its binding's verdict rather than its
+# own, because a binding names the closure region its cell points AT (see
+# docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
+# its binding is"). The relocated release drops the frame's slot reference; what
+# must stand is the counted `closure ⊇ cell` edge the capturer's env took, since
+# every later `DerefCell` that dispatches the sibling resolves through the cell.
+
+# (l) the sibling is reached through the cell on every step of the recursion, and
+# reads a heap value of its own. The cell's release now fires ahead of the letrec
+# body's tail call, so a release that reached zero recycles the cell under the very
+# read that dispatches `helper`.
+(defn l-fwd (i)
+  (let [src (list (string "l" i) i)]
+    (letrec [helper (fn (k) (%add k (length (first src))))
+             go (fn (k) (helper k))]
+      (go 0))))
+(defn l-read (i)
+  (l-fwd i))
+
+# (m) the CAPTURER is handed back, so the sole-held admission refuses and the return
+# half admits on the callee's captured edge — which is `closure ⊇ cell`. The caller
+# drives the returned closure afterwards, and every step of that drive derefs the
+# cell and reads `src` through the sibling, all after the defining frame is gone.
+(defn m2-fwd (i)
+  (let [src (list (string "m" i) i)]
+    (letrec [helper (fn (k)
+                      (when (%not (%int? k)) (error :k))
+                      (%add k (length (first src))))
+             go (fn (k)
+                  (when (%not (%int? k)) (error :k))
+                  (if (%lt k 1)
+                    go
+                    (begin
+                      (helper k)
+                      (go (%sub k 1)))))]
+      (go 3))))
+(defn m2-read (i)
+  (let [g (m2-fwd i)]
+    (if (nil? (g 3)) 0 1)))
+
+# (n) the cell's own CONTENT is handed back: `go` returns `helper`, so the sibling
+# outlives the cell that held it and the caller calls it directly. The cell's
+# relocated release must leave the sibling's region standing on the caller's mint.
+(defn n2-fwd (i)
+  (let [src (list (string "n" i) i)]
+    (letrec [helper (fn (k)
+                      (when (%not (%int? k)) (error :k))
+                      (%add k (length (first src))))
+             go (fn (k)
+                  (when (%not (%int? k)) (error :k))
+                  (if (%lt k 1) helper (go (%sub k 1))))]
+      (go 2))))
+(defn n2-read (i)
+  ((n2-fwd i) 0))
+
 # ── controls: the same reads with a NATIVE tail call — correct now ────────────
 (defn c-plain (i)
   (let [x (list (string "p" i) i)]
@@ -283,6 +339,9 @@
 (var aj 0)
 (var ak 0)
 (var k 0)
+(var l 0)
+(var m2 0)
+(var n2 0)
 (while (%lt i 3000)
   (assign a (a-moved i))
   (assign b (b-moved-beside i))
@@ -303,6 +362,9 @@
   (assign ai (i-arm i))
   (assign aj (j-arm i))
   (assign ak (k-arm i))
+  (assign l (l-read i))
+  (assign m2 (m2-read i))
+  (assign n2 (n2-read i))
   (assign k (c-plain i))
   # The sink is a module-level container by design (witness f stores into it);
   # drain it so the driver's own retention stays flat.
@@ -332,5 +394,10 @@
 (assert (%gt aj 0) "captured value freed under the arm callee's read")
 (assert (%gt ak 0)
         "value released twice where the arm falls through to the merge")
+
+(assert (%gt l 0)
+        "forward cell freed under the deref that dispatches its sibling")
+(assert (%gt m2 0) "forward cell freed before the handed-back capturer drove it")
+(assert (> n2 0) "sibling freed under the caller that received it from its cell")
 
 (println "region-tail-frame-exit-uaf: ok")

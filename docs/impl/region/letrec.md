@@ -121,6 +121,20 @@ The gate is asked per SCC, and the return admission is asked only when some memb
 actually carries the return facet — a non-escaping cycle never consults the tail
 shape, so the ordinary in-lambda and top-level cycles admit exactly as before.
 
+**A sibling capture that is not a cycle has no merge, and its cell rides the
+frame-exit release.** The merge only ever reaches a cell whose closure is in an
+admitted SCC. Where one member merely *calls* another — `go` calls `helper`, and
+`helper` does not call back — there is no cycle at all: `helper` keeps a forward
+cell for `go`'s benefit, per-region RC reclaims both, and the merge is not involved.
+The cell's release is then the ordinary binding-scope `DecrefRegion`, which the
+lowerer emits after the letrec body — dead code when that body ends in a
+frame-replacing tail call, exactly as any other of the frame's releases is. It is
+carried back ahead of the `TailCall` by the frame-exit release, whose count
+argument reads the cell under its binding's own escape verdict
+([mechanism.md](mechanism.md) § "A compiled capture cell is frame-held exactly as
+its binding is"). Both halves apply: the sole-held one where nothing leaves the
+frame, and the return-funded one where the capturing member is handed to the caller.
+
 The static-slot cell requirement is met in **every position**, top level and inside a
 lambda body alike: a `letrec` binding that is immutable, never mutated, and
 lambda-initialized — the recursive-closure shape — lowers its forward cell as a

@@ -694,3 +694,66 @@ fn region_ownership_reclaims_returned_cycle_bound_out_of_tail_position() {
          discriminator leaks {leak} per run, so the gauge is live)",
     );
 }
+
+/// Per-CALL reclamation of a **one-way** sibling capture — `go` calls `helper`,
+/// `helper` does not call back. There is no SCC, so no merge and no cycle channel:
+/// `helper` simply keeps a prebound forward cell for `go`'s benefit and per-region RC
+/// reclaims the pair. What decides whether it does is where the CELL's release lands.
+/// Its binding-scope `DecrefRegion` sits past the letrec body's frame-replacing tail
+/// call, and the frame-exit relocation's count argument is read over holder BINDINGS —
+/// which name the closure region a cell points at, never the cell's own. So the cell
+/// carries its binding's verdict one indirection out, and stranding it strands the
+/// sibling with it: the cell's reference is what holds that closure's region off zero
+/// (docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
+/// its binding is").
+///
+/// Two shapes, one per admission half: nothing leaves the frame (the sole-held half),
+/// and the capturer is RETURNED (the return-funded half, where the funding edge is
+/// `closure ⊇ cell` and must name the cell as well as the closure it points at). Both
+/// leak three objects in two regions per call — the cell, plus the sibling closure and
+/// its env — when the cell's release stays in the dead block.
+#[test]
+fn region_ownership_reclaims_sibling_captured_forward_cell_per_call() {
+    let live_chain = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live_chain > 150,
+        "precondition: the self-referential accumulator legitimately retains every \
+         prior, so region growth over 200 iterations must be large (~200) — got \
+         {live_chain}; if small the gauge is dead and the assertions below are vacuous",
+    );
+
+    let plain = mid_run_growth(
+        Runtime::new(),
+        "(def f (fn [k] \
+            (letrec [helper (fn [x] (%sub x 1)) \
+                     go (fn [m] (helper m))] \
+              (go k))))",
+        "(f 3)",
+        "arena/region-count",
+    );
+    assert!(
+        plain < 50,
+        "a one-way sibling capture must be reclaimed per call — region growth over 200 \
+         calls must be near zero, got {plain} (the forward cell's binding-scope release \
+         is dead past the letrec body's tail call, and the sibling closure it holds \
+         cannot reach zero until the cell does)",
+    );
+
+    let returned = mid_run_growth(
+        Runtime::new(),
+        "(def f (fn [k] \
+            (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
+                     go (fn [m] (when (%not (%int? m)) (error :m)) \
+                          (if (%lt m 1) go (go (helper m))))] \
+              (go k))))",
+        "(f 3)",
+        "arena/region-count",
+    );
+    assert!(
+        returned < 50,
+        "the same pair with the CAPTURER handed back must also reclaim — escape marks \
+         the sibling escaping by the return facet and no other, so the tail callee's \
+         `closure ⊇ cell` edge funds the relocated release — but region growth over 200 \
+         calls is {returned} (the discriminator grows {live_chain}, so the gauge is live)",
+    );
+}

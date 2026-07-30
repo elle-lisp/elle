@@ -534,6 +534,30 @@
   (let [acc (@array)]
     (t23-handback acc src)
     (length acc)))
+# `t23-fwd-cell`'s `go` reaches its sibling `helper` through a prebound FORWARD
+# CELL, and `helper` does not call back — a one-way sibling capture, so there is no
+# SCC and the closure-cycle merge never sees the cell. Its binding-scope
+# `DecrefRegion` lands in the dead block like any other of the frame's releases, and
+# the count argument reaches it through its BINDING's verdict: a binding names the
+# closure region its cell points at, never the cell's own, so an admission read over
+# holder bindings alone cannot see the cell at all. Stranding the cell strands the
+# sibling with it, the cell's reference being what holds that closure off zero
+# (docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
+# its binding is"). `t23-fwd-cell-ret` is the RETURN half of the same projection:
+# the capturer is handed back, so the funding edge — `closure ⊇ cell` — has to name
+# the cell as well as the closure it points at.
+(defn t23-fwd-cell [n]
+  (letrec [helper (fn [x] (%sub x 1))
+           go (fn [m] (helper m))]
+    (go n)))
+(defn t23-fwd-cell-ret [n]
+  (letrec [helper (fn [x]
+                    (when (%not (%int? x)) (error :x))
+                    (%sub x 1))
+           go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) go (go (helper m))))]
+    (go n)))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -1866,7 +1890,7 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The frame-exit release, five CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, seven CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
@@ -1882,7 +1906,10 @@
 # inside it, after the relocated release has run, and the env edge is what holds
 # the region off zero in between; `tail-frame-exit-moved` is the exemption face,
 # already 0, which reads GROWTH if the hoist ever releases an argument the callee
-# now owns. Undeclared, like `param-used-arm`, so a regression trips the
+# now owns. The two `tail-frame-exit-fwd-cell*` probes are the region no holder
+# binding NAMES — a prebound forward cell, which carries its binding's verdict one
+# indirection out, on the sole-held half and on the return-funded half in turn.
+# Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as F1a scratch. The
 # counterfactual and the boundary rows live in
 # `tests/elle/region-tail-frame-exit.lisp`; the soundness complement is
@@ -1921,6 +1948,20 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-moved (list 1 2 3))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-fwd-cell"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-fwd-cell 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-fwd-cell-ret"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-fwd-cell-ret 3)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a
