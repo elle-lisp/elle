@@ -915,17 +915,23 @@ fn merge_admits_returned_member_cycle_on_member_tail() {
 }
 
 #[test]
-fn merge_refuses_returned_cycle_on_non_member_tail() {
-    // THE RESIDUAL BOUNDARY, non-member half. The same returned-member cycle, but the
-    // letrec body tail-calls a NON-member `g`. The non-member channel
-    // (`cycle_tail_release` → `TailCall::deferred_release_slot`) exists precisely
-    // BECAUSE the compiler cannot classify the callee: if `g` resolves to a native the
-    // frame is not replaced and the LIVE scope-exit `DecrefRegion` fires — while the
-    // frame still owns the returned member, taking the arena to zero and handing the
-    // caller a freed closure. So the return facet is refused here and the cycle stays
-    // Shared (the always-legal baseline). Contrast
-    // `merge_admits_returned_member_cycle_on_member_tail`, whose member tail has the
-    // one channel that provably runs after the mint.
+fn merge_admits_returned_cycle_on_non_member_tail() {
+    // THE RETURN-FUNDED ADMISSION, non-member-tail face. The same returned-member
+    // cycle, but the letrec body tail-calls a NON-member `g`. Which channel carries the
+    // arena's release does not enter the ordering argument, and neither does the fact
+    // that the compiler cannot classify `g`: BOTH of the callee's runtime resolutions
+    // release after the mint. A closure `g` replaces the frame, so the binding-scope
+    // `DecrefRegion` is dead and the release rides `deferred_release_slot`, which
+    // `trampoline_loop` runs at the recursion's normal completion — after `g`'s own
+    // `Return` mint. A native `g` keeps the frame and falls through to that same
+    // binding-scope drop, which the lowerer emits at the `Letrec` node, i.e. AFTER the
+    // whole body — and so after the mint the tail call itself emits at the call site
+    // (the post-`TailCall` fall-through retain).
+    //
+    // What the admission needs is therefore only that the BODY hands the value over
+    // itself, which a tail call does (docs/impl/region/letrec.md § The frontier gate).
+    // This is the oracle probe `recur-local-mutual-ret-foreign`, whose 4 regions /
+    // 6 objects per call it closes.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(def g (fn [x] x)) \
@@ -944,25 +950,34 @@ fn merge_refuses_returned_cycle_on_non_member_tail() {
         2,
         "precondition: two compiled forward cells; got {cells:?}"
     );
-    for &c in &cells {
-        assert!(
-            !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
-            "a returned cycle whose body tail-calls a NON-member must NOT merge (its \
-             native fall-through is the live scope-exit drop, which runs BEFORE the \
-             return mint); cell r{} merged_parent={:?}",
-            c.0,
-            info.merged_parent,
-        );
-    }
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "a returned cycle whose body tail-calls a NON-member must merge onto ONE arena \
+         — both of that callee's resolutions release after the mint; cells={cells:?} \
+         merged_parent={:?}",
+        info.merged_parent,
+    );
+    // The non-member tail keeps its own channel: the closure resolution needs the
+    // explicit slot, since no member deferral covers it.
+    assert!(
+        !info.cycle_tail_release.is_empty(),
+        "the non-member tail must be recorded as an arena adopt site, or a closure \
+         callee's frame replacement strands the binding-scope drop; \
+         cycle_tail_release={:?}",
+        info.cycle_tail_release,
+    );
 }
 
 #[test]
-fn merge_refuses_returned_cycle_on_value_tail() {
-    // THE RESIDUAL BOUNDARY, no-tail-call half. The letrec body's tail is the bare
-    // member value `ev` — there is no tail call at all, so nothing strands the
-    // binding-scope `DecrefRegion` and it fires LIVE at the letrec scope exit, before
-    // `f` hands `ev` to its caller. Merging would free the arena under the returned
-    // closure. The cycle must stay Shared.
+fn merge_admits_returned_cycle_on_value_tail() {
+    // THE RETURN-FUNDED ADMISSION, value-tail face. The letrec body's tail is the bare
+    // member value `ev`, so there is no tail call at all — but the letrec IS `f`'s tail,
+    // so functionalization puts `f`'s `Return` INSIDE the letrec body. `lower_return`
+    // mints there, and the binding-scope `DecrefRegion` is emitted at the `Letrec` node
+    // after the body's whole lowering, so the release still follows the mint. The body
+    // hands the value over itself, which is all the admission asks.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(def f (fn [k] \
@@ -980,12 +995,56 @@ fn merge_refuses_returned_cycle_on_value_tail() {
         2,
         "precondition: two compiled forward cells; got {cells:?}"
     );
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "a returned cycle whose letrec is its frame's tail must merge onto ONE arena — \
+         the `Return` inside the body mints before the binding-scope drop; \
+         cells={cells:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+}
+
+#[test]
+fn merge_refuses_returned_cycle_bound_out_of_tail_position() {
+    // THE RESIDUAL. The identical returned cycle, one binding out of tail position: the
+    // letrec's value is bound to `c` and handed on by a LATER statement, so the body
+    // falls out to a bare value with no `Return` and no tail call of its own. The merge
+    // still pins the arena's release at the binding scope, so the `DecrefRegion` fires
+    // at the letrec — while `c` holds the member and the mint that funds `f`'s caller is
+    // an enclosing node away. Merging would hand that caller a freed closure, so the
+    // cycle keeps the Shared baseline.
+    //
+    // This is the boundary control for `merge_admits_returned_cycle_on_value_tail`: the
+    // two differ only in whether the letrec is the frame's tail, which is exactly the
+    // fact that decides whether the mint is inside the body.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] \
+           (let [c (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                                 (if (%lt m 1) ev (od (%sub m 1)))) \
+                            od (fn [m] (when (%not (%int? m)) (error :m)) \
+                                 (if (%lt m 1) ev (ev (%sub m 1))))] \
+                     ev)] \
+             (g 1) \
+             c))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
     for &c in &cells {
         assert!(
             !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
-            "a returned cycle whose letrec body has NO tail call must NOT merge (the \
-             live scope-exit drop runs before the return mint); cell r{} \
-             merged_parent={:?}",
+            "a returned cycle whose letrec is NOT its frame's tail must NOT merge — the \
+             binding-scope drop fires at the letrec, before any mint reaches the value \
+             it was bound out to; cell r{} merged_parent={:?}",
             c.0,
             info.merged_parent,
         );

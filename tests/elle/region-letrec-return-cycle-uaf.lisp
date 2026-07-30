@@ -6,10 +6,20 @@
 # The closure-cycle merge collapses the `ev`/`od` SCC and their forward cells onto one
 # arena. A returned member puts that arena on the return frontier, and the merge admits
 # it because the merge's release is a DECREF, not a free: the returned member lives IN
-# the arena, so the callee's `Return` mint raises the arena's own count, and the letrec
-# body's tail is a call to the MEMBER `ev`, whose deferral runs at the recursion's
-# NORMAL COMPLETION — after that mint. So the deferral drops only the frame's own
-# reference while the caller's stands (docs/impl/region/letrec.md § The frontier gate).
+# the arena, so the mint that funds the caller raises the arena's own count. What the
+# admission then needs is ORDER, and the one structural fact that supplies it is that
+# the letrec BODY hands the value over itself — every tail exit of it leaves the frame
+# (docs/impl/region/letrec.md § The frontier gate). The three ways it can do that are
+# each driven below, because each mints through a different instruction:
+#
+#   - a MEMBER tail call — the release rides the member deferral, which
+#     `trampoline_loop` runs at the recursion's normal completion, after the mint;
+#   - a NON-member tail call — a closure callee replaces the frame and takes the same
+#     late deferral through `deferred_release_slot`, while a NATIVE callee keeps the
+#     frame and falls through to the binding-scope drop, which the lowerer emits at the
+#     `Letrec` node and therefore after the mint the tail call emits at the call site;
+#   - a bare member VALUE — the letrec being the frame's tail, the frame's own `Return`
+#     sits inside the letrec body, so it mints there, again before that drop.
 #
 # The soundness hazard this pins: if the arena's release ran BEFORE the mint — or if the
 # deferral dropped the last reference rather than the frame's — the caller would hold a
@@ -19,10 +29,11 @@
 # SIGSEGV under `--trace=guardfree`. Each clique's non-base arm returns the member too,
 # so a corrupt read also shows as a wrong `fn?`/call result.
 #
-# Covers: the member-tail admission driven per loop iteration (the arena minted and
-# freed hundreds of times); re-entry of the returned handle across allocation churn;
-# a mixed body whose arms return DIFFERENT members; the refused residual (a non-member
-# body tail), which stays Shared and must still run correctly. Pinned under the UAF
+# Covers: each admitted body shape driven per loop iteration (the arena minted and freed
+# hundreds of times); re-entry of the returned handle across allocation churn; a mixed
+# body whose arms return DIFFERENT members; a branchy body whose two arms each tail-call
+# a non-member; and the refused residual (the letrec bound OUT of the frame's tail
+# position), which stays Shared and must still run correctly. Pinned under the UAF
 # oracle by `region_letrec_return_cycle_uaf` (tests/integration/elle_scripts.rs).
 
 # The admitted shape: the letrec body tail-calls the MEMBER `ev`, and both base cases
@@ -50,11 +61,10 @@
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     (ev n)))
 
-# The REFUSED residual: the same returned cycle whose body tail-calls a NON-member, so
-# the merge keeps the Shared baseline (its native fall-through would be the live
-# scope-exit drop, which runs before the mint). It leaks — the F4 probe
-# `recur-local-mutual-ret-foreign` measures that — but it must still RUN correctly, and
-# its returned handle must be re-enterable too.
+# A NON-member tail call whose callee resolves to a CLOSURE: the frame is replaced, so
+# the binding-scope drop is dead code and the arena's release rides
+# `TailCall::deferred_release_slot`, run at the recursion's completion after `ident`'s
+# own `Return` mint.
 (defn ident [x]
   x)
 (defn ret-foreign [n]
@@ -65,6 +75,62 @@
                 (when (%not (%int? m)) (error :m))
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     (ident (ev n))))
+
+# The same non-member tail call resolving to a NATIVE — the other half of that channel,
+# and the one with no deferral at all. `first` pushes no frame, so control falls through
+# to the binding-scope `DecrefRegion`; the reference that funds the caller is minted
+# just before it, by the post-`TailCall` retain over the native's result. That result IS
+# the member here (the pair's head), so the mint and the drop name the same arena and
+# their order is the whole soundness argument.
+(defn ret-native [n]
+  (letrec [ev (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (od (%sub m 1))))
+           od (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (ev (%sub m 1))))]
+    (first (%pair (ev n) nil))))
+
+# A bare member VALUE tail: no tail call strands anything, and the frame's own `Return`
+# — which functionalization places inside the letrec body, the letrec being this frame's
+# tail — is what mints before the binding-scope drop. Branching on the value keeps that
+# reading honest: each arm gets its OWN `Return`, so the admission must see both.
+(defn ret-value [n]
+  (letrec [ev (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (od (%sub m 1))))
+           od (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (ev (%sub m 1))))]
+    (if (< n 0) od ev)))
+
+# A BRANCHY body: two arms, each a non-member tail call, so two arena adopt sites are
+# recorded against one merged root and exactly one may fire per call. Mutually exclusive
+# arms are what make that a single release rather than two.
+(defn ret-arms [n]
+  (letrec [ev (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (od (%sub m 1))))
+           od (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) ev (ev (%sub m 1))))]
+    (if (< n 2) (ident (ev n)) (ident (od n)))))
+
+# The REFUSED residual: the letrec is bound OUT of the frame's tail position, so its
+# body falls out to a bare value and the value reaches `f`'s caller through `c` — past a
+# binding-scope drop that the merge would still pin at the letrec, ahead of any mint. The
+# cycle keeps the Shared baseline and leaks (the F4 probe `recur-local-mutual-ret-bound`
+# measures that), but it must still RUN correctly and its handle must be re-enterable.
+(defn ret-bound [n]
+  (let [c (letrec [ev (fn [m]
+                        (when (%not (%int? m)) (error :m))
+                        (if (%lt m 1) ev (od (%sub m 1))))
+                   od (fn [m]
+                        (when (%not (%int? m)) (error :m))
+                        (if (%lt m 1) ev (ev (%sub m 1))))]
+            ev)]
+    (ident n)
+    c))
 
 # Re-enter a returned handle repeatedly, churning fresh heap between calls so a
 # prematurely freed arena page is recycled under the closure's env.
@@ -92,6 +158,10 @@
 (drive "ret-member" ret-member)
 (drive "ret-either" ret-either)
 (drive "ret-foreign" ret-foreign)
+(drive "ret-native" ret-native)
+(drive "ret-value" ret-value)
+(drive "ret-arms" ret-arms)
+(drive "ret-bound" ret-bound)
 
 # Hold several returned handles live SIMULTANEOUSLY, then re-enter each. Each call mints
 # its own arena, so this pins that one call's deferral never touches another's — and

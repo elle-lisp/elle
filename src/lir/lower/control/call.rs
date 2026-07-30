@@ -534,6 +534,24 @@ impl<'a> Lowerer<'a> {
                 let moves_out_here = self
                     .current_hir_id
                     .is_some_and(|id| self.region_info.moves_out_release_sites.contains(&id));
+                // A closure-cycle arena rides this site's fall-through (the letrec body
+                // tail-calls a non-member out of a merged arena), and the merge admitted
+                // it on the premise that SOME mint stands between the native's result and
+                // the binding-scope `DecrefRegion` emitted after this body
+                // (docs/impl/region/letrec.md § The frontier gate). The two suppressions
+                // below hand that role to a retain the native already took, which the
+                // premise does not read — so the merge must never have admitted a site
+                // wearing them. It cannot today (a container site needs a `Match`-armed
+                // dispatch body, which the admission's exhaustiveness reading refuses,
+                // and a moves-out result is an element the store funnel counted
+                // separately), and asserting it here turns a future widening of either
+                // set into a loud panic at the seam rather than a stale-arena deref.
+                debug_assert!(
+                    deferred_release_slot.is_none() || !(container_released_here || moves_out_here),
+                    "a closure-cycle tail-release site must keep its ReturnValue mint or \
+                     a `Return`'s: the arena's binding-scope release runs after this \
+                     block on the native fall-through"
+                );
                 if !container_released_here && !moves_out_here && !self.return_mint_covers_here() {
                     self.emit(LirInstr::IncrefValueRegion { src: dst });
                 }

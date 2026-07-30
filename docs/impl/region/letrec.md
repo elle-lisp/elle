@@ -72,34 +72,51 @@ something else still reads the arena.
 - **The return half is admitted where the arena's release runs after the return
   mint.** A returned member does not outlive the arena's *count*: because the merge
   collapses that member's region onto the arena, the value handed out lives **in** the
-  arena, so the callee's `Return` mint raises the arena's own count. Three references
-  are in play over one call — the frame's own (taken at the letrec setup), the
-  caller's (minted by the `Return`), and any container's (taken by the store funnel) —
-  and the release the merge owns is the frame's. So the admission is entirely a
-  question of **order**: a release that runs after the mint drops the frame's
-  reference with the caller's already standing, and on a path that returns something
-  else nobody else holds the arena and the frame's is correctly the last.
+  arena, so the mint that funds the caller raises the arena's own count. Three
+  references are in play over one call — the frame's own (taken at the letrec setup),
+  the caller's (that mint), and any container's (taken by the store funnel) — and the
+  release the merge owns is the frame's. So the admission is entirely a question of
+  **order**: a release that runs after the mint drops the frame's reference with the
+  caller's already standing, and on a path that returns something else nobody else
+  holds the arena and the frame's is correctly the last.
 
-  Exactly one of the merge's channels has that order: the **member-callee tail
-  deferral**. When every tail exit of the letrec body is a tail call to an SCC member,
-  the callee is a letrec-bound lambda (immutable and lambda-initialized — the cell
-  requirement above), so the frame *is* replaced, the binding-scope `DecrefRegion` is
-  dead on every path, and `trampoline_loop` runs the deferred decref at the recursion's
-  **normal completion** — after every `Return` mint on the taken path. This is the
-  mutual twin of the cell-free self-recursive deferral's return admission
+  The order is settled by one structural question: **does the letrec body hand the
+  value over itself?** Every tail exit of the body must be a node that leaves the
+  frame — a `Return`, or a tail `Call`. Each of the three ways such an exit mints puts
+  the mint ahead of the merge's release:
+
+  - a **`Return`** mints where it stands (`lower_return`'s `IncrefValueRegion`), inside
+    the body, while the binding-scope `DecrefRegion` the merge owns is emitted at the
+    `Letrec` node — after the body's whole lowering — so the release follows it;
+  - a tail call to a **closure** replaces the frame, so that `DecrefRegion` is dead code
+    and the release rides a deferral instead — the member channel's
+    (`stranded_cycle_bindings`) or the non-member channel's (`deferred_release_slot`),
+    whichever applies — and `trampoline_loop` runs either at the recursion's **normal
+    completion**, after the callee's `Return` mint;
+  - a tail call to a **native** keeps the frame and falls through to that same
+    binding-scope `DecrefRegion`, but the call's own mint — the post-`TailCall`
+    fall-through retain, or `lower_return`'s retain where ANF named the result — is
+    emitted at the call site, inside the body, so it precedes the release too.
+
+  So *which* channel carries the release does not enter the ordering argument, and
+  neither does whether the compiler can classify the callee: the merge wires both
+  channels precisely because it cannot, and both are late enough. This is the same
+  ordering argument as the cell-free self-recursive deferral's return admission
   ([selfrec.md](../selfrec.md) § "The deferral's escape gate is the fiber frontier
-  alone"), and the same ordering argument: the deferral runs *after* the mint, so
-  unlike the frame-exit relocation there is nothing to bridge.
+  alone") — the release runs *after* the mint, so unlike the frame-exit relocation
+  there is nothing to bridge.
 
-  Every other return-facet shape keeps the baseline, because its release can run
-  **before** the mint: a body whose tail exit is not a member call (a bare member
-  value, a non-member callee, or no tail call at all) reaches the **live** scope-exit
-  `DecrefRegion`, which fires while the frame still owns the returned value — taking
-  the arena to zero and handing the caller a freed closure. The non-member channel
-  (`cycle_tail_release`, below) is refused for the same reason: it is wired precisely
-  *because* the compiler cannot classify the callee, so its native fall-through is the
-  live scope-exit drop. That is the residual: a returned cycle whose letrec body does
-  not exit through a member tail call.
+  What the body must **not** do is fall out to a bare value, because then the letrec's
+  value is handed to an *enclosing* consumer: the mint that funds the caller, if there
+  is one at all, sits outside the letrec node while the merge pins the release at the
+  binding scope. `(let [c (letrec [ev … od …] ev)] … c)` is that residual — `c` holds
+  the member past a `DecrefRegion` that already took the arena to zero. An exit the
+  reading does not recognise is refused for the same reason: the reading exists to prove
+  the mint is inside the body, so anything it cannot read must read as outside. A loop
+  and a short-circuit `And`/`Or` fall out to a value that way; a `Cond` with no else arm
+  and a `Match` fall out on the path where no arm is taken — which is why this reading
+  needs the arms EXHAUSTIVE where branch compensation, asking a different question,
+  admits a `Match` arm exactly as an `If` arm.
 
 The gate is asked per SCC, and the return admission is asked only when some member
 actually carries the return facet — a non-escaping cycle never consults the tail
@@ -179,7 +196,11 @@ and lets exactly one fire.
   recursion's normal completion, after the `Return` mint that funds the caller's
   reference. The marking is keyed on `closure_cycle_members`, so only a member of an
   **admitted** merge reaches it and the gate never has to re-argue admission; it is kept
-  whole so the two ends of the channel state the same premise.
+  whole so the two ends of the channel state the same premise. The non-member channel
+  below states it too, and is admitted for the return facet on the same terms: both
+  deferrals run at the recursion's completion, and the fall-through the non-member
+  channel additionally has is the binding-scope drop, which the frontier gate already
+  proved runs after the body's own mint.
 
 - **A tail call to a NON-member** (a native `%add`, a redefined operator `+`, a
   foreign closure `g`) rides an explicit slot instead. The arena is therefore
@@ -238,13 +259,17 @@ double-free) still refuses;
 and is never a member; `merge_collapses_self_and_sibling_captured_member_cell` — the mixed
 self+sibling-captured member's retained cell still merges).
 
-The **frontier gate**'s four faces are pinned as one family, so the two halves cannot
-drift into each other: `merge_admits_returned_member_cycle_on_member_tail` (the
-return-funded admission), `merge_refuses_returned_cycle_on_non_member_tail` and
-`merge_refuses_returned_cycle_on_value_tail` (the residual — the two ways a returned
-cycle reaches the live scope-exit drop), and `merge_refuses_fiber_crossing_letrec_cycle`
-(the fiber half, which no mint can fund; its letrec body's tail *is* a member call, so
-the fiber facet is the only gate left to bite).
+The **frontier gate**'s faces are pinned as one family, so the two halves cannot
+drift into each other. The return half's admission is pinned across all three ways a
+body leaves the frame — `merge_admits_returned_member_cycle_on_member_tail` (a member
+tail call), `merge_admits_returned_cycle_on_non_member_tail` (a non-member one, whose
+two callee kinds take the two late channels), and `merge_admits_returned_cycle_on_value_tail`
+(a bare member value, whose `Return` mints inside the body) — against
+`merge_refuses_returned_cycle_bound_out_of_tail_position` (the residual: the letrec's
+value is handed to an enclosing consumer, so no mint stands before the binding-scope
+drop). `merge_refuses_fiber_crossing_letrec_cycle` holds the fiber half, which no mint
+can fund; its letrec body's tail *is* a member call, so the fiber facet is the only
+gate left to bite.
 `merge_refuses_returned_cell_free_self_recursive_closure` guards the reading itself: a
 returned *self*-recursive closure is refused by CELL-FREEDOM, not by the frontier, so
 that refusal must not be read as "returned ⇒ refused".
@@ -261,8 +286,9 @@ returned cycle, `region_ownership_reclaims_nested_mutual_recursion_per_call` dri
 in-lambda cycle per call (bounded beside the live-chain discriminator, base case
 included) and `closure_cycle_discarded_release_is_prompt` pinning the binding-scope
 drop's promptness (a discarded top-level cycle freed at its letrec, not held to
-teardown). The oracle reads the pair `recur-local-mutual-ret` (closed at 0 — the
-admission) beside `recur-local-mutual-ret-foreign` (the refused residual).
+teardown). The oracle reads `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`
+and `recur-local-mutual-ret-value` (the three admitted body shapes, all closed at 0)
+beside `recur-local-mutual-ret-bound` (the refused residual).
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a
 pure self-recursive closure, which is reclaimed cell-free (ordinary RC / the tail-call
 deferred release — [selfrec.md](../selfrec.md)), not by this merge.

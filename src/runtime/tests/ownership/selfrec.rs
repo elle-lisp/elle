@@ -541,12 +541,15 @@ fn self_recursive_and_sibling_captured_no_double_free() {
 /// and both forward cells stayed live once per call.
 ///
 /// The facet is not a reason to refuse: the merge collapses the returned member's
-/// region onto the arena, so the value handed out lives IN the arena and the callee's
-/// `Return` mint raises the arena's own count. The letrec body's tail is a call to the
-/// MEMBER `ev`, so the binding-scope `DecrefRegion` is dead past that frame-replacing
-/// `TailCall` and the release rides the member deferral, which runs at the recursion's
-/// normal completion — after the mint. The caller then discards the result and the
-/// arena reaches zero.
+/// region onto the arena, so the value handed out lives IN the arena and the mint that
+/// funds the caller raises the arena's own count. The letrec body's tail is a call to
+/// the MEMBER `ev`, so the binding-scope `DecrefRegion` is dead past that
+/// frame-replacing `TailCall` and the release rides the member deferral, which runs at
+/// the recursion's normal completion — after the mint. The caller then discards the
+/// result and the arena reaches zero.
+///
+/// The other two body shapes that hand the value over themselves are gauged by
+/// [`region_ownership_reclaims_returned_cycle_every_frame_exit`].
 ///
 /// Same bounded-vs-discriminator counterfactual as the non-returning case: the merge is
 /// unconditional, so the pin is per-run region growth beside the leaking bare-@array
@@ -575,5 +578,78 @@ fn region_ownership_reclaims_returned_mutual_cycle_per_call() {
         "a RETURNED member's ev/od cycle must be reclaimed by the return-funded merge \
          admission — per-run live-region growth {growth} must be <= 0 (the \
          discriminator leaks {leak} per run, so the gauge is live)",
+    );
+}
+
+/// The return-funded admission turns on ONE structural fact — the letrec body hands the
+/// value over itself, every tail exit of it leaving the frame — and this drives the two
+/// remaining ways it can do that beside the member tail call above
+/// (docs/impl/region/letrec.md § The frontier gate).
+///
+/// A NON-member tail call reaches the caller's mint by either of its callee's
+/// resolutions: a closure replaces the frame and the release rides
+/// `deferred_release_slot` to the recursion's completion, a native keeps it and falls
+/// through to the binding-scope `DecrefRegion` the lowerer emits at the `Letrec` node —
+/// after the mint the call itself emits at the call site. A bare member VALUE tail has
+/// no tail call at all, and the frame's own `Return` (which functionalization places
+/// inside the letrec body, the letrec being the frame's tail) is what mints first.
+///
+/// The RESIDUAL is the same cycle one binding out of tail position: bound to `c` and
+/// handed on by a later statement, so the body falls out to a bare value and the
+/// binding-scope release would fire at the letrec while `c` still holds the member. It
+/// is refused, so it leaks — and that leak is this test's second live gauge. It reads
+/// with the same slope as the bare-`@array` discriminator, which is what proves the two
+/// bounded assertions above it are measuring reclamation rather than a dead gauge.
+#[test]
+fn region_ownership_reclaims_returned_cycle_every_frame_exit() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertions below are vacuous",
+    );
+    // The ev/od cycle, spelled once; each case differs only in the letrec BODY and in
+    // what encloses it. `ev` is returned (a value use), which disables call-site param
+    // joins — the diverging guards prove the `%lt`/`%sub` operands.
+    let cycle = "letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (od (%sub m 1)))) \
+                         od (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (ev (%sub m 1))))]";
+
+    let foreign = steady_region_growth(&format!(
+        "(def g (fn [x] x)) (def f (fn [k] ({cycle} (g (ev k))))) (begin (f 3) nil)"
+    ));
+    assert!(
+        foreign <= 0,
+        "a returned cycle whose body tail-calls a NON-member must be reclaimed — both \
+         of that callee's resolutions release after the mint — but per-run live-region \
+         growth is {foreign} (the discriminator leaks {leak} per run, so the gauge is \
+         live)",
+    );
+
+    let value = steady_region_growth(&format!("(def f (fn [k] ({cycle} ev))) (begin (f 3) nil)"));
+    assert!(
+        value <= 0,
+        "a returned cycle whose body's tail is a bare member VALUE must be reclaimed — \
+         the frame's `Return` sits inside the letrec body and mints before the \
+         binding-scope drop — but per-run live-region growth is {value} (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
+    );
+
+    // The residual, and the counterfactual for both assertions above: one binding out
+    // of tail position, the merge refuses and the whole cycle stays Shared.
+    let bound = steady_region_growth(&format!(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] (let [c ({cycle} ev)] (g k) c))) \
+         (begin (f 3) nil)"
+    ));
+    assert!(
+        bound > 0,
+        "the residual must still leak: a cycle whose letrec is NOT its frame's tail is \
+         refused (its binding-scope release fires before any mint reaches the value it \
+         was bound out to), so per-run live-region growth {bound} must be > 0 — if it \
+         is 0 the shape now reclaims and the two bounded assertions above have lost \
+         their counterfactual",
     );
 }

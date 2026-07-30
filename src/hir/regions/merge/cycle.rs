@@ -115,9 +115,10 @@ struct TailCallSite {
 /// (`(g od)`): the member's own move/return machinery would decref the arena a second
 /// time, colliding with the deferred release (a double-free). A member merely STORED into a fresh
 /// aggregate then passed is RC-counted and safe, and after ANF is a temp argument, not
-/// a member reference, so it is admitted. When a member carries the return facet the tail
-/// shape is read once more and more strictly: every tail EXIT of the body must be a
-/// MEMBER call, since only that deferral runs after the mint. The result extends the same `merged_parent`
+/// a member reference, so it is admitted. When a member carries the return facet the body
+/// is read once more, for a different question: every tail EXIT of it must LEAVE THE FRAME
+/// (a `Return`, or a tail `Call`), which is what puts the mint that funds the caller inside
+/// the body and so ahead of the merge's release. The result extends the same `merged_parent`
 /// forest the builder-idiom seed populates and rides the same `merged_root`
 /// canonicalization, unconditionally (not flag-gated) and on every tier.
 pub(crate) fn compute_closure_cycle_merges(
@@ -347,38 +348,27 @@ pub(crate) fn compute_closure_cycle_merges(
         if strands {
             continue;
         }
-        // The RETURN-FUNDED admission's funding requirement (docs/impl/region/letrec.md
-        // § The frontier gate). A returned member's arena may be released only AFTER
-        // the callee's `Return` mint has raised its count, and exactly one of the
-        // merge's channels has that order: the member-callee tail deferral, which
-        // `trampoline_loop` runs at the recursion's normal completion. So every tail
-        // EXIT of the letrec body must be a tail call to a MEMBER — the callee is then
-        // one of this letrec's own immutable, lambda-initialized bindings (the cell
-        // requirement above), so the frame is replaced on every path, the binding-scope
-        // `DecrefRegion` is dead, and the deferral is the arena's sole release.
+        // The RETURN-FUNDED admission's ordering requirement (docs/impl/region/letrec.md
+        // § The frontier gate). A returned member's arena may be released only AFTER the
+        // mint that funds the caller's reference, and one structural fact settles that
+        // for every channel at once: the letrec BODY must hand the value over itself —
+        // every tail exit of it leaves the frame. A `Return` mints where it stands,
+        // inside the body, ahead of the binding-scope `DecrefRegion` the lowerer emits
+        // at the `Letrec` node; a tail call to a closure replaces the frame, so that
+        // drop is dead and the release rides a deferral `trampoline_loop` runs at the
+        // recursion's normal completion, after the callee's `Return`; a tail call to a
+        // native keeps the frame but mints at the call site (the post-`TailCall`
+        // fall-through retain, or `lower_return`'s where ANF named the result), also
+        // inside the body.
         //
-        // Every other exit reaches the LIVE scope-exit drop — a bare member value or no
-        // tail call at all reaches it directly, and the non-member channel's native
-        // fall-through IS that drop — which fires while the frame still owns the
-        // returned value, freeing the arena under the caller's reference. Those keep
-        // the Shared baseline: the residual this admission names.
-        if return_facet {
-            let exit_calls = letrec_tail
-                .get(&drop_site)
-                .and_then(|t| t.exit_calls.as_ref());
-            let funded = exit_calls.is_some_and(|exits| {
-                !exits.is_empty()
-                    && exits.iter().all(|id| {
-                        sites.is_some_and(|sites| {
-                            sites
-                                .iter()
-                                .any(|s| s.hir_id == *id && s.callee.is_some_and(is_member))
-                        })
-                    })
-            });
-            if !funded {
-                continue;
-            }
+        // A body that falls out to a bare VALUE hands the letrec's value to an
+        // ENCLOSING consumer instead, and the merge pins the release at the binding
+        // scope regardless — so `(let [c (letrec [ev …] ev)] … c)` reads `c` past a
+        // drop that already took the arena to zero. That, and every exit this reading
+        // cannot recognise, keeps the Shared baseline: the residual this admission
+        // names.
+        if return_facet && !letrec_tail.get(&drop_site).is_some_and(|t| t.exits_frame) {
+            continue;
         }
         // Every non-member-callee body tail is an admitted adopt site (a member
         // callee stays on its own channel and is excluded). Keyed to the root below.
@@ -476,13 +466,12 @@ struct LetrecTail {
     /// deferral, or a non-member callee's explicit arena adopt) and must not pass a
     /// cycle member in by-move.
     sites: Vec<TailCallSite>,
-    /// `Some(ids)` when EVERY tail exit of the body is a tail `Call` (those calls'
-    /// ids), `None` when any exit is something else. The **return-funded** admission
-    /// needs this stronger reading than `sites`: a body can hold a tail call on one
-    /// path and hand back a bare member value on another, and only the former strands
-    /// the binding-scope drop — so `sites` alone cannot tell whether the live
-    /// scope-exit drop is reachable.
-    exit_calls: Option<Vec<HirId>>,
+    /// Does EVERY tail exit of the body leave the frame itself — a `Return`, or a
+    /// tail `Call`? The **return-funded** admission needs this reading rather than
+    /// `sites`: it decides whether the value the frame hands its caller is minted
+    /// INSIDE the body, ahead of the binding-scope drop the lowerer emits at the
+    /// `Letrec` node (docs/impl/region/letrec.md § The frontier gate).
+    exits_frame: bool,
 }
 
 /// For every `Letrec` node, how its BODY exits at the tail ([`LetrecTail`]).
@@ -494,53 +483,58 @@ fn collect_letrec_tail_callees(hir: &Hir, out: &mut FxHashMap<HirId, LetrecTail>
             hir.id,
             LetrecTail {
                 sites,
-                exit_calls: body_tail_exit_calls(body),
+                exits_frame: body_tail_exits_frame(body),
             },
         );
     }
     hir.for_each_child(|c| collect_letrec_tail_callees(c, out));
 }
 
-/// The tail-call ids of every tail EXIT of a letrec body, or `None` when some exit
-/// is not a tail call.
+/// Does every tail EXIT of a letrec body leave the frame — is the value the frame
+/// hands its caller produced (and minted) INSIDE this body?
 ///
-/// Descends only the tail position of the pure control forms, and deliberately
-/// answers `None` for everything it does not recognise: the consumer (the
-/// return-funded admission) uses this to prove the LIVE scope-exit `DecrefRegion` is
-/// unreachable, so an unrecognised exit must read as reachable. A bare value tail
-/// (`(letrec [ev …] ev)`), a loop, a short-circuit `And`/`Or`, and a `Cond` with no
-/// else arm all fall through to the scope exit and so all answer `None`.
-fn body_tail_exit_calls(hir: &Hir) -> Option<Vec<HirId>> {
+/// The return-funded admission reads this to know that the merge's binding-scope
+/// release runs after that mint (docs/impl/region/letrec.md § The frontier gate).
+/// Descends only the tail position of the pure control forms, and deliberately answers
+/// `false` for everything it does not recognise: a body it cannot read may hand its
+/// value to an enclosing consumer, whose mint is outside the letrec node and therefore
+/// after the release. A bare value tail out of tail position
+/// (`(let [c (letrec [ev …] ev)] … c)`), a loop, a short-circuit `And`/`Or`, and a
+/// `Cond` with no else arm all read that way.
+fn body_tail_exits_frame(hir: &Hir) -> bool {
     match &hir.kind {
-        HirKind::Call { is_tail: true, .. } => Some(vec![hir.id]),
-        HirKind::Return { value } => body_tail_exit_calls(value),
+        // The two nodes that hand a value to the CALLER from inside this body: the
+        // `Return` mints for it here, and a tail `Call` mints either at the callee's
+        // own `Return` (a closure, which replaces the frame) or at the post-`TailCall`
+        // fall-through retain emitted right here (a native, which does not).
+        HirKind::Return { .. } | HirKind::Call { is_tail: true, .. } => true,
         HirKind::Let { body, .. }
         | HirKind::Letrec { body, .. }
-        | HirKind::Parameterize { body, .. } => body_tail_exit_calls(body),
+        | HirKind::Parameterize { body, .. } => body_tail_exits_frame(body),
         HirKind::Begin(exprs) | HirKind::Block { body: exprs, .. } => {
-            body_tail_exit_calls(exprs.last()?)
+            exprs.last().is_some_and(body_tail_exits_frame)
         }
         HirKind::If {
             then_branch,
             else_branch,
             ..
-        } => {
-            let mut out = body_tail_exit_calls(then_branch)?;
-            out.extend(body_tail_exit_calls(else_branch)?);
-            Some(out)
-        }
+        } => body_tail_exits_frame(then_branch) && body_tail_exits_frame(else_branch),
         HirKind::Cond {
             clauses,
             else_branch,
         } => {
-            // No else arm means an implicit nil fall-through — a non-call exit.
-            let mut out = body_tail_exit_calls(else_branch.as_ref()?)?;
-            for (_, b) in clauses {
-                out.extend(body_tail_exit_calls(b)?);
-            }
-            Some(out)
+            // No else arm means an implicit nil fall-through — an exit that does not
+            // leave the frame, so the whole `Cond` does not.
+            else_branch
+                .as_ref()
+                .is_some_and(|e| body_tail_exits_frame(e))
+                && clauses.iter().all(|(_, b)| body_tail_exits_frame(b))
         }
-        _ => None,
+        // `Match` is absent deliberately, where branch compensation admits it exactly as
+        // an `If`: this reading needs the arms to be EXHAUSTIVE (a fall-through with no
+        // arm taken is an exit that does not leave the frame), which an `If` and a
+        // `Cond` with an else arm have and a pattern match does not.
+        _ => false,
     }
 }
 
