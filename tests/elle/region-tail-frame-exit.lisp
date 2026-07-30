@@ -279,6 +279,31 @@
   (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
     (top-sub (go n))))
 
+# (d18) the `def` face of the same three bodies. A `def` has no scope NODE, so the
+# analysis leaves its closure region's demise where the binding chain put it — the
+# binding's last use — and a use as a CALLEE resolves through `last_use` to the node
+# that CONSUMES it. So the release is emitted where that call has returned and the
+# recursion has completed, needing no relocation at all; only when the consuming
+# call is itself the frame-replacing tail call is it dead, and there the deferral
+# supplies it (`def-tail`, the closed control). What keeps the live rows off the
+# `MakeClosure` itself is that a `def` evaluates to what it bound, so the
+# unused-binding narrowing floors the demise at the `def` rather than at its
+# initializer (docs/impl/region/mechanism.md § "A binder's init release lands after
+# the slot store").
+(defn def-arg-call (n)
+  (def go (fn (m) (if (%lt m 1) 0 (go (%sub m 1)))))
+  (top-sub (go n)))
+(defn def-nontail (n)
+  (def go (fn (m) (if (%lt m 1) 0 (go (%sub m 1)))))
+  (%add (go n) 0))
+(defn def-stmt (n)
+  (def go (fn (m) (if (%lt m 1) 0 (go (%sub m 1)))))
+  (go n)
+  0)
+(defn def-tail (n)
+  (def go (fn (m) (if (%lt m 1) 0 (go (%sub m 1)))))
+  (go n))
+
 # (d17) the same reading's over-free face, in the leak direction: the operand's
 # value-producing leaf IS an allocation, so its region stays exempt. A fresh lambda
 # handed to the tail call is the callee's owned parameter, and the closure region
@@ -397,12 +422,6 @@
 # `deferred_release_slot` and the callee's `defer_callee_release` both appear in the
 # emitted bytecode), so what is open here is not an analysis refusal.
 #
-# `def-arg-call` is (d16)'s `def` face, and the residual of the placement table
-# (docs/impl/selfrec.md): a `def`-bound self-recursive closure has its release
-# SUPPRESSED rather than emitted at a scope end, so where the enclosing body
-# tail-calls something else there is no instruction for the relocation to move and
-# no deferral claiming it either.
-#
 # `callee-letrec-member` is the CALLEE-side gap. `helper` is captured by its sibling,
 # so it is allocated per call rather than seeded as a constant, and the letrec's body
 # tail-calls it. Its own region is exempt from the relocation by design — moving that
@@ -419,9 +438,6 @@
   (letrec [go (fn (m) (if (%lt m 1) :done (go (%sub m 1))))
            outer (fn (m) (go m))]
     (outer n)))
-(defn def-arg-call (n)
-  (def go (fn (m) (if (%lt m 1) 0 (go (%sub m 1)))))
-  (top-sub (go n)))
 (defn callee-letrec-member (n)
   (letrec [helper (fn (x) (%sub x 1))
            go (fn (m) (helper m))]
@@ -443,6 +459,9 @@
 (def fwd-cell-ret-sib-d (measure (fn () (fwd-cell-ret-sib 3)) 200 window))
 (def fwd-cell-sib-d (measure (fn () (fwd-cell-sib 3)) 200 window))
 (def def-arg-call-d (measure (fn () (def-arg-call 3)) 200 window))
+(def def-nontail-d (measure (fn () (def-nontail 3)) 200 window))
+(def def-stmt-d (measure (fn () (def-stmt 3)) 200 window))
+(def def-tail-d (measure (fn () (def-tail 3)) 200 window))
 (def arg-call-selfrec-d (measure (fn () (arg-call-selfrec 3)) 200 window))
 (def arg-call-toplevel-d (measure (fn () (arg-call-toplevel 3)) 200 window))
 (def callee-letrec-member-d
@@ -497,9 +516,10 @@
 (println "  operand value: selfrec " arg-call-selfrec-d "  toplevel "
          arg-call-toplevel-d "  lambda " lambda-arg-d "  aggregate "
          aggregate-arg-d)
+(println "  def binder: arg-call " def-arg-call-d "  nontail " def-nontail-d
+         "  stmt " def-stmt-d "  tail " def-tail-d)
 (println "  residual: sibling-captures-member " fwd-cell-sib-d
-         "  def-suppressed " def-arg-call-d "  callee-letrec-member "
-         callee-letrec-member-d)
+         "  callee-letrec-member " callee-letrec-member-d)
 (println "  controls: native " native-tail-d "  non-tail " non-tail-d)
 (println "  boundary: branch " branch-true-d "/" branch-false-d)
 
@@ -567,6 +587,12 @@
 (bounded? lambda-arg-d "a fresh lambda handed to the tail call as its argument")
 (bounded? aggregate-arg-d "the aggregate an argument builds around a local")
 
+(bounded? def-arg-call-d
+          "a `def`-bound self-recursive closure the tail call's ARGUMENT calls")
+(bounded? def-nontail-d "the same `def` under a non-tail consumer")
+(bounded? def-stmt-d "the same `def` called for effect")
+(bounded? def-tail-d "control: the `def` whose body tail-calls the binding")
+
 (assert (= (drive-walk [1 2 3]) 3) "walker result lost")
 (assert (= (length (drive-walk-moved [1 2 3])) 3) "moved-in walker result lost")
 (assert (= (length (arm-handback [1 2 3] true)) 3) "arm hand-back result lost")
@@ -591,7 +617,10 @@
 (assert (= (fwd-cell 3) :done) "forward-cell walker result lost")
 (assert (= (fwd-cell-sib 3) :done)
         "residual: sibling-captures-member result lost")
-(assert (= (def-arg-call 3) -1) "residual: def-suppressed result lost")
+(assert (= (def-arg-call 3) -1) "def-binder arg-call result lost")
+(assert (= (def-nontail 3) 0) "def-binder nontail result lost")
+(assert (= (def-stmt 3) 0) "def-binder statement result lost")
+(assert (= (def-tail 3) 0) "def-binder tail result lost")
 (assert (= (arg-call-selfrec 3) -1) "operand-value selfrec result lost")
 (assert (= (arg-call-toplevel 3) -1) "operand-value toplevel result lost")
 (assert (= (callee-letrec-member 3) 1)

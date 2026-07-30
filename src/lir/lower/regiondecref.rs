@@ -87,14 +87,6 @@ impl<'a> Lowerer<'a> {
             if self.region_info.suppressed_decref_regions.contains(&r) {
                 return;
             }
-            // A self-recursive `def` binding's cell-free closure region: its
-            // compiler-emitted `DecrefRegion` is stranded — the runtime adopt at the
-            // `(loop …)` tail call is the sole release. Emitting it here would free the
-            // region before the tail call re-enters the closure living in it (a
-            // use-after-free). Empty unless a self-recursive `def` was lowered.
-            if self.suppressed_self_regions.contains(&r) {
-                return;
-            }
             // A co-owned-cycle member is freed
             // by the single `FreeRegionGroup` emitted below at the group's drop site, not
             // by an individual decref — skip its own release. Empty without the flag, so

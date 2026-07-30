@@ -166,6 +166,27 @@ fn find_first_emit(hir: &super::Hir) -> Option<HirId> {
     found
 }
 
+/// Find the `Define` node that binds the named binding.
+fn find_define_by_name(
+    hir: &super::Hir,
+    name: &str,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+) -> Option<HirId> {
+    if let HirKind::Define { binding, .. } = &hir.kind {
+        if symbols.name(arena.get(*binding).name) == Some(name) {
+            return Some(hir.id);
+        }
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = find_define_by_name(c, name, arena, symbols);
+        }
+    });
+    found
+}
+
 fn find_first_loop(hir: &super::Hir) -> Option<HirId> {
     if matches!(&hir.kind, HirKind::Loop { .. }) {
         return Some(hir.id);

@@ -361,6 +361,42 @@ per-op rates), and `tests/elle/region-branch-arm-window-uaf.lisp` (the soundness
 complement — a value read, stored, returned, carried across a yield, or reached
 through a closure's environment after the branch must survive the moved release).
 
+## A binder's init release lands after the slot store
+
+A binding's initializer is an ordinary expression, so `lower_expr` emits its
+releases where it emits every node's: immediately after the node. That position is
+**before** the binder has stored the value into its slot, and a release landing
+there does the wrong thing on either route (§ "Two resolutions"): a **value-routed**
+one reloads the holder slot, reads the `nil` the binder pre-stamped and releases
+nothing at all, while a **slot-resolved** one names the region directly and frees a
+value the binder is about to store — leaving the slot pointing into freed pages.
+
+A release lands there only when the initializer is *itself* the region's
+`decref_point`, which is the unused-binding narrowing: nothing reads the bound name,
+so the value's last use is pulled back to where the value was made. `Let` and
+`Letrec` therefore route the init node through `deferred_decref_points` and emit its
+releases themselves, after the store (`tests/elle/region-unused-let-binding.lisp` is
+the pin).
+
+`Define` is the binder that must not be narrowed there in the first place, because
+**a `def` evaluates to what it bound**. Every other binding form's value is its
+*body*, so an init no name reads really is dead at the init; a `def`'s value IS the
+init, so it is live wherever the `def` is — handed to a callee, returned, bound to a
+second name, propagated out of a `begin` or a branch arm. The narrowing's floor for a
+`Define` is therefore the point the walk gave the `def` itself
+(`propagated_inits`, `hir/liveness/lastuse`): the enclosing consumer when there is
+one, and the `Define` node when the `def`'s value is discarded — whose releases
+`lower_expr` emits after `lower_define` has stored. Narrowing below that frees the
+value under the expression it was handed to
+(`tests/elle/region-define-init-release-uaf.lisp`); leaving it at the init frees
+nothing (`tests/elle/region-define-init-release.lisp`).
+
+So a `def`'s initializer region is released by the ordinary last-use mechanism,
+whatever it holds. This is what a cell-free self-recursive `def` rides — its closure
+region needs no suppression, because the binding's last use as a **callee** resolves
+to the node that consumes it and the release lands where the recursion has already
+completed ([selfrec.md](../selfrec.md) § the placement table).
+
 ## Every binder records its scope
 
 A `Var` read inside a `While`/`Loop` is extended to the loop node when the binding

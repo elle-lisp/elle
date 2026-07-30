@@ -72,22 +72,23 @@ WASM reads a reserved self slot the host installs at every closure entry.
 
 Removing the cell does **not** remove the tail-call deferred release. The self-recursive closure's
 own region is a **per-call** allocation whose lifetime spans the whole recursion (the
-self-reference borrows the executing closure, which lives in that region). Its scope-end
-`DecrefRegion` lands at the enclosing `letrec`/`def` scope, which for the dominant shape
-`(letrec [loop …] (loop k))` is **dead code past the frame-replacing `TailCall`** — so
-without a supplied release the per-call region leaks. This is the same stranding the
-forward cell used to suffer; no-cell removes the cell, not the stranding.
+self-reference borrows the executing closure, which lives in that region). For the dominant
+shape — `(letrec [loop …] (loop k))`, and the same body under a `def` — its `DecrefRegion`
+lands **past the frame-replacing `TailCall`**, dead code, so without a supplied release the
+per-call region leaks. This is the same stranding the forward cell used to suffer; no-cell
+removes the cell, not the stranding.
 
 Where the closure's single `DecrefRegion` lands, and who frees the region once, splits by
-whether the binding's body is a tail call:
+whether the binding's body is a tail call — and, one level up, by which node the binder
+gives the analysis to hang the demise on:
 
 | binding shape | closure `DecrefRegion` placement | who frees the region once |
 |---|---|---|
-| `letrec`, tail-call body to the binding | scope end — dead code past the `TailCall` | the tail-call **deferred release** |
-| `letrec`, tail-call body to another callee | scope end — dead code past the `TailCall` | the **frame-exit relocation** |
-| `letrec`, non-tail body | fires live at scope end | the live `DecrefRegion` |
-| `def`, tail-call body to the binding | suppressed (`suppressed_self_regions`) | the tail-call **deferred release** |
-| `def`, non-tail body | fires live at last use | the live `DecrefRegion` |
+| `letrec`, tail-call body to the binding | letrec scope end — dead code past the `TailCall` | the tail-call **deferred release** |
+| `letrec`, tail-call body to another callee | letrec scope end — dead code past the `TailCall` | the **frame-exit relocation** |
+| `letrec`, non-tail body | fires live at the letrec scope end | the live `DecrefRegion` |
+| `def`, body tail-calls the binding | the binding's last use IS that `TailCall` — dead code past it | the tail-call **deferred release** |
+| `def`, any other body | the binding's last use — the node that CONSUMES the closure | the live `DecrefRegion` |
 
 The tail-call rows are the load-bearing case (the dominant self-recursive helper is a
 tail loop). There the closure's release must not run before the recursion completes,
@@ -99,35 +100,41 @@ exclusive by construction. A body that tail-calls the binding itself makes the c
 region the call's own **callee**, which the frame-exit relocation exempts by design —
 moving that release ahead of the call would free the closure the call is about to enter —
 so the deferral is its channel. A body that tail-calls anything else has finished with the
-closure before the call is made: the recursion has already completed, nothing the call
-reaches names the region, and the relocation carries the scope-end release back ahead of
-the `TailCall` under its own sole-holder admission
-([region/mechanism.md](region/mechanism.md) § "A release past a frame-replacing tail call
-is not a release"). The dominant shape is a helper pair —
+closure before the call is made: the recursion has already completed and nothing the call
+reaches names the region. The dominant shape is a helper pair —
 `(letrec [helper …  go …] (helper (go n)))` — where `go`'s recursion produces the
 argument and a sibling consumes it.
 
-The `def` shape has no second row, and that is its **residual**: `lower_define`
-suppresses the release outright, so where the enclosing body tail-calls something other
-than the binding there is no instruction for the relocation to move and no deferral
-claiming it. That is a leak, never an over-free.
+- A `letrec` binding's scope **is** a node, so the region analysis carries the closure
+  region's demise out to the `Letrec` — which the lowerer emits after the body. When the
+  body is a frame-replacing tail call that is dead code, and the two rows above say which
+  channel supplies it: the deferral for a member callee, and otherwise the relocation,
+  which carries the scope-end release back ahead of the `TailCall` under its own
+  sole-holder admission ([region/mechanism.md](region/mechanism.md) § "A release past a
+  frame-replacing tail call is not a release"). `lower_letrec` marks a self-recursive
+  member `stranded_self_bindings` (`lir/lower/binding/let.rs`).
+- A `def` has no such node, so its closure region keeps the demise the ordinary binding
+  chain computed: the binding's **last use**. That is the tighter of the two placements
+  and it needs no relocation, because a use of the binding as a **callee** resolves
+  through `last_use` to the node that *consumes* it — the call. The release is therefore
+  emitted where that call has returned, so it post-dates the recursion; it is never
+  emitted between loading the closure and entering it. The one shape where the point is
+  not live is the one where the consuming call is itself the frame-replacing tail call —
+  the same dead block the `letrec` rows name, supplied by the same deferral, which is why
+  `lower_define` marks the binding `stranded_self_bindings` too.
 
-- For `letrec`, the region analysis already places the closure region's demise at the
-  letrec scope end, which the lowerer emits **after** the body's frame-replacing
-  `TailCall` — dead code that never runs. `lower_letrec` marks the binding
-  `stranded_self_bindings` (`lir/lower/binding.rs`).
-- For `def`, the binding is lowered without its enclosing scope's tail in hand, so the
-  region analysis places the closure region's demise at the binding's last use — the
-  func-load of the `(loop …)` recursive call — which the lowerer would emit as a **live**
-  `DecrefRegion` immediately before that call. `lower_define` therefore SUPPRESSES it
-  (`suppressed_self_regions`, checked in `emit_decrefs_for`) and marks the binding
-  `stranded_self_bindings`, reproducing the `letrec` path's runtime accounting for a body
-  that tail-calls the binding — and leaving the residual named above for one that does
-  not.
+What keeps the `def` rows off the initializer is the general binder rule
+([region/mechanism.md](region/mechanism.md) § "A binder's init release lands after the
+slot store"): a `def` evaluates to what it bound, so the unused-binding narrowing floors
+its init's demise at the `def` itself rather than pulling it back to the closure's own
+`MakeClosure`. A demise there would fire before the binder had stored, freeing the closure
+region while the slot still holds `nil`. That floor is the whole of the `def` face's
+release discipline; there is no self-recursion-specific suppression.
 
-Both markings are gated on **cell-freedom** (`!needs_capture()`): the strand+deferral is the
-release route *only* for a self-recursive binding with no forward cell. A member that is
-**also sibling-captured** has a cell that holds a counted reference to the closure region
+Both binders' markings are gated on **cell-freedom** (`!needs_capture()`): the
+strand+deferral is the release route *only* for a self-recursive binding with no forward
+cell. A member that is **also sibling-captured** has a cell that holds a counted reference
+to the closure region
 and releases it by the cell's cascade — a lifetime that outlives any single tail-call
 activation. Stranding such a binding would make the deferred release decref its region a SECOND
 time, freeing it under the still-live cell (the scheduler's mutually recursive
@@ -189,23 +196,25 @@ runs *after* the mint and needs none.
 **The fiber frontier still refuses.** A closure emitted or sent crosses to a resumer or
 receiver whose hold the compiler did not place, and a parked frame may borrow it uncounted
 — the refusal every return-funded admission keeps. So the **residual** is a cell-free
-self-recursive closure that crosses the fiber frontier: the two rows of the table above are
-exclusive by construction, so a binding this gate refuses has *neither* release — its
-scope-end `DecrefRegion` still sits past the `TailCall` and no deferred channel supplies it,
-stranding closure and env once per call. The frame-exit relocation does not reach it either:
-the region is the tail call's own **callee**, and a release moved ahead of the call would
-free the closure the call is about to enter. That is a leak, never an over-free.
+self-recursive closure that crosses the fiber frontier *and* whose defining body tail-calls
+it: that is the one pair of table rows where the deferral is the sole channel, so a binding
+this gate refuses has no release at all — its `DecrefRegion` still sits past the `TailCall`
+and no deferred channel supplies it, stranding closure and env once per call. The
+frame-exit relocation does not reach it either: the region is the tail call's own
+**callee**, and a release moved ahead of the call would free the closure the call is about
+to enter. That is a leak, never an over-free. Every other body shape keeps a release the
+gate never consults.
 
 ## Per-call cost, and the irreducible deferred release
 
 A retained self-recursive closure mints exactly **2 objects/call** — the closure and its env
 — with no per-call cell, the same cost as a foreign-capturing closure of equal capture arity
-(`self_recursive_loop_is_cell_free`). The tail-call **deferred release** is **irreducible for the
-cell-free case**: a cell-free self-recursive closure's region is a per-call allocation whose
-scope-end release is stranded past the recursive tail call — removing the *self*-cell removed
-the cell, not the stranding — so a cell-free self-tail-loop always needs the deferral to supply
-that once-only release (§ above). Cell-freedom buys the per-call object and better locality;
-it does not remove the deferral. The one exception is a **sibling-captured** self-recursive
+(`self_recursive_loop_is_cell_free`). The tail-call **deferred release** is **irreducible for a
+cell-free self-tail-loop**: such a closure's region is a per-call allocation whose release is
+stranded past the recursive tail call — removing the *self*-cell removed the cell, not the
+stranding — so it always needs the deferral to supply that once-only release (§ above).
+Cell-freedom buys the per-call object and better locality; it does not remove the deferral.
+The one exception is a **sibling-captured** self-recursive
 member: it is not cell-free, and its *sibling forward* cell's cascade — not the deferral — owns
 the once-only release (§ the cell-free gate), which is why marking it stranded would
 double-free (once by the cascade, once by the deferral). So the deferred release is irreducible precisely
@@ -247,14 +256,27 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   heap-allocating arithmetic runs clean and bounded (the heap churn recycles a
   prematurely-freed page, turning the latent use-after-free loud).
 - `…::self_recursive_define_in_lambda_no_double_free` — a `def` tail-loop runs to completion
-  (the strand + suppress frees the closure region exactly once).
+  (the strand frees the closure region exactly once).
+- `…::self_recursive_define_off_tail_reclaims_per_call` — the other `def` rows of the
+  placement table: a body that consumes the recursion's result instead of tail-calling the
+  binding releases live at that consuming node, with heap-churning arithmetic to make a
+  premature release loud.
 - `…::closure_cycle_nested_letrec_reclaims_per_call` — the full-stdlib per-call reclamation
   gauge for a nested self-recursive letrec loop.
 - `…::recursive_returned_closure_reclaims_per_call` — the return-funded admission: a
-  RETURNED cell-free self-recursive closure still reclaims per call, through both
-  stranding routes (`letrec`'s dead scope-end drop and `def`'s suppressed one).
+  RETURNED cell-free self-recursive closure still reclaims per call, through both binder
+  faces of the dead scope-end drop.
+- `…::unused_define_init_reclaims_per_call` — the binder rule underneath the `def` rows: an
+  unused `def`'s heap init is released, which it is only if the release lands after the
+  slot store (`region-unused-let-binding.lisp` is the `let` face).
 - `tests/elle/region-selfrec-return-release.lisp` — the soundness half of the same
   admission under the UAF oracle: every returned handle is RE-ENTERED after the
   deferred release, across allocation churn that recycles a prematurely freed page.
+- `tests/elle/region-tail-frame-exit.lisp` § the `def` binder — the four `def` bodies
+  of the placement table driven as leak rows, beside the `letrec` faces of the same
+  three.
+- `tests/elle/region-define-init-release{,-uaf}.lisp` — the binder rule the `def` rows
+  rest on, in both directions: an unread `def`'s init is released, and a `def`'s value
+  survives every way it leaves the `def`.
 - `tests/elle/oracle.lisp` — `recur-local-self` (leak rate 0), `recur-local-self-mint`
   (0, a returned self-recursive closure reclaims) beside `recur-local-foreign-mint`.

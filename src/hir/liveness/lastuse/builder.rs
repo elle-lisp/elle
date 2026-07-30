@@ -42,6 +42,15 @@ pub(super) struct LastUseBuilder<'a> {
     /// `Match` pattern binds a projection, not the scrutinee), so the two
     /// maps are not index-parallel.
     pub(super) binding_scope: HashMap<Binding, Vec<HirId>>,
+    /// Init nodes whose value is ALSO the binder's own value: the `Define`
+    /// arm, and only it. Every other binder's value is its BODY, so an init
+    /// no bound name reads really is dead where it was made and the
+    /// unused-binding narrowing may pull its last use back to the init
+    /// itself. A `def` evaluates to what it bound, so the same init is still
+    /// live wherever the `def` is — the narrowing must not reach below the
+    /// point the walk gave the `def` (docs/impl/region/mechanism.md § "A
+    /// binder's init release lands after the slot store").
+    pub(super) propagated_inits: rustc_hash::FxHashSet<HirId>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked. Outermost-first. Used to extend `last_use` for `Var`
     /// nodes so a binding bound OUTSIDE an iterative scope but
@@ -175,13 +184,21 @@ impl LastUseBuilder<'_> {
             HirKind::Emit { value, .. } => self.walk(value, true, hir.id),
 
             HirKind::Return { value } => self.walk(value, true, hir.id),
+            // Define: the value is bound to a name AND is the form's own value,
+            // so it dies exactly where the `def` itself does — `my_last`, which
+            // is the enclosing consumer when there is one and this node when the
+            // `def`'s value is discarded. A `let`'s init is consumed by the
+            // binder (the form's value is its BODY) and dies at the `let`; a
+            // `def`'s does not, and `propagated_inits` carries that difference to
+            // the unused-binding narrowing below.
             HirKind::Define { value, binding } => {
                 self.binding_init
                     .entry(*binding)
                     .or_default()
                     .push(value.id);
                 self.binding_scope.entry(*binding).or_default().push(hir.id);
-                self.walk(value, true, hir.id);
+                self.propagated_inits.insert(value.id);
+                self.walk(value, true, my_last);
             }
             HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
             HirKind::SetCell { cell, value } => {

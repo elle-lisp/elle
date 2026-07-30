@@ -242,19 +242,6 @@ pub struct Lowerer<'a> {
     /// captures the binding must not free the arena out from under a later use
     /// in the enclosing activation).
     stranded_cycle_bindings: rustc_hash::FxHashSet<Binding>,
-    /// Closure regions of self-recursive **`def`** bindings whose scope-end
-    /// `DecrefRegion` must be SUPPRESSED. A `letrec`-bound self-recursive closure has
-    /// its release land at the letrec scope end — dead code past the body's
-    /// frame-replacing `TailCall`, supplied once by the runtime's deferred release. A `def`-bound
-    /// one instead has its closure region demise at the binding's last use — the
-    /// func-load of the `(loop …)` recursive call — which the lowerer would emit as a
-    /// LIVE `DecrefRegion` immediately BEFORE that call, freeing the closure out from
-    /// under its own re-entry (the executing-closure re-dispatch then reads a recycled
-    /// page). Suppressing that decref and deferring it to the tail call instead (the
-    /// binding is also `stranded_self_bindings`) reproduces the `letrec` path's runtime
-    /// accounting: the region is freed exactly once, by the deferred release at the
-    /// recursion's normal completion.
-    suppressed_self_regions: rustc_hash::FxHashSet<crate::hir::region::Region>,
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
     current_function_params: Option<Vec<Binding>>,
@@ -408,7 +395,6 @@ impl<'a> Lowerer<'a> {
             self_recursive_bindings: rustc_hash::FxHashSet::default(),
             stranded_self_bindings: rustc_hash::FxHashSet::default(),
             stranded_cycle_bindings: rustc_hash::FxHashSet::default(),
-            suppressed_self_regions: rustc_hash::FxHashSet::default(),
             region_info: RegionInfo::empty(),
             escape_info: EscapeInfo::empty(),
             increfs_by_site: HashMap::new(),

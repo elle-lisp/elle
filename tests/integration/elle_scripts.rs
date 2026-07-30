@@ -345,6 +345,25 @@ fn region_tail_frame_exit_uaf() {
     );
 }
 
+// Guard — a `def` evaluates to what it bound, so its initializer's demise must
+// not be narrowed onto the initializer when nothing reads the binding
+// (docs/impl/region/mechanism.md § "A binder's init release lands after the slot
+// store"). Every other binder's value is its BODY, so an unread init really is
+// dead at the init; a `def`'s value IS the init and flows straight on. This
+// drives every way it leaves — handed to a callee, returned, bound to a second
+// name, propagated through a `begin`, produced by a branch arm, stored into a
+// container that outlives the frame, captured by a closure, and resolved by a
+// parked frame after a yield. Freeing any of them at the initializer faults on
+// the read — SIGSEGV under guardfree. The leak face is
+// `region-define-init-release.lisp`.
+#[test]
+fn region_define_init_release_uaf() {
+    run_elle_script_with_args(
+        "region-define-init-release-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
 // read AND module-scope `def @cell`) must take a counted reference, or the
 // cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior

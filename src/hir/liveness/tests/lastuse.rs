@@ -56,6 +56,82 @@ fn last_use_let_multiple_uses_in_body() {
     );
 }
 
+/// A `def` evaluates to what it bound, so the unused-binding narrowing must not pull
+/// its initializer's last use back onto the initializer
+/// (docs/impl/region/mechanism.md § "A binder's init release lands after the slot
+/// store"). Nothing reads `x` in either subject, which is exactly the condition the
+/// narrowing keys on — and the value is still live, because the `def` form's own
+/// value is it.
+///
+/// Two subjects: the `def` as a discarded statement (its value dies at the `def`,
+/// which is where the lowerer emits the release — after the binder's slot store, so
+/// the release names the stored value rather than the stamped `nil`), and the `def`
+/// in a consuming position (its value dies at the consumer, so a release at the
+/// initializer would free it under that consumer).
+#[test]
+fn last_use_define_init_dies_at_the_define_not_the_init() {
+    let (hir, arena, symbols, info) = analyze_with_hir("(fn () (def x (string \"a\")) 0)");
+    let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    assert_eq!(allocs.len(), 1, "expected exactly one (string ...) call");
+    let alloc = allocs[0];
+    let define = find_define_by_name(&hir, "x", &arena, &symbols).expect("a Define for x");
+
+    let got = info.last_use.get(&alloc).copied();
+    assert_eq!(
+        got,
+        Some(define),
+        "an unread `def`'s init @{} must die at the `def` @{}, got {:?} — narrowed onto \
+         the init, its release is emitted before the binder's slot store and frees \
+         nothing",
+        alloc.0,
+        define.0,
+        got
+    );
+}
+
+#[test]
+fn last_use_define_init_dies_at_its_consumer() {
+    let (hir, arena, symbols, info) = analyze_with_hir("(fn () (string (def x (string \"a\"))))");
+    let mut allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    assert_eq!(allocs.len(), 2, "expected two (string ...) calls");
+    allocs.sort_by_key(|id| id.0);
+    let inner = allocs[0];
+    let outer = allocs[1];
+
+    let got = info.last_use.get(&inner).copied();
+    assert_eq!(
+        got,
+        Some(outer),
+        "the init of a `def` in consuming position @{} must die at the consuming Call \
+         @{}, got {:?} — narrowed onto the init, its release frees the value under the \
+         call it was handed to",
+        inner.0,
+        outer.0,
+        got
+    );
+}
+
+/// The control for the pair above: every OTHER binder's value is its BODY, so an
+/// unread init really is dead where it was made and the narrowing must keep pulling
+/// it there — that promptness is what makes an unused `let`'s allocation reclaim at
+/// the init rather than at the enclosing scope's end.
+#[test]
+fn last_use_unused_let_init_stays_narrowed_to_the_init() {
+    let (hir, arena, symbols, info) = analyze_with_hir("(fn () (let [x (string \"a\")] 0))");
+    let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    assert_eq!(allocs.len(), 1, "expected exactly one (string ...) call");
+    let alloc = allocs[0];
+
+    let got = info.last_use.get(&alloc).copied();
+    assert_eq!(
+        got,
+        Some(alloc),
+        "an unread `let` init @{} must stay narrowed to itself, got {:?}",
+        alloc.0,
+        got
+    );
+}
+
 #[test]
 fn last_use_inline_call_arg_no_binding() {
     // `(string (string "a"))` — the inner string allocation has no

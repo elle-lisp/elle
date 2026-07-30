@@ -14,6 +14,7 @@ pub fn compute_last_use(
         capture_loop_ext: HashMap::new(),
         binding_init: HashMap::new(),
         binding_scope: HashMap::new(),
+        propagated_inits: rustc_hash::FxHashSet::default(),
         iter_scope_stack: Vec::new(),
         order,
         low: &low,
@@ -91,11 +92,29 @@ pub fn compute_last_use(
     // bindings can share one init id (a Destructure registers the value's id
     // for every pattern binding), so collisions aggregate by ord-max — the
     // value must survive the latest sharer's uses.
+    //
+    // With no use of the binding the override falls back to a FLOOR — where the
+    // init's value dies absent any name. For a binder that CONSUMES its init
+    // (every one but `Define`) that is the init itself, and narrowing to it is
+    // what frees an unused `let`'s allocation promptly. For a `Define` the value
+    // is also the form's value, so it dies wherever the `def` does and the walk
+    // already recorded that; narrowing past it would free the value under the
+    // expression the `def` was handed to (docs/impl/region/mechanism.md § "A
+    // binder's init release lands after the slot store"). A use, when there is
+    // one, still wins — the fallback is a floor, not a replacement.
     let mut staged: HashMap<HirId, HirId> = HashMap::new();
     for (binding, init_ids) in &builder.binding_init {
         let chosen = compute_chosen(binding, &builder.last_use, &builder.capture_loop_ext);
         for &init_id in init_ids {
-            let chosen = chosen.unwrap_or(init_id);
+            let floor = if builder.propagated_inits.contains(&init_id) {
+                builder.last_use.get(&init_id).copied().unwrap_or(init_id)
+            } else {
+                init_id
+            };
+            let chosen = match chosen {
+                Some(c) if ord(c) > ord(floor) => c,
+                _ => floor,
+            };
             staged
                 .entry(init_id)
                 .and_modify(|cur| {

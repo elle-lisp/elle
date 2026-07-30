@@ -63,25 +63,20 @@ impl<'a> Lowerer<'a> {
 
         // Self-recursive `def` nested in a lambda: lowering `value` above ran
         // `lower_lambda_expr`, which recorded this binding in `self_recursive_bindings`.
-        // Its cell-free closure region demises at the binding's last use — the
-        // func-load of the `(loop …)` recursive call — so the lowerer would emit a LIVE
-        // `DecrefRegion` right before that call, freeing the closure out from under its
-        // own re-entry (the executing-closure re-dispatch then reads a recycled page).
-        // The `letrec` path avoids this by landing that decref at the letrec scope end
-        // — dead code past the body's frame-replacing `TailCall`, supplied once by the
-        // adopt. Mirror it for `def`: SUPPRESS the closure region's `DecrefRegion`
-        // (`suppressed_self_regions`) and STRAND the binding (`stranded_self_bindings`)
-        // so a tail call to it adopts the region — the sole, once-only release.
-        // Cell-free self-recursion only (see the `lower_letrec` twin): a
-        // sibling-captured (`needs_capture`) self-recursive binding is held by a
-        // cell, so its region is released by the cell's cascade, not this
-        // suppress-and-strand adopt — stranding it double-frees under the live cell.
+        // Its cell-free closure region demises at the binding's LAST USE, and a use as a
+        // callee resolves to the node that consumes it — the call — so the ordinary
+        // `DecrefRegion` lands where the recursion has already completed. The one body
+        // shape where that node is the enclosing frame's own tail call leaves the release
+        // in dead code past the `TailCall`, exactly as the `letrec` scope-end drop is;
+        // STRAND the binding (`stranded_self_bindings`) so a tail call to it defers the
+        // region's release — the sole, once-only release on that path
+        // (docs/impl/selfrec.md § the placement table). Cell-free self-recursion only
+        // (see the `lower_letrec` twin): a sibling-captured (`needs_capture`)
+        // self-recursive binding is held by a cell, so its region is released by the
+        // cell's cascade — stranding it double-frees under the live cell.
         if self.self_recursive_bindings.contains(&binding)
             && !self.arena.get(binding).needs_capture()
         {
-            if let Some(&closure_region) = self.region_info.alloc_region.get(&value.id) {
-                self.suppressed_self_regions.insert(closure_region);
-            }
             self.stranded_self_bindings.insert(binding);
         }
 

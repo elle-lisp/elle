@@ -312,8 +312,9 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
 /// reference *before* `trampoline_loop` breaks and runs the deferred decref, so the
 /// count between the two is the caller's and the deferral drops only the frame's own.
 ///
-/// Two shapes, one per stranding route — a `letrec` self-loop (dead scope-end drop)
-/// and a `def` self-loop (`suppressed_self_regions`). Each result is DISCARDED at the
+/// Two shapes, one per binder face of the dead drop — a `letrec` self-loop (whose demise
+/// is the letrec scope end) and a `def` self-loop (whose demise is the binding's last
+/// use, which for this body IS the tail call). Each result is DISCARDED at the
 /// call site, so nothing legitimately retains it and the whole per-call region must
 /// come back. Boolean-only bodies keep them on `Runtime::without_stdlib()`, where no
 /// trait dispatch churns the region count.
@@ -360,8 +361,8 @@ fn recursive_returned_closure_reclaims_per_call() {
          must be ~0, got {letrec_self}",
     );
 
-    // `def` self-loop: the would-be-live DecrefRegion is suppressed instead of dead,
-    // reproducing the letrec accounting through the other stranding route.
+    // `def` self-loop: the demise is the binding's last use, which for this body is the
+    // `(loop k)` TailCall itself — the same dead block, reached through the other binder.
     let define_self = growth(
         "(def fdef (fn [k] (def loop (fn [m] (if m loop (loop true)))) (loop k)))",
         "(fdef false)",
@@ -369,8 +370,8 @@ fn recursive_returned_closure_reclaims_per_call() {
     assert!(
         define_self < 50,
         "a returned cell-free self-recursive `def` closure must be reclaimed per call \
-         (its release is suppressed, so the deferral is the only channel): region \
-         growth over 200 discarded calls must be ~0, got {define_self}",
+         (its release is dead past the tail call, so the deferral is the only channel): \
+         region growth over 200 discarded calls must be ~0, got {define_self}",
     );
 }
 
@@ -425,16 +426,15 @@ fn tail_or_short_circuit_returns_owned_param_no_uaf() {
 /// re-enters the executing closure living in that region) reads a foreign object and trips
 /// the `tag/object mismatch — list` panic at `arena.rs`.
 ///
-/// A self-recursive `def`'s closure region demises at the binding's last use — the func-load
-/// of the `(loop …)` recursive call — which the lowerer would emit as a LIVE `DecrefRegion`
-/// right before that tail call, freeing the closure out from under its own re-entry. So
-/// `lower_define` SUPPRESSES that decref (`suppressed_self_regions`) and STRANDS the binding
-/// (`stranded_self_bindings`); the tail-call deferred release is then the sole, once-only release,
-/// reproducing the `letrec` path's accounting. The gauge (region growth over 200 calls)
-/// additionally pins the region is reclaimed per call — a leak would grow it unbounded.
+/// A self-recursive `def`'s closure region demises at the binding's last use, which for
+/// this body is the `(loop k)` tail call — dead code past the frame replacement. So
+/// `lower_define` STRANDS the binding (`stranded_self_bindings`) and the tail-call
+/// deferred release is the sole, once-only release, reproducing the `letrec` path's
+/// accounting. The gauge (region growth over 200 calls) additionally pins the region is
+/// reclaimed per call — a leak would grow it unbounded.
 ///
-/// Counterfactual: panics with the `tag/object mismatch` UAF before the `def`-stranding +
-/// premature-decref-suppression fix; runs clean and bounded after.
+/// Counterfactual: panics with the `tag/object mismatch` UAF before the `def`-stranding
+/// fix; runs clean and bounded after.
 #[test]
 fn self_recursive_define_with_arith_reclaims_per_call() {
     // Subject: a self-recursive `def` (not `letrec`) nested in a lambda, recursing with
@@ -467,12 +467,106 @@ fn self_recursive_define_with_arith_reclaims_per_call() {
     );
 }
 
+/// The OTHER `def` rows of the placement table (docs/impl/selfrec.md § the placement
+/// table): a body that does not tail-call the binding.
+///
+/// A `def` has no scope NODE, so the analysis leaves its closure region's demise at the
+/// binding's last use — and a use of the binding as a CALLEE resolves through `last_use`
+/// to the node that CONSUMES it, the call. The release is therefore emitted where that
+/// call has returned and the recursion has completed, which is the ordinary live
+/// `DecrefRegion` and needs no strand, no relocation and no deferral. Only when the
+/// consuming call is itself the frame-replacing tail call (`…_with_arith_…` above) is
+/// the point dead and the deferral its channel.
+///
+/// Three bodies, one per way the recursion's result can be consumed short of tail-calling
+/// the binding: as a tail call's ARGUMENT, under a non-tail consumer, and discarded as a
+/// statement. Run under the FULL stdlib with heap-allocating `<`/`-` so a prematurely
+/// freed closure page is recycled mid-recursion and the latent use-after-free panics
+/// (`tag/object mismatch`) instead of reading stale-but-intact memory.
+///
+/// Counterfactual: each reads ~200 — one stranded region per call — if the closure
+/// region's ordinary release is withheld; ~0 with it standing.
+#[test]
+fn self_recursive_define_off_tail_reclaims_per_call() {
+    let growth = |body: &str| {
+        mid_run_growth(
+            Runtime::new(),
+            &format!(
+                "(def sub1 (fn [x] (- x 1))) \
+                 (def f (fn [k] \
+                    (def loop (fn [m] (if (< m 1) 0 (loop (- m 1))))) \
+                    {body}))"
+            ),
+            "(f 3)",
+            "arena/region-count",
+        )
+    };
+    let live = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    for (label, body) in [
+        ("a tail call's argument", "(sub1 (loop k))"),
+        ("a non-tail consumer", "(+ (loop k) 0)"),
+        ("a discarded statement", "(begin (loop k) 0)"),
+    ] {
+        let g = growth(body);
+        assert!(
+            g < 50,
+            "a cell-free self-recursive `def` whose body consumes the recursion through \
+             {label} must be reclaimed per call by its ordinary release: region growth \
+             over 200 calls must be ~0, got {g}",
+        );
+    }
+}
+
+/// The binder rule underneath the `def` rows above (docs/impl/region/mechanism.md § "A
+/// binder's init release lands after the slot store"): an UNUSED `def` whose initializer
+/// allocates must still release it.
+///
+/// This is the `def` face of `region-unused-let-binding.lisp`. The last-use narrowing
+/// pulls an unread binding's init demise back to where the value was made — correct for
+/// every binder whose value is its BODY, and wrong for the one binder whose value IS the
+/// initializer, because the lowerer then emits the release before `lower_define` has
+/// stored the value and it reloads the binder's stamped `nil`. Nothing is freed and the
+/// initializer's region is held to fiber teardown.
+///
+/// `Runtime::without_stdlib` keeps the reading to the shape under test, and the gauge is
+/// the OBJECT count: the strand is one cons cell per call, in a region the pool hands
+/// straight back out, so `arena/region-count` reads it as flat. Counterfactual: ~200 while
+/// the demise sits on the initializer, ~0 once it sits on the `def`.
+#[test]
+fn unused_define_init_reclaims_per_call() {
+    let live = mid_run_discriminator(Runtime::without_stdlib(), "arena/count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so object \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+    let unused = mid_run_growth(
+        Runtime::without_stdlib(),
+        "(def f (fn [k] (def x (list k k)) 0))",
+        "(f 3)",
+        "arena/count",
+    );
+    assert!(
+        unused < 50,
+        "the heap initializer of a `def` nothing reads must be released: object growth \
+         over 200 calls must be ~0, got {unused} — narrowed onto the initializer the \
+         release is emitted before the binder's slot store and reloads the stamped `nil`",
+    );
+}
+
 /// A self-recursive `def` nested in a lambda is cell-free (docs/impl/selfrec.md), handled
 /// exactly like a self-recursive `letrec`: no forward cell, the self-reference resolves to
-/// the executing closure. `lower_define` STRANDS the binding (`stranded_self_bindings`) and
-/// SUPPRESSES its closure region's would-be-live `DecrefRegion` (`suppressed_self_regions`)
-/// so the tail-call deferred release is the sole release — the closure region must be freed EXACTLY
-/// once. A leaked suppression (both the live decref AND the adopt firing) is a double-free.
+/// the executing closure. `lower_define` STRANDS the binding (`stranded_self_bindings`) so
+/// the tail-call deferred release is the sole release — the closure region must be freed
+/// EXACTLY once. Both the dead-block decref and the deferral firing is a double-free.
 /// This pins that the program runs to completion (the double-free was a `DecrefRegion(...) —
 /// phantom region or double-free` panic in `regionstore/refcount.rs`).
 #[test]
