@@ -15,6 +15,37 @@ use std::sync::Arc;
 #[cfg(feature = "jit")]
 use crate::jit::{JitCode, JitRejectionInfo};
 
+/// The releases a frame-replacing tail call leaves behind, one per channel.
+///
+/// Everything the lowerer emits after a `TailCall` runs only on the native
+/// fall-through, so a closure callee strands every release the enclosing scopes
+/// put there. Two channels supply the strand, and a single tail call may need
+/// **both**: a letrec body that tail-calls a per-call local closure out of a
+/// closure-cycle merged arena strands the arena's binding-scope `DecrefRegion`
+/// *and* the callee closure's own. The channels name different regions by
+/// construction — a merge MEMBER callee is absent from `cycle_tail_release` and
+/// `tail_callee_defers_release` refuses every `closure_cycle_members` region —
+/// so neither can stand in for the other.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct DeferredReleases {
+    /// The closure-cycle merged arena named by `TailCall::deferred_release_slot`,
+    /// resolved through this activation's region map.
+    pub arena: Option<RuntimeRegion>,
+    /// The callee closure's own per-call region, flagged by
+    /// `TailCall::defer_callee_release`.
+    pub callee: Option<RuntimeRegion>,
+}
+
+impl DeferredReleases {
+    /// The regions to release at the activation's normal completion, in the
+    /// order the channels were earned. Order is immaterial — each is a decref of
+    /// a `Counted` region, and where one holds a counted edge to the other the
+    /// cascade and the direct decref commute.
+    pub fn regions(self) -> impl Iterator<Item = RuntimeRegion> {
+        self.arena.into_iter().chain(self.callee)
+    }
+}
+
 pub(crate) struct TailCallInfo {
     pub code: crate::value::Code,
     pub env: Rc<Vec<Value>>,
@@ -28,27 +59,25 @@ pub(crate) struct TailCallInfo {
     /// always a real closure in practice).
     pub closure: Value,
     pub squelch_mask: SignalBits,
-    /// The callee CLOSURE's region, when it is a per-call *local* closure whose
-    /// compiler-emitted `DecrefValueRegion` is dead (emitted past the `TailCall`
-    /// — see `lower_call`'s `is_tail` arm). A tail call replaces the frame, so
-    /// that trailing release never runs and the closure's region leaks (one per
-    /// call through every higher-order stdlib fn: `fold`/`map`/`filter`/…, whose
-    /// recursion tail-calls a `letrec`-bound `go`). The new activation TAKES OVER
-    /// that release and runs it when the activation completes (the
-    /// trampoline-loop break) — the missing decref, deferred to where the
-    /// frame-replacing tail call moved the closure's lifetime. The region stays
-    /// `Counted` throughout: this is a deferred decref, never an ownership-forest
-    /// adoption.
+    /// The releases this tail call stranded past the frame replacement, which the
+    /// new activation TAKES OVER and runs when it completes (the trampoline-loop
+    /// break). Each region stays `Counted` throughout: these are deferred
+    /// decrefs, never ownership-forest adoptions.
     ///
-    /// `None` for a callee that is NOT a per-call local closure — a top-level
-    /// `defn` (a program-root closure, region held for the program's life: it has
-    /// no per-call decref and tail-calling it never leaked) or a native/parameter
-    /// callee (no frame replacement). The discriminator is
-    /// `VM::tail_callee_release_region`: a local closure's region is recorded in the
-    /// CURRENT activation's region map (and, with its decref dead, never cleared);
-    /// a program-root closure's region was minted in a different, popped
-    /// activation. Releasing a program-root region would be a use-after-free.
-    pub deferred_release_region: Option<RuntimeRegion>,
+    /// The callee channel covers a per-call *local* closure whose
+    /// compiler-emitted `DecrefValueRegion` the lowerer put past the `TailCall`
+    /// (one such region per call through every higher-order stdlib fn:
+    /// `fold`/`map`/`filter`/…, whose recursion tail-calls a `letrec`-bound
+    /// `go`). It is empty for a callee that is NOT a per-call local closure — a
+    /// top-level `defn` (a program-root closure, region held for the program's
+    /// life: it has no per-call decref and tail-calling it never leaked) or a
+    /// native/parameter callee (no frame replacement). The discriminator is
+    /// `VM::tail_callee_release_region`: a local closure's region is recorded in
+    /// the CURRENT activation's region map (and, with its decref dead, never
+    /// cleared); a program-root closure's region was minted in a different,
+    /// popped activation. Releasing a program-root region would be a
+    /// use-after-free.
+    pub deferred: DeferredReleases,
 }
 
 /// Pending fiber resume for the trampoline.

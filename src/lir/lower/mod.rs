@@ -234,7 +234,7 @@ pub struct Lowerer<'a> {
     /// letrec's body TAIL-CALLS. The frame-replacing `TailCall` strands the
     /// arena's single binding-scope `DecrefRegion` as dead code, so a tail call
     /// to one of these defers the merged region's release (`tail_callee_defers_release`
-    /// → `TailCallInfo::deferred_release_region`), run exactly once at the recursion's
+    /// → `TailCallInfo::deferred`), run exactly once at the recursion's
     /// normal completion — the same channel `stranded_self_bindings` rides.
     /// Marked by `lower_letrec` from the letrec BODY's tail callees only (after
     /// the inits are lowered, so interior sibling rotations never defer), and

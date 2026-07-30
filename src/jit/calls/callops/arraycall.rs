@@ -299,10 +299,10 @@ pub extern "C" fn elle_jit_tail_call(
             closure: func,
             squelch_mask: closure.squelch_mask,
             // JIT tail-call path: closure-callee adoption not yet wired here.
-            // Leaving `None` keeps today's behaviour (the closure region leaks,
-            // as before this change) — a no-regression placeholder until the
+            // Leaving the channels empty keeps the region held to the activation's
+            // own teardown — a bounded over-keep, never an over-free — until the
             // adopt-and-release is extended to the JIT trampolines.
-            deferred_release_region: None,
+            deferred: Default::default(),
         });
 
         return TAIL_CALL_SENTINEL;

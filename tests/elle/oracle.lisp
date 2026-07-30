@@ -558,6 +558,19 @@
                 (when (%not (%int? m)) (error :m))
                 (if (%lt m 1) go (go (helper m))))]
     (go n)))
+# `t23-fwd-cell-sib` inverts `t23-fwd-cell`: the SIBLING captures the self-recursive
+# member, and the body tail-calls the sibling. That one `TailCall` strands two
+# regions on two independent channels — the merged arena's `deferred_release_slot`
+# (`go`'s closure, its env, and the forward cell the single-closure self-edge
+# admission collapsed into it) and the sibling's own `defer_callee_release`. RED if
+# the runtime reads them as alternatives again, which reclaims neither: the
+# sibling's counted `closure ⊇ cell` edge holds the arena off zero until the
+# sibling's own region goes (docs/impl/region/letrec.md § "The arena channel and the
+# callee channel are independent").
+(defn t23-fwd-cell-sib [n]
+  (letrec [go (fn [m] (if (%lt m 1) :done (go (%sub m 1))))
+           outer (fn [m] (go m))]
+    (outer n)))
 # `t23-operand-value`'s tail call names `go` NOWHERE — its ARGUMENT calls `go`, so
 # what the callee is handed is that call's result and `go`'s own closure region was
 # read and finished with before the call was made. The exemption reads an operand's
@@ -1903,7 +1916,7 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The frame-exit release, eight CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, nine CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
@@ -1921,7 +1934,10 @@
 # already 0, which reads GROWTH if the hoist ever releases an argument the callee
 # now owns. The two `tail-frame-exit-fwd-cell*` probes are the region no holder
 # binding NAMES — a prebound forward cell, which carries its binding's verdict one
-# indirection out, on the sole-held half and on the return-funded half in turn.
+# indirection out, on the sole-held half and on the return-funded half in turn;
+# `tail-frame-exit-fwd-cell-sib` is the inversion where the sibling captures the
+# member, so one tail call strands a merged arena AND its callee, on two channels
+# that neither substitute for one another nor name the same region.
 # `tail-frame-exit-operand-value` is the reading of what the call itself names: a
 # region the tail call reaches through no operand's VALUE, only through an argument's
 # own nested call, is not exempt.
@@ -1978,6 +1994,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-fwd-cell-ret 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-fwd-cell-sib"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-fwd-cell-sib 3)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "tail-frame-exit-operand-value"
                    (fn [b]

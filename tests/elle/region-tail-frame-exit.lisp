@@ -259,6 +259,21 @@
                 (if (%lt m 1) helper (go (helper m))))]
     (go n)))
 
+# (d15b) the SIBLING captures the self-recursive member, and the letrec body
+# tail-calls the sibling. One `TailCall` carries BOTH deferred channels: the
+# merged arena's `deferred_release_slot` (`go`'s closure, its env, and the forward
+# cell the single-closure self-edge admission collapsed into it) and the sibling's
+# own `defer_callee_release`. They name different regions and each drops a
+# different reference the frame owns, so the runtime runs both — and reading them
+# as alternatives reclaims nothing at all, because the sibling's counted
+# `closure ⊇ cell` edge holds the arena off zero until the sibling's own region
+# goes (docs/impl/region/letrec.md § "The arena channel and the callee channel are
+# independent").
+(defn fwd-cell-sib (n)
+  (letrec [go (fn (m) (if (%lt m 1) :done (go (%sub m 1))))
+           outer (fn (m) (go m))]
+    (outer n)))
+
 # (d16) the exemption reads an operand's VALUE, not its syntax
 # (docs/impl/region/mechanism.md § "What an operand names is its VALUE, not its
 # syntax"). Here the letrec body's tail call names `go` nowhere — its ARGUMENT is a
@@ -267,8 +282,8 @@
 # release sits at the letrec's scope end, past the frame-replacing `TailCall`, and
 # the relocation is what carries it back: a self-recursive member is the tail
 # callee's own region only when the body tail-calls IT (docs/impl/selfrec.md § the
-# placement table). Three faces of the same reading: a sibling callee, a top-level
-# callee and a top-level callee.
+# placement table). Two faces of the same reading: a sibling callee and a
+# top-level callee.
 (defn arg-call-selfrec (n)
   (letrec [helper (fn (x) (%sub x 1))
            go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
@@ -414,30 +429,19 @@
   (let [g (fn () c)]
     (if t (g) 0)))
 
-# residual: a sibling captures the self-recursive member ───────────────────────
-# `fwd-cell-sib` inverts (d12): the SIBLING captures the self-recursive member, and
-# the body tail-calls the sibling. Both regions strand — the merged arena (`go`'s
-# closure, its env, and the forward cell the merge collapsed into it) and the
-# sibling's own closure and env. Both channels ARE wired at that call (the arena's
-# `deferred_release_slot` and the callee's `defer_callee_release` both appear in the
-# emitted bytecode), so what is open here is not an analysis refusal.
+# residual: the letrec member the body tail-calls ─────────────────────────────
+# `helper` is captured by its sibling, so it is allocated per call rather than
+# seeded as a constant, and the letrec's body tail-calls it. Its own region is
+# exempt from the relocation by design — moving that release ahead of the call
+# would free the closure the call is about to enter — and the deferral does not
+# claim it either, because `tail_callee_defers_release` reads a demise landing at
+# the CALL node while the lowerer placed this one at the letrec's scope end.
+# Neither channel a letrec body's tail callee can ride fits the shape: a one-way
+# sibling capture is neither self-recursion (`stranded_self_bindings`) nor an SCC
+# (`stranded_cycle_bindings`).
 #
-# `callee-letrec-member` is the CALLEE-side gap. `helper` is captured by its sibling,
-# so it is allocated per call rather than seeded as a constant, and the letrec's body
-# tail-calls it. Its own region is exempt from the relocation by design — moving that
-# release ahead of the call would free the closure the call is about to enter — and
-# the deferral does not claim it either, because `tail_callee_defers_release` reads a
-# demise landing at the CALL node while the lowerer placed this one at the letrec's
-# scope end. Neither channel a letrec body's tail callee can ride fits the shape: a
-# one-way sibling capture is neither self-recursion (`stranded_self_bindings`) nor an
-# SCC (`stranded_cycle_bindings`).
-#
-# Driven for their DELTAS, printed rather than asserted, so a future session reads
-# the measured rate off a test instead of prose.
-(defn fwd-cell-sib (n)
-  (letrec [go (fn (m) (if (%lt m 1) :done (go (%sub m 1))))
-           outer (fn (m) (go m))]
-    (outer n)))
+# Driven for its DELTA, printed rather than asserted, so a future session reads the
+# measured rate off a test instead of prose.
 (defn callee-letrec-member (n)
   (letrec [helper (fn (x) (%sub x 1))
            go (fn (m) (helper m))]
@@ -512,14 +516,14 @@
 (println "  cells: immutable " cell-immutable-d "  reassigned "
          cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d)
 (println "  fwd cells: plain " fwd-cell-plain-d "  selfrec-control " fwd-cell-d
-         "  returned " fwd-cell-ret-d "/" fwd-cell-ret-sib-d)
+         "  returned " fwd-cell-ret-d "/" fwd-cell-ret-sib-d
+         "  sibling-captures-member " fwd-cell-sib-d)
 (println "  operand value: selfrec " arg-call-selfrec-d "  toplevel "
          arg-call-toplevel-d "  lambda " lambda-arg-d "  aggregate "
          aggregate-arg-d)
 (println "  def binder: arg-call " def-arg-call-d "  nontail " def-nontail-d
          "  stmt " def-stmt-d "  tail " def-tail-d)
-(println "  residual: sibling-captures-member " fwd-cell-sib-d
-         "  callee-letrec-member " callee-letrec-member-d)
+(println "  residual: callee-letrec-member " callee-letrec-member-d)
 (println "  controls: native " native-tail-d "  non-tail " non-tail-d)
 (println "  boundary: branch " branch-true-d "/" branch-false-d)
 
@@ -580,6 +584,8 @@
           "control: the same cell where the capture adopt already claims it")
 (bounded? fwd-cell-ret-d "the forward cell of a capturer the frame hands back")
 (bounded? fwd-cell-ret-sib-d "the forward cell whose own content is handed back")
+(bounded? fwd-cell-sib-d
+          "the arena and the sibling callee stranded by one tail call")
 
 (bounded? arg-call-selfrec-d
           "a self-recursive member the tail call's ARGUMENT calls")
@@ -615,8 +621,7 @@
 (assert (= (arm-cell-ro 7 false) 0)
         "residual: arm immutable cell sibling arm lost")
 (assert (= (fwd-cell 3) :done) "forward-cell walker result lost")
-(assert (= (fwd-cell-sib 3) :done)
-        "residual: sibling-captures-member result lost")
+(assert (= (fwd-cell-sib 3) :done) "sibling-captures-member result lost")
 (assert (= (def-arg-call 3) -1) "def-binder arg-call result lost")
 (assert (= (def-nontail 3) 0) "def-binder nontail result lost")
 (assert (= (def-stmt 3) 0) "def-binder statement result lost")

@@ -225,8 +225,8 @@ compile time whether a tail call replaces the frame**: that is decided at runtim
 the callee *value* (a `func.as_closure()` replaces the frame and trampolines; a
 `func.as_native_def()` keeps the frame and falls through to the live scope-exit drop),
 and any binding — a redefined operator `+`, a `%`-intrinsic — may be rebound to
-either. So the merge never classifies the callee; it wires **both** release channels
-and lets exactly one fire.
+either. So the merge never classifies the callee; it wires **both** arena release
+channels and lets exactly one fire.
 
 - **A tail call to an SCC member** rides the existing stranded-cycle channel:
   `lower_letrec` marks the member bindings the letrec body tail-calls
@@ -234,7 +234,7 @@ and lets exactly one fire.
   descending into nested lambdas), `tail_callee_defers_release` returns true for such a callee
   (read through a **non-upvalue** reference only, so a nested closure in the body can
   never free the arena out from under a later use), and the `TailCall` carries
-  `deferred_release_region = region_of(callee)` — the merged arena, because a member lives in it.
+  `DeferredReleases::callee = region_of(callee)` — the merged arena, because a member lives in it.
   That consumer refuses a callee crossing the **fiber** frontier, and admits the return
   facet — the same reading, for the same reason, as the merge's own frontier gate above
   and as the cell-free self-recursive deferral ([selfrec.md](../selfrec.md) § "The
@@ -264,6 +264,25 @@ and lets exactly one fire.
   completion; if it turns out a **native**, the frame is not replaced, the slot is
   never consumed, and the live scope-exit `DecrefRegion` frees the arena — mutually
   exclusive, exactly one release, the compiler having classified nothing.
+
+**The arena channel and the callee channel are independent.** The member/non-member
+split above decides which channel carries the **arena**'s release. It says nothing
+about the callee's **own** region. A non-member callee that is itself a per-call
+local closure strands its own `DecrefRegion` at the very same `TailCall`, and
+`tail_callee_defers_release` claims it — so one tail call carries the arena slot and
+the callee flag together, and the runtime must run both. Reading them as
+alternatives reclaims **nothing** where the callee captures a member: the callee's
+counted `closure ⊇ cell` edge holds the arena off zero, so the arena's own decref
+frees neither region. The everyday shape is a letrec whose sibling captures a
+self-recursive member — `(letrec [go (fn [m] … (go …)) outer (fn [m] (go m))]
+(outer n))`, where the merge collapses `go`'s closure, its env and its forward cell
+onto one arena and the body tail-calls `outer`. The two channels never name the same
+region: a merge MEMBER callee is absent from `cycle_tail_release`, and
+`tail_callee_defers_release` refuses every `closure_cycle_members` region. Order
+between them is immaterial — each is a decref of a `Counted` region, so the cascade
+and the direct decref commute. Pinned by `region-tail-frame-exit.lisp`'s
+`fwd-cell-sib` row, the oracle's `tail-frame-exit-fwd-cell-sib` probe, and
+`region-tail-frame-exit-uaf.lisp` witness (s) on the soundness side.
 
 Both member and non-member releases run at the recursion's completion / the
 scope-exit, so the same channel the cell-free self-recursive deferred release rides

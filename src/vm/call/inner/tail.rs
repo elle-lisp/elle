@@ -133,24 +133,34 @@ impl VM {
             // done here. A program-root callee is never flagged, so its
             // program-lifetime region is never released. See `TailCallInfo`.
             //
-            // `deferred_release_slot` takes precedence: a letrec body tail-calling a
-            // NON-member out of a closure-cycle merged arena carries the arena's
-            // static slot (`RegionInfo::cycle_tail_release`), which we resolve
-            // through THIS activation's region map — the arena was minted during
-            // the letrec setup and its scope-exit `DecrefRegion` is dead past this
+            // The arena channel: a letrec body tail-calling a NON-member out of a
+            // closure-cycle merged arena carries the arena's static slot
+            // (`RegionInfo::cycle_tail_release`), which we resolve through THIS
+            // activation's region map — the arena was minted during the letrec
+            // setup and its scope-exit `DecrefRegion` is dead past this
             // frame-replacing tail call. We reached the closure arm, so the frame
             // IS replaced; the deferred release supplies that dead drop at the
-            // recursion's
-            // completion. (A native callee never reaches here — it keeps the frame
-            // and runs the live scope-exit drop — so the slot and `defer_callee_release`
-            // are mutually exclusive per call and never both apply.) See
+            // recursion's completion. (A native callee never reaches here — it
+            // keeps the frame and runs the live scope-exit drop.) See
             // `LirInstr::TailCall::deferred_release_slot`.
-            let deferred_release_region = if let Some(slot) = deferred_release_slot {
-                self.runtime_region_for_release_slot(slot)
-            } else if defer_callee_release {
-                self.tail_callee_release_region(func)
-            } else {
-                None
+            //
+            // The two channels are INDEPENDENT, not alternatives. A non-member
+            // callee that is itself a per-call local closure strands its own
+            // region at the same `TailCall` as the arena's, and each release
+            // belongs to a reference the frame separately owns: dropping one for
+            // the other strands that reference, and where the callee captures a
+            // merge member its own counted edge pins the arena too, so the arena
+            // channel alone reclaims nothing (docs/impl/region/letrec.md § "The
+            // arena channel and the callee channel are independent"). They never
+            // name the same region — a merge MEMBER callee is absent from
+            // `cycle_tail_release`, and `tail_callee_defers_release` refuses every
+            // `closure_cycle_members` region.
+            let deferred = crate::vm::core::DeferredReleases {
+                arena: deferred_release_slot
+                    .and_then(|slot| self.runtime_region_for_release_slot(slot)),
+                callee: defer_callee_release
+                    .then(|| self.tail_callee_release_region(func))
+                    .flatten(),
             };
 
             // Build proper environment using cached vector. Each env value mints
@@ -182,7 +192,7 @@ impl VM {
                 env: new_env_rc,
                 closure: func,
                 squelch_mask: closure.squelch_mask,
-                deferred_release_region,
+                deferred,
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));

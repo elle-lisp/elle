@@ -394,7 +394,7 @@ impl VM {
         }
     }
     /// The callee closure's runtime region, whose release the new activation
-    /// takes over (`TailCallInfo::deferred_release_region`).
+    /// takes over (`DeferredReleases::callee`).
     /// Called ONLY when the compiler flagged this tail call's callee as a
     /// per-call local closure whose release is dead past the `TailCall`
     /// (`lower_call`'s `defer_callee_release`, plumbed through `TailCallInfo`). The

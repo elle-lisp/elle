@@ -312,6 +312,26 @@
 (defn n2-read (i)
   ((n2-fwd i) 0))
 
+# (s) the SIBLING captures the self-recursive member and the letrec body tail-calls
+# the sibling, so ONE tail call carries both deferred channels — the merged arena's
+# `deferred_release_slot` and the sibling's own `defer_callee_release`
+# (docs/impl/region/letrec.md § "The arena channel and the callee channel are
+# independent"). Each drops a different frame reference; running either twice takes
+# a live region to zero and recycles its pages under the next call's walk. `go`
+# reads a heap value of its own on every step, and reaches it through the cell the
+# arena holds.
+(defn s-sib (i)
+  (let [src (list (string "s" i) i)]
+    (letrec [go (fn (k)
+                  (when (%not (%int? k)) (error :k))
+                  (if (%lt k 1) (length (first src)) (go (%sub k 1))))
+             outer (fn (k)
+                     (when (%not (%int? k)) (error :k))
+                     (go k))]
+      (outer 3))))
+(defn s-read (i)
+  (s-sib i))
+
 # ── the operand-value face: what an argument's evaluation merely USED ─────────
 # The exemption reads an operand's VALUE, not its syntax (docs/impl/region/mechanism.md
 # § "What an operand names is its VALUE, not its syntax"), so a region reached only
@@ -393,6 +413,7 @@
 (var l 0)
 (var m2 0)
 (var n2 0)
+(var s1 0)
 (var o1 0)
 (var p1 0)
 (var q1 0)
@@ -420,6 +441,7 @@
   (assign l (l-read i))
   (assign m2 (m2-read i))
   (assign n2 (n2-read i))
+  (assign s1 (s-read i))
   (assign o1 (o-read i))
   (assign p1 (p-read i))
   (assign q1 (q-read i))
@@ -458,6 +480,8 @@
         "forward cell freed under the deref that dispatches its sibling")
 (assert (%gt m2 0) "forward cell freed before the handed-back capturer drove it")
 (assert (> n2 0) "sibling freed under the caller that received it from its cell")
+(assert (%gt s1 0)
+        "arena freed under the sibling callee stranded by the same tail call")
 
 (assert (%gt o1 0)
         "argument freed under the callee its own nested call handed it to")

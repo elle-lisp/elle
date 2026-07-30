@@ -188,10 +188,10 @@ impl VM {
         let mut current_env = closure_env.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        // Closure-callee releases taken over from frame-replacing tail calls in
-        // this activation (`TailCallInfo::deferred_release_region`). A tail
-        // call's callee closure
-        // is a per-call local allocation whose compiler-emitted release is dead
+        // Releases taken over from frame-replacing tail calls in this activation
+        // (`TailCallInfo::deferred`, one entry per channel — a single tail call
+        // may hand over both a merged closure-cycle arena and its callee closure).
+        // Each is a per-call allocation whose compiler-emitted release is dead
         // past the `TailCall`; this activation took over that release and runs it
         // on NORMAL completion below. Deduped by region: a tail-recursive `go`
         // re-enters with the SAME closure each iteration but carries one dead
@@ -235,7 +235,7 @@ impl VM {
 
             if let Some(tail) = self.pending_tail_call.take() {
                 accumulated_squelch_mask |= tail.squelch_mask;
-                if let Some(r) = tail.deferred_release_region {
+                for r in tail.deferred.regions() {
                     if !deferred_releases.contains(&r) {
                         deferred_releases.push(r);
                     }

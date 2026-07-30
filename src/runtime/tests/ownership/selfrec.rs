@@ -254,6 +254,53 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
     );
 }
 
+/// Per-CALL reclamation where ONE tail call carries BOTH deferred channels
+/// (docs/impl/region/letrec.md § "The arena channel and the callee channel are
+/// independent"). `go` is self-recursive AND sibling-captured, so it keeps a
+/// forward cell the single-closure self-edge admission collapses onto its closure
+/// region; `outer` captures that cell, and the letrec body tail-calls `outer`.
+/// That `TailCall` therefore names the arena in `deferred_release_slot` and flags
+/// `defer_callee_release` for `outer`'s own per-call region — two regions, two
+/// references the frame owns, neither substitutable for the other.
+///
+/// Running only one is not a partial win but no win at all: `outer`'s counted
+/// `closure ⊇ cell` edge holds the arena off zero, so the arena's decref frees
+/// nothing while `outer`'s region survives. The gauge is per-iteration live-region
+/// growth beside the live-chain discriminator, so a regression that drops either
+/// channel reads as ~5 objects in 2 regions per call.
+#[test]
+fn region_ownership_reclaims_sibling_captured_member_per_call() {
+    let prelude = "(def f (fn [k] \
+        (letrec [go (fn [m] (if (%lt m 1) :done (go (%sub m 1)))) \
+                 outer (fn [m] (go m))] \
+          (outer k))))";
+
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live_chain_growth > 150,
+        "precondition: the live accumulator retains every prior, so region growth \
+         over 200 iterations must be large (~200) — got {live_chain_growth}; if \
+         small, the gauge is dead and the assertions below are vacuous",
+    );
+
+    let growth = mid_run_growth(Runtime::new(), prelude, "(f 3)", "arena/region-count");
+    assert!(
+        growth < 50,
+        "a letrec whose sibling captures a self-recursive member must reclaim both \
+         regions per call — the merged arena and the sibling callee — region growth \
+         over 200 calls must be near zero, got {growth} (reading the two deferred \
+         channels as alternatives reclaims neither: the sibling's counted edge holds \
+         the arena off zero)",
+    );
+    let base_case = mid_run_growth(Runtime::new(), prelude, "(f 0)", "arena/region-count");
+    assert!(
+        base_case < 50,
+        "the base-case-only path must also reclaim both regions — the body's single \
+         tail call to the sibling is the sole release point either way — region \
+         growth over 200 calls must be near zero, got {base_case}",
+    );
+}
+
 /// Per-call reclamation of a cell-free self-recursive `letrec` closure
 /// (docs/impl/selfrec.md), isolated WITHOUT the stdlib so nothing else churns the
 /// region count. The subject is the same shape as

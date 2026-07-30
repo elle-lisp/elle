@@ -146,7 +146,7 @@ cell-free case.
 In both stranded cases the runtime **deferred release** supplies it.
 `tail_callee_defers_release` (`lir/lower/control/call.rs`) returns true for a tail call to a
 `stranded_self_bindings` callee that does not cross the fiber frontier; the `TailCall` then
-carries `deferred_release_region = region_of(callee)`, and `trampoline_loop` (`vm/execute.rs`)
+carries `DeferredReleases::callee = region_of(callee)`, and `trampoline_loop` (`vm/execute.rs`)
 decrefs each deferred region exactly once on the recursion's **normal completion** (deduped — a
 tail-recursive `loop` re-enters with the same closure each iteration but carries one
 stranded decref).
