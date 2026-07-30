@@ -200,13 +200,16 @@ pub fn analyze_regions_with(
     // extending the same `merged_parent` forest and riding the same `merged_root`
     // canonicalization as the builder-idiom seed. Unconditional (not flag-gated), so it
     // lands on every tier. The single `DecrefRegion` fires at the root region's
-    // `decref_point`, which is set here to the cycle's binding scope — the `letrec`
-    // that prebinds the members' capture cells (region/adopt.md § The lifetime
-    // obligation the root carries). Its scope-exit post-dominates every direct use of
-    // the members (they are bound there), while a foreign capture of a member is
-    // RC-counted and outlives the single decref. Runs after the builder seed (it
-    // shares the map) and before the ownership pass (so `is_merged` excludes these
-    // members).
+    // `decref_point`, set here to the merge's own `drop_site` (region/adopt.md § The
+    // lifetime obligation the root carries). That is normally the cycle's binding scope
+    // — the `letrec` that prebinds the members' capture cells — whose scope-exit
+    // post-dominates every direct use of the members (they are bound there), while a
+    // foreign capture of a member is RC-counted and outlives the single decref. Where
+    // the letrec hands a member OUT it is instead the release point that member's own
+    // region already carries, so the arena follows the value past the binding scope
+    // rather than being taken to zero under it (region/letrec.md § "Drop site —
+    // following a handed-out member"). Runs after the builder seed (it shares the map)
+    // and before the ownership pass (so `is_merged` excludes these members).
     for cm in super::merge::compute_closure_cycle_merges(hir, arena, &info, &escape_info, &order) {
         for &m in &cm.members {
             // The member set (roots included) feeds `tail_callee_defers_release`' refusal

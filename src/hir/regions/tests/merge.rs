@@ -1007,18 +1007,30 @@ fn merge_admits_returned_cycle_on_value_tail() {
 }
 
 #[test]
-fn merge_refuses_returned_cycle_bound_out_of_tail_position() {
-    // THE RESIDUAL. The identical returned cycle, one binding out of tail position: the
-    // letrec's value is bound to `c` and handed on by a LATER statement, so the body
-    // falls out to a bare value with no `Return` and no tail call of its own. The merge
-    // still pins the arena's release at the binding scope, so the `DecrefRegion` fires
-    // at the letrec — while `c` holds the member and the mint that funds `f`'s caller is
-    // an enclosing node away. Merging would hand that caller a freed closure, so the
-    // cycle keeps the Shared baseline.
+fn merge_admits_returned_cycle_bound_out_of_tail_position() {
+    // THE HANDED-OUT MEMBER (docs/impl/region/letrec.md § "Drop site — following a
+    // handed-out member"). The identical returned cycle, one binding out of tail
+    // position: the letrec's value is bound to `c` and handed on by a LATER statement,
+    // so the body falls out to a bare value with no `Return` and no tail call of its
+    // own. `c` names `ev`'s region directly — a `DerefCell` read of the member mints
+    // nothing — so the member outlives the binding scope on the cycle's own reference,
+    // and a release pinned at the letrec would take the arena to zero under a live
+    // holder.
     //
-    // This is the boundary control for `merge_admits_returned_cycle_on_value_tail`: the
-    // two differ only in whether the letrec is the frame's tail, which is exactly the
-    // fact that decides whether the mint is inside the body.
+    // That is a reason to move the release, not to refuse the cycle. `ev`'s region
+    // already carries a `decref_point`: the last-use rule extended it through `c` and
+    // pinned it at the enclosing `Return`, whose mint runs before that node's own
+    // `emit_decrefs_for`. The merge adopts that point as the arena's drop site — the
+    // release the compiler already emits for this member, now covering the siblings and
+    // cells whose uses it post-dominates — and waives the sole-held proxy for the member
+    // it followed.
+    //
+    // Both halves are asserted, because either alone is unsound: merging while the drop
+    // stays at the letrec frees the arena under `c`, and moving the drop without merging
+    // reclaims nothing. This is the boundary control for
+    // `merge_admits_returned_cycle_on_value_tail` — the two differ only in whether the
+    // letrec is the frame's tail, which decides whether the mint is inside the body or
+    // an enclosing node away.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(def g (fn [x] x)) \
@@ -1033,6 +1045,71 @@ fn merge_refuses_returned_cycle_bound_out_of_tail_position() {
          (f 3)",
         &mut symbols,
     );
+    let letrec_id =
+        letrec_binding_node(&hir, &arena, &symbols, "ev").expect("the in-lambda letrec binding");
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "a returned cycle bound OUT of its frame's tail must still merge onto ONE arena \
+         — the handed-out member's own release point is late enough to fund it; \
+         cells={cells:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+    let root = roots.into_iter().next().unwrap();
+    let drop_site = info
+        .region_data
+        .get(&root)
+        .expect("the merged root carries the arena's single release")
+        .decref_point;
+    // The release must have FOLLOWED THE VALUE OUT. Structurally, not numerically: the
+    // drop site must post-dominate the binding scope while lying outside its subtree —
+    // exactly what pinning it at the letrec (`drop_site == letrec_id`) fails to do.
+    let order = compute_order(&hir);
+    let pd = super::super::postdom::PostDom::new(&hir, &order);
+    assert!(
+        !pd.in_subtree(drop_site, letrec_id),
+        "the arena's release must follow the handed-out member OUT of the binding scope, \
+         but the drop site @{} still lies inside the letrec @{}'s subtree — `c` reads the \
+         member past a `DecrefRegion` that already took the arena to zero",
+        drop_site.0,
+        letrec_id.0,
+    );
+    assert!(
+        pd.drop_post_dominates(drop_site, letrec_id, super::super::postdom::EmitMode::Merge),
+        "the adopted drop site @{} must post-dominate the binding scope @{} — every \
+         member's binding-scoped use is inside it",
+        drop_site.0,
+        letrec_id.0,
+    );
+}
+
+#[test]
+fn merge_refuses_fiber_crossing_handed_out_member() {
+    // The fiber half of the frontier gate over the HANDED-OUT shape. Following a member
+    // out of the binding scope waives the sole-held proxy for it, so the binding it is
+    // bound out to no longer refuses the cycle by itself — which makes this the pin that
+    // the FIBER facet is still read on that path. `c` is yielded, so the member reaches a
+    // resumer whose hold the compiler did not place and a parked frame may borrow it
+    // uncounted; no release point, however late, funds that.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(fiber/new (fn () \
+           (let [c (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                                 (if (%lt m 1) ev (od (%sub m 1)))) \
+                            od (fn [m] (when (%not (%int? m)) (error :m)) \
+                                 (if (%lt m 1) ev (ev (%sub m 1))))] \
+                     ev)] \
+             (begin (yield c) (c 3)))) \
+           |:yield|)",
+        &mut symbols,
+    );
     let cells = ev_od_cells(&hir, &arena, &symbols, &info);
     assert_eq!(
         cells.len(),
@@ -1042,9 +1119,55 @@ fn merge_refuses_returned_cycle_bound_out_of_tail_position() {
     for &c in &cells {
         assert!(
             !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
-            "a returned cycle whose letrec is NOT its frame's tail must NOT merge — the \
-             binding-scope drop fires at the letrec, before any mint reaches the value \
-             it was bound out to; cell r{} merged_parent={:?}",
+            "a cycle whose handed-out member is YIELDED must NOT merge — the fiber \
+             frontier is refused outright, and following the value out does not change \
+             that; cell r{} merged_parent={:?}",
+            c.0,
+            info.merged_parent,
+        );
+    }
+}
+
+#[test]
+fn merge_refuses_returned_cycle_whose_body_hands_out_nothing() {
+    // THE RESIDUAL of the two orderings. The same returned cycle out of tail position,
+    // but the body's tail is a non-tail `(g ev)` rather than the bare member: it does
+    // not leave the frame (so no mint stands inside the body), and what the letrec
+    // yields is the CALL's result — a fresh region, not a member — so there is no
+    // handed-out member whose release point the arena could follow either. `ev` is on
+    // the return frontier (its base case hands itself back) with nothing to order that
+    // against, so the cycle keeps the Shared baseline.
+    //
+    // This is the counterfactual that keeps the two admissions honest: neither may be
+    // read as "a returned cycle out of tail position merges". The one that does
+    // (`merge_admits_returned_cycle_bound_out_of_tail_position`) differs only in the
+    // body's tail naming the member itself.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_with_effects(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] \
+           (let [c (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                                 (if (%lt m 1) ev (od (%sub m 1)))) \
+                            od (fn [m] (when (%not (%int? m)) (error :m)) \
+                                 (if (%lt m 1) ev (ev (%sub m 1))))] \
+                     (g ev))] \
+             (g 1) \
+             c))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    for &c in &cells {
+        assert!(
+            !info.merged_parent.contains_key(&c) && !info.merged_parent.values().any(|&p| p == c),
+            "a returned cycle whose body neither leaves the frame nor hands a member \
+             out must NOT merge — no mint is inside the body and no member's release \
+             point is available to follow; cell r{} merged_parent={:?}",
             c.0,
             info.merged_parent,
         );

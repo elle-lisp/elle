@@ -106,17 +106,16 @@ something else still reads the arena.
   alone") — the release runs *after* the mint, so unlike the frame-exit relocation
   there is nothing to bridge.
 
-  What the body must **not** do is fall out to a bare value, because then the letrec's
-  value is handed to an *enclosing* consumer: the mint that funds the caller, if there
-  is one at all, sits outside the letrec node while the merge pins the release at the
-  binding scope. `(let [c (letrec [ev … od …] ev)] … c)` is that residual — `c` holds
-  the member past a `DecrefRegion` that already took the arena to zero. An exit the
-  reading does not recognise is refused for the same reason: the reading exists to prove
-  the mint is inside the body, so anything it cannot read must read as outside. A loop
-  and a short-circuit `And`/`Or` fall out to a value that way; a `Cond` with no else arm
-  and a `Match` fall out on the path where no arm is taken — which is why this reading
-  needs the arms EXHAUSTIVE where branch compensation, asking a different question,
-  admits a `Match` arm exactly as an `If` arm.
+  A body that falls out to a bare value hands the letrec's value to an *enclosing*
+  consumer instead, so the mint that funds the caller — if there is one at all — sits
+  outside the letrec node. That is not a reason to refuse; it is a reason the release
+  cannot stay at the binding scope, and § "Drop site" below follows the value out to
+  where its own release already sits. What the reading here decides is only whether the
+  mint is inside the body: an exit it does not recognise must read as outside, so a loop
+  and a short-circuit `And`/`Or` fall out to a value that way, and a `Cond` with no else
+  arm and a `Match` fall out on the path where no arm is taken — which is why this
+  reading needs the arms EXHAUSTIVE where branch compensation, asking a different
+  question, admits a `Match` arm exactly as an `If` arm.
 
 The gate is asked per SCC, and the return admission is asked only when some member
 actually carries the return facet — a non-escaping cycle never consults the tail
@@ -134,42 +133,75 @@ reassigned, or not lambda-initialized — keeps, inside a lambda, the runtime
 cell and refuses the merge; a purely self-recursive binding is cell-free by
 construction and never a member.
 
-**Drop site — the binding scope.** A cycle has no member whose natural last-use
-post-dominates the rest (no containing parent pins it, unlike the builder idiom), so
-the merge sets the canonical root region's `decref_point` to the cycle's **binding
-scope**: the single non-lambda `Let`/`Letrec` that prebinds every member's capture
-cell (the `begin_cell_regions` key). This is decided by structural ancestry, never a
-numeric `compute_order` compare (adopt.md § "The lifetime obligation the root carries"). The
-root is the SCC closure of least program order (region ids order nothing); any member
-mints the shared physical region at runtime (mint-or-reuse), so the root only names
-the merged slot and carries the single decref.
+**Drop site — the binding scope.** A cycle whose members stay inside their scope has no
+member whose natural last-use post-dominates the rest (no containing parent pins it,
+unlike the builder idiom), so the merge sets the canonical root region's `decref_point`
+to the cycle's **binding scope**: the single non-lambda `Let`/`Letrec` that prebinds
+every member's capture cell (the `begin_cell_regions` key). This is decided by
+structural ancestry, never a numeric `compute_order` compare (adopt.md § "The lifetime
+obligation the root carries"). The root is the SCC closure of least program order
+(region ids order nothing); any member mints the shared physical region at runtime
+(mint-or-reuse), so the root only names the merged slot and carries the single decref.
 
 Why the binding scope is the right post-dominator — and not its enclosing scope. The
 members are bound in that one `letrec`, so **every direct reference to a member is
 lexically within its scope** and the scope-exit (the lowerer's `emit_decrefs_for` on
-the node, after its whole body) post-dominates them all. A reference *out* of the
-scope is possible only by a **foreign capture** — a closure outside the SCC that holds
-a member — and that is a cross-region reference *into* the merged arena, RC-counted:
+the node, after its whole body) post-dominates them all. Two things can carry a
+reference *out* of the scope, and only one of them is handled here. A **foreign
+capture** — a closure outside the SCC that holds a member — is a cross-region reference
+*into* the merged arena, RC-counted:
 increfed when the capturing closure is built (`incref_cross_region_refs` scans its env
 for cross-region refs and records the outgoing edge) and released by the free-time cascade
 (walking that recorded edge) when the capturer's region frees. So it keeps the arena's RC ≥ 1 past the single decref, and the arena survives
 until the capturer dies. The single
 `DecrefRegion` therefore releases only the cycle's own allocation reference, promptly,
-at the binding scope-exit, and can never free a still-referenced arena. Eligibility is
+at the binding scope-exit, and can never free a still-referenced arena. The other
+carrier — the letrec's own value — is uncounted and moves the drop site instead; that is
+the next section. Eligibility is
 gated on **letrec-subtree containment**: every member's allocation site must lie within
 the binding-scope letrec's own subtree (a post-order interval test — the cells' sites
 *are* the letrec node; the closures' `Lambda` nodes are its init descendants), so the
-drop site is a structural ancestor-or-self of every member by construction. A member
+binding scope is a structural ancestor-or-self of every member by construction. A member
 whose region reaches the SCC from outside that subtree (a reused binding identity
 naming a foreign lambda) refuses the cycle. The binding-scope drop is strictly tighter
 than the enclosing structural post-dominator, because the cell target sits *at* the
 binding node, whose enclosing-scope stack excludes itself, dragging the
 allocation-site common ancestor up to the binding scope's **parent** — for a top-level
 discarded cycle, the file `Begin`, i.e. program teardown. Dropping at the binding scope
-itself closes that program-duration over-keep (the residual the §9 promptness ledger
-named). The remaining slack — the binding scope-exit can still fall after a member's
-last use *within* the letrec body — is bounded by that one scope, a granularity nit,
-not the unbounded blowup.
+itself frees a discarded cycle at its letrec instead. The remaining slack — the binding
+scope-exit can still fall after a member's last use *within* the letrec body — is
+bounded by that one scope, a granularity nit, not the unbounded blowup.
+
+**Drop site — following a handed-out member.** Foreign capture is not the only way out
+of the binding scope: the **letrec's own value** is a second, and unlike a capture it is
+uncounted. When the body falls out to a bare value that reads a member binding, the
+enclosing consumer's binding names that member's region directly — a `Var`/`DerefCell`
+read mints nothing — so the value outlives the binding scope on no reference but the
+cycle's own. Pinning the release at the binding scope there would take the arena to zero
+under a live holder.
+
+Two consequences, and one fact discharges both. The handed-out member's region already
+carries a `decref_point`: the ordinary last-use rule extended it through the outer
+binding, and where the value is returned, pinned it at the enclosing `Return` — the node
+whose `IncrefValueRegion` mints the caller's reference *before* its own
+`emit_decrefs_for` runs (mechanism.md § the `return_sites` extension). That point is
+therefore where the compiler already emits this member's release in the unmerged
+compilation, and adopting it as the **arena's** drop site adds no release the program did
+not have; it only widens what the one release covers, to members whose uses are all
+inside a scope that point post-dominates. So:
+
+- the release **follows the value out**: the drop site is that common `decref_point`,
+  admitted when it lies outside the binding scope's subtree and post-dominates it
+  (`postdom::drop_post_dominates`, `EmitMode::Merge`) — and when the handed-out members
+  do not disagree on it, since one arena carries one release;
+- the **sole-held** requirement is waived for exactly those members. Sole-heldness is a
+  proxy for "no second name reaches this member", asked because the binding-scope drop
+  cannot see past itself; the adopted point is the real thing, computed over every
+  holder's last use rather than assumed from their count. Cells and members the letrec
+  does not hand out keep the proxy.
+
+A body whose handed-out value the reading cannot follow to a single post-dominating
+point keeps the Shared baseline.
 
 **A tail-call letrec body hands the drop to a tail-call deferred release — for a member *or* a
 non-member callee.** When the letrec body ends in a frame-replacing tail call, the
@@ -264,10 +296,14 @@ drift into each other. The return half's admission is pinned across all three wa
 body leaves the frame — `merge_admits_returned_member_cycle_on_member_tail` (a member
 tail call), `merge_admits_returned_cycle_on_non_member_tail` (a non-member one, whose
 two callee kinds take the two late channels), and `merge_admits_returned_cycle_on_value_tail`
-(a bare member value, whose `Return` mints inside the body) — against
-`merge_refuses_returned_cycle_bound_out_of_tail_position` (the residual: the letrec's
-value is handed to an enclosing consumer, so no mint stands before the binding-scope
-drop). `merge_refuses_fiber_crossing_letrec_cycle` holds the fiber half, which no mint
+(a bare member value, whose `Return` mints inside the body) — plus the ordering that
+comes from the other side, `merge_admits_returned_cycle_bound_out_of_tail_position` (the
+letrec's value handed to an enclosing consumer, where the release follows the member out;
+it asserts the merge AND the drop site, since either alone is unsound). Their
+counterfactual is `merge_refuses_returned_cycle_whose_body_hands_out_nothing`: a body
+that neither leaves the frame nor names a member at its tail has no order to read either
+way, so "returned and out of tail position" is not by itself an admission.
+`merge_refuses_fiber_crossing_letrec_cycle` holds the fiber half, which no mint
 can fund; its letrec body's tail *is* a member call, so the fiber facet is the only
 gate left to bite.
 `merge_refuses_returned_cell_free_self_recursive_closure` guards the reading itself: a
@@ -282,13 +318,17 @@ live across later mint/free cycles), and by
 `runtime::tests::ownership::region_ownership_reclaims_mutual_recursion_closure_cycle`
 (bounded per-run region growth beside a leaking discriminator), with
 `region_ownership_reclaims_returned_mutual_cycle_per_call` doing the same for the
-returned cycle, `region_ownership_reclaims_nested_mutual_recursion_per_call` driving the
+returned cycle, `region_ownership_reclaims_returned_cycle_bound_out_of_tail_position`
+for the handed-out member (both halves — the value returned out of the frame, and the
+value called in place and never handed further),
+`region_ownership_reclaims_nested_mutual_recursion_per_call` driving the
 in-lambda cycle per call (bounded beside the live-chain discriminator, base case
 included) and `closure_cycle_discarded_release_is_prompt` pinning the binding-scope
 drop's promptness (a discarded top-level cycle freed at its letrec, not held to
-teardown). The oracle reads `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`
-and `recur-local-mutual-ret-value` (the three admitted body shapes, all closed at 0)
-beside `recur-local-mutual-ret-bound` (the refused residual).
+teardown — the case that must NOT pick up a later drop site). The oracle reads
+`recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`,
+`recur-local-mutual-ret-value` and `recur-local-mutual-ret-bound` — the four body
+shapes, all closed at 0.
 `region_ownership_reclaims_self_recursion_closure_cycle` pins the same bounded growth for a
 pure self-recursive closure, which is reclaimed cell-free (ordinary RC / the tail-call
 deferred release — [selfrec.md](../selfrec.md)), not by this merge.

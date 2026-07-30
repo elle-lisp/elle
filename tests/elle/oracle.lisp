@@ -227,21 +227,20 @@
                    "yield-multimut" "protect-while" "denied-discard"
                    "cancel-discard" "abort-discard"])
 (declare-root :f3 ["io-yield ev/sleep"])
-# F4's pinned member is `recur-local-mutual-ret-bound` — a returned ev/od SCC bound OUT
-# of its frame's tail position, so the merged arena's binding-scope release would fire at
-# the letrec while the binding still holds the member and before any mint reaches it. The
-# merge refuses the return facet there, leaving the cycle Shared and uncollectable by
-# per-region RC. Its boundary controls are the three admitted body shapes —
-# `recur-local-mutual-ret` for a member tail call, `recur-local-mutual-ret-foreign` for
-# a non-member one, `recur-local-mutual-ret-value` for a bare member value — all CLOSED
-# at 0 and undeclared, like `rest-array-copy`, so a regression there trips the
-# completeness gate loudly instead of being absorbed as F4. The class's other named shape
-# (the ambiguous-owner / unemittable-edge subtree — `compute_adopt_edges` refusals) still
+# F4 has NO declared probe: the returned closure cycle is closed for every body shape,
+# including the one bound OUT of its frame's tail position, where the merge follows the
+# handed-out member to the release point the last-use rule already computed for it. Its
+# four body shapes are CLOSED controls at 0 — `recur-local-mutual-ret` for a member tail
+# call, `recur-local-mutual-ret-foreign` for a non-member one,
+# `recur-local-mutual-ret-value` for a bare member value, and
+# `recur-local-mutual-ret-bound` for the letrec bound out of tail position. All are
+# undeclared, like `rest-array-copy`, so a regression to open trips the completeness gate
+# loudly instead of being absorbed under the root. The class's other named shape — the
+# ambiguous-owner / unemittable-edge subtree, the `compute_adopt_edges` refusals — still
 # has no probe.
 # `recur-local-self-mint` is NOT a member of this class despite the resemblance: the
 # returned self-recursive closure records no region cycle at all and is cell-free, so
 # it belongs to the deferred-release mechanism instead and is a control below.
-(declare-root :f4 ["recur-local-mutual-ret-bound"])
 # The whole `break-*` family is CLOSED controls (undeclared, like
 # `rest-array-copy`), so a regression to open trips the completeness gate loudly
 # instead of being absorbed as F5: `break-value*` pin the break TRANSFER (the
@@ -1141,18 +1140,20 @@
 (pin (measure "recur-local-mutual-ret-value" (fn [j] (lcl-mutual-ret-value 3))
               100 6 60 0.4 0.5) 0)
 
-# The RESIDUAL of that admission, and F4's pinned member. The identical returned ev/od
-# cycle, one BINDING out of tail position: the letrec's value is bound to `c` and handed
-# on by a later statement, so the body falls out to a bare value with no `Return` and no
-# tail call of its own. The merge would still pin the arena's release at the binding
-# scope, where it fires at the letrec — while `c` holds the member and the mint that
-# funds the caller is an enclosing node away — so the return facet is refused, the cycle
-# stays Shared, and per-region RC cannot collect a cycle: two closures and two forward
-# cells stay live per call. This is the boundary control for `recur-local-mutual-ret-value`
-# above — the two differ only in whether the letrec is the frame's tail, which is exactly
-# the fact that decides where the mint lands — so the pair reads the admission's gate
-# directly rather than by resemblance. Its close needs the release to follow the value
-# out of the binding scope.
+# The fourth body shape: the identical returned ev/od cycle, one BINDING out of tail
+# position. The letrec's value is bound to `c` and handed on by a later statement, so the
+# body falls out to a bare value with no `Return` and no tail call of its own — `c` names
+# the member's region directly, an uncounted read, and the mint that funds the caller is
+# an enclosing node away. Pinning the arena's release at the binding scope would fire it
+# at the letrec, under a live `c`; the merge instead follows the value out and adopts the
+# release point the last-use rule already computed for the handed-out member — here the
+# enclosing `Return`, whose mint precedes that node's own releases
+# (docs/impl/region/letrec.md § "Drop site — following a handed-out member"). This is the
+# boundary control for `recur-local-mutual-ret-value` above — the two differ only in
+# whether the letrec is the frame's tail, which is exactly the fact that decides where the
+# mint lands — so the pair reads the two dispositions directly rather than by
+# resemblance. Refusing this shape held its four regions — two closures, two forward
+# cells — per call.
 (defn lcl-mutual-ret-bound [n]
   (let [c (letrec [ev (fn [m]
                         (when (%not (%int? m)) (error :m))
@@ -1164,7 +1165,7 @@
     (lcl-ident n)
     c))
 (pin (measure "recur-local-mutual-ret-bound" (fn [j] (lcl-mutual-ret-bound 3))
-              100 6 60 0.4 0.5) 6)
+              100 6 60 0.4 0.5) 0)
 
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
 # `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a

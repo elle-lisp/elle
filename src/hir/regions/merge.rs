@@ -8,8 +8,9 @@
 //!    into the parent `%pair` it is stored into (docs/impl/region/merging.md § Merging).
 //!  - [`cycle`] — the `letrec` closure-cycle merge: an SCC of mutually-recursive
 //!    closures ∪ their prebound capture cells, collapsed onto one arena and freed by a
-//!    single `DecrefRegion` at the cycle's binding scope (docs/impl/region/letrec.md
-//!    § The letrec closure-cycle merge).
+//!    single `DecrefRegion` at the cycle's binding scope — or, where the letrec hands a
+//!    member out, where that member's own release already sits
+//!    (docs/impl/region/letrec.md § The letrec closure-cycle merge).
 //!
 //! The lowerer consumes both through `static_slot`'s `merged_root` canonicalization:
 //! every member of a merge tree resolves to the root's slot, so members allocate into

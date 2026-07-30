@@ -36,10 +36,12 @@ fn region_ownership_reclaims_mutual_recursion_closure_cycle() {
 }
 
 /// PROMPTNESS of the closure-cycle merge's drop site (docs/impl/region/letrec.md
-/// § The letrec closure-cycle merge; the §9 promptness ledger). A *discarded*
+/// § "Drop site — the binding scope"). A *discarded*
 /// top-level letrec closure cycle must be freed at its BINDING SCOPE — the `letrec`
 /// that prebinds its capture cells — its true last use, NOT held to the enclosing
-/// post-dominator (the file `Begin`, i.e. program teardown). The capture cell is
+/// post-dominator (the file `Begin`, i.e. program teardown). This is also the
+/// counterweight to the handed-out-member reading: a cycle nothing carries out of the
+/// binding scope must keep the tight drop, never inherit a later one. The capture cell is
 /// keyed by the letrec NODE, whose enclosing-scope stack excludes itself, so the
 /// allocation-site post-dominator dropped at the letrec's PARENT (the file Begin for
 /// a top-level cycle) — a program-duration over-keep that, summed over many such
@@ -594,12 +596,10 @@ fn region_ownership_reclaims_returned_mutual_cycle_per_call() {
 /// no tail call at all, and the frame's own `Return` (which functionalization places
 /// inside the letrec body, the letrec being the frame's tail) is what mints first.
 ///
-/// The RESIDUAL is the same cycle one binding out of tail position: bound to `c` and
-/// handed on by a later statement, so the body falls out to a bare value and the
-/// binding-scope release would fire at the letrec while `c` still holds the member. It
-/// is refused, so it leaks — and that leak is this test's second live gauge. It reads
-/// with the same slope as the bare-`@array` discriminator, which is what proves the two
-/// bounded assertions above it are measuring reclamation rather than a dead gauge.
+/// The cycle bound OUT of tail position is not a frame exit at all and reclaims for a
+/// different reason; [`region_ownership_reclaims_returned_cycle_bound_out_of_tail_position`]
+/// is its gauge. The bare-`@array` discriminator asserted first is what proves the
+/// bounded assertions here are measuring reclamation rather than a dead gauge.
 #[test]
 fn region_ownership_reclaims_returned_cycle_every_frame_exit() {
     let leak = leak_discriminator();
@@ -636,20 +636,61 @@ fn region_ownership_reclaims_returned_cycle_every_frame_exit() {
          binding-scope drop — but per-run live-region growth is {value} (the \
          discriminator leaks {leak} per run, so the gauge is live)",
     );
+}
 
-    // The residual, and the counterfactual for both assertions above: one binding out
-    // of tail position, the merge refuses and the whole cycle stays Shared.
-    let bound = steady_region_growth(&format!(
+/// The cycle whose letrec is NOT its frame's tail: bound to `c` and handed on by a
+/// later statement, so the body falls out to a bare member value and `c` names the
+/// member's region directly (docs/impl/region/letrec.md § "Drop site — following a
+/// handed-out member"). No mint stands between the letrec and the binding scope, so a
+/// release pinned there would free the arena under `c`; the merge instead adopts the
+/// point the last-use rule already computed for the handed-out member — the enclosing
+/// `Return`, whose mint precedes that node's own releases — and waives the sole-held
+/// proxy for the member it followed.
+///
+/// Two shapes, because the two halves of that reading are independent: the value is
+/// RETURNED out of `f` (the release rides the `Return` pin), and the value is CALLED
+/// inside `f` and never handed further (the release rides its ordinary last use). Both
+/// reclaim the whole cycle — two closures and two forward cells — per call.
+///
+/// Counterfactual: both read the discriminator's slope while the cycle is refused to
+/// Shared, where per-region RC cannot collect it.
+#[test]
+fn region_ownership_reclaims_returned_cycle_bound_out_of_tail_position() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertions below are vacuous",
+    );
+    let cycle = "letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (od (%sub m 1)))) \
+                         od (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (ev (%sub m 1))))]";
+
+    let returned = steady_region_growth(&format!(
         "(def g (fn [x] x)) \
          (def f (fn [k] (let [c ({cycle} ev)] (g k) c))) \
          (begin (f 3) nil)"
     ));
     assert!(
-        bound > 0,
-        "the residual must still leak: a cycle whose letrec is NOT its frame's tail is \
-         refused (its binding-scope release fires before any mint reaches the value it \
-         was bound out to), so per-run live-region growth {bound} must be > 0 — if it \
-         is 0 the shape now reclaims and the two bounded assertions above have lost \
-         their counterfactual",
+        returned <= 0,
+        "a cycle bound out of tail position and RETURNED must be reclaimed — the \
+         handed-out member's release is pinned at the enclosing `Return`, after its \
+         mint — but per-run live-region growth is {returned} (the discriminator leaks \
+         {leak} per run, so the gauge is live)",
+    );
+
+    let called = steady_region_growth(&format!(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] (let [c ({cycle} ev)] (g k) (begin (c 3) nil)))) \
+         (begin (f 3) nil)"
+    ));
+    assert!(
+        called <= 0,
+        "a cycle bound out of tail position and CALLED in place must be reclaimed — the \
+         handed-out member's release sits at its ordinary last use, which post-dominates \
+         the binding scope — but per-run live-region growth is {called} (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
     );
 }

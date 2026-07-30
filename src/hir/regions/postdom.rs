@@ -71,7 +71,7 @@ impl<'a> PostDom<'a> {
 
     /// Is `inner` inside `outer`'s post-order subtree interval — i.e. is `outer`
     /// a structural ancestor of `inner` (`compute_subtree_low`)?
-    fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
+    pub(super) fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
         let lo = self.low.get(&outer).copied().unwrap_or(0);
         let oi = self.ord(inner);
         oi >= lo && oi <= self.ord(outer)

@@ -29,12 +29,18 @@
 # SIGSEGV under `--trace=guardfree`. Each clique's non-base arm returns the member too,
 # so a corrupt read also shows as a wrong `fn?`/call result.
 #
+# A body that hands its value to an ENCLOSING consumer instead — the letrec bound OUT of
+# the frame's tail position — reaches the same ordering from the other side: the release
+# follows the handed-out member to the point the last-use rule already computed for it
+# (docs/impl/region/letrec.md § "Drop site — following a handed-out member").
+#
 # Covers: each admitted body shape driven per loop iteration (the arena minted and freed
 # hundreds of times); re-entry of the returned handle across allocation churn; a mixed
 # body whose arms return DIFFERENT members; a branchy body whose two arms each tail-call
-# a non-member; and the refused residual (the letrec bound OUT of the frame's tail
-# position), which stays Shared and must still run correctly. Pinned under the UAF
-# oracle by `region_letrec_return_cycle_uaf` (tests/integration/elle_scripts.rs).
+# a non-member; and three placements of the bound-out reading — the member handed on to
+# the caller, called in place and never handed further, and reached through the frame's
+# own tail call. Pinned under the UAF oracle by `region_letrec_return_cycle_uaf`
+# (tests/integration/elle_scripts.rs).
 
 # The admitted shape: the letrec body tail-calls the MEMBER `ev`, and both base cases
 # hand back the member `ev` itself.
@@ -116,11 +122,15 @@
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     (if (< n 2) (ident (ev n)) (ident (od n)))))
 
-# The REFUSED residual: the letrec is bound OUT of the frame's tail position, so its
-# body falls out to a bare value and the value reaches `f`'s caller through `c` — past a
-# binding-scope drop that the merge would still pin at the letrec, ahead of any mint. The
-# cycle keeps the Shared baseline and leaks (the F4 probe `recur-local-mutual-ret-bound`
-# measures that), but it must still RUN correctly and its handle must be re-enterable.
+# The letrec bound OUT of the frame's tail position: its body falls out to a bare member
+# value, so `c` names the member's region directly — an uncounted read — and the value
+# reaches `f`'s caller through `c`, past the letrec. Pinning the arena's release at the
+# binding scope would free it under `c`; the merge instead follows the value out, adopting
+# the release point the last-use rule already computed for the handed-out member — here
+# the enclosing `Return`, whose mint precedes that node's own releases
+# (docs/impl/region/letrec.md § "Drop site — following a handed-out member"). The hazard
+# this drives is that ordering: get it wrong and the caller holds a closure whose env
+# lives in a freed arena.
 (defn ret-bound [n]
   (let [c (letrec [ev (fn [m]
                         (when (%not (%int? m)) (error :m))
@@ -131,6 +141,42 @@
             ev)]
     (ident n)
     c))
+
+# The other half of that reading: the handed-out member is CALLED in place and never
+# leaves `f`, so there is no mint at all and the adopted release point is the member's
+# ordinary last use. The arena must survive every re-entry of `c` and still come back —
+# the call below runs the whole recursion through the merged arena after the letrec node
+# the release used to sit on.
+(defn bound-called [n]
+  (let [c (letrec [ev (fn [m]
+                        (when (%not (%int? m)) (error :m))
+                        (if (%lt m 1) ev (od (%sub m 1))))
+                   od (fn [m]
+                        (when (%not (%int? m)) (error :m))
+                        (if (%lt m 1) ev (ev (%sub m 1))))]
+            ev)]
+    (ident n)
+    (assert (fn? (c 3)) "bound-called: re-entering the bound-out member")
+    (assert (fn? (c 0))
+            "bound-called: the base case through the bound-out member")
+    :ok))
+
+# The handed-out member reached through the frame's own TAIL CALL. `c` is the callee in
+# tail position, so the release point adopted for it sits past a frame-replacing
+# `TailCall` — the one placement where the arena's release may not run at all. That
+# direction is safe by construction: a release that does not run over-keeps, where the
+# opposite error would free the arena under the callee, which IS a member of it. Driven
+# here so the recursion actually runs through the arena after the letrec node.
+(defn bound-tail [n]
+  (let [c (letrec [ev (fn [m]
+                        (when (%not (%int? m)) (error :m))
+                        (if (%lt m 1) ev (od (%sub m 1))))
+                   od (fn [m]
+                        (when (%not (%int? m)) (error :m))
+                        (if (%lt m 1) ev (ev (%sub m 1))))]
+            ev)]
+    (ident n)
+    (c 3)))
 
 # Re-enter a returned handle repeatedly, churning fresh heap between calls so a
 # prematurely freed arena page is recycled under the closure's env.
@@ -162,6 +208,19 @@
 (drive "ret-value" ret-value)
 (drive "ret-arms" ret-arms)
 (drive "ret-bound" ret-bound)
+(drive "bound-tail" bound-tail)
+
+# The called-in-place shape returns a keyword, not a closure, so it drives its own loop —
+# the re-entry assertions live inside `bound-called` itself, where the arena is still the
+# executing frame's.
+(def @churn2 @[])
+(def @m 0)
+(while (%lt m 80)
+  (assert (= (bound-called m) :ok)
+          (string "bound-called: must run to completion at i=" m))
+  (push churn2 (string "bc-" m))
+  (assign m (%add m 1)))
+(assert (= (length churn2) 80) "bound-called: churn count")
 
 # Hold several returned handles live SIMULTANEOUSLY, then re-enter each. Each call mints
 # its own arena, so this pins that one call's deferral never touches another's — and
