@@ -53,6 +53,7 @@ impl AsyncBackend {
                         buffer_handle: buf_handle,
                         listener_kind,
                         filled: 0,
+                        timeout: request.timeout,
                     },
                 );
                 Ok(id)
@@ -114,6 +115,7 @@ impl AsyncBackend {
                         buffer_handle: buf_handle,
                         listener_kind: None,
                         filled: 0,
+                        timeout: request.timeout,
                     },
                 );
                 Ok(id)
@@ -160,6 +162,7 @@ impl AsyncBackend {
                         buffer_handle: buf_handle,
                         listener_kind: None,
                         filled: 0,
+                        timeout: request.timeout,
                     },
                 );
                 Ok(id)
@@ -200,6 +203,7 @@ impl AsyncBackend {
                         buffer_handle: buf_handle,
                         listener_kind: None,
                         filled: 0,
+                        timeout: request.timeout,
                     },
                 );
                 Ok(id)

@@ -18,15 +18,19 @@ impl CompletionHub {
             // See src/io/sigfd.rs and docs/posix-signals.md.
             crate::io::sigfd::mask_all_signals_on_this_thread();
             let (result_code, data) = match op {
-                PoolOp::Read { fd, size } => {
+                PoolOp::Read { fd, size, timeout } => {
+                    let bound = SocketTimeout::arm(fd, libc::SO_RCVTIMEO, timeout);
                     let mut buf = vec![0u8; size];
                     let ret =
                         unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, size) };
                     if ret < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
+                        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                        let code = if bound.armed() && is_timeout_errno(errno) {
+                            libc::ETIMEDOUT
+                        } else {
+                            errno
+                        };
+                        (-code, Vec::new())
                     } else {
                         buf.truncate(ret as usize);
                         (ret as i32, buf)
@@ -36,7 +40,9 @@ impl CompletionHub {
                     fd,
                     size,
                     graphemes,
+                    timeout,
                 } => {
+                    let bound = SocketTimeout::arm(fd, libc::SO_RCVTIMEO, timeout);
                     // Buffer grows as we go — graphemes mode can't preallocate
                     // because we don't know the byte count in advance.  In
                     // bytes mode we still grow into a `size`-capacity Vec so
@@ -74,11 +80,17 @@ impl CompletionHub {
                             libc::read(fd, buf[total..].as_mut_ptr() as *mut libc::c_void, want)
                         };
                         if ret < 0 {
+                            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                            if bound.armed() && is_timeout_errno(errno) {
+                                // The deadline passed with nothing more
+                                // arriving. That is the caller's timeout, not
+                                // the end of the stream — surfacing the
+                                // partial here would read as EOF and the
+                                // completion would map it to nil.
+                                break (-libc::ETIMEDOUT, Vec::new());
+                            }
                             if total == 0 {
-                                break (
-                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                                    Vec::new(),
-                                );
+                                break (-errno, Vec::new());
                             }
                             // Partial read then error: surface what we got
                             // so the completion path treats it as short-then-EOF.
@@ -92,8 +104,9 @@ impl CompletionHub {
                         total += ret as usize;
                     }
                 }
-                PoolOp::ReadLine { fd } | PoolOp::ReadAll { fd } => {
+                PoolOp::ReadLine { fd, timeout } | PoolOp::ReadAll { fd, timeout } => {
                     let until_newline = matches!(op, PoolOp::ReadLine { .. });
+                    let bound = SocketTimeout::arm(fd, libc::SO_RCVTIMEO, timeout);
                     let mut accumulated = Vec::new();
                     let mut chunk = vec![0u8; 4096];
                     loop {
@@ -101,11 +114,16 @@ impl CompletionHub {
                             libc::read(fd, chunk.as_mut_ptr() as *mut libc::c_void, chunk.len())
                         };
                         if ret < 0 {
+                            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                            if bound.armed() && is_timeout_errno(errno) {
+                                // The deadline passed with nothing more
+                                // arriving. Report the timeout rather than the
+                                // partial, which the completion would treat as
+                                // a line or a stream that ended.
+                                break (-libc::ETIMEDOUT, Vec::new());
+                            }
                             if accumulated.is_empty() {
-                                break (
-                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                                    Vec::new(),
-                                );
+                                break (-errno, Vec::new());
                             }
                             // Return whatever we accumulated before the error
                             break (accumulated.len() as i32, accumulated);
@@ -120,7 +138,24 @@ impl CompletionHub {
                         }
                     }
                 }
-                PoolOp::Write { fd, data } => {
+                PoolOp::Write { fd, data, timeout } => {
+                    // `port/write` writes every byte before it returns
+                    // (docs/io.md), so loop until the payload is gone. One
+                    // write(2) transfers only what fits in the fd's send
+                    // buffer, which on a socket is routinely a fraction of a
+                    // large payload.
+                    //
+                    // The caller's timeout rides the fd's own send timeout for
+                    // the duration of this op. These fds are blocking, so a
+                    // write to a peer that has stopped reading parks inside
+                    // the syscall — polling for writability first cannot bound
+                    // that, but SO_SNDTIMEO makes the syscall itself return.
+                    // It applies per operation, not to the whole call: a
+                    // stalled peer trips it, while one that merely reads
+                    // slowly keeps making progress and the transfer finishes
+                    // however long it takes. That mirrors the io_uring path,
+                    // which re-arms its LinkTimeout on each resubmission.
+                    let bound = SocketTimeout::arm(fd, libc::SO_SNDTIMEO, timeout);
                     let mut total = 0usize;
                     loop {
                         let ret = unsafe {
@@ -130,19 +165,32 @@ impl CompletionHub {
                                 data.len() - total,
                             )
                         };
-                        if ret < 0 {
-                            if total == 0 {
-                                break (
-                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                                    Vec::new(),
-                                );
+                        if ret > 0 {
+                            total += ret as usize;
+                            if total >= data.len() {
+                                break (total as i32, Vec::new());
                             }
-                            break (total as i32, Vec::new());
+                            continue;
                         }
-                        total += ret as usize;
-                        if total >= data.len() {
-                            break (total as i32, Vec::new());
+                        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                        if ret < 0 && errno == libc::EINTR {
+                            // A signal interrupted the syscall before any byte
+                            // moved; the payload is unchanged, so retry.
+                            continue;
                         }
+                        if ret < 0 && bound.armed() && is_timeout_errno(errno) {
+                            // The send timeout expired with nothing
+                            // transferred. Report it as the caller's timeout,
+                            // which `complete_port_op` maps to a `:timeout`
+                            // error rather than a generic I/O one.
+                            break (-libc::ETIMEDOUT, Vec::new());
+                        }
+                        // Surface the failure rather than the bytes that did
+                        // get through: a count smaller than the payload reads
+                        // as a completed write to a caller that trusts the
+                        // full-write contract. A zero return on a non-empty
+                        // tail cannot make progress either, so it fails too.
+                        break (-(if ret == 0 { libc::EIO } else { errno }), Vec::new());
                     }
                 }
                 PoolOp::Flush { fd } => {
@@ -421,4 +469,104 @@ impl CompletionHub {
         });
         Ok(())
     }
+}
+
+/// Holds `SO_RCVTIMEO` or `SO_SNDTIMEO` on an fd for the lifetime of one
+/// worker operation, putting the previous value back on drop.
+///
+/// These worker fds are blocking, so an operation against a peer that has gone
+/// quiet parks inside the syscall — polling for readiness first cannot bound
+/// that, because the syscall can block again after the poll returns. The
+/// socket's own timeout makes the syscall itself return: it transfers what it
+/// can within the interval and reports `EAGAIN` when it could transfer nothing
+/// at all.
+///
+/// The bound is per operation, which is what `:timeout` means once a call needs
+/// several of them (docs/io.md). A peer that has stalled trips it; one that is
+/// merely slow keeps making progress and the call finishes however long it
+/// takes.
+struct SocketTimeout {
+    fd: RawFd,
+    optname: libc::c_int,
+    /// The value to restore, and the flag for whether the bound took at all.
+    /// `None` leaves the fd untouched — the case for a non-socket fd, which
+    /// rejects these options. A file or pipe never stalls on an absent peer,
+    /// so it needs no bound.
+    prev: Option<libc::timeval>,
+}
+
+impl SocketTimeout {
+    /// Arm `optname` on `fd` for `timeout`, or do nothing when the caller
+    /// passed no deadline or the fd will not take one.
+    fn arm(fd: RawFd, optname: libc::c_int, timeout: Option<Duration>) -> Self {
+        let prev = timeout.and_then(|dur| {
+            let mut prev: libc::timeval = unsafe { std::mem::zeroed() };
+            let mut len = std::mem::size_of::<libc::timeval>() as libc::socklen_t;
+            let read_back = unsafe {
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    optname,
+                    &mut prev as *mut libc::timeval as *mut libc::c_void,
+                    &mut len,
+                )
+            };
+            if read_back != 0 {
+                return None;
+            }
+            let mut tv = libc::timeval {
+                tv_sec: dur.as_secs() as libc::time_t,
+                tv_usec: dur.subsec_micros() as libc::suseconds_t,
+            };
+            // An all-zero timeval means "no timeout" to the kernel, so a
+            // request finer than a microsecond becomes the smallest
+            // expressible bound rather than an unbounded wait.
+            if tv.tv_sec == 0 && tv.tv_usec == 0 {
+                tv.tv_usec = 1;
+            }
+            let applied = unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    optname,
+                    &tv as *const libc::timeval as *const libc::c_void,
+                    std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+                )
+            };
+            if applied == 0 {
+                Some(prev)
+            } else {
+                None
+            }
+        });
+        SocketTimeout { fd, optname, prev }
+    }
+
+    /// True when the bound is actually in force, so the caller can tell an
+    /// `EAGAIN` that means "deadline reached" from one that means anything
+    /// else.
+    fn armed(&self) -> bool {
+        self.prev.is_some()
+    }
+}
+
+impl Drop for SocketTimeout {
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev {
+            unsafe {
+                libc::setsockopt(
+                    self.fd,
+                    libc::SOL_SOCKET,
+                    self.optname,
+                    &prev as *const libc::timeval as *const libc::c_void,
+                    std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+                );
+            }
+        }
+    }
+}
+
+/// True when `errno` is the socket timeout expiring with nothing transferred.
+fn is_timeout_errno(errno: i32) -> bool {
+    errno == libc::EAGAIN || errno == libc::EWOULDBLOCK
 }

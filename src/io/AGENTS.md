@@ -184,6 +184,46 @@ Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling
 
 Buffered data is never lost on EOF or error. The backend drains buffered data before surfacing EOF or error status.
 
+## Full-Write Invariant
+
+`IoOp::Write` completes only when the whole payload has left for the fd. One
+`write(2)` transfers at most what fits in the send buffer, so both backends
+loop: the io_uring path resubmits the unwritten tail from the same pooled
+buffer (`drain_cqes`, `PendingOp::Port.filled` counts the bytes already
+accepted), and the thread-pool worker loops inside `PoolOp::Write`. The
+completion reports `filled + result_code`, which equals the payload length.
+
+A failure part-way through surfaces as an error, not as a short count — a
+count smaller than the payload would read as success to a caller that trusts
+the invariant. See `docs/io.md` and `tests/elle/port-shortwrite.lisp`.
+
+## Operation timeouts
+
+A request's `:timeout` bounds each kernel operation, not the whole call. Most
+calls are one operation and the distinction does not arise. It arises for every
+call that loops: `Write` until the payload is gone, `ReadExact` until its count,
+`ReadAll` until EOF, `ReadLine` until a newline. For those, a peer that has
+stalled must trip the deadline while one that is merely slow must not — a
+per-call deadline would satisfy the first and break the second.
+
+Each backend carries the bound its own way:
+
+| Backend | Mechanism | Expiry |
+|---------|-----------|--------|
+| io_uring | `push_resubmit` re-arms a `LinkTimeout` on every resubmission; `PendingOp::Port.timeout` carries the duration | `ECANCELED` |
+| thread pool | `SocketTimeout` holds `SO_SNDTIMEO`/`SO_RCVTIMEO` on the fd for the operation and restores it on drop | `ETIMEDOUT` |
+
+`complete_port_op` maps both errnos to the `:timeout` error kind.
+
+The pool worker cannot poll for readiness instead: its fds are blocking, so the
+syscall can park after a poll reports the fd ready. The socket's own timeout is
+what makes the syscall itself return. A non-socket fd rejects these options and
+is left unbounded, which is correct — a file or pipe never stalls on an absent
+peer.
+
+Pinned by `tests/elle/port-write-timeout.lisp` and
+`tests/elle/port-read-timeout.lisp`, both run on each backend.
+
 ## Backend Execution
 
 ### Subprocess Operations

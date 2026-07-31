@@ -19,3 +19,13 @@ fn test_port_key_from_pipe() {
     let key = PortKey::from_port(&p);
     assert!(matches!(key, PortKey::Fd(_)));
 }
+
+/// The backends re-derive an fd from its key on every resubmission, so the
+/// stdio keys must map to the POSIX numbers they name.
+#[test]
+fn port_key_raw_fd_maps_stdio_to_posix_numbers() {
+    assert_eq!(PortKey::Stdin.raw_fd(), 0);
+    assert_eq!(PortKey::Stdout.raw_fd(), 1);
+    assert_eq!(PortKey::Stderr.raw_fd(), 2);
+    assert_eq!(PortKey::Fd(37).raw_fd(), 37);
+}

@@ -307,7 +307,10 @@ primitive! {
             propagates: 0,
         }),
         arity: Arity::AtLeast(2),
-        doc: "Write data to port. Returns bytes written.",
+        doc: "Write all of data to port, looping over short writes. \
+              Returns the number of bytes written, which equals the length \
+              of data — a caller never loops on the count. Errors if the \
+              fd fails part-way, since an unknown prefix reached the peer.",
         params: &["port", "data"],
         category: "port",
         example: "(port/write (port/stdout) \"hello\")",

@@ -1,5 +1,41 @@
 use super::*;
 
+/// Push a resubmitted operation, re-arming the caller's timeout as a linked
+/// timeout SQE so the bound applies to this operation as it did to the first.
+///
+/// Returns the `Timespec` the kernel reads when it processes the SQE. It must
+/// stay alive until `ring.submit()` hands the queue over, so the caller holds
+/// it — a resubmit loop pushes many SQEs before one submit.
+#[must_use = "the timespec must outlive the ring.submit() that consumes the SQE"]
+fn push_resubmit(
+    ring: &mut io_uring::IoUring,
+    id: SubmissionId,
+    entry: io_uring::squeue::Entry,
+    timeout: Option<Duration>,
+) -> Option<Box<io_uring::types::Timespec>> {
+    let entry = if timeout.is_some() {
+        entry.flags(io_uring::squeue::Flags::IO_LINK)
+    } else {
+        entry
+    };
+    unsafe {
+        let _ = ring.submission().push(&entry);
+    }
+    let dur = timeout?;
+    let ts = Box::new(
+        io_uring::types::Timespec::new()
+            .sec(dur.as_secs())
+            .nsec(dur.subsec_nanos()),
+    );
+    let timeout_sqe = io_uring::opcode::LinkTimeout::new(&*ts)
+        .build()
+        .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
+    unsafe {
+        let _ = ring.submission().push(&timeout_sqe);
+    }
+    Some(ts)
+}
+
 /// Drain all available CQEs from the completion ring.
 ///
 /// This is the **single** CQE processing path — used by both poll (non-blocking)
@@ -24,6 +60,8 @@ pub(crate) fn drain_cqes(
     // Collect ReadLine and short-Read ops that need re-submission (can't
     // submit SQEs while iterating the CQ ring).
     let mut read_resubmits: Vec<(SubmissionId, RawFd, usize, PendingOp)> = Vec::new();
+    // Short writes needing re-submission, collected for the same reason.
+    let mut write_resubmits: Vec<(SubmissionId, RawFd, PendingOp)> = Vec::new();
 
     for cqe in ring.completion() {
         let user_data = cqe.user_data();
@@ -137,12 +175,7 @@ pub(crate) fn drain_cqes(
                     if !has_newline {
                         // No newline found — advance filled cursor for re-submission.
                         *filled = total_in_fiber;
-                        let fd = match port_key {
-                            PortKey::Fd(raw) => *raw,
-                            PortKey::Stdout => 1,
-                            PortKey::Stderr => 2,
-                            PortKey::Stdin => unreachable!(),
-                        };
+                        let fd = port_key.raw_fd();
                         read_resubmits.push((id, fd, 4096, pending_op));
                         continue;
                     }
@@ -245,12 +278,7 @@ pub(crate) fn drain_cqes(
                         }
                         // Reset filled for re-submission (data moved to state.buffer)
                         *filled = 0;
-                        let fd = match &port_key {
-                            PortKey::Fd(raw) => *raw,
-                            PortKey::Stdout => 1,
-                            PortKey::Stderr => 2,
-                            PortKey::Stdin => unreachable!(),
-                        };
+                        let fd = port_key.raw_fd();
                         // The resubmit loop reads `buf_len - filled` bytes into
                         // the fiber buffer (filled was just reset to 0), so the
                         // size passed here is unused — kept 0 for clarity.
@@ -276,14 +304,45 @@ pub(crate) fn drain_cqes(
                     if let Some(bh) = buf_handle {
                         buffer_pool.release(bh);
                     }
-                    let fd = match port_key {
-                        PortKey::Fd(raw) => *raw,
-                        PortKey::Stdout => 1,
-                        PortKey::Stderr => 2,
-                        PortKey::Stdin => unreachable!(),
-                    };
+                    let fd = port_key.raw_fd();
                     read_resubmits.push((id, fd, 4096, pending_op));
                     continue;
+                }
+            }
+
+            // Write re-submission. One write(2) transfers only what fits in the
+            // fd's send buffer at that moment, which on a socket is routinely a
+            // fraction of a large payload. `port/write` writes every byte before
+            // it returns (docs/io.md), so resubmit the unwritten tail from the
+            // same pooled buffer — `filled` is the offset the payload has been
+            // accepted up to — and let the operation complete only once nothing
+            // is left. The completion reports `filled + result_code`.
+            let mut write_stalled = false;
+            if let PendingOp::Port {
+                op: IoOp::Write { .. },
+                ref port_key,
+                ref mut filled,
+                ..
+            } = pending_op
+            {
+                // The pooled buffer holds the whole payload (copied there at
+                // submission), so its length is what the write owes.
+                let payload_len = buf_handle
+                    .map(|bh| buffer_pool.get_mut(bh).len())
+                    .unwrap_or(0);
+                if result_code >= 0 && *filled + (result_code as usize) < payload_len {
+                    if result_code == 0 {
+                        // The kernel accepted nothing of a non-empty tail.
+                        // Resubmitting would spin, and reporting the partial
+                        // count would read as a completed write to a caller
+                        // that trusts the contract — so fail the operation.
+                        write_stalled = true;
+                    } else {
+                        *filled += result_code as usize;
+                        let fd = port_key.raw_fd();
+                        write_resubmits.push((id, fd, pending_op));
+                        continue;
+                    }
                 }
             }
 
@@ -294,7 +353,11 @@ pub(crate) fn drain_cqes(
 
             let completion = process_raw_completion(
                 id,
-                result_code,
+                if write_stalled {
+                    -libc::EIO
+                } else {
+                    result_code
+                },
                 data,
                 &pending_op,
                 fd_states,
@@ -306,10 +369,21 @@ pub(crate) fn drain_cqes(
         }
     }
 
+    // A re-armed `LinkTimeout` hands the kernel a pointer to its `Timespec`,
+    // which must stay put until the `ring.submit()` below consumes the SQE.
+    // The boxes live here so every resubmission's timespec outlives that call.
+    let mut link_timeouts: Vec<Box<io_uring::types::Timespec>> = Vec::new();
+
     // Re-submit ReadLine and short-Read ops that need more data.
     // For reads with pre-allocated buffers, re-submit into the remaining
     // space in the fiber's buffer (advance past filled bytes).
     for (id, fd, _size, mut pending_op) in read_resubmits {
+        // Bound this operation the way the original submission was bounded. A
+        // read that needs several operations — read-exact until its count,
+        // read-all until EOF, read-line until a newline — would otherwise be
+        // unbounded from its second operation on, and a peer that goes quiet
+        // would hang a read that asked for a timeout.
+        let op_timeout = pending_op.timeout();
         if let PendingOp::Port {
             op:
                 IoOp::ReadLine { ref buffer }
@@ -340,21 +414,24 @@ pub(crate) fn drain_cqes(
                 // Push back into completions via process_raw_completion.
                 continue;
             }
-            unsafe {
+            let sqe = unsafe {
                 let (dst, _) = crate::io::request::writeable_buffer_ptr(buffer);
-                let sqe = io_uring::opcode::Read::new(
+                io_uring::opcode::Read::new(
                     io_uring::types::Fd(fd),
                     dst.add(*filled),
                     remaining as u32,
                 )
                 .offset(u64::MAX)
                 .build()
-                .user_data(id.as_u64());
-                pending.insert(id, pending_op);
-                let _ = ring.submission().push(&sqe);
-            }
+                .user_data(id.as_u64())
+            };
+            pending.insert(id, pending_op);
+            link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         } else {
-            // Non-read re-submission (shouldn't happen, but handle defensively)
+            // `ReadAll` lands here: it has no pre-allocated fiber buffer to
+            // read into (its length is unknown until EOF), so each round takes
+            // a fresh pooled buffer and the completion accumulates it in the
+            // fd_state.
             let new_buf = buffer_pool.alloc(4096);
             let buf = buffer_pool.get_mut(new_buf);
             buf.resize(4096, 0);
@@ -376,11 +453,46 @@ pub(crate) fn drain_cqes(
                 *filled = 0;
             }
             pending.insert(id, pending_op);
-            unsafe {
-                let _ = ring.submission().push(&sqe);
-            }
+            link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         }
     }
+
+    // Re-submit the unwritten tail of each short write. The payload still sits
+    // in the pooled buffer the original submission copied it into, so the tail
+    // needs no second copy — only a pointer past the bytes already accepted.
+    for (id, fd, pending_op) in write_resubmits {
+        let (bh, filled, timeout) = match &pending_op {
+            PendingOp::Port {
+                buffer_handle: Some(bh),
+                filled,
+                timeout,
+                ..
+            } => (*bh, *filled, *timeout),
+            // A write always carries a pooled buffer (aio::submit allocates one
+            // for every non-read op), so this arm is unreachable; dropping the
+            // op here would strand the fiber, so keep it pending for teardown.
+            _ => continue,
+        };
+        let buf = buffer_pool.get_mut(bh);
+        let remaining = (buf.len() - filled).min(MAX_WRITE_CHUNK);
+        let sqe = unsafe {
+            io_uring::opcode::Write::new(
+                io_uring::types::Fd(fd),
+                buf.as_ptr().add(filled),
+                remaining as u32,
+            )
+            .offset(u64::MAX)
+            .build()
+            .user_data(id.as_u64())
+        };
+        // Bound this chunk the way the original submission was bounded. A
+        // payload larger than one syscall would otherwise be unbounded from
+        // its second chunk on, and a peer that stops reading would hang a
+        // write that asked for a timeout.
+        pending.insert(id, pending_op);
+        link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));
+    }
+
     if !ring.submission().is_empty() {
         let _ = ring.submit();
     }

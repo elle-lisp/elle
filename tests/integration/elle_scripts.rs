@@ -1311,6 +1311,42 @@ fn posix_threadpool() {
     run_elle_script_with_args("posix", &["--no-uring"]);
 }
 
+// The full-write invariant on the OTHER backend. `port-shortwrite.lisp` proves
+// that `port/write` transfers every byte of a payload far larger than one
+// write(2) can move; the harness runs it on io_uring (the Linux default), where
+// `drain_cqes` resubmits the unwritten tail. `--no-uring` is a process-global
+// choice, so this pin is the only way to cover the thread-pool worker's own
+// write loop (`PoolOp::Write`) on the Linux runner — the path macOS always
+// takes. See src/io/AGENTS.md § Full-Write Invariant.
+#[test]
+fn port_shortwrite_threadpool() {
+    run_elle_script_with_args("port-shortwrite", &["--no-uring"]);
+}
+
+// `:timeout` on a write that outgrows one syscall, on the OTHER backend. The
+// two backends bound a blocked operation by different means — io_uring links a
+// timeout SQE, the thread-pool worker relies on the fd's own send timeout — so
+// each needs its own coverage of the re-armed deadline. Measured before the
+// fix, both ignored `:timeout` on the resubmitted tail identically: the call
+// blocked until the peer closed the socket and then reported ECONNRESET.
+// See src/io/AGENTS.md § Full-Write Invariant.
+#[test]
+fn port_write_timeout_threadpool() {
+    run_elle_script_with_args("port-write-timeout", &["--no-uring"]);
+}
+
+// `:timeout` on the looping reads, on the OTHER backend. io_uring re-arms a
+// linked timeout on each resubmission; the thread-pool worker holds
+// `SO_RCVTIMEO` on the fd for the operation. The pool half needs its own
+// coverage twice over: it is the sole mechanism on macOS, and it was the
+// weaker of the two before — measured on this file, io_uring already bounded a
+// single `port/read` while the pool backend bounded no read at all.
+// See src/io/AGENTS.md § Operation timeouts.
+#[test]
+fn port_read_timeout_threadpool() {
+    run_elle_script_with_args("port-read-timeout", &["--no-uring"]);
+}
+
 // (Hygiene for syntax-case bindings is carried structurally — synthetic-ness
 // lives on PatternBinding (src/syntax/expand/syntaxcase.rs) rather than being
 // inferred from a name's string prefix. The regression for it lives in

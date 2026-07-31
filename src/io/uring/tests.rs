@@ -156,6 +156,154 @@ fn sig_next_uring_child_logic() -> i32 {
     0
 }
 
+/// The full-write invariant at the drain loop (src/io/AGENTS.md § Full-Write
+/// Invariant). One write(2) transfers only what fits in the fd's send buffer,
+/// so `drain_cqes` must resubmit the unwritten tail — from the pooled buffer
+/// the submission copied the payload into — until nothing is left, and report
+/// the total across every resubmission rather than the last CQE's count.
+///
+/// A 4 KiB send buffer cannot take a 512 KiB payload in one syscall, so a
+/// backend that completes on the first CQE fails both assertions: the reported
+/// count is short, and the peer's tally is short. Driving `drain_cqes` directly
+/// keeps the coverage at the resubmission mechanism; the end-to-end contract is
+/// `tests/elle/port-shortwrite.lisp`.
+#[test]
+fn short_write_resubmits_until_the_payload_is_gone() {
+    use crate::io::pending::PendingOp;
+    use crate::io::types::{FdState, PortKey};
+    use crate::io::{Completion, SubmissionId};
+    use crate::value::Value;
+    use std::collections::{HashMap, VecDeque};
+    use std::time::{Duration, Instant};
+
+    const PAYLOAD: usize = 512 * 1024;
+    const SNDBUF: libc::c_int = 4096;
+
+    let mut ring = match io_uring::IoUring::new(8) {
+        Ok(ring) => ring,
+        // No io_uring on this host kernel — nothing to cover here. The
+        // thread-pool half of the invariant is pinned by the `--no-uring`
+        // run of port-shortwrite.lisp.
+        Err(_) => return,
+    };
+
+    let mut fds: [libc::c_int; 2] = [0; 2];
+    assert_eq!(
+        unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) },
+        0,
+        "socketpair failed: {}",
+        std::io::Error::last_os_error()
+    );
+    let (write_fd, read_fd) = (fds[0], fds[1]);
+    unsafe {
+        libc::setsockopt(
+            write_fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &SNDBUF as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+        // Non-blocking, so the kernel returns a short count instead of
+        // sleeping until the whole payload fits — the case under test.
+        libc::fcntl(write_fd, libc::F_SETFL, libc::O_NONBLOCK);
+    }
+
+    // The peer drains continuously, so a write that loops can always finish.
+    let reader = std::thread::spawn(move || {
+        let mut received = 0usize;
+        let mut buf = vec![0u8; 64 * 1024];
+        while received < PAYLOAD {
+            let n =
+                unsafe { libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if n <= 0 {
+                break;
+            }
+            received += n as usize;
+        }
+        unsafe { libc::close(read_fd) };
+        received
+    });
+
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let data = crate::primitives::ctx::Alloc::new(&mut heap).bytes(vec![b'x'; PAYLOAD]);
+
+    let mut pool = BufferPool::new();
+    let buf_handle = pool.alloc(4096);
+    let id = SubmissionId::from_raw(1);
+    super::submit_uring_stream(
+        &mut ring,
+        id,
+        write_fd,
+        &IoOp::Write { data },
+        None,
+        &mut pool,
+        Some(buf_handle),
+        0,
+    )
+    .expect("submit_uring_stream");
+
+    let mut pending: HashMap<SubmissionId, PendingOp> = HashMap::new();
+    pending.insert(
+        id,
+        PendingOp::Port {
+            op: IoOp::Write { data },
+            port_key: PortKey::Fd(write_fd),
+            port: Value::NIL,
+            buffer_handle: Some(buf_handle),
+            listener_kind: None,
+            filled: 0,
+            timeout: None,
+        },
+    );
+    let mut fd_states: HashMap<PortKey, FdState> = HashMap::new();
+    let mut completions: VecDeque<Completion> = VecDeque::new();
+    let mut eventfd_fired = false;
+
+    // Bounded so a regression that stops resubmitting fails here instead of
+    // wedging the test run.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while completions.is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "write never completed: {} of {} bytes reported after 20s",
+            pending.get(&id).map(|p| p.filled()).unwrap_or(0),
+            PAYLOAD
+        );
+        let ts = io_uring::types::Timespec::new().sec(1).nsec(0);
+        let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+        match ring.submitter().submit_with_args(1, &args) {
+            Ok(_) => {}
+            Err(e) if e.raw_os_error() == Some(libc::ETIME) => {}
+            Err(e) if e.raw_os_error() == Some(libc::EINTR) => {}
+            Err(e) => panic!("submit_with_args: {}", e),
+        }
+        super::drain_cqes(
+            &mut ring,
+            &mut pending,
+            &mut pool,
+            &mut fd_states,
+            &mut completions,
+            &mut heap as *mut crate::value::fiberheap::FiberHeap,
+            &mut eventfd_fired,
+        );
+    }
+
+    let completion = completions.pop_front().expect("one completion");
+    let value = completion.result.expect("write succeeded");
+    assert_eq!(
+        value.as_int(),
+        Some(PAYLOAD as i64),
+        "port/write must report every byte it wrote, not the last chunk"
+    );
+
+    unsafe { libc::close(write_fd) };
+    let received = reader.join().expect("reader thread");
+    assert_eq!(
+        received, PAYLOAD,
+        "the peer must receive every byte, not just what the first syscall took"
+    );
+}
+
 /// Verify apply_socket_options actually sets SO_SNDBUF on a socket fd.
 #[test]
 fn test_apply_sndbuf() {

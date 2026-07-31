@@ -6,6 +6,7 @@ use crate::io::types::PortKey;
 use crate::port::PortKind;
 use crate::value::Value;
 use std::os::unix::io::RawFd;
+use std::time::Duration;
 
 /// Pending async I/O operation.
 ///
@@ -24,9 +25,18 @@ pub(crate) enum PendingOp {
         buffer_handle: Option<BufferHandle>,
         /// For Accept: which kind of listener (TcpListener or UnixListener).
         listener_kind: Option<PortKind>,
-        /// Bytes written into the fiber's pre-allocated buffer so far.
-        /// Used for short-read re-submission. Zero for non-read ops.
+        /// Bytes of this operation's payload already transferred: read into
+        /// the fiber's pre-allocated buffer, or written out to the fd. Both
+        /// directions resubmit the remainder from this offset, and the
+        /// completion reports `filled + result_code`. Zero for ops that move
+        /// no payload.
         filled: usize,
+        /// The request's timeout, carried so a resubmission can re-arm the
+        /// `LinkTimeout` that bounds it. A payload too large for one syscall
+        /// completes over several SQEs, and `:timeout` means "give up after
+        /// this long" for each of them rather than for the first alone.
+        /// `None` leaves the operation unbounded.
+        timeout: Option<Duration>,
     },
     /// Connect to a remote address.
     Connect {
@@ -114,6 +124,15 @@ impl PendingOp {
         match self {
             PendingOp::Port { filled, .. } => *filled,
             _ => 0,
+        }
+    }
+
+    /// The request's timeout, for a backend re-arming the bound on a
+    /// resubmission. `None` for ops that carry no deadline.
+    pub(super) fn timeout(&self) -> Option<Duration> {
+        match self {
+            PendingOp::Port { timeout, .. } => *timeout,
+            _ => None,
         }
     }
 

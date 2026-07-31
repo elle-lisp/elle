@@ -410,11 +410,18 @@ impl AsyncBackend {
                     PlatformBackend::ThreadPool => {
                         let _ = buffer_pool;
                         let pool_op = match &request.op {
-                            IoOp::ReadLine { .. } => PoolOp::ReadLine { fd },
-                            IoOp::ReadAll => PoolOp::ReadAll { fd },
+                            IoOp::ReadLine { .. } => PoolOp::ReadLine {
+                                fd,
+                                timeout: request.timeout,
+                            },
+                            IoOp::ReadAll => PoolOp::ReadAll {
+                                fd,
+                                timeout: request.timeout,
+                            },
                             IoOp::Read { count, .. } => PoolOp::Read {
                                 fd,
                                 size: *count - read_buffered,
+                                timeout: request.timeout,
                             },
                             IoOp::ReadExact { count, .. } => {
                                 let is_text = matches!(port.encoding(), Encoding::Text);
@@ -429,18 +436,24 @@ impl AsyncBackend {
                                         fd,
                                         size: *count,
                                         graphemes: true,
+                                        timeout: request.timeout,
                                     }
                                 } else {
                                     PoolOp::ReadExact {
                                         fd,
                                         size: *count - read_buffered,
                                         graphemes: false,
+                                        timeout: request.timeout,
                                     }
                                 }
                             }
                             IoOp::Write { data } => {
                                 let bytes = Self::extract_write_bytes(data);
-                                PoolOp::Write { fd, data: bytes }
+                                PoolOp::Write {
+                                    fd,
+                                    data: bytes,
+                                    timeout: request.timeout,
+                                }
                             }
                             IoOp::Flush => PoolOp::Flush { fd },
                             _ => unreachable!(),
@@ -472,6 +485,7 @@ impl AsyncBackend {
                         buffer_handle: buf_handle,
                         listener_kind: None,
                         filled: read_buffered,
+                        timeout: request.timeout,
                     },
                 );
                 Ok(id)

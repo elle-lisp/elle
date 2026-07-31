@@ -27,7 +27,11 @@ pub(super) fn complete_port_op(
             if result_code < 0 {
                 // Error
                 let errno = -result_code;
-                let is_timeout = errno == 125; // ECANCELED
+                // ECANCELED is io_uring cancelling an op whose linked timeout
+                // fired; ETIMEDOUT is a thread-pool worker whose own bounded
+                // wait expired. Both are the caller's `:timeout` elapsing, so
+                // they carry the same error kind.
+                let is_timeout = errno == libc::ECANCELED || errno == libc::ETIMEDOUT;
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
@@ -369,7 +373,15 @@ pub(super) fn complete_port_op(
                     }
                     val
                 }
-                IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
+                // A write completes only when the whole payload is gone, so the
+                // count is everything transferred across every resubmission —
+                // the last CQE's bytes plus the offset it started from. The
+                // io_uring path accumulates that offset in `filled`; the pool
+                // worker loops internally and leaves it at zero.
+                IoOp::Write { .. } => Value::int((pending.filled() + result_code as usize) as i64),
+                // A datagram send is atomic: the kernel takes all of it or none,
+                // so there is no partial to accumulate.
+                IoOp::SendTo { .. } => Value::int(result_code as i64),
                 IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
                 IoOp::Accept {
                     ref options,

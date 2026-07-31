@@ -82,6 +82,55 @@ with `port/close`.
 # (port/close p)               — close port
 ```
 
+### `port/write` writes every byte
+
+`port/write` returns the length of the data you gave it. The caller never
+loops on the return value.
+
+One `write(2)` transfers only what fits in the fd's send buffer at that
+moment. On a socket that is often far less than the payload: a 4 KiB send
+buffer accepts about 21 KB of a 200 KB write, and a default one accepts a
+few megabytes of an 8 MB write. The backend therefore resubmits from the
+byte after the last one accepted, and completes the operation only when the
+whole payload is gone. `port/read` is the deliberate opposite — it returns
+"up to n bytes" per POSIX, and `port/read-exact` is its all-or-nothing
+sibling.
+
+If the fd fails part-way through, `port/write` raises the error rather than
+returning a short count. An unknown prefix of the payload reached the peer
+in that case, the same guarantee `write(2)`-loop helpers give elsewhere.
+
+The pinning tests are `tests/elle/port-shortwrite.lisp` and
+`tests/elle/port-shortread-framing.lisp` for the read direction.
+
+### `:timeout` bounds each operation
+
+Every port call takes an optional `:timeout` in milliseconds, and it bounds
+each kernel operation rather than the whole call.
+
+Most calls are a single operation, so the two readings agree. They part
+company on the calls that loop — `port/write` until the payload is gone,
+`port/read-exact` until its count, `port/read-all` until EOF, and
+`port/read-line` until a newline. There, a peer that has stopped trips the
+deadline, while a peer that is merely slow keeps making progress and the call
+finishes however long that takes.
+
+```lisp
+# (port/read-line conn :timeout 5000)
+#   — signals :timeout; the peer is connected but sends nothing
+# (port/write conn payload :timeout 5000)
+#   — signals :timeout; the peer accepted the connection and never read
+# (port/read-exact conn 1000000 :timeout 5000)
+#   — succeeds, and may take far longer than 5 s; the peer is slow, not stalled
+```
+
+Both readings stop a hang; only the per-operation one keeps a slow transfer
+working. `port/read` is unaffected either way: it is a single "up to n bytes"
+operation.
+
+The pinning tests are `tests/elle/port-write-timeout.lisp` and
+`tests/elle/port-read-timeout.lisp`, both run on each backend.
+
 ### Streams from ports
 
 ```lisp

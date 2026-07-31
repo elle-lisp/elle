@@ -8,9 +8,14 @@ use std::time::Duration;
 
 /// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
 pub(super) enum PoolOp {
+    /// Read up to `size` bytes. `timeout` bounds the wait for data to arrive,
+    /// via the fd's own receive timeout; `None` waits indefinitely. Every read
+    /// variant carries it — these worker fds are blocking, so without it a
+    /// peer that goes quiet parks the worker forever.
     Read {
         fd: RawFd,
         size: usize,
+        timeout: Option<Duration>,
     },
     /// Read exactly `size` units, looping until full or EOF/error.
     /// Units are bytes when `graphemes` is false and grapheme clusters
@@ -24,10 +29,16 @@ pub(super) enum PoolOp {
         fd: RawFd,
         size: usize,
         graphemes: bool,
+        timeout: Option<Duration>,
     },
+    /// Write every byte of `data`, looping over short writes. `timeout`
+    /// bounds the wait for the fd to become writable on each pass, so a peer
+    /// that stops reading cannot hang the write past the caller's deadline;
+    /// `None` waits indefinitely.
     Write {
         fd: RawFd,
         data: Vec<u8>,
+        timeout: Option<Duration>,
     },
     Flush {
         fd: RawFd,
@@ -81,10 +92,12 @@ pub(super) enum PoolOp {
     /// always receives data containing `\n` (or the final chunk at EOF).
     ReadLine {
         fd: RawFd,
+        timeout: Option<Duration>,
     },
     /// Read until EOF. Loops internally, accumulating all data.
     ReadAll {
         fd: RawFd,
+        timeout: Option<Duration>,
     },
     /// Blocking read on an inotify/kqueue fd for filesystem watch events.
     WatchRead {

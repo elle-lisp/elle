@@ -455,6 +455,9 @@ impl AsyncBackendInner {
                 buffer_handle: Some(buf_handle),
                 listener_kind: None,
                 filled: 0,
+                // The stdin worker owns its own blocking read; nothing here
+                // resubmits through the ring, so there is no link to re-arm.
+                timeout: None,
             },
         );
         Ok(id)

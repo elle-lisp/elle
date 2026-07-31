@@ -29,5 +29,13 @@ pub(crate) use stream::*;
 /// less anyway.
 const MAX_READ_CHUNK: usize = 64 * 1024;
 
+/// Upper bound on a single kernel write, in bytes. io_uring carries an SQE's
+/// length as a `u32`, so a payload past that boundary must be split; the
+/// short-write resubmit loop in `drain_cqes` already walks a payload the fd
+/// accepts piecewise, and a payload too large for one SQE is the same walk
+/// with a bigger first step. 1 GiB keeps every realistic write to one syscall
+/// while staying far below the `u32` limit.
+const MAX_WRITE_CHUNK: usize = 1024 * 1024 * 1024;
+
 #[cfg(test)]
 mod tests;

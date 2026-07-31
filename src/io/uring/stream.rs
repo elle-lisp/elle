@@ -62,7 +62,11 @@ pub(crate) fn submit_uring_stream(
             let buf = buffer_pool.get_mut(bh);
             buf.clear();
             buf.extend_from_slice(&bytes);
-            opcode::Write::new(Fd(fd), buf.as_ptr(), buf.len() as u32)
+            // The whole payload stays in the pooled buffer: the fd accepts only
+            // what fits in its send buffer, and `drain_cqes` resubmits the tail
+            // from here until every byte is gone.
+            let write_size = buf.len().min(MAX_WRITE_CHUNK);
+            opcode::Write::new(Fd(fd), buf.as_ptr(), write_size as u32)
                 .offset(u64::MAX)
                 .build()
                 .user_data(id.as_u64())

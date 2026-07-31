@@ -30,6 +30,19 @@ impl PortKey {
             },
         }
     }
+
+    /// The underlying file descriptor. The three stdio keys stand for the
+    /// POSIX numbers they name; `Fd` carries its own. Backends re-derive the
+    /// fd from the key whenever they resubmit an operation, so this mapping
+    /// lives in one place.
+    pub(crate) fn raw_fd(&self) -> RawFd {
+        match self {
+            PortKey::Stdin => 0,
+            PortKey::Stdout => 1,
+            PortKey::Stderr => 2,
+            PortKey::Fd(raw) => *raw,
+        }
+    }
 }
 
 /// Per-fd buffered state.
