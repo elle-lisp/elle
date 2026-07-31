@@ -1047,27 +1047,173 @@ fn stranded_param_release_is_replicated_into_every_branch_arm() {
 }
 
 #[test]
-fn moved_argument_release_stays_after_its_own_arm_tail_call() {
-    // The exemption is read PER point: `x` (local slot 0) is the then-arm call's
-    // argument, so that arm keeps its release in the dead block — even though the
-    // same arm does take a replica of `t`'s release, and even though the merge's
-    // other point is free to take one of `x`'s.
+fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
+    // The exemption is read PER point. `x` (local slot 0) is the then-arm call's
+    // argument, so that arm takes no replica of `x`'s release — the callee's
+    // owned-parameter release is what frees it there. The same arm still takes a
+    // replica of `t`'s release, and the merge's other point, whose call names
+    // nothing, takes one of `x`'s.
     let module = compile_to_lir(
         "(begin (def s (fn (a) a)) (def s2 (fn () 1)) \
          (def f (fn (x t) (if t (s x) (s2)))) (f (list 1 2) true))",
     );
     let arms = branch_arm_release_slots(&module);
     assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
-    let (before, after) = &arms[0];
+    let (moving_before, moving_after) = &arms[0];
     assert!(
-        !before.contains(&0),
+        !moving_before.contains(&0),
         "the moved argument's release was replicated ahead of the arm's TailCall \
-         (before={before:?}) — that release IS the ownership move",
+         (before={moving_before:?}) — that release IS the ownership move",
     );
     assert!(
-        after.contains(&0),
-        "the moved argument's release left the dead block entirely (after={after:?})",
+        !moving_after.contains(&0),
+        "the moved argument's release was left in the arm's dead block \
+         (after={moving_after:?}) — nothing there runs",
     );
+    assert!(
+        moving_before.contains(&1),
+        "the arm took no replica at all (before={moving_before:?}) — the exemption \
+         is read per REGION at each point, not per point",
+    );
+    let (other_before, _) = &arms[1];
+    assert!(
+        other_before.contains(&0),
+        "the sibling arm, whose call names nothing, did not take the replica \
+         (before={other_before:?})",
+    );
+}
+
+/// The local slots each block of `func` releases by value, tagged with whether
+/// that block ends in a frame-replacing `TailCall`.
+///
+/// A branch whose arms do not all tail-call is read here rather than through
+/// `branch_arm_release_slots`, which needs one `TailCall` per arm: what these pins
+/// ask is whether the release reaches the arm that FALLS THROUGH, so the merge
+/// block — which makes no tail call at all — is the block that has to carry it.
+fn released_slots_by_block(func: &LirFunction) -> Vec<(bool, Vec<u16>)> {
+    func.blocks
+        .iter()
+        .map(|b| {
+            let exits = b
+                .instructions
+                .iter()
+                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }));
+            let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
+            let mut slots = Vec::new();
+            for i in &b.instructions {
+                match &i.instr {
+                    LirInstr::LoadLocal { dst, slot } => {
+                        from_slot.insert(*dst, *slot);
+                    }
+                    LirInstr::DecrefValueRegion { src } => {
+                        if let Some(&slot) = from_slot.get(src) {
+                            slots.push(slot);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (exits, slots)
+        })
+        .collect()
+}
+
+/// The first function whose blocks include both a `TailCall`-bearing one and one
+/// without — a branch where only some arms leave through a callee.
+fn mixed_exit_function(module: &crate::lir::LirModule) -> Vec<(bool, Vec<u16>)> {
+    std::iter::once(&module.entry)
+        .chain(module.closures.iter())
+        .map(released_slots_by_block)
+        .find(|blocks| {
+            blocks.iter().any(|(exits, _)| *exits)
+                && blocks.iter().any(|(exits, s)| !*exits && !s.is_empty())
+        })
+        .unwrap_or_default()
+}
+
+// ── A tail-calling arm does not hold back its falling-through siblings ───────
+//
+// The branch-arm release window anchors a region's one release at the branch's
+// consuming node, the point every arm reaches. One arm shape does not reach it: a
+// tail call to a closure replaces the frame. Declining the whole branch for that
+// strands the region on every OTHER arm — the `append`/`concat` dispatch shape,
+// where the list arm hands the argument to `append-list` and every other arm pays
+// the argument's whole object graph. The relocation covers the frame-exiting arm
+// instead, by replica or by the ownership-move exemption
+// (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
+// replica, not the anchor").
+//
+// The counterfactual is declining the branch whole: then `x`'s only release sits
+// in the tail-calling arm and no block outside it names slot 0. End-to-end
+// witnesses: tests/elle/region-branch-arm-window.lisp (rows g/h) and
+// tests/elle/region-branch-arm-window-uaf.lisp.
+
+#[test]
+fn fallthrough_arm_releases_though_a_sibling_tail_call_exits() {
+    // `x` (the first parameter, hence local slot 0) is named by both arms, so its
+    // `decref_point` lands in the later one — which tail-calls. The falling-through
+    // arm must still reach a release.
+    let module = compile_to_lir(
+        "(begin (def s (fn (a) (length a))) \
+         (def f (fn (x t) (if t (length x) (s x)))) (f (list 1 2) true))",
+    );
+    let blocks = mixed_exit_function(&module);
+    assert!(
+        !blocks.is_empty(),
+        "expected a function with both a tail-calling and a falling-through block",
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|(exits, slots)| !*exits && slots.contains(&0)),
+        "the stranded parameter's release is emitted only where the frame is \
+         replaced (blocks={blocks:?}) — the falling-through arm frees nothing",
+    );
+}
+
+#[test]
+fn tail_call_argument_release_stays_the_ownership_move() {
+    // The complement of the pin above, on the same shape: the arm that tail-calls
+    // with `x` keeps its release AFTER the `TailCall`. That release is the
+    // ownership move the callee's owned-parameter release consumes, so a replica
+    // ahead of the call would drop the callee's reference.
+    let module = compile_to_lir(
+        "(begin (def s (fn (a) (length a))) \
+         (def f (fn (x t) (if t (length x) (s x)))) (f (list 1 2) true))",
+    );
+    let func = std::iter::once(&module.entry)
+        .chain(module.closures.iter())
+        .find(|f| {
+            let blocks = released_slots_by_block(f);
+            blocks.iter().any(|(exits, _)| *exits)
+                && blocks.iter().any(|(exits, s)| !*exits && !s.is_empty())
+        })
+        .expect("a function with both a tail-calling and a falling-through block");
+    for b in &func.blocks {
+        let Some(at) = b
+            .instructions
+            .iter()
+            .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+        else {
+            continue;
+        };
+        let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
+        for (idx, i) in b.instructions.iter().enumerate() {
+            match &i.instr {
+                LirInstr::LoadLocal { dst, slot } => {
+                    from_slot.insert(*dst, *slot);
+                }
+                LirInstr::DecrefValueRegion { src } if from_slot.get(src) == Some(&0) => {
+                    assert!(
+                        idx > at,
+                        "the tail call's own argument was released ahead of it \
+                         — that release IS the ownership move",
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 // ── A re-storable capture cell's slot is not a release route ─────────────────

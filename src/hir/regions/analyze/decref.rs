@@ -451,16 +451,21 @@ pub(super) fn populate_decref_points(
 /// longer finds it inside one, so neither of its per-arm routes fires for that
 /// region — the single anchored release is what they were approximating.
 ///
-/// Three boundaries bound the window, the same three the break window carries.
-/// Two are about how many times a release runs: a `While`/`Loop` nested in the
+/// Two boundaries bound the window, the same two the break window carries, and
+/// both are about how many times a release runs: a `While`/`Loop` nested in the
 /// branch and holding the `decref_point` (its body re-allocates per iteration, so
 /// one release cannot cover N) and a `Lambda` holding it (its releases run in
-/// another activation, against another frame's slots). The third guards the
-/// anchor: a **frame-replacing** tail call in the branch means that arm leaves
-/// through the callee rather than arriving at the merge, so the branch declines
-/// whole. A tail call to a *native* pushes no frame and falls through, which is
-/// why the callee kind decides it (`frame_replacing_tail_calls`) and not
-/// `is_tail`.
+/// another activation, against another frame's slots).
+///
+/// An arm that leaves through a **frame-replacing** tail call does not arrive at
+/// the merge, so the anchor alone does not cover it — the frame-exit relocation
+/// does, replicating the anchored release ahead of that arm's `TailCall` or
+/// leaving it to the callee that took the argument over. That replica exists only
+/// for a value-routed release, so such a branch narrows the window to
+/// `call_result_regions` instead of declining whole; everything else keeps its
+/// in-arm release and `regions::compensate`'s counted routes. A tail call to a
+/// *native* pushes no frame and falls through, which is why the callee kind
+/// decides it (`frame_replacing_tail_calls`) and not `is_tail`.
 ///
 /// The region must also be **live-in** — every allocation and holder-definition
 /// site outside the branch's subtree — so a value born inside an arm keeps its
@@ -540,6 +545,15 @@ fn pin_branch_arm_releases(
     )
     .sole;
 
+    // Snapshotted for the frame-exit narrowing below, which reads it while
+    // `region_data` is borrowed mutably. These are the regions
+    // `emit_decref_for_region` releases by VALUE through a holder slot — the only
+    // shape the frame-exit relocation can replicate into an arm, because only a
+    // value route nil-stamps the slot it read and so no-ops on a second copy
+    // (mechanism.md § "An arm that leaves through a callee takes a replica, not
+    // the anchor"; `self_cancelling_run`).
+    let call_result_regions = info.call_result_regions.clone();
+
     // Regions whose release belongs to another mechanism: moving their
     // `decref_point` would move a release that mechanism, not this one, emits.
     let excluded: rustc_hash::FxHashSet<Region> = info
@@ -564,13 +578,17 @@ fn pin_branch_arm_releases(
             .copied()
             .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
             .collect();
-        if scopes.frame_exits.iter().any(|&e| {
+        // Does any arm leave through a callee instead of arriving at the merge?
+        // The anchor still covers the arms that fall through, and the frame-exit
+        // relocation covers the rest — but only for a release it can REPLICATE,
+        // which is the value route alone. So the answer narrows the window to
+        // `call_result_regions` here rather than declining the branch whole; every
+        // other region keeps its in-arm release and compensation's counted routes.
+        let arm_exits_frame = scopes.frame_exits.iter().any(|&e| {
             e >= br.node_lo
                 && e <= br.node_hi
                 && !inner_lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
-        }) {
-            continue;
-        }
+        });
         let anchor = last_use.get(&br.id).copied().unwrap_or(br.id);
         let anchor_ord = ord(anchor);
         // Only the barriers nested INSIDE this branch matter: one enclosing the
@@ -583,6 +601,9 @@ fn pin_branch_arm_releases(
             .collect();
         for (&r, d) in info.region_data.iter_mut() {
             if excluded.contains(&r) {
+                continue;
+            }
+            if arm_exits_frame && !call_result_regions.contains(&r) {
                 continue;
             }
             let dord = ord(d.decref_point);
@@ -628,14 +649,16 @@ struct BranchWindowScopes {
     /// whose exits a `frame_exits` entry belongs to.
     lambdas: Vec<(u32, u32)>,
     /// Post-order indices of the tail calls that may replace the frame. One
-    /// inside a branch means its merge label is not a point every arm reaches.
+    /// inside a branch means its merge label is not a point every arm reaches, so
+    /// the branch anchors only the releases the relocation can replicate into
+    /// that arm.
     ///
     /// Narrower than [`BreakWindowScopes::frame_exits`], which counts every
     /// `Return` and every tail `Call`: a functionalized `Return` inside an arm
     /// stores the branch's result and jumps to the merge rather than leaving, and
     /// a tail call to a *native* falls through to it. Only a callee that can
-    /// replace the frame actually skips the merge, and the window exists for the
-    /// native-tail dispatch arm, which the coarser rule would decline.
+    /// replace the frame actually skips the merge, and reading the coarser set
+    /// would narrow every native-tail dispatch arm for nothing.
     frame_exits: Vec<u32>,
 }
 

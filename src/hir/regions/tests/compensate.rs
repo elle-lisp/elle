@@ -85,8 +85,10 @@ fn release_clears_the_arms(
 // Two mechanisms discharge that one obligation, and the routing is a property of
 // the region and the branch together. The window moves the region's single
 // release to a point every arm reaches — admitted only where escape proves the
-// frame is the region's sole holder, and only where the branch's merge label is
-// reached by every arm. Everything else keeps the in-arm release plus the per-arm
+// frame is the region's sole holder. Where an arm leaves through a frame-replacing
+// callee it reaches no merge, and the frame-exit relocation covers it instead, so
+// such a branch narrows the window to the value-routed releases that relocation
+// can replicate. Everything else keeps the in-arm release plus the per-arm
 // compensation routes, which carry a count argument instead. The tests below pin
 // each route on the shape that selects it.
 
@@ -149,26 +151,41 @@ fn match_arms_are_treated_like_if_arms() {
 }
 
 #[test]
-fn a_frame_replacing_arm_keeps_the_per_arm_compensation() {
-    // The window's third boundary selects the other route: `(g 7)` in tail
-    // position replaces the frame, so the ELSE arm never arrives at the merge and
-    // a release anchored there would be dead on exactly that path. The branch
-    // declines the window, and the dead sibling arm takes its head release —
-    // which is what keeps `xs` from stranding on the path that returns it.
+fn a_frame_replacing_arm_anchors_a_value_routed_release() {
+    // `(g 7)` in tail position replaces the frame, so the ELSE arm leaves through
+    // the callee rather than arriving at the merge. The anchor alone does not
+    // cover that arm — the frame-exit relocation replicates the anchored release
+    // ahead of its `TailCall` — so the branch narrows to the releases that
+    // relocation can replicate instead of declining whole
+    // (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes
+    // a replica, not the anchor"). Only a VALUE route is replicable, which is what
+    // the first assertion states about this shape and the second relies on.
     let (hir, arena, symbols, info) =
         analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) (g 7)))");
-    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let b = find_binding_by_name(&hir, "xs", &arena, &symbols).expect("the param `xs`");
     assert!(
-        arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
-        "a branch the window declines must still compensate its dead sibling arm"
+        info.binding_source_regions.get(&b).is_some_and(
+            |rs| !rs.is_empty() && rs.iter().all(|r| info.call_result_regions.contains(r))
+        ),
+        "the narrowing admits only value-routed regions, so this pin needs `xs` \
+         to be one — a region released by id keeps the whole-branch decline"
+    );
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a frame-replacing sibling arm must not decline a value-routed release"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
+        "the anchored release must not be doubled by a per-arm compensation"
     );
 }
 
 #[test]
 fn a_native_tail_arm_does_not_decline_the_window() {
-    // The counterfactual for the boundary above: a tail call to a NATIVE pushes
-    // no frame and falls through to the merge, so the same shape over `length`
-    // keeps the window — the distinction is the callee kind, not `is_tail`.
+    // A tail call to a NATIVE pushes no frame and falls through to the merge, so
+    // it is not a frame exit at all and the narrowing above never applies — the
+    // distinction is the callee kind, not `is_tail`.
     let (hir, arena, symbols, info) =
         analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) (length xs)))");
     let (then_id, else_id) = first_if_arms(&hir).expect("an If node");

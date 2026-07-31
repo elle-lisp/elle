@@ -26,11 +26,20 @@
 # routes, and that decline is what the store / return / escaping-closure witnesses
 # of region-branch-arm-window-uaf.lisp drive.
 #
+# An arm that leaves through a frame-replacing callee never reaches the merge, so
+# the anchor alone does not cover it. The frame-exit relocation does: a merge owns
+# the relocation points its arms sealed, so the anchored release is replicated
+# ahead of each arm's `TailCall`, and an arm whose call NAMES the region keeps its
+# copy in the dead block instead — that release is the ownership move the callee
+# consumes (docs/impl/region/mechanism.md § "An arm that leaves through a callee
+# takes a replica, not the anchor"). Such a branch is driven on BOTH kinds of arm
+# below, since the two paths are covered by different halves of the composition.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
-# must be BOUNDED for each placement, and for the three boundary shapes, whose
+# must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
 # region-branch-arm-window-uaf.lisp; the per-op rates are the `param-used-arm`
-# probes in tests/elle/oracle.lisp.
+# and `branch-arm-tailcall-sibling` probes in tests/elle/oracle.lisp.
 
 (def window 2000)
 
@@ -96,8 +105,8 @@
 # counted reference through the allocation funnel, so the re-anchored release
 # still drops only the frame's own (docs/impl/region/mechanism.md § "Lexical
 # capture is not a second holder to fear"). The closure is called OUTSIDE the
-# branch, so no arm leaves through a frame-replacing callee and the window's third
-# boundary does not fire.
+# branch, so every arm falls through to the merge and the anchor alone covers this
+# row — the replicated placement is rows (g) and (h) below.
 (defn used-captured (v t)
   (let [f (fn () (length v))]
     (%add (f)
@@ -106,11 +115,39 @@
             :b (length v)
             _ (length v)))))
 
+# (g) a sibling arm leaves through a frame-replacing CLOSURE tail call that names
+# the same parameter — the shape `append`/`concat` take, where the list arm hands
+# the argument to `append-list`. Driving the OTHER arm is the leak this closes:
+# `v`'s one release sits in the tail-calling arm, so every call that dispatches
+# elsewhere strands the argument's whole object graph. Driving the tail-calling arm
+# is the complement — its reference is the ownership move, and the callee's owned
+# parameter release is what must still fire.
+(defn tc-callee (v)
+  (length v))
+(defn tailcall-sibling (v t)
+  (match t
+    :a (length v)
+    :b (tc-callee v)
+    _ 0))
+
+# (h) the tail-calling arm names NOTHING the other arms hold: the region's release
+# is anchored at the merge and REPLICATED ahead of that arm's call, since no
+# exemption applies to it. Driven on both the falling-through and the frame-exiting
+# arm, which the two halves of the composition cover separately.
+(defn tc-bare ()
+  0)
+(defn tailcall-elsewhere (v t)
+  (match t
+    :a (length v)
+    :b (length v)
+    :c (tc-bare)
+    _ 0))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
-# boundary would leave one release covering many allocations (the loop), a
-# release emitted against another frame's slots (the lambda), or a release
-# stranded past a frame replacement (the closure tail call) — all read as growth.
+# boundary would leave one release covering many allocations (the loop) or a
+# release emitted against another frame's slots (the lambda) — both read as
+# growth.
 
 # A nested loop holding the `decref_point`: the loop body re-allocates per
 # iteration, so `s`'s release must fire per iteration, not once after the branch.
@@ -140,18 +177,6 @@
     :b 1
     _ 2))
 
-# A frame-replacing tail call in an arm: that arm leaves through the callee and
-# never reaches the merge label, so the branch declines the window whole. Driven
-# on the frame-exiting arm itself — the one whose own release a hoist to the
-# merge would strand.
-(defn bound-callee (v)
-  (length v))
-(defn bound-tailcall (v t)
-  (match t
-    :a (length v)
-    :b (bound-callee v)
-    _ 0))
-
 # controls ─────────────────────────────────────────────────────────────────────
 # Already-bounded shapes: taking the arm that HOLDS the `decref_point`, and a
 # single-arm dispatch with nothing to strand. A red subject above is the window
@@ -175,10 +200,16 @@
 (def used-local-d (measure (fn () (used-local :a)) 200 window))
 (def used-captured-d
   (measure (fn () (used-captured (list 1 2 3) :a)) 200 window))
+(def tailcall-sibling-fallthrough-d
+  (measure (fn () (tailcall-sibling (list 1 2 3) :a)) 200 window))
+(def tailcall-sibling-exit-d
+  (measure (fn () (tailcall-sibling (list 1 2 3) :b)) 200 window))
+(def tailcall-elsewhere-fallthrough-d
+  (measure (fn () (tailcall-elsewhere (list 1 2 3) :a)) 200 window))
+(def tailcall-elsewhere-exit-d
+  (measure (fn () (tailcall-elsewhere (list 1 2 3) :c)) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
-(def bound-tailcall-d
-  (measure (fn () (bound-tailcall (list 1 2 3) :b)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
 (def ctl-one-arm-d (measure (fn () (ctl-one-arm (list 1 2 3) :a)) 200 window))
 
@@ -187,8 +218,11 @@
          type-dispatch-d)
 (println "  two " used-two-d "  local " used-local-d "  captured "
          used-captured-d)
-(println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d
-         "  tailcall " bound-tailcall-d)
+(println "  tail-calling sibling: names-arg fallthrough "
+         tailcall-sibling-fallthrough-d "  exit " tailcall-sibling-exit-d)
+(println "  tail-calling sibling: names-none fallthrough "
+         tailcall-elsewhere-fallthrough-d "  exit " tailcall-elsewhere-exit-d)
+(println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
 (println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
 
 # Every leak in this class is at least one whole region per call, so a surviving
@@ -207,9 +241,17 @@
 (bounded? used-captured-d
           "parameter the arms reach through a locally-called closure's env")
 
+(bounded? tailcall-sibling-fallthrough-d
+          "arm falling through while a sibling tail-calls with the parameter")
+(bounded? tailcall-sibling-exit-d
+          "arm tail-calling with the parameter: the ownership move")
+(bounded? tailcall-elsewhere-fallthrough-d
+          "arm falling through while a sibling tail-calls naming nothing")
+(bounded? tailcall-elsewhere-exit-d
+          "arm tail-calling naming nothing: the replicated release")
+
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
-(bounded? bound-tailcall-d "closure tail call in an arm: the merge is unreached")
 
 # Value preservation: re-anchoring a release must not change what runs.
 (assert (= (used-param (list 1 2 3) :a) 3) "param arm result lost")
@@ -221,9 +263,15 @@
 (assert (= (used-two (list 1 2) (list 3 4) :a) 4) "two-param arm result lost")
 (assert (= (used-local :b) 3) "local arm result lost")
 (assert (= (used-captured (list 1 2 3) :b) 6) "captured arm result lost")
+(assert (= (tailcall-sibling (list 1 2 3) :a) 3)
+        "tail-calling sibling: fall-through arm result lost")
+(assert (= (tailcall-sibling (list 1 2 3) :b) 3)
+        "tail-calling sibling: frame-exiting arm result lost")
+(assert (= (tailcall-elsewhere (list 1 2 3) :a) 3)
+        "bare tail-calling sibling: fall-through arm result lost")
+(assert (= (tailcall-elsewhere (list 1 2 3) :c) 0)
+        "bare tail-calling sibling: frame-exiting arm result lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
-(assert (= (bound-tailcall (list 1 2 3) :b) 3)
-        "boundary tail call body diverged")
 
 (println "region-branch-arm-window: ok")

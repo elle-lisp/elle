@@ -324,8 +324,8 @@ window ever separates them.
 
 ### The boundaries
 
-Three bound the window, the same three the break window carries and
-for the same reasons. Two are about *how many times* a release runs:
+Two bound the window, the same two the break window carries and for the same
+reasons. Both are about *how many times* a release runs:
 
 - **An iterative scope nested in the branch** (`While`/`Loop`) holding the
   `decref_point`. A release inside it runs per iteration; hoisting it past the
@@ -333,17 +333,6 @@ for the same reasons. Two are about *how many times* a release runs:
 - **A `Lambda` nested in the branch** holding it. Its body's releases run in a
   different activation against a different frame's slots, which never reach this
   branch's merge label.
-
-The third guards the anchor itself — the hoist's premise is that the merge label
-is a point every arm **reaches**:
-
-- **A frame-replacing tail call in the branch.** A tail call to a *closure*
-  replaces the frame, so that arm leaves through the callee and never arrives at
-  the merge; a release moved there would be dead on exactly the path that runs
-  it. A tail call to a **native** pushes no frame and falls through to the merge,
-  which is why the callee kind decides this and not the `is_tail` flag: the
-  native-tail dispatch shape is the whole point of the window. The branch
-  declines whole when any arm can leave through a callee.
 
 The region must also be **live-in** to the branch (every allocation and
 holder-definition site outside the branch's subtree) — the same premise
@@ -354,12 +343,62 @@ Regions whose release belongs to another mechanism are excluded exactly as in
 compensation: merge children, co-owned-group members, capture cells, the
 mutated-slot 1-slot containers, and anything already suppressed.
 
-Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with all
-three boundaries, the `If` face and the captured-holder face driven as rows), the
-`param-used-arm` / `param-used-arm-if` probes in `tests/elle/oracle.lisp` (the
-per-op rates), and `tests/elle/region-branch-arm-window-uaf.lisp` (the soundness
-complement — a value read, stored, returned, carried across a yield, or reached
-through a closure's environment after the branch must survive the moved release).
+### An arm that leaves through a callee takes a replica, not the anchor
+
+One arm shape does not reach the merge label at all: a tail call to a *closure*
+replaces the frame, so that arm leaves through the callee. Read as "the anchor
+must be a point every arm reaches", that shape would make the branch decline
+whole — and it would take the dominant polymorphic stdlib entry point with it.
+`append` and `concat` hand a list argument to `append-list` / `concat-seq` in one
+arm, so on **every other** arm the owned parameter's whole object graph is
+stranded, once per call.
+
+The window needs a weaker premise than that reading states: the release must
+**run once on every path**, which one point covering every path is only one way
+to achieve. The frame-exit relocation supplies the other (§ "The relocation point
+outlives the block, and a branch merge inherits it"): a merge starts life owning
+the points its arms sealed, so a release emitted at the anchor is also
+**replicated** ahead of each arm's `TailCall`. An arm that leaves through its
+callee runs its own copy and never reaches the anchor; an arm that falls through
+reaches the anchor and no-ops against the `nil` stamp if it already ran a copy.
+So the window anchors whatever the arms end in, and the exemption already
+reads per point: an arm whose call **names** the region keeps its copy in the
+dead block, because that release is the ownership move the callee's
+owned-parameter release consumes.
+
+Neither mechanism owes a new count argument for the composition. Both make a
+release fire on a path where none fired before, and both discharge exactly that
+with `sole_frame_held_regions` — the anchor at the analysis, each replica at its
+own point.
+
+The composition does need a release the relocation can replicate, and only a
+**value-routed** one qualifies: it loads the holder slot, releases that value's
+region, and stamps the slot `nil`, so a second copy on one path
+no-ops. A release by region id (`DecrefRegion`) leaves no stamp and would count
+twice, which is why the relocation refuses it — and refusing it *there* would
+leave the anchored release covering only the falling-through arms while the
+tail-calling arm, which per-arm compensation used to reach at its head, got
+nothing. So the frame-exit relaxation is asked per region and admits only
+`call_result_regions`, the class `emit_decref_for_region` releases by value
+through a slot. This is `self_cancelling_run`'s restriction read one step
+earlier, at the admission it builds on, and it is the same value-route line
+compensation's `tail` route already draws. A branch with a frame-replacing arm
+therefore still declines whole for every other region, which keeps compensation's
+head and tail routes reaching them exactly as before.
+
+Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with both
+boundaries, the `If` face, the captured-holder face and the frame-replacing-arm
+faces driven as rows), the `param-used-arm` / `param-used-arm-if` /
+`branch-arm-tailcall-sibling` probes in `tests/elle/oracle.lisp` (the per-op
+rates), the placement pins in `lir::lower::tests::release`
+(`fallthrough_arm_releases_though_a_sibling_tail_call_exits`,
+`tail_call_argument_release_stays_the_ownership_move`,
+`moved_argument_takes_no_replica_in_the_arm_that_moves_it`), the value-route
+narrowing pin `regions::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
+and `tests/elle/region-branch-arm-window-uaf.lisp` (the
+soundness complement — a value read, stored, returned, carried across a yield,
+reached through a closure's environment, or moved into a sibling arm's tail callee
+after the branch must survive the moved release).
 
 ## A binder's init release lands after the slot store
 

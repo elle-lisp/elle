@@ -12,11 +12,17 @@
 # a closure / its caller, so a second holder exists the moved release must leave
 # standing — and where that holder ESCAPES, the admission refuses the window
 # outright; the arm re-allocates per iteration of a nested loop, so
-# one release cannot cover N; the arm's releases belong to another frame; the arm
-# parked a fiber that resolves the region through its own activation map after the
-# branch; and the arm leaves through a frame-replacing callee that never reaches
-# the merge. A wrongly-admitted window frees a live region and the read below
+# one release cannot cover N; the arm's releases belong to another frame; and the
+# arm parked a fiber that resolves the region through its own activation map after
+# the branch. A wrongly-admitted window frees a live region and the read below
 # faults.
+#
+# A branch one of whose arms leaves through a frame-replacing callee is admitted
+# like any other — the relocation replicates the anchored release ahead of that
+# arm's call, or the exemption leaves it to the callee that took the argument over
+# (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
+# replica, not the anchor"). So the escape refusals are driven over that branch
+# shape too, since it reaches the admission by a path the others do not.
 #
 # Every witness reads the subject's HEAP contents after the branch, through a
 # chain long enough that an over-early free faults rather than reading stale but
@@ -132,8 +138,11 @@
     (fiber/resume f)))
 
 # (h) an arm that leaves through a frame-replacing TAIL CALL, with a sibling arm
-# naming the same parameter. The branch declines the window, so this arm's own
-# release must still run where it was placed.
+# naming the same parameter. The window anchors such a branch and the relocation
+# covers the frame-exiting arm, so both paths must hold: the tail-calling arm hands
+# its reference to the callee (the exemption keeps that release in the dead block,
+# and the callee's owned-parameter release is the one that fires), while the
+# sibling arm takes the release the merge anchors.
 (defn w-tail-callee (v)
   (length (first v)))
 (defn w-tail (v t)
@@ -141,6 +150,27 @@
     :a (length (first v))
     :b (w-tail-callee v)
     _ 0))
+
+# (h2) the same branch with the falling-through arm STORING the subject into a
+# container that outlives the frame. The store is an escape facet, so the admission
+# refuses the region however the sibling arm ends — the read back out must find it.
+(defn w-tail-store (v t)
+  (match t
+    :a (push sink v)
+    :b (w-tail-callee v)
+    _ 0)
+  (length (get sink (%sub (length sink) 1))))
+
+# (h3) the same branch with the falling-through arm RETURNING the subject, so the
+# caller reads it after the callee's frame would have replaced this one. The return
+# is an escape facet too, and the caller's read must see the value alive.
+(defn w-tail-return-inner (v t)
+  (match t
+    :a v
+    :b (w-tail-callee v)
+    _ 0))
+(defn w-tail-return (v t)
+  (length (first (w-tail-return-inner v t))))
 
 # (i) the `If` face, with the subject consumed after the branch.
 (defn w-if (v c)
@@ -164,6 +194,9 @@
 (var j 0)
 (var k 0)
 (var m 0)
+(var p 0)
+(var q 0)
+(var r 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -174,6 +207,9 @@
   (assign f (w-lambda i :a))
   (assign g (w-park (list (string "g" i) i) :a))
   (assign h (w-tail (list (string "h" i) i) :b))
+  (assign p (w-tail (list (string "p" i) i) :a))
+  (assign q (w-tail-store (list (string "q" i) i) :a))
+  (assign r (w-tail-return (list (string "r" i) i) :a))
   (assign j (w-if (list (string "j" i) (string "jj" i)) true))
   (assign k (c-plain (list (string "k" i) i)))
   # The sink is a module-level container by design (witness b stores into it);
@@ -192,6 +228,12 @@
 (assert (%gt f 0) "lambda-body value released from the enclosing frame")
 (assert (> g 0) "parked fiber's borrow freed by the moved release")
 (assert (%gt h 0) "tail-call arm's own release lost to the merge")
+(assert (%gt p 0)
+        "arm value freed by the merge release a tail-calling sibling admitted")
+(assert (%gt q 0)
+        "stored arm value freed though a sibling arm leaves through a callee")
+(assert (%gt r 0)
+        "returned arm value freed though a sibling arm leaves through a callee")
 (assert (%gt j 0) "`if` arm value freed under the post-branch read")
 
 (println "region-branch-arm-window-uaf: ok")

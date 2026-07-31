@@ -481,6 +481,19 @@
     _ (length v)))
 (defn t22-param-if [v c]
   (if c (length v) (%add 1 (length v))))
+# The same window over a branch one of whose arms leaves through a frame-replacing
+# CLOSURE tail call naming the same parameter — the `append`/`concat` dispatch
+# shape. Anchoring is what covers the arm driven here; the frame-exiting arm is
+# covered by the relocation's exemption, since its call took the argument over
+# (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
+# replica, not the anchor").
+(defn t22-tc-callee [v]
+  (length v))
+(defn t22-tailcall-sibling [v t]
+  (match t
+    :a (length v)
+    :b (t22-tc-callee v)
+    _ 0))
 # The frame-exit release (docs/impl/region/mechanism.md § "A release past a
 # frame-replacing tail call is not a release"). `t23-unused`'s parameter is used
 # nowhere, so its release is the unused-parameter fallback the lowerer emits at the
@@ -820,7 +833,7 @@
         (cyc-mk)
         nil)) 0]  # string ops + realistic patterns
     ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1))) 0]
-   ["concat" (fn [j] (concat "a" "b" "c")) 4]
+   ["concat" (fn [j] (concat "a" "b" "c")) 1]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
    ["join" (fn [j] (string/join ["a" "b" "c"] ",")) 0]
    ["trim" (fn [j] (string/trim "  x  ")) 0]
@@ -942,7 +955,7 @@
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
         (fiber/resume f))) 0]
-   ["concat-while" (fn [j] (concat "x" (number->string j))) 3]
+   ["concat-while" (fn [j] (concat "x" (number->string j))) 1]
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
@@ -1330,7 +1343,7 @@
 # call-result regions no static slot can name. Pinned at the exact `(concat "a" "b")`
 # / 2-element `fold` shapes.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
-                   count-gauge 100 6 60 0.4 0.5) 3)
+                   count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
                    count-gauge 100 6 60 0.4 0.5) 1)
@@ -1385,7 +1398,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) 22)
+                   count-gauge 100 6 60 0.4 0.5) 18)
 
 # Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
 # (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
@@ -1607,7 +1620,7 @@
            (fn [i]
              (let [f (fn [] i)]
                (f))) 0)
-(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 3)
+(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 1)
 (pin (measure-core "yield-put"
                    (fn [b]
                      (drain-block (fn [n]
@@ -1788,7 +1801,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign s (concat s "x"))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "append-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1796,7 +1809,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign acc (append acc [j]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 2)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 
 # ── Discarded call-result + break-escape ──────────────────────────────
 # Direct while-statement run-blocks (no thunk wrapper): the discarded value is a
@@ -1893,9 +1906,13 @@
 # region (3 cons cells) strands on every arm that is not the one naming it last,
 # unless the single release is anchored where every arm reaches it. Undeclared,
 # like `rest-array-copy`, so a regression trips the completeness gate loudly
-# rather than being absorbed as an F5 strand. Their counterfactual and the three
+# rather than being absorbed as an F5 strand. Their counterfactual and the two
 # window boundaries are `tests/elle/region-branch-arm-window.lisp`; the soundness
 # complement is `region-branch-arm-window-uaf.lisp`.
+# `branch-arm-tailcall-sibling` is the third: the same window over a branch whose
+# OTHER arm leaves through a frame-replacing closure tail call. Declining such a
+# branch whole strands the argument on the arm driven here, which is what the
+# `concat`/`append` family paid per call.
 (pin (measure-core "param-used-arm"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1909,6 +1926,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t22-param-if (list 1 2 3) true)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "branch-arm-tailcall-sibling"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-tailcall-sibling (list 1 2 3) :a)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The scope-map face of the same `Match`: the arm READS a name its pattern bound,
 # and that read is a borrowing read of the SCRUTINEE (rules.md Rule 4), so it is
