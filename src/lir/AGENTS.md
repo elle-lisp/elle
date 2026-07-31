@@ -150,6 +150,43 @@ stored in `Closure.location_map` and used by the VM for error reporting.
      non-suspending functions, `call_sites` is empty. This avoids overhead
      for silent functions that can never yield.
 
+11. **A block's first emitted predecessor fixes its operand depth.** Every
+     other edge into that block must arrive at the same depth. See "Merge
+     operand depth" below.
+
+## Merge operand depth
+
+The VM addresses local `n` as `frame_base + n` on the operand stack, so the
+entry block reserves `num_locals` positions and operands stack above them
+(`Emitter::emit_block`). A path that pops one operand too many falls through
+that floor and destroys a live local; the damage shows up much later, as a
+`LoadLocal` of a high slot indexing past the end of the stack.
+
+The emitter simulates the operand stack per block. A block inherits its
+starting simulation from the first predecessor that reaches it
+(`yield_stack_state`, first writer wins), because the simulation cannot
+reconcile two different incoming shapes. That makes one rule mandatory:
+
+> **The first predecessor emitted fixes the merge block's operand depth, and
+> every later edge into that block must leave exactly that depth.**
+
+`pop_trailing_orphans_to` is the only tool the emitter has for meeting the rule.
+An orphan is a stack cell that no register's canonical position names — the
+residue `ensure_on_top` leaves when it copies a value up with `DupN` and the
+copy is then consumed. Orphans are dead, so popping them is free; popping
+them is also what keeps a loop body from growing the stack by one cell per
+iteration.
+
+But the pops are per-edge, and only `Terminator::Jump` performs them, so they
+must be **bounded by the target's already-fixed depth**. Popping past it
+splits the paths: the branch edge into the merge leaves the orphan, the jump
+edge removes it, and the merge's successors — which inherited the branch's
+simulation — pop it a second time on the path that already did. Two pops, one
+value, and the second one lands in the reserved local region. This is why
+`Terminator::Jump` trims only down to the target's recorded depth
+(`yield_stack_state`, or `block_entry_depth` for a back edge into a block
+already emitted) rather than to the first live value.
+
 ## Key instructions
 
 | Instruction | Stack effect | Notes |

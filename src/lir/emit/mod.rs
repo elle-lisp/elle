@@ -32,6 +32,11 @@ pub struct Emitter {
     /// When a block ends with Terminator::Yield, the stack state is saved here
     /// so the resume block can start with the correct simulation state.
     yield_stack_state: HashMap<Label, (Vec<Reg>, HashMap<Reg, usize>)>,
+    /// Operand depth each already-emitted block started at, keyed by label.
+    /// `yield_stack_state` answers the same question for a block still ahead of
+    /// the cursor, but `emit_block` consumes that entry — so this is what a back
+    /// edge into a loop header has left to trim against (`edge_depth`).
+    block_entry_depth: HashMap<Label, usize>,
     /// Yield point metadata collected during emission.
     yield_points: Vec<YieldPointInfo>,
     /// Call site metadata collected during emission.
@@ -62,6 +67,7 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             symbol_names: HashMap::new(),
             yield_stack_state: HashMap::new(),
+            block_entry_depth: HashMap::new(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             current_func_may_suspend: false,
@@ -81,6 +87,7 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             symbol_names,
             yield_stack_state: HashMap::new(),
+            block_entry_depth: HashMap::new(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             current_func_may_suspend: false,
@@ -176,6 +183,7 @@ impl Emitter {
         self.stack.clear();
         self.reg_to_stack.clear();
         self.yield_stack_state.clear();
+        self.block_entry_depth.clear();
         self.yield_points.clear();
         self.call_sites.clear();
         self.current_func_may_suspend = func.signal.may_suspend();
@@ -241,6 +249,11 @@ impl Emitter {
             self.reg_to_stack.clear();
         }
 
+        // This block's operand depth is now fixed. Record it before the
+        // instructions run: once the cursor is past a block, a back edge into it
+        // has nothing else to trim against (`edge_depth`).
+        self.block_entry_depth.insert(block.label, self.stack.len());
+
         // Pre-allocate local slots at the start of the entry block.
         //
         // The VM shares a single stack for both local variable slots
@@ -275,6 +288,22 @@ impl Emitter {
         self.emit_terminator(&block.terminator.terminator);
     }
 
+    /// The operand depth `label` is already fixed at, or `None` when this edge
+    /// is the first to reach it and so gets to fix it.
+    ///
+    /// A block's depth is decided by whichever predecessor is emitted first —
+    /// the simulation keeps that predecessor's stack and discards every later
+    /// one (see `Terminator::Jump`'s `or_insert_with`). The record lives in
+    /// `yield_stack_state` while the block is still ahead of the cursor, and
+    /// moves to `block_entry_depth` when `emit_block` consumes it, so a back
+    /// edge into an already-emitted loop header is answered too.
+    fn edge_depth(&self, label: Label) -> Option<usize> {
+        self.yield_stack_state
+            .get(&label)
+            .map(|(stack, _)| stack.len())
+            .or_else(|| self.block_entry_depth.get(&label).copied())
+    }
+
     fn emit_terminator(&mut self, term: &Terminator) {
         match term {
             Terminator::Return(reg) => {
@@ -289,7 +318,16 @@ impl Emitter {
                 // path for `apply`).  Without this, branches that create
                 // orphans leave a deeper stack than branches that don't,
                 // causing wrong DupN offsets in the merge block.
-                self.pop_trailing_orphans();
+                //
+                // Bounded by the depth the target is already fixed at: a
+                // `Terminator::Branch` edge into the same merge pops nothing, so
+                // trimming past that depth would leave the two edges at
+                // different depths — and the merge's successors, which inherited
+                // the branch's simulation, would pop the orphan again on the
+                // path that already dropped it (src/lir/AGENTS.md § "Merge
+                // operand depth").
+                let floor = self.edge_depth(*label).unwrap_or(0);
+                self.pop_trailing_orphans_to(floor);
 
                 // Save stack state for the target block if this is the first
                 // predecessor to jump there. Multiple blocks may jump to the

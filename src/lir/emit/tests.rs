@@ -134,6 +134,126 @@ fn test_yield_point_info_collected() {
     assert!(yield_points[0].stack_regs.is_empty());
 }
 
+// ── Merge-block operand depth ──
+//
+// A block inherits its stack simulation from the first predecessor that
+// reaches it, so that predecessor fixes the merge's operand depth and every
+// later edge must arrive at the same depth (src/lir/AGENTS.md § "Merge operand
+// depth"). `pop_trailing_orphans_to` is the only lever the emitter has, and it
+// runs on `Terminator::Jump` only — so a jump edge that trims past the depth a
+// sibling branch edge left behind desynchronizes the two paths, and the
+// orphan the jump already removed is popped a second time downstream.
+
+/// A two-diamond function that pins the rule. The entry block leaves ONE
+/// orphan on the operand stack, then branches; `L1` is the diamond's other
+/// arm and jumps to the merge. The merge branches again, and both of its arms
+/// jump to the exit.
+///
+/// Slot 2 holds the sentinel the function returns. It is the topmost local, so
+/// it is the first casualty of a pop that falls through the reserved region:
+/// the second (spurious) orphan pop shortens the stack to `num_locals - 1`, and
+/// the exit block's `LoadLocal 2` then indexes past its end.
+///
+/// The orphan is built the way the lowerer builds one at a reassignment
+/// (`lower_assign`'s drop-on-overwrite arm): push the new value, push the old
+/// value, store the new value — `ensure_on_top` must `DupN` it back to the top
+/// past the old one — then consume the old value. What remains is the new
+/// value's original cell, which no register names any more.
+fn orphan_across_merge_func() -> LirFunction {
+    let mut func = LirFunction::new(Arity::Exact(0));
+    func.num_locals = 3;
+    func.num_regs = 6;
+    func.entry = Label(0);
+
+    let konst = |dst: Reg, n: i64| {
+        SpannedInstr::new(
+            LirInstr::Const {
+                dst,
+                value: LirConst::Int(n),
+            },
+            synthetic_span(),
+        )
+    };
+    let store = |slot: u16, src: Reg| {
+        SpannedInstr::new(LirInstr::StoreLocal { slot, src }, synthetic_span())
+    };
+    let load = |dst: Reg, slot: u16| {
+        SpannedInstr::new(LirInstr::LoadLocal { dst, slot }, synthetic_span())
+    };
+    let jump = |label: Label| SpannedTerminator::new(Terminator::Jump(label), synthetic_span());
+
+    // Entry: park the sentinel in slot 2, then manufacture the orphan.
+    let mut entry = BasicBlock::new(Label(0));
+    entry.instructions.push(konst(Reg(0), 42));
+    entry.instructions.push(store(2, Reg(0)));
+    entry.instructions.push(konst(Reg(1), 7)); // the "new" value
+    entry.instructions.push(konst(Reg(2), 9)); // the "old" value, pushed above it
+    entry.instructions.push(store(0, Reg(1))); // DupN past the old value, then store
+    entry.instructions.push(store(1, Reg(2))); // consume the old value
+                                               // Simulated stack is now [Reg(1)] — one orphan, and it is on top.
+    entry.instructions.push(load(Reg(3), 0));
+    entry.terminator = SpannedTerminator::new(
+        Terminator::Branch {
+            cond: Reg(3),
+            then_label: Label(1),
+            else_label: Label(2),
+        },
+        synthetic_span(),
+    );
+    func.blocks.push(entry);
+
+    // The diamond's other arm: nothing but the jump to the merge.
+    let mut arm = BasicBlock::new(Label(1));
+    arm.terminator = jump(Label(2));
+    func.blocks.push(arm);
+
+    // The merge, which branches again into a second diamond.
+    let mut merge = BasicBlock::new(Label(2));
+    merge.instructions.push(load(Reg(4), 1));
+    merge.terminator = SpannedTerminator::new(
+        Terminator::Branch {
+            cond: Reg(4),
+            then_label: Label(3),
+            else_label: Label(4),
+        },
+        synthetic_span(),
+    );
+    func.blocks.push(merge);
+
+    for label in [Label(3), Label(4)] {
+        let mut b = BasicBlock::new(label);
+        b.terminator = jump(Label(5));
+        func.blocks.push(b);
+    }
+
+    // Exit: read the sentinel back out of the topmost local and return it.
+    let mut exit = BasicBlock::new(Label(5));
+    exit.instructions.push(load(Reg(5), 2));
+    exit.terminator = SpannedTerminator::new(Terminator::Return(Reg(5)), synthetic_span());
+    func.blocks.push(exit);
+
+    func
+}
+
+#[test]
+fn merge_predecessors_leave_equal_operand_depth() {
+    // Locals 0 and 1 hold 7 and 9, so both branches take their `then` arm and
+    // the run passes through two jump edges. Each edge may drop the orphan at
+    // most once between them; a second drop shortens the stack into the
+    // reserved local region and the sentinel in slot 2 stops existing.
+    let func = orphan_across_merge_func();
+    let mut emitter = Emitter::new();
+    let (bytecode, _, _) = emitter.emit(&func);
+    let mut vm = crate::vm::VM::new();
+    let result = vm.execute(&bytecode);
+    assert_eq!(
+        result.ok().and_then(|v| v.as_int()),
+        Some(42),
+        "a jump edge into an already-fixed merge must not pop below the depth \
+         the branch edge left, or the frame loses its topmost local"
+    );
+}
+
 // ── The coalescing equivalence oracle (`AssertRegionMatches`) ──
 //
 // `AssertRegionMatches { region_id, src }` is the debug-only net under
