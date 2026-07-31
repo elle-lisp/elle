@@ -408,9 +408,10 @@ fn reassign_scope_split_is_structural_under_inline_rewalk() {
 /// Facet A of the captured-mutable read mis-coalesce
 /// (integration::file_scope::captures::test_mutable_var_mutation_visible_after_call):
 /// a `(begin (var x …) …)` single-form file's `x` is a compiled Begin-pre-pass
-/// CaptureCell that is RE-STORED from inside a sibling closure — neither
-/// module-scope-classified (`captured_reassigns` needs `is_file_scope`) nor
-/// fn-local. A whole-value read through the cell is solved to the CELL's own
+/// CaptureCell that is RE-STORED from inside a sibling closure, so the write site
+/// is in a lambda while the binding is not (`record_top_level_reassign` records
+/// it in `captured_reassigns` on the binding's account, not the write site's).
+/// A whole-value read through the cell is solved to the CELL's own
 /// region, which must be poisoned in `mutated_binding_value_regions` so
 /// `coalescible_region` refuses the static route (the return retain stays
 /// value-resolved instead of resolving the cell's slot against repointed

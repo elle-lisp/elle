@@ -410,8 +410,8 @@ impl RegionInference {
     /// become drop-on-overwrite + suppressed-decref in the post-pass, differing
     /// only in which decrefs are suppressed. Capture-cell bindings (`needs_capture`)
     /// are excluded from both — their RC is owned by `handle_update_capture` /
-    /// `handle_store_upvalue` — and recorded in `captured_reassigns` when
-    /// module-scope.
+    /// `handle_store_upvalue` — and recorded in `captured_reassigns` instead,
+    /// whatever scope the write sits in.
     fn record_top_level_reassign(&mut self, b: Binding, site: HirId, val_regions: &[Region]) {
         // MODULE-SCOPE classification, not the raw `in_lambda` flag: a file-letrec
         // (top-level `def`/`var`) binding is program-extent even when the
@@ -428,16 +428,24 @@ impl RegionInference {
         // advanced.lisp match-in-loop crash under `elle test`).
         let module_scope = !self.in_lambda() || self.arena().get(b).is_file_scope;
         // Capture-cell bindings are excluded from BOTH container maps: their RC is
-        // owned by `handle_update_capture`, not the 1-slot-container model. A
-        // module-scope captured reassign is still recorded separately so the lowerer
-        // drops the init's alloc reference at the define (the cell content changes;
-        // routing that decref through the cell slot is a UAF). A genuine fn-local
-        // captured reassign goes through the env-cell (`StoreCapture`) path, not a
-        // compiled `MakeCaptureCell`, so it is not in this class.
+        // owned by `handle_update_capture`, not the 1-slot-container model. They are
+        // recorded separately so the lowerer drops the init's alloc reference at the
+        // define (the cell content changes; routing that decref through the cell slot
+        // is a UAF).
+        //
+        // Recorded regardless of the scope classification above: `module_scope` reads
+        // the scope THIS WRITE sits in, and a cell is just as repointed by an `assign`
+        // inside a closure the defining scope encloses — the shape
+        // `(begin (var x …) (defn f () (assign x …)) (f))`, where the binding owns a
+        // compiled cell yet every write is in a lambda. Gating on the write site
+        // classifies such a binding fn-local, leaves the cell-slot routing in place,
+        // and frees the reassigned value under the frame that hands it back
+        // (region-capture-cell-closure-reassign-uaf.lisp). A genuinely fn-local
+        // captured binding — defined inside a lambda — is unaffected by the wider
+        // recording: its cell is a `populate_env` env cell reached by `StoreCapture`,
+        // a path that never consults this set.
         if self.arena().get(b).needs_capture() {
-            if module_scope {
-                self.captured_reassigns.insert(b);
-            }
+            self.captured_reassigns.insert(b);
             return;
         }
         // Genuine fn-local reassigns go to `local_reassigns` — same container model,

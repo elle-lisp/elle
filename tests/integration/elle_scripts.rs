@@ -565,6 +565,22 @@ fn region_capture_cell_reassign_uaf() {
     );
 }
 
+// The same hazard with the `assign` moved INSIDE a closure the defining scope
+// encloses. The binding still owns a compiled `MakeCaptureCell`, so the routing
+// question is unchanged — but classifying the reassign by the ASSIGN SITE's scope
+// calls it fn-local, keeps the cell-slot routing, and frees the value the frame
+// hands back. The classification is a fact about the binding, not the write site
+// (docs/impl/region/bindings.md § "Captured reassigned cells"). Compile-level
+// twins over more shapes: `lir::lower::tests::release`'s
+// `*_closure_reassign_leaves_no_cell_slot_release`.
+#[test]
+fn region_capture_cell_closure_reassign_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-capture-cell-closure-reassign-uaf.lisp",
+        &["--trace=guardfree"],
+    );
+}
+
 // GREEN (live guard) — the BENIGN, non-reassigned sibling of the hazard above: a
 // top-level mutable captured by one or more closures (boxed in a MakeCaptureCell)
 // but never reassigned. The RC accounting balances; the hazard here is

@@ -85,7 +85,7 @@ fn coalesced_string_literal_return_is_slot_resolved() {
 #[test]
 fn captured_reassign_init_drop_is_slot_resolved() {
     // `@x` is captured by `u` (forcing needs_capture → a `MakeCaptureCell` init)
-    // AND reassigned at module scope, so it lands in `captured_reassigns`:
+    // AND reassigned, so it lands in `captured_reassigns`:
     // `store_captured_cell_init` runs with reassigned=true and drops the producer's
     // reference to the fresh init `(%pair 1 2)`. That init is a fresh local
     // allocation whose region is a known slot, so the drop coalesces to a

@@ -93,16 +93,22 @@ pub struct RegionInfo {
     /// at the destructure's id and a stale ptr survives to a later
     /// use of `r`, panicking in arena::deref.
     pub binding_source_regions: HashMap<Binding, Vec<Region>>,
-    /// Top-level captured (`needs_capture`, outside a lambda) bindings that are
-    /// reassigned — `@x` boxed in a compiled `MakeCaptureCell` AND later
-    /// reassigned. For these the lowerer must drop the init value's alloc
-    /// reference at the define off its own register, and must NOT route that
-    /// decref through the cell slot (a reassignment repoints the cell, so a
-    /// slot-load + `result_region_of` unwrap frees a different, live value —
-    /// region-capture-cell-reassign-uaf.lisp). A captured binding that is
-    /// NEVER reassigned is absent here and keeps the ordinary
-    /// routed-through-cell release (the cell content is stable, so the unwrap
-    /// always names the right value).
+    /// Captured (`needs_capture`) bindings that some `assign` reassigns — `@x`
+    /// boxed in a `MakeCaptureCell` AND later repointed. For these the lowerer
+    /// must drop the init value's alloc reference at the define off its own
+    /// register, and must NOT route that decref through the cell slot (a
+    /// reassignment repoints the cell, so a slot-load + `result_region_of` unwrap
+    /// frees a different, live value — region-capture-cell-reassign-uaf.lisp). A
+    /// captured binding that is NEVER reassigned is absent here and keeps the
+    /// ordinary routed-through-cell release (the cell content is stable, so the
+    /// unwrap always names the right value).
+    ///
+    /// Membership is a fact about the BINDING, so the write's own scope does not
+    /// gate it: an `assign` inside a closure the defining scope encloses repoints
+    /// the cell exactly as a sibling write does
+    /// (region-capture-cell-closure-reassign-uaf.lisp). A binding defined inside a
+    /// lambda reads its cell through `populate_env`/`StoreCapture` instead, a path
+    /// that never consults this set.
     pub captured_reassigned_bindings: FxHashSet<Binding>,
     /// Regions that have at least one allocation assigned to them.
     pub live_regions: FxHashSet<Region>,

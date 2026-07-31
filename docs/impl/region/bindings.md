@@ -298,6 +298,30 @@ itself a capture cell is not counted (its own cell machinery owns its
 references); the alias-of-a-mutable-by-a-mutable pairing stays within the
 cells' own store/overwrite accounting.
 
+The writer side owes one rule of its own, at the **init**. A compiled-cell
+binding's slot holds the CELL, so routing the init value's release through that
+slot makes `DecrefValueRegion` reload the slot and — via `result_region_of`,
+which unwraps a capture cell — free whatever the cell holds when the release
+fires. Once a reassignment has repointed the cell, that is a different, live
+value (the capture-cell reassign UAF). So a reassigned captured binding drops
+its init's producer reference off the value register at the define
+(`store_captured_cell_init`) and the cell-slot routing is skipped; the cell's
+own counted reference (taken by the store, `capture_store_with_rebind`) then
+holds the init until the next overwrite or the cell's free cascade.
+
+**The reassign is a fact about the BINDING, not about where the assign sits.**
+`RegionInfo::captured_reassigned_bindings` names every captured binding some
+`assign` repoints, wherever that `assign` appears — including inside a closure
+the definition scope encloses. The binding `results` in `(begin (var results
+(list)) (defn collect () (assign results (pair 55 results))) (collect))` has a
+compiled cell (its define is outside any lambda) and is repointed from inside
+`collect`; classifying it by the *assign site*'s scope would call it fn-local,
+leave the cell-slot routing in place, and free the reassigned value under the
+program that returns it (`region-capture-cell-closure-reassign-uaf.lisp`). A
+genuinely fn-local captured binding — defined inside a lambda — is unaffected
+either way: its cell is a `populate_env` env cell reached by `StoreCapture`, a
+path that never consults this set.
+
 **Env cells in loops: release once per activation, not per iteration.** A
 captured local (`needs_capture` binding defined inside a lambda) and a captured
 param are materialized as a per-value env cell by `populate_env` — a

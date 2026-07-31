@@ -39,15 +39,16 @@ impl<'a> Lowerer<'a> {
         // `emit_decrefs_for(value.id)` inside `lower_expr` can find
         // it (matches `lower_let`'s ordering).
         //
-        // EXCEPTION — a top-level captured AND reassigned binding: its slot
-        // holds the `MakeCaptureCell` whose content a later reassignment
-        // repoints, so routing the init's region through this slot makes its
-        // decref reload the cell and (via `result_region_of`, which unwraps a
-        // capture cell) free whatever the cell holds at the decref's RUNTIME
-        // firing point — a different, live value (the capture-cell reassign UAF;
-        // region-capture-cell-reassign-uaf.lisp). Skip the routing and drop the
-        // init's alloc reference off its register below. A captured binding
-        // never reassigned keeps the routing (stable cell content).
+        // EXCEPTION — a captured AND reassigned binding: its slot holds the
+        // `MakeCaptureCell` whose content a later reassignment repoints, so
+        // routing the init's region through this slot makes its decref reload the
+        // cell and (via `result_region_of`, which unwraps a capture cell) free
+        // whatever the cell holds at the decref's RUNTIME firing point — a
+        // different, live value (the capture-cell reassign UAF;
+        // region-capture-cell-reassign-uaf.lisp, and with the write inside a
+        // closure region-capture-cell-closure-reassign-uaf.lisp). Skip the routing
+        // and drop the init's alloc reference off its register below. A captured
+        // binding never reassigned keeps the routing (stable cell content).
         let captured_reassigned = self
             .region_info
             .captured_reassigned_bindings

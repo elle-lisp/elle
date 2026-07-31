@@ -198,11 +198,12 @@ impl<'a> Lowerer<'a> {
             // `emit_decrefs_for(init.id)` inside `lower_expr` can
             // find it (matches `lower_let`'s ordering).
             //
-            // EXCEPTION — a top-level captured AND reassigned binding's slot
-            // holds the `MakeCaptureCell` whose content a later reassignment
-            // repoints; routing the init's region through this slot makes its
-            // decref free a different, live value (the capture-cell reassign
-            // UAF). Skip the routing and drop the init's alloc reference off its
+            // EXCEPTION — a captured AND reassigned binding's slot holds the
+            // `MakeCaptureCell` whose content a later reassignment repoints —
+            // wherever that reassignment sits, a sibling form or a closure the
+            // defining scope encloses; routing the init's region through this slot
+            // makes its decref free a different, live value (the capture-cell
+            // reassign UAF). Skip the routing and drop the init's alloc reference off its
             // register below via `store_captured_cell_init`. (A captured binding
             // that is never reassigned keeps the routing — the cell content is
             // stable, so the unwrap always names this init value.)
