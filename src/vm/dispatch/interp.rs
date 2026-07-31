@@ -9,6 +9,48 @@ mod params;
 mod signals;
 
 impl VM {
+    /// Debug-only: confirm the frame's reserved local region is still intact
+    /// before executing the instruction at `instr_ip`.
+    ///
+    /// The emitter opens each body by pushing one `Nil` per local, so local `n`
+    /// occupies stack position `frame_base + n` and operands stack above them
+    /// (`Code::reserved_locals`). Nothing in a well-formed body pops through
+    /// that floor. When something does, the frame silently loses its top
+    /// local(s): stores meant for a local land on an operand, reads return a
+    /// neighbour's value, and the failure only becomes visible much later — when
+    /// a `LoadLocal` of a high slot finally indexes past the end of the stack,
+    /// often thousands of instructions and several suspensions away from the
+    /// code that did it. Checking the floor per instruction names the culprit
+    /// instead, with its source location.
+    /// The prologue itself is exempt: it is the `reserved_locals` single-byte
+    /// `Nil` opcodes at offsets `0..reserved_locals`, and it is what establishes
+    /// the floor, so the region is only guaranteed complete past it.
+    #[cfg(debug_assertions)]
+    fn debug_assert_locals_intact(&self, code: &crate::value::Code, instr_ip: usize) {
+        if instr_ip < code.reserved_locals {
+            return;
+        }
+        let floor = self.current_frame_base() + code.reserved_locals;
+        if self.fiber.stack.len() >= floor {
+            return;
+        }
+        let loc = code
+            .location_map
+            .get(&instr_ip)
+            .map(|l| format!("{l}"))
+            .unwrap_or_else(|| "<no source location>".to_string());
+        panic!(
+            "VM bug: the frame's reserved local region has been popped into at ip \
+             {instr_ip} ({loc}): the stack holds {} value(s) but this body reserves \
+             {} local slot(s) above frame base {}. A local slot no longer exists, so \
+             later local reads and writes at this depth address the wrong values \
+             (src/vm/dispatch/interp.rs, `debug_assert_locals_intact`)",
+            self.fiber.stack.len(),
+            code.reserved_locals,
+            self.current_frame_base(),
+        );
+    }
+
     /// Inner execution loop that handles all instructions.
     ///
     /// Takes `Rc` references to bytecode and constants so that yield and
@@ -89,6 +131,12 @@ impl VM {
             }
 
             instr_ip = ip; // save instruction start before reading opcode
+
+            // Locals live beneath the operands on this same stack, so nothing
+            // may pop through the reserved region (see `Code::reserved_locals`).
+            #[cfg(debug_assertions)]
+            self.debug_assert_locals_intact(code, instr_ip);
+
             let instr_byte = bc[ip];
             ip += 1;
 

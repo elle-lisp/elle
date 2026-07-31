@@ -68,12 +68,28 @@ pub struct Code {
     /// minting. Empty unless a merge fired (a nested `%pair` literal seeding the
     /// builder idiom), so byte-identical to the plain mint when no merge exists.
     pub merged_slots: Rc<FxHashSet<u32>>,
+    /// How many stack positions this code object's entry prologue reserves for
+    /// the frame's locals.
+    ///
+    /// The VM addresses local `n` as `frame_base + n` on the same stack it uses
+    /// for operands, so the emitter opens every function body with this many
+    /// `Nil` pushes and operands then live above them (`lir::emit::emit_block`).
+    /// That makes the count a floor the operand stack must never fall through:
+    /// popping into the reserved region destroys a live local, and the damage
+    /// only surfaces later, when a `LoadLocal` of a high slot reads past the end
+    /// of the stack. `VM::debug_assert_locals_intact` checks the floor at each
+    /// instruction in debug builds.
+    ///
+    /// `0` for a code object with no prologue — a bootstrap or `eval` thunk —
+    /// where the check is vacuous.
+    pub reserved_locals: usize,
 }
 
 impl Code {
     /// Bundle the code-object Rcs into a `Code`. `merged_slots` defaults to the
-    /// shared empty set; a caller that carries merge metadata (the per-call
-    /// `ClosureTemplate::code`) sets `merged_slots` after construction.
+    /// shared empty set and `reserved_locals` to `0`; a caller that carries
+    /// merge metadata or a local-reserving prologue (the per-call
+    /// `ClosureTemplate::code`) sets them after construction.
     pub fn new(
         bytecode: Rc<Vec<u8>>,
         constants: Rc<Vec<Value>>,
@@ -86,6 +102,7 @@ impl Code {
             location_map,
             child_protos,
             merged_slots: empty_merged_slots(),
+            reserved_locals: 0,
         }
     }
 }

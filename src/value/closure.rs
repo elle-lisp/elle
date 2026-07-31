@@ -132,6 +132,10 @@ impl ClosureTemplate {
         // alloc dispatch can mint-or-reuse merged slots (an `Rc` bump, not an
         // allocation). Empty unless a merge fired, so inert on the default path.
         code.merged_slots = self.merged_slots.clone();
+        // The body's prologue reserves one stack position per local, so operands
+        // sit above them; carry the count so the dispatch loop can check that
+        // nothing pops into the reserved region (`Code::reserved_locals`).
+        code.reserved_locals = self.num_locals;
         code
     }
 
