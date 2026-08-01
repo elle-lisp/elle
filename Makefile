@@ -102,7 +102,9 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # lacks is dropped, not skip-listed. The session DB is the runner's default
 # ($ELLE_CACHE/elle-tests.db) — every run, make-driven or not, accumulates in
 # the one history that `--summary`/`--query` and the regression-archaeology
-# queries read. Never point a run at a private DB.
+# queries read. Never point a run at a private DB. Concurrent runs share it
+# safely: the connection waits on a busy database rather than raising
+# (docs/test-runner.md § Concurrent runs wait).
 
 # Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
 # parked here with a tracked reason. Currently empty.

@@ -631,37 +631,20 @@ fn dropped_parked_fiber_releases_signal_escape_retain() {
     );
 }
 
-/// An EMITTED terminal signal's payload region is reclaimed once the fiber is
-/// gone. `Emit` covers `(halt v)` and `(error v)` from a fiber body.
+/// A fiber that RETURNS a freshly-allocated value reclaims its region.
 ///
-/// The park takes TWO independent references on the payload's region, and each
-/// owes its own release:
+/// The park retain (`incref_signal_region`, child.rs step 6a) pins the result
+/// for a later `fiber/value`, and the fiber's free-time cross-ref scan releases
+/// it. The pair must balance, or every completing fiber strands its result.
 ///
-/// - the `EmitEscape` retain (`handle_emit`), covering the window until the
-///   compiler's `DecrefRegion` at the emit's decref_point fires — released for
-///   an unrunnable fiber by `Fiber::take_parked_state` → `release_fiber_owned`;
-/// - the terminal park retain (`incref_signal_region`, child.rs step 6a),
-///   pinning the value for a later `fiber/value` — released by the fiber's
-///   free-time cross-ref scan.
-///
-/// Reporting the escape retain only for a NON-terminal parked signal strands
-/// one region per emitting fiber, which is what the growth here measures.
-///
-/// The counterfactual is the second arm: the same body RETURNING the same
-/// freshly-allocated value reclaims it, so a growing emit arm is the emit path's
-/// own accounting and not the harness's.
-#[test]
-fn an_emitted_terminal_payload_region_is_reclaimed() {
-    assert_eq!(
-        payload_regions_stranded_over(50, crate::value::fiber::SIG_HALT),
-        0,
-        "an emitting fiber must release its payload's park escape retain",
-    );
-}
-
+/// This is also the discriminator for the emit arm: `payload_regions_stranded_over`
+/// with `SIG_HALT` measures the same shape with a signal, and today it reads 50
+/// — a fiber body's `(halt v)` / `(error v)` takes an `EmitEscape` retain on top
+/// of the park retain and only one of the two is released. `ht.md` carries the
+/// reproducer; the obvious fix (report the escape retain for a terminal signal
+/// too) over-frees.
 #[test]
 fn a_returned_payload_region_is_reclaimed() {
-    // The discriminator for the pin above: same body, no signal, no escape.
     assert_eq!(
         payload_regions_stranded_over(50, crate::value::fiber::SIG_OK),
         0,

@@ -99,4 +99,50 @@
 
 (db:close conn)
 
+## ── Concurrent writers wait instead of failing ──────────────────────
+##
+## The test runner's session DB is one path per user, shared by every checkout,
+## so two runs write the same file (docs/test-runner.md § Concurrent runs wait).
+## A writer that finds the database busy must WAIT for it. Without the wait it
+## raises `database is locked` and the losing run dies partway through, whose
+## partial tally reads green at a glance.
+##
+## Every connection is opened in WAL journal mode with a busy timeout. WAL is a
+## property of the database file, not of the connection, so an in-memory
+## database reports `memory` and only an on-disk one can pin it.
+
+(with-temp-dir dir (def path (path/join dir "busy.db")) (def a (db:open path))
+               (defer
+                 (db:close a)
+
+                 (assert (= (let [r (first (db:query a "PRAGMA journal_mode"))]
+                              r:journal_mode) "wal")
+                         "an on-disk connection opens in WAL mode")
+                 (assert (> (let [r (first (db:query a "PRAGMA busy_timeout"))]
+                              r:timeout) 0)
+                         "a connection opens with a busy timeout set")
+
+                 (db:exec a "CREATE TABLE t (n INTEGER)")
+
+                 ## The counterfactual for the wait itself. `a` takes the write
+                 ## lock and never releases it, so `b`'s insert cannot succeed —
+                 ## the question is only whether it waits first. With no busy
+                 ## timeout the failure is immediate; with one it takes at least
+                 ## the timeout.
+                 (def b (db:open path))
+                 (defer
+                   (db:close b)
+                   (db:exec b "PRAGMA busy_timeout = 400")
+                   (db:exec a "BEGIN IMMEDIATE")
+                   (let [t0 (clock/monotonic)
+                         [ok? err] (protect ((fn []
+                           (db:exec b "INSERT INTO t VALUES (1)"))))
+                         waited (- (clock/monotonic) t0)]
+                     (db:exec a "COMMIT")
+                     (assert (not ok?) "the blocked writer eventually gives up")
+                     (assert (= err:error :sqlite-error) "and reports it as one")
+                     (assert (> waited 0.25)
+                             (string "a blocked writer must WAIT for the lock, not "
+                                     "fail at once (waited " waited "s)"))))))
+
 (println "sqlite: all tests passed")

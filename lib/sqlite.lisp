@@ -44,6 +44,13 @@
   (def c-col-blob (cfn "sqlite3_column_blob" :ptr @[:ptr :int]))
   (def c-col-bytes (cfn "sqlite3_column_bytes" :int @[:ptr :int]))
   (def c-changes (cfn "sqlite3_changes" :int @[:ptr]))
+  (def c-busy-timeout (cfn "sqlite3_busy_timeout" :int @[:ptr :int]))
+
+  ## How long a writer waits for a busy database before raising. The default
+  ## covers a concurrent test-runner pass over the shared session DB
+  ## (docs/test-runner.md § Concurrent runs wait); past it the holder is wedged
+  ## rather than slow, and failing is the honest answer.
+  (def DEFAULT-BUSY-MS 30000)
 
   ## ── Bytes helpers ──────────────────────────────────────────────────
 
@@ -123,8 +130,22 @@
 
   ## ── Public API ───────────────────────────────────────────────────
 
+  (defn busy-ms []
+    "The configured busy-wait, in milliseconds."
+    (let [v (get (sys/env) "ELLE_SQLITE_BUSY_MS")]
+      (if (nil? v)
+        DEFAULT-BUSY-MS
+        (let [[ok? n] (protect (parse-int v))]
+          (if (and ok? (> n 0)) n DEFAULT-BUSY-MS)))))
+
   (defn open [path]
-    "Open a SQLite database. Use \":memory:\" for in-memory."
+    "Open a SQLite database. Use \":memory:\" for in-memory.
+
+   Every connection waits on a busy database rather than raising at once, and
+   an on-disk one uses WAL journaling so a reader and a writer can share the
+   file. Two processes writing one database is the normal case here — the test
+   runner's session DB is a single path per user — so they must queue
+   (docs/test-runner.md § Concurrent runs wait)."
     (let* [pp (ffi/malloc 8)
            rc (c-open path pp)
            db (ffi/read pp :ptr)]
@@ -132,6 +153,16 @@
       (unless (= rc SQLITE_OK)
         (error {:error :sqlite-error
                 :message (string "open: " (ffi/string (c-errmsg db)))}))
+      (c-busy-timeout db (busy-ms))
+      ## WAL is a property of the FILE, so `:memory:` answers `memory` and the
+      ## request is a no-op there. A read-only directory can refuse the change;
+      ## the connection still works journaled the old way, so do not fail the
+      ## open over it. Driven through the raw statement calls rather than
+      ## `exec`, which is defined below.
+      (let [[ok? stmt] (protect (prepare db "PRAGMA journal_mode = WAL"))]
+        (when ok?
+          (c-step stmt)
+          (c-finalize stmt)))
       db))
 
   (defn close [db]

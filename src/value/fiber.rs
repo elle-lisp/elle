@@ -236,24 +236,25 @@ pub struct ParkedState {
     /// can be stale (its value's release was emitted value-based, or died past a
     /// tail call), so a blanket map release double-frees a possibly-recycled id.
     pub nodes: Vec<crate::hir::region::RuntimeRegion>,
-    /// The value whose park escape retain (`EmitEscape` / `SuspendEscape`) this
-    /// fiber owns: the suspend took exactly one, and its symmetric release lives
-    /// on the resume path this fiber will never take.
+    /// The parked NON-TERMINAL signal (a yielded value, a yielding io request, a
+    /// capability-denial payload) — its park took exactly one escape retain
+    /// (`EmitEscape` / `SuspendEscape`) whose symmetric release lives on the
+    /// resume path the fiber will never take.
     ///
-    /// Independent of whether the `signal` SLOT was emptied. A terminal signal
-    /// keeps its slot — `fiber/value` reads it later, and the *separate* park
-    /// retain pinning it is released by the free-time signal scan — but its
-    /// escape retain is still owed here. Reporting only the non-terminal case
-    /// strands one retain per fiber that halted with a heap payload.
-    pub escape_retain: Option<Value>,
+    /// `None` when the parked signal is terminal. A terminal signal keeps its
+    /// slot for `fiber/value`, and the free-time signal scan releases the park
+    /// retain that pins it. That scan does NOT release the emit escape retain a
+    /// `(halt v)` / `(error v)` from a fiber body also took, which is a leak —
+    /// see `ht.md`. Reporting the retain here regardless of the bits is not the
+    /// fix: it over-frees, and `elle test` faults on the second run.
+    pub signal: Option<(SignalBits, Value)>,
 }
 
 impl Fiber {
     /// Take the parked region state of a fiber that can never run again — see
-    /// [`ParkedState`]. Empties the fiber's `suspended` chain, and the `signal`
-    /// slot when that signal is non-terminal, so no second release path can
-    /// reach them. A terminal signal keeps its slot: `fiber/value` reads a dead
-    /// fiber's result.
+    /// [`ParkedState`]. Empties the fiber's `suspended` chain and, for a parked
+    /// non-terminal signal this fiber OWNS, the `signal` slot, so no second
+    /// release path can reach them.
     ///
     /// Ownership of the signal's park escape retain is read from the chain's
     /// innermost frame: a `Bytecode` frame means the suspend ran here (the
@@ -278,19 +279,13 @@ impl Fiber {
                 nodes.extend(f.activation_owner_node);
             }
         }
-        let escape_retain = match self.signal {
-            Some((bits, v)) if owns_signal => {
-                if !crate::vm::fiber::is_terminal_signal(bits) {
-                    self.signal = None;
-                }
-                Some(v)
+        let signal = match self.signal {
+            Some((bits, _)) if owns_signal && !crate::vm::fiber::is_terminal_signal(bits) => {
+                self.signal.take()
             }
             _ => None,
         };
-        ParkedState {
-            nodes,
-            escape_retain,
-        }
+        ParkedState { nodes, signal }
     }
 
     /// Create a new fiber from a closure with the given signal mask.

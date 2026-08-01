@@ -65,29 +65,23 @@ pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
     bits.is_empty() || bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT)
 }
 
-/// Release the one park escape retain a DISCARDED fiber's parked signal carries
-/// — `EmitEscape` for a `(yield v)`/`(emit …)`/`(halt v)` value, `SuspendEscape`
-/// for a yielding io request or capability-denial payload. The retain's
-/// symmetric release lives on the resume path (the resumed body's own pending
-/// release, or [`release_parked_signal`] for an io request); a fiber that can
-/// never run again reaches neither, so its terminal teardown
+/// Release the one park escape retain a DISCARDED fiber's non-terminal parked
+/// signal carries — `EmitEscape` for a `(yield v)`/`(emit …)` value,
+/// `SuspendEscape` for a yielding io request or capability-denial payload. The
+/// retain's symmetric release lives on the resume path (the resumed body's own
+/// pending release, or [`release_parked_signal`] for an io request); a fiber
+/// that can never run again reaches neither, so its terminal teardown
 /// (`release_fiber_owned`) and the region free path's fiber discharge
 /// (`RegionStore::teardown_set`) release it here instead. Distinct from
 /// [`release_parked_signal`], whose io gate and shared-region skip are
 /// resume-path concerns: at a discard there is no resume value and no body to
 /// double-release against (docs/impl/region/owner.md § "Park/unpark symmetry").
-///
-/// Takes the VALUE, not the signal pair, because whether the retain is owed does
-/// not depend on the bits. A TERMINAL signal owes it too: the park retain that
-/// pins its slot for `fiber/value` ([`incref_signal_region`]) is a second,
-/// independent reference released by the free-time scan.
-/// `Fiber::take_parked_state` decides ownership; a no-op for `None` or an
-/// immediate.
+/// A no-op for `None` or an immediate.
 pub(crate) fn release_discarded_signal(
     heap: &mut crate::value::fiberheap::FiberHeap,
-    escape_retain: Option<Value>,
+    parked: Option<(SignalBits, Value)>,
 ) {
-    if let Some(v) = escape_retain {
+    if let Some((_, v)) = parked {
         let r = crate::value::arena::region_of(heap, v);
         crate::value::arena::decref_region(heap, r);
     }

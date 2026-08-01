@@ -86,9 +86,26 @@ The database is never authoritative. Two layers:
 
 So git sees only text you can read; the rich queryable data is a cache that
 *happens* to give you SQL joins. Distribution is `git clone` — each machine
-builds its own index on first run. Sharing a *results set* (e.g. CI publishing
-for an agent to inspect) is an optional `tar` of the index + CAS, and it never
-touches the repo.
+builds its own index on first run. Sharing a *results set* (for example CI
+publishing for an agent to inspect) is an optional `tar` of the index + CAS, and
+it never touches the repo.
+
+### Concurrent runs wait, they do not collide
+
+One path per user means every checkout shares the index, which is the point —
+`--summary` and `--query` read one accumulated history, so a run must never be
+pointed at a private database. Two runs therefore write to the same file.
+
+They must queue, not fail. `lib/sqlite.lisp` opens every connection in WAL
+journal mode with a busy timeout, so a writer that finds the database busy waits
+for it instead of raising `sqlite-error: database is locked`. Without the wait,
+the losing run dies partway through and reports `DID NOT COMPLETE — killed after
+recording results for N of 25 selected files`, whose partial tally reads green
+at a glance.
+
+The timeout bounds the wait. A run blocked longer than
+`ELLE_SQLITE_BUSY_MS` (default 30000) still raises, because at that point the
+holder is wedged rather than slow.
 
 ### Assets live in a filesystem CAS, not in the database
 

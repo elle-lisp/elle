@@ -283,13 +283,13 @@ impl RegionStore {
                         if let Some(node) = fib.fiber_owner_node.take() {
                             discharged.push(node.get());
                         }
-                        // The parked signal's park escape retain (EmitEscape /
-                        // SuspendEscape), released at a resume that will never
-                        // come. Resolve the value's region exactly as the
-                        // content scan does (page-header read + ownership
-                        // check); a foreign or immediate value resolves to
-                        // nothing.
-                        if let Some(v) = parked.escape_retain {
+                        // The parked non-terminal signal's park escape retain
+                        // (EmitEscape / SuspendEscape), released at a resume
+                        // that will never come. Resolve the value's region
+                        // exactly as the content scan does (page-header read +
+                        // ownership check); a foreign or immediate value
+                        // resolves to nothing.
+                        if let Some((_, v)) = parked.signal {
                             if let Some(ptr) = v.as_heap_ptr() {
                                 let rid = unsafe {
                                     crate::value::fiberheap::regionpool::region_of_page_ptr(
