@@ -149,14 +149,14 @@ pub extern "C" fn elle_jit_call(
                 .fiber
                 .signal
                 .as_ref()
-                .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
+                .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT))
             {
                 return JitValue::nil();
             }
 
             // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
             if let Some((sig, _)) = vm.fiber.signal {
-                if !sig.is_ok() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
+                if !sig.is_empty() && !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) {
                     // Squelch enforcement on the JIT-to-JIT path
                     if !closure_squelch_mask.is_empty() {
                         let squelched = sig.intersection(closure_squelch_mask);
@@ -248,9 +248,9 @@ pub extern "C" fn elle_jit_call(
         // returned a suspending signal that matches, convert to signal-violation.
         let bits = result.bits;
         if !closure_squelch_mask.is_empty()
-            && !bits.is_ok()
-            && !bits.contains(SIG_ERROR)
-            && !bits.contains(SIG_HALT)
+            && !bits.is_empty()
+            && !bits.intersects(SIG_ERROR)
+            && !bits.intersects(SIG_HALT)
         {
             let squelched = bits.intersection(closure_squelch_mask);
             if !squelched.is_empty() {

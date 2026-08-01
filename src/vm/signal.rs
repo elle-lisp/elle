@@ -30,7 +30,7 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
     ) -> Option<SignalBits> {
-        if !bits.is_ok() {
+        if !bits.is_empty() {
             etrace!(
                 self,
                 crate::config::trace_bits::SIGNAL,
@@ -57,7 +57,7 @@ impl VM {
                 let mut ctx =
                     crate::primitives::ctx::Alloc::boundary(unsafe { &mut *self.heap_ptr });
                 let (sig, result) = self.dispatch_query(&mut ctx, value);
-                if sig.contains(SIG_ERROR) {
+                if sig.intersects(SIG_ERROR) {
                     self.fiber.signal = Some((sig, result));
                     self.fiber.stack.push(Value::NIL);
                 } else {
@@ -131,7 +131,7 @@ impl VM {
         bits: SignalBits,
         value: Value,
     ) -> SignalBits {
-        if !bits.is_ok() {
+        if !bits.is_empty() {
             etrace!(
                 self,
                 crate::config::trace_bits::SIGNAL,

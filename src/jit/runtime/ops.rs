@@ -199,7 +199,7 @@ pub extern "C" fn elle_jit_put(
             crate::primitives::access::prim_put(ctx, &[obj, key, val])
         });
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%put: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -228,7 +228,7 @@ pub extern "C" fn elle_jit_del(
             crate::primitives::lstruct::prim_del(ctx, &[obj, key])
         });
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%del: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -260,7 +260,7 @@ pub extern "C" fn elle_jit_has(
         &[obj, key],
     );
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%has?: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -298,7 +298,7 @@ pub extern "C" fn elle_jit_push(
             crate::primitives::intrinsics::prim_push(ctx, &[arr, val])
         });
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%array-push: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -333,7 +333,7 @@ pub extern "C" fn elle_jit_string_push(
             crate::primitives::intrinsics::prim_string_push(ctx, &[coll, val])
         });
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%string-push: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -371,7 +371,7 @@ pub extern "C" fn elle_jit_bytes_push(
             crate::primitives::intrinsics::prim_bytes_push(ctx, &[coll, val])
         });
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%bytes-push: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -431,7 +431,7 @@ pub extern "C" fn elle_jit_freeze(
         &[v],
     );
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%freeze: intrinsic contract violated"
     );
     JitValue::from_value(result)
@@ -461,7 +461,7 @@ pub extern "C" fn elle_jit_thaw(
         &[v],
     );
     assert!(
-        !bits.contains(crate::value::SIG_ERROR),
+        !bits.intersects(crate::value::SIG_ERROR),
         "%thaw: intrinsic contract violated"
     );
     JitValue::from_value(result)

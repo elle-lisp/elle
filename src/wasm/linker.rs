@@ -62,12 +62,12 @@ pub(crate) fn run_bytecode_closure(
         .as_ref()
         .map(|(_, v)| *v)
         .unwrap_or(Value::NIL);
-    let signal = if bits.is_ok() || (bits == crate::value::SIG_HALT && val == Value::NIL) {
+    let signal = if bits.is_empty() || (bits == crate::value::SIG_HALT && val == Value::NIL) {
         crate::value::SIG_OK
     } else {
         bits
     };
-    if bits.is_ok() || (bits == crate::value::SIG_HALT && val == Value::NIL) {
+    if bits.is_empty() || (bits == crate::value::SIG_HALT && val == Value::NIL) {
         vm_ref.fiber.signal.take();
     }
     let (tag, payload) = caller.data_mut().value_to_wasm(val);

@@ -42,7 +42,7 @@ impl VM {
         self.runtime_config.jit = saved_jit;
 
         let bits = result.bits;
-        if bits.is_ok() {
+        if bits.is_empty() {
             let val = if let Some((_, v)) = self.fiber.signal.take() {
                 v
             } else {

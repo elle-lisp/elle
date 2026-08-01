@@ -95,7 +95,7 @@ pub(crate) fn handle_intr_put(vm: &mut VM) {
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::access::prim_put(ctx, &[obj, key, val])
     });
-    if bits.contains(crate::value::SIG_ERROR) {
+    if bits.intersects(crate::value::SIG_ERROR) {
         vm.fiber.signal = Some((bits, result));
         vm.fiber.stack.push(Value::NIL);
         return;
@@ -109,7 +109,7 @@ pub(crate) fn handle_intr_del(vm: &mut VM) {
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::lstruct::prim_del(ctx, &[obj, key])
     });
-    if bits.contains(crate::value::SIG_ERROR) {
+    if bits.intersects(crate::value::SIG_ERROR) {
         vm.fiber.signal = Some((bits, result));
         vm.fiber.stack.push(Value::NIL);
         return;
@@ -127,7 +127,7 @@ pub(crate) fn handle_intr_has(vm: &mut VM) {
         &mut crate::primitives::ctx::NativeCtx::boundary_vm(vm),
         &[obj, key],
     );
-    if bits.contains(crate::value::SIG_ERROR) {
+    if bits.intersects(crate::value::SIG_ERROR) {
         vm.fiber.signal = Some((bits, result));
         vm.fiber.stack.push(Value::NIL);
         return;
@@ -147,7 +147,7 @@ pub(crate) fn handle_intr_push(vm: &mut VM) {
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::intrinsics::prim_push(ctx, &[collection, value])
     });
-    if bits.contains(crate::value::SIG_ERROR) {
+    if bits.intersects(crate::value::SIG_ERROR) {
         // A type mismatch reaching this opcode is a compiler bug (emitted
         // without the operand proof it requires) — panic like the sibling
         // intrinsics, not signal. The catchable path is the registered
@@ -171,7 +171,7 @@ pub(crate) fn handle_intr_string_push(vm: &mut VM) {
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::intrinsics::prim_string_push(ctx, &[collection, value])
     });
-    if bits.contains(crate::value::SIG_ERROR) {
+    if bits.intersects(crate::value::SIG_ERROR) {
         panic!(
             "%string-push: expected string or @string, got {} (pushed value: {})",
             collection.type_name(),
@@ -192,7 +192,7 @@ pub(crate) fn handle_intr_bytes_push(vm: &mut VM) {
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::intrinsics::prim_bytes_push(ctx, &[collection, value])
     });
-    if bits.contains(crate::value::SIG_ERROR) {
+    if bits.intersects(crate::value::SIG_ERROR) {
         panic!(
             "%bytes-push: expected bytes or @bytes (value an integer byte or a bytes value), \
              got {} (value {})",

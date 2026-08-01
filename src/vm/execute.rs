@@ -207,7 +207,7 @@ impl VM {
             let (bits, ip) =
                 self.execute_bytecode_inner_impl(&current_code, &current_env, current_ip);
 
-            if !bits.is_ok() {
+            if !bits.is_empty() {
                 if self.enforce_squelch(bits, accumulated_squelch_mask) {
                     break ExecResult {
                         bits: SIG_ERROR,
@@ -335,7 +335,7 @@ impl VM {
         // without re-entering here, so a tail call correctly reuses the frame.
         self.push_activation_region_map();
         let mut result = self.trampoline_loop(code, closure_env, 0);
-        if !result.bits.is_ok() {
+        if !result.bits.is_empty() {
             result.activation_region_map = self
                 .fiber
                 .activation_region_maps

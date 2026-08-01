@@ -76,7 +76,7 @@ impl VM {
             // (region-native-tail-return-uaf.lisp; omitting it freed the result
             // under the caller's borrow).
             //
-            // `bits.is_ok()` is exactly `SignalAction::Ok` (see `classify`). A
+            // `bits.is_empty()` is exactly `SignalAction::Ok` (see `classify`). A
             // non-OK native carries its value as a SIGNAL that may embed an arg
             // (a yielding `port/write`/`port/flush` hands the scheduler an
             // `IoRequest` embedding the port — a Rule-5 suspend-escape): keep the
@@ -84,7 +84,7 @@ impl VM {
             // releases the embedded arg on resume/abort. NOT replacing the
             // frame here would run the dead arg releases and free a port the
             // scheduler still reads (the unmasked escape UAF).
-            if bits.is_ok() {
+            if bits.is_empty() {
                 self.fiber.stack.push(value);
                 return None;
             }

@@ -33,7 +33,7 @@ impl VM {
                 result.env,
                 result.ip,
                 result.stack,
-                !bits.contains(SIG_FUEL),
+                !bits.intersects(SIG_FUEL),
                 result.activation_region_map,
                 result.activation_owner_node,
                 result.current_closure,
@@ -235,7 +235,7 @@ impl VM {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
                     match bits {
-                        Some(sig) if !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) => {
+                        Some(sig) if !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) => {
                             // JIT function suspended — any bits except SIG_ERROR/SIG_HALT
                             // cause the caller frame to be appended for resumption.
                             // fiber.signal and fiber.suspended are set by the JIT yield
@@ -338,7 +338,11 @@ impl VM {
             // I/O) is a programmer bug. Abort with a clear diagnostic.
             if closure.template.signal.bits.is_empty()
                 && closure.template.signal.propagates == 0
-                && self.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_ok())
+                && self
+                    .fiber
+                    .signal
+                    .as_ref()
+                    .is_some_and(|(b, _)| !b.is_empty())
             {
                 let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
                 let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
@@ -370,11 +374,11 @@ impl VM {
                 self.fiber.call_stack.pop();
                 return Some(SIG_ERROR);
             }
-            if bits.is_ok() {
+            if bits.is_empty() {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 self.fiber.stack.push(value);
                 self.fiber.call_stack.pop();
-            } else if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
+            } else if !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT) {
                 // Suspending signal — any bits except SIG_ERROR/SIG_HALT
                 // cause the caller frame to be appended for resumption.
                 // Propagated from a nested call (interpreter or tail-call-to-native path).

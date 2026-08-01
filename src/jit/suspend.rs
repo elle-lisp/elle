@@ -105,7 +105,7 @@ pub extern "C" fn elle_jit_yield(
     }
     vm.fiber.signal = Some((sig, yielded));
 
-    if !sig.contains(crate::value::fiber::SIG_ERROR) {
+    if !sig.intersects(crate::value::fiber::SIG_ERROR) {
         // Suspension: build a frame for later resumption. The compiled
         // prologue pushed THIS activation's region-remap frame
         // (`elle_jit_push_region_map`), and the side-exit's pop runs after
@@ -261,13 +261,13 @@ pub extern "C" fn elle_jit_yield_through_call(
 /// (SIG_YIELD, SIG_SWITCH, user-defined). Used after Call instructions in
 /// yielding functions.
 ///
-/// Checks `!is_ok()` rather than matching specific signal bits, because
+/// Checks `!is_empty()` rather than matching specific signal bits, because
 /// I/O primitives return compound signals like `SIG_YIELD | SIG_IO` and
 /// SIG_SWITCH must also be detected for fiber/resume trampolining.
 #[no_mangle]
 pub extern "C" fn elle_jit_has_signal(vm: u64) -> JitValue {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    JitValue::bool_val(vm.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_ok()))
+    JitValue::bool_val(vm.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_empty()))
 }
 
 #[cfg(test)]

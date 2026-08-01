@@ -67,9 +67,7 @@ impl VM {
                 let (current_handle, current_fv) = fiber_stack.pop().unwrap();
                 let mask = current_handle.with(|f| f.mask);
 
-                if bits.contains(SIG_HALT) {
-                    self.finalize_dead_fiber(&current_handle);
-                }
+                self.finalize_if_halted(&current_handle, bits);
 
                 if super::catch::mask_catches(mask, bits) {
                     self.fiber.child = None;
@@ -136,7 +134,7 @@ impl VM {
                     break;
                 } else {
                     // Signal NOT caught — propagate through fiber stack.
-                    if bits.contains(SIG_ERROR) {
+                    if bits.intersects(SIG_ERROR) {
                         current_handle.with_mut(|f| f.status = FiberStatus::Error);
                     }
 
@@ -147,7 +145,7 @@ impl VM {
                     // For uncaught suspending signals (e.g. SIG_IO), build
                     // FiberResume frame on the parent so the suspension chain
                     // preserves the fiber nesting for re-entry.
-                    if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
+                    if !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT) {
                         let (parent_handle, _) = fiber_stack.last().unwrap();
                         let child_resume_frame = SuspendedFrame::FiberResume {
                             handle: current_handle.clone(),

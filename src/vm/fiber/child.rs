@@ -59,7 +59,7 @@ impl VM {
         //    the parent's mask. SIG_HALT is also provisionally Suspended
         //    here — the resume handler promotes to Dead if the mask
         //    doesn't catch it (`finalize_dead_fiber`).
-        self.fiber.status = if bits.is_ok() {
+        self.fiber.status = if bits.is_empty() {
             FiberStatus::Dead
         } else {
             FiberStatus::Paused
@@ -72,7 +72,7 @@ impl VM {
         //     (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown
         //     frees everything the fiber owns"). The child is the live
         //     `self.fiber` here, so the take needs no handle borrow.
-        if bits.is_ok() {
+        if bits.is_empty() {
             let owned = super::take_fiber_owned(&mut self.fiber);
             super::release_fiber_owned(unsafe { &mut *self.heap_ptr }, owned);
         }

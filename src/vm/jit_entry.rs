@@ -203,7 +203,7 @@ impl VM {
             .fiber
             .signal
             .as_ref()
-            .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
+            .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT))
         {
             self.fiber.stack.push(Value::NIL);
             return None;
@@ -235,7 +235,7 @@ impl VM {
                 self.pending_entry_closure = tail.closure;
                 let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
                 let eb = exec_result.bits;
-                if eb.is_ok() {
+                if eb.is_empty() {
                     let (_, val) = self.fiber.signal.take().unwrap();
                     self.fiber.stack.push(val);
                     return None;
@@ -255,7 +255,7 @@ impl VM {
                     // Non-NIL halt: leave signal in place, dispatch loop will see it.
                     self.fiber.stack.push(Value::NIL);
                     return None;
-                } else if eb.contains(SIG_ERROR) {
+                } else if eb.intersects(SIG_ERROR) {
                     // SIG_ERROR — signal already set on fiber
                     self.fiber.stack.push(Value::NIL);
                     return None;

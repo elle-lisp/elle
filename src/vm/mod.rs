@@ -240,7 +240,7 @@ impl VM {
         // Signal handling loop — handles SIG_SWITCH iteratively. Breaks with the
         // Result so the executing-closure register is restored once on the way out.
         let result: Result<Value, String> = loop {
-            if bits.is_ok() {
+            if bits.is_empty() {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 break Ok(value);
             } else if bits == SIG_HALT {
@@ -251,7 +251,7 @@ impl VM {
                     break Ok(value);
                 }
                 break Err(self.format_error_with_location(value));
-            } else if bits.contains(SIG_ERROR) {
+            } else if bits.intersects(SIG_ERROR) {
                 let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                 // Remember whether this uncaught error is a loud gate (:gated):
                 // the top-level driver treats that as a skip, not a failure.
@@ -261,7 +261,7 @@ impl VM {
                 break Err(self.format_error_with_location(err_value));
             } else if bits == SIG_SWITCH {
                 bits = self.handle_sig_switch();
-            } else if bits.contains(SIG_YIELD) {
+            } else if bits.intersects(SIG_YIELD) {
                 break Err("Unexpected yield outside fiber context".to_string());
             } else {
                 self.fiber.signal.take();
@@ -306,10 +306,8 @@ impl VM {
 
         let mask = pending.handle.with(|f| f.mask);
 
-        if result_bits.contains(SIG_HALT) {
-            self.finalize_dead_fiber(&pending.handle);
-        }
-        if result_bits.contains(SIG_ERROR) {
+        self.finalize_if_halted(&pending.handle, result_bits);
+        if result_bits.intersects(SIG_ERROR) {
             pending
                 .handle
                 .with_mut(|f| f.status = crate::value::FiberStatus::Error);
@@ -327,7 +325,7 @@ impl VM {
             // to resume after handling the signal (e.g., SIG_IO → sync I/O).
             // Prepend a FiberResume frame so resume_suspended can re-enter
             // the child fiber when the signal is handled.
-            if !result_bits.contains(SIG_ERROR) && !result_bits.contains(SIG_HALT) {
+            if !result_bits.intersects(SIG_ERROR) && !result_bits.intersects(SIG_HALT) {
                 let fiber_resume_frame = SuspendedFrame::FiberResume {
                     handle: pending.handle.clone(),
                     fiber_value: pending.fiber_value,

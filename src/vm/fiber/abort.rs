@@ -38,7 +38,7 @@ impl VM {
         if mask_catches(mask, result_bits) {
             // Abort is terminal — even if the parent catches the signal,
             // the aborted fiber is finished and must not stay :paused.
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             self.fiber.child = None;
@@ -47,7 +47,7 @@ impl VM {
             None
         } else {
             // Uncaught error → terminal
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             if self.reject_orphaned_signal(result_bits, "fiber/abort") {
@@ -55,7 +55,7 @@ impl VM {
                 None
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) {
+                if result_bits.intersects(SIG_ERROR) {
                     self.fiber.stack.push(Value::NIL);
                     None
                 } else {
@@ -84,7 +84,7 @@ impl VM {
 
         if mask_catches(mask, result_bits) {
             // Abort is terminal — set child to :error even when caught
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             self.fiber.child = None;
@@ -92,7 +92,7 @@ impl VM {
             self.fiber.signal = Some((SIG_OK, result_value));
             SIG_OK
         } else {
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             if self.reject_orphaned_signal(result_bits, "fiber/abort") {

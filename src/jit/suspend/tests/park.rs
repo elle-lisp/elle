@@ -79,7 +79,7 @@ fn jit_yield_parks_owner_node_for_resume_completion() {
 
         let frames = vm.fiber.suspended.take().expect("the yield parked a frame");
         let bits = vm.resume_suspended(frames, Value::NIL);
-        assert!(bits.is_ok(), "the resumed body completes normally");
+        assert!(bits.is_empty(), "the resumed body completes normally");
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
         assert!(
             gen_after > gen_before,
@@ -158,7 +158,7 @@ fn jit_yield_through_call_parks_owner_node_for_resume_completion() {
             .take()
             .expect("the caller frame was parked");
         let bits = vm.resume_suspended(frames, Value::NIL);
-        assert!(bits.is_ok(), "the resumed caller completes normally");
+        assert!(bits.is_empty(), "the resumed caller completes normally");
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
         assert!(
             gen_after > gen_before,

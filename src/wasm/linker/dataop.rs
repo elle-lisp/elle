@@ -268,35 +268,47 @@ pub fn dispatch_data_op(
         x if x == DataOp::IntrLength as i32 => {
             let (b, r) = crate::primitives::list::prim_length(&mut ctx, &args[..1]);
             assert!(
-                !b.contains(SIG_ERROR),
+                !b.intersects(SIG_ERROR),
                 "%length: intrinsic contract violated"
             );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrGetOp as i32 => {
             let (b, r) = crate::primitives::access::prim_get(&mut ctx, &args[..2]);
-            assert!(!b.contains(SIG_ERROR), "%get: intrinsic contract violated");
+            assert!(
+                !b.intersects(SIG_ERROR),
+                "%get: intrinsic contract violated"
+            );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrPutOp as i32 => {
             let (b, r) = crate::primitives::access::prim_put(&mut ctx, &args[..3]);
-            assert!(!b.contains(SIG_ERROR), "%put: intrinsic contract violated");
+            assert!(
+                !b.intersects(SIG_ERROR),
+                "%put: intrinsic contract violated"
+            );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrDelOp as i32 => {
             let (b, r) = crate::primitives::lstruct::prim_del(&mut ctx, &args[..2]);
-            assert!(!b.contains(SIG_ERROR), "%del: intrinsic contract violated");
+            assert!(
+                !b.intersects(SIG_ERROR),
+                "%del: intrinsic contract violated"
+            );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrHasOp as i32 => {
             let (b, r) = crate::primitives::lstruct::prim_has_key(&mut ctx, &args[..2]);
-            assert!(!b.contains(SIG_ERROR), "%has?: intrinsic contract violated");
+            assert!(
+                !b.intersects(SIG_ERROR),
+                "%has?: intrinsic contract violated"
+            );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrPushOp as i32 => {
             let (b, r) = crate::primitives::array::prim_push(&mut ctx, &args[..2]);
             assert!(
-                !b.contains(SIG_ERROR),
+                !b.intersects(SIG_ERROR),
                 "%array-push: intrinsic contract violated"
             );
             (SIG_OK, r)
@@ -309,20 +321,26 @@ pub fn dispatch_data_op(
         }
         x if x == DataOp::IntrPopOp as i32 => {
             let (b, r) = crate::primitives::array::prim_pop(&mut ctx, &args[..1]);
-            assert!(!b.contains(SIG_ERROR), "%pop: intrinsic contract violated");
+            assert!(
+                !b.intersects(SIG_ERROR),
+                "%pop: intrinsic contract violated"
+            );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrFreezeOp as i32 => {
             let (b, r) = crate::primitives::structs::prim_freeze(&mut ctx, &args[..1]);
             assert!(
-                !b.contains(SIG_ERROR),
+                !b.intersects(SIG_ERROR),
                 "%freeze: intrinsic contract violated"
             );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrThawOp as i32 => {
             let (b, r) = crate::primitives::structs::prim_thaw(&mut ctx, &args[..1]);
-            assert!(!b.contains(SIG_ERROR), "%thaw: intrinsic contract violated");
+            assert!(
+                !b.intersects(SIG_ERROR),
+                "%thaw: intrinsic contract violated"
+            );
             (SIG_OK, r)
         }
         x if x == DataOp::IntrIdenticalOp as i32 => (

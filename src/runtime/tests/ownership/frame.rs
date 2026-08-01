@@ -68,7 +68,7 @@ fn tail_call_frame_delivers_nil_locals() {
 
     let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
     let (bits, result) = vm.do_fiber_resume(&handle, fiber_value);
-    assert!(bits.is_ok(), "the tail-called body completes normally");
+    assert!(bits.is_empty(), "the tail-called body completes normally");
     assert!(
         result.is_nil(),
         "a tail-called frame's unwritten local slot must read NIL, exactly as \

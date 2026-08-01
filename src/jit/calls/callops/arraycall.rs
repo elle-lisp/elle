@@ -150,7 +150,7 @@ pub(super) fn interp_exec_result_to_jit_value(
     exec: crate::vm::execute::ExecResult,
 ) -> JitValue {
     let bits = exec.bits;
-    if !bits.is_ok() && !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
+    if !bits.is_empty() && !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT) {
         let had_inner_stack = !exec.stack.is_empty();
         let mut frames = vm.fiber.suspended.take().unwrap_or_default();
         vm.park_suspended_callee_frame(&mut frames, bits, exec);
@@ -172,7 +172,7 @@ pub(super) fn interp_exec_result_to_jit_value(
 /// of an interpreter callee use `interp_exec_result_to_jit_value` instead, which
 /// also parks a fuel-suspended callee's inner frame.
 pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
-    if bits.is_ok() {
+    if bits.is_empty() {
         let (_, val) = vm.fiber.signal.take().unwrap();
         JitValue::from_value(val)
     } else if bits == SIG_HALT {
@@ -191,7 +191,7 @@ pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits)
             // Non-NIL halt (stack overflow): signal stays set, JIT caller checks.
             JitValue::nil()
         }
-    } else if bits.contains(SIG_ERROR) {
+    } else if bits.intersects(SIG_ERROR) {
         // SIG_ERROR — signal already set on fiber
         JitValue::nil()
     } else {

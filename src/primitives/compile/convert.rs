@@ -30,7 +30,7 @@ pub(crate) fn signal_to_value(sig: &Signal, ctx: &mut NativeCtx) -> Value {
     // Derived convenience booleans
     let silent = sig.bits.is_empty() && sig.propagates == 0;
     let yields = sig.may_suspend();
-    let io = sig.bits.contains(crate::signals::SIG_IO);
+    let io = sig.bits.intersects(crate::signals::SIG_IO);
     fields.insert(kw("silent"), Value::bool(silent));
     fields.insert(kw("yields"), Value::bool(yields));
     fields.insert(kw("io"), Value::bool(io));

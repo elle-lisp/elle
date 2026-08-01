@@ -52,7 +52,7 @@ use std::fmt;
 //   Bits 17-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 
-pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
+pub const SIG_OK: SignalBits = SignalBits::EMPTY; // no bits set = normal return
 pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
 pub const SIG_YIELD: SignalBits = SignalBits::new(1 << 1); // cooperative suspension
 pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
@@ -360,7 +360,7 @@ impl fmt::Display for Signal {
         if self.propagates != 0 {
             let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
             write!(f, "polymorphic({})", indices.join(","))?;
-        } else if self.bits.contains(SIG_YIELD) {
+        } else if self.bits.intersects(SIG_YIELD) {
             write!(f, "yields")?;
         } else {
             write!(f, "silent")?;
@@ -368,16 +368,16 @@ impl fmt::Display for Signal {
 
         // Append capability flags
         let mut flags = Vec::new();
-        if self.bits.contains(SIG_ERROR) {
+        if self.bits.intersects(SIG_ERROR) {
             flags.push("errors");
         }
-        if self.bits.contains(SIG_HALT) {
+        if self.bits.intersects(SIG_HALT) {
             flags.push("halts");
         }
-        if self.bits.contains(SIG_FFI) {
+        if self.bits.intersects(SIG_FFI) {
             flags.push("ffi");
         }
-        if self.bits.contains(SIG_DEBUG) {
+        if self.bits.intersects(SIG_DEBUG) {
             flags.push("debug");
         }
         if !flags.is_empty() {

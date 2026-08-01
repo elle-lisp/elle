@@ -240,7 +240,7 @@ pub(super) fn cond_facts(
 /// a number has left the straight-line path.
 pub(super) fn diverges(h: &Hir) -> bool {
     match &h.kind {
-        HirKind::Emit { signal, .. } => signal.contains(crate::value::SIG_ERROR),
+        HirKind::Emit { signal, .. } => signal.intersects(crate::value::SIG_ERROR),
         HirKind::Begin(xs) => xs.last().is_some_and(diverges),
         HirKind::Block { body, .. } => body.last().is_some_and(diverges),
         HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => diverges(body),

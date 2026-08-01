@@ -274,7 +274,7 @@ fn adopt_into_activation_absorbs_redelivery() {
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
-            result.bits.is_ok(),
+            result.bits.is_empty(),
             "the double-adopt body completes normally"
         );
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());

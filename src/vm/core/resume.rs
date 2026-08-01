@@ -172,7 +172,7 @@ impl VM {
 
                     let exec = self.execute_bytecode_from_ip(&frame.code, &frame.env, frame.ip);
 
-                    if exec.bits.is_ok() {
+                    if exec.bits.is_empty() {
                         self.pop_activation_region_map();
                         let (_, v) = self.fiber.signal.take().unwrap();
                         if self
@@ -200,7 +200,7 @@ impl VM {
                                 i, exec.bits, susp_len, remaining,
                             );
                         }
-                        if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
+                        if !exec.bits.intersects(SIG_HALT) && self.fiber.suspended.is_none() {
                             // `from_ip` does not pop, so the activation's remap
                             // (mutated by this resumed execution) is still on
                             // top. Carry it forward to the re-suspend frame,
@@ -219,7 +219,7 @@ impl VM {
                                 exec.env,
                                 exec.ip,
                                 exec.stack,
-                                !exec.bits.contains(SIG_FUEL),
+                                !exec.bits.intersects(SIG_FUEL),
                                 activation_region_map,
                                 activation_owner_node,
                                 exec.current_closure,
@@ -230,8 +230,8 @@ impl VM {
 
                         // For suspending signals (any bits except error/halt),
                         // merge remaining outer frames
-                        if !exec.bits.contains(SIG_ERROR)
-                            && !exec.bits.contains(SIG_HALT)
+                        if !exec.bits.intersects(SIG_ERROR)
+                            && !exec.bits.intersects(SIG_HALT)
                             && i + 1 < frames.len()
                         {
                             if let Some(ref mut new_frames) = self.fiber.suspended {

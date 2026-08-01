@@ -72,7 +72,7 @@ impl VM {
         let wasm_tier = self.wasm_tier.as_ref().unwrap();
         match wasm_tier.call(vm_ptr, bytecode_ptr, &closure_rc, args, self_val) {
             Ok((value, signal)) => {
-                if signal.is_ok() {
+                if signal.is_empty() {
                     self.fiber.stack.push(value);
                     None
                 } else if signal == SIG_HALT {
@@ -84,7 +84,7 @@ impl VM {
                     self.fiber.signal = Some((signal, value));
                     self.fiber.stack.push(Value::NIL);
                     None
-                } else if signal.contains(SIG_ERROR) {
+                } else if signal.intersects(SIG_ERROR) {
                     // Error — set signal on fiber
                     self.fiber.signal = Some((signal, value));
                     self.fiber.stack.push(Value::NIL);

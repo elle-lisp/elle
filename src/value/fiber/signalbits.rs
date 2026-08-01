@@ -36,23 +36,18 @@ impl SignalBits {
 
     // -- Predicates ----------------------------------------------------------
 
-    /// True when no bits are set (normal return / no signals).
+    /// True when no bits are set — a normal return, `SIG_OK`.
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
-    /// Alias for `is_empty` — reads better in dispatch contexts.
-    pub const fn is_ok(self) -> bool {
-        self.0 == 0
-    }
-
     /// True when `self` and `other` share at least one bit.
+    ///
+    /// This is the routing question a fiber mask asks, so it is an overlap
+    /// test and not a subset test: a mask of `|:log|` catches the compound
+    /// signal `|:log :audit|`. It is symmetric, and the empty set intersects
+    /// nothing — see `signalbits/tests.rs`.
     pub const fn intersects(self, other: SignalBits) -> bool {
-        self.0 & other.0 != 0
-    }
-
-    /// Alias for `intersects` — existing API, kept for compatibility.
-    pub const fn contains(self, other: SignalBits) -> bool {
         self.0 & other.0 != 0
     }
 
@@ -71,8 +66,8 @@ impl SignalBits {
     /// to be caught by a partial mask (e.g. |:log|).
     pub fn covers(self, other: SignalBits) -> bool {
         use crate::signals::SIG_IO;
-        other.is_ok()
-            || (self.intersects(other) && (!other.contains(SIG_IO) || self.contains(SIG_IO)))
+        other.is_empty()
+            || (self.intersects(other) && (!other.intersects(SIG_IO) || self.intersects(SIG_IO)))
     }
 
     // -- Combining -----------------------------------------------------------
@@ -173,3 +168,6 @@ impl From<SignalBits> for u64 {
         v.raw()
     }
 }
+
+#[cfg(test)]
+mod tests;

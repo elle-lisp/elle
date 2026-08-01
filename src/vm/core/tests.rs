@@ -9,9 +9,9 @@ fn test_signal_bits() {
     assert_eq!(SIG_YIELD.raw(), 2);
 
     let mask = SIG_ERROR | SIG_YIELD;
-    assert!(mask.contains(SIG_ERROR));
-    assert!(mask.contains(SIG_YIELD));
-    assert!(!mask.contains(SIG_OK)); // SIG_OK has no bits, contains() returns false
+    assert!(mask.intersects(SIG_ERROR));
+    assert!(mask.intersects(SIG_YIELD));
+    assert!(!mask.intersects(SIG_OK)); // SIG_OK has no bits, so it shares none
 }
 
 #[test]

@@ -77,7 +77,7 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // VM's heap, freed value-based by the consumer.
             let mut ctx = crate::primitives::ctx::Alloc::boundary(unsafe { &mut *vm.heap_ptr });
             let (sig, result) = vm.dispatch_query(&mut ctx, value);
-            if sig.contains(SIG_ERROR) {
+            if sig.intersects(SIG_ERROR) {
                 vm.fiber.signal = Some((sig, result));
                 JitValue::nil()
             } else {
@@ -163,7 +163,7 @@ pub extern "C" fn elle_jit_has_exception(vm: u64) -> JitValue {
         vm.fiber
             .signal
             .as_ref()
-            .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT)),
+            .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT)),
     )
 }
 

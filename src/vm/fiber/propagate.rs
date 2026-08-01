@@ -30,7 +30,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
+        if child_bits.intersects(SIG_ERROR) || child_bits.intersects(SIG_HALT) {
             self.fiber.stack.push(Value::NIL);
             None
         } else if self.current_fiber_handle.is_none() {
@@ -70,7 +70,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
+        if child_bits.intersects(SIG_ERROR) || child_bits.intersects(SIG_HALT) {
             child_bits
         } else if self.current_fiber_handle.is_none() {
             // At root fiber: no parent to catch the propagated signal

@@ -22,26 +22,14 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        // Every other position that drives a child tests `.contains(SIG_HALT)`
-        // here. The two agree only while a halt arrives alone; the assertion
-        // pins that, because widening this test is an over-free hazard
-        // (`finalize_dead_fiber` releases everything the child owns) and
-        // narrowing the others is a leak.
-        debug_assert!(
-            !result_bits.contains(SIG_HALT) || result_bits == SIG_HALT,
-            "SIG_HALT reached a JIT resume alongside other bits ({result_bits:?}); \
-             the halt-finalization tests across vm/fiber no longer agree"
-        );
-        if result_bits == SIG_HALT {
-            self.finalize_dead_fiber(&handle);
-        }
+        self.finalize_if_halted(&handle, result_bits);
 
         if mask_catches(mask, result_bits) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)
         } else {
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
@@ -49,7 +37,7 @@ impl VM {
                 JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
+                if result_bits.intersects(SIG_ERROR) || result_bits.intersects(SIG_HALT) {
                     JitValue::nil()
                 } else {
                     // Uncaught non-error signal (yield, I/O, etc.) — side-exit.
@@ -93,7 +81,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
+        if child_bits.intersects(SIG_ERROR) || child_bits.intersects(SIG_HALT) {
             JitValue::nil()
         } else if self.current_fiber_handle.is_none() {
             self.set_error(
@@ -124,21 +112,21 @@ impl VM {
 
         if mask_catches(mask, result_bits) {
             // Abort is terminal — set child to :error even when caught
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)
         } else {
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             if self.reject_orphaned_signal(result_bits, "fiber/abort") {
                 JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
+                if result_bits.intersects(SIG_ERROR) || result_bits.intersects(SIG_HALT) {
                     JitValue::nil()
                 } else {
                     YIELD_SENTINEL

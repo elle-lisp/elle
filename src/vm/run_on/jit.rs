@@ -99,7 +99,7 @@ impl VM {
                     self.fiber.signal = Some(sig);
                 }
 
-                if eb.is_ok() {
+                if eb.is_empty() {
                     let val = if let Some((_, v)) = self.fiber.signal.take() {
                         v
                     } else {
@@ -116,7 +116,7 @@ impl VM {
                         return (SIG_OK, val);
                     }
                     return (crate::value::SIG_HALT, val);
-                } else if eb.contains(SIG_ERROR) {
+                } else if eb.intersects(SIG_ERROR) {
                     // Error already set on fiber.signal — extract it.
                     if let Some((bits, val)) = self.fiber.signal.take() {
                         return (bits, val);
@@ -200,8 +200,8 @@ impl VM {
             // Squelch enforcement for non-yield signals.
             let squelch_mask = closure.squelch_mask;
             if !squelch_mask.is_empty()
-                && !bits.contains(SIG_ERROR)
-                && !bits.contains(crate::value::SIG_HALT)
+                && !bits.intersects(SIG_ERROR)
+                && !bits.intersects(crate::value::SIG_HALT)
             {
                 let squelched = bits.intersection(squelch_mask);
                 if !squelched.is_empty() {
@@ -217,7 +217,7 @@ impl VM {
                     return (SIG_ERROR, err);
                 }
             }
-            if !bits.is_ok() {
+            if !bits.is_empty() {
                 return (bits, val);
             }
         }

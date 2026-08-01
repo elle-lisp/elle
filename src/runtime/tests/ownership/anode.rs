@@ -42,7 +42,7 @@ fn activation_owner_node_frees_adopted_member_on_normal_completion() {
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
-            result.bits.is_ok(),
+            result.bits.is_empty(),
             "the adopt-and-return body completes normally"
         );
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
@@ -106,7 +106,7 @@ fn activation_owner_node_survives_yield_resume_completion() {
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
-            result.bits.contains(crate::value::fiber::SIG_YIELD),
+            result.bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
         );
         assert_eq!(
@@ -118,7 +118,7 @@ fn activation_owner_node_survives_yield_resume_completion() {
 
         let frames = vm.fiber.suspended.take().expect("the yield parked a frame");
         let bits = vm.resume_suspended(frames, crate::value::Value::NIL);
-        assert!(bits.is_ok(), "the resumed body completes normally");
+        assert!(bits.is_empty(), "the resumed body completes normally");
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
         assert!(
             gen_after > gen_before,
@@ -183,14 +183,14 @@ fn activation_owner_node_survives_repeated_parks() {
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
-            result.bits.contains(crate::value::fiber::SIG_YIELD),
+            result.bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the first yield"
         );
 
         let frames = vm.fiber.suspended.take().expect("first park");
         let bits = vm.resume_suspended(frames, crate::value::Value::NIL);
         assert!(
-            bits.contains(crate::value::fiber::SIG_YIELD),
+            bits.intersects(crate::value::fiber::SIG_YIELD),
             "the resumed body parks again at the second yield"
         );
         assert_eq!(
@@ -201,7 +201,7 @@ fn activation_owner_node_survives_repeated_parks() {
 
         let frames = vm.fiber.suspended.take().expect("second park");
         let bits = vm.resume_suspended(frames, crate::value::Value::NIL);
-        assert!(bits.is_ok(), "the twice-resumed body completes normally");
+        assert!(bits.is_empty(), "the twice-resumed body completes normally");
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
         assert!(
             gen_after > gen_before,
@@ -273,7 +273,7 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
         vm.fiber.fuel = Some(0);
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
-            result.bits.contains(crate::value::SIG_FUEL),
+            result.bits.intersects(crate::value::SIG_FUEL),
             "the body pauses at the backward jump with zero fuel"
         );
         assert!(
@@ -293,7 +293,7 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
             result.env,
             result.ip,
             result.stack,
-            !result.bits.contains(crate::value::SIG_FUEL),
+            !result.bits.intersects(crate::value::SIG_FUEL),
             result.activation_region_map,
             result.activation_owner_node,
             result.current_closure,
@@ -304,7 +304,7 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
             vec![SuspendedFrame::Bytecode(frame)],
             crate::value::Value::NIL,
         );
-        assert!(bits.is_ok(), "the refueled body completes normally");
+        assert!(bits.is_empty(), "the refueled body completes normally");
         let gen_after = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
         assert!(
             gen_after > gen_before,

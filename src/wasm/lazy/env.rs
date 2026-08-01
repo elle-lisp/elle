@@ -253,7 +253,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                     let wasm_tier = vm_ref.wasm_tier.as_ref().unwrap();
                     match wasm_tier.call(vm, bytecode_ptr, &closure_rc, &args, func_val) {
                         Ok((value, signal)) => {
-                            if signal.is_ok() {
+                            if signal.is_empty() {
                                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
                                 return (tag, payload, 0);
                             } else if signal == crate::value::SIG_HALT {
@@ -289,7 +289,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                         let exec =
                             vm_ref.execute_bytecode_saving_stack(&closure.template.code(), &env);
                         let bits = exec.bits;
-                        if bits.is_ok() {
+                        if bits.is_empty() {
                             let (_, val) = vm_ref.fiber.signal.take().unwrap();
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
                             (tag, payload, 0)

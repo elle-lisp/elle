@@ -13,12 +13,31 @@ impl VM {
     /// terminal (`fiber/resume` refuses it), so the parked chain and owner nodes can
     /// never be replayed. An `:error` promotion must NOT come here — an errored
     /// fiber is resumable (the restarts system) and keeps its parked state.
-    pub(crate) fn finalize_dead_fiber(&mut self, handle: &FiberHandle) {
+    fn finalize_dead_fiber(&mut self, handle: &FiberHandle) {
         let owned = handle.with_mut(|fiber| {
             fiber.status = FiberStatus::Dead;
             take_fiber_owned(fiber)
         });
         release_fiber_owned(unsafe { &mut *self.heap_ptr }, owned);
+    }
+
+    /// Finalize a just-resumed child whose signal ended it for good.
+    ///
+    /// `SIG_HALT` is the one signal that does. It is non-resumable, so the
+    /// child can never run again and everything it owns is released here. An
+    /// error is NOT such a signal: an errored fiber stays resumable through the
+    /// restarts system and keeps its parked state.
+    ///
+    /// Every position that drives a child fiber — `fiber/resume` in call, tail,
+    /// and JIT position, the trampoline's unwind, and the `SIG_SWITCH` handler
+    /// — routes its halt through here, so those five cannot drift apart. A
+    /// position testing too narrowly strands the child's regions; one testing
+    /// too widely frees a fiber that can still run. `fiber-halt.lisp` drives
+    /// each position.
+    pub(crate) fn finalize_if_halted(&mut self, handle: &FiberHandle, bits: SignalBits) {
+        if bits.intersects(SIG_HALT) {
+            self.finalize_dead_fiber(handle);
+        }
     }
 
     /// Inheritance a trampolined resume must propagate eagerly, while the
@@ -135,9 +154,7 @@ impl VM {
         let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
         let mask = handle.with(|fiber| fiber.mask);
 
-        if result_bits.contains(SIG_HALT) {
-            self.finalize_dead_fiber(&handle);
-        }
+        self.finalize_if_halted(&handle, result_bits);
 
         if mask_catches(mask, result_bits) {
             self.fiber.child = None;
@@ -145,7 +162,7 @@ impl VM {
             self.fiber.stack.push(result_value);
             None
         } else {
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
@@ -154,7 +171,7 @@ impl VM {
                 None
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
+                if result_bits.intersects(SIG_ERROR) || result_bits.intersects(SIG_HALT) {
                     self.fiber.stack.push(Value::NIL);
                     None
                 } else {
@@ -244,9 +261,7 @@ impl VM {
         let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
         let mask = handle.with(|fiber| fiber.mask);
 
-        if result_bits.contains(SIG_HALT) {
-            self.finalize_dead_fiber(&handle);
-        }
+        self.finalize_if_halted(&handle, result_bits);
 
         if mask_catches(mask, result_bits) {
             self.fiber.child = None;
@@ -254,7 +269,7 @@ impl VM {
             self.fiber.signal = Some((SIG_OK, result_value));
             SIG_OK
         } else {
-            if result_bits.contains(SIG_ERROR) {
+            if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
@@ -262,7 +277,7 @@ impl VM {
                 SIG_ERROR
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if !result_bits.contains(SIG_ERROR) && !result_bits.contains(SIG_HALT) {
+                if !result_bits.intersects(SIG_ERROR) && !result_bits.intersects(SIG_HALT) {
                     let fiber_resume_frame = SuspendedFrame::FiberResume {
                         handle: handle.clone(),
                         fiber_value,

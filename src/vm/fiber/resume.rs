@@ -201,7 +201,9 @@ impl VM {
         // Use the active bytecode/constants/env from ExecResult, not the
         // original closure fields — a tail call may have switched to a
         // different function's bytecode before the signal occurred.
-        if !result.bits.is_ok() && !result.bits.contains(SIG_HALT) && self.fiber.suspended.is_none()
+        if !result.bits.is_empty()
+            && !result.bits.intersects(SIG_HALT)
+            && self.fiber.suspended.is_none()
         {
             // Use the captured inner stack so that on resume the instruction at
             // result.ip sees the same operand stack it had when it paused. This is
@@ -221,7 +223,7 @@ impl VM {
                 result.env,
                 result.ip,
                 result.stack,
-                !result.bits.contains(SIG_FUEL),
+                !result.bits.intersects(SIG_FUEL),
                 result.activation_region_map,
                 result.activation_owner_node,
                 result.current_closure,

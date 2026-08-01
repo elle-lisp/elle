@@ -122,8 +122,8 @@ fn composed_sig_error_io_stores_signal_returns_nil() {
         let result = jit_handle_primitive_signal(&mut vm, bits, h.ctx().string("io-error"));
         assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        assert!(sig.contains(SIG_IO));
+        assert!(sig.intersects(SIG_ERROR));
+        assert!(sig.intersects(SIG_IO));
     });
 }
 
@@ -137,7 +137,7 @@ fn sig_error_terminal_stored_as_error_not_panic() {
         let result = jit_handle_primitive_signal(&mut vm, bits, h.ctx().string("terminal"));
         assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        assert!(sig.contains(SIG_TERMINAL));
+        assert!(sig.intersects(SIG_ERROR));
+        assert!(sig.intersects(SIG_TERMINAL));
     });
 }

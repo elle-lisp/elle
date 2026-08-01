@@ -97,7 +97,7 @@ impl VM {
         loop {
             // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits, _)) = self.fiber.signal {
-                if bits.contains(SIG_ERROR) || bits.contains(SIG_HALT) {
+                if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
                     if self.error_loc.is_none() {
                         self.error_loc = location_map.get(&instr_ip).cloned();
                     }
@@ -173,7 +173,7 @@ impl VM {
 
             // Check for error signal set by this instruction's handler
             if let Some((bits, _)) = self.fiber.signal {
-                if bits.contains(SIG_ERROR) || bits.contains(SIG_HALT) {
+                if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
                     if self.error_loc.is_none() {
                         self.error_loc = location_map.get(&instr_ip).cloned();
                     }

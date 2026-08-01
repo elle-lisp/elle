@@ -321,7 +321,7 @@ impl VM {
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
 
         let bits = result.bits;
-        if bits.is_ok() {
+        if bits.is_empty() {
             let (_, value) = self.fiber.signal.take().unwrap();
             Ok(value)
         } else if bits == crate::value::SIG_HALT {
@@ -331,7 +331,7 @@ impl VM {
             } else {
                 Err(self.format_error_with_location(value))
             }
-        } else if bits.contains(crate::value::SIG_ERROR) {
+        } else if bits.intersects(crate::value::SIG_ERROR) {
             let (_, err) = self
                 .fiber
                 .signal

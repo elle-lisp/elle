@@ -318,8 +318,8 @@ impl VM {
     /// Callers handle any additional side effects (stack push, call_stack pop, etc.).
     pub(crate) fn enforce_squelch(&mut self, bits: SignalBits, mask: SignalBits) -> bool {
         if mask.is_empty()
-            || bits.contains(crate::value::SIG_ERROR)
-            || bits.contains(crate::value::SIG_HALT)
+            || bits.intersects(crate::value::SIG_ERROR)
+            || bits.intersects(crate::value::SIG_HALT)
             || bits == crate::value::SIG_SWITCH
         {
             return false;

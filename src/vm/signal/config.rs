@@ -246,7 +246,7 @@ impl VM {
         self.pending_entry_closure = thunk;
         let bits = self.run_thunk_to_completion(&closure.template.code(), &thunk_env);
 
-        if !bits.is_ok() {
+        if !bits.is_empty() {
             // Propagate the error/signal — fiber.signal is already set by inner execution.
             let (sig, val) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
             return (sig, val);

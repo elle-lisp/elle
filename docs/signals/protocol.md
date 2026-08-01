@@ -65,8 +65,15 @@ is `bits == 0`, which is a single branch.
 
 **`SignalBits` is a pure bitmask. Every bit is independent and orthogonal.**
 There are no "types" of signals — only bits. The VM and schedulers check for
-individual bits using `contains()`, never with equality. Any combination of
+individual bits using `intersects()`, never with equality. Any combination of
 bits is valid and meaningful — the caller decides what the combination means.
+
+`intersects()` asks whether the two sets share **at least one** bit. It is
+symmetric, and it is true for a partial overlap: `(A|B).intersects(B|C)` holds.
+It is not a subset test. `SignalBits` has no subset test, because no caller
+wants one — a mask catches a compound signal on any shared bit. The one
+exception is `covers()`, which additionally requires the `SIG_IO`
+infrastructure bit on both sides; see its doc comment.
 
 Examples of valid composed signals:
 

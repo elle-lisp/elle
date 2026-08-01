@@ -70,7 +70,7 @@ impl VM {
 
         let result = match tier.call(vm_ptr, bytecode_ptr, &closure_rc, args, closure_val) {
             Ok((value, signal)) => {
-                if signal.is_ok() {
+                if signal.is_empty() {
                     (SIG_OK, value)
                 } else if signal == crate::value::SIG_HALT {
                     if value == Value::NIL {

@@ -244,7 +244,7 @@ fn route_emit(
 ) -> (i64, i64, i64) {
     let mask = fiber_handle.with(|f| f.mask);
 
-    if bits.contains(crate::value::SIG_ERROR) && !mask.covers(bits) {
+    if bits.intersects(crate::value::SIG_ERROR) && !mask.covers(bits) {
         install_signal(
             caller,
             fiber_handle,
@@ -321,7 +321,7 @@ fn route_error(
     value: Value,
 ) -> (i64, i64, i64) {
     let caught =
-        bits.contains(crate::value::SIG_ERROR) && fiber_handle.with(|f| f.mask).covers(bits);
+        bits.intersects(crate::value::SIG_ERROR) && fiber_handle.with(|f| f.mask).covers(bits);
     if caught {
         install_signal(
             caller,

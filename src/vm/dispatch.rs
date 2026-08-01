@@ -55,7 +55,7 @@ impl VM {
 
         self.fiber.signal = Some((signal_bits, value));
 
-        if !signal_bits.contains(SIG_ERROR) {
+        if !signal_bits.intersects(SIG_ERROR) {
             // Suspension: save stack and create a frame for later resumption.
             let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
 

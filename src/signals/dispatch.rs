@@ -37,11 +37,11 @@ pub enum SignalAction {
 /// Classify a primitive's return signal into a broad action category.
 ///
 /// Uses exact equality for VM-internal signals (which are produced by
-/// specific primitives with known bit patterns) and `contains()` for
-/// user-facing signals (which can be composed, e.g. SIG_ERROR | SIG_IO).
+/// specific primitives with known bit patterns) and `intersects()` for
+/// user-facing signals (which can be composed, for example SIG_ERROR | SIG_IO).
 #[inline]
 pub fn classify(bits: SignalBits, value: &Value) -> SignalAction {
-    if bits.is_ok() {
+    if bits.is_empty() {
         return SignalAction::Ok;
     }
     if bits == SIG_RESUME {
@@ -56,10 +56,10 @@ pub fn classify(bits: SignalBits, value: &Value) -> SignalAction {
     if bits == SIG_QUERY {
         return SignalAction::Query;
     }
-    if bits.contains(SIG_ERROR) {
+    if bits.intersects(SIG_ERROR) {
         return SignalAction::Error;
     }
-    if bits.contains(SIG_HALT) {
+    if bits.intersects(SIG_HALT) {
         return SignalAction::Halt;
     }
     SignalAction::Suspend

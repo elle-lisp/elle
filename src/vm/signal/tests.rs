@@ -33,7 +33,7 @@ fn composed_error_io_treated_as_error() {
         // Error path returns None
         assert!(result.is_none());
         let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
+        assert!(sig.intersects(SIG_ERROR));
         // NIL pushed (error convention)
         assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
         // No suspended frame created
@@ -69,11 +69,11 @@ fn tail_composed_error_io_treated_as_error() {
         let result = vm.handle_primitive_signal_tail(bits, h.ctx().string("boom"));
 
         // Should return the full composed bits
-        assert!(result.contains(SIG_ERROR));
-        assert!(result.contains(SIG_IO));
+        assert!(result.intersects(SIG_ERROR));
+        assert!(result.intersects(SIG_IO));
         let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        assert!(sig.contains(SIG_IO));
+        assert!(sig.intersects(SIG_ERROR));
+        assert!(sig.intersects(SIG_IO));
     })
 }
 
@@ -115,9 +115,9 @@ fn tail_error_priority_over_yield() {
 
         let result = vm.handle_primitive_signal_tail(bits, h.ctx().string("err"));
 
-        assert!(result.contains(SIG_ERROR));
+        assert!(result.intersects(SIG_ERROR));
         let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
+        assert!(sig.intersects(SIG_ERROR));
     })
 }
 

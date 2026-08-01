@@ -15,7 +15,7 @@ use crate::vm::core::VM;
 ///
 /// Three cases, in order:
 ///
-/// - A child that finished normally (`bits.is_ok()`) is always absorbed. It
+/// - A child that finished normally (`bits.is_empty()`) is always absorbed. It
 ///   emitted nothing, so there is nothing for a mask to miss.
 /// - A terminal signal (`SIG_TERMINAL`) is never absorbed, whatever the mask
 ///   asks for. Terminal means the child cannot continue, so letting a parent
@@ -23,7 +23,7 @@ use crate::vm::core::VM;
 ///   resumable.
 /// - Otherwise the mask decides, via [`SignalBits::covers`].
 pub(crate) fn mask_catches(mask: SignalBits, bits: SignalBits) -> bool {
-    bits.is_ok() || (mask.covers(bits) && !bits.contains(SIG_TERMINAL))
+    bits.is_empty() || (mask.covers(bits) && !bits.intersects(SIG_TERMINAL))
 }
 
 impl VM {
@@ -43,8 +43,8 @@ impl VM {
     /// in whatever way its position requires.
     pub(crate) fn reject_orphaned_signal(&mut self, bits: SignalBits, op: &str) -> bool {
         let orphaned = self.current_fiber_handle.is_none()
-            && !bits.contains(SIG_ERROR)
-            && !bits.contains(SIG_HALT);
+            && !bits.intersects(SIG_ERROR)
+            && !bits.intersects(SIG_HALT);
         if orphaned {
             self.set_error(
                 "state-error",

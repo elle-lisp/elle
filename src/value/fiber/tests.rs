@@ -134,47 +134,15 @@ fn test_fiber_handle_double_put_panics() {
     handle.put(fiber); // should panic — slot already occupied
 }
 
+/// The compiler-reserved bit assignments the bytecode encoding depends on.
+/// The set algebra over them lives in `signalbits/tests.rs`.
 #[test]
-fn test_signal_bits() {
+fn test_signal_bit_positions() {
     assert_eq!(SIG_OK.raw(), 0);
     assert_eq!(SIG_ERROR.raw(), 1);
     assert_eq!(SIG_YIELD.raw(), 2);
     assert_eq!(SIG_DEBUG.raw(), 4);
     assert_eq!(SIG_RESUME.raw(), 8);
-
-    // Mask catches error and yield but not debug
-    let mask = SIG_ERROR | SIG_YIELD;
-    assert!(mask.contains(SIG_ERROR));
-    assert!(mask.contains(SIG_YIELD));
-    assert!(!mask.contains(SIG_DEBUG));
-    assert!(!mask.contains(SIG_RESUME));
-
-    // User-defined signals in bits 32-63
-    let user_sig = SignalBits::new(1 << 32);
-    assert!(!user_sig.contains(mask));
-}
-
-#[test]
-fn test_signal_bits_covers() {
-    // covers: exact match — mask handles exact signal
-    assert!(SIG_YIELD.covers(SIG_YIELD));
-    // covers: SIG_YIELD mask does NOT handle SIG_YIELD|SIG_IO (missing SIG_IO infrastructure bit)
-    assert!(!SIG_YIELD.covers(SIG_YIELD | SIG_IO));
-    // covers: mask with SIG_IO handles SIG_YIELD|SIG_IO (IO bit present, overlap on YIELD)
-    assert!((SIG_ERROR | SIG_IO).covers(SIG_YIELD | SIG_IO));
-    // covers: all-bits mask handles any compound signal
-    assert!(SignalBits::new(!0).covers(SIG_YIELD | SIG_IO));
-    // covers: SIG_OK (zero) is always handled by any mask
-    assert!(SIG_YIELD.covers(SIG_OK));
-    assert!(SIG_OK.covers(SIG_OK));
-    // covers: user-defined signals use overlap semantics (no SIG_IO involved)
-    // mask |:log| catches |:log :audit| because :log overlaps
-    let log_bit = SignalBits::new(1 << 16);
-    let audit_bit = SignalBits::new(1 << 17);
-    assert!(log_bit.covers(log_bit | audit_bit));
-    assert!(audit_bit.covers(log_bit | audit_bit));
-    // covers: mask does not catch a completely disjoint signal
-    assert!(!SIG_YIELD.covers(SIG_ERROR));
 }
 
 #[test]
@@ -199,16 +167,16 @@ fn test_fiber_debug_format() {
 fn test_fiber_zero_mask() {
     // A fiber with mask=0 propagates all signals
     let fiber = Fiber::new(test_closure(), SIG_OK);
-    assert!(!fiber.mask.contains(SIG_ERROR));
-    assert!(!fiber.mask.contains(SIG_YIELD));
+    assert!(!fiber.mask.intersects(SIG_ERROR));
+    assert!(!fiber.mask.intersects(SIG_YIELD));
 }
 
 #[test]
 fn test_fiber_full_mask() {
     // A fiber with all bits set catches everything
-    let fiber = Fiber::new(test_closure(), SignalBits::new(u64::MAX));
-    assert!(fiber.mask.contains(SIG_ERROR));
-    assert!(fiber.mask.contains(SIG_YIELD));
-    assert!(fiber.mask.contains(SIG_DEBUG));
-    assert!(fiber.mask.contains(SIG_RESUME));
+    let fiber = Fiber::new(test_closure(), SignalBits::ALL);
+    assert!(fiber.mask.intersects(SIG_ERROR));
+    assert!(fiber.mask.intersects(SIG_YIELD));
+    assert!(fiber.mask.intersects(SIG_DEBUG));
+    assert!(fiber.mask.intersects(SIG_RESUME));
 }

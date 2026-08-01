@@ -7,7 +7,7 @@
 //! invalidating a live borrow (docs/impl/region/owner.md § "Owner nodes").
 
 use crate::value::fiber::FiberStatus;
-use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR};
+use crate::value::{FiberHandle, SuspendedFrame, Value, SIG_ERROR};
 
 /// Everything a fiber owns through the ownership forest, TAKEN out of the fiber
 /// (its slots emptied) so the release can run after the fiber borrow is dropped
@@ -18,10 +18,11 @@ use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR};
 pub(crate) struct FiberOwned {
     /// Each still-parked `BytecodeFrame`'s activation owner node, in chain order.
     parked_nodes: Vec<crate::hir::region::RuntimeRegion>,
-    /// The parked non-terminal signal (a yielded value / io request / denial
-    /// payload), whose one park escape retain is released on the resume path —
-    /// which will never come for a terminal fiber (`release_discarded_signal`).
-    parked_signal: Option<(SignalBits, Value)>,
+    /// The parked signal's value (a yielded value / io request / denial payload
+    /// / terminal result), whose one park escape retain is released on the
+    /// resume path — which will never come for a terminal fiber
+    /// (`release_discarded_signal`).
+    escape_retain: Option<Value>,
     /// The fiber's own owner node (`Fiber::fiber_owner_node`).
     fiber_node: Option<crate::hir::region::RuntimeRegion>,
 }
@@ -56,7 +57,7 @@ pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberO
     let parked = fiber.take_parked_state();
     FiberOwned {
         parked_nodes: parked.nodes,
-        parked_signal: parked.signal,
+        escape_retain: parked.escape_retain,
         fiber_node: fiber.fiber_owner_node.take(),
     }
 }
@@ -74,7 +75,7 @@ pub(crate) fn release_fiber_owned(
 ) {
     let FiberOwned {
         parked_nodes,
-        parked_signal,
+        escape_retain,
         fiber_node,
     } = owned;
     for node in parked_nodes {
@@ -86,7 +87,7 @@ pub(crate) fn release_fiber_owned(
     if let Some(fnode) = fiber_node {
         heap.decref_region_if_present(fnode);
     }
-    super::release_discarded_signal(heap, parked_signal);
+    super::release_discarded_signal(heap, escape_retain);
 }
 
 /// The hard-kill teardown `fiber/cancel` (of a new/parked fiber) and

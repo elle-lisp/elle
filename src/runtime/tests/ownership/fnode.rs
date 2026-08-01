@@ -45,7 +45,7 @@ fn fiber_owner_node_freed_at_fiber_completion() {
         let gen_before = unsafe { &*heap_ptr }.generation_raw(member_rid.get());
 
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
-        assert!(bits.is_ok(), "the noop fiber body completes");
+        assert!(bits.is_empty(), "the noop fiber body completes");
         assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
         let gen_after = unsafe { &*heap_ptr }.generation_raw(member_rid.get());
         assert!(
@@ -116,7 +116,7 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
 
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         assert!(
-            bits.contains(crate::value::fiber::SIG_YIELD),
+            bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
         );
         assert_eq!(handle.with(|f| f.status), FiberStatus::Paused);
@@ -164,7 +164,7 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
         });
 
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
-        assert!(bits.is_ok(), "the resumed two-frame chain completes");
+        assert!(bits.is_empty(), "the resumed two-frame chain completes");
         assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
         let bumped_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a;
         let bumped_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get()) > gen_b;
@@ -234,7 +234,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
 
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         assert!(
-            bits.contains(crate::value::fiber::SIG_YIELD),
+            bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
         );
 
@@ -248,7 +248,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
             );
             crate::primitives::fiber_introspect::prim_fiber_cancel(&mut ctx, &[fiber_value])
         };
-        assert!(bits.is_ok(), "cancelling a parked fiber succeeds");
+        assert!(bits.is_empty(), "cancelling a parked fiber succeeds");
         unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
         assert_eq!(handle.with(|f| f.status), FiberStatus::Error);
         assert!(
@@ -284,7 +284,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
             );
             crate::primitives::fiber_introspect::prim_fiber_abort(&mut ctx, &[fiber_value])
         };
-        assert!(bits.is_ok(), "aborting a :new fiber succeeds");
+        assert!(bits.is_empty(), "aborting a :new fiber succeeds");
         unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
         assert_eq!(handle.with(|f| f.status), FiberStatus::Error);
         assert!(
@@ -337,7 +337,7 @@ fn fiber_kill_park_retains_terminal_payload() {
 
     let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
     assert!(
-        bits.contains(crate::value::fiber::SIG_YIELD),
+        bits.intersects(crate::value::fiber::SIG_YIELD),
         "the body parks at the yield"
     );
 
@@ -351,7 +351,7 @@ fn fiber_kill_park_retains_terminal_payload() {
         );
         crate::primitives::fiber_introspect::prim_fiber_cancel(&mut ctx, &[fiber_value, payload])
     };
-    assert!(bits.is_ok(), "cancelling a parked fiber succeeds");
+    assert!(bits.is_empty(), "cancelling a parked fiber succeeds");
     unsafe { &mut *heap_ptr }.decref_region_if_present(ctx_region);
     assert_eq!(handle.with(|f| f.status), FiberStatus::Error);
 
@@ -440,7 +440,7 @@ fn discard_frees_parked_activation_owner_node() {
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
-            result.bits.contains(crate::value::fiber::SIG_YIELD),
+            result.bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
         );
 
@@ -468,11 +468,11 @@ fn discard_frees_parked_activation_owner_node() {
         let gen_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get());
 
         let result = vm.execute_bytecode_saving_stack(&adopt_yield_code(child_a), &Rc::new(vec![]));
-        assert!(result.bits.contains(crate::value::fiber::SIG_YIELD));
+        assert!(result.bits.intersects(crate::value::fiber::SIG_YIELD));
         let mut chain = vm.fiber.suspended.take().expect("first park");
 
         let result = vm.execute_bytecode_saving_stack(&adopt_yield_code(child_b), &Rc::new(vec![]));
-        assert!(result.bits.contains(crate::value::fiber::SIG_YIELD));
+        assert!(result.bits.intersects(crate::value::fiber::SIG_YIELD));
         chain.extend(vm.fiber.suspended.take().expect("second park"));
 
         vm.fiber.suspended = Some(chain);
@@ -540,7 +540,7 @@ fn dropped_parked_fiber_discharges_owned_state() {
 
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         assert!(
-            bits.contains(crate::value::fiber::SIG_YIELD),
+            bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
         );
         assert_eq!(handle.with(|f| f.status), FiberStatus::Paused);
@@ -606,7 +606,7 @@ fn dropped_parked_fiber_releases_signal_escape_retain() {
         let gen_p = unsafe { &*heap_ptr }.generation_raw(rid_p.get());
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         assert!(
-            bits.contains(crate::value::fiber::SIG_YIELD),
+            bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
         );
         assert_eq!(handle.with(|f| f.status), FiberStatus::Paused);
@@ -629,4 +629,91 @@ fn dropped_parked_fiber_releases_signal_escape_retain() {
         "every dropped parked fiber's yielded-value region must be reclaimed \
          (baseline={baseline}, after 50 cycles={after})",
     );
+}
+
+/// An EMITTED terminal signal's payload region is reclaimed once the fiber is
+/// gone. `Emit` covers `(halt v)` and `(error v)` from a fiber body.
+///
+/// The park takes TWO independent references on the payload's region, and each
+/// owes its own release:
+///
+/// - the `EmitEscape` retain (`handle_emit`), covering the window until the
+///   compiler's `DecrefRegion` at the emit's decref_point fires — released for
+///   an unrunnable fiber by `Fiber::take_parked_state` → `release_fiber_owned`;
+/// - the terminal park retain (`incref_signal_region`, child.rs step 6a),
+///   pinning the value for a later `fiber/value` — released by the fiber's
+///   free-time cross-ref scan.
+///
+/// Reporting the escape retain only for a NON-terminal parked signal strands
+/// one region per emitting fiber, which is what the growth here measures.
+///
+/// The counterfactual is the second arm: the same body RETURNING the same
+/// freshly-allocated value reclaims it, so a growing emit arm is the emit path's
+/// own accounting and not the harness's.
+#[test]
+fn an_emitted_terminal_payload_region_is_reclaimed() {
+    assert_eq!(
+        payload_regions_stranded_over(50, crate::value::fiber::SIG_HALT),
+        0,
+        "an emitting fiber must release its payload's park escape retain",
+    );
+}
+
+#[test]
+fn a_returned_payload_region_is_reclaimed() {
+    // The discriminator for the pin above: same body, no signal, no escape.
+    assert_eq!(
+        payload_regions_stranded_over(50, crate::value::fiber::SIG_OK),
+        0,
+        "a fiber returning a fresh value must release its region",
+    );
+}
+
+/// Run `n` fibers whose body puts a freshly-allocated value on the stack and
+/// leaves with `bits` (a bare `Return` for `SIG_OK`, an `Emit` otherwise),
+/// driving each through the resume path a halt takes. Returns the net live
+/// region growth: the payload of every cycle should be gone by the end.
+fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i64 {
+    use crate::compiler::bytecode::{Bytecode, Instruction};
+    use crate::value::fiber::FiberStatus;
+
+    let mut vm = crate::vm::VM::new();
+    let heap_ptr = vm.heap_ptr;
+
+    // Warm up one cycle so the baseline excludes first-run allocation.
+    let mut baseline = 0i64;
+    for i in 0..=n {
+        let heap = unsafe { &mut *heap_ptr };
+        let (payload, rid) = alloc_in_fresh_region(heap, cons());
+
+        let mut bc = Bytecode::new();
+        let idx = bc.add_constant(payload);
+        bc.emit(Instruction::LoadConst);
+        bc.emit_u16(idx);
+        if !bits.is_empty() {
+            bc.emit(Instruction::Emit);
+            bc.emit_u16(bits.raw() as u16);
+        }
+        bc.emit(Instruction::Return);
+        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+
+        let (result_bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
+        vm.finalize_if_halted(&handle, result_bits);
+        if !bits.is_empty() {
+            assert_eq!(result_bits, bits, "the body leaves with exactly its signal");
+            assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
+        }
+
+        // Drop the fiber: its free-time scan is what owes the payload release.
+        // The test's own alloc reference goes last, so the fiber's release is
+        // the one that has to land for the region to reach rc 0.
+        release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+        drop(handle);
+        unsafe { &mut *heap_ptr }.decref_region_if_present(rid);
+
+        if i == 0 {
+            baseline = unsafe { &*heap_ptr }.active_region_count() as i64;
+        }
+    }
+    unsafe { &*heap_ptr }.active_region_count() as i64 - baseline
 }
