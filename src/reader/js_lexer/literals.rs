@@ -212,73 +212,12 @@ impl JsLexer {
     pub(super) fn read_number(&mut self) -> Result<JsToken, String> {
         let start = self.cursor.pos();
         let mut is_float = false;
-
-        // Hex literal
-        if self.peek() == Some('0') && matches!(self.peek2(), Some('x') | Some('X')) {
-            self.advance(); // 0
-            self.advance(); // x
-            while let Some(c) = self.peek() {
-                if c.is_ascii_hexdigit() || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            let s: String = self
-                .cursor
-                .span(start)
-                .iter()
-                .filter(|c| **c != '_')
-                .collect();
-            let val =
-                i64::from_str_radix(&s[2..], 16).map_err(|e| format!("bad hex literal: {}", e))?;
-            return Ok(JsToken::Int(val));
+        if let Some(val) = self
+            .cursor
+            .scan_radix_literal(crate::reader::scan::RadixPrefixes::HexOctalBinary)
+        {
+            return Ok(JsToken::Int(val?));
         }
-
-        // Binary literal
-        if self.peek() == Some('0') && matches!(self.peek2(), Some('b') | Some('B')) {
-            self.advance(); // 0
-            self.advance(); // b
-            while let Some(c) = self.peek() {
-                if c == '0' || c == '1' || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            let s: String = self
-                .cursor
-                .span(start)
-                .iter()
-                .filter(|c| **c != '_')
-                .collect();
-            let val = i64::from_str_radix(&s[2..], 2)
-                .map_err(|e| format!("bad binary literal: {}", e))?;
-            return Ok(JsToken::Int(val));
-        }
-
-        // Octal literal
-        if self.peek() == Some('0') && matches!(self.peek2(), Some('o') | Some('O')) {
-            self.advance(); // 0
-            self.advance(); // o
-            while let Some(c) = self.peek() {
-                if ('0'..='7').contains(&c) || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            let s: String = self
-                .cursor
-                .span(start)
-                .iter()
-                .filter(|c| **c != '_')
-                .collect();
-            let val =
-                i64::from_str_radix(&s[2..], 8).map_err(|e| format!("bad octal literal: {}", e))?;
-            return Ok(JsToken::Int(val));
-        }
-
         // Decimal integer or float
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() || c == '_' {

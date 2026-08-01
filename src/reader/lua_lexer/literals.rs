@@ -134,26 +134,11 @@ impl LuaLexer {
         let start = self.cursor.pos();
         let mut is_float = false;
 
-        // Hex literal
-        if self.peek() == Some('0') && matches!(self.peek2(), Some('x') | Some('X')) {
-            self.advance(); // 0
-            self.advance(); // x
-            while let Some(c) = self.peek() {
-                if c.is_ascii_hexdigit() || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            let s: String = self
-                .cursor
-                .span(start)
-                .iter()
-                .filter(|c| **c != '_')
-                .collect();
-            let val =
-                i64::from_str_radix(&s[2..], 16).map_err(|e| format!("bad hex literal: {}", e))?;
-            return Ok(LuaToken::Int(val));
+        if let Some(val) = self
+            .cursor
+            .scan_radix_literal(crate::reader::scan::RadixPrefixes::HexOnly)
+        {
+            return Ok(LuaToken::Int(val?));
         }
 
         // Decimal integer or float

@@ -133,6 +133,60 @@ impl CharCursor {
     pub fn chars(&self) -> &[char] {
         &self.input
     }
+
+    /// Scan a radix-prefixed integer literal at the cursor, if one starts here.
+    ///
+    /// Consumes the `0x`-style prefix and every digit of that radix that
+    /// follows. `_` is accepted anywhere among the digits and dropped before
+    /// parsing, so `0xdead_beef` reads as one value.
+    ///
+    /// Returns `None` with the cursor unmoved when the text here carries no
+    /// prefix `accepts` allows, which leaves the caller to scan it as a decimal
+    /// integer or float. A prefix with no digits after it returns `Some(Err)`:
+    /// `0x` cannot be read as the decimal `0` followed by the name `x`, since
+    /// the language committed to a hex literal at the prefix.
+    pub fn scan_radix_literal(&mut self, accepts: RadixPrefixes) -> Option<Result<i64, String>> {
+        if self.nth(0) != Some('0') {
+            return None;
+        }
+        let (radix, name) = match self.nth(1) {
+            Some('x' | 'X') => (16, "hex"),
+            Some('o' | 'O') if accepts == RadixPrefixes::HexOctalBinary => (8, "octal"),
+            Some('b' | 'B') if accepts == RadixPrefixes::HexOctalBinary => (2, "binary"),
+            _ => return None,
+        };
+        self.advance();
+        self.advance();
+
+        let digits_start = self.pos();
+        while let Some(c) = self.peek() {
+            if c == '_' || c.is_digit(radix) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let digits: String = self
+            .span(digits_start)
+            .iter()
+            .filter(|c| **c != '_')
+            .collect();
+
+        Some(i64::from_str_radix(&digits, radix).map_err(|e| format!("bad {name} literal: {}", e)))
+    }
+}
+
+/// Which radix prefixes a language accepts on an integer literal.
+///
+/// The languages differ here, so the scanner cannot simply accept them all:
+/// reading `0b1` as a binary literal in Lua would swallow text Lua lexes as
+/// the number `0` followed by the name `b1`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RadixPrefixes {
+    /// `0x` alone — Lua.
+    HexOnly,
+    /// `0x`, `0o` and `0b` — JavaScript and Python.
+    HexOctalBinary,
 }
 
 #[cfg(test)]
