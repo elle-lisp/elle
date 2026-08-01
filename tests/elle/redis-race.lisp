@@ -21,6 +21,14 @@
 
 (def redis ((import-file "lib/redis.lisp")))
 
+# Redis is shared infrastructure, so the key prefix carries this process's pid.
+# A fixed prefix collides the way a fixed scratch filename does: a second run
+# against the same server — another checkout, a rerun overlapping this one —
+# seeds, reads and deletes the same keys, and each run sees the other's
+# deletions as its own corrupted framing.  The pid makes each run's keyspace
+# its own, so a collision cannot be mistaken for the interleaving under test.
+(def key-prefix (string "test:race:" (sys/pid) ":"))
+
 (def n-fibers 8)
 (def n-rounds 50)
 (def n-keys-per-round 16)
@@ -40,7 +48,7 @@
                 (while (< f n-fibers)
                   (let [@k 0]
                     (while (< k n-keys-per-round)
-                      (redis:set (string "test:race:" f ":" k)
+                      (redis:set (string key-prefix f ":" k)
                                  (string "value-" f "-" k))
                       (assign k (+ k 1))))
                   (assign f (+ f 1))))
@@ -65,7 +73,7 @@
                                       (while (< k n-keys-per-round)
                                         (push cmds
                                         (list "GET"
-                                        (string "test:race:" fiber-idx ":" k)))
+                                        (string key-prefix fiber-idx ":" k)))
                                         (assign k (+ k 1)))
                                       (let [[pok? results] (protect (apply redis:pipeline
                                         (->list cmds)))]
@@ -115,7 +123,7 @@
                 (while (< f n-fibers)
                   (let [@k 0]
                     (while (< k n-keys-per-round)
-                      (redis:del (string "test:race:" f ":" k))
+                      (redis:del (string key-prefix f ":" k))
                       (assign k (+ k 1))))
                   (assign f (+ f 1))))
 

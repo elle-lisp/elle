@@ -5,8 +5,14 @@
 # All tests run within a single connection; the test cleans up only its own
 # "test:redis:*" keys via SCAN+DEL so it never touches db0 (or any db) as a
 # whole.  Each tests/elle/redis*.lisp file owns a distinct "test:<name>:*"
-# sub-namespace so the parallel test runner can fire them concurrently
+# sub-namespace, so the runner can fire DIFFERENT redis files concurrently
 # against a shared Redis without one wiping another's keys mid-run.
+#
+# That namespace is per FILE, not per RUN.  Two runs of THIS file against the
+# same server — a second checkout, a rerun overlapping this one — share these
+# keys, and each one's cleanup deletes the other's mid-flight.  redis-race.lisp
+# scopes its keys by pid for exactly that reason; this file does not, so do not
+# run two copies of it at once.
 
 (def redis ((import-file "lib/redis.lisp")))
 
