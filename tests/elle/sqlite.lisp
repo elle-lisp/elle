@@ -109,40 +109,52 @@
 ##
 ## Every connection is opened in WAL journal mode with a busy timeout. WAL is a
 ## property of the database file, not of the connection, so an in-memory
-## database reports `memory` and only an on-disk one can pin it.
+## database reports `memory` and only an on-disk one can pin it. How long to
+## wait is the `*busy-ms*` parameter, read at open.
 
-(with-temp-dir dir (def path (path/join dir "busy.db")) (def a (db:open path))
-               (defer
-                 (db:close a)
+(defn busy-timeout [conn]
+  (let [r (first (db:query conn "PRAGMA busy_timeout"))]
+    r:timeout))
 
-                 (assert (= (let [r (first (db:query a "PRAGMA journal_mode"))]
-                              r:journal_mode) "wal")
-                         "an on-disk connection opens in WAL mode")
-                 (assert (> (let [r (first (db:query a "PRAGMA busy_timeout"))]
-                              r:timeout) 0)
-                         "a connection opens with a busy timeout set")
+(with-temp-dir dir
+               (let [path (path/join dir "busy.db")]
+                 (with a (db:open path) db:close
+                       (assert (= (let [r (first (db:query a
+                                        "PRAGMA journal_mode"))]
+                                    r:journal_mode) "wal")
+                               "an on-disk connection opens in WAL mode")
+                       (assert (= (busy-timeout a) 30000)
+                               "a connection opens with the default busy timeout")
 
-                 (db:exec a "CREATE TABLE t (n INTEGER)")
+                       (db:exec a "CREATE TABLE t (n INTEGER)")
 
-                 ## The counterfactual for the wait itself. `a` takes the write
-                 ## lock and never releases it, so `b`'s insert cannot succeed —
-                 ## the question is only whether it waits first. With no busy
-                 ## timeout the failure is immediate; with one it takes at least
-                 ## the timeout.
-                 (def b (db:open path))
-                 (defer
-                   (db:close b)
-                   (db:exec b "PRAGMA busy_timeout = 400")
-                   (db:exec a "BEGIN IMMEDIATE")
-                   (let [t0 (clock/monotonic)
-                         [ok? err] (protect ((fn []
-                           (db:exec b "INSERT INTO t VALUES (1)"))))
-                         waited (- (clock/monotonic) t0)]
-                     (db:exec a "COMMIT")
-                     (assert (not ok?) "the blocked writer eventually gives up")
-                     (assert (= err:error :sqlite-error) "and reports it as one")
-                     (assert (> waited 0.25)
-                             (string "a blocked writer must WAIT for the lock, not "
-                                     "fail at once (waited " waited "s)"))))))
+                       ## `parameterize` around the open chooses the bound for that
+                       ## connection, and only for it: `a` above kept the default.
+                       (with b
+                             (parameterize ((db:*busy-ms* 400))
+                               (db:open path)) db:close
+                             (assert (= (busy-timeout b) 400)
+                                     "parameterize around the open chooses the wait")
+                             (assert (= (busy-timeout a) 30000)
+                                     "and leaves an already-open connection alone")
+
+                             ## The counterfactual for the wait itself. `a` takes the
+                             ## write lock and never releases it, so `b`'s insert cannot
+                             ## succeed — the question is only whether it waits first.
+                             ## With no busy timeout the failure is immediate; with one
+                             ## it takes at least the timeout.
+                             (db:exec a "BEGIN IMMEDIATE")
+                             (let [t0 (clock/monotonic)
+                                   [ok? err] (protect ((fn []
+                                     (db:exec b "INSERT INTO t VALUES (1)"))))
+                                   waited (- (clock/monotonic) t0)]
+                               (db:exec a "COMMIT")
+                               (assert (not ok?)
+                                       "the blocked writer eventually gives up")
+                               (assert (= err:error :sqlite-error)
+                                       "and reports it as one")
+                               (assert (> waited 0.25)
+                                       (string "a blocked writer must WAIT for the lock, "
+                                       "not fail at once (waited " waited "s)")))))))
 
 (println "sqlite: all tests passed")

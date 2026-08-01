@@ -103,9 +103,8 @@ the losing run dies partway through and reports `DID NOT COMPLETE — killed aft
 recording results for N of 25 selected files`, whose partial tally reads green
 at a glance.
 
-The timeout bounds the wait. A run blocked longer than
-`ELLE_SQLITE_BUSY_MS` (default 30000) still raises, because at that point the
-holder is wedged rather than slow.
+The timeout bounds the wait. A run blocked longer than 30 seconds still raises,
+because at that point the holder is wedged rather than slow.
 
 ### Assets live in a filesystem CAS, not in the database
 

@@ -46,11 +46,16 @@
   (def c-changes (cfn "sqlite3_changes" :int @[:ptr]))
   (def c-busy-timeout (cfn "sqlite3_busy_timeout" :int @[:ptr :int]))
 
-  ## How long a writer waits for a busy database before raising. The default
-  ## covers a concurrent test-runner pass over the shared session DB
+  ## How long a writer waits for a busy database before raising, in
+  ## milliseconds. `open` reads it, so `parameterize` around the open chooses
+  ## the bound for that connection:
+  ##
+  ##   (parameterize ((db:*busy-ms* 500)) (db:open path))
+  ##
+  ## The default covers a concurrent test-runner pass over the shared session DB
   ## (docs/test-runner.md § Concurrent runs wait); past it the holder is wedged
   ## rather than slow, and failing is the honest answer.
-  (def DEFAULT-BUSY-MS 30000)
+  (def *busy-ms* (make-parameter 30000))
 
   ## ── Bytes helpers ──────────────────────────────────────────────────
 
@@ -130,14 +135,6 @@
 
   ## ── Public API ───────────────────────────────────────────────────
 
-  (defn busy-ms []
-    "The configured busy-wait, in milliseconds."
-    (let [v (get (sys/env) "ELLE_SQLITE_BUSY_MS")]
-      (if (nil? v)
-        DEFAULT-BUSY-MS
-        (let [[ok? n] (protect (parse-int v))]
-          (if (and ok? (> n 0)) n DEFAULT-BUSY-MS)))))
-
   (defn open [path]
     "Open a SQLite database. Use \":memory:\" for in-memory.
 
@@ -153,7 +150,7 @@
       (unless (= rc SQLITE_OK)
         (error {:error :sqlite-error
                 :message (string "open: " (ffi/string (c-errmsg db)))}))
-      (c-busy-timeout db (busy-ms))
+      (c-busy-timeout db (*busy-ms*))
       ## WAL is a property of the FILE, so `:memory:` answers `memory` and the
       ## request is a no-op there. A read-only directory can refuse the change;
       ## the connection still works journaled the old way, so do not fail the
@@ -211,4 +208,4 @@
         (c-finalize stmt)
         (->list rows))))
 
-  {:open open :close close :exec exec :query query})
+  {:open open :close close :exec exec :query query :*busy-ms* *busy-ms*})
