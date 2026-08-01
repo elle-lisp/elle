@@ -10,7 +10,7 @@
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
+use crate::value::fiber::{SignalBits, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -102,10 +102,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "vm/config" => prim_vm_config {
-        signal: (Signal {
-            bits: SIG_QUERY.union(SIG_ERROR),
-            propagates: 0,
-        }),
+        signal: Signal::query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Read runtime configuration. No args returns the full config struct. \
               Pass a keyword (:trace, :jit, :wasm, :stats) to read a specific field.",
@@ -115,10 +112,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "vm/config-set" => prim_vm_config_set {
-        signal: (Signal {
-            bits: SIG_QUERY.union(SIG_ERROR),
-            propagates: 0,
-        }),
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Set a runtime configuration field. Use (put (vm/config) :key value) instead.",
         params: &["key", "value"],

@@ -211,10 +211,7 @@ fn prim_stream_flush(
 
 primitive! {
     "port/read-line" => prim_stream_read_line {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Read one line from port. Returns bytes or nil (EOF).",
         params: &["port"],
@@ -228,10 +225,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/read" => prim_stream_read {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
         params: &["port", "n"],
@@ -244,10 +238,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/read-exact" => prim_stream_read_exact {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Read exactly n bytes from port, looping over short reads. \
               Returns bytes/string of length n, or nil if EOF arrived first. \
@@ -263,10 +254,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/read-all" => prim_stream_read_all {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Read everything remaining from port.",
         params: &["port"],
@@ -280,10 +268,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "port/write" => prim_stream_write {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Write all of data to port, looping over short writes. \
               Returns the number of bytes written, which equals the length \
@@ -306,10 +291,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "port/flush" => prim_stream_flush {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Flush port's write buffer.",
         params: &["port"],

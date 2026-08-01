@@ -39,10 +39,7 @@ use query::*;
 
 primitive! {
     "port/open" => prim_port_open {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Open a file as a text (UTF-8) port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
@@ -53,10 +50,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/open-bytes" => prim_port_open_bytes {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Open a file as a binary port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
@@ -66,10 +60,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/close" => prim_port_close {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Close a port. Idempotent. Yields to cancel pending I/O before closing the fd.",
         params: &["port"],
@@ -129,10 +120,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/seek" => prim_port_seek {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Range(2, 4),
         doc: "Seek to a byte offset in a file port. Returns new absolute position.\nSyntax: (port/seek port offset [:from :start|:current|:end])\nDefault :from is :start (SEEK_SET). Discards the read buffer on seek.",
         params: &["port", "offset"],
@@ -143,10 +131,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "port/tell" => prim_port_tell {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Return current logical byte position in a file port.\nAccounts for per-fd read buffering: position = kernel_offset - buffer.len().",
         params: &["port"],

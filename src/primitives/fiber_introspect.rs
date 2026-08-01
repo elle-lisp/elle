@@ -285,10 +285,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "fiber/cancel" => prim_fiber_cancel {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_TERMINAL),
-            propagates: 0,
-        }),
+        signal: Signal::of(SIG_ERROR.union(SIG_TERMINAL)),
         arity: Arity::Range(1, 2),
         doc: "Hard-kill a fiber. Sets it to :error without unwinding. No defer/protect runs. Supports self-cancel.",
         params: &["fiber", "error?"],
@@ -318,10 +315,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "fiber/propagate" => prim_fiber_propagate {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_PROPAGATE),
-            propagates: 0,
-        }),
+        signal: Signal::of(SIG_ERROR.union(SIG_PROPAGATE)),
         arity: Arity::Exact(1),
         doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
@@ -334,10 +328,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "fiber/caps" => prim_fiber_caps {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_QUERY),
-            propagates: 0,
-        }),
+        signal: Signal::query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Get the fiber's active capabilities as a keyword set",
         params: &["fiber?"],
@@ -346,10 +337,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "fiber/abort" => prim_fiber_abort {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_ABORT),
-            propagates: 0,
-        }),
+        signal: Signal::of(SIG_ERROR.union(SIG_ABORT)),
         arity: Arity::Range(1, 2),
         doc: "Gracefully terminate a fiber by injecting an error and resuming it. Defer/protect blocks run.",
         params: &["fiber", "error?"],

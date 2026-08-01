@@ -245,10 +245,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "tcp/accept" => prim_tcp_accept {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
         params: &["listener"],
@@ -260,10 +257,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "tcp/connect-ip" => prim_tcp_connect_ip {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Connect to a TCP endpoint by IP literal (IPv4 or IPv6). Hostnames are rejected — the stdlib tcp/connect wrapper resolves names and calls this per address. Returns a stream port.",
         params: &["ip", "port"],
@@ -274,10 +268,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "tcp/shutdown" => prim_tcp_shutdown {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
@@ -296,10 +287,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "udp/send-to" => prim_udp_send_to {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(4),
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
         params: &["socket", "data", "addr", "port"],
@@ -319,10 +307,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "udp/recv-from" => prim_udp_recv_from {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
         params: &["socket", "count"],
@@ -334,10 +319,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "sys/resolve" => prim_sys_resolve {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",
         params: &["hostname"],

@@ -174,7 +174,7 @@ pub(crate) fn prim_arena_region_info(
 
 primitive! {
     "debug/arena-stats" => prim_arena_stats {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Return heap arena statistics.",
         params: &["fiber?"],
@@ -220,7 +220,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-allocs" => prim_arena_allocs {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Run thunk, return (result . net-allocs).",
         params: &["thunk"],

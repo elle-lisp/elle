@@ -210,10 +210,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/accept" => prim_unix_accept {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Accept a connection on a Unix listener. Returns a stream port.",
         params: &["listener"],
@@ -224,10 +221,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/connect" => prim_unix_connect {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],
@@ -237,10 +231,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/shutdown" => prim_unix_shutdown {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Shutdown a Unix stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],

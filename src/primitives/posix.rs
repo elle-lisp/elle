@@ -390,10 +390,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "os/sig-next" => prim_sig_next {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Wait for the next batch of signal deliveries on a receiver. Yields to the scheduler. Resumes with an array of [{:signal :sigterm :sender-pid n :sender-uid n :code n :count n} ...].",
         params: &["receiver"],

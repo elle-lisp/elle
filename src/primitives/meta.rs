@@ -391,7 +391,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "git" => prim_git {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR).union(SIG_GPU), propagates: 0 }),
+        signal: Signal::of(SIG_QUERY.union(SIG_ERROR).union(SIG_GPU)),
         arity: Arity::Range(1, 2),
         doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache on its template. \
               Returns the closure. All closures sharing the same template see the cached SPIR-V. \

@@ -236,10 +236,7 @@ primitive! {
         ret: crate::primitives::def::RetType::Fiber,
     }
     "fiber/resume" => prim_fiber_resume {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_RESUME),
-            propagates: 0,
-        }),
+        signal: Signal::of(SIG_ERROR.union(SIG_YIELD).union(SIG_RESUME)),
         arity: Arity::Range(1, 2),
         doc: "Resume a fiber, optionally delivering a value",
         params: &["fiber", "value"],

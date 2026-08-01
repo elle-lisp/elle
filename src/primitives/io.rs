@@ -386,10 +386,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "ev/sleep" => prim_ev_sleep {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
         params: &["seconds"],
@@ -399,10 +396,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "ev/poll-fd" => prim_ev_poll_fd {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Range(2, 3),
         doc: "Poll a raw fd for readiness — yields to the scheduler. mode: :read, :write, :read-write. Optional timeout in seconds.",
         params: &["fd", "mode", "timeout?"],

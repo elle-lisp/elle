@@ -303,7 +303,7 @@ pub(crate) fn prim_compile_spirv(
 // Declarative primitive definitions for introspection operations.
 primitive! {
     "jit?" => prim_is_jit {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
         params: &["value"],
@@ -387,7 +387,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "doc" => prim_doc {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Look up documentation for a value or builtin. \
               Pass a closure (user-defined or stdlib) to extract its docstring. \
@@ -400,7 +400,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "vm/query" => prim_vm_query {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Query VM state (call-count, doc, global?, fiber/self)",
         params: &["op", "arg"],
@@ -416,7 +416,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "jit/rejections" => prim_jit_rejections {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls} structs sorted by call count ascending.",
         category: "meta",
         example: "(jit/rejections)",
@@ -444,10 +444,7 @@ primitive! {
 primitive!(
     pub(crate) const MLIR_PRIMITIVES =
         "mlir/compile-spirv" => prim_compile_spirv {
-            signal: (Signal {
-                bits: SIG_QUERY.union(SIG_ERROR),
-                propagates: 0,
-            }),
+            signal: Signal::query_errors(),
             arity: Arity::Range(1, 2),
             doc: "Compile a GPU-eligible closure to SPIR-V bytes.",
             params: &["closure", "workgroup-size"],

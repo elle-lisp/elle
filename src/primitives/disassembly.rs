@@ -359,7 +359,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "vm/list-primitives" => prim_list_primitives {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Range(0, 1),
         doc: "List registered names as a sorted list of symbols. Optional category filter.",
         params: &["category?"],
@@ -369,7 +369,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "vm/primitive-meta" => prim_primitive_meta {
-        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
+        signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Get structured metadata for a primitive as a struct.",
         params: &["name"],

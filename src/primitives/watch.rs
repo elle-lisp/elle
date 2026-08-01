@@ -164,10 +164,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "watch-next" => prim_watch_next {
-        signal: (Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        }),
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Wait for filesystem events. Yields to the scheduler; resumes with an array of event structs [{:kind :modify :path \"...\"}]. Event kinds: :create, :modify, :remove, :rename. On macOS (kqueue), :create is reported as :modify because kqueue does not distinguish them at the directory level.",
         params: &["watcher"],

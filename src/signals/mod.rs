@@ -173,6 +173,58 @@ impl Signal {
         }
     }
 
+    /// Performs asynchronous I/O: suspends on the request and may error
+    /// (SIG_IO | SIG_YIELD | SIG_ERROR).
+    ///
+    /// The signal of every port, socket, and file primitive that reaches the
+    /// scheduler. `SIG_YIELD` belongs with `SIG_IO` because the request
+    /// suspends the calling fiber until the backend completes it.
+    pub const fn io_yields_errors() -> Self {
+        Signal {
+            bits: SIG_IO.union(SIG_YIELD).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Runs a subprocess: asynchronous I/O under the exec capability
+    /// (SIG_EXEC | SIG_IO | SIG_YIELD | SIG_ERROR).
+    ///
+    /// Both `SIG_EXEC` and `SIG_IO` are emitted, and they do different jobs.
+    /// `SIG_IO` is the dispatch bit that routes the request through the I/O
+    /// scheduler; `SIG_EXEC` is the capability bit a fiber mask tests to
+    /// permit or deny spawning at all.
+    pub const fn subprocess() -> Self {
+        Signal {
+            bits: SIG_EXEC.union(SIG_IO).union(SIG_YIELD).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Asks the VM about the current fiber and may error
+    /// (SIG_QUERY | SIG_ERROR).
+    ///
+    /// A query cannot read what it needs from its arguments — the answer is
+    /// the running fiber's own state — so it returns `SIG_QUERY` and the VM
+    /// answers it.
+    pub const fn query_errors() -> Self {
+        Signal {
+            bits: SIG_QUERY.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// An arbitrary set of emitted bits, propagating no parameter.
+    ///
+    /// For the signals with no name of their own. Prefer a named constructor
+    /// where one fits: the name says what the primitive does, where a bit set
+    /// only says which bits it sets.
+    pub const fn of(bits: SignalBits) -> Self {
+        Signal {
+            bits,
+            propagates: 0,
+        }
+    }
+
     /// Sends a POSIX signal (capability-gated) and may error (SIG_OS_SIGNAL | SIG_ERROR).
     /// Used by os/sig-send and os/sig-raise.
     pub const fn os_signal_errors() -> Self {

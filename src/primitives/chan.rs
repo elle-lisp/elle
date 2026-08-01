@@ -499,10 +499,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "chan/wait-ready" => prim_chan_wait_ready {
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
+        signal: Signal::io_yields_errors(),
         arity: Arity::Range(1, 2),
         doc: "Park the current fiber until a receiver is ready, a sender closes, or timeout-ms elapses. Returns nil; caller re-checks with chan/try-select.",
         params: &["receivers", "&opt timeout-ms"],

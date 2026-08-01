@@ -18,7 +18,7 @@ use crate::primitives::ctx::NativeCtx;
 use crate::signals::registry::with_registry;
 use crate::signals::Signal;
 use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -323,7 +323,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "compile/run-on" => prim_compile_run_on {
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        signal: Signal::query_errors(),
         arity: Arity::AtLeast(2),
         doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :mlir-cpu). Used by lib/differential.lisp to verify tier agreement. Returns the result, or signals :tier-rejected if the tier doesn't accept the closure.",
         params: &["tier", "f"],
@@ -332,7 +332,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "compile/barrier-module" => prim_compile_barrier_module {
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Compile a file (SOURCE, NAME) in the per-form fault-barrier test mode: whole-module analysis (epoch + shared bindings), then return a mutable array of [index thunk] pairs — one 0-arg thunk per test (expression) form, each capturing the file's shared bindings. def/var forms run eagerly as setup. Signals on a compile failure or a def-initializer fault. Powers `elle test` (src/test.lisp).",
         params: &["source", "name"],
@@ -341,7 +341,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "compile/whole-module" => prim_compile_whole_module {
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Compile a file (SOURCE, NAME) as ONE whole-file thunk (legacy multi-form test mode): whole-module analysis (epoch + letrec bindings), then return a mutable array with a single [0 thunk] pair whose 0-arg thunk runs every top-level form (def/var and expressions alike) in source order. Unlike compile/barrier-module it does not hoist def/var eagerly or slice expressions per form — so an imperative script runs in order, once per tier, in isolation, matching a direct file run. Signals on a compile failure. Powers `elle test` for multi-form files (src/test.lisp).",
         params: &["source", "name"],
@@ -350,7 +350,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "compile/read-forms" => prim_compile_read_forms {
-        signal: Signal { bits: SIG_OK.union(SIG_ERROR), propagates: 0 },
+        signal: Signal::of(SIG_OK.union(SIG_ERROR)),
         arity: Arity::Exact(2),
         doc: "Parse SOURCE (NAME for error spans) into a list of syntax values, without expanding or compiling. Companion to compile/whole-module-syntax: read a legacy multi-form file once in the main VM, then ship the syntax (sendable across os/spawn) to a worker that compiles + runs it with its own stdlib. Powers `elle test` (src/test.lisp).",
         params: &["source", "name"],
@@ -359,7 +359,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "compile/whole-module-syntax" => prim_compile_whole_module_syntax {
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Like compile/whole-module, but from a list of already-parsed syntax values (FORMS, from compile/read-forms) plus NAME, instead of a source string. Returns a mutable array with one [0 thunk] pair. Lets the runner parse a multi-form file in the main VM and compile it in a worker against the worker's own stdlib. Powers `elle test` (src/test.lisp).",
         params: &["forms", "name"],
@@ -368,7 +368,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "compile/dumps" => prim_compile_dumps {
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Compile a module (SOURCE, NAME) once through the file front-end and return a struct of rendered --dump artifacts keyed by kind: :ast :fhir :defuse :regions :hir :lir :cfg :dfa :jit :escape. The in-process form of `elle --dump=KIND` (returns the text instead of printing and exiting). Stages that fail to compile or yield nothing are omitted. Powers CAS asset capture in `elle test` (src/test.lisp).",
         params: &["source", "name"],

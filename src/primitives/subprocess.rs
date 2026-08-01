@@ -247,13 +247,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "subprocess/exec" => prim_subprocess_exec {
-        signal: (Signal {
-            // SIG_EXEC: capability bit for fiber mask access control.
-            // SIG_IO: dispatch bit — routes through the I/O scheduler.
-            // Both are emitted; dispatch is IO-based; exec bit enables capability gating.
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
-            propagates: 0,
-        }),
+        signal: Signal::subprocess(),
         arity: Arity::Range(2, 3),
         doc: "Spawn a subprocess. Returns {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <process>}",
         params: &["program", "args", "opts"],
@@ -269,11 +263,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "subprocess/wait" => prim_subprocess_wait {
-        signal: (Signal {
-            // SIG_EXEC: capability bit (same fiber mask semantics as subprocess/exec).
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
-            propagates: 0,
-        }),
+        signal: Signal::subprocess(),
         arity: Arity::Exact(1),
         doc: "Wait for a subprocess to exit. Returns exit code (0 = success).",
         params: &["handle"],

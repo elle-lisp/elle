@@ -257,3 +257,50 @@ fn test_squelch_all_bits_leaves_error() {
     let result = sig.squelch(mask);
     assert_eq!(result.bits, SIG_ERROR);
 }
+
+// ── Named constructors ───────────────────────────────────────────────
+//
+// Each pins the bits its name promises. The set is what the analyzer reasons
+// about, so a constructor whose name and bits disagree mis-declares every
+// primitive that uses it.
+
+#[test]
+fn io_yields_errors_names_all_three_bits() {
+    let sig = Signal::io_yields_errors();
+    assert!(sig.bits.intersects(SIG_IO), "must name :io");
+    assert!(
+        sig.bits.intersects(SIG_YIELD),
+        "an I/O request suspends its fiber, so it must name :yield"
+    );
+    assert!(sig.bits.intersects(SIG_ERROR), "must name :error");
+    assert_eq!(sig.propagates, 0);
+}
+
+#[test]
+fn query_errors_names_query_and_error_only() {
+    let sig = Signal::query_errors();
+    assert_eq!(sig.bits, SIG_QUERY.union(SIG_ERROR));
+    assert_eq!(sig.propagates, 0);
+}
+
+#[test]
+fn of_carries_the_bits_through_and_propagates_nothing() {
+    let bits = SIG_ERROR.union(SIG_ABORT);
+    assert_eq!(Signal::of(bits).bits, bits);
+    assert_eq!(Signal::of(bits).propagates, 0);
+}
+
+#[test]
+fn subprocess_names_the_dispatch_bit_and_the_capability_bit() {
+    let sig = Signal::subprocess();
+    assert!(
+        sig.bits.intersects(SIG_IO),
+        ":io routes the request through the scheduler"
+    );
+    assert!(
+        sig.bits.intersects(SIG_EXEC),
+        ":exec is what a fiber mask denies to forbid spawning"
+    );
+    assert!(sig.bits.intersects(SIG_YIELD));
+    assert!(sig.bits.intersects(SIG_ERROR));
+}
