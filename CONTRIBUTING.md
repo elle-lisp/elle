@@ -89,8 +89,19 @@ tests and zero assertions, the session was wasted.
 
 | Command | Runtime | What it does |
 |---------|---------|-------------|
-| `make smoke` | ~30s | Elle scripts (VM, JIT, WASM) + doctests + docgen |
-| `make test` | ~4min | smoke + fmt + clippy + rustdoc + unit + integration tests |
+| `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
+| `make smoke` | ~30min release | Elle corpus (VM, JIT) + doctests + embedding |
+| `make test` | smoke + ~5min | smoke + fmt + clippy + rustdoc + unit + integration tests |
+
+Pass the release binary to anything that runs the corpus — the debug default
+takes hours rather than ~30 minutes:
+
+```sh
+make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+```
+
+Never read a batched suite's exit status through a pipe: `make smoke-elle |
+tail` reports `tail`'s exit, not the suite's.
 
 See [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md) for
 test organization, helpers, and how to add tests.

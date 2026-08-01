@@ -173,13 +173,26 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 ## Testing
 
 **⚠️ NEVER run `cargo test --workspace` without explicit user instruction.**
-It takes ~30 minutes. Use `make test` (~2min) for pre-commit verification.
+It takes ~30 minutes.
 
 | Command | Runtime | What it does |
 |---------|---------|-------------|
-| `make smoke` | ~15s | Elle examples only |
-| `make test` | ~2min | build + examples + elle scripts + unit tests |
+| `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
+| `make smoke` | ~30min release | corpus + doctests + embedding |
+| `make test` | smoke + ~5min | smoke, then fmt, clippy, rustdoc, unit and integration tests |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
+
+**Pass the release binary to anything that runs the corpus.** `make smoke` and
+`make smoke-elle` default to the debug binary outside CI, which takes hours
+rather than ~30 minutes:
+
+```sh
+make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+```
+
+**Never read a batched suite's exit status through a pipe.** `make smoke-elle |
+tail` reports `tail`'s exit, not the suite's, so a failed batch looks green.
+Redirect to a file, or use `elle test --summary`.
 
 For test organization, helpers, and how to add tests:
 [`docs/testing.md`](docs/testing.md).
