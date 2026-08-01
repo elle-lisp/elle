@@ -5,7 +5,6 @@
 use crate::value::fiber::FiberStatus;
 use crate::value::{
     FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_SWITCH,
-    SIG_TERMINAL,
 };
 
 use crate::vm::core::VM;
@@ -72,9 +71,7 @@ impl VM {
                     self.finalize_dead_fiber(&current_handle);
                 }
 
-                let caught = bits.is_ok() || (mask.covers(bits) && !bits.contains(SIG_TERMINAL));
-
-                if caught {
+                if super::catch::mask_catches(mask, bits) {
                     self.fiber.child = None;
                     self.fiber.child_value = None;
 

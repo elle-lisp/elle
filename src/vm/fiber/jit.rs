@@ -22,13 +22,21 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
+        // Every other position that drives a child tests `.contains(SIG_HALT)`
+        // here. The two agree only while a halt arrives alone; the assertion
+        // pins that, because widening this test is an over-free hazard
+        // (`finalize_dead_fiber` releases everything the child owns) and
+        // narrowing the others is a leak.
+        debug_assert!(
+            !result_bits.contains(SIG_HALT) || result_bits == SIG_HALT,
+            "SIG_HALT reached a JIT resume alongside other bits ({result_bits:?}); \
+             the halt-finalization tests across vm/fiber no longer agree"
+        );
         if result_bits == SIG_HALT {
             self.finalize_dead_fiber(&handle);
         }
 
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
+        if mask_catches(mask, result_bits) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)
@@ -37,14 +45,7 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.set_error(
-                    "state-error",
-                    "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
-                );
+            if self.reject_orphaned_signal(result_bits, "fiber/resume") {
                 JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
@@ -121,9 +122,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
+        if mask_catches(mask, result_bits) {
             // Abort is terminal — set child to :error even when caught
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
@@ -135,14 +134,7 @@ impl VM {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.set_error(
-                    "state-error",
-                    "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
-                );
+            if self.reject_orphaned_signal(result_bits, "fiber/abort") {
                 JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));

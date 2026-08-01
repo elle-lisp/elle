@@ -23,13 +23,14 @@ use crate::jit::JitValue;
 use crate::value::fiber::FiberStatus;
 use crate::value::{
     BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT,
-    SIG_OK, SIG_SWITCH, SIG_TERMINAL, SIG_YIELD,
+    SIG_OK, SIG_SWITCH, SIG_YIELD,
 };
 use std::rc::Rc;
 
 use super::core::VM;
 
 mod abort;
+mod catch;
 mod child;
 mod jit;
 mod owned;
@@ -47,6 +48,7 @@ mod borrow_tests;
 // `crate::vm::fiber::<Item>` (external callers) or `super::<Item>` (sibling
 // submodules) still resolves unchanged. Visibility matches each item's original
 // `pub(crate)`/private declaration.
+pub(crate) use catch::mask_catches;
 pub(crate) use owned::{kill_fiber, parked_owner_nodes, release_fiber_owned, take_fiber_owned};
 use refcount::{incref_signal_region, release_discarded_signal};
 pub(crate) use refcount::{

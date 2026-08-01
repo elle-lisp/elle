@@ -139,9 +139,7 @@ impl VM {
             self.finalize_dead_fiber(&handle);
         }
 
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
+        if mask_catches(mask, result_bits) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
@@ -151,14 +149,7 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.set_error(
-                    "state-error",
-                    "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
-                );
+            if self.reject_orphaned_signal(result_bits, "fiber/resume") {
                 self.fiber.stack.push(Value::NIL);
                 None
             } else {
@@ -257,9 +248,7 @@ impl VM {
             self.finalize_dead_fiber(&handle);
         }
 
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
+        if mask_catches(mask, result_bits) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));
@@ -269,14 +258,7 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.set_error(
-                    "state-error",
-                    "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
-                );
+            if self.reject_orphaned_signal(result_bits, "fiber/resume") {
                 SIG_ERROR
             } else {
                 self.fiber.signal = Some((result_bits, result_value));

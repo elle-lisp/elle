@@ -5,8 +5,9 @@
 use std::rc::Rc;
 
 use crate::value::fiber::FiberStatus;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_TERMINAL};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
 use crate::vm::core::VM;
+use crate::vm::fiber::mask_catches;
 
 impl VM {
     /// Handle SIG_ABORT from fiber/abort (Call position).
@@ -34,8 +35,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        if result_bits.is_ok() || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL))
-        {
+        if mask_catches(mask, result_bits) {
             // Abort is terminal — even if the parent catches the signal,
             // the aborted fiber is finished and must not stay :paused.
             if result_bits.contains(SIG_ERROR) {
@@ -50,14 +50,7 @@ impl VM {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.set_error(
-                    "state-error",
-                    "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
-                );
+            if self.reject_orphaned_signal(result_bits, "fiber/abort") {
                 self.fiber.stack.push(Value::NIL);
                 None
             } else {
@@ -89,9 +82,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
+        if mask_catches(mask, result_bits) {
             // Abort is terminal — set child to :error even when caught
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
@@ -104,14 +95,7 @@ impl VM {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.set_error(
-                    "state-error",
-                    "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
-                );
+            if self.reject_orphaned_signal(result_bits, "fiber/abort") {
                 SIG_ERROR
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
