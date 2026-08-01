@@ -13,53 +13,83 @@ use super::rules::{
     replace_rules_in_range, unwrap_rules_in_range,
 };
 
+/// Every rule the walk applies, collected for one epoch range.
+///
+/// The six tables travel together through the whole recursion, and three of
+/// them are `HashMap<&str, &str>` — passed positionally they could be swapped
+/// at a call site with no compile error, and a rename table read as removals
+/// would reject every migrated symbol. Naming the fields removes that. Build
+/// one with [`Rules::for_range`]; the tests build partial sets field by field
+/// from [`Rules::none`].
+#[derive(Default)]
+pub(super) struct Rules<'a> {
+    pub renames: HashMap<&'a str, &'a str>,
+    pub removals: HashMap<&'a str, &'a str>,
+    pub replaces: Vec<(&'a str, usize, &'a str)>,
+    pub unwraps: HashMap<&'a str, &'a str>,
+    pub flattens: Vec<&'a str>,
+    pub flatten_clauses: Vec<(&'a str, usize)>,
+}
+
+impl Rules<'static> {
+    /// The rules that apply when crossing from `from_epoch` to `to_epoch`.
+    pub(super) fn for_range(from_epoch: u64, to_epoch: u64) -> Self {
+        Rules {
+            renames: collapsed_renames(from_epoch, to_epoch),
+            removals: removals_in_range(from_epoch, to_epoch),
+            replaces: replace_rules_in_range(from_epoch, to_epoch),
+            unwraps: unwrap_rules_in_range(from_epoch, to_epoch),
+            flattens: flatten_rules_in_range(from_epoch, to_epoch),
+            flatten_clauses: flatten_clause_rules_in_range(from_epoch, to_epoch),
+        }
+    }
+}
+
+impl Rules<'_> {
+    /// No rules at all — the walk rewrites nothing.
+    #[cfg(test)]
+    pub(super) fn none() -> Self {
+        Rules::default()
+    }
+
+    /// True when no rule of any kind applies, so the walk can be skipped.
+    fn is_empty(&self) -> bool {
+        self.renames.is_empty()
+            && self.removals.is_empty()
+            && self.replaces.is_empty()
+            && self.unwraps.is_empty()
+            && self.flattens.is_empty()
+            && self.flatten_clauses.is_empty()
+    }
+}
+
 /// Migrate syntax forms from `from_epoch` to `to_epoch`.
 ///
 /// Applies all renames and replacements in one pass. Returns the number
 /// of nodes rewritten. Returns `Err` if a removed form is encountered.
 pub fn migrate(forms: &mut [Syntax], from_epoch: u64, to_epoch: u64) -> Result<usize, String> {
-    let renames = collapsed_renames(from_epoch, to_epoch);
-    let removals = removals_in_range(from_epoch, to_epoch);
-    let replaces = replace_rules_in_range(from_epoch, to_epoch);
-    let unwraps = unwrap_rules_in_range(from_epoch, to_epoch);
-    let flattens = flatten_rules_in_range(from_epoch, to_epoch);
-    let flatten_clauses = flatten_clause_rules_in_range(from_epoch, to_epoch);
-
-    if renames.is_empty()
-        && removals.is_empty()
-        && replaces.is_empty()
-        && unwraps.is_empty()
-        && flattens.is_empty()
-        && flatten_clauses.is_empty()
-    {
+    let rules = Rules::for_range(from_epoch, to_epoch);
+    if rules.is_empty() {
         return Ok(0);
     }
 
     let mut count = 0;
     for form in forms.iter_mut() {
-        count += rewrite_node(
-            form,
-            &renames,
-            &removals,
-            &replaces,
-            &unwraps,
-            &flattens,
-            &flatten_clauses,
-        )?;
+        count += rewrite_node(form, &rules)?;
     }
     Ok(count)
 }
 
 /// Recursively rewrite a single syntax node.
-fn rewrite_node(
-    syntax: &mut Syntax,
-    renames: &HashMap<&str, &str>,
-    removals: &HashMap<&str, &str>,
-    replaces: &[(&str, usize, &str)],
-    unwraps: &HashMap<&str, &str>,
-    flattens: &[&str],
-    flatten_clauses: &[(&str, usize)],
-) -> Result<usize, String> {
+pub(super) fn rewrite_node(syntax: &mut Syntax, rules: &Rules<'_>) -> Result<usize, String> {
+    let Rules {
+        renames,
+        removals,
+        replaces,
+        unwraps,
+        flattens,
+        flatten_clauses,
+    } = rules;
     let mut count = 0;
 
     // Check for FlattenClauses match: (cond (test body) ...) → (cond test body ...)
@@ -210,15 +240,7 @@ fn rewrite_node(
                                 syntax.kind = SyntaxKind::List(begin_items);
                             }
                             count += 1;
-                            count += rewrite_node(
-                                syntax,
-                                renames,
-                                removals,
-                                replaces,
-                                unwraps,
-                                flattens,
-                                flatten_clauses,
-                            )?;
+                            count += rewrite_node(syntax, rules)?;
                             return Ok(count);
                         }
                     }
@@ -246,15 +268,7 @@ fn rewrite_node(
                     count += 1;
                     // Recurse into the replacement so renames and nested
                     // replacements still apply.
-                    count += rewrite_node(
-                        syntax,
-                        renames,
-                        removals,
-                        replaces,
-                        unwraps,
-                        flattens,
-                        flatten_clauses,
-                    )?;
+                    count += rewrite_node(syntax, rules)?;
                     return Ok(count);
                 }
             }
@@ -285,15 +299,7 @@ fn rewrite_node(
         | SyntaxKind::Bytes(items)
         | SyntaxKind::BytesMut(items) => {
             for item in items.iter_mut() {
-                count += rewrite_node(
-                    item,
-                    renames,
-                    removals,
-                    replaces,
-                    unwraps,
-                    flattens,
-                    flatten_clauses,
-                )?;
+                count += rewrite_node(item, rules)?;
             }
         }
 
@@ -306,15 +312,7 @@ fn rewrite_node(
         | SyntaxKind::Unquote(inner)
         | SyntaxKind::UnquoteSplicing(inner)
         | SyntaxKind::Splice(inner) => {
-            count += rewrite_node(
-                inner,
-                renames,
-                removals,
-                replaces,
-                unwraps,
-                flattens,
-                flatten_clauses,
-            )?;
+            count += rewrite_node(inner, rules)?;
         }
 
         // Atoms — nothing to rewrite.

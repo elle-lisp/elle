@@ -1,6 +1,10 @@
 use super::*;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 
+// Every `rewrite_node` test names only the rules it exercises and takes the
+// rest from `Rules::none()`. Spelling all six tables out per test hid which
+// one each was actually about.
+
 fn sym(name: &str) -> Syntax {
     Syntax::new(SyntaxKind::Symbol(name.to_string()), Span::synthetic())
 }
@@ -15,21 +19,13 @@ fn list(items: Vec<Syntax>) -> Syntax {
 
 #[test]
 fn test_rename_symbol() {
-    let renames: HashMap<&str, &str> = [("foo", "bar")].into_iter().collect();
-    let removals = HashMap::new();
-    let replaces = vec![];
+    let rules = Rules {
+        renames: [("foo", "bar")].into_iter().collect(),
+        ..Rules::none()
+    };
 
     let mut form = sym("foo");
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert_eq!(count, 1);
     assert_eq!(form.as_symbol(), Some("bar"));
@@ -37,21 +33,13 @@ fn test_rename_symbol() {
 
 #[test]
 fn test_rename_in_list() {
-    let renames: HashMap<&str, &str> = [("old", "new")].into_iter().collect();
-    let removals = HashMap::new();
-    let replaces = vec![];
+    let rules = Rules {
+        renames: [("old", "new")].into_iter().collect(),
+        ..Rules::none()
+    };
 
     let mut form = list(vec![sym("old"), int(1), sym("old")]);
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert_eq!(count, 2);
     if let SyntaxKind::List(items) = &form.kind {
@@ -64,21 +52,13 @@ fn test_rename_in_list() {
 
 #[test]
 fn test_no_rewrite_inside_quote() {
-    let renames: HashMap<&str, &str> = [("foo", "bar")].into_iter().collect();
-    let removals = HashMap::new();
-    let replaces = vec![];
+    let rules = Rules {
+        renames: [("foo", "bar")].into_iter().collect(),
+        ..Rules::none()
+    };
 
     let mut form = Syntax::new(SyntaxKind::Quote(Box::new(sym("foo"))), Span::synthetic());
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert_eq!(count, 0);
     if let SyntaxKind::Quote(inner) = &form.kind {
@@ -88,24 +68,16 @@ fn test_no_rewrite_inside_quote() {
 
 #[test]
 fn test_rewrite_inside_quasiquote() {
-    let renames: HashMap<&str, &str> = [("foo", "bar")].into_iter().collect();
-    let removals = HashMap::new();
-    let replaces = vec![];
+    let rules = Rules {
+        renames: [("foo", "bar")].into_iter().collect(),
+        ..Rules::none()
+    };
 
     let mut form = Syntax::new(
         SyntaxKind::Quasiquote(Box::new(sym("foo"))),
         Span::synthetic(),
     );
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert_eq!(count, 1);
     if let SyntaxKind::Quasiquote(inner) = &form.kind {
@@ -115,20 +87,13 @@ fn test_rewrite_inside_quasiquote() {
 
 #[test]
 fn test_removal_errors() {
-    let renames = HashMap::new();
-    let removals: HashMap<&str, &str> = [("gone", "use replacement instead")].into_iter().collect();
-    let replaces = vec![];
+    let rules = Rules {
+        removals: [("gone", "use replacement instead")].into_iter().collect(),
+        ..Rules::none()
+    };
 
     let mut form = sym("gone");
-    let result = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    );
+    let result = rewrite_node(&mut form, &rules);
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("has been removed"));
@@ -136,21 +101,10 @@ fn test_removal_errors() {
 
 #[test]
 fn test_no_changes_no_rules() {
-    let renames = HashMap::new();
-    let removals = HashMap::new();
-    let replaces = vec![];
+    let rules = Rules::none();
 
     let mut form = list(vec![sym("foo"), int(1)]);
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert_eq!(count, 0);
 }
@@ -167,9 +121,10 @@ fn test_migrate_empty_range() {
 #[test]
 fn test_replace_basic() {
     // (assert-eq X Y msg) → (assert (= X Y) msg)
-    let renames = HashMap::new();
-    let removals = HashMap::new();
-    let replaces = vec![("assert-eq", 3usize, "(assert (= $1 $2) $3)")];
+    let rules = Rules {
+        replaces: vec![("assert-eq", 3usize, "(assert (= $1 $2) $3)")],
+        ..Rules::none()
+    };
 
     let mut form = list(vec![
         sym("assert-eq"),
@@ -177,16 +132,7 @@ fn test_replace_basic() {
         int(2),
         Syntax::new(SyntaxKind::String("msg".to_string()), Span::synthetic()),
     ]);
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert!(count >= 1);
     // Result should be (assert (= 1 2) "msg")
@@ -205,9 +151,10 @@ fn test_replace_basic() {
 #[test]
 fn test_replace_with_complex_args() {
     // (assert-eq (+ 1 2) (- 5 2) "arith") → (assert (= (+ 1 2) (- 5 2)) "arith")
-    let renames = HashMap::new();
-    let removals = HashMap::new();
-    let replaces = vec![("assert-eq", 3usize, "(assert (= $1 $2) $3)")];
+    let rules = Rules {
+        replaces: vec![("assert-eq", 3usize, "(assert (= $1 $2) $3)")],
+        ..Rules::none()
+    };
 
     let mut form = list(vec![
         sym("assert-eq"),
@@ -215,16 +162,7 @@ fn test_replace_with_complex_args() {
         list(vec![sym("-"), int(5), int(2)]),
         Syntax::new(SyntaxKind::String("arith".to_string()), Span::synthetic()),
     ]);
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert!(count >= 1);
     if let SyntaxKind::List(items) = &form.kind {
@@ -248,21 +186,13 @@ fn test_replace_with_complex_args() {
 #[test]
 fn test_replace_arity_mismatch_passthrough() {
     // (assert-eq X Y) with arity 2 should NOT match a rule expecting arity 3
-    let renames = HashMap::new();
-    let removals = HashMap::new();
-    let replaces = vec![("assert-eq", 3usize, "(assert (= $1 $2) $3)")];
+    let rules = Rules {
+        replaces: vec![("assert-eq", 3usize, "(assert (= $1 $2) $3)")],
+        ..Rules::none()
+    };
 
     let mut form = list(vec![sym("assert-eq"), int(1), int(2)]);
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert_eq!(count, 0);
     if let SyntaxKind::List(items) = &form.kind {
@@ -276,21 +206,14 @@ fn test_replace_and_rename_together() {
     // Also rename "old-sym" → "new-sym"
     // Input: (old-fn old-sym 2)
     // Expected: (new-fn (+ new-sym 2))
-    let renames: HashMap<&str, &str> = [("old-sym", "new-sym")].into_iter().collect();
-    let removals = HashMap::new();
-    let replaces = vec![("old-fn", 2usize, "(new-fn (+ $1 $2))")];
+    let rules = Rules {
+        renames: [("old-sym", "new-sym")].into_iter().collect(),
+        replaces: vec![("old-fn", 2usize, "(new-fn (+ $1 $2))")],
+        ..Rules::none()
+    };
 
     let mut form = list(vec![sym("old-fn"), sym("old-sym"), int(2)]);
-    let count = rewrite_node(
-        &mut form,
-        &renames,
-        &removals,
-        &replaces,
-        &HashMap::new(),
-        &[],
-        &[],
-    )
-    .unwrap();
+    let count = rewrite_node(&mut form, &rules).unwrap();
 
     assert!(count >= 2); // at least 1 replace + 1 rename
     if let SyntaxKind::List(items) = &form.kind {
