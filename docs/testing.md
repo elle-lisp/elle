@@ -116,6 +116,27 @@ For backend-specific assertions, gate on the live policy/tier
 runner the trap turns it into a `skip`, but `:gated` carries a *reason* and is the
 intended idiom.
 
+### Naming resources outside the process
+
+A test that names anything another process can see — a Redis key, a temp file, a
+socket path — must carry the running process's pid in the name. Two runs of one
+file share every fixed name: a second checkout of this project, a rerun that
+overlaps the first, or the same file launched twice. Each run then writes and
+deletes the other's state mid-flight, and a reader sees its own value missing.
+That failure reads exactly like the defect the test exists to catch, so the test
+can no longer tell you which one happened.
+
+Build every name through one helper, and match the cleanup pattern against the
+same prefix:
+
+```lisp
+(def key-prefix (string "test:redis:" (sys/pid) ":"))
+(defn test-key [name] (string key-prefix name))
+```
+
+A per-file namespace does not cover this. It separates different files, not two
+runs of one file.
+
 ### Per-thread native teardown
 
 An FFI library may register thread-local destructors (e.g. libgit2 via OpenSSL:
