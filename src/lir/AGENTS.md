@@ -239,7 +239,7 @@ This matches the interpreter's stack state when yield propagates through a call.
 
 `IncrefRegion` and `DecrefRegion` are the only region-lifecycle
 bytecodes. The lowerer emits them based on output from the region
-solver (`src/hir/regions.rs`), not a local escape analysis pass.
+solver (`src/hir/region/infer.rs`), not a local escape analysis pass.
 `DecrefRegion` is the sole region-demise opcode — there is no
 `FreeRegion`.
 

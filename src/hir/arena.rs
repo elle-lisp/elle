@@ -35,7 +35,7 @@ pub struct BindingInner {
     /// SINGLE consumer — `needs_capture()`, for cell layout. Escape's capture facet
     /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
     /// seeds, never this proxy), and the region solver's reachability questions read
-    /// the HIR capture-graph (`regions::escape::captured_bindings`); neither reads
+    /// the HIR capture-graph (`region::infer::escape::captured_bindings`); neither reads
     /// this field, and there is no getter through which they could.
     is_captured: bool,
     /// Whether this binding is immutable (def)
@@ -117,7 +117,7 @@ impl BindingInner {
     /// is the broader [`needs_capture`](Self::needs_capture), which folds in the
     /// prebound letrec cell too (a capture of ANY cell-materialized binding is a
     /// borrow through a separately-owned env cell, never a containment the closure
-    /// owns; `regions::ownership::capture::capture_containment_edges`). The letrec
+    /// owns; `region::infer::ownership::capture::capture_containment_edges`). The letrec
     /// cell is not re-stored, so it needs no counted read, but it IS a cell borrow,
     /// so its capture yields no containment edge — the two concerns split here.
     pub fn is_restorable_capture_cell(&self) -> bool {

@@ -23,7 +23,7 @@
 //! multi-arm dispatch, and the container over-keep it strands, cease to exist. Where
 //! the container type is genuinely dynamic (a parameter joined to Top across disjoint
 //! callers), no arm is statically selected and the wrapper call is left intact (the
-//! dynamic case is the branch-compensation fallback's, `regions::compensate`).
+//! dynamic case is the branch-compensation fallback's, `region::infer::compensate`).
 //!
 //! This is the function-boundary generalization of the `each`-macro dead-arm prune
 //! (`prune.rs`): there the dispatch is inlined by macro expansion and the dead arms

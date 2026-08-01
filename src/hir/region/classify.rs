@@ -26,7 +26,7 @@ pub struct CallClassification {
     /// The ownership inference reads this to classify a `Funnel` store's container
     /// argument (a `MutableArray`/`MutableStruct` container retains the stored
     /// value's region — the forest recovers a containment edge there; see the
-    /// `Funnel` arm in `regions::walk`). Empty by default — only the real
+    /// `Funnel` arm in `region::infer::walk`). Empty by default — only the real
     /// primitive classification (`PrimitiveClassification::new`) fills it.
     pub ret_types: rustc_hash::FxHashMap<SymbolId, crate::primitives::def::RetType>,
     /// Primitive SymbolId → the 0-based argument indices the callee EMBEDS into its
@@ -46,7 +46,7 @@ pub struct CallClassification {
     /// set `%add`). `Funnel` alone is too broad: it also covers REMOVALS (`%del` —
     /// decrefs the value) and BYTE-COPY pushes (`%string-push`/`%bytes-push` —
     /// retain no region). Only at a retaining-store site is the stored value's RC
-    /// raised, the invariant `regions::compensate` needs to place a per-arm decref
+    /// raised, the invariant `region::infer::compensate` needs to place a per-arm decref
     /// that cannot over-free. Populated by `PrimitiveClassification::new`.
     pub retaining_store_funnels: FxHashSet<SymbolId>,
     /// SymbolIds of the BYTE-COPY store funnels (`%string-push`/`%string-push-mut`/
@@ -56,7 +56,7 @@ pub struct CallClassification {
     /// as a retaining store's does, but here the per-arm release is `val`'s ACTUAL
     /// last use (the byte-copy touched neither its incref nor its decref), so it is
     /// sound to compensate — the `%del` in-body-decref double-free hazard the
-    /// compensation excludes does NOT apply. `regions::compensate` releases the
+    /// compensation excludes does NOT apply. `region::infer::compensate` releases the
     /// stranded `val` per-arm from `funnel_bytecopy_value_sites`. Populated by
     /// `PrimitiveClassification::new`.
     pub bytecopy_store_funnels: FxHashSet<SymbolId>,
@@ -75,7 +75,7 @@ pub struct CallClassification {
     /// regardless of effect. A `pop` dispatch wrapper uses its container arg0 in every
     /// `(match (type-of coll) …)` arm but frees it in ONE, so the owned-param reference
     /// strands on every other arm — the F1b container strand `add`/`del` have. The walk
-    /// records arg0 as a `funnel_container_sites` container so `regions::compensate`
+    /// records arg0 as a `funnel_container_sites` container so `region::infer::compensate`
     /// releases it per-arm. Distinct from `moves_out_passthrough` (the PassThrough
     /// subset, for the ELEMENT's tail-retain suppression): the CONTAINER strand affects
     /// the fresh-result (`Funnel`) arms too. Populated by `PrimitiveClassification::new`.
@@ -90,7 +90,7 @@ pub struct CallClassification {
     /// Populated by `PrimitiveClassification::new`.
     pub container_read_funnels: FxHashSet<SymbolId>,
     /// The SymbolId of `fiber/new`, when the symbol table carries it — the
-    /// transferred-returned-subtree cut (`regions::ownership::transfer`) must
+    /// transferred-returned-subtree cut (`region::infer::ownership::transfer`) must
     /// recognize a fiber-body producer structurally. `None` under the default
     /// empty classification, which disables that cut's fiber face.
     pub fiber_new: Option<SymbolId>,

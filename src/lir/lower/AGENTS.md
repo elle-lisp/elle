@@ -13,7 +13,7 @@ HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operat
 Does NOT:
 - Resolve bindings (that's HIR)
 - Decide escape or region assignment (that's the region solver,
-  `src/hir/regions.rs`) — the lowerer has no escape-analysis pass; it only
+  `src/hir/region/infer.rs`) — the lowerer has no escape-analysis pass; it only
   *emits* from `RegionInfo`
 - Execute code (that's VM)
 - Perform optimization (future work)
@@ -94,7 +94,7 @@ The lowerer propagates HIR spans to LIR instructions. The emitter builds a `Loca
 
 Region allocation uses `IncrefRegion` and `DecrefRegion` instructions
 to manage per-region reference counts. The lowerer emits these based
-on output from the region solver (`src/hir/regions.rs`); there is no
+on output from the region solver (`src/hir/region/infer.rs`); there is no
 local escape-analysis pass that gates region instructions. See
 `docs/regions.md` for the full memory model.
 
@@ -278,7 +278,7 @@ about to hand its consumer, and for the rest there is nothing left to free.
 - **Changing binding lowering**: Update `binding.rs`
 - **Changing control flow**: Update `control.rs`
 - **Changing pattern matching**: Update `pattern.rs` and `pattern/{keyed,matching,seq}.rs`
-- **Changing region RC emission**: Update `regionemit.rs` (it reads the solver's `RegionInfo`); to change *what* is escaping or *where* a region is dropped, edit the region solver in `src/hir/regions.rs`, not the lowerer
+- **Changing region RC emission**: Update `regionemit.rs` (it reads the solver's `RegionInfo`); to change *what* is escaping or *where* a region is dropped, edit the region solver in `src/hir/region/infer.rs`, not the lowerer
 - **Changing tail-call ownership**: Update `control.rs::tail_arg_is_borrowed` and `control/call.rs::tail_callee_defers_release`
 - **Adding new bytecode instructions**: Update `expr.rs`, `control.rs`, `binding.rs`, or `lambda.rs` to emit them
 

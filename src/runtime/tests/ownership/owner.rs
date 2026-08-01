@@ -2,7 +2,7 @@ use super::*;
 
 /// End-to-end reclamation of the **capture-back-edge cycle** — the activation-owner cut
 /// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC"; inference
-/// pin `regions::tests::adopt::activation_adopts_capture_back_edge_scc`). A Fresh container
+/// pin `region::infer::tests::adopt::activation_adopts_capture_back_edge_scc`). A Fresh container
 /// `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store `m ⊇ c`), and `c`
 /// captures `m` back (capture `c ⊇ m`) — the m↔c cycle through a closure env. No REGION root
 /// can own it: `m` is captured, so its `decref_point` over-extends past the closure while its
@@ -49,7 +49,7 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
 /// End-to-end reclamation of the **transferred returned cycle** — the
 /// consuming-activation owner cut (docs/impl/region/owner.md § "Owner nodes" —
 /// "The transferred returned subtree"; inference pin
-/// `regions::tests::adopt::transfer_adopts_returned_cycle_to_consumer`). A
+/// `region::infer::tests::adopt::transfer_adopts_returned_cycle_to_consumer`). A
 /// producer `mk` builds an a↔b cycle and returns its root; the top-level
 /// consumer discards it. No region root can own it (the root crosses the
 /// return frontier) and per-region RC cannot collect the cycle, so flag-off it

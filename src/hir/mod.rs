@@ -25,7 +25,6 @@ mod liveness;
 mod narrow;
 mod pattern;
 pub mod region;
-mod regions;
 mod regularize;
 mod return_incref;
 pub mod symbols;
@@ -47,8 +46,8 @@ pub use expr::{
 pub use lint::HirLinter;
 pub use liveness::BitSet;
 pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
+pub(crate) use region::infer::return_frontier_regions;
+pub use region::infer::{analyze_regions, analyze_regions_with, format_regions};
 pub use region::{CallClassification, Region, RegionInfo};
-pub(crate) use regions::return_frontier_regions;
-pub use regions::{analyze_regions, analyze_regions_with, format_regions};
 pub(crate) use regularize::regularize;
 pub use symbols::extract_symbols_from_hir;

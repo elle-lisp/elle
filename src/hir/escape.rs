@@ -4,11 +4,11 @@
 //! in — computed once over the regularized IR. Every consumer that needs the
 //! property reads it rather than recomputing a proxy: the region solver (the Owned-
 //! vs-Shared classifier, the reassign gate, the merge gate, branch compensation —
-//! all through the region projection in `regions::escape`) and the lowerer's
+//! all through the region projection in `region::infer::escape`) and the lowerer's
 //! tail-call ownership predicates. There is no parallel escape judgment anywhere
 //! else: the former lexical proxy (`is_captured`) is demoted to a structural hint
 //! (below), and the region solver records no escape facts of its own — it projects
-//! this analysis's verdict onto regions through `regions::escape`.
+//! this analysis's verdict onto regions through `region::infer::escape`.
 //!
 //! ## The two questions it answers
 //!
@@ -74,18 +74,18 @@
 //! sets, the frontier facets also record the **allocation-site `HirId`s** they reach
 //! (`record_frontier_sites`): `return_frontier_sites` / `fiber_frontier_sites`. The
 //! region solver projects these — and the atom-level facets — onto regions through
-//! its own `alloc_region` / `binding_source_regions` maps (`regions::escape`). Escape
+//! its own `alloc_region` / `binding_source_regions` maps (`region::infer::escape`). Escape
 //! never sees a region; the projection is the consumer's.
 //!
 //! ## Consumers
 //!
 //! Every consumer reads this analysis; none keeps a parallel judgment.
 //!
-//! - **The region solver** (`regions::escape` projects the verdict to regions):
+//! - **The region solver** (`region::infer::escape` projects the verdict to regions):
 //!   the ownership **Shared seed** (`compute_shared_seeds` = the return ∪ fiber
 //!   frontier), the **merge** gate's not-returned check (`returned_regions` = the
 //!   return frontier; its separate sole-held *reachability* refusal reads the
-//!   region capture-graph `regions::escape::captured_bindings`, never escape and
+//!   region capture-graph `region::infer::escape::captured_bindings`, never escape and
 //!   never the `is_captured` proxy), branch **compensation**'s escaping-exclusion
 //!   (the return frontier), and the reassign 1-slot-container gate
 //!   (`binding_escapes_via_return`, per binding).
@@ -216,7 +216,7 @@ pub struct EscapeInfo {
     /// runtime-counted), so the *return* facet, not the full escape set, is the
     /// right question. It is read **per binding** (atom-level). Together with
     /// `return_frontier_sites` it is the return half of the ownership Shared seed,
-    /// projected to regions by `regions::escape` — precise for a cell that merely
+    /// projected to regions by `region::infer::escape` — precise for a cell that merely
     /// *points at* a region some function returns without itself flowing to a tail
     /// (the value genuinely is not returned).
     binding_returns: FxHashSet<Binding>,

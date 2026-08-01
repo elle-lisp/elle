@@ -1,4 +1,4 @@
-//! Region types for per-value region inference.
+//! Per-value region inference: the types, and the walk that assigns them.
 //!
 //! Every allocation site gets its own unique region, assigned by a single
 //! forward walk (no constraint solver, no widening). Each region's
@@ -8,10 +8,14 @@
 //! assignments and the set of regions that contain live allocations.
 //! The lowerer queries `scope_has_local_allocs(hir_id)` to decide a
 //! scope's region handling.
+//!
+//! The types live in the submodules here; the walk that produces them lives
+//! in [`infer`].
 
 mod classify;
 mod data;
 mod id;
+pub mod infer;
 mod info;
 mod order;
 mod stats;

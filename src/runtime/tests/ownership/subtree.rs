@@ -228,7 +228,7 @@ fn region_ownership_reclaims_nested_cycle_subtree() {
 
 /// End-to-end soundness of a COMBINED store + capture subtree (the modes chained in
 /// one Owned component, pinned at the inference level by
-/// `regions::tests::adopt::adopt_edges_chains_store_and_capture_in_one_subtree`). A Fresh
+/// `region::infer::tests::adopt::adopt_edges_chains_store_and_capture_in_one_subtree`). A Fresh
 /// container `root` holds a local capturing closure `c`, and `c` captures the pair `p`:
 /// `c` is adopted by `root` through a STORE edge and `p` is adopted by `c` through a
 /// CAPTURE edge. So at runtime `c` is a capture-adopt PARENT (owning `p`) that then

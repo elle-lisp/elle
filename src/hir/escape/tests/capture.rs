@@ -144,7 +144,7 @@ fn fiber_emit_value_escapes() {
 /// fiber frontier): its message (arg 1) is stored uncounted into the channel and
 /// crosses the fiber boundary, so it escapes. The binding-level escape set treats
 /// `Sends` exactly like `Stores`; the frontier distinction matters only for the
-/// fiber facet (the Shared seed `regions::escape` projects).
+/// fiber facet (the Shared seed `region::infer::escape` projects).
 /// The scrutiny the coarse presumption lacked is the *negative* case in the
 /// same shape: the channel itself (arg 0) is the store target, not a source, so
 /// it does NOT escape. The message is a **local** (`m`, a live region) — a

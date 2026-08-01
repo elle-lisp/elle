@@ -507,7 +507,7 @@ two compounding facts, neither of which the ordinary consuming-node treatment
 So the transfer is stated as two facts, both over structures the solver already
 holds:
 
-- **Region flow** (`hir/regions/walk`, the `Block`/`Break` arms): a `Block`'s
+- **Region flow** (`hir/region/infer/walk`, the `Block`/`Break` arms): a `Block`'s
   result region set is the union of its fall-through value's regions and every
   targeting `break`'s value regions. A binding that names the block's value
   therefore names those regions, and the ordinary binding-chain `decref_point`

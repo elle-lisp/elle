@@ -135,7 +135,7 @@ pub struct RegionInfo {
     /// last call).
     ///
     /// Read by the ownership lifetime obligation
-    /// (`regions::ownership::compute_adopt_edges`) for a **captured** member: a value
+    /// (`region::infer::ownership::compute_adopt_edges`) for a **captured** member: a value
     /// reachable only through a local closure is then admitted as Owned (freed at the
     /// closure's true death by subtree drop) rather than refused for a phantom
     /// over-extension. A value also used *after* its closure keeps a later direct use
@@ -170,7 +170,7 @@ pub struct RegionInfo {
     /// caller-owned (region/effects.md § `Fresh`). A `call_result` region is
     /// ordinarily refused by the ownership inference as a runtime placeholder
     /// (a possible borrow / opaque result), but a `Fresh` one is a legitimate
-    /// Owned candidate — `regions::ownership` admits it, which is what makes a
+    /// Owned candidate — `region::infer::ownership` admits it, which is what makes a
     /// mutable container or aggregate built by a native call (the `@array`/
     /// `array`/`@struct` constructors, opaque to the walk) ownable. Baseline release
     /// is unchanged — every `call_result` (Fresh or not) still frees by value
@@ -200,7 +200,7 @@ pub struct RegionInfo {
     /// (the funnel counts the store at runtime — a compile-time edge would
     /// double-count; region/effects.md § `Funnel`). This set re-supplies that
     /// containment for the forest **without** any `IncrefRegion` — it is read
-    /// only by `regions::ownership`, never by the lowerer's incref/decref
+    /// only by `region::infer::ownership`, never by the lowerer's incref/decref
     /// emission of RC, so the baseline stream is unchanged. The **site** is the
     /// funnel `Call` node, carried exactly as `cross_region_refs` carries its
     /// store site, so an adopt for a funnel-contained member can be keyed at the
@@ -223,7 +223,7 @@ pub struct RegionInfo {
     /// Funnel-store call site HirId → the regions of the heap values stored there
     /// (the non-container args of a `Funnel` intrinsic). The runtime mutable-store
     /// funnel increfs each stored value, so a per-arm decref placed at such a site
-    /// (`regions::branch_arm_decrefs`) is guaranteed to leave the value's RC ≥ 1
+    /// (`region::infer::branch_arm_decrefs`) is guaranteed to leave the value's RC ≥ 1
     /// (the container's reference) — it releases only the value's own owning
     /// reference and can never over-free. Recorded even when the container's type
     /// is statically unknown (a parameter container — the `put`/`set` dispatch),
@@ -234,7 +234,7 @@ pub struct RegionInfo {
     /// value's bytes into the container instead of retaining its region). A dispatch
     /// wrapper stores the value through such a funnel in ONE arm while its `val` param
     /// is used across arms, so `val`'s owned reference strands on the sibling arms — the
-    /// byte-copy dual of the retaining `funnel_store_sites` strand. `regions::compensate`
+    /// byte-copy dual of the retaining `funnel_store_sites` strand. `region::infer::compensate`
     /// places a per-arm release from here. Sound BECAUSE the byte-copy touched neither
     /// the value's incref nor its decref: the per-arm release is the value's true
     /// last-use release, NOT a redundant strand (as for a retaining store, whose
@@ -249,7 +249,7 @@ pub struct RegionInfo {
     /// returns its container pass-through, so the container is return-escaping and
     /// the wrapper never releases the owning reference it holds as an owned param —
     /// yet the funnel's `pass_through_retain` leaves the returned value's RC ≥ 1.
-    /// A per-arm decref placed at such a site (`regions::compensate`) therefore
+    /// A per-arm decref placed at such a site (`region::infer::compensate`) therefore
     /// releases only that stranded owned-param reference and can never drop the
     /// live returned container to zero. Recorded even for a parameter container
     /// (the `put`/`push`/`add` dispatch), where `containment_edges` records nothing.
@@ -276,7 +276,7 @@ pub struct RegionInfo {
     /// read's last use — the *borrowing node* of region/rules.md Rule 4. Anchored at the
     /// read instead, the container's free-time cascade drops the element's last count and
     /// the reader derefs a freed page. Pinned by
-    /// `regions::tests::borrow::opcode_read_extends_container_decref_to_the_reader` and
+    /// `region::infer::tests::borrow::opcode_read_extends_container_decref_to_the_reader` and
     /// `region_container_read_borrow_uaf`.
     pub uncounted_read_sites: HashMap<HirId, Vec<Region>>,
     /// **Counted** container element-READ edges `(read_call_site, alias_region,
@@ -292,7 +292,7 @@ pub struct RegionInfo {
     /// the lowerer's `order_releases` sorts the alias before its container where the two
     /// releases share a `decref_point` — the alias's `DecrefValueRegion` resolves its
     /// region by reading the value's own page, which the container's release can tear.
-    /// Pinned by `regions::tests::borrow` and `region_container_read_borrow_uaf`.
+    /// Pinned by `region::infer::tests::borrow` and `region_container_read_borrow_uaf`.
     pub counted_read_aliases: Vec<(HirId, Region, Region)>,
     /// Call-result alias edges `(call_site, result_region, argument_region)` — the
     /// result side's analogue of the may-store arg clique. A callee may hand back an
@@ -315,7 +315,7 @@ pub struct RegionInfo {
     /// the walk re-walks its body with the caller's argument regions bound to the
     /// parameters, so the regions it returns are the real ones. Read by the ownership
     /// inference and by the lowerer's release order, never by its incref/decref emission;
-    /// the baseline RC stream is unchanged. Pinned by `regions::tests::borrow` and
+    /// the baseline RC stream is unchanged. Pinned by `region::infer::tests::borrow` and
     /// `region_call_result_alias_uaf`.
     pub opaque_result_aliases: Vec<(HirId, Region, Region)>,
     /// Funnel-result identity edges `(funnel_call_site, result_region,
@@ -357,7 +357,7 @@ pub struct RegionInfo {
     /// emitted, so this set is consulted only on the tail path.
     pub moves_out_release_sites: FxHashSet<HirId>,
     /// Monomorphic store/remove funnel call sites where the per-arm CONTAINER
-    /// compensation (`regions::compensate`) released the wrapper's owned-param
+    /// compensation (`region::infer::compensate`) released the wrapper's owned-param
     /// reference to the container AND the funnel is a `-mut` pass-through (so the
     /// result IS that container). At exactly these sites the lowerer DROPS the
     /// redundant tail `IncrefValueRegion` (ReturnValue) retain
@@ -468,7 +468,7 @@ pub struct RegionInfo {
     /// (a child is stored into exactly one parent to qualify), so this is a
     /// forest, never a cycle; `merged_root` follows it to the outermost region.
     ///
-    /// Computed by `regions::merge` and consumed by the lowerer: `static_slot`
+    /// Computed by `region::infer::merge` and consumed by the lowerer: `static_slot`
     /// canonicalizes every region through `merged_root`, so a merge tree's child,
     /// parent, and deeper nests all allocate against, incref, and decref ONE static
     /// slot (the root's), landing in one physical region freed by the root's single
@@ -519,7 +519,7 @@ pub struct RegionInfo {
     /// Lexical capture is deliberately not one of the refusals: a closure's hold on
     /// what it captures is counted (or owning), never an uncounted borrow, and
     /// capture by an *escaping* closure is already an escape facet
-    /// (`regions::escape::sole_frame_held_regions`). The mutated refusal is not an
+    /// (`region::infer::escape::sole_frame_held_regions`). The mutated refusal is not an
     /// escape fact but compensation's release-route one, so it is asked per region
     /// rather than per holder: a `cell_release_regions` member names the cell BOX,
     /// which no `assign` repoints, and keeps its mutated holder
@@ -549,7 +549,7 @@ pub struct RegionInfo {
     /// drop"), populated by the ownership pass; empty when the shape stays Shared,
     /// so the lowerer's emission is then the per-region-RC baseline. Store-site HirId → the interior
     /// containment edges `(child_region, parent_region)` of an externally-unique
-    /// Owned subtree (`regions::ownership::compute_owned_subtrees`). At each such
+    /// Owned subtree (`region::infer::ownership::compute_owned_subtrees`). At each such
     /// site the lowerer emits `AdoptRegion(parent, child)` — linking the child's
     /// runtime region into the parent's Owned subtree (no RC) — instead of the
     /// interior edge's `IncrefRegion`. The subtree's root keeps its single decref;
@@ -619,7 +619,7 @@ pub struct RegionInfo {
     /// consuming activation's owner-node release set-drops root + interior
     /// members (adopted under it by the producer-side edges merged into the
     /// adopt maps above). Computed by
-    /// `regions::ownership::compute_transfer_adopts`.
+    /// `region::infer::ownership::compute_transfer_adopts`.
     pub transfer_adopt_regions: FxHashSet<Region>,
     /// Ownership forest, **activation-owner** cut, populated by the ownership pass;
     /// empty when no capture-back-edge SCC is present. Adopt-site HirId — the innermost
@@ -633,7 +633,7 @@ pub struct RegionInfo {
     /// suppressed (`suppressed_decref_regions`, the suppress ⊆ adopt contract), so
     /// the node's completion release is the members' sole demise — the interior
     /// m↔c references reclaim with the set. Members are in allocation program
-    /// order. Computed by `regions::ownership::compute_activation_adopts`.
+    /// order. Computed by `region::infer::ownership::compute_activation_adopts`.
     pub activation_adopt_sites: HashMap<HirId, Vec<Region>>,
     /// Per-path branch compensation: an arm-body HirId → regions whose
     /// `DecrefRegion` the lowerer must emit at that arm's HEAD. A region whose
@@ -642,7 +642,7 @@ pub struct RegionInfo {
     /// reaches the use); the compensating release at this arm's head frees it
     /// once on this path, before any tail call. The two releases are on mutually
     /// exclusive arms, so exactly one fires per path. Computed by
-    /// `regions::compensate`; empty when no branch leaks a live-in region.
+    /// `region::infer::compensate`; empty when no branch leaks a live-in region.
     pub branch_compensation: HashMap<HirId, Vec<Region>>,
     /// Per-arm decref placement: HirId → regions whose release the lowerer must
     /// emit AFTER that node (through `emit_decrefs_for`'s value-route). The
@@ -655,7 +655,7 @@ pub struct RegionInfo {
     /// after the arm's own use (not at its head — that would precede the use, a
     /// UAF). Exactly one of the per-arm releases (or the `decref_point` itself)
     /// fires per path, the arms being mutually exclusive. Computed by
-    /// `regions::compensate`; empty when no branch leaks a multiply-used region.
+    /// `region::infer::compensate`; empty when no branch leaks a multiply-used region.
     pub branch_arm_decrefs: HashMap<HirId, Vec<Region>>,
     /// Statistics.
     pub stats: RegionStats,
@@ -722,7 +722,7 @@ impl RegionInfo {
     /// one — a file-body/nested-`begin` double-declare, where which physical cell a given
     /// closure holds is not resolvable from the binding alone (the two cells have distinct
     /// regions). The ownership forest's `closure ⊇ cell` re-point
-    /// (`regions::ownership::capture`) and its `AdoptCellRegion` emit
+    /// (`region::infer::ownership::capture`) and its `AdoptCellRegion` emit
     /// (`lir::lower::cell_region_of_binding`) both gate on this, so analysis and the lowerer
     /// name the same cell — or agree to refuse (leave the capture a borrow, Shared).
     pub fn single_cell_region_of(&self, binding: Binding) -> Option<Region> {

@@ -416,7 +416,7 @@ impl<'a> Lowerer<'a> {
     /// names this node (a region's last use within a sibling arm of an `If`/`Match`
     /// whose `decref_point` is in a DIFFERENT arm). Called AFTER the node's own
     /// `emit_decrefs_for`, so it fires after the arm's use of the value. Restricted
-    /// by the analysis (`regions::compensate`) to single-holder `call_result`
+    /// by the analysis (`region::infer::compensate`) to single-holder `call_result`
     /// regions, so only the value-route applies. Mutually exclusive arms ⇒ exactly
     /// one of these (or the `decref_point`) fires per path.
     pub(super) fn emit_arm_decrefs(&mut self, hir_id: HirId) {
@@ -460,7 +460,7 @@ impl<'a> Lowerer<'a> {
     /// `emit_decrefs_for`'s per-region routing — call-result regions release by
     /// value off the holder slot (then nil-stamp it), all others by region id —
     /// for the same classes, minus the discarded-result/group paths the analysis
-    /// (`regions::compensate`) excludes. See that module for why exactly one of
+    /// (`region::infer::compensate`) excludes. See that module for why exactly one of
     /// the two releases fires per path.
     pub(super) fn emit_branch_compensation(&mut self, hir_id: HirId) {
         let regions = match self.region_info.branch_compensation.get(&hir_id) {

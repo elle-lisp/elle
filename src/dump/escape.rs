@@ -25,7 +25,7 @@
 //! - `[lambda_captures]` — per lambda: its params and capture set (`CaptureInfo`).
 //! - `[return_frontier]` — the regions escape's authoritative return verdict
 //!   projects onto (`crate::hir::EscapeInfo`, projected through `alloc_region` /
-//!   `binding_source_regions` by `regions::escape`).
+//!   `binding_source_regions` by `region::infer::escape`).
 //! - `[suppressed_decref_regions]` — the reassign-gate / store-path-owned set.
 //! - `[region_instrs]` — per LIR function, the emitted RC instructions
 //!   (`Incref/DecrefRegion`, `Incref/DecrefValueRegion`, `DecrefCellRegion`) and

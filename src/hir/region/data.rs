@@ -40,7 +40,7 @@ pub struct RegionData {
     pub decref_point: HirId,
     /// Where the region's release sits by the structural last-use rule alone —
     /// i.e. before the branch-arm release window re-anchored it onto a branch
-    /// (`regions::analyze::decref`, docs/impl/region/mechanism.md § "A release
+    /// (`region::infer::analyze::decref`, docs/impl/region/mechanism.md § "A release
     /// inside one arm is not a release on the other arms").
     ///
     /// The two differ only for a region that window moved, and the distinction is
