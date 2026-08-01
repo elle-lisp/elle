@@ -1,7 +1,7 @@
 //! Box primitives for mutable storage
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -29,13 +29,7 @@ pub(crate) fn prim_unbox(
     if let Some(v) = args[0].lbox_get() {
         (SIG_OK, v)
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("unbox: expected box, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "unbox", "box")
     }
 }
 
@@ -52,13 +46,7 @@ pub(crate) fn prim_rebox(
         crate::value::arena::lbox_store_with_rebind(ctx.heap_mut(), args[0], args[1]);
         (SIG_OK, args[1])
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("rebox: expected box, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "rebox", "box")
     }
 }
 

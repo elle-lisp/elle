@@ -12,13 +12,7 @@ pub(crate) fn prim_to_int(
     if let Some(f) = args[0].as_float() {
         return (SIG_OK, Value::int(f as i64));
     }
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!("integer: expected number, got {}", args[0].type_name()),
-        ),
-    )
+    type_error!(ctx, args[0], "integer", "number")
 }
 
 /// Parse a string or keyword to integer, with optional radix (2–36).
@@ -61,16 +55,7 @@ pub(crate) fn prim_parse_int(
     if let Some(name) = args[0].as_keyword_name() {
         return parse_int(ctx, &name, radix);
     }
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "parse-int: expected string or keyword, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "parse-int", "string or keyword")
 }
 
 fn parse_int(
@@ -102,13 +87,7 @@ pub(crate) fn prim_to_float(
     if let Some(f) = args[0].as_float() {
         return (SIG_OK, Value::float(f));
     }
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!("float: expected number, got {}", args[0].type_name()),
-        ),
-    )
+    type_error!(ctx, args[0], "float", "number")
 }
 
 /// Parse a string or keyword to float.
@@ -122,16 +101,7 @@ pub(crate) fn prim_parse_float(
     if let Some(name) = args[0].as_keyword_name() {
         return parse_float(ctx, &name);
     }
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "parse-float: expected string or keyword, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "parse-float", "string or keyword")
 }
 
 fn parse_float(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, s: &str) -> (SignalBits, Value) {
@@ -168,16 +138,7 @@ pub(crate) fn prim_number_to_string(
             };
             return (SIG_OK, ctx.string(s));
         }
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "number->string: expected number, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[0], "number->string", "number");
     }
 
     // 2-arg: integer n + radix
@@ -191,21 +152,7 @@ pub(crate) fn prim_number_to_string(
             ),
         );
     }
-    let n = match args[0].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "number->string: expected number, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
+    let n = prim_arg!(ctx, args, 0, as_int, "number->string", "number");
     let radix = match args[1].as_int() {
         Some(r) => r,
         None => {

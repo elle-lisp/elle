@@ -49,16 +49,12 @@ fn prim_install_allocator(
     let alloc_box: Rc<AllocatorBox> = match extract_allocator_rc(args[0]) {
         Some(rc) => rc,
         None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "allocator/install: expected an allocator (ExternalObject \
-                         wrapping AllocatorBox), got {}",
-                        args[0].type_name()
-                    ),
-                ),
+            return type_error!(
+                ctx,
+                args[0],
+                "allocator/install",
+                "an allocator (ExternalObject \
+                         wrapping AllocatorBox)"
             );
         }
     };

@@ -15,21 +15,7 @@ pub(crate) fn prim_fiber_set_fuel(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/set-fuel: expected fiber, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/set-fuel", "fiber");
 
     let fuel = match args[1].as_int() {
         Some(n) if n >= 0 => n as u32,
@@ -40,16 +26,7 @@ pub(crate) fn prim_fiber_set_fuel(
             );
         }
         None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/set-fuel: expected integer, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
+            return type_error!(ctx, args[1], "fiber/set-fuel", "integer");
         }
     };
 
@@ -68,18 +45,7 @@ pub(crate) fn prim_fiber_fuel(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/fuel: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/fuel", "fiber");
 
     let fuel_val = handle.with(|fiber| {
         fiber
@@ -98,21 +64,7 @@ pub(crate) fn prim_fiber_clear_fuel(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/clear-fuel: expected fiber, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/clear-fuel", "fiber");
 
     handle.with_mut(|fiber| {
         fiber.fuel = None;

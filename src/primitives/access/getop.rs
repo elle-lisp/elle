@@ -298,14 +298,10 @@ pub(crate) fn prim_get(
     }
 
     // Unsupported type
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "get: expected collection (list, array, @array, string, @string, or struct), got {}",
-                args[0].type_name()
-            ),
-        ),
+    type_error!(
+        ctx,
+        args[0],
+        "get",
+        "collection (list, array, @array, string, @string, or struct)"
     )
 }

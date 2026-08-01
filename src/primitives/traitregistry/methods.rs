@@ -208,18 +208,7 @@ pub(super) fn trait_seq_nth(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let n = match args[1].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("nth: expected integer index, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
+    let n = prim_arg!(ctx, args, 1, as_int, "nth", "integer index");
     match super::super::seq::seq_nth(&args[0], n, ctx) {
         Ok(v) => (SIG_OK, v),
         Err(e) => (SIG_ERROR, e),

@@ -253,13 +253,7 @@ impl VM {
                     // instance's heap stats (all of an instance's fibers share
                     // its one heap).
                     if arg.as_fiber().is_none() {
-                        return (
-                            SIG_ERROR,
-                            ctx.error(
-                                "type-error",
-                                format!("arena/stats: expected fiber, got {}", arg.type_name()),
-                            ),
-                        );
+                        return type_error!(ctx, arg, "arena/stats", "fiber");
                     }
                     let stats = ctx.struct_from(unsafe { build_stats(&*self.heap_ptr) });
                     (SIG_OK, stats)
@@ -329,18 +323,7 @@ impl VM {
 
                 let closure = match closure_val.as_closure() {
                     Some(c) => c,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error(
-                                "type-error",
-                                format!(
-                                    "mlir/compile-spirv: expected closure, got {}",
-                                    closure_val.type_name()
-                                ),
-                            ),
-                        )
-                    }
+                    None => return type_error!(ctx, closure_val, "mlir/compile-spirv", "closure"),
                 };
                 let lir = match &closure.template.lir_function {
                     Some(lir) => lir,
@@ -385,15 +368,7 @@ impl VM {
 
                 let closure = match closure_val.as_closure() {
                     Some(c) => c,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error(
-                                "type-error",
-                                format!("git: expected closure, got {}", closure_val.type_name()),
-                            ),
-                        )
-                    }
+                    None => return type_error!(ctx, closure_val, "git", "closure"),
                 };
                 // Already cached? Return early.
                 if closure.template.spirv.get().is_some() {

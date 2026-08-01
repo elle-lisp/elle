@@ -34,13 +34,7 @@ pub(crate) fn prim_exit(
         }
         n as i32
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("exit: expected integer, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "exit", "integer");
     };
 
     // When the driving VM has the exit trap set (the test runner, around a

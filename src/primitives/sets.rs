@@ -109,16 +109,7 @@ pub(crate) fn prim_add(
         crate::value::arena::set_add_with_incref(ctx.heap_mut(), args[0], frozen);
         (SIG_OK, args[0])
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "add: expected set or mutable set, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        type_error!(ctx, args[0], "add", "set or mutable set")
     }
 }
 
@@ -141,16 +132,7 @@ pub(crate) fn prim_del(
         crate::value::arena::set_del_with_decref(ctx.heap_mut(), args[0], &frozen);
         (SIG_OK, args[0])
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "del: expected set or mutable set, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        type_error!(ctx, args[0], "del", "set or mutable set")
     }
 }
 
@@ -335,15 +317,11 @@ pub(crate) fn prim_seq_to_set(
         return (SIG_OK, v);
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "seq->set: expected sequence (list, array, @array, string, @string, bytes, @bytes, set, @set), got {}",
-                v.type_name()
-            ),
-        ),
+    type_error!(
+        ctx,
+        v,
+        "seq->set",
+        "sequence (list, array, @array, string, @string, bytes, @bytes, set, @set)"
     )
 }
 

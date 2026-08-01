@@ -249,15 +249,7 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
             }
         }
     } else {
-        vm.set_error(
-            "type-error",
-            format!(
-                "splice: expected array, tuple, or list, got {}",
-                source.type_name()
-            ),
-        );
-        vm.fiber.stack.push(Value::NIL);
-        return;
+        vm_type_error!(vm, source, "splice", "array, tuple, or list")
     };
 
     if array.is_array_mut() {

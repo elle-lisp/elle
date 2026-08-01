@@ -85,18 +85,7 @@ pub(super) fn prim_udp_recv_from(
                 ),
             )
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "udp/recv-from: expected integer for count, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "udp/recv-from", "integer for count"),
     };
     let timeout = match extract_keyword_timeout(args, 2, "udp/recv-from", ctx) {
         Ok(t) => t,

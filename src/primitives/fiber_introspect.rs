@@ -26,18 +26,7 @@ pub(crate) fn prim_fiber_bits(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/bits: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/bits", "fiber");
 
     let bits = handle.with(|fiber| fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(SIG_OK));
     (SIG_OK, Value::int(bits.raw() as i64))
@@ -50,18 +39,7 @@ pub(crate) fn prim_fiber_mask(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/mask: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/mask", "fiber");
 
     let mask = handle.with(|fiber| fiber.mask);
     (SIG_OK, Value::int(mask.raw() as i64))
@@ -89,18 +67,7 @@ pub(crate) fn prim_fiber_parent(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/parent: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/parent", "fiber");
 
     let parent = handle.with(|fiber| fiber.parent.clone());
     match parent.and_then(|w| w.upgrade()) {
@@ -116,18 +83,7 @@ pub(crate) fn prim_fiber_child(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/child: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/child", "fiber");
 
     let child_val = handle.with(|fiber| fiber.child_value.unwrap_or(Value::NIL));
     (SIG_OK, child_val)
@@ -144,21 +100,7 @@ pub(crate) fn prim_fiber_propagate(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/propagate: expected fiber, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/propagate", "fiber");
 
     // Validate: fiber must be in error or paused state with a signal
     let has_signal = handle.with(|fiber| {
@@ -190,18 +132,7 @@ pub(crate) fn prim_fiber_cancel(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/cancel: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/cancel", "fiber");
 
     let error_value = args.get(1).copied().unwrap_or(Value::NIL);
 
@@ -258,18 +189,7 @@ pub(crate) fn prim_fiber_abort(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/abort: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/abort", "fiber");
 
     let error_value = args.get(1).copied().unwrap_or(Value::NIL);
     let status = handle.with(|fiber| fiber.status);
@@ -336,18 +256,7 @@ pub(crate) fn prim_fiber_caps(
             ctx.pair(Value::keyword("fiber/caps"), Value::NIL),
         );
     }
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/caps: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/caps", "fiber");
 
     let caps = handle.with(|fiber| crate::signals::CAP_MASK.subtract(fiber.withheld));
     let registry = crate::signals::registry::global_registry().lock().unwrap();

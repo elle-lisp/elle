@@ -136,30 +136,13 @@ pub(crate) fn prim_del(
         crate::value::arena::struct_remove_with_decref(ctx.heap_mut(), args[0], &key);
         (SIG_OK, args[0]) // Return the mutated struct
     } else if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("del: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+        let s = prim_arg!(ctx, args, 0, as_struct, "del", "struct");
         (
             SIG_OK,
             ctx.struct_from_sorted(sorted_struct_remove(s, &key)),
         ) // Return new struct
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("del: expected struct or set, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "del", "struct or set")
     }
 }
 
@@ -170,44 +153,16 @@ pub(crate) fn prim_keys(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if args[0].is_struct_mut() {
-        let mstruct = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("keys: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+        let mstruct = prim_arg!(ctx, args, 0, as_struct_mut, "keys", "struct");
         let borrowed = mstruct.borrow();
         let keys: Vec<Value> = borrowed.keys().map(|k| k.to_value(ctx)).collect();
         (SIG_OK, ctx.list(keys))
     } else if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("keys: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+        let s = prim_arg!(ctx, args, 0, as_struct, "keys", "struct");
         let keys: Vec<Value> = s.iter().map(|(k, _)| k.to_value(ctx)).collect();
         (SIG_OK, ctx.list(keys))
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("keys: expected struct, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "keys", "struct")
     }
 }
 
@@ -218,44 +173,16 @@ pub(crate) fn prim_values(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if args[0].is_struct_mut() {
-        let mstruct = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("values: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+        let mstruct = prim_arg!(ctx, args, 0, as_struct_mut, "values", "struct");
         let borrowed = mstruct.borrow();
         let values: Vec<Value> = borrowed.values().copied().collect();
         (SIG_OK, ctx.list(values))
     } else if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("values: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+        let s = prim_arg!(ctx, args, 0, as_struct, "values", "struct");
         let values: Vec<Value> = s.iter().map(|(_, v)| *v).collect();
         (SIG_OK, ctx.list(values))
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("values: expected struct, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "values", "struct")
     }
 }
 

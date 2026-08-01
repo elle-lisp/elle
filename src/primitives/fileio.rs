@@ -29,13 +29,7 @@ pub(crate) fn prim_slurp(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("slurp: expected string, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "slurp", "string")
     }
 }
 
@@ -47,25 +41,13 @@ pub(crate) fn prim_spit(
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("spit: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "spit", "string");
     };
 
     let content = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("spit: expected string, got {}", args[1].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[1], "spit", "string");
     };
 
     match std::fs::write(&path, &content) {
@@ -87,25 +69,13 @@ pub(crate) fn prim_append_file(
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("append-file: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "append-file", "string");
     };
 
     let content = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("append-file: expected string, got {}", args[1].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[1], "append-file", "string");
     };
 
     use std::fs::OpenOptions;
@@ -158,16 +128,7 @@ pub(crate) fn prim_list_directory(
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "list-directory: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[0], "list-directory", "string");
     };
 
     match std::fs::read_dir(&path) {
@@ -222,13 +183,7 @@ pub(crate) fn prim_read_lines(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("read-lines: expected string, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "read-lines", "string")
     }
 }
 

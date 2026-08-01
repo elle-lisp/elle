@@ -211,13 +211,7 @@ pub(crate) fn prim_keyword(
     if let Some(kw) = args[0].with_string(Value::keyword) {
         (SIG_OK, kw)
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("keyword: expected string, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "keyword", "string")
     }
 }
 
@@ -270,21 +264,7 @@ pub(crate) fn prim_compile_spirv(
             ),
         );
     }
-    let closure = match args[0].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "mlir/compile-spirv: expected closure, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let closure = prim_arg!(ctx, args, 0, as_closure, "mlir/compile-spirv", "closure");
     let lir = match &closure.template.lir_function {
         Some(lir) => lir,
         None => {

@@ -155,15 +155,11 @@ pub(crate) fn prim_freeze(
         return (SIG_OK, args[0]);
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "freeze: expected collection (@array, @struct, @set, @string, @bytes), got {}",
-                args[0].type_name()
-            ),
-        ),
+    type_error!(
+        ctx,
+        args[0],
+        "freeze",
+        "collection (@array, @struct, @set, @string, @bytes)"
     )
 }
 
@@ -300,15 +296,11 @@ pub(crate) fn prim_thaw(
         return (SIG_OK, args[0]);
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "thaw: expected collection (array, struct, set, string, bytes), got {}",
-                args[0].type_name()
-            ),
-        ),
+    type_error!(
+        ctx,
+        args[0],
+        "thaw",
+        "collection (array, struct, set, string, bytes)"
     )
 }
 
@@ -345,14 +337,5 @@ pub(crate) fn prim_pairs(
         return (SIG_OK, pairs_from_slice(ctx, &entries));
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "pairs: expected struct or @struct, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "pairs", "struct or @struct")
 }

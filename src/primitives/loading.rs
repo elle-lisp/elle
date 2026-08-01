@@ -22,31 +22,9 @@ pub(crate) fn prim_ffi_call(
             ctx.error("type-error", "ffi/call: function pointer is nil"),
         );
     }
-    let fn_addr = match args[0].as_pointer() {
-        Some(addr) => addr,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("ffi/call: expected pointer, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
+    let fn_addr = prim_arg!(ctx, args, 0, as_pointer, "ffi/call", "pointer");
 
-    let sig = match args[1].as_ffi_signature() {
-        Some(s) => s.clone(),
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("ffi/call: expected signature, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
+    let sig = prim_arg!(ctx, args, 1, as_ffi_signature, "ffi/call", "signature").clone();
 
     let call_args = &args[2..];
 
@@ -109,16 +87,7 @@ pub(crate) fn prim_ffi_native(
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "ffi/native: expected string or nil, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[0], "ffi/native", "string or nil");
     };
     match vm.ffi_mut().load_library(&path) {
         Ok(id) => (SIG_OK, ctx.lib_handle(id)),
@@ -133,31 +102,11 @@ pub(crate) fn prim_ffi_lookup(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let lib_id = match args[0].as_lib_handle() {
-        Some(id) => id,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ffi/lookup: expected library handle, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let lib_id = prim_arg!(ctx, args, 0, as_lib_handle, "ffi/lookup", "library handle");
     let sym_name = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("ffi/lookup: expected string, got {}", args[1].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[1], "ffi/lookup", "string");
     };
     let vm = ctx.vm();
     match vm.ffi().get_symbol(lib_id, &sym_name) {
@@ -177,34 +126,18 @@ pub(crate) fn prim_ffi_on_unload(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let lib_id = match args[0].as_lib_handle() {
-        Some(id) => id,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ffi/on-unload: expected library handle, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let lib_id = prim_arg!(
+        ctx,
+        args,
+        0,
+        as_lib_handle,
+        "ffi/on-unload",
+        "library handle"
+    );
     let sym_name = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "ffi/on-unload: expected string, got {}",
-                    args[1].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[1], "ffi/on-unload", "string");
     };
     match ctx.vm().ffi().register_teardown(lib_id, &sym_name) {
         Ok(()) => (SIG_OK, Value::NIL),
@@ -244,16 +177,7 @@ pub(crate) fn prim_ffi_signature(
         match args[1].list_to_vec_in(ctx.heap_mut()) {
             Ok(v) => v,
             Err(_) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "ffi/signature: expected array or list for arg types, got {}",
-                            args[1].type_name()
-                        ),
-                    ),
-                )
+                return type_error!(ctx, args[1], "ffi/signature", "array or list for arg types")
             }
         }
     };
@@ -283,18 +207,7 @@ pub(crate) fn prim_ffi_signature(
                     ),
                 )
             }
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "ffi/signature: expected integer for fixed_args, got {}",
-                            args[2].type_name()
-                        ),
-                    ),
-                )
-            }
+            None => return type_error!(ctx, args[2], "ffi/signature", "integer for fixed_args"),
         }
     } else {
         None
@@ -314,35 +227,10 @@ pub(crate) fn prim_ffi_callback(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let sig = match args[0].as_ffi_signature() {
-        Some(s) => s.clone(),
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ffi/callback: expected signature, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let sig = prim_arg!(ctx, args, 0, as_ffi_signature, "ffi/callback", "signature").clone();
     let closure_rc = match args[1].as_closure() {
         Some(c) => std::rc::Rc::new(c.clone()),
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ffi/callback: expected closure, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "ffi/callback", "closure"),
     };
 
     // Validate arity: closure must accept the right number of arguments
@@ -393,21 +281,7 @@ pub(crate) fn prim_ffi_callback_free(
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL); // free(nil) is a no-op
     }
-    let addr = match args[0].as_pointer() {
-        Some(a) => a,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ffi/callback-free: expected pointer, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let addr = prim_arg!(ctx, args, 0, as_pointer, "ffi/callback-free", "pointer");
 
     if ctx.vm().ffi_mut().callbacks_mut().remove(addr) {
         (SIG_OK, Value::NIL)

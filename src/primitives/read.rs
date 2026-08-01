@@ -22,13 +22,7 @@ pub(crate) fn prim_read(
     let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("read: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "read", "string");
     };
 
     // Parse the first form
@@ -67,13 +61,7 @@ pub(crate) fn prim_read_all(
     let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("read-all: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "read-all", "string");
     };
 
     let syntaxes = match read_syntax_all(&source, "<read>") {

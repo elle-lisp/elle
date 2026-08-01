@@ -103,6 +103,9 @@ pub mod plugin;
 #[allow(improper_ctypes_definitions)]
 pub mod plugin_api;
 pub mod port;
+// `#[macro_use]`: the `type-error` macros of `primitives::arg` also serve the
+// VM opcode handlers, and `vm` is declared after this.
+#[macro_use]
 pub mod primitives;
 pub mod reader;
 pub mod repl;

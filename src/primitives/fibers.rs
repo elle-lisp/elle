@@ -40,13 +40,7 @@ pub(crate) fn prim_fiber_new(
     let closure = match args[0].as_closure() {
         Some(c) => std::rc::Rc::new(c.clone()),
         None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/new: expected closure, got {}", args[0].type_name()),
-                ),
-            );
+            return type_error!(ctx, args[0], "fiber/new", "closure");
         }
     };
 
@@ -138,18 +132,7 @@ pub(crate) fn prim_fiber_resume(
         );
     }
 
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/resume: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/resume", "fiber");
 
     let resume_value = args.get(1).copied().unwrap_or(Value::NIL);
 
@@ -219,18 +202,7 @@ pub(crate) fn prim_fiber_status(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/status: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/status", "fiber");
 
     let status = handle.with(|fiber| fiber.status);
     (SIG_OK, status_keyword(status))
@@ -244,18 +216,7 @@ pub(crate) fn prim_fiber_value(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/value: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/value", "fiber");
 
     let value = handle.with(|fiber| fiber.signal.as_ref().map(|(_, v)| *v).unwrap_or(Value::NIL));
     (SIG_OK, value)

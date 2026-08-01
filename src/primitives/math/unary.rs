@@ -16,13 +16,7 @@ fn unary_float(
 ) -> (SignalBits, Value) {
     match args[0].as_number() {
         Some(n) => (SIG_OK, Value::float(op(n))),
-        None => (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("{name}: expected number, got {}", args[0].type_name()),
-            ),
-        ),
+        None => crate::primitives::arg::type_error_named(ctx, &args[0], name, "number"),
     }
 }
 

@@ -97,21 +97,7 @@ pub(crate) fn prim_bit_shift_left(
         Err(e) => return e,
     };
 
-    let shift = match args[1].as_int() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "bit/shift-left: expected integer, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let shift = prim_arg!(ctx, args, 1, as_int, "bit/shift-left", "integer");
 
     if shift < 0 {
         return (
@@ -138,21 +124,7 @@ pub(crate) fn prim_bit_shift_right(
         Err(e) => return e,
     };
 
-    let shift = match args[1].as_int() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "bit/shift-right: expected integer, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let shift = prim_arg!(ctx, args, 1, as_int, "bit/shift-right", "integer");
 
     if shift < 0 {
         return (

@@ -26,18 +26,7 @@ pub(crate) fn prim_ffi_struct(
     } else {
         match args[0].list_to_vec_in(ctx.heap_mut()) {
             Ok(v) => v,
-            Err(_) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "ffi/struct: expected array or list of types, got {}",
-                            args[0].type_name()
-                        ),
-                    ),
-                )
-            }
+            Err(_) => return type_error!(ctx, args[0], "ffi/struct", "array or list of types"),
         }
     };
 
@@ -110,18 +99,7 @@ pub(crate) fn prim_ffi_array(
                 ),
             )
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ffi/array: expected integer for count, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "ffi/array", "integer for count"),
     };
     let desc = TypeDesc::Array(Box::new(elem_desc), count);
     (SIG_OK, ctx.ffi_type(desc))
@@ -171,15 +149,7 @@ pub fn prim_ffi_malloc(
                 ctx.error("argument-error", "ffi/malloc: size must be positive"),
             )
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("ffi/malloc: expected integer, got {}", args[0].type_name()),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[0], "ffi/malloc", "integer"),
     };
     let ptr = unsafe { libc::malloc(size) };
     if ptr.is_null() {
@@ -214,18 +184,7 @@ pub fn prim_ffi_free(
         };
     }
     // Raw CPointer: free without lifecycle tracking (backwards compat)
-    let addr = match args[0].as_pointer() {
-        Some(a) => a,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("ffi/free: expected pointer, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
+    let addr = prim_arg!(ctx, args, 0, as_pointer, "ffi/free", "pointer");
     unsafe { libc::free(addr as *mut libc::c_void) };
     (SIG_OK, Value::NIL)
 }
@@ -249,21 +208,7 @@ pub fn prim_ptr_add(
         Ok(a) => a,
         Err(e) => return e,
     };
-    let offset = match args[1].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ptr/add: expected integer for offset, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let offset = prim_arg!(ctx, args, 1, as_int, "ptr/add", "integer for offset");
     // Use checked_add on i64 to detect overflow.
     let result = match (addr as i64).checked_add(offset) {
         Some(n) => n,
@@ -347,21 +292,7 @@ pub fn prim_ptr_from_int(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let n = match args[0].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "ptr/from-int: expected integer, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let n = prim_arg!(ctx, args, 0, as_int, "ptr/from-int", "integer");
     // Reinterpret as unsigned — negative values are valid C pointers
     // (e.g. SQLITE_TRANSIENT = (void(*)(void*))-1 = 0xFFFFFFFFFFFFFFFF).
     let addr = n as u64;

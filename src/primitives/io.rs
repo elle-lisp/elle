@@ -60,13 +60,7 @@ fn prim_io_backend(
                 ),
             ),
         ),
-        None => (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("io/backend: expected keyword, got {}", args[0].type_name()),
-            ),
-        ),
+        None => type_error!(ctx, args[0], "io/backend", "keyword"),
     }
 }
 
@@ -93,18 +87,7 @@ fn prim_io_submit(
     };
     let request = match args[1].as_external::<IoRequest>() {
         Some(r) => r,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "io/submit: expected io-request, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "io/submit", "io-request"),
     };
     // The requesting instance's own heap (the ctx's). The backend records it and
     // builds every completion value on it — immediate (spawn) or harvested on the
@@ -159,21 +142,7 @@ fn prim_io_wait(
             )
         }
     };
-    let timeout_ms = match args[1].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "io/wait: expected integer timeout, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let timeout_ms = prim_arg!(ctx, args, 1, as_int, "io/wait", "integer timeout");
     match backend.0.wait(timeout_ms) {
         Ok(completions) => {
             let heap: *mut crate::value::fiberheap::FiberHeap = ctx.heap_mut();
@@ -204,15 +173,11 @@ fn prim_io_cancel(
     let id = match args[1].as_int() {
         Some(n) if n >= 0 => SubmissionId::from_raw(n as u64),
         _ => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "io/cancel: expected non-negative integer submission ID, got {}",
-                        args[1].type_name()
-                    ),
-                ),
+            return type_error!(
+                ctx,
+                args[1],
+                "io/cancel",
+                "non-negative integer submission ID"
             )
         }
     };

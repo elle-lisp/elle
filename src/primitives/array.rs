@@ -45,15 +45,7 @@ pub(crate) fn prim_array_new(
             }
             i as usize
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("array/new: expected integer, got {}", args[0].type_name()),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[0], "array/new", "integer"),
     };
 
     let fill = args[1];
@@ -102,15 +94,7 @@ pub(crate) fn prim_popn(
             }
             i as usize
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("popn: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "popn", "integer"),
     };
 
     if args[0].is_array_mut() {
@@ -127,16 +111,7 @@ pub(crate) fn prim_popn(
         return (SIG_OK, ctx.string_mut(removed));
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "popn: expected @array or @string, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "popn", "@array or @string")
 }
 
 /// Insert a value at an index in an @array or @string (mutates in place, returns the collection)
@@ -146,18 +121,7 @@ pub(crate) fn prim_insert(
 ) -> (SignalBits, Value) {
     use crate::primitives::access::resolve_index;
 
-    let raw_index = match args[1].as_int() {
-        Some(i) => i,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("insert: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
+    let raw_index = prim_arg!(ctx, args, 1, as_int, "insert", "integer");
 
     if args[0].is_array_mut() {
         let len = args[0].array_mut_ref().unwrap().len();
@@ -236,16 +200,7 @@ pub(crate) fn prim_insert(
         return (SIG_OK, args[0]);
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "insert: expected @array or @string, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "insert", "@array or @string")
 }
 
 /// Remove element(s) at an index from an @array or @string (mutates in place, returns the collection)
@@ -255,18 +210,7 @@ pub(crate) fn prim_remove(
 ) -> (SignalBits, Value) {
     use crate::primitives::access::resolve_index;
 
-    let raw_index = match args[1].as_int() {
-        Some(i) => i,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("remove: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
+    let raw_index = prim_arg!(ctx, args, 1, as_int, "remove", "integer");
 
     let count = if args.len() == 3 {
         match args[2].as_int() {
@@ -282,15 +226,7 @@ pub(crate) fn prim_remove(
                 }
                 i as usize
             }
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("remove: expected integer, got {}", args[2].type_name()),
-                    ),
-                )
-            }
+            None => return type_error!(ctx, args[2], "remove", "integer"),
         }
     } else {
         1
@@ -319,16 +255,7 @@ pub(crate) fn prim_remove(
         return (SIG_OK, args[0]);
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "remove: expected @array or @string, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "remove", "@array or @string")
 }
 
 primitive! {

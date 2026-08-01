@@ -371,14 +371,5 @@ pub(crate) fn prim_put(
     }
 
     // Unsupported type
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "put: expected array, struct, set, bytes, or string, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "put", "array, struct, set, bytes, or string")
 }

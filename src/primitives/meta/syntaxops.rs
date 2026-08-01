@@ -271,18 +271,7 @@ pub(crate) fn prim_git(
     }
     #[cfg(feature = "mlir")]
     {
-        let closure = match args[0].as_closure() {
-            Some(c) => c,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("git: expected closure, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+        let closure = prim_arg!(ctx, args, 0, as_closure, "git", "closure");
         // Fast path: already cached
         if closure.template.spirv.get().is_some() {
             return (SIG_OK, args[0]);
@@ -332,18 +321,7 @@ pub(crate) fn prim_disgit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let closure = match args[0].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("disgit: expected closure, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
+    let closure = prim_arg!(ctx, args, 0, as_closure, "disgit", "closure");
     match closure.template.spirv.get() {
         Some(bytes) => (SIG_OK, ctx.bytes(bytes.clone())),
         None => (

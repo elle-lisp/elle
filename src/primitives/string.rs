@@ -92,15 +92,7 @@ pub(crate) fn prim_string_find(
 
     let needle = match args[1].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("string/find: expected string, got {}", args[1].type_name()),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "string/find", "string"),
     };
 
     let offset = if args.len() == 3 {
@@ -185,13 +177,7 @@ pub(crate) fn prim_uri_encode(
             })
             .unwrap();
     }
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!("uri-encode: expected string, got {}", args[0].type_name()),
-        ),
-    )
+    type_error!(ctx, args[0], "uri-encode", "string")
 }
 
 /// Create an @string from byte integers, strings, or @strings.
@@ -250,16 +236,7 @@ pub(crate) fn prim_string_size_of(
     if let Some(buf_ref) = args[0].as_string_mut() {
         return (SIG_OK, Value::int(buf_ref.borrow().len() as i64));
     }
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "string/size-of: expected string or @string, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "string/size-of", "string or @string")
 }
 
 /// Repeat a string N times
@@ -270,16 +247,7 @@ pub(crate) fn prim_string_repeat(
     let s = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "string/repeat: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[0], "string/repeat", "string");
     };
     let n = if let Some(i) = args[1].as_int() {
         if i < 0 {
@@ -293,16 +261,7 @@ pub(crate) fn prim_string_repeat(
         }
         i as usize
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "string/repeat: expected integer count, got {}",
-                    args[1].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[1], "string/repeat", "integer count");
     };
     (SIG_OK, ctx.string(s.repeat(n)))
 }

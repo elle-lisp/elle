@@ -75,16 +75,7 @@ pub(super) fn prim_port_set_options(
                 );
             }
             None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "port/set-options: expected keyword, got {}",
-                            key.type_name()
-                        ),
-                    ),
-                );
+                return type_error!(ctx, key, "port/set-options", "keyword");
             }
         }
         i += 2;
@@ -184,21 +175,7 @@ pub(super) fn prim_port_seek(
         );
     }
 
-    let offset = match args[1].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "port/seek: expected integer for offset, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let offset = prim_arg!(ctx, args, 1, as_int, "port/seek", "integer for offset");
 
     // Parse optional :from keyword-value pair (args[2] and args[3]).
     let whence = if args.len() == 4 {
@@ -213,18 +190,7 @@ pub(super) fn prim_port_seek(
                     ),
                 )
             }
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "port/seek: expected keyword for third argument, got {}",
-                            args[2].type_name()
-                        ),
-                    ),
-                )
-            }
+            None => return type_error!(ctx, args[2], "port/seek", "keyword for third argument"),
         }
         match args[3].as_keyword_name().as_deref() {
             Some("start") => libc::SEEK_SET,
@@ -242,18 +208,7 @@ pub(super) fn prim_port_seek(
                     ),
                 )
             }
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "port/seek: expected keyword for :from value, got {}",
-                            args[3].type_name()
-                        ),
-                    ),
-                )
-            }
+            None => return type_error!(ctx, args[3], "port/seek", "keyword for :from value"),
         }
     } else {
         libc::SEEK_SET // default: seek from start

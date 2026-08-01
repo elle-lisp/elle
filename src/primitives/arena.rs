@@ -49,16 +49,7 @@ pub(crate) fn prim_arena_set_object_limit(
         }
         Some(n as usize)
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "arena/set-object-limit: expected integer or nil, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        );
+        return type_error!(ctx, args[0], "arena/set-object-limit", "integer or nil");
     };
     let prev = ctx.heap_mut().set_object_limit(limit);
     let result = match prev {

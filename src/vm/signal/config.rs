@@ -67,16 +67,7 @@ impl VM {
                 ),
             }
         } else {
-            (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "vm/config: expected keyword or nil, got {}",
-                        arg.type_name()
-                    ),
-                ),
-            )
+            type_error!(ctx, arg, "vm/config", "keyword or nil")
         }
     }
     /// Handle `(vm/config-set key value)` — mutates the VM's RuntimeConfig.

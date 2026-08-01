@@ -249,29 +249,11 @@ pub(crate) fn prim_seq_to_hex(
                 Ok(bytes) => (SIG_OK, ctx.string(bytes_to_hex_string(&bytes))),
                 Err(e) => e,
             },
-            Err(_) => (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "seq->hex: expected proper list, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            ),
+            Err(_) => type_error!(ctx, args[0], "seq->hex", "proper list"),
         };
     }
 
-    (
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "seq->hex: expected bytes, array, list, or integer, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    type_error!(ctx, args[0], "seq->hex", "bytes, array, list, or integer")
 }
 
 /// Slice a sequence. Returns same type as input.

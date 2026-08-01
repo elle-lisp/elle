@@ -19,13 +19,7 @@ pub(crate) fn prim_delete_file(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("delete-file: expected string, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "delete-file", "string")
     }
 }
 
@@ -47,16 +41,7 @@ pub(crate) fn prim_delete_directory(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "delete-directory: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        type_error!(ctx, args[0], "delete-directory", "string")
     }
 }
 
@@ -78,16 +63,7 @@ pub(crate) fn prim_delete_directory_all(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "delete-directory-all: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        type_error!(ctx, args[0], "delete-directory-all", "string")
     }
 }
 
@@ -171,16 +147,7 @@ pub(crate) fn prim_create_directory(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "create-directory: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        type_error!(ctx, args[0], "create-directory", "string")
     }
 }
 
@@ -202,16 +169,7 @@ pub(crate) fn prim_create_directory_all(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "create-directory-all: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        type_error!(ctx, args[0], "create-directory-all", "string")
     }
 }
 
@@ -223,25 +181,13 @@ pub(crate) fn prim_rename_file(
     let old_path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("rename-file: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "rename-file", "string");
     };
 
     let new_path = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("rename-file: expected string, got {}", args[1].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[1], "rename-file", "string");
     };
 
     match std::fs::rename(&old_path, &new_path) {
@@ -263,25 +209,13 @@ pub(crate) fn prim_copy_file(
     let src = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("copy-file: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "copy-file", "string");
     };
 
     let dst = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("copy-file: expected string, got {}", args[1].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[1], "copy-file", "string");
     };
 
     match std::fs::copy(&src, &dst) {
@@ -313,13 +247,7 @@ pub(crate) fn prim_file_size(
             })
             .unwrap()
     } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("file-size: expected string, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "file-size", "string")
     }
 }
 

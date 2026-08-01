@@ -62,16 +62,7 @@ pub(super) fn format_named(
         let key = match args[i].as_keyword_name() {
             Some(name) => name,
             None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "string/format: expected keyword, got {}",
-                            args[i].type_name()
-                        ),
-                    ),
-                );
+                return type_error!(ctx, args[i], "string/format", "keyword");
             }
         };
         kwargs.insert(key.clone(), args[i + 1]);

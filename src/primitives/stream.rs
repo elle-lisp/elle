@@ -79,18 +79,7 @@ fn prim_stream_read(
                 ),
             )
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "port/read: expected integer for count, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "port/read", "integer for count"),
     };
     let timeout = match extract_keyword_timeout(args, 2, "port/read", ctx) {
         Ok(t) => t,
@@ -124,18 +113,7 @@ fn prim_stream_read_exact(
                 ),
             )
         }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "port/read-exact: expected integer for count, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "port/read-exact", "integer for count"),
     };
     let timeout = match extract_keyword_timeout(args, 2, "port/read-exact", ctx) {
         Ok(t) => t,

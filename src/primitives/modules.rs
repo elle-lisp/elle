@@ -148,13 +148,7 @@ pub(crate) fn prim_import_file(
     let spec = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!("import: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "import", "string");
     };
 
     let path = match resolve_import(&spec) {

@@ -154,20 +154,10 @@ pub(crate) fn handle_array_ref(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutRef");
     let Some(idx_val) = idx.as_int() else {
-        vm.set_error(
-            "type-error",
-            format!("array-ref: expected integer index, got {}", idx.type_name()),
-        );
-        vm.fiber.stack.push(Value::NIL);
-        return;
+        vm_type_error!(vm, idx, "array-ref", "integer index")
     };
     let Some(vec_ref) = vec.as_array_mut() else {
-        vm.set_error(
-            "type-error",
-            format!("array-ref: expected array, got {}", vec.type_name()),
-        );
-        vm.fiber.stack.push(Value::NIL);
-        return;
+        vm_type_error!(vm, vec, "array-ref", "array")
     };
     let vec_borrow = vec_ref.borrow();
     match vec_borrow.get(idx_val as usize) {
@@ -206,23 +196,10 @@ pub(crate) fn handle_array_set(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutSet");
     let Some(_idx_val) = idx.as_int() else {
-        vm.set_error(
-            "type-error",
-            format!(
-                "array-set!: expected integer index, got {}",
-                idx.type_name()
-            ),
-        );
-        vm.fiber.stack.push(Value::NIL);
-        return;
+        vm_type_error!(vm, idx, "array-set!", "integer index")
     };
     if !vec.is_array_mut() {
-        vm.set_error(
-            "type-error",
-            format!("array-set!: expected array, got {}", vec.type_name()),
-        );
-        vm.fiber.stack.push(Value::NIL);
-        return;
+        vm_type_error!(vm, vec, "array-set!", "array")
     }
     // Note: Arrays are immutable in this implementation
     vm.fiber.stack.push(val);
@@ -364,12 +341,7 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
         ctx.array(elems)
     } else {
-        vm.set_error(
-            "type-error",
-            format!("destructuring: expected array, got {}", val.type_name()),
-        );
-        vm.fiber.stack.push(Value::NIL);
-        return;
+        vm_type_error!(vm, val, "destructuring", "array")
     };
     vm.fiber.stack.push(result);
 }

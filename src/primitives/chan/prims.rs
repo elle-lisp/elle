@@ -151,16 +151,7 @@ pub(super) fn prim_chan_new(
                 );
             }
             None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "chan: expected integer for capacity, got {}",
-                            args[0].type_name()
-                        ),
-                    ),
-                );
+                return type_error!(ctx, args[0], "chan", "integer for capacity");
             }
         };
         crossbeam_channel::bounded(cap)
@@ -406,16 +397,7 @@ pub(super) fn prim_chan_wait_ready(
                 );
             }
             None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "chan/wait-ready: expected integer for timeout, got {}",
-                            args[1].type_name()
-                        ),
-                    ),
-                );
+                return type_error!(ctx, args[1], "chan/wait-ready", "integer for timeout");
             }
         }
     } else {

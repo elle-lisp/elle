@@ -39,13 +39,7 @@ fn prim_path_join(
         if let Some(s) = arg.with_string(|s| s.to_string()) {
             parts.push(s);
         } else {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("path/join: expected string, got {}", arg.type_name()),
-                ),
-            );
+            return type_error!(ctx, arg, "path/join", "string");
         }
     }
     let refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
@@ -119,33 +113,11 @@ fn prim_path_with_extension(
 ) -> (SignalBits, Value) {
     let path_str = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "path/with-extension: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[0], "path/with-extension", "string"),
     };
     let ext_str = match args[1].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "path/with-extension: expected string, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "path/with-extension", "string"),
     };
     (
         SIG_OK,
@@ -208,33 +180,11 @@ fn prim_path_relative(
 ) -> (SignalBits, Value) {
     let path_str = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "path/relative: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[0], "path/relative", "string"),
     };
     let base_str = match args[1].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "path/relative: expected string, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "path/relative", "string"),
     };
     match crate::path::relative(&path_str, &base_str) {
         Some(rel) => (SIG_OK, ctx.string(rel)),
