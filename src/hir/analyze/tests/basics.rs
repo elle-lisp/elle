@@ -283,3 +283,76 @@ fn test_lookup_in_current_scope_with_scopes() {
     // Invisible with empty scopes
     assert_eq!(analyzer.lookup_in_current_scope("x", &[]), None);
 }
+
+// ── Collection literals ──────────────────────────────────────────────
+
+/// A sequence literal spreads a splice into the constructor call, so the
+/// spliced item reaches the primitive as a spreading argument.
+#[test]
+fn an_array_literal_spreads_a_splice() {
+    let mut symbols = SymbolTable::new();
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+
+    let spliced = Syntax::new(SyntaxKind::Splice(Box::new(make_int(1))), make_span());
+    let syntax = Syntax::new(SyntaxKind::Array(vec![make_int(0), spliced]), make_span());
+
+    let result = analyzer.analyze(&syntax).unwrap();
+    match result.hir.kind {
+        HirKind::Call { args, .. } => {
+            assert_eq!(args.len(), 2);
+            assert!(!args[0].spliced, "a plain item does not spread");
+            assert!(args[1].spliced, "a spliced item spreads");
+        }
+        other => panic!("expected a constructor call, got {other:?}"),
+    }
+}
+
+/// A struct or set literal has no positional reading to spread a splice into,
+/// so it rejects one, and the message names the construct.
+#[test]
+fn the_unordered_literals_reject_a_splice() {
+    for (kind, expected) in [
+        (
+            SyntaxKind::Struct(vec![Syntax::new(
+                SyntaxKind::Splice(Box::new(make_int(1))),
+                make_span(),
+            )]),
+            "struct constructors",
+        ),
+        (
+            SyntaxKind::StructMut(vec![Syntax::new(
+                SyntaxKind::Splice(Box::new(make_int(1))),
+                make_span(),
+            )]),
+            "struct constructors",
+        ),
+        (
+            SyntaxKind::Set(vec![Syntax::new(
+                SyntaxKind::Splice(Box::new(make_int(1))),
+                make_span(),
+            )]),
+            "set constructors",
+        ),
+        (
+            SyntaxKind::SetMut(vec![Syntax::new(
+                SyntaxKind::Splice(Box::new(make_int(1))),
+                make_span(),
+            )]),
+            "mutable set constructors",
+        ),
+    ] {
+        let mut symbols = SymbolTable::new();
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+
+        let err = match analyzer.analyze(&Syntax::new(kind, make_span())) {
+            Err(e) => e,
+            Ok(_) => panic!("a splice in {expected} must be rejected"),
+        };
+        assert!(
+            err.contains("splice is not supported in") && err.contains(expected),
+            "the message must name the construct; got: {err}"
+        );
+    }
+}

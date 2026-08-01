@@ -1,6 +1,65 @@
 use super::*;
 
+/// What a collection literal does with a `;splice` among its items.
+enum SpliceRule {
+    /// The splice spreads into the constructor call: `[1 ;xs 2]` passes the
+    /// elements of `xs` as separate arguments.
+    Spread,
+    /// The literal rejects it. The payload names the construct and the reason,
+    /// and completes the sentence "splice is not supported in ".
+    Reject(&'static str),
+}
+
+/// `{..}` and `@{..}` reject a splice for the same reason and say so in the
+/// same words: the reader pairs their items into keys and values, and a spread
+/// arrives as a flat run with no pairing.
+const STRUCT_SPLICE: SpliceRule =
+    SpliceRule::Reject("struct constructors (key-value types require key-value pairs)");
+
 impl<'a> Analyzer<'a> {
+    /// Lower a collection literal to a call of the primitive that builds it.
+    ///
+    /// Every literal form — `[..]`, `@[..]`, `b[..]`, `{..}`, `|..|` and their
+    /// mutable twins — is a call to a constructor primitive with the items as
+    /// arguments. What differs between them is only which primitive to call
+    /// and whether an item may splice: a sequence spreads a splice, while a
+    /// struct or a set rejects one, having no positional reading to spread it
+    /// into.
+    ///
+    /// The call's signal is the combination of its items'.
+    fn analyze_collection_literal(
+        &mut self,
+        prim: &str,
+        items: &[Syntax],
+        splice: SpliceRule,
+        span: Span,
+    ) -> Result<Hir, String> {
+        let mut args = Vec::new();
+        let mut signal = Signal::silent();
+        for item in items {
+            let (inner, spliced) = Self::unwrap_splice(item);
+            if spliced {
+                if let SpliceRule::Reject(what) = splice {
+                    return Err(format!("{}: splice is not supported in {what}", item.span));
+                }
+            }
+            let hir = self.analyze_expr(inner)?;
+            signal = signal.combine(hir.signal);
+            args.push(CallArg { expr: hir, spliced });
+        }
+        let binding = self.resolve_primitive(prim);
+        let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
+        Ok(Hir::new(
+            HirKind::Call {
+                func: Box::new(func),
+                args,
+                is_tail: false,
+            },
+            span,
+            signal,
+        ))
+    }
+
     pub(crate) fn analyze_expr(&mut self, syntax: &Syntax) -> Result<Hir, String> {
         // Publish this form's intro scopes for the duration of its analysis:
         // any scope frame its handler pushes snapshots them as the frame's
@@ -70,162 +129,27 @@ impl<'a> Analyzer<'a> {
                 }
             }
 
-            // Immutable array literal [...] - call array primitive
+            // The sequence literals: a splice spreads into the constructor call.
             SyntaxKind::Array(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    let (inner, spliced) = Self::unwrap_splice(item);
-                    let hir = self.analyze_expr(inner)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg { expr: hir, spliced });
-                }
-                let binding = self.resolve_primitive("array");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
+                self.analyze_collection_literal("array", items, SpliceRule::Spread, span)
             }
-
-            // Mutable array literal @[...] - call @array primitive
             SyntaxKind::ArrayMut(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    let (inner, spliced) = Self::unwrap_splice(item);
-                    let hir = self.analyze_expr(inner)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg { expr: hir, spliced });
-                }
-                let binding = self.resolve_primitive("@array");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
+                self.analyze_collection_literal("@array", items, SpliceRule::Spread, span)
             }
-
-            // Immutable bytes literal b[...] - call bytes primitive
             SyntaxKind::Bytes(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    let (inner, spliced) = Self::unwrap_splice(item);
-                    let hir = self.analyze_expr(inner)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg { expr: hir, spliced });
-                }
-                let binding = self.resolve_primitive("bytes");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
+                self.analyze_collection_literal("bytes", items, SpliceRule::Spread, span)
             }
-
-            // Mutable bytes literal @b[...] - call @bytes primitive
             SyntaxKind::BytesMut(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    let (inner, spliced) = Self::unwrap_splice(item);
-                    let hir = self.analyze_expr(inner)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg { expr: hir, spliced });
-                }
-                let binding = self.resolve_primitive("@bytes");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
+                self.analyze_collection_literal("@bytes", items, SpliceRule::Spread, span)
             }
 
-            // Struct literal {...} - call struct primitive
+            // The key-value and set literals: a splice has no positional
+            // reading to spread into, so it is rejected.
             SyntaxKind::Struct(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    if matches!(&item.kind, SyntaxKind::Splice(_))
-                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
-                    {
-                        return Err(format!(
-                            "{}: splice is not supported in struct constructors (key-value types require key-value pairs)",
-                            item.span
-                        ));
-                    }
-                    let hir = self.analyze_expr(item)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg {
-                        expr: hir,
-                        spliced: false,
-                    });
-                }
-                let binding = self.resolve_primitive("struct");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
+                self.analyze_collection_literal("struct", items, STRUCT_SPLICE, span)
             }
-
-            // Mutable struct literal @{...} - call @struct primitive
             SyntaxKind::StructMut(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    if matches!(&item.kind, SyntaxKind::Splice(_))
-                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
-                    {
-                        return Err(format!(
-                            "{}: splice is not supported in struct constructors (key-value types require key-value pairs)",
-                            item.span
-                        ));
-                    }
-                    let hir = self.analyze_expr(item)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg {
-                        expr: hir,
-                        spliced: false,
-                    });
-                }
-                let binding = self.resolve_primitive("@struct");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
+                self.analyze_collection_literal("@struct", items, STRUCT_SPLICE, span)
             }
 
             // Quote - convert to a heap-literal template (or immediate) at
@@ -270,71 +194,18 @@ impl<'a> Analyzer<'a> {
                 span
             )),
 
-            // Set literal |...| - call set constructor primitive
-            SyntaxKind::Set(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    if matches!(&item.kind, SyntaxKind::Splice(_))
-                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
-                    {
-                        return Err(format!(
-                            "{}: splice is not supported in set constructors (unordered collection)",
-                            item.span
-                        ));
-                    }
-                    let hir = self.analyze_expr(item)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg {
-                        expr: hir,
-                        spliced: false,
-                    });
-                }
-                let binding = self.resolve_primitive("set");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
-            }
-
-            // Mutable set literal @|...| - call mutable-set constructor primitive
-            SyntaxKind::SetMut(items) => {
-                let mut args = Vec::new();
-                let mut signal = Signal::silent();
-                for item in items {
-                    if matches!(&item.kind, SyntaxKind::Splice(_))
-                        || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
-                    {
-                        return Err(format!(
-                            "{}: splice is not supported in mutable set constructors (unordered collection)",
-                            item.span
-                        ));
-                    }
-                    let hir = self.analyze_expr(item)?;
-                    signal = signal.combine(hir.signal);
-                    args.push(CallArg {
-                        expr: hir,
-                        spliced: false,
-                    });
-                }
-                let binding = self.resolve_primitive("@set");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
-                Ok(Hir::new(
-                    HirKind::Call {
-                        func: Box::new(func),
-                        args,
-                        is_tail: false,
-                    },
-                    span,
-                    signal,
-                ))
-            }
+            SyntaxKind::Set(items) => self.analyze_collection_literal(
+                "set",
+                items,
+                SpliceRule::Reject("set constructors (unordered collection)"),
+                span,
+            ),
+            SyntaxKind::SetMut(items) => self.analyze_collection_literal(
+                "@set",
+                items,
+                SpliceRule::Reject("mutable set constructors (unordered collection)"),
+                span,
+            ),
 
             // List - could be special form or function call
             SyntaxKind::List(items) => {
