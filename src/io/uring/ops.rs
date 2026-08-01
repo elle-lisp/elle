@@ -16,14 +16,7 @@ pub(crate) fn submit_uring_sleep(
         .sec(duration.as_secs())
         .nsec(duration.subsec_nanos());
     let timeout_sqe = opcode::Timeout::new(&ts).build().user_data(id.as_u64());
-    unsafe {
-        ring.submission()
-            .push(&timeout_sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, timeout_sqe, None) }
 }
 /// Submit IORING_OP_POLL_ADD to wait for a raw fd to become ready.
 ///
@@ -47,32 +40,7 @@ pub(crate) fn submit_uring_poll_add(
     let poll_sqe = opcode::PollAdd::new(io_uring::types::Fd(fd), events)
         .build()
         .user_data(id.as_u64());
-    let poll_sqe = if timeout.is_some() {
-        poll_sqe.flags(io_uring::squeue::Flags::IO_LINK)
-    } else {
-        poll_sqe
-    };
-    unsafe {
-        ring.submission()
-            .push(&poll_sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-        unsafe {
-            ring.submission()
-                .push(&timeout_sqe)
-                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-        }
-    }
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, poll_sqe, timeout) }
 }
 /// Arm the standing one-shot `POLL_ADD(eventfd, POLLIN)` that bridges hub
 /// completions into the io_uring wait. Its CQE carries `EVENTFD_USER_DATA`
@@ -116,14 +84,7 @@ pub(crate) fn submit_uring_process_wait(
     // SAFETY: `entry` references `siginfo_ptr` which is kept alive by the
     // caller for the lifetime of the pending op. The SQE is submitted
     // immediately here, and the kernel will fill siginfo on child exit.
-    unsafe {
-        ring.submission()
-            .push(&entry)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, entry, None) }
 }
 /// Submit IORING_OP_OPENAT via io_uring.
 ///
@@ -171,36 +132,7 @@ pub(crate) fn submit_uring_open(
         .build()
         .user_data(id.as_u64());
 
-    let open_sqe = if timeout.is_some() {
-        open_sqe.flags(io_uring::squeue::Flags::IO_LINK)
-    } else {
-        open_sqe
-    };
-
-    // SAFETY: See invariant above — path_ptr is valid through ring.submit().
-    unsafe {
-        ring.submission()
-            .push(&open_sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-        unsafe {
-            ring.submission()
-                .push(&timeout_sqe)
-                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-        }
-    }
-
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, open_sqe, timeout) }
 }
 /// Submit an AsyncCancel SQE to cancel a pending operation.
 ///
@@ -264,14 +196,7 @@ pub(crate) fn submit_uring_sig_next(
         .build()
         .user_data(id.as_u64());
 
-    unsafe {
-        ring.submission()
-            .push(&sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, sqe, None) }
 }
 /// Submit a read on an inotify fd to wait for filesystem events.
 pub(crate) fn submit_uring_watch_next(
@@ -290,12 +215,5 @@ pub(crate) fn submit_uring_watch_next(
         .build()
         .user_data(id.as_u64());
 
-    unsafe {
-        ring.submission()
-            .push(&sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, sqe, None) }
 }

@@ -21,6 +21,9 @@ pub(crate) use ops::*;
 mod stream;
 pub(crate) use stream::*;
 
+mod submit;
+pub(crate) use submit::submit_linked;
+
 /// Upper bound on a single kernel read, in bytes. A `read-exact` whose
 /// buffer is larger (e.g. a text read of many graphemes, sized at
 /// 4 bytes/grapheme) is filled by several page-sized reads plus the

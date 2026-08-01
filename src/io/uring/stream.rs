@@ -75,35 +75,7 @@ pub(crate) fn submit_uring_stream(
         _ => return Err(format!("io/submit: unexpected stream op {:?}", op)),
     };
 
-    let entry = if timeout.is_some() {
-        entry.flags(io_uring::squeue::Flags::IO_LINK)
-    } else {
-        entry
-    };
-
-    unsafe {
-        ring.submission()
-            .push(&entry)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-        unsafe {
-            ring.submission()
-                .push(&timeout_sqe)
-                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-        }
-    }
-
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, entry, timeout) }
 }
 pub(crate) fn submit_uring_accept(
     ring: &mut io_uring::IoUring,
@@ -118,35 +90,7 @@ pub(crate) fn submit_uring_accept(
         .build()
         .user_data(id.as_u64());
 
-    let accept_sqe = if timeout.is_some() {
-        accept_sqe.flags(io_uring::squeue::Flags::IO_LINK)
-    } else {
-        accept_sqe
-    };
-
-    unsafe {
-        ring.submission()
-            .push(&accept_sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-        unsafe {
-            ring.submission()
-                .push(&timeout_sqe)
-                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-        }
-    }
-
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, accept_sqe, timeout) }
 }
 /// Submit a Connect SQE via io_uring.
 ///
@@ -312,35 +256,7 @@ pub(crate) fn submit_uring_sendto(
                 .build()
                 .user_data(id.as_u64());
 
-            let sendto_sqe = if timeout.is_some() {
-                sendto_sqe.flags(io_uring::squeue::Flags::IO_LINK)
-            } else {
-                sendto_sqe
-            };
-
-            unsafe {
-                ring.submission()
-                    .push(&sendto_sqe)
-                    .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-            }
-
-            if let Some(dur) = timeout {
-                let ts = io_uring::types::Timespec::new()
-                    .sec(dur.as_secs())
-                    .nsec(dur.subsec_nanos());
-                let timeout_sqe = opcode::LinkTimeout::new(&ts)
-                    .build()
-                    .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-                unsafe {
-                    ring.submission()
-                        .push(&timeout_sqe)
-                        .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-                }
-            }
-
-            ring.submit()
-                .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-            Ok(())
+            unsafe { submit_linked(ring, id, sendto_sqe, timeout) }
         }
         Err(_) => Err("invalid address format".to_string()),
     }
@@ -412,35 +328,7 @@ pub(crate) fn submit_uring_recvfrom(
         .build()
         .user_data(id.as_u64());
 
-    let recvfrom_sqe = if timeout.is_some() {
-        recvfrom_sqe.flags(io_uring::squeue::Flags::IO_LINK)
-    } else {
-        recvfrom_sqe
-    };
-
-    unsafe {
-        ring.submission()
-            .push(&recvfrom_sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-        unsafe {
-            ring.submission()
-                .push(&timeout_sqe)
-                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-        }
-    }
-
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, recvfrom_sqe, timeout) }
 }
 pub(crate) fn submit_uring_shutdown(
     ring: &mut io_uring::IoUring,
@@ -457,33 +345,5 @@ pub(crate) fn submit_uring_shutdown(
         .build()
         .user_data(id.as_u64());
 
-    let shutdown_sqe = if timeout.is_some() {
-        shutdown_sqe.flags(io_uring::squeue::Flags::IO_LINK)
-    } else {
-        shutdown_sqe
-    };
-
-    unsafe {
-        ring.submission()
-            .push(&shutdown_sqe)
-            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-    }
-
-    if let Some(dur) = timeout {
-        let ts = io_uring::types::Timespec::new()
-            .sec(dur.as_secs())
-            .nsec(dur.subsec_nanos());
-        let timeout_sqe = opcode::LinkTimeout::new(&ts)
-            .build()
-            .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG);
-        unsafe {
-            ring.submission()
-                .push(&timeout_sqe)
-                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
-        }
-    }
-
-    ring.submit()
-        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
-    Ok(())
+    unsafe { submit_linked(ring, id, shutdown_sqe, timeout) }
 }

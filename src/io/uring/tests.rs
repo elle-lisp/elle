@@ -508,3 +508,73 @@ fn test_all_combined() {
     assert_eq!(read_opt(libc::SOL_SOCKET, libc::SO_KEEPALIVE), 1);
     unsafe { libc::close(fd) };
 }
+
+/// A submission carrying a deadline must come back as `-ECANCELED` once the
+/// deadline passes, and must still yield exactly one completion for the
+/// operation.
+///
+/// Both halves are the linked-timeout protocol `submit_linked` implements: the
+/// `IO_LINK` flag is what lets the timer cancel the operation, and the tag on
+/// the timer's `user_data` is what keeps its own completion from being
+/// mistaken for the operation's. Drop the flag and the poll waits forever;
+/// drop the tag and the caller sees two completions for one request.
+#[test]
+fn a_linked_timeout_cancels_its_operation_and_reports_once() {
+    use crate::io::uring::submit_linked;
+    use crate::io::SubmissionId;
+    use std::time::Duration;
+
+    let mut ring = match io_uring::IoUring::new(8) {
+        Ok(ring) => ring,
+        // No io_uring on this host kernel — the thread-pool backend covers
+        // the same timeout behavior through port-read-timeout.lisp.
+        Err(_) => return,
+    };
+
+    // A pipe nobody ever writes to: the poll can only end by timing out.
+    let mut fds: [libc::c_int; 2] = [0; 2];
+    assert_eq!(
+        unsafe { libc::pipe(fds.as_mut_ptr()) },
+        0,
+        "pipe failed: {}",
+        std::io::Error::last_os_error()
+    );
+    let (read_fd, write_fd) = (fds[0], fds[1]);
+
+    let id = SubmissionId::from_raw(0x5eed);
+    let poll = io_uring::opcode::PollAdd::new(io_uring::types::Fd(read_fd), libc::POLLIN as u32)
+        .build()
+        .user_data(id.as_u64());
+
+    // SAFETY: the poll SQE points at no caller-owned memory beyond the fd,
+    // which outlives the submission.
+    unsafe { submit_linked(&mut ring, id, poll, Some(Duration::from_millis(50))) }
+        .expect("submission failed");
+
+    ring.submit_and_wait(1).expect("wait failed");
+
+    let mut for_the_operation = 0;
+    let mut result = None;
+    for cqe in ring.completion() {
+        if cqe.user_data() == id.as_u64() {
+            for_the_operation += 1;
+            result = Some(cqe.result());
+        }
+    }
+
+    unsafe {
+        libc::close(read_fd);
+        libc::close(write_fd);
+    }
+
+    assert_eq!(
+        for_the_operation, 1,
+        "the operation must produce exactly one completion; the timer's own \
+         CQE carries the tag and is not it"
+    );
+    assert_eq!(
+        result,
+        Some(-libc::ECANCELED),
+        "an expired deadline must cancel the linked operation"
+    );
+}
