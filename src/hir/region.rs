@@ -13,6 +13,7 @@ mod classify;
 mod data;
 mod id;
 mod info;
+mod order;
 mod stats;
 
 // Re-export at the crate::hir::region root so every path that resolved as
@@ -22,6 +23,7 @@ pub use classify::CallClassification;
 pub use data::{OutlivesConstraint, Region, RegionData};
 pub use id::{MappedRegion, RuntimeRegion, StaticRegion};
 pub use info::{CellContainer, RegionInfo, TailCalleeFacts};
+pub use order::{PinDecref, ProgramOrder};
 pub use stats::RegionStats;
 
 #[cfg(test)]

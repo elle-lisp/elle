@@ -12,6 +12,7 @@
 use super::super::*;
 use crate::hir::defuse::DefUseBuilder;
 use crate::hir::liveness::LastUseInfo;
+use crate::hir::region::{PinDecref, ProgramOrder};
 
 /// Populate and extend `region_data[*].decref_point` across the several passes
 /// that ran inline after `build_info`.
@@ -32,17 +33,11 @@ pub(super) fn populate_decref_points(
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let porder = ProgramOrder::new(order);
     let last_use = &last_use_info.per_node;
     for (alloc_id, &region) in &info.alloc_region {
         let lu = last_use.get(alloc_id).copied().unwrap_or(*alloc_id);
-        info.region_data
-            .entry(region)
-            .and_modify(|d| {
-                if ord(lu) > ord(d.decref_point) {
-                    d.extend_to(lu);
-                }
-            })
-            .or_insert(RegionData::at(lu));
+        info.region_data.pin_to(region, lu, porder);
     }
     // Pre-allocated capture cells (one region per cell, keyed by the Begin's
     // HirId in `begin_cell_regions` — not in `alloc_region`, which holds one
@@ -54,16 +49,8 @@ pub(super) fn populate_decref_points(
     // emitted and the cell's initial reference leaks (Rule 8).
     for (begin_id, cells) in &info.begin_cell_regions {
         let lu = last_use.get(begin_id).copied().unwrap_or(*begin_id);
-        for &(_b, region) in cells {
-            info.region_data
-                .entry(region)
-                .and_modify(|d| {
-                    if ord(lu) > ord(d.decref_point) {
-                        d.extend_to(lu);
-                    }
-                })
-                .or_insert(RegionData::at(lu));
-        }
+        info.region_data
+            .pin_all_to(cells.iter().map(|&(_b, region)| region), lu, porder);
     }
 
     // Extend decref_point through binding chains: when a binding b holds a
@@ -178,14 +165,7 @@ pub(super) fn populate_decref_points(
                 // (docs/impl/region/bindings.md § "Reassigned mutable bindings
                 // are 1-slot containers").
                 if !held_as_cell.is_some_and(|vs| vs.contains(&r)) {
-                    info.region_data
-                        .entry(r)
-                        .and_modify(|d| {
-                            if ord(lu) > ord(d.decref_point) {
-                                d.extend_to(lu);
-                            }
-                        })
-                        .or_insert(RegionData::at(lu));
+                    info.region_data.pin_to(r, lu, porder);
                 }
                 // Record the binding-resolved (tight) last-use per region, for the
                 // ownership lifetime obligation. Unlike
@@ -288,16 +268,8 @@ pub(super) fn populate_decref_points(
     // instead of borrowing it.
     for (read_id, container_regions) in &info.uncounted_read_sites {
         let lu = last_use.get(read_id).copied().unwrap_or(*read_id);
-        for &r in container_regions {
-            info.region_data
-                .entry(r)
-                .and_modify(|d| {
-                    if ord(lu) > ord(d.decref_point) {
-                        d.extend_to(lu);
-                    }
-                })
-                .or_insert(RegionData::at(lu));
-        }
+        info.region_data
+            .pin_all_to(container_regions.iter().copied(), lu, porder);
     }
 
     // Pin each value stored into a fn-local 1-slot container to its STORE site.
@@ -312,17 +284,8 @@ pub(super) fn populate_decref_points(
     // (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
     // containers").
     for (lu, value_regions) in &cell_store_pins {
-        let lu = *lu;
-        for &r in value_regions {
-            info.region_data
-                .entry(r)
-                .and_modify(|d| {
-                    if ord(lu) > ord(d.decref_point) {
-                        d.extend_to(lu);
-                    }
-                })
-                .or_insert(RegionData::at(lu));
-        }
+        info.region_data
+            .pin_all_to(value_regions.iter().copied(), *lu, porder);
     }
 
     // Extend each returned value's region `decref_point` to its `Return`
@@ -334,17 +297,8 @@ pub(super) fn populate_decref_points(
     // region is the callee's phantom scope (guard-suppressed) and this
     // is inert.
     for (return_id, regions) in return_sites {
-        let lu = *return_id;
-        for &r in regions {
-            info.region_data
-                .entry(r)
-                .and_modify(|d| {
-                    if ord(lu) > ord(d.decref_point) {
-                        d.extend_to(lu);
-                    }
-                })
-                .or_insert(RegionData::at(lu));
-        }
+        info.region_data
+            .pin_all_to(regions.iter().copied(), *return_id, porder);
     }
 
     // Extend each destructured value's regions' `decref_point` to its
@@ -356,17 +310,8 @@ pub(super) fn populate_decref_points(
     // prologue with unused params (docs/impl/region/rules.md Rule 4;
     // tests/elle/region-named-param-uaf.lisp, the lib/http2 import segv).
     for (destructure_id, regions) in destructure_sites {
-        let lu = *destructure_id;
-        for &r in regions {
-            info.region_data
-                .entry(r)
-                .and_modify(|d| {
-                    if ord(lu) > ord(d.decref_point) {
-                        d.extend_to(lu);
-                    }
-                })
-                .or_insert(RegionData::at(lu));
-        }
+        info.region_data
+            .pin_all_to(regions.iter().copied(), *destructure_id, porder);
     }
 
     // Extend each BROKEN value's regions' `decref_point` to where the `Block`
@@ -392,16 +337,8 @@ pub(super) fn populate_decref_points(
     // consume it"; tests/elle/region-break-transfer.lisp).
     for (block_id, regions) in break_sites {
         let lu = last_use.get(block_id).copied().unwrap_or(*block_id);
-        for &r in regions {
-            info.region_data
-                .entry(r)
-                .and_modify(|d| {
-                    if ord(lu) > ord(d.decref_point) {
-                        d.extend_to(lu);
-                    }
-                })
-                .or_insert(RegionData::at(lu));
-        }
+        info.region_data
+            .pin_all_to(regions.iter().copied(), lu, porder);
     }
 
     // Re-anchor every release that landed inside a branch arm onto the branch.
