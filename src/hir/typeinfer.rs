@@ -26,7 +26,7 @@ use std::collections::HashMap;
 mod contract;
 mod fuse;
 pub(crate) use fuse::fuse_map_chains;
-pub use fuse::FnInlineRegistry;
+pub(crate) use fuse::FnInlineRegistry;
 mod guard;
 mod infer;
 use infer::*;
