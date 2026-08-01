@@ -30,6 +30,8 @@ mod regularize;
 mod return_incref;
 pub mod symbols;
 pub mod tailcall;
+#[cfg(test)]
+pub(crate) mod testkit;
 pub mod typeinfer;
 pub mod types;
 

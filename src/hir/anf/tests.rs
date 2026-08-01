@@ -1,44 +1,19 @@
 use super::*;
-use crate::hir::analyze::Analyzer;
 use crate::hir::expr::{HirId, HirKind};
-use crate::hir::functionalize::functionalize;
-use crate::hir::tailcall::mark_tail_calls;
+use crate::hir::testkit::HirFixture;
 use crate::hir::BindingArena;
-use crate::primitives::register_primitives;
-use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
-use crate::vm::VM;
+
+/// These tests also call `h`, and want a `cond_var` that reads as true. The
+/// analyzer does not inline letrec-bound closures, so calls to these survive
+/// into HIR as real `Call` nodes — which is what the ANF tests examine.
+const STUBS: &str = "cond_var (fn () true) \
+                     f (fn (& args) args) \
+                     g (fn (& args) args) \
+                     h (fn (& args) args)";
 
 fn analyze_anf(source: &str) -> (Hir, BindingArena, SymbolTable) {
-    // Wrap source so `f`, `g`, `h`, `cond_var` are bound as fns and
-    // available inside the test expression. The letrec puts them in
-    // an outer scope; the analyzer doesn't inline letrec-bound
-    // closures, so calls to them survive into HIR as real Calls.
-    let wrapped = format!(
-        "(letrec [cond_var (fn () true) \
-                      f (fn (& args) args) \
-                      g (fn (& args) args) \
-                      h (fn (& args) args)] {})",
-        source
-    );
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand failed");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    anf_lift(&mut analysis.hir, &mut arena);
-    (analysis.hir, arena, symbols)
+    HirFixture::new().stubs(STUBS).build(source)
 }
 
 /// Pre-order walk that hands out borrowed references with the

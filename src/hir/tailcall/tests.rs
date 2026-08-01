@@ -1,37 +1,19 @@
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
-use crate::hir::{Analyzer, BindingArena};
-use crate::primitives::register_primitives;
-use crate::reader::read_syntax;
-use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
-use crate::vm::VM;
+use crate::hir::testkit::{HirFixture, Stage};
 
-/// Wrap source in a letrec that pre-defines common free variables
-/// (f, g, h) so they resolve during analysis. The tail-call tests
-/// use these as placeholder callees.
+/// These tests use `f`, `g` and `h` as placeholder callees in tail position.
+const STUBS: &str = "f (fn (& args) nil) g (fn (& args) nil) h (fn (& args) nil)";
+
+/// Stops at `TailMarked`: these tests examine what `mark_tail_calls` decided,
+/// so the passes after it must not run and rewrite the calls first.
 fn analyze_and_mark(source: &str) -> Hir {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-
-    // Wrap in letrec to define free variables used by tail-call tests
-    let wrapped = format!(
-        "(letrec [f (fn (& args) nil) g (fn (& args) nil) h (fn (& args) nil)] {})",
-        source
-    );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand failed");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-    mark_tail_calls(&mut analysis.hir);
-    analysis.hir
+    let (hir, _arena, _symbols) = HirFixture::new()
+        .stubs(STUBS)
+        .stage(Stage::TailMarked)
+        .build(source);
+    hir
 }
 
 fn find_calls(hir: &Hir) -> Vec<bool> {

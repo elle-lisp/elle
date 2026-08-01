@@ -13,30 +13,13 @@ pub(super) fn compile_fhir(
     crate::pipeline::compile_file_to_fhir(source, symbols, &mut cctx, "<test>").expect("compile")
 }
 
-/// Parse → expand → analyze → functionalize → analyze_regions.
+/// The compiled tree's region inference. Uses the allocating stubs: a stub
+/// returning its argument list allocates, which is what these tests observe.
 pub(super) fn analyze(source: &str) -> (BindingArena, SymbolTable, RegionInfo) {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-
-    let wrapped = format!(
-        "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
-        source
-    );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand failed");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-
-    let info = analyze_regions(&analysis.hir, &arena);
+    let (hir, arena, symbols) = crate::hir::testkit::HirFixture::new()
+        .stubs(crate::hir::testkit::STUBS_RETURNING_ARGS)
+        .build(source);
+    let info = analyze_regions(&hir, &arena);
     (arena, symbols, info)
 }
 

@@ -2,40 +2,14 @@
 
 use super::*;
 use crate::hir::dataflow::{analyze_dataflow, DataflowInfo};
-use crate::hir::functionalize::functionalize;
-use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{Analyzer, BindingArena};
-use crate::primitives::register_primitives;
-use crate::reader::read_syntax;
+use crate::hir::testkit::HirFixture;
+use crate::hir::BindingArena;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
-use crate::vm::VM;
 
-/// Parse → expand → analyze → functionalize → dataflow, returning
-/// everything needed by both def-use and liveness tests.
+/// The compiled tree plus its dataflow, which is what every def-use test reads.
 fn analyze(source: &str) -> (BindingArena, SymbolTable, DataflowInfo) {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-
-    let wrapped = format!(
-        "(letrec [cond_var (fn () nil) f (fn (& args) nil) g (fn (& args) nil)] {})",
-        source
-    );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand failed");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-
-    let info = analyze_dataflow(&analysis.hir);
+    let (hir, arena, symbols) = HirFixture::new().build(source);
+    let info = analyze_dataflow(&hir);
     (arena, symbols, info)
 }
 

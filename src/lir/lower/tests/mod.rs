@@ -25,47 +25,28 @@ fn make_lowerer_with(
     source: &str,
     mutate: impl FnOnce(&mut crate::hir::region::RegionInfo, &crate::hir::Hir),
 ) -> (Lowerer<'static>, crate::hir::Hir) {
-    use crate::hir::functionalize::functionalize;
-    use crate::hir::tailcall::mark_tail_calls;
-    use crate::hir::Analyzer;
-    use crate::primitives::register_primitives;
-    use crate::reader::read_syntax;
+    use crate::hir::testkit::{HirFixture, STUBS_RETURNING_ARGS};
     use crate::symbol::SymbolTable;
-    use crate::syntax::Expander;
-    use crate::vm::VM;
 
     let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-    let wrapped = format!(
-        "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
-        source
-    );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand");
+    // Leaked so the `Lowerer<'static>` this returns can borrow it: the tests
+    // keep the lowerer past any scope the arena could live in.
     let arena = Box::leak(Box::new(crate::hir::BindingArena::new()));
-    let mut analyzer = Analyzer::new(&mut symbols, arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze");
-    let prim_values = analyzer.primitive_values().clone();
-    drop(analyzer);
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, arena);
+    let built =
+        HirFixture::new()
+            .stubs(STUBS_RETURNING_ARGS)
+            .build_into(source, arena, &mut symbols);
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &built.meta);
     let mut region_info =
-        crate::hir::analyze_regions_with(&analysis.hir, arena, pc.call_classification.clone());
-    mutate(&mut region_info, &analysis.hir);
+        crate::hir::analyze_regions_with(&built.hir, arena, pc.call_classification.clone());
+    mutate(&mut region_info, &built.hir);
     let lowerer = Lowerer::new(arena)
         .with_primitive_classification(pc)
-        .with_primitive_values(prim_values)
+        .with_primitive_values(built.primitive_values)
         .with_symbol_names(symbols.all_names())
         .with_region_info(region_info);
-    (lowerer, analysis.hir)
+    (lowerer, built.hir)
 }
 
 fn compile_to_lir(source: &str) -> crate::lir::LirModule {

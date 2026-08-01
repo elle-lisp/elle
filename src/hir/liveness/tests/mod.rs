@@ -1,37 +1,12 @@
 use super::*;
 use crate::hir::dataflow::{analyze_dataflow, DataflowInfo};
-use crate::hir::functionalize::functionalize;
-use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{Analyzer, BindingArena};
-use crate::primitives::register_primitives;
-use crate::reader::read_syntax;
+use crate::hir::testkit::{HirFixture, STUBS_RETURNING_ARGS};
+use crate::hir::BindingArena;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
-use crate::vm::VM;
 
 fn analyze(source: &str) -> (BindingArena, SymbolTable, DataflowInfo) {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-
-    let wrapped = format!(
-        "(letrec [cond_var (fn () nil) f (fn (& args) nil) g (fn (& args) nil)] {})",
-        source
-    );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand failed");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-
-    let info = analyze_dataflow(&analysis.hir);
+    let (hir, arena, symbols) = HirFixture::new().build(source);
+    let info = analyze_dataflow(&hir);
     (arena, symbols, info)
 }
 
@@ -53,28 +28,12 @@ fn is_live_anywhere(info: &DataflowInfo, b: Binding) -> bool {
         .is_some_and(|&idx| info.live_out.values().any(|live| live.contains(idx)))
 }
 
+/// As `analyze`, but with the allocating stubs, and handing the tree back for
+/// tests that inspect nodes rather than only the dataflow result.
 fn analyze_with_hir(source: &str) -> (super::Hir, BindingArena, SymbolTable, DataflowInfo) {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-    let wrapped = format!(
-        "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
-        source
-    );
-    let syntax = read_syntax(&wrapped, "<test>").expect("parse");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze");
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-    let info = analyze_dataflow(&analysis.hir);
-    (analysis.hir, arena, symbols, info)
+    let (hir, arena, symbols) = HirFixture::new().stubs(STUBS_RETURNING_ARGS).build(source);
+    let info = analyze_dataflow(&hir);
+    (hir, arena, symbols, info)
 }
 
 /// Find every Call whose func is the named primitive.
@@ -200,23 +159,10 @@ fn find_first_loop(hir: &super::Hir) -> Option<HirId> {
     found
 }
 
+/// The compiled tree alone, with no stub `letrec` around it, for the tests
+/// that walk from the root.
 fn hir_of(source: &str) -> crate::hir::Hir {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let meta = register_primitives(&mut vm, &mut symbols);
-    let syntax = read_syntax(source, "<test>").expect("parse failed");
-    let mut expander = Expander::new();
-    let expanded = expander
-        .expand(syntax, &mut symbols, &mut vm)
-        .expect("expand failed");
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-    analysis.hir
+    HirFixture::new().bare().build(source).0
 }
 
 // `Hir` must be nameable from the test submodules below (their bodies use
