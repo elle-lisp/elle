@@ -8,9 +8,21 @@ impl<'a> Lowerer<'a> {
     /// allocating-intrinsic in a consumer position is bound to a
     /// synthetic Let — so this map covers the result via its binding
     /// slot directly, without a separate stash-and-reload slot.
-    pub(super) fn record_region_slot(&mut self, hir_id: HirId, slot: u16) {
+    pub(super) fn record_region_slot(&mut self, hir_id: HirId, slot: super::ValueSlot) {
         if let Some(&r) = self.region_info.alloc_region.get(&hir_id) {
             self.region_to_slot.insert(r, slot);
+        }
+    }
+
+    /// The address space `allocate_slot_routed` minted this binding's slot from:
+    /// an in-lambda captured binding lives in the env, everything else on the
+    /// stack. The one place that decision is re-derived, so a recording site
+    /// cannot disagree with the allocation.
+    pub(super) fn value_slot_for(&self, binding: Binding, slot: u16) -> super::ValueSlot {
+        if self.in_lambda && self.arena.get(binding).needs_capture() {
+            super::ValueSlot::Env(slot)
+        } else {
+            super::ValueSlot::Local(slot)
         }
     }
 
@@ -158,7 +170,7 @@ impl<'a> Lowerer<'a> {
         };
         for &r in regions.clone().iter() {
             if self.region_info.cell_release_regions.contains(&r) {
-                self.region_to_slot.insert(r, slot);
+                self.region_to_slot.insert(r, super::ValueSlot::Env(slot));
             }
         }
     }
@@ -248,9 +260,12 @@ impl<'a> Lowerer<'a> {
         child: crate::hir::region::Region,
         parent: crate::hir::region::Region,
     ) {
-        let (Some(&pslot), Some(&cslot)) = (
-            self.region_to_slot.get(&parent),
-            self.region_to_slot.get(&child),
+        // Stack-only, like the other adopt emitters: an env-celled endpoint
+        // skips the adopt and leaves both regions independently reference
+        // counted — the always-legal fallback a missing slot already takes.
+        let (Some(pslot), Some(cslot)) = (
+            self.region_to_slot.get(&parent).and_then(|s| s.local()),
+            self.region_to_slot.get(&child).and_then(|s| s.local()),
         ) else {
             return;
         };
@@ -291,7 +306,9 @@ impl<'a> Lowerer<'a> {
     pub(super) fn emit_adopt_into_activation(&mut self, members: &[crate::hir::region::Region]) {
         let mut seen: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
         for &m in members {
-            let Some(&slot) = self.region_to_slot.get(&m) else {
+            // Stack-only (see `emit_adopt_region`): an env-celled member is
+            // skipped, its region staying `Counted` and over-kept to teardown.
+            let Some(slot) = self.region_to_slot.get(&m).and_then(|s| s.local()) else {
                 continue;
             };
             if !seen.insert(slot) {
@@ -377,7 +394,7 @@ impl<'a> Lowerer<'a> {
                 && self.region_info.call_result_regions.contains(&src)
                 && !self.region_info.cell_release_regions.contains(&src)
             {
-                if let Some(&slot) = self.region_to_slot.get(&src) {
+                if let Some(slot) = self.region_to_slot.get(&src).and_then(|s| s.local()) {
                     let val_reg = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
                     self.emit(LirInstr::IncrefValueRegion { src: val_reg });

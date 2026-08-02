@@ -54,7 +54,7 @@ impl<'a> Lowerer<'a> {
             .captured_reassigned_bindings
             .contains(&binding);
         if !captured_reassigned {
-            self.record_region_slot(value.id, slot);
+            self.record_region_slot(value.id, self.value_slot_for(binding, slot));
         }
 
         // Now lower the value (which can reference the binding)

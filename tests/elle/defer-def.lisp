@@ -1,13 +1,16 @@
 (elle/epoch 12)
 # defer-def: a nested defer's body must run, not fault.
 #
-# THIS TEST FAILS. It exits 1 with
-#   {:error :type-error :message "fiber/resume: expected fiber, got nil"}
-# naming an internal invariant the author cannot act on. It goes green when
-# the defect is fixed. `ht.md` carries the analysis notes.
+# The surface shape of the release mis-route `region-def-in-lambda-capture.lisp`
+# states directly: `defer` runs its body in a fiber, so a `def` in a defer scope
+# is a `def` inside a lambda, and a nested `defer` whose body reads it is the
+# sibling closure that makes it env-celled. This file is the end-to-end witness —
+# it says what an author actually sees when the release frees the wrong local:
+# the nested defer's `(fiber/new …)` reads back nil and the script dies with
+# `fiber/resume: expected fiber, got nil`.
 #
-# Four ingredients, all required together — drop any one and the script
-# passes. Each is pinned by its own assertion below, so this file also states
+# Four ingredients, all required together — drop any one and the fault does not
+# reproduce. Each has its own discriminator below, so this file also states
 # which lever to pull:
 #
 #   1. an enclosing `defer`;
@@ -18,8 +21,7 @@
 #
 # `with-temp-dir` matches this shape because it expands through `with`,
 # which is a `defer` — the temp directory itself is incidental, so nothing
-# here touches the filesystem. The working rule for authors: inside a
-# `defer` scope, bind with `let`, never `def`.
+# here touches the filesystem.
 
 (defn increment [x]
   (+ x 1))

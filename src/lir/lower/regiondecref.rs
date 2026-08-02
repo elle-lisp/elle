@@ -108,7 +108,8 @@ impl<'a> Lowerer<'a> {
                 return;
             }
             if self.region_info.call_result_regions.contains(&r) {
-                if let Some(&slot) = self.region_to_slot.get(&r) {
+                if let Some(&value_slot) = self.region_to_slot.get(&r) {
+                    let slot = value_slot.index();
                     // Backstop — "a mutated slot is not a release route"
                     // (docs/impl/region/bindings.md). `slot` belongs to a
                     // reassigned binding, so by this region's `decref_point` the
@@ -197,7 +198,24 @@ impl<'a> Lowerer<'a> {
                         }
                         return;
                     }
-                    self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+                    // Read the value from the space its slot was minted in
+                    // ([`super::ValueSlot`]). An env-celled binding loads its
+                    // cell RAW and lets `DecrefValueRegion` unwrap it:
+                    // `result_region_of` sees through a capture cell to the
+                    // content, which is the region this release names. That is
+                    // the same route the top-level captured branch takes through
+                    // its stack slot, and it keeps the cell unborrowed at the
+                    // load — `LoadCapture` reads the content under a borrow the
+                    // release path can still be holding.
+                    match value_slot {
+                        super::ValueSlot::Local(slot) => {
+                            self.emit(LirInstr::LoadLocal { dst: val_reg, slot })
+                        }
+                        super::ValueSlot::Env(index) => self.emit(LirInstr::LoadCaptureRaw {
+                            dst: val_reg,
+                            index,
+                        }),
+                    }
                     // A transferred-returned-subtree consumer site: the release
                     // is REPLACED by `AdoptIntoActivation` — the adopt consumes
                     // the result region's whole count (the returned cycle's
@@ -234,8 +252,18 @@ impl<'a> Lowerer<'a> {
                     // nil makes the non-taken-arm release a no-op (region_of(nil)
                     // is None) while the taken arm rewrites its slot first, so the
                     // live value is still released exactly once.
-                    if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-                        self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                    //
+                    // An ENV-celled value is not stamped: the write that would
+                    // clear it is `StoreCapture`, whose funnel
+                    // (`capture_store_with_rebind`) decrefs the content it
+                    // displaces — releasing a second time the very reference
+                    // this decref just took. The stamp guards a reused STACK
+                    // slot; an env cell is one per binding per activation and is
+                    // never reused, so there is nothing for it to guard.
+                    if let Some(slot) = value_slot.local() {
+                        if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
+                            self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                        }
                     }
                     if crate::config::get().has_trace("rc") {
                         // The hir_id here is the `decref_point` HirId — where
@@ -359,7 +387,9 @@ impl<'a> Lowerer<'a> {
     fn emit_free_region_group(&mut self, members: &[crate::hir::region::Region]) {
         let mut regs = Vec::with_capacity(members.len());
         for &m in members {
-            let Some(&slot) = self.region_to_slot.get(&m) else {
+            // Stack-only emission: an env-celled member leaves the group
+            // unfreed, the same always-legal fallback a missing slot takes.
+            let Some(slot) = self.region_to_slot.get(&m).and_then(|s| s.local()) else {
                 return;
             };
             let reg = self.fresh_reg();
@@ -434,7 +464,10 @@ impl<'a> Lowerer<'a> {
             {
                 continue;
             }
-            if let Some(&slot) = self.region_to_slot.get(&r) {
+            // Stack-only: the analysis restricts this compensation to
+            // single-holder `call_result` regions, and an env-celled binding is
+            // not one — skipping leaves the region on its own `decref_point`.
+            if let Some(slot) = self.region_to_slot.get(&r).and_then(|s| s.local()) {
                 let val_reg = self.fresh_reg();
                 self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
                 self.emit(LirInstr::DecrefValueRegion { src: val_reg });
@@ -486,8 +519,9 @@ impl<'a> Lowerer<'a> {
                 // Value-route: the value was allocated before the branch, so the
                 // holder slot is live entering this (dead-on-this-path) arm. Load
                 // it, release its runtime region, then nil-stamp so a later reuse
-                // of the slot is not mistaken for this freed value.
-                if let Some(&slot) = self.region_to_slot.get(&r) {
+                // of the slot is not mistaken for this freed value. Stack-only,
+                // as `emit_arm_decrefs` is.
+                if let Some(slot) = self.region_to_slot.get(&r).and_then(|s| s.local()) {
                     let val_reg = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
                     self.emit(LirInstr::DecrefValueRegion { src: val_reg });

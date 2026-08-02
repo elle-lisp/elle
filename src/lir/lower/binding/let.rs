@@ -71,7 +71,7 @@ impl<'a> Lowerer<'a> {
             // would leak. Defer the init node's decrefs, store the value,
             // then emit them against the now-populated slot.
             let slot = self.allocate_slot(*binding);
-            self.record_region_slot(init.id, slot);
+            self.record_region_slot(init.id, self.value_slot_for(*binding, slot));
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             self.emit_counted_cell_read_retain(init.id, init_reg);
@@ -212,7 +212,21 @@ impl<'a> Lowerer<'a> {
                 .captured_reassigned_bindings
                 .contains(binding);
             if !captured_reassigned {
-                self.record_region_slot(init.id, slot);
+                // A COMPILED forward cell took a stack slot even when captured
+                // in a lambda (`allocate_slot_routed(.., !compiled_cell)` in the
+                // pre-pass above), so the space follows that same condition
+                // rather than `value_slot_for`'s capture test.
+                let celled = self.arena.get(*binding).letrec_compiled_cell(
+                    matches!(init.kind, HirKind::Lambda { .. }),
+                    self.in_lambda,
+                );
+                let space = if self.in_lambda && self.arena.get(*binding).needs_capture() && !celled
+                {
+                    super::super::ValueSlot::Env(slot)
+                } else {
+                    super::super::ValueSlot::Local(slot)
+                };
+                self.record_region_slot(init.id, space);
             }
             // Defer the init node's region releases until after the value is
             // stored (mirrors `lower_let`). Without this, an init region whose

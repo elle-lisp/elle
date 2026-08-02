@@ -145,6 +145,49 @@ enum HoistBlock {
     Finished(usize),
 }
 
+/// Where a value-route release reads the value whose region it means.
+///
+/// `allocate_slot_routed` mints binding slots from two disjoint address spaces,
+/// both indexed by `u16`: an in-lambda captured binding gets an ENV index (the
+/// index `LoadCapture`/`StoreCapture` address, backed by the `populate_env`
+/// cell), and every other binding gets a STACK index (`LoadLocal`/`StoreLocal`).
+/// Nothing about the number says which, so a bare `u16` in `region_to_slot` lets
+/// an env index be read back as a stack slot — naming whichever local happens to
+/// sit at that index and releasing it under its holder
+/// (`tests/elle/region-def-in-lambda-capture.lisp`). Carrying the space with the
+/// index makes that unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum ValueSlot {
+    /// A stack-frame local. `LoadLocal { slot }` yields the value itself.
+    Local(u16),
+    /// An env-cell index. `LoadCapture { index }` UNWRAPS the cell and yields
+    /// its content — the value whose region a release means. (The cell's own
+    /// region is a separate concern, released through `LoadCaptureRaw` +
+    /// `DecrefCellRegion` for a `cell_release_regions` member.)
+    Env(u16),
+}
+
+impl ValueSlot {
+    /// The raw index, for the sites that only need to dedupe or report it.
+    pub(super) fn index(self) -> u16 {
+        match self {
+            ValueSlot::Local(i) | ValueSlot::Env(i) => i,
+        }
+    }
+
+    /// The stack slot, or `None` for an env index. Use at sites whose emission
+    /// is stack-only (`AdoptRegion`, `FreeRegionGroup`, the branch-arm
+    /// compensations): skipping an env-celled region there leaves it
+    /// independently reference-counted, which is each of those cuts' documented
+    /// always-legal fallback.
+    pub(super) fn local(self) -> Option<u16> {
+        match self {
+            ValueSlot::Local(i) => Some(i),
+            ValueSlot::Env(_) => None,
+        }
+    }
+}
+
 /// Lowers HIR to LIR
 pub struct Lowerer<'a> {
     arena: &'a BindingArena,
@@ -298,7 +341,8 @@ pub struct Lowerer<'a> {
     /// function's region_table. Lazily populated by `alloc_region_id()`.
     region_to_table: HashMap<crate::hir::region::Region, StaticRegion>,
     /// For each allocating HIR node's region, the slot of the
-    /// binding that names its result. Populated by `lower_let`,
+    /// binding that names its result. See [`ValueSlot`] for why the
+    /// address space travels with the index. Populated by `lower_let`,
     /// `lower_letrec`, `lower_define`, and other binding sites by
     /// reading `region_info.alloc_region.get(&init.id)` after the
     /// slot is allocated. Saved/restored across lambda boundaries
@@ -315,7 +359,7 @@ pub struct Lowerer<'a> {
     /// expression in a consumer position is bound to a synthetic
     /// `Let`, so the binding-slot path covers the Call result directly —
     /// no separate stash-and-reload slot at the Call site.
-    region_to_slot: HashMap<crate::hir::region::Region, u16>,
+    region_to_slot: HashMap<crate::hir::region::Region, ValueSlot>,
     /// Stack slots (this function's local index space) owned by a fn-local
     /// reassigned mutable binding (`RegionInfo::reassigned_local_bindings`).
     /// Populated in `allocate_slot_routed`, reset per function like

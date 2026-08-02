@@ -173,10 +173,11 @@ impl<'a> Lowerer<'a> {
             let Some(&slot) = self.binding_to_slot.get(param) else {
                 continue;
             };
+            let space = self.value_slot_for(*param, slot);
             if let Some(regions) = self.region_info.binding_source_regions.get(param) {
                 for &r in regions.clone().iter() {
                     if self.region_info.call_result_regions.contains(&r) {
-                        self.region_to_slot.insert(r, slot);
+                        self.region_to_slot.insert(r, space);
                     }
                 }
             }
