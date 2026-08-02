@@ -637,18 +637,42 @@ fn dropped_parked_fiber_releases_signal_escape_retain() {
 /// for a later `fiber/value`, and the fiber's free-time cross-ref scan releases
 /// it. The pair must balance, or every completing fiber strands its result.
 ///
-/// This is also the discriminator for the emit arm: `payload_regions_stranded_over`
-/// with `SIG_HALT` measures the same shape with a signal, and today it reads 50
-/// — a fiber body's `(halt v)` / `(error v)` takes an `EmitEscape` retain on top
-/// of the park retain and only one of the two is released. `ht.md` carries the
-/// reproducer; the obvious fix (report the escape retain for a terminal signal
-/// too) over-frees.
+/// This is the discriminator for the emitting arm below: same shape, same
+/// harness, no signal. It passes, so a failure there is the terminal-signal
+/// path's own accounting rather than anything the harness does.
 #[test]
 fn a_returned_payload_region_is_reclaimed() {
     assert_eq!(
         payload_regions_stranded_over(50, crate::value::fiber::SIG_OK),
         0,
         "a fiber returning a fresh value must release its region",
+    );
+}
+
+/// A fiber that leaves with a TERMINAL signal carrying a freshly-allocated
+/// payload reclaims that payload's region.
+///
+/// Reaching `Emit` takes an `EmitEscape` retain on the payload's region
+/// (`handle_emit`), covering the window until the compiler's `DecrefRegion` at
+/// the emit's decref point fires. `with_child_fiber` then takes a second,
+/// independent park retain on the same region so a later `fiber/value` can read
+/// the result. Both retains must be discharged, exactly once each: the
+/// free-time cross-ref scan releases the park retain, so the escape retain owes
+/// a release of its own.
+///
+/// **This test fails.** One region survives per halted fiber, so the count is
+/// the cycle count rather than zero. `Fiber::take_parked_state` reports a
+/// parked signal's region only when the signal is non-terminal, which is what
+/// leaves the escape retain outstanding here; reporting it regardless of the
+/// bits measures correct in isolation but over-frees the corpus, so the escape
+/// retain is already being consumed somewhere along the terminal teardown.
+/// The `SIG_OK` discriminator above stays green either way.
+#[test]
+fn an_emitted_terminal_payload_region_is_reclaimed() {
+    assert_eq!(
+        payload_regions_stranded_over(50, crate::value::fiber::SIG_HALT),
+        0,
+        "an emitting fiber must release its payload's park escape retain",
     );
 }
 
