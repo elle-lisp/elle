@@ -272,7 +272,7 @@ fn test_drop_with_inflight_read_cancels_and_drains() {
         );
 
         let req = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port,
             timeout: None,
         };

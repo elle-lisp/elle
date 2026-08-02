@@ -1,7 +1,7 @@
 //! PendingOp — in-flight async I/O operation tracking.
 
 use crate::io::pool::BufferHandle;
-use crate::io::request::{ConnectAddr, IoOp};
+use crate::io::request::{ConnectAddr, PortOp};
 use crate::io::types::PortKey;
 use crate::port::PortKind;
 use crate::value::Value;
@@ -17,7 +17,7 @@ use std::time::Duration;
 pub(crate) enum PendingOp {
     /// Operation on an existing port.
     Port {
-        op: IoOp,
+        op: PortOp,
         port_key: PortKey,
         port: Value,
         /// BufferPool handle for non-read operations. `None` for Read/ReadLine

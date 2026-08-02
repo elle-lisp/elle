@@ -1,6 +1,6 @@
 //! Unix domain socket primitives.
 
-use crate::io::request::{ConnectAddr, IoOp, IoRequest};
+use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
 use crate::port::{Direction, Port, PortKind};
 use crate::primitives::def::RegionEffect;
 use crate::primitives::kwarg::extract_connect_kwargs;
@@ -111,7 +111,7 @@ pub(crate) fn prim_unix_accept(
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             ctx,
-            IoOp::Accept {
+            PortOp::Accept {
                 options: kwargs.options,
                 encoding,
                 accept_port: ctx.external(
@@ -123,7 +123,8 @@ pub(crate) fn prim_unix_accept(
                         String::new(),
                     ),
                 ),
-            },
+            }
+            .into(),
             port_val,
             kwargs.timeout,
         ),
@@ -191,7 +192,7 @@ pub(crate) fn prim_unix_shutdown(
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::new(ctx, IoOp::Shutdown { how }, port_val),
+        IoRequest::new(ctx, PortOp::Shutdown { how }.into(), port_val),
     )
 }
 

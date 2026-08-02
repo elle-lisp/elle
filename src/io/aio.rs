@@ -6,7 +6,7 @@ use crate::io::completion;
 use crate::io::pending::PendingOp;
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
+    ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{
     CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
@@ -397,7 +397,7 @@ impl AsyncBackendInner {
     }
 
     /// Submit a stdin operation.
-    fn submit_stdin(&mut self, id: SubmissionId, op: &IoOp) -> Result<SubmissionId, String> {
+    fn submit_stdin(&mut self, id: SubmissionId, op: &PortOp) -> Result<SubmissionId, String> {
         // The stdin worker reports through the shared hub like every other
         // worker — hand it a sender clone and the bridge eventfd at spawn.
         let sender = self.hub.sender();
@@ -405,31 +405,18 @@ impl AsyncBackendInner {
         let stdin_thread = self
             .stdin_thread
             .get_or_insert_with(|| StdinThread::new(sender, eventfd));
+        // The worker reads; it has no write, socket or seek path.
         let op_kind = match op {
-            IoOp::ReadLine { .. } => StdinOpKind::ReadLine,
-            IoOp::Read { count, .. } => StdinOpKind::Read { count: *count },
-            IoOp::ReadAll => StdinOpKind::ReadAll,
-            IoOp::ReadExact { .. }
-            | IoOp::Write { .. }
-            | IoOp::Flush
-            | IoOp::Accept { .. }
-            | IoOp::Connect { .. }
-            | IoOp::SendTo { .. }
-            | IoOp::RecvFrom { .. }
-            | IoOp::Shutdown { .. }
-            | IoOp::Sleep { .. }
-            | IoOp::Spawn(_)
-            | IoOp::ProcessWait
-            | IoOp::Open { .. }
-            | IoOp::Seek { .. }
-            | IoOp::Tell
-            | IoOp::Task(_)
-            | IoOp::Resolve { .. }
-            | IoOp::WatchNext
-            | IoOp::SigNext
-            | IoOp::Close
-            | IoOp::PollFd { .. }
-            | IoOp::ChanSelectPark(_) => {
+            PortOp::ReadLine { .. } => StdinOpKind::ReadLine,
+            PortOp::Read { count, .. } => StdinOpKind::Read { count: *count },
+            PortOp::ReadAll => StdinOpKind::ReadAll,
+            PortOp::ReadExact { .. }
+            | PortOp::Write { .. }
+            | PortOp::Flush
+            | PortOp::Accept { .. }
+            | PortOp::SendTo { .. }
+            | PortOp::RecvFrom { .. }
+            | PortOp::Shutdown { .. } => {
                 return Err("io/submit: unsupported operation on stdin".into())
             }
         };
@@ -441,15 +428,7 @@ impl AsyncBackendInner {
         self.pending.insert(
             id,
             PendingOp::Port {
-                op: match op {
-                    IoOp::ReadLine { buffer } => IoOp::ReadLine { buffer: *buffer },
-                    IoOp::Read { count, buffer } => IoOp::Read {
-                        count: *count,
-                        buffer: *buffer,
-                    },
-                    IoOp::ReadAll => IoOp::ReadAll,
-                    _ => unreachable!(),
-                },
+                op: op.clone(),
                 port_key: PortKey::Stdin,
                 port: Value::NIL,
                 buffer_handle: Some(buf_handle),

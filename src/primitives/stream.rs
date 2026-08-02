@@ -4,7 +4,7 @@
 //! IoRequest and return (SIG_YIELD | SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
 
-use crate::io::request::{IoOp, IoRequest};
+use crate::io::request::{IoRequest, PortOp};
 use crate::port::Port;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
@@ -48,7 +48,7 @@ fn prim_stream_read_line(
     let buffer = ctx.bytes(vec![0u8; READ_LINE_BUF_SIZE]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::ReadLine { buffer }, port, timeout),
+        IoRequest::with_timeout(ctx, PortOp::ReadLine { buffer }.into(), port, timeout),
     )
 }
 
@@ -88,7 +88,7 @@ fn prim_stream_read(
     let buffer = ctx.bytes(vec![0u8; count]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::Read { count, buffer }, port, timeout),
+        IoRequest::with_timeout(ctx, PortOp::Read { count, buffer }.into(), port, timeout),
     )
 }
 
@@ -139,7 +139,12 @@ fn prim_stream_read_exact(
     let buffer = ctx.bytes(vec![0u8; buf_len]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::ReadExact { count, buffer }, port, timeout),
+        IoRequest::with_timeout(
+            ctx,
+            PortOp::ReadExact { count, buffer }.into(),
+            port,
+            timeout,
+        ),
     )
 }
 
@@ -158,7 +163,7 @@ fn prim_stream_read_all(
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::ReadAll, port, timeout),
+        IoRequest::with_timeout(ctx, PortOp::ReadAll.into(), port, timeout),
     )
 }
 
@@ -186,7 +191,7 @@ fn prim_stream_write(
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::Write { data }, port, timeout),
+        IoRequest::with_timeout(ctx, PortOp::Write { data }.into(), port, timeout),
     )
 }
 
@@ -205,7 +210,7 @@ fn prim_stream_flush(
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::Flush, port, timeout),
+        IoRequest::with_timeout(ctx, PortOp::Flush.into(), port, timeout),
     )
 }
 

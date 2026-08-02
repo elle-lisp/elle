@@ -6,7 +6,7 @@
 //! complete immediately. Accept/connect/send/recv/shutdown yield SIG_IO
 //! for scheduler dispatch.
 
-use crate::io::request::{ConnectAddr, IoOp, IoRequest};
+use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
 use crate::port::{Direction, Port, PortKind};
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;

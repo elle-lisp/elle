@@ -61,11 +61,12 @@ pub(super) fn prim_tcp_accept(
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             ctx,
-            IoOp::Accept {
+            PortOp::Accept {
                 options: kwargs.options,
                 encoding,
                 accept_port,
-            },
+            }
+            .into(),
             port_val,
             kwargs.timeout,
         ),
@@ -173,6 +174,6 @@ pub(super) fn prim_tcp_shutdown(
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::new(ctx, IoOp::Shutdown { how }, port_val),
+        IoRequest::new(ctx, PortOp::Shutdown { how }.into(), port_val),
     )
 }

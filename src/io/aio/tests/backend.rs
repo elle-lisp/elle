@@ -14,12 +14,12 @@ fn test_submit_returns_monotonic_ids() {
         let port = open_read_port(&path);
 
         let req1 = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port,
             timeout: None,
         };
         let req2 = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port,
             timeout: None,
         };
@@ -46,7 +46,7 @@ fn test_submit_closed_port_errors() {
         port.close();
 
         let req = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port: port_val,
             timeout: None,
         };
@@ -72,7 +72,7 @@ fn test_submit_and_wait_read() {
         let port = open_read_port(&path);
 
         let req = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port,
             timeout: None,
         };
@@ -98,9 +98,10 @@ fn test_submit_and_wait_write() {
         let port = open_write_port(&path);
 
         let req = IoRequest {
-            op: IoOp::Write {
+            op: PortOp::Write {
                 data: h.ctx().string("async write"),
-            },
+            }
+            .into(),
             port,
             timeout: None,
         };

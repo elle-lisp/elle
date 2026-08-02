@@ -234,7 +234,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
         &mut ring,
         id,
         write_fd,
-        &IoOp::Write { data },
+        &PortOp::Write { data },
         None,
         &mut pool,
         Some(buf_handle),
@@ -246,7 +246,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     pending.insert(
         id,
         PendingOp::Port {
-            op: IoOp::Write { data },
+            op: PortOp::Write { data },
             port_key: PortKey::Fd(write_fd),
             port: Value::NIL,
             buffer_handle: Some(buf_handle),

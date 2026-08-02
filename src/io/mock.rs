@@ -3,7 +3,7 @@
 //! Fulfills `IoRequest`s from in-memory state. No OS resources needed.
 //! Completions resolve after a configurable latency (zero by default).
 
-use crate::io::request::{IoOp, IoRequest};
+use crate::io::request::{IoOp, IoRequest, PortOp};
 use crate::io::{Completion, SubmissionId};
 use crate::value::Value;
 
@@ -117,17 +117,17 @@ impl crate::io::IoBackend for MockBackend {
         let id = inner.mint_id();
 
         let op_name = match &request.op {
-            IoOp::ReadLine { .. } => "read-line",
-            IoOp::Read { .. } => "read",
-            IoOp::ReadExact { .. } => "read-exact",
-            IoOp::ReadAll => "read-all",
-            IoOp::Write { .. } => "write",
-            IoOp::Flush => "flush",
-            IoOp::Accept { .. } => "accept",
+            IoOp::Port(PortOp::ReadLine { .. }) => "read-line",
+            IoOp::Port(PortOp::Read { .. }) => "read",
+            IoOp::Port(PortOp::ReadExact { .. }) => "read-exact",
+            IoOp::Port(PortOp::ReadAll) => "read-all",
+            IoOp::Port(PortOp::Write { .. }) => "write",
+            IoOp::Port(PortOp::Flush) => "flush",
+            IoOp::Port(PortOp::Accept { .. }) => "accept",
+            IoOp::Port(PortOp::SendTo { .. }) => "send-to",
+            IoOp::Port(PortOp::RecvFrom { .. }) => "recv-from",
+            IoOp::Port(PortOp::Shutdown { .. }) => "shutdown",
             IoOp::Connect { .. } => "connect",
-            IoOp::SendTo { .. } => "send-to",
-            IoOp::RecvFrom { .. } => "recv-from",
-            IoOp::Shutdown { .. } => "shutdown",
             IoOp::Sleep { .. } => "sleep",
             IoOp::Spawn(_) => "spawn",
             IoOp::ProcessWait => "process-wait",
@@ -155,32 +155,98 @@ impl crate::io::IoBackend for MockBackend {
             ))
         } else {
             match &request.op {
-                IoOp::ReadLine { .. }
-                | IoOp::Read { .. }
-                | IoOp::ReadExact { .. }
-                | IoOp::ReadAll => {
-                    if inner.read_cursor < inner.read_data.len() {
-                        let data = inner.read_data[inner.read_cursor].clone();
-                        inner.read_cursor += 1;
-                        if data.is_empty() {
-                            Ok(Value::NIL) // EOF
+                IoOp::Port(op) => match op {
+                    PortOp::ReadLine { .. }
+                    | PortOp::Read { .. }
+                    | PortOp::ReadExact { .. }
+                    | PortOp::ReadAll => {
+                        if inner.read_cursor < inner.read_data.len() {
+                            let data = inner.read_data[inner.read_cursor].clone();
+                            inner.read_cursor += 1;
+                            if data.is_empty() {
+                                Ok(Value::NIL) // EOF
+                            } else {
+                                let heap =
+                                    unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+                                let ctx = crate::primitives::ctx::Alloc::new(heap);
+                                Ok(ctx.string(String::from_utf8_lossy(&data).as_ref()))
+                            }
                         } else {
-                            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-                            let ctx = crate::primitives::ctx::Alloc::new(heap);
-                            Ok(ctx.string(String::from_utf8_lossy(&data).as_ref()))
+                            Ok(Value::NIL) // EOF — no data seeded
                         }
-                    } else {
-                        Ok(Value::NIL) // EOF — no data seeded
                     }
-                }
-                IoOp::Write { data } => {
-                    let len = data
-                        .with_string(|s| s.len())
-                        .or_else(|| data.as_bytes().map(|b| b.len()))
-                        .unwrap_or(0);
-                    Ok(Value::int(len as i64))
-                }
-                IoOp::Flush | IoOp::Shutdown { .. } => Ok(Value::NIL),
+                    PortOp::Write { data } => {
+                        let len = data
+                            .with_string(|s| s.len())
+                            .or_else(|| data.as_bytes().map(|b| b.len()))
+                            .unwrap_or(0);
+                        Ok(Value::int(len as i64))
+                    }
+                    PortOp::Flush | PortOp::Shutdown { .. } => Ok(Value::NIL),
+                    PortOp::Accept { .. } => Err(crate::io::io_error(
+                        "io-error",
+                        "mock: accept not supported",
+                        origin_heap,
+                    )),
+                    PortOp::SendTo { data, .. } => {
+                        let len = data
+                            .with_string(|s| s.len())
+                            .or_else(|| data.as_bytes().map(|b| b.len()))
+                            .unwrap_or(0);
+                        Ok(Value::int(len as i64))
+                    }
+                    PortOp::RecvFrom { result, .. } => {
+                        if inner.read_cursor < inner.read_data.len() {
+                            let payload = inner.read_data[inner.read_cursor].clone();
+                            inner.read_cursor += 1;
+                            // Fill the pre-allocated result struct (born on the
+                            // requesting fiber's heap) in place — same discipline as
+                            // the real backends, no fresh allocation here.
+                            use crate::io::request::{
+                                bytes_to_string_in_place, set_struct_field_in_place,
+                                truncate_buffer, writeable_buffer_ptr,
+                            };
+                            use crate::value::heap::TableKey;
+                            let struct_ref =
+                                result.as_struct().expect("recv result must be a struct");
+                            let data_buf = crate::value::sorted_struct_get(
+                                struct_ref,
+                                &TableKey::Keyword("data".into()),
+                            )
+                            .copied()
+                            .expect("recv result must have :data");
+                            let addr_buf = crate::value::sorted_struct_get(
+                                struct_ref,
+                                &TableKey::Keyword("addr".into()),
+                            )
+                            .copied()
+                            .expect("recv result must have :addr");
+                            unsafe {
+                                let (dst, cap) = writeable_buffer_ptr(&data_buf);
+                                let n = payload.len().min(cap);
+                                std::ptr::copy_nonoverlapping(payload.as_ptr(), dst, n);
+                                truncate_buffer(&data_buf, n);
+
+                                let abytes = b"127.0.0.1";
+                                let (dst, cap) = writeable_buffer_ptr(&addr_buf);
+                                let n2 = abytes.len().min(cap);
+                                std::ptr::copy_nonoverlapping(abytes.as_ptr(), dst, n2);
+                                truncate_buffer(&addr_buf, n2);
+                                let addr_val = bytes_to_string_in_place(addr_buf, origin_heap)
+                                    .unwrap_or(addr_buf);
+                                set_struct_field_in_place(
+                                    result,
+                                    &TableKey::Keyword("addr".into()),
+                                    addr_val,
+                                );
+                                // :port stays 0 (mock).
+                            }
+                            Ok(*result)
+                        } else {
+                            Ok(Value::NIL)
+                        }
+                    }
+                },
                 IoOp::Sleep { duration } => {
                     // Sleep honors its own duration as latency override
                     let deadline = Instant::now() + *duration;
@@ -190,73 +256,11 @@ impl crate::io::IoBackend for MockBackend {
                     });
                     return Ok(id);
                 }
-                IoOp::Accept { .. } => Err(crate::io::io_error(
-                    "io-error",
-                    "mock: accept not supported",
-                    origin_heap,
-                )),
                 IoOp::Connect { .. } => Err(crate::io::io_error(
                     "io-error",
                     "mock: connect not supported",
                     origin_heap,
                 )),
-                IoOp::SendTo { data, .. } => {
-                    let len = data
-                        .with_string(|s| s.len())
-                        .or_else(|| data.as_bytes().map(|b| b.len()))
-                        .unwrap_or(0);
-                    Ok(Value::int(len as i64))
-                }
-                IoOp::RecvFrom { result, .. } => {
-                    if inner.read_cursor < inner.read_data.len() {
-                        let payload = inner.read_data[inner.read_cursor].clone();
-                        inner.read_cursor += 1;
-                        // Fill the pre-allocated result struct (born on the
-                        // requesting fiber's heap) in place — same discipline as
-                        // the real backends, no fresh allocation here.
-                        use crate::io::request::{
-                            bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer,
-                            writeable_buffer_ptr,
-                        };
-                        use crate::value::heap::TableKey;
-                        let struct_ref = result.as_struct().expect("recv result must be a struct");
-                        let data_buf = crate::value::sorted_struct_get(
-                            struct_ref,
-                            &TableKey::Keyword("data".into()),
-                        )
-                        .copied()
-                        .expect("recv result must have :data");
-                        let addr_buf = crate::value::sorted_struct_get(
-                            struct_ref,
-                            &TableKey::Keyword("addr".into()),
-                        )
-                        .copied()
-                        .expect("recv result must have :addr");
-                        unsafe {
-                            let (dst, cap) = writeable_buffer_ptr(&data_buf);
-                            let n = payload.len().min(cap);
-                            std::ptr::copy_nonoverlapping(payload.as_ptr(), dst, n);
-                            truncate_buffer(&data_buf, n);
-
-                            let abytes = b"127.0.0.1";
-                            let (dst, cap) = writeable_buffer_ptr(&addr_buf);
-                            let n2 = abytes.len().min(cap);
-                            std::ptr::copy_nonoverlapping(abytes.as_ptr(), dst, n2);
-                            truncate_buffer(&addr_buf, n2);
-                            let addr_val =
-                                bytes_to_string_in_place(addr_buf, origin_heap).unwrap_or(addr_buf);
-                            set_struct_field_in_place(
-                                result,
-                                &TableKey::Keyword("addr".into()),
-                                addr_val,
-                            );
-                            // :port stays 0 (mock).
-                        }
-                        Ok(*result)
-                    } else {
-                        Ok(Value::NIL)
-                    }
-                }
                 IoOp::Spawn(_) | IoOp::ProcessWait => Err(crate::io::io_error(
                     "io-error",
                     "mock: subprocess ops not supported",

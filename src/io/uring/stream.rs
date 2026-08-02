@@ -1,6 +1,7 @@
 use super::*;
 
-/// Submit a stream I/O operation (Read, ReadLine, ReadAll, Write, Flush).
+/// Submit a stream I/O operation (ReadLine, Read, ReadExact, ReadAll, Write,
+/// Flush) — the byte-stream half of [`PortOp`].
 ///
 /// `read_buffered`: for Read ops, the number of bytes already sitting in the
 /// fd_state buffer. The kernel read is reduced by this amount so the
@@ -10,7 +11,7 @@ pub(crate) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
     id: SubmissionId,
     fd: RawFd,
-    op: &IoOp,
+    op: &PortOp,
     timeout: Option<Duration>,
     buffer_pool: &mut BufferPool,
     buf_handle: Option<BufferHandle>,
@@ -20,7 +21,7 @@ pub(crate) fn submit_uring_stream(
     use io_uring::types::Fd;
 
     let entry = match op {
-        IoOp::ReadLine { buffer } => {
+        PortOp::ReadLine { buffer } => {
             let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
             let read_size = (dst_cap - read_buffered).min(4096);
             unsafe {
@@ -30,7 +31,7 @@ pub(crate) fn submit_uring_stream(
                     .user_data(id.as_u64())
             }
         }
-        IoOp::ReadAll => {
+        PortOp::ReadAll => {
             let bh = buf_handle.expect("ReadAll requires BufferHandle");
             let buf = buffer_pool.get_mut(bh);
             buf.resize(4096, 0);
@@ -39,7 +40,7 @@ pub(crate) fn submit_uring_stream(
                 .build()
                 .user_data(id.as_u64())
         }
-        IoOp::Read { count, buffer } | IoOp::ReadExact { count, buffer } => {
+        PortOp::Read { count, buffer } | PortOp::ReadExact { count, buffer } => {
             let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
             // Fill to buffer capacity. For binary Read/ReadExact the buffer
             // is sized to `count`, so this reads exactly `count` bytes. For a
@@ -56,7 +57,7 @@ pub(crate) fn submit_uring_stream(
                     .user_data(id.as_u64())
             }
         }
-        IoOp::Write { data } => {
+        PortOp::Write { data } => {
             let bytes = crate::io::aio::AsyncBackend::extract_write_bytes(data);
             let bh = buf_handle.expect("Write requires BufferHandle");
             let buf = buffer_pool.get_mut(bh);
@@ -71,8 +72,13 @@ pub(crate) fn submit_uring_stream(
                 .build()
                 .user_data(id.as_u64())
         }
-        IoOp::Flush => opcode::Fsync::new(Fd(fd)).build().user_data(id.as_u64()),
-        _ => return Err(format!("io/submit: unexpected stream op {:?}", op)),
+        PortOp::Flush => opcode::Fsync::new(Fd(fd)).build().user_data(id.as_u64()),
+        // The socket ops carry their own SQE builders (`submit_uring_accept`
+        // and friends); `AsyncBackend::submit` routes them there instead.
+        PortOp::Accept { .. }
+        | PortOp::SendTo { .. }
+        | PortOp::RecvFrom { .. }
+        | PortOp::Shutdown { .. } => return Err(format!("io/submit: {:?} is not a stream op", op)),
     };
 
     unsafe { submit_linked(ring, id, entry, timeout) }

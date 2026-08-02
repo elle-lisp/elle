@@ -5,7 +5,7 @@ use libc;
 fn test_io_request_type_name() {
     crate::primitives::ctx::with_test_ctx(|ctx| {
         let buf = ctx.bytes(vec![0u8; 64]);
-        let req = IoRequest::new(ctx, IoOp::ReadLine { buffer: buf }, Value::NIL);
+        let req = IoRequest::new(ctx, PortOp::ReadLine { buffer: buf }.into(), Value::NIL);
         assert_eq!(req.external_type_name(), Some("io-request"));
     });
 }
@@ -13,7 +13,7 @@ fn test_io_request_type_name() {
 #[test]
 fn test_io_request_not_port() {
     crate::primitives::ctx::with_test_ctx(|ctx| {
-        let req = IoRequest::new(ctx, IoOp::Flush, Value::NIL);
+        let req = IoRequest::new(ctx, PortOp::Flush.into(), Value::NIL);
         assert_ne!(req.external_type_name(), Some("port"));
     });
 }
@@ -23,7 +23,12 @@ fn test_io_request_with_timeout() {
     crate::primitives::ctx::with_test_ctx(|ctx| {
         let timeout = Some(Duration::from_millis(5000));
         let buf = ctx.bytes(vec![0u8; 64]);
-        let req = IoRequest::with_timeout(ctx, IoOp::ReadLine { buffer: buf }, Value::NIL, timeout);
+        let req = IoRequest::with_timeout(
+            ctx,
+            PortOp::ReadLine { buffer: buf }.into(),
+            Value::NIL,
+            timeout,
+        );
         let extracted = req.as_external::<IoRequest>().unwrap();
         assert_eq!(extracted.timeout, timeout);
     });
@@ -78,6 +83,78 @@ fn test_ioop_seek_variant_carries_offset_and_whence() {
 fn test_ioop_tell_variant_is_unit() {
     let op = IoOp::Tell;
     assert!(matches!(op, IoOp::Tell));
+}
+
+// ── The submit path's copy into the pending entry ────────────────────────
+//
+// `AsyncBackend::submit` moves a request's op into its `PendingOp::Port`
+// entry with `op.clone()`, and the completion path reads the op back out of
+// that entry to find its buffer, its count and its accept port. A `Clone`
+// that drops a field would strand the in-flight operation on a default,
+// which is why the copy is pinned per field rather than by `Clone` deriving
+// at all.
+
+#[test]
+fn cloning_a_read_keeps_its_count_and_buffer() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+        let buffer = h.ctx().bytes(vec![0u8; 32]);
+        let op = PortOp::Read { count: 17, buffer };
+        match op.clone() {
+            PortOp::Read {
+                count: cloned_count,
+                buffer: cloned_buffer,
+            } => {
+                assert_eq!(cloned_count, 17, "the clone keeps the requested count");
+                assert_eq!(
+                    cloned_buffer.as_heap_ptr(),
+                    buffer.as_heap_ptr(),
+                    "the clone points at the same fiber-heap buffer, not a copy",
+                );
+            }
+            other => panic!("clone changed the variant: {:?}", other),
+        }
+    });
+}
+
+#[test]
+fn cloning_an_accept_keeps_its_options_encoding_and_port() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+        let accept_port = h.ctx().bytes(vec![0u8; 8]);
+        let options = SocketOptions {
+            sndbuf: Some(4096),
+            ..Default::default()
+        };
+        let op = PortOp::Accept {
+            options: options.clone(),
+            encoding: crate::port::Encoding::Text,
+            accept_port,
+        };
+        match op.clone() {
+            PortOp::Accept {
+                options: cloned_options,
+                encoding: cloned_encoding,
+                accept_port: cloned_port,
+            } => {
+                assert_eq!(
+                    cloned_options.sndbuf, options.sndbuf,
+                    "the clone keeps the socket options the caller asked for",
+                );
+                assert_eq!(
+                    cloned_encoding,
+                    crate::port::Encoding::Text,
+                    "the clone keeps the accepted port's encoding",
+                );
+                assert_eq!(
+                    cloned_port.as_heap_ptr(),
+                    accept_port.as_heap_ptr(),
+                    "the clone points at the pre-allocated accept port",
+                );
+            }
+            other => panic!("clone changed the variant: {:?}", other),
+        }
+    });
 }
 
 #[test]

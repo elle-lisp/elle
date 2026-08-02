@@ -2,7 +2,7 @@
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::IoOp;
+use crate::io::request::PortOp;
 use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::io::{Completion, SubmissionId};
 use crate::port::{Encoding, Port, PortKind};

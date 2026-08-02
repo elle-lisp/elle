@@ -190,9 +190,21 @@ impl AsyncBackend {
             return inner.handle_seek_tell(id, port, &port_key, &request.op);
         }
 
+        // Everything above either returned or was portless, so what is left is
+        // an operation the backend runs asynchronously against this port.
+        let op = match &request.op {
+            IoOp::Port(op) => op,
+            other => {
+                return Err(format!(
+                    "io/submit: {:?} does not operate on an open port",
+                    other
+                ))
+            }
+        };
+
         // For stdin, route to stdin thread
         if matches!(port_key, PortKey::Stdin) {
-            return inner.submit_stdin(id, &request.op);
+            return inner.submit_stdin(id, op);
         }
 
         // Determine fd
@@ -203,15 +215,15 @@ impl AsyncBackend {
             PortKey::Stdin => unreachable!(),
         };
 
-        let buf_handle = match &request.op {
-            IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadExact { .. } => None,
+        let buf_handle = match op {
+            PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. } => None,
             _ => Some(inner.buffer_pool.alloc(4096)),
         };
 
         // Flush on socket/pipe/stdio ports is a no-op: fsync(2) returns EINVAL on
         // non-file fds (sockets, pipes, and stdio when redirected to pipes in subprocesses).
         // Return an immediate successful completion rather than submitting to the pool.
-        if matches!(&request.op, IoOp::Flush)
+        if matches!(op, PortOp::Flush)
             && matches!(
                 port.kind(),
                 PortKind::TcpStream
@@ -244,8 +256,8 @@ impl AsyncBackend {
                 .fd_states
                 .entry(port_key.clone())
                 .or_insert_with(FdState::new);
-            match &request.op {
-                IoOp::ReadLine { buffer } => {
+            match op {
+                PortOp::ReadLine { buffer } => {
                     if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
                         let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
                         unsafe {
@@ -283,7 +295,7 @@ impl AsyncBackend {
                         state.buffer.clear();
                     }
                 }
-                IoOp::Read { count, buffer } => {
+                PortOp::Read { count, buffer } => {
                     if state.buffer.len() >= *count {
                         let chunk: Vec<u8> = state.buffer.drain(..*count).collect();
                         unsafe {
@@ -314,7 +326,7 @@ impl AsyncBackend {
                     read_buffered = state.buffer.len();
                     state.buffer.clear();
                 }
-                IoOp::ReadExact { count, buffer } => {
+                PortOp::ReadExact { count, buffer } => {
                     // ReadExact's unit is whatever the port is measured in:
                     // bytes for Binary, graphemes for Text.  If the buffered
                     // prefix already contains `count` units, serve from buffer.
@@ -376,15 +388,19 @@ impl AsyncBackend {
         }
 
         // Dispatch by operation type
-        match &request.op {
-            IoOp::Accept { .. }
-            | IoOp::SendTo { .. }
-            | IoOp::RecvFrom { .. }
-            | IoOp::Shutdown { .. } => {
-                Self::submit_socket(&mut inner, request, id, fd, port_key, port, buf_handle)
+        match op {
+            PortOp::Accept { .. }
+            | PortOp::SendTo { .. }
+            | PortOp::RecvFrom { .. }
+            | PortOp::Shutdown { .. } => {
+                Self::submit_socket(&mut inner, request, op, id, fd, port_key, port, buf_handle)
             }
-            // Stream I/O ops (ReadLine, Read, ReadAll, Write, Flush)
-            _ => {
+            PortOp::ReadLine { .. }
+            | PortOp::Read { .. }
+            | PortOp::ReadExact { .. }
+            | PortOp::ReadAll
+            | PortOp::Write { .. }
+            | PortOp::Flush => {
                 let AsyncBackendInner {
                     ref mut platform,
                     ref mut hub,
@@ -400,7 +416,7 @@ impl AsyncBackend {
                             ring,
                             id,
                             fd,
-                            &request.op,
+                            op,
                             request.timeout,
                             buffer_pool,
                             buf_handle,
@@ -409,21 +425,21 @@ impl AsyncBackend {
                     }
                     PlatformBackend::ThreadPool => {
                         let _ = buffer_pool;
-                        let pool_op = match &request.op {
-                            IoOp::ReadLine { .. } => PoolOp::ReadLine {
+                        let pool_op = match op {
+                            PortOp::ReadLine { .. } => PoolOp::ReadLine {
                                 fd,
                                 timeout: request.timeout,
                             },
-                            IoOp::ReadAll => PoolOp::ReadAll {
+                            PortOp::ReadAll => PoolOp::ReadAll {
                                 fd,
                                 timeout: request.timeout,
                             },
-                            IoOp::Read { count, .. } => PoolOp::Read {
+                            PortOp::Read { count, .. } => PoolOp::Read {
                                 fd,
                                 size: *count - read_buffered,
                                 timeout: request.timeout,
                             },
-                            IoOp::ReadExact { count, .. } => {
+                            PortOp::ReadExact { count, .. } => {
                                 let is_text = matches!(port.encoding(), Encoding::Text);
                                 if is_text {
                                     // Grapheme-counted: the worker grows its
@@ -447,7 +463,7 @@ impl AsyncBackend {
                                     }
                                 }
                             }
-                            IoOp::Write { data } => {
+                            PortOp::Write { data } => {
                                 let bytes = Self::extract_write_bytes(data);
                                 PoolOp::Write {
                                     fd,
@@ -455,8 +471,12 @@ impl AsyncBackend {
                                     timeout: request.timeout,
                                 }
                             }
-                            IoOp::Flush => PoolOp::Flush { fd },
-                            _ => unreachable!(),
+                            PortOp::Flush => PoolOp::Flush { fd },
+                            // The socket arm above claims these.
+                            PortOp::Accept { .. }
+                            | PortOp::SendTo { .. }
+                            | PortOp::RecvFrom { .. }
+                            | PortOp::Shutdown { .. } => unreachable!(),
                         };
                         hub.submit(id, pool_op)?;
                     }
@@ -465,21 +485,7 @@ impl AsyncBackend {
                 pending.insert(
                     id,
                     PendingOp::Port {
-                        op: match &request.op {
-                            IoOp::ReadLine { buffer } => IoOp::ReadLine { buffer: *buffer },
-                            IoOp::Read { count, buffer } => IoOp::Read {
-                                count: *count,
-                                buffer: *buffer,
-                            },
-                            IoOp::ReadExact { count, buffer } => IoOp::ReadExact {
-                                count: *count,
-                                buffer: *buffer,
-                            },
-                            IoOp::ReadAll => IoOp::ReadAll,
-                            IoOp::Write { data } => IoOp::Write { data: *data },
-                            IoOp::Flush => IoOp::Flush,
-                            _ => unreachable!(),
-                        },
+                        op: op.clone(),
                         port_key,
                         port: request.port,
                         buffer_handle: buf_handle,

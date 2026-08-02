@@ -71,11 +71,12 @@ fn test_accept_wait_does_not_return_zero_completions_spuriously() {
         let accept_id = backend
             .submit(
                 &IoRequest {
-                    op: IoOp::Accept {
+                    op: PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
-                    },
+                    }
+                    .into(),
                     port: listener_port,
                     timeout: None,
                 },
@@ -180,11 +181,12 @@ fn test_accept_via_uring() {
             ),
         );
         let accept_req = IoRequest {
-            op: IoOp::Accept {
+            op: PortOp::Accept {
                 options: Default::default(),
                 encoding: crate::port::Encoding::Binary,
                 accept_port: accept_port_val,
-            },
+            }
+            .into(),
             port: listener_port,
             timeout: None,
         };
@@ -354,11 +356,12 @@ fn test_accept_and_connect_concurrent() {
         let accept_id = backend
             .submit(
                 &IoRequest {
-                    op: IoOp::Accept {
+                    op: PortOp::Accept {
                         options: Default::default(),
                         encoding: crate::port::Encoding::Binary,
                         accept_port: accept_port_val,
-                    },
+                    }
+                    .into(),
                     port: listener_port,
                     timeout: None,
                 },

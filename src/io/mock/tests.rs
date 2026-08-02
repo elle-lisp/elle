@@ -10,7 +10,7 @@ fn test_mock_read() {
         mock.seed_read(b"hello world".to_vec());
 
         let req = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port: Value::NIL,
             timeout: None,
         };
@@ -32,9 +32,10 @@ fn test_mock_write() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mock = MockBackend::new();
         let req = IoRequest {
-            op: IoOp::Write {
+            op: PortOp::Write {
                 data: h.ctx().string("test data"),
-            },
+            }
+            .into(),
             port: Value::NIL,
             timeout: None,
         };
@@ -56,7 +57,7 @@ fn test_mock_error_injection() {
         mock.inject_error(5); // EIO
 
         let req = IoRequest {
-            op: IoOp::ReadAll,
+            op: PortOp::ReadAll.into(),
             port: Value::NIL,
             timeout: None,
         };
@@ -77,7 +78,7 @@ fn test_mock_call_log() {
 
         let _ = mock.submit(
             &IoRequest {
-                op: IoOp::ReadAll,
+                op: PortOp::ReadAll.into(),
                 port: Value::NIL,
                 timeout: None,
             },
@@ -85,7 +86,7 @@ fn test_mock_call_log() {
         );
         let _ = mock.submit(
             &IoRequest {
-                op: IoOp::Flush,
+                op: PortOp::Flush.into(),
                 port: Value::NIL,
                 timeout: None,
             },
@@ -103,9 +104,10 @@ fn test_mock_eof_no_data() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mock = MockBackend::new();
         let req = IoRequest {
-            op: IoOp::ReadLine {
+            op: PortOp::ReadLine {
                 buffer: h.ctx().bytes(vec![0u8; 64]),
-            },
+            }
+            .into(),
             port: Value::NIL,
             timeout: None,
         };
@@ -123,7 +125,7 @@ fn test_mock_monotonic_ids() {
     let id1 = mock
         .submit(
             &IoRequest {
-                op: IoOp::Flush,
+                op: PortOp::Flush.into(),
                 port: Value::NIL,
                 timeout: None,
             },
@@ -133,7 +135,7 @@ fn test_mock_monotonic_ids() {
     let id2 = mock
         .submit(
             &IoRequest {
-                op: IoOp::Flush,
+                op: PortOp::Flush.into(),
                 port: Value::NIL,
                 timeout: None,
             },
@@ -150,7 +152,7 @@ fn test_mock_latency_poll_before_deadline() {
 
     mock.submit(
         &IoRequest {
-            op: IoOp::Flush,
+            op: PortOp::Flush.into(),
             port: Value::NIL,
             timeout: None,
         },
@@ -170,7 +172,7 @@ fn test_mock_latency_wait() {
 
     mock.submit(
         &IoRequest {
-            op: IoOp::Flush,
+            op: PortOp::Flush.into(),
             port: Value::NIL,
             timeout: None,
         },
@@ -190,7 +192,7 @@ fn test_mock_latency_wait_timeout() {
 
     mock.submit(
         &IoRequest {
-            op: IoOp::Flush,
+            op: PortOp::Flush.into(),
             port: Value::NIL,
             timeout: None,
         },
@@ -211,7 +213,7 @@ fn test_mock_cancel() {
     let id = mock
         .submit(
             &IoRequest {
-                op: IoOp::Flush,
+                op: PortOp::Flush.into(),
                 port: Value::NIL,
                 timeout: None,
             },

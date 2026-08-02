@@ -42,7 +42,7 @@ fn push_resubmit(
 /// and wait (after blocking). Handles:
 /// - Timeout CQE filtering (high-bit user_data tag)
 /// - Connect fd cleanup on error
-/// - IoOp-aware buffer extraction (only reads buffer for stream reads)
+/// - PortOp-aware buffer extraction (only reads buffer for stream reads)
 pub(crate) fn drain_cqes(
     ring: &mut io_uring::IoUring,
     pending: &mut HashMap<SubmissionId, PendingOp>,
@@ -111,7 +111,7 @@ pub(crate) fn drain_cqes(
             let buf_handle = pending_op.buffer_handle();
             let data = match &pending_op {
                 PendingOp::Port { op, .. } => match op {
-                    IoOp::RecvFrom { .. } if result_code > 0 => {
+                    PortOp::RecvFrom { .. } if result_code > 0 => {
                         let msghdr_size = std::mem::size_of::<libc::msghdr>();
                         let iovec_size = std::mem::size_of::<libc::iovec>();
                         let sockaddr_size = std::mem::size_of::<libc::sockaddr_storage>();
@@ -134,13 +134,13 @@ pub(crate) fn drain_cqes(
                         encoded.extend_from_slice(&sa_bytes);
                         encoded
                     }
-                    IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadExact { .. }
+                    PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. }
                         if result_code > 0 =>
                     {
                         // Data was written directly into the fiber buffer by the kernel.
                         Vec::new()
                     }
-                    IoOp::ReadAll if result_code > 0 => {
+                    PortOp::ReadAll if result_code > 0 => {
                         let buf = buffer_pool.get_mut(buf_handle.unwrap());
                         buf[..result_code as usize].to_vec()
                     }
@@ -160,7 +160,7 @@ pub(crate) fn drain_cqes(
             // ReadLine re-submission: if the read returned data but no newline
             // was found in the fiber's buffer, resubmit for more data.
             if let PendingOp::Port {
-                op: IoOp::ReadLine { ref buffer },
+                op: PortOp::ReadLine { ref buffer },
                 ref port_key,
                 ref mut filled,
                 ..
@@ -199,7 +199,7 @@ pub(crate) fn drain_cqes(
                 is_exact,
             ) = match &mut pending_op {
                 PendingOp::Port {
-                    op: IoOp::Read { count, buffer },
+                    op: PortOp::Read { count, buffer },
                     port_key,
                     port,
                     filled,
@@ -213,7 +213,7 @@ pub(crate) fn drain_cqes(
                     false,
                 ),
                 PendingOp::Port {
-                    op: IoOp::ReadExact { count, buffer },
+                    op: PortOp::ReadExact { count, buffer },
                     port_key,
                     port,
                     filled,
@@ -291,7 +291,7 @@ pub(crate) fn drain_cqes(
             // ReadAll re-submission: buffer data and resubmit until EOF
             // (result_code == 0). ReadAll reads until the write end closes.
             if let PendingOp::Port {
-                op: IoOp::ReadAll,
+                op: PortOp::ReadAll,
                 ref port_key,
                 ..
             } = pending_op
@@ -319,7 +319,7 @@ pub(crate) fn drain_cqes(
             // is left. The completion reports `filled + result_code`.
             let mut write_stalled = false;
             if let PendingOp::Port {
-                op: IoOp::Write { .. },
+                op: PortOp::Write { .. },
                 ref port_key,
                 ref mut filled,
                 ..
@@ -386,9 +386,9 @@ pub(crate) fn drain_cqes(
         let op_timeout = pending_op.timeout();
         if let PendingOp::Port {
             op:
-                IoOp::ReadLine { ref buffer }
-                | IoOp::Read { ref buffer, .. }
-                | IoOp::ReadExact { ref buffer, .. },
+                PortOp::ReadLine { ref buffer }
+                | PortOp::Read { ref buffer, .. }
+                | PortOp::ReadExact { ref buffer, .. },
             ref mut filled,
             ref port_key,
             ..

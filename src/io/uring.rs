@@ -4,7 +4,7 @@ use crate::io::aio::{EVENTFD_USER_DATA, TIMEOUT_USER_DATA_TAG};
 use crate::io::completion::process_raw_completion;
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{apply_socket_options, ConnectAddr, IoOp};
+use crate::io::request::{apply_socket_options, ConnectAddr, PortOp};
 use crate::io::types::{FdState, PortKey};
 use crate::io::{Completion, SubmissionId};
 use crate::port::{Port, PortKind};

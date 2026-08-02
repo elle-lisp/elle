@@ -62,9 +62,18 @@ impl std::fmt::Debug for TaskFn {
     }
 }
 
-/// I/O operation descriptor.
-#[derive(Debug)]
-pub enum IoOp {
+/// An operation on an already-open port that a backend runs asynchronously, so
+/// it outlives its submission as a `PendingOp::Port` entry until a completion
+/// arrives.
+///
+/// Every field is clonable, which is what lets the submit path copy a request's
+/// op into that entry. The whole enum is the set the completion path can see:
+/// a variant here is one the backend must be able to finish.
+///
+/// `Close`, `Seek` and `Tell` also address a port but finish inside
+/// `AsyncBackend::submit` without reaching a backend, so they stay on [`IoOp`].
+#[derive(Debug, Clone)]
+pub enum PortOp {
     /// Read one line (up to `\n`). Returns bytes or nil (EOF).
     /// The buffer is pre-allocated on the fiber's heap.
     ReadLine {
@@ -97,12 +106,6 @@ pub enum IoOp {
     Write { data: Value },
     /// Flush port's write buffer. Returns nil.
     Flush,
-    /// Seek to a position in a file. Returns new absolute byte offset.
-    /// `whence`: libc::SEEK_SET (0), libc::SEEK_CUR (1), libc::SEEK_END (2).
-    Seek { offset: i64, whence: i32 },
-    /// Query current logical file position (kernel offset minus buffer len).
-    /// Returns the logical byte offset as int.
-    Tell,
     /// Accept a connection on a listener. Returns new stream port.
     /// Socket options are applied to the accepted fd after accept(2).
     /// `encoding` controls the resulting port's text/binary mode —
@@ -114,8 +117,6 @@ pub enum IoOp {
         encoding: crate::port::Encoding,
         accept_port: Value,
     },
-    /// Connect to a remote address. Returns connected stream port.
-    Connect { addr: ConnectAddr },
     /// Send data to a remote address via UDP. Returns bytes sent.
     SendTo {
         addr: String,
@@ -129,11 +130,27 @@ pub enum IoOp {
     /// fiber's heap** (like `Read`'s `buffer`). The kernel writes the datagram
     /// payload directly into `:data` (zero-copy via the iovec), and the
     /// completion fills `:data`/`:addr`/`:port` in place and returns `result`
-    /// unchanged — no value is instantiated on the scheduler's heap, so there is
-    /// no cross-heap reference (the arena-lifetime "bytes arrive zeroed" bug).
+    /// unchanged. Nothing is instantiated on the scheduler's heap, so the
+    /// resumed fiber holds no cross-heap reference.
     RecvFrom { count: usize, result: Value },
     /// Shutdown a socket connection. Returns nil.
     Shutdown { how: i32 },
+}
+
+/// I/O operation descriptor.
+#[derive(Debug)]
+pub enum IoOp {
+    /// An asynchronous operation on an already-open port. These are the only
+    /// ops that become an in-flight `PendingOp::Port` entry.
+    Port(PortOp),
+    /// Seek to a position in a file. Returns new absolute byte offset.
+    /// `whence`: libc::SEEK_SET (0), libc::SEEK_CUR (1), libc::SEEK_END (2).
+    Seek { offset: i64, whence: i32 },
+    /// Query current logical file position (kernel offset minus buffer len).
+    /// Returns the logical byte offset as int.
+    Tell,
+    /// Connect to a remote address. Returns connected stream port.
+    Connect { addr: ConnectAddr },
     /// Async sleep. No port — just a timer. Returns nil after duration elapses.
     Sleep { duration: Duration },
     /// Spawn a subprocess. Returns a struct:
@@ -187,6 +204,12 @@ pub enum IoOp {
     /// closes when the op completes, is cancelled, or never makes it
     /// past submit.
     ChanSelectPark(crate::primitives::chan::ChanSelectGuardCell),
+}
+
+impl From<PortOp> for IoOp {
+    fn from(op: PortOp) -> Self {
+        IoOp::Port(op)
+    }
 }
 
 /// A typed I/O request. Wrapped as ExternalObject with type_name "io-request".

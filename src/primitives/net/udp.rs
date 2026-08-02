@@ -53,11 +53,12 @@ pub(super) fn prim_udp_send_to(
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             ctx,
-            IoOp::SendTo {
+            PortOp::SendTo {
                 addr,
                 port_num,
                 data,
-            },
+            }
+            .into(),
             socket_val,
             timeout,
         ),
@@ -113,7 +114,12 @@ pub(super) fn prim_udp_recv_from(
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(ctx, IoOp::RecvFrom { count, result }, socket_val, timeout),
+        IoRequest::with_timeout(
+            ctx,
+            PortOp::RecvFrom { count, result }.into(),
+            socket_val,
+            timeout,
+        ),
     )
 }
 /// (sys/resolve hostname) → array of IP address strings

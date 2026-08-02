@@ -48,10 +48,10 @@ pub(super) fn complete_port_op(
             if result_code == 0
                 && matches!(
                     op,
-                    IoOp::ReadLine { .. }
-                        | IoOp::Read { .. }
-                        | IoOp::ReadExact { .. }
-                        | IoOp::ReadAll
+                    PortOp::ReadLine { .. }
+                        | PortOp::Read { .. }
+                        | PortOp::ReadExact { .. }
+                        | PortOp::ReadAll
                 )
             {
                 // EOF for read operations
@@ -62,7 +62,7 @@ pub(super) fn complete_port_op(
 
                 // For ReadLine: check buffer for a partial last line
                 // (file content without trailing newline).
-                if let IoOp::ReadLine { ref buffer } = op {
+                if let PortOp::ReadLine { ref buffer } = op {
                     // Check fd_state buffer first (leftover from previous calls)
                     if !state.buffer.is_empty() {
                         let remainder: Vec<u8> = state.buffer.drain(..).collect();
@@ -110,7 +110,7 @@ pub(super) fn complete_port_op(
                 }
 
                 // For Read: return accumulated data on EOF.
-                if let IoOp::Read { ref buffer, .. } = op {
+                if let PortOp::Read { ref buffer, .. } = op {
                     // Check fd_state buffer first
                     if !state.buffer.is_empty() {
                         let partial: Vec<u8> = state.buffer.drain(..).collect();
@@ -163,14 +163,14 @@ pub(super) fn complete_port_op(
                 // return nil so the caller can distinguish "got n bytes"
                 // from "stream ended early".  Callers who want the
                 // partial should use Read.
-                if matches!(op, IoOp::ReadExact { .. }) {
+                if matches!(op, PortOp::ReadExact { .. }) {
                     state.buffer.clear();
                     return Completion::ok(id, Value::NIL);
                 }
 
                 // For ReadAll: return accumulated buffer on EOF
                 // (empty bytes for empty files, not nil).
-                if matches!(op, IoOp::ReadAll) {
+                if matches!(op, PortOp::ReadAll) {
                     let all: Vec<u8> = state.buffer.drain(..).collect();
                     let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
                     let ctx = crate::primitives::ctx::Alloc::new(heap);
@@ -192,7 +192,7 @@ pub(super) fn complete_port_op(
 
             // Success
             let value = match op {
-                IoOp::ReadLine { ref buffer } => {
+                PortOp::ReadLine { ref buffer } => {
                     // The data is in the fiber's pre-allocated buffer (for both
                     // io_uring and thread pool paths). Total valid bytes:
                     let total = pending.filled() + result_code as usize;
@@ -267,7 +267,7 @@ pub(super) fn complete_port_op(
                         crate::io::request::bytes_to_string_in_place(*buffer, origin_heap)
                     });
                 }
-                IoOp::Read { ref buffer, .. } | IoOp::ReadExact { ref buffer, .. } => {
+                PortOp::Read { ref buffer, .. } | PortOp::ReadExact { ref buffer, .. } => {
                     // Prepend any bytes left in the fd_state buffer from a
                     // previous over-read (e.g. ReadLine read past the line
                     // boundary, or a previous short-read for this op).  The
@@ -313,7 +313,7 @@ pub(super) fn complete_port_op(
                     // count, so detect "short" here — in the port's own unit — and
                     // map it to nil too, discarding the partial exactly as the EOF
                     // arm does.
-                    if let IoOp::ReadExact { count, .. } = op {
+                    if let PortOp::ReadExact { count, .. } = op {
                         let enough = match encoding {
                             Encoding::Text => {
                                 let bytes = buffer.as_bytes().unwrap_or(&[]);
@@ -335,7 +335,7 @@ pub(super) fn complete_port_op(
                         // ReadAll keep the full buffer.  `bytes_to_string_in_place`
                         // is retained so the result lands in the buffer's region
                         // (s11 region routing) rather than a fresh allocation.
-                        if let IoOp::ReadExact { count, .. } = op {
+                        if let PortOp::ReadExact { count, .. } = op {
                             let (end, leftover) = {
                                 let bytes = buffer.as_bytes().unwrap_or(&[]);
                                 let end = crate::io::nth_grapheme_byte_end(bytes, *count)
@@ -355,7 +355,7 @@ pub(super) fn complete_port_op(
                     }
                     *buffer
                 }
-                IoOp::ReadAll => {
+                PortOp::ReadAll => {
                     // ReadAll still uses the existing fd_states.buffer accumulation.
                     // Accumulated in fd_states.buffer by re-submission loop.
                     let state = fd_states
@@ -378,12 +378,14 @@ pub(super) fn complete_port_op(
                 // the last CQE's bytes plus the offset it started from. The
                 // io_uring path accumulates that offset in `filled`; the pool
                 // worker loops internally and leaves it at zero.
-                IoOp::Write { .. } => Value::int((pending.filled() + result_code as usize) as i64),
+                PortOp::Write { .. } => {
+                    Value::int((pending.filled() + result_code as usize) as i64)
+                }
                 // A datagram send is atomic: the kernel takes all of it or none,
                 // so there is no partial to accumulate.
-                IoOp::SendTo { .. } => Value::int(result_code as i64),
-                IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-                IoOp::Accept {
+                PortOp::SendTo { .. } => Value::int(result_code as i64),
+                PortOp::Flush | PortOp::Shutdown { .. } => Value::NIL,
+                PortOp::Accept {
                     ref options,
                     ref accept_port,
                     ..
@@ -406,50 +408,7 @@ pub(super) fn complete_port_op(
                     port_ref.set_fd(fd);
                     *accept_port
                 }
-                IoOp::Connect { .. } => {
-                    // Connect ops use PendingOp::Connect, not PendingOp::Port
-                    unreachable!("Connect should use PendingOp::Connect variant")
-                }
-                IoOp::Spawn(_) | IoOp::ProcessWait => {
-                    // Subprocess ops are dispatched before the port guard and never
-                    // produce a PendingOp::Port entry — they cannot reach this branch.
-                    unreachable!("Spawn/ProcessWait should be dispatched before port guard")
-                }
-                IoOp::Open { .. } => {
-                    // Open ops use PendingOp::Open, not PendingOp::Port — cannot reach here.
-                    unreachable!("Open should use PendingOp::Open variant")
-                }
-                IoOp::Seek { .. } | IoOp::Tell => {
-                    // Seek/Tell are immediate completions (lseek syscall, no io_uring).
-                    // They never produce a PendingOp::Port entry — cannot reach here.
-                    unreachable!(
-                        "Seek/Tell are handled as immediate completions before PendingOp insertion"
-                    )
-                }
-                IoOp::Task(_) => {
-                    // Task ops use PendingOp::Task, not PendingOp::Port — cannot reach here.
-                    unreachable!("Task should use PendingOp::Task variant")
-                }
-                IoOp::Resolve { .. } => {
-                    unreachable!("Resolve is portless; cannot reach PendingOp::Port")
-                }
-                IoOp::WatchNext => {
-                    unreachable!("WatchNext uses PendingOp::WatchNext, not PendingOp::Port")
-                }
-                IoOp::SigNext => {
-                    unreachable!("SigNext uses PendingOp::SigNext, not PendingOp::Port")
-                }
-                IoOp::PollFd { .. } => {
-                    unreachable!("PollFd is portless; cannot reach PendingOp::Port")
-                }
-                IoOp::ChanSelectPark(_) => {
-                    unreachable!(
-                        "ChanSelectPark uses PendingOp::ChanSelectPark, not PendingOp::Port"
-                    )
-                }
-                // Close completion: port already closed in submit. Return nil.
-                IoOp::Close => Value::NIL,
-                IoOp::RecvFrom { result, .. } => {
+                PortOp::RecvFrom { result, .. } => {
                     // `data` is addr_len(4 LE) + sockaddr_storage, optionally
                     // followed by the payload (thread-pool path; the io_uring
                     // path received it zero-copy straight into `:data`).

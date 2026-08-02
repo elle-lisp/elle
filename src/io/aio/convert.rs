@@ -37,7 +37,7 @@ pub(super) fn stdin_to_completion(
         Ok(data) => {
             // For Read/ReadLine, copy data into the pre-allocated buffer
             if let PendingOp::Port {
-                op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+                op: PortOp::ReadLine { ref buffer } | PortOp::Read { ref buffer, .. },
                 ref port,
                 ..
             } = &pending_op
@@ -54,7 +54,7 @@ pub(super) fn stdin_to_completion(
                     let final_len = if matches!(
                         &pending_op,
                         PendingOp::Port {
-                            op: IoOp::ReadLine { .. },
+                            op: PortOp::ReadLine { .. },
                             ..
                         }
                     ) {
@@ -72,7 +72,7 @@ pub(super) fn stdin_to_completion(
                     crate::io::request::truncate_buffer(buffer, final_len);
                 }
                 if let PendingOp::Port {
-                    op: IoOp::ReadLine { buffer } | IoOp::Read { buffer, .. },
+                    op: PortOp::ReadLine { buffer } | PortOp::Read { buffer, .. },
                     ..
                 } = &pending_op
                 {
@@ -80,7 +80,7 @@ pub(super) fn stdin_to_completion(
                     let result = if matches!(
                         &pending_op,
                         PendingOp::Port {
-                            op: IoOp::ReadLine { .. },
+                            op: PortOp::ReadLine { .. },
                             ..
                         }
                     ) || enc == Encoding::Text
@@ -137,9 +137,9 @@ pub(super) fn pool_to_completion(
     // `pc.data` straight through `process_raw_completion`.)
     if let PendingOp::Port {
         op:
-            IoOp::Read { ref buffer, .. }
-            | IoOp::ReadLine { ref buffer }
-            | IoOp::ReadExact { ref buffer, .. },
+            PortOp::Read { ref buffer, .. }
+            | PortOp::ReadLine { ref buffer }
+            | PortOp::ReadExact { ref buffer, .. },
         filled,
         ..
     } = &pending_op
