@@ -241,12 +241,17 @@ pub struct ParkedState {
     /// (`EmitEscape` / `SuspendEscape`) whose symmetric release lives on the
     /// resume path the fiber will never take.
     ///
-    /// `None` when the parked signal is terminal. A terminal signal keeps its
-    /// slot for `fiber/value`, and the free-time signal scan releases the park
-    /// retain that pins it. That scan does NOT release the emit escape retain a
-    /// `(halt v)` / `(error v)` from a fiber body also took, which is a leak —
-    /// see `ht.md`. Reporting the retain here regardless of the bits is not the
-    /// fix: it over-frees, and `elle test` faults on the second run.
+    /// `None` when the parked signal is TERMINAL. A terminal signal keeps its
+    /// slot for `fiber/value`, and the one retain pinning it — the park retain
+    /// (`incref_signal_region`) — is the free-time signal scan's to release.
+    ///
+    /// Reporting a terminal signal here as well is not a second discharge to be
+    /// had, it is an over-free: a terminal signal reaches the slot by paths that
+    /// take no escape retain at all (a native error's `set_error`, a bare
+    /// `Return`), and releasing one they never took frees a live region — the
+    /// `elle test` harness dies on its own first file. What a terminal EMIT owes
+    /// instead is settled where the imbalance starts, by not retaining
+    /// (`VM::handle_emit`).
     pub signal: Option<(SignalBits, Value)>,
 }
 

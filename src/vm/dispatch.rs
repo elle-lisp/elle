@@ -45,13 +45,27 @@ impl VM {
         // returns. Incref the value's region here so the matching
         // decref doesn't take RC to zero while the scheduler still
         // holds the value via `fiber.signal`.
-        let heap = unsafe { &mut *self.heap_ptr };
-        let value_region = crate::value::arena::region_of(heap, value);
-        crate::value::arena::incref_for_escape(
-            heap,
-            value_region,
-            crate::value::arena::EscapeSite::EmitEscape,
-        );
+        //
+        // A HALT is the one signal whose decref never fires, so it is the one
+        // signal that must not be retained. The dispatch loop leaves at this
+        // emit, and every position that drives a child routes a halt through
+        // `VM::finalize_if_halted`, which promotes the fiber to `:dead` — which
+        // `fiber/resume` refuses. So the instruction after this one is
+        // unreachable and there is no consumer for the retain: taking it strands
+        // the payload's region, one per halted fiber. What pins the payload
+        // meanwhile is the park retain the resume takes for a terminal result
+        // (`incref_signal_region`, child.rs step 6a), exactly as it does for the
+        // bare `Return` a `SIG_OK` body leaves through — which likewise reaches
+        // `fiber.signal` unretained.
+        if !signal_bits.intersects(SIG_HALT) {
+            let heap = unsafe { &mut *self.heap_ptr };
+            let value_region = crate::value::arena::region_of(heap, value);
+            crate::value::arena::incref_for_escape(
+                heap,
+                value_region,
+                crate::value::arena::EscapeSite::EmitEscape,
+            );
+        }
 
         self.fiber.signal = Some((signal_bits, value));
 

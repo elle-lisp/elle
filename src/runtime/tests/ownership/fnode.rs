@@ -727,8 +727,7 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
 
 /// The payload region's refcount at each stage of a fiber that leaves with a
 /// freshly-allocated result, for a bare `Return` (`SIG_OK`) and for an `Emit`
-/// (`SIG_HALT`) alike. Both leave the same way — the result is parked in
-/// `fiber.signal` for a later `fiber/value` — so both must keep the same ledger:
+/// (`SIG_HALT`) alike:
 ///
 /// | stage | rc |
 /// |---|---|
@@ -738,17 +737,18 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
 /// | the fiber freed, its free-time signal scan run | 1 |
 /// | the test released its own reference | 0 |
 ///
-/// The park is worth **exactly one** retain (`incref_signal_region`, child.rs
-/// step 6a), whose sole release is the free-time signal scan. An `Emit` also
-/// takes an `EmitEscape` retain covering the window to the compiler's
-/// `DecrefRegion` at the emit's decref point — but a `SIG_HALT` emit never
-/// reaches that decref (the dispatch loop leaves, and the halt promotion makes
-/// the fiber unresumable), so that retain must not be taken.
+/// Both arms leave the same way — the result is parked in `fiber.signal` for a
+/// later `fiber/value` — so both keep the same ledger, at every stage. The park
+/// is worth **exactly one** retain (`incref_signal_region`, child.rs step 6a),
+/// whose sole release is the free-time signal scan.
 ///
-/// This is the staged form of [`an_emitted_terminal_payload_region_is_reclaimed`]:
-/// the net-count pin says a region survives, this one says at which stage the
-/// ledger first diverges — the two arms read the same at every stage or the
-/// emit's accounting is wrong.
+/// An `Emit` also retains its payload as it escapes into the slot, covering the
+/// window to the compiler's `DecrefRegion` at the emit's decref point — but a
+/// `SIG_HALT` emit never reaches that decref (the dispatch loop leaves, and the
+/// halt promotion makes the fiber unresumable), so that retain has no consumer
+/// and must not be taken. Taking it is the leak
+/// [`an_emitted_terminal_payload_region_is_reclaimed`] measures; the arms
+/// diverge here first, at the park, one stage before the net count can show it.
 #[test]
 fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
     use crate::compiler::bytecode::{Bytecode, Instruction};
