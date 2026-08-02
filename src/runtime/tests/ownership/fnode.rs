@@ -725,19 +725,49 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
     unsafe { &*heap_ptr }.active_region_count() as i64 - baseline
 }
 
+/// The payload region's refcount at each stage of a fiber that leaves with a
+/// freshly-allocated result, for a bare `Return` (`SIG_OK`) and for an `Emit`
+/// (`SIG_HALT`) alike. Both leave the same way — the result is parked in
+/// `fiber.signal` for a later `fiber/value` — so both must keep the same ledger:
+///
+/// | stage | rc |
+/// |---|---|
+/// | allocated (the test's own reference) | 1 |
+/// | the fiber left, its result parked | 2 |
+/// | the halt promoted the fiber to `:dead` | 2 |
+/// | the fiber freed, its free-time signal scan run | 1 |
+/// | the test released its own reference | 0 |
+///
+/// The park is worth **exactly one** retain (`incref_signal_region`, child.rs
+/// step 6a), whose sole release is the free-time signal scan. An `Emit` also
+/// takes an `EmitEscape` retain covering the window to the compiler's
+/// `DecrefRegion` at the emit's decref point — but a `SIG_HALT` emit never
+/// reaches that decref (the dispatch loop leaves, and the halt promotion makes
+/// the fiber unresumable), so that retain must not be taken.
+///
+/// This is the staged form of [`an_emitted_terminal_payload_region_is_reclaimed`]:
+/// the net-count pin says a region survives, this one says at which stage the
+/// ledger first diverges — the two arms read the same at every stage or the
+/// emit's accounting is wrong.
 #[test]
-fn zz_diag() {
+fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
     use crate::compiler::bytecode::{Bytecode, Instruction};
 
     for bits in [crate::value::fiber::SIG_OK, crate::value::fiber::SIG_HALT] {
         let mut vm = crate::vm::VM::new();
         let heap_ptr = vm.heap_ptr;
-        let heap = unsafe { &mut *heap_ptr };
-        let (payload, rid) = alloc_in_fresh_region(heap, cons());
-        eprintln!(
-            "--- bits={bits:?} rid={rid:?} rc after alloc={}",
-            unsafe { &*heap_ptr }.region_rc(rid)
-        );
+        let (payload, rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        macro_rules! rc {
+            ($stage:expr, $want:expr) => {
+                assert_eq!(
+                    unsafe { &*heap_ptr }.region_rc(rid),
+                    $want,
+                    "{bits:?}: payload region rc {}",
+                    $stage
+                )
+            };
+        }
+        rc!("as allocated — the test's own reference", 1);
 
         let mut bc = Bytecode::new();
         let idx = bc.add_constant(payload);
@@ -748,38 +778,27 @@ fn zz_diag() {
             bc.emit_u16(bits.raw() as u16);
         }
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
-        eprintln!(
-            "  rc after child_fiber={}",
-            unsafe { &*heap_ptr }.region_rc(rid)
-        );
+        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
+        rc!("after the fiber is built — the body has not run", 1);
 
         let (result_bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
-        eprintln!(
-            "  rc after resume={} result_bits={result_bits:?} suspended={:?} status={:?}",
-            unsafe { &*heap_ptr }.region_rc(rid),
-            handle.with(|f| f.suspended.as_ref().map(|s| s.len())),
-            handle.with(|f| f.status)
-        );
-        vm.finalize_if_halted(&handle, result_bits);
-        eprintln!(
-            "  rc after finalize={} suspended={:?} status={:?} signal={:?}",
-            unsafe { &*heap_ptr }.region_rc(rid),
-            handle.with(|f| f.suspended.as_ref().map(|s| s.len())),
-            handle.with(|f| f.status),
-            handle.with(|f| f.signal.map(|(b, _)| b))
+        assert_eq!(result_bits, bits, "the body leaves with exactly its signal");
+        rc!(
+            "after the fiber leaves — one park retain pins the result",
+            2
         );
 
+        vm.finalize_if_halted(&handle, result_bits);
+        rc!("after the halt promotion — the result stays pinned", 2);
+
         release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
-        eprintln!(
-            "  rc after release_fiber_value={}",
-            unsafe { &*heap_ptr }.region_rc(rid)
-        );
         drop(handle);
-        unsafe { &mut *heap_ptr }.decref_region_if_present(rid);
-        eprintln!(
-            "  rc after final decref={}",
-            unsafe { &*heap_ptr }.region_rc(rid)
+        rc!(
+            "after the fiber frees — its signal scan released the park",
+            1
         );
+
+        unsafe { &mut *heap_ptr }.decref_region_if_present(rid);
+        rc!("after the test's own release — nothing holds it", 0);
     }
 }
