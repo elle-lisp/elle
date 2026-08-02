@@ -25,6 +25,12 @@ To query the current epoch at runtime:
 (elle/epoch)   # returns the current epoch number
 ```
 
+Epochs version the syntax. The peer declaration `(unicode! N)` versions the
+string semantics: it selects the Unicode segmentation generation the program
+runs under. Where `(elle/epoch N)` is consumed and rewrites the tree,
+`(unicode! N)` is checked by the analyzer and locks the table generation.
+See [`compile-time.md`](compile-time.md) and [`strings.md`](strings.md).
+
 ## What happens at compile time
 
 The epoch migration pass runs after parsing and before macro expansion:

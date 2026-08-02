@@ -6,7 +6,6 @@
 //! repeating the 12-way type match.
 use crate::primitives::ctx::NativeCtx;
 use crate::value::{sorted_struct_contains, TableKey, Value};
-use unicode_segmentation::UnicodeSegmentation;
 
 use super::sets::freeze_value;
 
@@ -68,6 +67,7 @@ pub fn coll_empty(val: &Value, ctx: &mut NativeCtx) -> Result<bool, Value> {
 
 /// Element/key/grapheme/byte count.
 pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
+    let gen = ctx.unicode_generation();
     if val.is_nil() || val.is_empty_list() {
         return Ok(0);
     }
@@ -83,13 +83,13 @@ pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
     if let Some(arr) = val.as_array_mut() {
         return Ok(arr.borrow().len());
     }
-    if let Some(r) = val.with_string(|s| s.graphemes(true).count()) {
+    if let Some(r) = val.with_string(|s| crate::segment::grapheme_count(s, gen)) {
         return Ok(r);
     }
     if let Some(buf_ref) = val.as_string_mut() {
         let borrowed = buf_ref.borrow();
         match std::str::from_utf8(&borrowed) {
-            Ok(s) => return Ok(s.graphemes(true).count()),
+            Ok(s) => return Ok(crate::segment::grapheme_count(s, gen)),
             Err(e) => {
                 return Err(ctx.error(
                     "encoding-error",
@@ -122,7 +122,7 @@ pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
             .symbols()
             .and_then(|s| s.name(crate::value::SymbolId(sid)).map(|n| n.to_string()));
         if let Some(name) = name {
-            return Ok(name.graphemes(true).count());
+            return Ok(crate::segment::grapheme_count(&name, gen));
         }
         return Err(ctx.error(
             "internal-error",
@@ -130,7 +130,7 @@ pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
         ));
     }
     if let Some(name) = val.as_keyword_name() {
-        return Ok(name.graphemes(true).count());
+        return Ok(crate::segment::grapheme_count(&name, gen));
     }
     if let Some(syntax) = val.as_syntax() {
         use crate::syntax::SyntaxKind;
@@ -240,16 +240,24 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
     }
     // String — grapheme clusters
     if val.is_string() {
+        let gen = ctx.unicode_generation();
         return val
-            .with_string(|s| Ok(s.graphemes(true).map(|g| ctx.string(g)).collect()))
+            .with_string(|s| {
+                Ok(crate::segment::graphemes(s, gen)
+                    .map(|g| ctx.string(g))
+                    .collect())
+            })
             .unwrap_or_else(|| Ok(vec![]));
     }
     // @string — grapheme clusters
     if val.is_string_mut() {
+        let gen = ctx.unicode_generation();
         if let Some(data) = val.as_string_mut() {
             let bytes = data.borrow();
             if let Ok(s) = std::str::from_utf8(&bytes) {
-                return Ok(s.graphemes(true).map(|g| ctx.string(g)).collect());
+                return Ok(crate::segment::graphemes(s, gen)
+                    .map(|g| ctx.string(g))
+                    .collect());
             }
         }
         return Ok(vec![]);

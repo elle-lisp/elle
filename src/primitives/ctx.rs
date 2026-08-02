@@ -209,6 +209,12 @@ impl<'h> NativeCtx<'h> {
         // `&mut VM` here and a `&mut FiberHeap` from `self.alloc` never overlap.
         unsafe { &mut *self.vm }
     }
+
+    /// The VM's Unicode segmentation generation, for grapheme operations.
+    #[inline]
+    pub fn unicode_generation(&self) -> crate::segment::Generation {
+        self.vm().unicode_generation()
+    }
 }
 
 /// Generate the ergonomic `ctx.*` constructors (docs/impl/region/ctx.md

@@ -46,6 +46,8 @@ pub(super) fn process_raw_completion(
     // The requesting instance's heap; completion values are born on it
     // (`crate::io::completion_heap_ptr`).
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    // The owning VM's Unicode generation, forwarded to the port arm.
+    gen: crate::segment::Generation,
 ) -> Completion {
     // Release the buffer back to the pool (if present — reads don't use BufferPool)
     if let Some(bh) = buf_handle {
@@ -355,7 +357,7 @@ pub(super) fn process_raw_completion(
             Completion::ok(id, ctx.array(ips))
         }
         PendingOp::Port { .. } => {
-            complete_port_op(id, result_code, data, pending, fd_states, origin_heap)
+            complete_port_op(id, result_code, data, pending, fd_states, origin_heap, gen)
         }
     }
 }

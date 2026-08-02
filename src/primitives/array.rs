@@ -70,7 +70,7 @@ pub(crate) fn prim_pop(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    match seq_pop(&args[0], ctx) {
+    match seq_pop(&args[0], ctx.unicode_generation(), ctx) {
         Ok(v) => (SIG_OK, v),
         Err(e) => (SIG_ERROR, e),
     }

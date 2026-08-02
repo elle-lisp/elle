@@ -97,6 +97,8 @@ bytecode. Error messages include file:line:col information.
 - **`rewrite`** — Source-to-source token-level rewriting engine
 - **`formatter`** — Code formatting for Elle source
 - **`epoch`** — Epoch-based migration system for breaking changes
+- **`segment`** — Unicode grapheme segmentation seam; vendored table
+  generations, per-VM selection
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives.
   See [`docs/plugins.md`](docs/plugins.md) for the full list.
 - **`path`** — UTF-8 path operations

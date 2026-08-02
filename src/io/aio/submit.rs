@@ -250,6 +250,7 @@ impl AsyncBackend {
         // when a Read request can't be fully served — the completion handler
         // must prepend those bytes to the fd data.
         let port_encoding = port.encoding();
+        let gen = inner.unicode_generation;
         let mut read_buffered: usize = 0;
         {
             let state = inner
@@ -338,7 +339,9 @@ impl AsyncBackend {
                                 None
                             }
                         }
-                        Encoding::Text => crate::io::nth_grapheme_byte_end(&state.buffer, *count),
+                        Encoding::Text => {
+                            crate::io::nth_grapheme_byte_end(&state.buffer, *count, gen)
+                        }
                     };
                     if let Some(take_bytes) = early {
                         let chunk: Vec<u8> = state.buffer.drain(..take_bytes).collect();
@@ -452,6 +455,7 @@ impl AsyncBackend {
                                         fd,
                                         size: *count,
                                         graphemes: true,
+                                        gen,
                                         timeout: request.timeout,
                                     }
                                 } else {
@@ -459,6 +463,7 @@ impl AsyncBackend {
                                         fd,
                                         size: *count - read_buffered,
                                         graphemes: false,
+                                        gen,
                                         timeout: request.timeout,
                                     }
                                 }

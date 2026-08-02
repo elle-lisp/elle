@@ -10,10 +10,11 @@ pub(super) fn cook_raw(
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    gen: crate::segment::Generation,
 ) -> Option<Completion> {
     match rc {
         RawCompletion::Pool(pc) => {
-            pool_to_completion(pc, pending, fd_states, buffer_pool, origin_heap)
+            pool_to_completion(pc, pending, fd_states, buffer_pool, origin_heap, gen)
         }
         RawCompletion::Stdin(sc) => stdin_to_completion(sc, pending, buffer_pool, origin_heap),
     }
@@ -113,6 +114,7 @@ pub(super) fn pool_to_completion(
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(pc.id);
     let mut pending_op = pending.remove(&id)?;
@@ -167,5 +169,6 @@ pub(super) fn pool_to_completion(
         buffer_pool,
         bh,
         origin_heap,
+        gen,
     ))
 }

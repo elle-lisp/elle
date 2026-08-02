@@ -11,6 +11,9 @@ pub(super) fn complete_port_op(
     // The requesting instance's heap; result values are born on it
     // (`crate::io::completion_heap_ptr`).
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    // The owning VM's Unicode generation; text ReadExact splits the byte
+    // stream at its cluster boundaries and stashes the remainder.
+    gen: crate::segment::Generation,
 ) -> Completion {
     match pending {
         PendingOp::Port {
@@ -317,7 +320,7 @@ pub(super) fn complete_port_op(
                         let enough = match encoding {
                             Encoding::Text => {
                                 let bytes = buffer.as_bytes().unwrap_or(&[]);
-                                crate::io::grapheme_count_in_valid_prefix(bytes) >= *count
+                                crate::io::grapheme_count_in_valid_prefix(bytes, gen) >= *count
                             }
                             Encoding::Binary => total >= *count,
                         };
@@ -338,7 +341,7 @@ pub(super) fn complete_port_op(
                         if let PortOp::ReadExact { count, .. } = op {
                             let (end, leftover) = {
                                 let bytes = buffer.as_bytes().unwrap_or(&[]);
-                                let end = crate::io::nth_grapheme_byte_end(bytes, *count)
+                                let end = crate::io::nth_grapheme_byte_end(bytes, *count, gen)
                                     .unwrap_or(bytes.len());
                                 (end, bytes[end..].to_vec())
                             };

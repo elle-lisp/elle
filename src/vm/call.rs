@@ -264,7 +264,7 @@ impl VM {
             let mut ctx = crate::primitives::ctx::Alloc::with_region(alloc_region, unsafe {
                 &mut *self.heap_ptr
             });
-            call_collection(func, args, &mut ctx)
+            call_collection(func, args, self.unicode_generation, &mut ctx)
         };
         if let Some(Ok(value)) = result.as_ref() {
             let heap = unsafe { &mut *self.heap_ptr };

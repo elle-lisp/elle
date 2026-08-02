@@ -724,3 +724,62 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
     }
     unsafe { &*heap_ptr }.active_region_count() as i64 - baseline
 }
+
+#[test]
+fn zz_diag() {
+    use crate::compiler::bytecode::{Bytecode, Instruction};
+
+    for bits in [crate::value::fiber::SIG_OK, crate::value::fiber::SIG_HALT] {
+        let mut vm = crate::vm::VM::new();
+        let heap_ptr = vm.heap_ptr;
+        let heap = unsafe { &mut *heap_ptr };
+        let (payload, rid) = alloc_in_fresh_region(heap, cons());
+        eprintln!(
+            "--- bits={bits:?} rid={rid:?} rc after alloc={}",
+            unsafe { &*heap_ptr }.region_rc(rid)
+        );
+
+        let mut bc = Bytecode::new();
+        let idx = bc.add_constant(payload);
+        bc.emit(Instruction::LoadConst);
+        bc.emit_u16(idx);
+        if !bits.is_empty() {
+            bc.emit(Instruction::Emit);
+            bc.emit_u16(bits.raw() as u16);
+        }
+        bc.emit(Instruction::Return);
+        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+        eprintln!(
+            "  rc after child_fiber={}",
+            unsafe { &*heap_ptr }.region_rc(rid)
+        );
+
+        let (result_bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
+        eprintln!(
+            "  rc after resume={} result_bits={result_bits:?} suspended={:?} status={:?}",
+            unsafe { &*heap_ptr }.region_rc(rid),
+            handle.with(|f| f.suspended.as_ref().map(|s| s.len())),
+            handle.with(|f| f.status)
+        );
+        vm.finalize_if_halted(&handle, result_bits);
+        eprintln!(
+            "  rc after finalize={} suspended={:?} status={:?} signal={:?}",
+            unsafe { &*heap_ptr }.region_rc(rid),
+            handle.with(|f| f.suspended.as_ref().map(|s| s.len())),
+            handle.with(|f| f.status),
+            handle.with(|f| f.signal.map(|(b, _)| b))
+        );
+
+        release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+        eprintln!(
+            "  rc after release_fiber_value={}",
+            unsafe { &*heap_ptr }.region_rc(rid)
+        );
+        drop(handle);
+        unsafe { &mut *heap_ptr }.decref_region_if_present(rid);
+        eprintln!(
+            "  rc after final decref={}",
+            unsafe { &*heap_ptr }.region_rc(rid)
+        );
+    }
+}

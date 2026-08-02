@@ -14,7 +14,6 @@
 //! external callers naming `crate::primitives::seq::seq_*` resolve unchanged.
 use crate::primitives::ctx::NativeCtx;
 use crate::value::Value;
-use unicode_segmentation::UnicodeSegmentation;
 
 mod helpers;
 mod mutate;

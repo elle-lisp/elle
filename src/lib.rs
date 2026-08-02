@@ -111,6 +111,7 @@ pub mod reader;
 pub mod repl;
 pub mod rewrite;
 pub mod runtime;
+pub mod segment;
 pub mod signals;
 pub mod symbol;
 pub mod symbols;

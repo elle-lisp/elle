@@ -99,9 +99,10 @@ pub(crate) fn run_collection_call(
     what: &str,
 ) -> (i64, i64, i64) {
     let call_result = {
+        let gen = unsafe { &*caller.data().vm }.unicode_generation();
         let heap = unsafe { &mut *caller.data().heap_ptr() };
         let mut ctx = crate::primitives::ctx::Alloc::new(heap);
-        crate::vm::call::call_collection(&func_val, args, &mut ctx)
+        crate::vm::call::call_collection(&func_val, args, gen, &mut ctx)
     };
     let (value, signal) = match call_result {
         Some(Ok(value)) => (value, crate::value::SIG_OK.raw() as i64),

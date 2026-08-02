@@ -134,6 +134,9 @@ fn sf_numeric_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<H
 fn sf_immutable_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
     a.analyze_immutable_assert(items, span)
 }
+fn sf_unicode(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    a.analyze_unicode(items, span)
+}
 fn sf_quote(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
     if items.len() != 2 {
         return Err(format!("{}: quote requires 1 argument", span));
@@ -398,6 +401,15 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         params: &["body..."],
         arity: Arity::AtLeast(1),
         example: "(immutable! [1 2 3])",
+        ..SpecialForm::DEFAULT
+    },
+    SpecialForm {
+        name: "unicode!",
+        handler: Some(sf_unicode),
+        doc: "Declare the Unicode generation this source assumes; checked at compile time against the program's locked generation, evaluates to nil. With no arguments, fold to the selected version as [major minor patch].",
+        params: &["major", "minor", "patch"],
+        arity: Arity::Range(0, 3),
+        example: "(unicode! 17)",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {

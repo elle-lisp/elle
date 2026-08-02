@@ -179,6 +179,26 @@ impl Config {
                 i += 1;
                 continue;
             }
+            if let Some(rest) = arg.strip_prefix("--unicode=") {
+                let components: Result<Vec<i64>, _> =
+                    rest.split('.').map(|c| c.parse::<i64>()).collect();
+                let request = match components {
+                    Ok(req) if !req.is_empty() && req.len() <= 3 && req.iter().all(|c| *c >= 0) => {
+                        req
+                    }
+                    _ => {
+                        return Err(format!(
+                            "--unicode: expected MAJ[.MIN[.PATCH]] (for example 16.0), got '{}'",
+                            rest
+                        ))
+                    }
+                };
+                let gen = crate::segment::Generation::from_request(&request)
+                    .map_err(|e| format!("--unicode: {}", e))?;
+                config.unicode = Some(gen);
+                i += 1;
+                continue;
+            }
             if let Some(rest) = arg.strip_prefix("--region-page-size=") {
                 let n: usize = rest
                     .parse()

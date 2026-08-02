@@ -30,6 +30,10 @@ The init sequence:
    symbol table, compile context, and heap; registers primitives (wiring
    the VM at its own symbol table and compile context); and loads the
    stdlib. (`Runtime::without_stdlib()` skips the stdlib.)
+   `Runtime::with_unicode(gen)` selects the Unicode segmentation
+   generation for the VM's whole life; `Runtime::new()` uses the newest
+   vendored generation. See the "Unicode version" section in
+   [`strings.md`](strings.md).
 2. Register custom primitives via `PrimitiveDef`, then
    `rt.compile_and_heap()` → `CompileCtx::register_repl_binding` so the
    compiler sees them.

@@ -8,6 +8,7 @@ use super::*;
 pub(crate) fn call_collection(
     func: &Value,
     args: &[Value],
+    gen: crate::segment::Generation,
     ctx: &mut crate::primitives::ctx::Alloc<'_>,
 ) -> Option<Result<Value, (&'static str, String)>> {
     // ── Structs (immutable and mutable) ──────────────────────────────
@@ -132,14 +133,13 @@ pub(crate) fn call_collection(
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
         return func
             .with_string(|s| {
-                use unicode_segmentation::UnicodeSegmentation;
                 if index >= 0 {
-                    match s.graphemes(true).nth(index as usize) {
+                    match crate::segment::graphemes(s, gen).nth(index as usize) {
                         Some(g) => Some(Ok(ctx.string(g))),
                         None => Some(Ok(default)),
                     }
                 } else {
-                    let graphemes: Vec<&str> = s.graphemes(true).collect();
+                    let graphemes: Vec<&str> = crate::segment::graphemes(s, gen).collect();
                     match resolve_index(index, graphemes.len()) {
                         Some(i) => Some(Ok(ctx.string(graphemes[i]))),
                         None => Some(Ok(default)),
@@ -178,14 +178,13 @@ pub(crate) fn call_collection(
                 )))
             }
         };
-        use unicode_segmentation::UnicodeSegmentation;
         if index >= 0 {
-            return match s.graphemes(true).nth(index as usize) {
+            return match crate::segment::graphemes(s, gen).nth(index as usize) {
                 Some(g) => Some(Ok(ctx.string(g))),
                 None => Some(Ok(default)),
             };
         } else {
-            let graphemes: Vec<&str> = s.graphemes(true).collect();
+            let graphemes: Vec<&str> = crate::segment::graphemes(s, gen).collect();
             return match resolve_index(index, graphemes.len()) {
                 Some(i) => Some(Ok(ctx.string(graphemes[i]))),
                 None => Some(Ok(default)),

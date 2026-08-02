@@ -196,6 +196,7 @@ fn compile_file_to_lir_inner(
     analyzer.set_compile_ctx(cctx);
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
+    analyzer.set_unicode_generation(cctx.unicode_generation());
     analyzer.bind_primitives(&meta);
     if !core_env.is_empty() {
         analyzer.bind_compile_time_env(&core_env, true);

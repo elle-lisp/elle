@@ -33,6 +33,19 @@ impl VM {
         Self::on_heap(heap_ptr)
     }
 
+    /// The Unicode segmentation generation this VM was constructed with.
+    pub fn unicode_generation(&self) -> crate::segment::Generation {
+        self.unicode_generation
+    }
+
+    /// Select the generation. Construction-time only (RuntimeCore,
+    /// worker spawn, embedding): no string may yet have been segmented
+    /// on this VM, or cluster-derived state (text-port leftovers,
+    /// indices) would silently change meaning.
+    pub(crate) fn set_unicode_generation(&mut self, gen: crate::segment::Generation) {
+        self.unicode_generation = gen;
+    }
+
     /// Build a VM pointing at an externally-owned heap (`RuntimeCore`'s
     /// `Box<FiberHeap>`), the coexistence-correct constructor: the program VM and
     /// its instance's macro-expansion VM share this one heap, so core.lisp and
@@ -72,6 +85,7 @@ impl VM {
 
         VM {
             runtime_config: rc,
+            unicode_generation: crate::config::get().unicode_generation(),
             heap_ptr,
             compile_ctx_ptr: std::ptr::null_mut(),
             symbols_ptr: std::ptr::null_mut(),

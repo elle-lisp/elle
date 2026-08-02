@@ -29,6 +29,9 @@ pub(super) enum PoolOp {
         fd: RawFd,
         size: usize,
         graphemes: bool,
+        /// The generation that segments cluster-counted reads; captured at
+        /// request build on the VM thread, applied on the worker thread.
+        gen: crate::segment::Generation,
         timeout: Option<Duration>,
     },
     /// Write every byte of `data`, looping over short writes. `timeout`

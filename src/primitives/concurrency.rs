@@ -115,6 +115,9 @@ fn spawn_closure_impl(
     // cell, so a `chan_trace` on the joiner's wake path gates on that instance.
     let done_wake = WakeList::new(ctx.heap_mut().trace_cell());
     let worker_wake = Arc::clone(&done_wake);
+    // The worker inherits the spawning VM's Unicode generation: a program is
+    // one set of string semantics, whichever VM computes a length.
+    let unicode_generation = ctx.unicode_generation();
 
     // Size the worker's stack to the main thread's (see `worker_stack_size`):
     // the worker compiles arbitrary Elle, and the frontend recurses deep — the
@@ -142,6 +145,7 @@ fn spawn_closure_impl(
             // wait forever for a wake that never comes.
             let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut vm = VM::new();
+                vm.set_unicode_generation(unicode_generation);
                 let mut symbols = SymbolTable::new();
                 // Register primitives so docs are available in the spawned thread.
                 // Primitives are in the bytecode constant pool — no globals remapping needed.
@@ -160,6 +164,7 @@ fn spawn_closure_impl(
                 // resolves macros and exports. Boxed for a stable address; the VM
                 // points at it.
                 let mut compile = Box::new(crate::pipeline::CompileCtx::new());
+                compile.set_unicode_generation(unicode_generation);
                 vm.set_compile_ctx(&mut *compile as *mut crate::pipeline::CompileCtx);
 
                 // Heavy worker (`sys/spawn`): materialize the standard library so

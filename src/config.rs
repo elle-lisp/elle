@@ -248,6 +248,13 @@ pub struct Config {
     /// Maximum bytes to cache in the per-thread page pool
     /// (CLI: --page-pool-max). Default: 4MB.
     pub page_pool_max: usize,
+
+    /// The Unicode segmentation generation new VMs default to, resolved
+    /// once at startup from `--unicode=` and the main file's `(unicode! …)`
+    /// declaration. `None` = the newest vendored generation. Embedding
+    /// hosts override per-instance via `Runtime::with_unicode`; worker VMs
+    /// inherit their parent's generation explicitly.
+    pub unicode: Option<crate::segment::Generation>,
 }
 
 impl Default for Config {
@@ -277,6 +284,7 @@ impl Default for Config {
             trace_keywords: Vec::new(),
             region_page_size: 4096,
             page_pool_max: 4 * 1024 * 1024,
+            unicode: None,
         }
     }
 }
@@ -284,6 +292,11 @@ impl Default for Config {
 mod parse;
 
 impl Config {
+    /// The Unicode segmentation generation new VMs default to.
+    pub fn unicode_generation(&self) -> crate::segment::Generation {
+        self.unicode.unwrap_or(crate::segment::Generation::NEWEST)
+    }
+
     /// Check if a trace keyword is set.
     pub fn has_trace(&self, keyword: &str) -> bool {
         self.trace_keywords.iter().any(|k| k == keyword)

@@ -151,7 +151,8 @@ fn mutable_array_push_keeps_region_alive() {
 
     let popped = {
         let mut ctx = crate::primitives::ctx::Alloc::with_region(rid_b, unsafe { &mut *heap_ptr });
-        crate::primitives::seq::seq_pop(&arr, &mut ctx).expect("pop of a non-empty @array")
+        crate::primitives::seq::seq_pop(&arr, crate::segment::Generation::NEWEST, &mut ctx)
+            .expect("pop of a non-empty @array")
     };
     // `pop` MOVES the last element out to the caller — it does NOT destroy it
     // (unlike `del`/`remove`, which discard the removed value). The @array's
@@ -225,7 +226,8 @@ fn pop_extracts_moved_out_element_from_owned_subtree() {
     // Pop moves val OUT — the extract must move it back to a caller-owned Counted(1).
     let popped = {
         let mut ctx = crate::primitives::ctx::Alloc::with_region(rid_b, unsafe { &mut *heap_ptr });
-        crate::primitives::seq::seq_pop(&arr, &mut ctx).expect("pop of a non-empty @array")
+        crate::primitives::seq::seq_pop(&arr, crate::segment::Generation::NEWEST, &mut ctx)
+            .expect("pop of a non-empty @array")
     };
     let heap = unsafe { &mut *heap_ptr };
     assert!(

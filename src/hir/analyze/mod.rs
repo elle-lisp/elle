@@ -260,6 +260,11 @@ pub struct Analyzer<'a> {
     /// When true, bindings without `@` prefix are immutable.
     /// Gated on epoch >= 8; epoch <= 7 files are mutable-by-default.
     immutable_by_default: bool,
+    /// The Unicode generation this program is locked to. `(unicode! …)`
+    /// declarations are checked against it and the 0-arg query folds to
+    /// its version. Wired from the CompileCtx by the pipeline; analyzers
+    /// with no VM behind them (LSP, lint) keep the process default.
+    unicode_generation: crate::segment::Generation,
     /// User signals declared in THIS compilation (`(signal :kw)`). Used to
     /// reject duplicate declarations within one compile while allowing the same
     /// signal to be re-declared by a SEPARATE compile — the process-global signal
@@ -333,6 +338,7 @@ impl<'a> Analyzer<'a> {
             last_signal_projection: None,
             current_immutability_asserts: HashSet::new(),
             immutable_by_default: true,
+            unicode_generation: crate::config::get().unicode_generation(),
             signals_declared: HashSet::new(),
             import_ctx: None,
         };
@@ -422,6 +428,11 @@ impl<'a> Analyzer<'a> {
     /// Epoch >= 8 enables this; epoch <= 7 disables it.
     pub fn set_immutable_by_default(&mut self, v: bool) {
         self.immutable_by_default = v;
+    }
+
+    /// Set the Unicode generation `(unicode! …)` declarations check against.
+    pub fn set_unicode_generation(&mut self, gen: crate::segment::Generation) {
+        self.unicode_generation = gen;
     }
 
     /// Levenshtein edit distance between two strings.

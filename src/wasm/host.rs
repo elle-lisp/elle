@@ -362,7 +362,9 @@ impl ElleHost {
     ) -> (crate::value::fiber::SignalBits, Value) {
         let backend = match &self.io_backend {
             Some(_) => self.io_backend.as_ref().unwrap(),
-            None => match crate::io::aio::AsyncBackend::new() {
+            None => match crate::io::aio::AsyncBackend::new_with_unicode(
+                unsafe { &*self.vm }.unicode_generation(),
+            ) {
                 Ok(be) => {
                     self.io_backend = Some(AnyBackend(Box::new(be)));
                     self.io_backend.as_ref().unwrap()

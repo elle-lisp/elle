@@ -140,6 +140,7 @@ fn compile_syntaxes_frontend_xform_inner(
     analyzer.set_compile_ctx(cctx);
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
+    analyzer.set_unicode_generation(cctx.unicode_generation());
     analyzer.bind_primitives(&meta);
     if !expander.core_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.core_env, true);

@@ -83,6 +83,7 @@ pub(super) fn print_help() {
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
     println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
+    println!("  --unicode=MAJ[.MIN]   Unicode generation for string semantics (default: newest vendored)");
     println!("  --json                JSON output on stderr\n");
     println!("Syntax:");
     println!("  .lisp             S-expression syntax (default)");

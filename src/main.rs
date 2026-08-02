@@ -435,11 +435,11 @@ fn main() {
         return;
     }
 
-    let (config, remaining_args) = elle::config::Config::parse(&args[1..]).unwrap_or_else(|e| {
-        eprintln!("elle: {}", e);
-        std::process::exit(1);
-    });
-    elle::config::init(config);
+    let (mut config, remaining_args) =
+        elle::config::Config::parse(&args[1..]).unwrap_or_else(|e| {
+            eprintln!("elle: {}", e);
+            std::process::exit(1);
+        });
 
     // Trap POSIX signals at startup, before any thread spawn. This
     // installs sigaction handlers for TERM/INT/QUIT/HUP (clean exit),
@@ -455,46 +455,89 @@ fn main() {
     // are belt-and-suspenders but are not the primary defence.
     elle::io::init_process_signals();
 
-    // One runtime drives every entry path (file / eval / stdin / REPL); its
-    // Drop (or the explicit `teardown` below) runs the principled, RC-driven
-    // teardown sweep (docs/impl/region/rules.md § "Teardown — every region frees").
-    let mut rt = if elle::config::get().no_stdlib {
-        Runtime::without_stdlib()
-    } else {
-        Runtime::new()
-    };
-
     let mut had_errors = false;
     let mut files: Vec<String> = Vec::new();
     let mut eval_exprs: Vec<String> = Vec::new();
     let mut read_stdin = false;
+    let mut source_arg = String::new();
+    let mut user_args: Vec<String> = Vec::new();
 
     // remaining_args from Config::parse: file args, eval expressions (--eval:...), and user args after --.
-    // Separate eval expressions from file args.
+    // Separate eval expressions from file args. This runs BEFORE Runtime
+    // construction so the main source can select the Unicode generation.
     for (i, arg) in remaining_args.iter().enumerate() {
         if let Some(expr) = arg.strip_prefix("--eval:") {
             eval_exprs.push(expr.to_string());
         } else if arg == "-" && files.is_empty() && eval_exprs.is_empty() {
             read_stdin = true;
-            rt.vm().source_arg = "-".to_string();
-            rt.vm().user_args = remaining_args[i + 1..].to_vec();
+            source_arg = "-".to_string();
+            user_args = remaining_args[i + 1..].to_vec();
             break;
         } else if arg == "--" {
-            rt.vm().user_args = remaining_args[i + 1..].to_vec();
+            user_args = remaining_args[i + 1..].to_vec();
             break;
         } else if files.is_empty() && eval_exprs.is_empty() {
-            rt.vm().source_arg = arg.clone();
+            source_arg = arg.clone();
             files.push(arg.clone());
             // Everything after the first file arg goes to user_args
-            rt.vm().user_args = remaining_args[i + 1..].to_vec();
+            user_args = remaining_args[i + 1..].to_vec();
             break;
         }
     }
-    if eval_exprs.is_empty() && files.is_empty() && !read_stdin {
-        // REPL mode: vm.source_arg stays "" and vm.user_args stays empty.
-    } else if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
-        rt.vm().source_arg = "<eval>".to_string();
+    if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
+        source_arg = "<eval>".to_string();
     }
+
+    // Resolve the Unicode generation before any VM exists: the main file
+    // (or the -e expressions) may declare it, and the CLI flag may select
+    // it; the surfaces must agree. Stdin and the REPL select via the flag
+    // only. A source that fails to parse here is ignored — the compiler
+    // reports the parse error properly later. Literate .md sources are
+    // not scanned (their code lives inside markdown).
+    let scanned_source = if let Some(f) = files.first() {
+        if f.ends_with(".md") {
+            None
+        } else {
+            std::fs::read_to_string(f).ok().map(|src| (src, f.clone()))
+        }
+    } else if !eval_exprs.is_empty() {
+        Some((eval_exprs.join("\n"), "<eval>".to_string()))
+    } else {
+        None
+    };
+    if let Some((src, name)) = scanned_source {
+        if let Ok(Some(request)) = elle::segment::scan_unicode_request(&src, &name) {
+            let declared = elle::segment::Generation::from_request(&request).unwrap_or_else(|e| {
+                eprintln!("elle: {}: {}", name, e);
+                std::process::exit(1);
+            });
+            match config.unicode {
+                Some(flagged) if flagged != declared => {
+                    eprintln!(
+                        "elle: --unicode={} conflicts with the {} declaration in {}",
+                        flagged.version_string(),
+                        declared.version_string(),
+                        name
+                    );
+                    std::process::exit(1);
+                }
+                _ => config.unicode = Some(declared),
+            }
+        }
+    }
+    elle::config::init(config);
+
+    // One runtime drives every entry path (file / eval / stdin / REPL); its
+    // Drop (or the explicit `teardown` below) runs the principled, RC-driven
+    // teardown sweep (docs/impl/region/rules.md § "Teardown — every region frees").
+    // The VM reads the resolved Unicode generation from the global config.
+    let mut rt = if elle::config::get().no_stdlib {
+        Runtime::without_stdlib()
+    } else {
+        Runtime::new()
+    };
+    rt.vm().source_arg = source_arg;
+    rt.vm().user_args = user_args;
 
     if read_stdin {
         let (vm, symbols, cctx) = rt.parts();

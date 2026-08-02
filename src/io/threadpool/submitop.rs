@@ -40,6 +40,7 @@ impl CompletionHub {
                     fd,
                     size,
                     graphemes,
+                    gen,
                     timeout,
                 } => {
                     let bound = SocketTimeout::arm(fd, libc::SO_RCVTIMEO, timeout);
@@ -60,7 +61,7 @@ impl CompletionHub {
                     loop {
                         let want = if graphemes {
                             // Re-evaluate progress every iteration.
-                            let g = grapheme_count_in_valid_prefix(&buf[..total]);
+                            let g = grapheme_count_in_valid_prefix(&buf[..total], gen);
                             if g >= size {
                                 break (total as i32, buf[..total].to_vec());
                             }

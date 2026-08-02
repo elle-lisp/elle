@@ -97,10 +97,16 @@ pub extern "C" fn elle_jit_type_of(tag: u64, payload: u64) -> JitValue {
 }
 
 /// Polymorphic length — panics on unsupported types (intrinsic contract).
+/// The trailing `JitCtx` names the VM whose Unicode generation decides
+/// grapheme boundaries for the string arms.
 #[no_mangle]
-pub extern "C" fn elle_jit_length(tag: u64, payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_length(
+    tag: u64,
+    payload: u64,
+    jit_ctx: *mut crate::jit::JitCtx,
+) -> JitValue {
     let v = Value { tag, payload };
-    use unicode_segmentation::UnicodeSegmentation;
+    let gen = unsafe { &*(*jit_ctx).vm() }.unicode_generation();
     let len = if v.is_empty_list() || v.is_nil() {
         0
     } else if v.is_pair() {
@@ -121,14 +127,14 @@ pub extern "C" fn elle_jit_length(tag: u64, payload: u64) -> JitValue {
         b.len()
     } else if let Some(b) = v.as_bytes_mut() {
         b.borrow().len()
-    } else if let Some(r) = v.with_string(|s| s.graphemes(true).count()) {
+    } else if let Some(r) = v.with_string(|s| crate::segment::grapheme_count(s, gen)) {
         r
     } else if let Some(buf) = v.as_string_mut() {
         let b = buf.borrow();
-        std::str::from_utf8(&b)
-            .expect("%length: @string invalid UTF-8")
-            .graphemes(true)
-            .count()
+        crate::segment::grapheme_count(
+            std::str::from_utf8(&b).expect("%length: @string invalid UTF-8"),
+            gen,
+        )
     } else {
         panic!("%length: unsupported type {}", v.type_name())
     };

@@ -87,6 +87,20 @@ impl CompileCtx {
         self.vm.heap_ptr
     }
 
+    /// The Unicode generation this instance compiles under. Stored on the
+    /// macro VM (one source of truth per instance): macro-time string ops
+    /// and the analyzer's `(unicode! …)` check read the same value the
+    /// program VM runs with.
+    pub fn unicode_generation(&self) -> crate::segment::Generation {
+        self.vm.unicode_generation()
+    }
+
+    /// Select the generation. Construction-time only, set by the owning
+    /// `RuntimeCore` before any compile runs.
+    pub(crate) fn set_unicode_generation(&mut self, gen: crate::segment::Generation) {
+        self.vm.set_unicode_generation(gen);
+    }
+
     /// Shared compile-context construction over an already-built macro VM
     /// (standalone or instance-heap-sharing).
     fn on_vm(mut vm: VM) -> Self {

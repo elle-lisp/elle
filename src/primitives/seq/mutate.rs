@@ -82,8 +82,13 @@ pub fn seq_push(
     ))
 }
 
-/// Pop the last element from a mutable sequence.
-pub fn seq_pop(val: &Value, ctx: &mut crate::primitives::ctx::Alloc) -> Result<Value, Value> {
+/// Pop the last element from a mutable sequence. `gen` decides the
+/// grapheme boundaries of an @string's final cluster.
+pub fn seq_pop(
+    val: &Value,
+    gen: crate::segment::Generation,
+    ctx: &mut crate::primitives::ctx::Alloc,
+) -> Result<Value, Value> {
     if val.is_array_mut() {
         if val.array_mut_ref().unwrap().is_empty() {
             return Err(ctx.error("argument-error", "pop: empty @array"));
@@ -97,7 +102,10 @@ pub fn seq_pop(val: &Value, ctx: &mut crate::primitives::ctx::Alloc) -> Result<V
         }
         let s = std::str::from_utf8(&buf)
             .map_err(|_| ctx.error("encoding-error", "pop: @string contains invalid UTF-8"))?;
-        let cluster = s.graphemes(true).next_back().unwrap().to_string();
+        let cluster = crate::segment::graphemes(s, gen)
+            .next_back()
+            .unwrap()
+            .to_string();
         let new_len = buf.len() - cluster.len();
         buf.truncate(new_len);
         drop(buf);

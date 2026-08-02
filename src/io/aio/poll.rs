@@ -41,6 +41,7 @@ impl AsyncBackend {
         // value the harvest builds is born on it. Captured as a `Copy` pointer so
         // it survives the field destructure below.
         let origin_heap = inner.origin_heap;
+        let gen = inner.unicode_generation;
 
         // First drain anything already ready (ring CQEs + the hub).
         inner.drain_ready();
@@ -87,6 +88,7 @@ impl AsyncBackend {
                         fd_states,
                         completions,
                         origin_heap,
+                        gen,
                         hub.eventfd(),
                     )?;
                 }
@@ -106,7 +108,7 @@ impl AsyncBackend {
                         };
                         if let Some(rc) = waited {
                             if let Some(c) =
-                                cook_raw(rc, pending, fd_states, buffer_pool, origin_heap)
+                                cook_raw(rc, pending, fd_states, buffer_pool, origin_heap, gen)
                             {
                                 completions.push_back(c);
                             }

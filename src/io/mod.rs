@@ -65,8 +65,7 @@ pub(crate) fn os_error(context: &str) -> String {
 ///   bytes.  Mid-buffer invalid UTF-8 is conservatively treated the
 ///   same way (stop at the last valid prefix); in practice this never
 ///   fires for well-formed text.
-pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8]) -> usize {
-    use unicode_segmentation::UnicodeSegmentation;
+pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8], gen: crate::segment::Generation) -> usize {
     let valid = match std::str::from_utf8(buf) {
         Ok(s) => s,
         Err(e) => {
@@ -74,11 +73,14 @@ pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8]) -> usize {
             unsafe { std::str::from_utf8_unchecked(&buf[..upto]) }
         }
     };
-    valid.graphemes(true).count()
+    crate::segment::grapheme_count(valid, gen)
 }
 
-pub(crate) fn nth_grapheme_byte_end(buf: &[u8], n: usize) -> Option<usize> {
-    use unicode_segmentation::UnicodeSegmentation;
+pub(crate) fn nth_grapheme_byte_end(
+    buf: &[u8],
+    n: usize,
+    gen: crate::segment::Generation,
+) -> Option<usize> {
     if n == 0 {
         return Some(0);
     }
@@ -93,7 +95,7 @@ pub(crate) fn nth_grapheme_byte_end(buf: &[u8], n: usize) -> Option<usize> {
     };
     let mut pos = 0usize;
     let mut count = 0usize;
-    for g in valid.graphemes(true) {
+    for g in crate::segment::graphemes(valid, gen) {
         pos += g.len();
         count += 1;
         if count == n {

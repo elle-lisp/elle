@@ -226,7 +226,7 @@ pub(crate) fn handle_type_of(vm: &mut VM) {
 
 pub(crate) fn handle_length(vm: &mut VM) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    use unicode_segmentation::UnicodeSegmentation;
+    let gen = vm.unicode_generation;
     let len = if val.is_empty_list() || val.is_nil() {
         0
     } else if val.is_pair() {
@@ -247,14 +247,14 @@ pub(crate) fn handle_length(vm: &mut VM) {
         b.len()
     } else if let Some(b) = val.as_bytes_mut() {
         b.borrow().len()
-    } else if let Some(r) = val.with_string(|s| s.graphemes(true).count()) {
+    } else if let Some(r) = val.with_string(|s| crate::segment::grapheme_count(s, gen)) {
         r
     } else if let Some(buf) = val.as_string_mut() {
         let b = buf.borrow();
-        std::str::from_utf8(&b)
-            .expect("%length: @string invalid UTF-8")
-            .graphemes(true)
-            .count()
+        crate::segment::grapheme_count(
+            std::str::from_utf8(&b).expect("%length: @string invalid UTF-8"),
+            gen,
+        )
     } else {
         panic!("%length: unsupported type {}", val.type_name())
     };

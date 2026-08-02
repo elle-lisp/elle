@@ -76,8 +76,15 @@ pub struct RuntimeCore {
 impl RuntimeCore {
     /// Build a core: a primitives-registered VM + symbol table and a fresh
     /// `CompileCtx` (core.lisp + prelude). No stdlib, no thread-local contexts —
-    /// the caller (which knows its lifecycle) drives those.
+    /// the caller (which knows its lifecycle) drives those. Uses the
+    /// process-default Unicode generation.
     pub fn bare() -> Self {
+        Self::bare_with_unicode(crate::config::get().unicode_generation())
+    }
+
+    /// Build a core whose VMs (program and macro) segment strings under the
+    /// given Unicode generation for their whole lives.
+    pub fn bare_with_unicode(gen: crate::segment::Generation) -> Self {
         // This instance's heap, owned here and shared by the program VM and the
         // macro-expansion VM. Built first: both VMs point their `heap_ptr` at it,
         // so the instance is one region store and core.lisp/stdlib closures
@@ -86,6 +93,7 @@ impl RuntimeCore {
         let mut heap = Box::new(crate::value::fiberheap::FiberHeap::new());
         let heap_ptr: *mut crate::value::fiberheap::FiberHeap = &mut *heap;
         let mut vm = Box::new(VM::new_with_heap(heap_ptr));
+        vm.set_unicode_generation(gen);
         let mut symbols = Box::new(SymbolTable::new());
         let meta = register_primitives(&mut vm, &mut symbols);
         // Point the VM at this instance's symbol table (stable boxed address),
@@ -95,6 +103,7 @@ impl RuntimeCore {
         vm.set_symbols(&mut *symbols as *mut SymbolTable);
         // The macro VM shares this instance's heap (see `bare`'s heap comment).
         let mut compile = Box::new(CompileCtx::new_with_heap(heap_ptr));
+        compile.set_unicode_generation(gen);
         // The runtime `eval` instruction resolves macros/exports through this
         // instance's compile context; point the VM at it (stable boxed address).
         vm.set_compile_ctx(&mut *compile as *mut CompileCtx);
@@ -178,8 +187,19 @@ impl Runtime {
         Self::build(false)
     }
 
+    /// Build a stdlib-loaded runtime whose VM segments strings under the
+    /// given Unicode generation for its whole life. `Runtime::new()` uses
+    /// the newest vendored generation (or the process `--unicode=` choice).
+    pub fn with_unicode(gen: crate::segment::Generation) -> Self {
+        Self::build_with(true, gen)
+    }
+
     fn build(load_stdlib: bool) -> Self {
-        let mut core = RuntimeCore::bare();
+        Self::build_with(load_stdlib, crate::config::get().unicode_generation())
+    }
+
+    fn build_with(load_stdlib: bool, gen: crate::segment::Generation) -> Self {
+        let mut core = RuntimeCore::bare_with_unicode(gen);
 
         // `RuntimeCore::bare` already pointed the VM at this instance's symbol
         // table, so stdlib-load gensym (and all runtime name resolution) resolve

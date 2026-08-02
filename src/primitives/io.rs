@@ -39,7 +39,7 @@ fn prim_io_backend(
     args: &[Value],
 ) -> (SignalBits, Value) {
     match args[0].as_keyword_name().as_deref() {
-        Some("async") => match AsyncBackend::new() {
+        Some("async") => match AsyncBackend::new_with_unicode(ctx.unicode_generation()) {
             Ok(backend) => {
                 let any = AnyBackend(Box::new(backend));
                 (SIG_OK, ctx.external("io-backend", any))

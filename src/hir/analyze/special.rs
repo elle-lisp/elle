@@ -389,6 +389,55 @@ impl<'a> Analyzer<'a> {
         Ok(Hir::silent(HirKind::Nil, span))
     }
 
+    /// `(unicode! major [minor [patch]])` — declare the Unicode generation
+    /// this source assumes. The generation is locked per program before VM
+    /// construction, so the declaration is checked against the lock and
+    /// evaluates to nil; a mismatch or a non-vendored request is a compile
+    /// error. `(unicode!)` with no arguments is the query form: it folds to
+    /// the same HIR the literal `[major minor patch]` produces. The LSP and
+    /// lint analyzers check against the process default, so a file meant
+    /// for `--unicode=16` shows a conflict diagnostic there.
+    pub(crate) fn analyze_unicode(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        let locked = self.unicode_generation;
+        if items.len() == 1 {
+            let (major, minor, patch) = locked.version();
+            let elems: Vec<Syntax> = [major, minor, patch]
+                .iter()
+                .map(|c| Syntax::new(SyntaxKind::Int(*c as i64), span.clone()))
+                .collect();
+            return self.analyze_expr(&Syntax::new(SyntaxKind::Array(elems), span));
+        }
+        if items.len() > 4 {
+            return Err(format!(
+                "{}: unicode! takes at most 3 version components",
+                span
+            ));
+        }
+        let mut request = Vec::new();
+        for item in &items[1..] {
+            match item.kind {
+                SyntaxKind::Int(n) if n >= 0 => request.push(n),
+                _ => {
+                    return Err(format!(
+                        "{}: unicode! components must be non-negative integer literals",
+                        item.span
+                    ))
+                }
+            }
+        }
+        let declared = crate::segment::Generation::from_request(&request)
+            .map_err(|e| format!("{}: {}", span, e))?;
+        if declared != locked {
+            return Err(format!(
+                "{}: unicode! declares Unicode {}, but this program runs under Unicode {}",
+                span,
+                declared.version_string(),
+                locked.version_string()
+            ));
+        }
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
+
     /// `(immutable! x)` — assert that binding `x` is never assigned in the body.
     pub(crate) fn analyze_immutable_assert(
         &mut self,

@@ -153,6 +153,9 @@ mod runner_exit_trap {
 mod subprocess_sigmask {
     include!("subprocess_sigmask.rs");
 }
+mod unicode_generation {
+    include!("unicode_generation.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

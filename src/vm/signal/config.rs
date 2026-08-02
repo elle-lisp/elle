@@ -45,6 +45,10 @@ impl VM {
                 TableKey::from_value(&Value::keyword("flip")).unwrap(),
                 Value::bool(crate::config::flip_enabled()),
             );
+            map.insert(
+                TableKey::from_value(&Value::keyword("unicode")).unwrap(),
+                self.unicode_version_value(ctx),
+            );
             (SIG_OK, ctx.struct_from(map))
         } else if let Some(kw) = arg.as_keyword_name() {
             match kw.as_str() {
@@ -58,6 +62,7 @@ impl VM {
                 }
                 "stats" => (SIG_OK, Value::bool(rc.stats)),
                 "flip" => (SIG_OK, Value::bool(crate::config::flip_enabled())),
+                "unicode" => (SIG_OK, self.unicode_version_value(ctx)),
                 _ => (
                     SIG_ERROR,
                     ctx.error(
@@ -70,6 +75,16 @@ impl VM {
             type_error!(ctx, arg, "vm/config", "keyword or nil")
         }
     }
+    /// The VM's Unicode generation as a `[major minor patch]` array.
+    fn unicode_version_value(&self, ctx: &mut crate::primitives::ctx::Alloc) -> Value {
+        let (major, minor, patch) = self.unicode_generation.version();
+        ctx.array(vec![
+            Value::int(major as i64),
+            Value::int(minor as i64),
+            Value::int(patch as i64),
+        ])
+    }
+
     /// Handle `(vm/config-set key value)` — mutates the VM's RuntimeConfig.
     pub(super) fn handle_vm_config_set(
         &mut self,
@@ -203,6 +218,10 @@ impl VM {
             }
             // Legacy: flip is always off (no-op). Accept for compat.
             "flip" => Value::NIL,
+            "unicode" => ctx.error(
+                "argument-error",
+                "vm/config-set :unicode: the Unicode generation is fixed at VM construction",
+            ),
             _ => ctx.error(
                 "argument-error",
                 format!("vm/config-set: unknown field :{}", kw),

@@ -30,6 +30,10 @@ pub struct AsyncBackend {
 }
 
 struct AsyncBackendInner {
+    /// The owning VM's Unicode generation, captured at backend construction.
+    /// Grapheme-counted text reads (`read-exact` on a text port) split the
+    /// byte stream at cluster boundaries with it, on and off the VM thread.
+    unicode_generation: crate::segment::Generation,
     fd_states: HashMap<PortKey, FdState>,
     pending: HashMap<SubmissionId, PendingOp>,
     completions: VecDeque<Completion>,
@@ -90,7 +94,15 @@ impl AsyncBackend {
     ///
     /// On Linux with the `io-uring` feature, attempts io_uring first.
     /// Falls back to thread-pool on failure or on non-Linux platforms.
+    /// Uses the process-default Unicode generation; a backend serving a VM
+    /// with an explicit generation is built via [`Self::new_with_unicode`].
     pub fn new() -> Result<Self, String> {
+        Self::new_with_unicode(crate::config::get().unicode_generation())
+    }
+
+    /// Create a new async backend serving a VM with the given Unicode
+    /// generation.
+    pub fn new_with_unicode(gen: crate::segment::Generation) -> Result<Self, String> {
         let mut platform = Self::create_platform_backend();
         let mut hub = CompletionHub::new();
         // On the uring platform, wire the eventfd bridge: a hub worker raises
@@ -100,6 +112,7 @@ impl AsyncBackend {
         Self::wire_eventfd_bridge(&mut platform, &mut hub)?;
         Ok(AsyncBackend {
             inner: RefCell::new(AsyncBackendInner {
+                unicode_generation: gen,
                 fd_states: HashMap::new(),
                 pending: HashMap::new(),
                 completions: VecDeque::new(),
@@ -264,6 +277,7 @@ impl AsyncBackendInner {
             // posts its CQE promptly, so 50ms is a ceiling, not the expected
             // latency.
             let origin_heap = self.origin_heap;
+            let gen = self.unicode_generation;
             let AsyncBackendInner {
                 ref mut platform,
                 ref mut pending,
@@ -291,6 +305,7 @@ impl AsyncBackendInner {
                     fd_states,
                     &mut sink,
                     origin_heap,
+                    gen,
                     &mut bridge_fired,
                 );
             }
@@ -340,6 +355,7 @@ impl AsyncBackendInner {
     /// hub worker's wake would be lost.
     fn drain_uring_completions(&mut self) {
         let origin_heap = self.origin_heap;
+        let gen = self.unicode_generation;
         #[cfg(target_os = "linux")]
         let eventfd = self.hub.eventfd();
         match &mut self.platform {
@@ -353,6 +369,7 @@ impl AsyncBackendInner {
                     &mut self.fd_states,
                     &mut self.completions,
                     origin_heap,
+                    gen,
                     &mut eventfd_fired,
                 );
                 if eventfd_fired {
@@ -381,6 +398,7 @@ impl AsyncBackendInner {
     /// a cancelled op whose `pending` entry is already gone.
     fn drain_hub(&mut self) {
         let origin_heap = self.origin_heap;
+        let gen = self.unicode_generation;
         let AsyncBackendInner {
             ref mut hub,
             ref mut pending,
@@ -390,7 +408,7 @@ impl AsyncBackendInner {
             ..
         } = *self;
         for rc in hub.drain_raw() {
-            if let Some(c) = cook_raw(rc, pending, fd_states, buffer_pool, origin_heap) {
+            if let Some(c) = cook_raw(rc, pending, fd_states, buffer_pool, origin_heap, gen) {
                 completions.push_back(c);
             }
         }

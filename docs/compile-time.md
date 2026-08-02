@@ -23,6 +23,7 @@ examples live in the linked topic docs; this catalog is the map.
 |---|---|---|
 | `defmacro`, quasiquote, `macro?`, `expand-macro` | macro expansion (reader → analyzer) | expands to code |
 | `(elle/epoch N)` | migration pass, before expansion | no (consumed) |
+| `(unicode! …)` | analysis | no (declaration → `nil`; 0-arg query folds to the version array) |
 | `silence`, `muffle`, `attune!` | signal inference | no (shapes the inferred signal) |
 | `silent!`, `numeric!`, `immutable!` | post-inference checks | no (evaluate to `nil`) |
 | `when!` / `unless!` / `gate!` *(proposed)* | analysis | silent: elided · loud: emits `:gated` |
@@ -39,7 +40,9 @@ Three prefixes/suffixes signal *when* an operation acts:
 - **`name!` — a compile-time-only special form.** It produces no runtime code;
   the analyzer checks it and the form evaluates to `nil`. The bang is the
   project's marker for "this is resolved by the compiler, not run." Existing
-  members: `silent!`, `numeric!`, `immutable!`, `attune!`.
+  members: `silent!`, `numeric!`, `immutable!`, `attune!`, `unicode!`. One
+  member bends the `nil` rule: `(unicode!)` with no arguments is a query, not
+  an assertion, and folds to the selected Unicode version array.
 - **`%name` — an intrinsic.** Compile-time proven against its operand contract,
   then lowered to a single VM instruction (storing ops to the native funnel
   call) — no runtime validation, no signal emission, no rest-arg allocation;
@@ -127,6 +130,25 @@ an assertions-disabled build) is proposed alongside; see
 The epoch migration pass runs **after parsing, before macro expansion**, applying
 backward-compatible syntax rewrites; the declaration form itself is consumed.
 Migration rule types and the current epoch: [`epochs.md`](epochs.md).
+
+## Unicode generation selection
+
+```
+(unicode! N [MIN [PATCH]])   # declare the Unicode generation this source assumes
+(unicode!)                   # query: folds to the selected version, e.g. [17 0 0]
+```
+
+Where epochs version the *syntax*, `unicode!` versions the *string semantics*:
+`length`, `get`, and `slice` count UAX #29 grapheme clusters, and each build
+vendors one or more table generations. The generation is locked per VM before
+construction, from three surfaces that must agree: the declaration in the main
+file, the `--unicode=` CLI flag, and the embedding constructor. Default: the
+newest vendored generation. After the lock, every `(unicode! …)` in the
+program is an assertion against the locked generation — a conflict or a
+non-vendored request is a compile error naming the versions involved. The
+declaration selects real behavior, not just a check: under `(unicode! 16)`
+strings segment with the Unicode 16.0 tables. Details and examples:
+[`strings.md`](strings.md).
 
 ## Quoting and scope reification
 

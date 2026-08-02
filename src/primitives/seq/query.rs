@@ -24,8 +24,9 @@ pub fn seq_first(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
     }) {
         return r;
     }
+    let gen = ctx.unicode_generation();
     if let Some(r) = with_text(val, |s, _| {
-        s.graphemes(true)
+        crate::segment::graphemes(s, gen)
             .next()
             .map(|g| ctx.string(g))
             .ok_or_else(|| ctx.error("argument-error", "first: empty sequence"))
@@ -61,8 +62,9 @@ pub fn seq_rest(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
     }) {
         return Ok(r);
     }
+    let gen = ctx.unicode_generation();
     if let Some(r) = with_text(val, |s, m| {
-        let rest: String = s.graphemes(true).skip(1).collect();
+        let rest: String = crate::segment::graphemes(s, gen).skip(1).collect();
         make_string(rest, m, ctx)
     }) {
         return Ok(r);
@@ -101,8 +103,9 @@ pub fn seq_last(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
     }) {
         return r;
     }
+    let gen = ctx.unicode_generation();
     if let Some(r) = with_text(val, |s, _| {
-        s.graphemes(true)
+        crate::segment::graphemes(s, gen)
             .next_back()
             .map(|g| ctx.string(g))
             .ok_or_else(|| ctx.error("argument-error", "last: empty sequence"))
@@ -178,8 +181,9 @@ pub fn seq_nth(val: &Value, n: i64, ctx: &mut NativeCtx) -> Result<Value, Value>
     }) {
         return r;
     }
+    let gen = ctx.unicode_generation();
     if let Some(r) = with_text(val, |s, _| {
-        let graphemes: Vec<&str> = s.graphemes(true).collect();
+        let graphemes: Vec<&str> = crate::segment::graphemes(s, gen).collect();
         resolve_index(n, graphemes.len())
             .map(|i| ctx.string(graphemes[i]))
             .ok_or_else(|| {
@@ -229,8 +233,9 @@ pub fn seq_reverse(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
     }) {
         return Ok(r);
     }
+    let gen = ctx.unicode_generation();
     if let Some(r) = with_text(val, |s, m| {
-        let reversed: String = s.graphemes(true).rev().collect();
+        let reversed: String = crate::segment::graphemes(s, gen).rev().collect();
         make_string(reversed, m, ctx)
     }) {
         return Ok(r);
@@ -269,8 +274,9 @@ pub fn seq_slice(val: &Value, start: i64, end: i64, ctx: &mut NativeCtx) -> Resu
     }) {
         return Ok(r);
     }
+    let gen = ctx.unicode_generation();
     if let Some(r) = with_text(val, |str_val, m| {
-        let graphemes: Vec<&str> = str_val.graphemes(true).collect();
+        let graphemes: Vec<&str> = crate::segment::graphemes(str_val, gen).collect();
         let s = resolve_slice_index(start, graphemes.len()).min(graphemes.len());
         let e = resolve_slice_index(end, graphemes.len()).min(graphemes.len());
         if s >= e {

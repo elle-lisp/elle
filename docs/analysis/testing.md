@@ -53,6 +53,11 @@ destructuring syntax, arity mismatches at known call sites.
 it does not compile. Use `eval_source(input).is_err()` and inspect the error
 message.
 
+The same rule covers Unicode generation tests: corpus files compile on the
+shared runner VM, which uses the default generation, so a file that selects
+another generation with `(unicode! N)` cannot join the corpus. Build a
+`Runtime::with_unicode(...)` in a Rust integration test instead.
+
 **3. Does the test assert that something fails at runtime and need to inspect
 the error message for specific content?**
 

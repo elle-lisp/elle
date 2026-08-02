@@ -85,13 +85,14 @@ pub(crate) fn prim_get(
                 )
             }
         };
+        let gen = ctx.unicode_generation();
         if index >= 0 {
-            match s.graphemes(true).nth(index as usize) {
+            match crate::segment::graphemes(s, gen).nth(index as usize) {
                 Some(g) => return (SIG_OK, ctx.string(g)),
                 None => return (SIG_OK, default),
             }
         } else {
-            let graphemes: Vec<&str> = s.graphemes(true).collect();
+            let graphemes: Vec<&str> = crate::segment::graphemes(s, gen).collect();
             match resolve_index(index, graphemes.len()) {
                 Some(i) => return (SIG_OK, ctx.string(graphemes[i])),
                 None => return (SIG_OK, default),
@@ -168,6 +169,7 @@ pub(crate) fn prim_get(
 
     // String (immutable grapheme cluster sequence)
     if args[0].is_string() {
+        let gen = ctx.unicode_generation();
         return args[0]
             .with_string(|s| {
                 let index = match args[1].as_int() {
@@ -186,12 +188,12 @@ pub(crate) fn prim_get(
                     }
                 };
                 if index >= 0 {
-                    match s.graphemes(true).nth(index as usize) {
+                    match crate::segment::graphemes(s, gen).nth(index as usize) {
                         Some(g) => (SIG_OK, ctx.string(g)),
                         None => (SIG_OK, default),
                     }
                 } else {
-                    let graphemes: Vec<&str> = s.graphemes(true).collect();
+                    let graphemes: Vec<&str> = crate::segment::graphemes(s, gen).collect();
                     match resolve_index(index, graphemes.len()) {
                         Some(i) => (SIG_OK, ctx.string(graphemes[i])),
                         None => (SIG_OK, default),

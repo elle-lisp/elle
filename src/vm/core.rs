@@ -100,6 +100,12 @@ pub struct VM {
     /// Mutable runtime configuration: trace flags, JIT/WASM policy.
     /// Accessible from Elle via `(vm/config)`.
     pub runtime_config: crate::config::RuntimeConfig,
+    /// The Unicode segmentation generation for every grapheme operation
+    /// this VM performs. Fixed at construction (readable via
+    /// `(vm/config :unicode)`, never settable): text ports stash bytes
+    /// split at cluster boundaries, so a mid-run change would corrupt
+    /// their framing.
+    pub(crate) unicode_generation: crate::segment::Generation,
     /// Pointer to this instance's heap. The VM does not own it: a `RuntimeCore`
     /// owns it as a sibling `Box<FiberHeap>` (`VM::new_with_heap`), or — for a bare
     /// VM with no `RuntimeCore` — it is a privately leaked heap (`VM::new`). Either

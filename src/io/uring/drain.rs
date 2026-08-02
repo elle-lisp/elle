@@ -43,6 +43,7 @@ fn push_resubmit(
 /// - Timeout CQE filtering (high-bit user_data tag)
 /// - Connect fd cleanup on error
 /// - PortOp-aware buffer extraction (only reads buffer for stream reads)
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn drain_cqes(
     ring: &mut io_uring::IoUring,
     pending: &mut HashMap<SubmissionId, PendingOp>,
@@ -52,6 +53,9 @@ pub(crate) fn drain_cqes(
     // The requesting instance's heap; completion values are born on it
     // (`crate::io::completion_heap_ptr`).
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    // The owning VM's Unicode generation; text ReadExact decides "enough
+    // graphemes yet?" and splits the stream with it.
+    gen: crate::segment::Generation,
     // Set to true if the standing eventfd bridge `POLL_ADD` fired (a hub worker
     // raised the eventfd). The caller clears the eventfd and re-arms the poll —
     // the sentinel CQE has no `pending` entry and no buffer to process.
@@ -264,7 +268,7 @@ pub(crate) fn drain_cqes(
                         };
                         let mut combined = state.buffer.clone();
                         combined.extend_from_slice(fiber_bytes);
-                        crate::io::grapheme_count_in_valid_prefix(&combined) < count
+                        crate::io::grapheme_count_in_valid_prefix(&combined, gen) < count
                     } else {
                         total < count
                     };
@@ -364,6 +368,7 @@ pub(crate) fn drain_cqes(
                 buffer_pool,
                 buf_handle,
                 origin_heap,
+                gen,
             );
             completions.push_back(completion);
         }
@@ -508,6 +513,8 @@ pub(crate) fn wait_uring(
     // The requesting instance's heap; completion values are born on it
     // (`crate::io::completion_heap_ptr`).
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    // The owning VM's Unicode generation, forwarded to drain_cqes.
+    gen: crate::segment::Generation,
     // The bridge eventfd (`Some` on the uring platform). When its standing
     // `POLL_ADD` is what woke this wait, the counter is cleared and the poll
     // re-armed before returning so the next wait stays wakeable. The hub
@@ -559,6 +566,7 @@ pub(crate) fn wait_uring(
         fd_states,
         completions,
         origin_heap,
+        gen,
         &mut eventfd_fired,
     );
 
@@ -589,6 +597,7 @@ pub(crate) fn wait_uring(
                 fd_states,
                 completions,
                 origin_heap,
+                gen,
                 &mut eventfd_fired,
             );
         }

@@ -329,8 +329,12 @@ impl<'a> FunctionTranslator<'a> {
             // === Data access ===
             LirInstr::Length { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
+                // `%length` segments string arms under the VM's Unicode
+                // generation, reached through the threaded `JitCtx` (passed in
+                // the vm pointer slot of the `value_unary_vm` ABI, like `%pop`).
+                let jit_ctx = self.jit_ctx()?;
                 let (rt, rp) =
-                    self.call_helper_value_unary(builder, self.helpers.length, st, sp)?;
+                    self.call_helper_value_vm(builder, self.helpers.length, st, sp, jit_ctx)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
             LirInstr::Get { dst, obj, key } => {

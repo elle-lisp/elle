@@ -284,7 +284,9 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         is_closure: declare(module, "elle_jit_is_closure", &value_unary)?,
         is_fiber: declare(module, "elle_jit_is_fiber", &value_unary)?,
         type_of: declare(module, "elle_jit_type_of", &value_unary)?,
-        length: declare(module, "elle_jit_length", &value_unary)?,
+        // value_unary_vm: the trailing slot carries this activation's JitCtx,
+        // resolved to the VM whose Unicode generation segments the string arms.
+        length: declare(module, "elle_jit_length", &value_unary_vm)?,
         // get/pop allocate nothing through a PrimFn and read no VM state, so they
         // take no `JitCtx`. The rest run `PrimFn` bodies and resolve their VM from
         // the threaded `JitCtx` (trailing I64), keeping the VM dependency explicit

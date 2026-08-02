@@ -284,6 +284,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
             &mut fd_states,
             &mut completions,
             &mut heap as *mut crate::value::fiberheap::FiberHeap,
+            crate::segment::Generation::NEWEST,
             &mut eventfd_fired,
         );
     }

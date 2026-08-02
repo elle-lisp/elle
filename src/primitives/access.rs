@@ -6,7 +6,6 @@
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{sorted_struct_get, sorted_struct_insert, TableKey, Value};
-use unicode_segmentation::UnicodeSegmentation;
 
 mod getop;
 pub(crate) use getop::*;
@@ -115,7 +114,7 @@ pub(crate) fn prim_put(
                 )
             }
         };
-        let graphemes: Vec<&str> = s.graphemes(true).collect();
+        let graphemes: Vec<&str> = crate::segment::graphemes(s, ctx.unicode_generation()).collect();
         let resolved = match resolve_index(index, graphemes.len()) {
             Some(i) => i,
             None => {
@@ -309,7 +308,8 @@ pub(crate) fn prim_put(
                         )
                     }
                 };
-                let graphemes: Vec<&str> = s.graphemes(true).collect();
+                let graphemes: Vec<&str> =
+                    crate::segment::graphemes(s, ctx.unicode_generation()).collect();
                 let resolved = match resolve_index(index, graphemes.len()) {
                     Some(i) => i,
                     None => {

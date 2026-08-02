@@ -31,14 +31,13 @@ pub(crate) fn handle_intr_get(vm: &mut VM) {
         let tk = TableKey::from_value(&key).expect("%get: unhashable key");
         t.borrow().get(&tk).copied().unwrap_or(Value::NIL)
     } else if let Some(r) = obj.with_string(|s| {
-        use unicode_segmentation::UnicodeSegmentation;
         let i = key.as_int().expect("%get: string index must be int") as usize;
         // The grapheme is born in the SOURCE string's own region (a pass-through
         // result, like `CollectionCallResult`): `%get` carries no region operand
         // (it is not modelled as allocating; the JIT path does not allocate at
         // all), so the result co-locates with the indexed string whose lifetime
         // covers the result's use. A heap string always has a region.
-        match s.graphemes(true).nth(i) {
+        match crate::segment::graphemes(s, vm.unicode_generation).nth(i) {
             Some(g) => {
                 let region = crate::value::arena::region_of(unsafe { &mut *vm.heap_ptr }, obj)
                     .expect("%get: indexed string must have a region");

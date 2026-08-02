@@ -140,7 +140,6 @@ pub(super) fn prim_length(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    use unicode_segmentation::UnicodeSegmentation;
     let val = &args[0];
     let len = if val.is_empty_list() || val.is_nil() {
         0
@@ -165,12 +164,14 @@ pub(super) fn prim_length(
         b.len()
     } else if let Some(b) = val.as_bytes_mut() {
         b.borrow().len()
-    } else if let Some(r) = val.with_string(|s| s.graphemes(true).count()) {
+    } else if let Some(r) =
+        val.with_string(|s| crate::segment::grapheme_count(s, ctx.unicode_generation()))
+    {
         r
     } else if let Some(buf) = val.as_string_mut() {
         let b = buf.borrow();
         match std::str::from_utf8(&b) {
-            Ok(s) => s.graphemes(true).count(),
+            Ok(s) => crate::segment::grapheme_count(s, ctx.unicode_generation()),
             Err(_) => {
                 return (
                     SIG_ERROR,
