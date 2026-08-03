@@ -258,7 +258,7 @@ primitive! {
     "fiber/status" => prim_fiber_status {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Get the fiber's lifecycle status (:new, :alive, :suspended, :dead, :error)",
+        doc: "Get the fiber's lifecycle status (:new, :alive, :paused, :dead, :error)",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/status f)",

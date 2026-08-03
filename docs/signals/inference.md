@@ -473,7 +473,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 # (emit bits value) => suspends
 
 # === Introspection ===
-# (fiber/status fiber) => :new :alive :suspended :dead :error
+# (fiber/status fiber) => :new :alive :paused :dead :error
 # (fiber/value fiber) => value
 # (fiber/bits fiber) => int
 # (fiber/mask fiber) => int

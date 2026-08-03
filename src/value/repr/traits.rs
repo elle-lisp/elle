@@ -123,9 +123,11 @@ impl Hash for Value {
                 }
 
                 // Remaining reference-identity types (Closure,
-                // NativeFn, ManagedPointer, Parameter, Syntax): hash by
-                // payload (the slot pointer). These are not subject to
-                // outbox relocation under the current model.
+                // ManagedPointer, Parameter, Syntax): hash by payload (the
+                // slot pointer). These are not subject to outbox relocation
+                // under the current model. (Native-fn is an immediate whose
+                // payload is its prim id, so it never reaches this arm with
+                // an address.)
                 _ => self.payload.hash(state),
             }
         }

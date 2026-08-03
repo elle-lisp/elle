@@ -92,7 +92,7 @@ pub(crate) fn prim_fiber_child(
 /// (fiber/propagate fiber) → suspends
 ///
 /// Propagate a caught signal from a child fiber, preserving the child chain
-/// for stack traces. The fiber must be in :error or :suspended status.
+/// for stack traces. The fiber must be in :error or :paused status.
 ///
 /// Returns SIG_PROPAGATE — the VM sets parent.child = fiber and propagates
 /// the fiber's signal upward.
@@ -112,7 +112,7 @@ pub(crate) fn prim_fiber_propagate(
             SIG_ERROR,
             ctx.error(
                 "internal-error",
-                "fiber/propagate: fiber must be errored or suspended with a signal",
+                "fiber/propagate: fiber must be errored or paused with a signal",
             ),
         );
     }
