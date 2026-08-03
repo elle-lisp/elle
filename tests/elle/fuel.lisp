@@ -211,3 +211,31 @@
             "nested: outer completes independently")
     (assert (= (fiber/value outer) 42) "nested: outer return value correct")
     (assert (= (fiber/status inner) :paused) "nested: inner remains paused")))
+
+# ============================================================================
+# Scenario 12: A single-step driver loop is transparent
+# ============================================================================
+#
+# The debugger steps a fiber by metering fuel: give the fiber one unit,
+# resume, repeat (docs/debugger.md § "Stepping"). A fuel pause re-executes
+# the interrupted instruction on resume, so the stepped run must produce
+# exactly the free run's result. Fuel is not refilled on resume — the
+# driver must set it before every step.
+
+(let [f (fiber/new (fn []
+                     (letrec [loop (fn (n acc)
+                                     (if (%lt n 10)
+                                       (loop (%add n 1) (%add acc n))
+                                       acc))]
+                       (loop 0 0))) |:fuel|)]
+  (var steps 0)
+  (fiber/set-fuel f 1)
+  (fiber/resume f)
+  (while (= (fiber/status f) :paused)
+    (assert (= (fiber/value f) nil) "step: each pause carries a nil payload")
+    (assign steps (+ steps 1))
+    (fiber/set-fuel f 1)
+    (fiber/resume f))
+  (assert (= (fiber/status f) :dead) "step: the stepped fiber completes")
+  (assert (= (fiber/value f) 45) "step: stepping does not change the result")
+  (assert (< 5 steps) "step: the run paused at many charge sites"))
