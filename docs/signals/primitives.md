@@ -10,7 +10,7 @@ User-facing fiber operations and patterns.
 | `fiber/new` | `(fn mask) → fiber` | Create fiber from closure with signal mask |
 | `fiber/resume` | `(fiber value) → value` | Resume fiber, delivering a value# returns signal value |
 | `emit` | `(bits value) → (suspends)` | Emit signal from current fiber |
-| `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:suspended`, `:dead`, `:error` |
+| `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:paused`, `:dead`, `:error` |
 | `fiber/value` | `(fiber) → value` | Signal payload or return value |
 | `fiber/bits` | `(fiber) → int` | Signal bits from last signal |
 | `fiber/mask` | `(fiber) → int` | Capability mask |
@@ -74,7 +74,7 @@ propagation.
 
 
 Whether a signal is terminal or resumable is a **handler decision**, not a
-signal property. Any signal leaves the child in `Suspended` status. The
+signal property. Any signal leaves the child in `Paused` status. The
 handler either:
 
 - **Resumes** the child (delivering a value) → resumable
