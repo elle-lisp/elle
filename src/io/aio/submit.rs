@@ -49,23 +49,17 @@ impl AsyncBackend {
         }
 
         // Open is portless — creates a new port rather than operating on one.
+        // The op's `direction`/`encoding` describe the port the completion
+        // fills; the port itself arrives pre-allocated in `request.port`, so
+        // the submission needs neither.
         if let IoOp::Open {
             ref path,
             flags,
             mode,
-            direction,
-            encoding,
+            ..
         } = request.op
         {
-            return self.submit_open(
-                path,
-                flags,
-                mode,
-                direction,
-                encoding,
-                request.timeout,
-                request.port,
-            );
+            return self.submit_open(path, flags, mode, request.timeout, request.port);
         }
 
         // Task: run closure on thread pool.

@@ -64,7 +64,7 @@ pub(crate) fn apply_socket_options(fd: std::os::unix::io::RawFd, opts: &SocketOp
 /// then the IP-only `tcp/connect-ip` primitive for each returned address. This
 /// keeps the backend free of a blocking getaddrinfo fallback: an io_uring connect
 /// always has an address it can hand the kernel directly.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConnectAddr {
     Tcp {
         addr: std::net::IpAddr,

@@ -13,7 +13,7 @@ to a backend for execution.
 |--------|----------------|
 | `types.rs` | Shared types: `PortKey`, `FdState`, `FdStatus` — used by both backends |
 | `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
-| `pending.rs` | `PendingOp` enum — in-flight async operation tracking (5 variants) |
+| `pending.rs` | `PendingOp` enum — in-flight async operation tracking, one variant per operation shape |
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
 | `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
@@ -91,13 +91,20 @@ Methods:
 
 ### PendingOp
 
-Enum tracking in-flight async operations (5 variants):
+What one in-flight operation's completion needs, one variant per operation
+shape. Every variant carries a `BufferHandle`; the rest is what that operation
+alone must remember:
 
-- `Port { op, port_key, port, buffer_handle, listener_kind }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `listener_kind` is `Some(PortKind)` for Accept only.
-- `Connect { addr, buffer_handle, connect_fd }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
+- `Port { op, port_key, port, buffer_handle, listener_kind, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `listener_kind` is `Some(PortKind)` for Accept only.
+- `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
+- `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
-- `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing.
+- `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing. Null on the thread-pool path, where the worker reports the exit code itself.
 - `Task { buffer_handle }` — background task running on thread pool.
+- `Resolve { buffer_handle }` — getaddrinfo(3) on the thread pool.
+- `WatchNext { watcher, buffer_handle }` / `SigNext { receiver, buffer_handle }` — a read on the inotify / signalfd descriptor. The external is held so it outlives the read.
+- `PollFd { buffer_handle }` — readiness wait on a bare descriptor.
+- `ChanSelectPark { buffer_handle, guard }` — readiness wait on a `chan/wait-ready` wake fd. The guard owns the fd(s) and the wake-list registrations, so dropping this entry deregisters exactly once.
 
 ### PoolOp / PoolCompletion / RawCompletion / CompletionHub
 
@@ -224,6 +231,45 @@ peer.
 Pinned by `tests/elle/port-write-timeout.lisp` and
 `tests/elle/port-read-timeout.lisp`, both run on each backend.
 
+## The submission frame
+
+Every operation the async backend issues passes through
+`AsyncBackend::submit_op` (`src/io/aio/requests.rs`), which performs the four
+steps each submission shares:
+
+| Step | What it decides |
+|---|---|
+| `mint_id` | the id the operation carries to the kernel or to a worker |
+| `buffer_pool.alloc(buf_bytes)` | the pinned bytes the kernel may write into, held until the completion arrives |
+| `dispatch(&mut Dispatch)` | which platform runs the operation, and what its pending entry must remember |
+| `pending.insert(id, ..)` | the entry the arriving completion is resolved by |
+
+`Dispatch` bundles the id, the buffer handle, and the three backend fields a
+dispatch reaches: `platform`, `hub`, `buffer_pool`. The `match platform` stays
+at each call site — every operation calls a different `submit_uring_*` and
+builds a different `PoolOp`, and the ring type does not exist off Linux, so a
+shared helper would need a `#[cfg]`'d signature for no gain.
+`Dispatch::poll_fd` is the one exception: `ev/poll-fd` and the
+`chan/wait-ready` park wait on a bare descriptor the same way and differ only
+in what they remember.
+
+`dispatch` returns what the platform decided and the pending entry must record
+— the pre-created socket fd for a connect, the `siginfo_t` allocation for a
+process wait, `()` for the operations that decide nothing. `make_pending`
+turns that plus the buffer handle into the `PendingOp`.
+
+Two operations finish inside the submit call, so they take no buffer and file
+no pending entry; both push a `Completion` straight onto the queue:
+
+- `Spawn` — the child is started synchronously by `spawn_to_struct`.
+- `ProcessWait` on a child whose exit code is already cached in its
+  `ProcessHandle`.
+
+A dispatch failure returns before any pending entry exists, and leaves the
+buffer reserved: `submit_linked` can fail with the operation's SQE already
+pushed onto the submission queue, so the kernel may still read that buffer on
+the next `ring.submit()`.
+
 ## Backend Execution
 
 ### Subprocess Operations
@@ -269,3 +315,8 @@ Pinned by `tests/elle/port-write-timeout.lisp` and
 14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
 16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). There is no io_uring equivalent for an arbitrary closure, so a `Task` always runs on the thread pool (feeding the `CompletionHub`) on every platform. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
+17. **One submission, one pending entry, one id.** `submit_op` files the
+    `PendingOp` under the same id it dispatched the operation with, so an
+    arriving completion always finds its entry. A completion whose entry is
+    missing is discarded, and the fiber waiting on it never wakes — a hang,
+    not an error. Pinned by `src/io/aio/tests/submit.rs`.

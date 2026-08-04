@@ -13,7 +13,7 @@ use crate::io::threadpool::{
 };
 use crate::io::types::{FdState, PortKey};
 use crate::io::{Completion, SubmissionId};
-use crate::port::{Direction, Encoding, Port, PortKind};
+use crate::port::{Encoding, Port, PortKind};
 use crate::value::Value;
 
 use std::cell::RefCell;
@@ -186,6 +186,16 @@ impl AsyncBackend {
     #[cfg(all(target_os = "linux", test))]
     pub(crate) fn is_uring(&self) -> bool {
         matches!(self.inner.borrow().platform, PlatformBackend::Uring(_))
+    }
+
+    /// The ids of every operation still in flight, ascending. Tests pin the
+    /// submission frame with it: one submission files one pending entry, and
+    /// the entry is keyed by the id `submit` returned.
+    #[cfg(test)]
+    pub(crate) fn pending_ids(&self) -> Vec<SubmissionId> {
+        let mut ids: Vec<SubmissionId> = self.inner.borrow().pending.keys().copied().collect();
+        ids.sort();
+        ids
     }
 }
 
