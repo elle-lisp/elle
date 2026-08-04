@@ -5,8 +5,8 @@
 //! reduces code size from O(total_regs * suspend_points) to
 //! O(live_regs * suspend_points).
 
+use crate::lir::{for_each_def, for_each_terminator_use, for_each_use};
 use crate::lir::{Label, LirFunction, LirInstr, Reg, Terminator};
-use crate::wasm::regalloc::{for_each_def, for_each_terminator_use, for_each_use};
 use std::collections::{HashMap, HashSet};
 
 /// Per-suspend-point live set, keyed by `(block_idx, instr_idx)`.

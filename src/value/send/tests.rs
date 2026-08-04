@@ -1,9 +1,6 @@
 use super::*;
-use crate::lir::{
-    BasicBlock, Label, LirConst, LirFunction, LirInstr, Reg, SpannedInstr, SpannedTerminator,
-    Terminator,
-};
-use crate::syntax::Span;
+use crate::lir::testkit::LirFixture;
+use crate::lir::{LirConst, LirFunction, LirInstr, Reg, Terminator};
 use crate::value::closure::{Closure, ClosureTemplate};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::HeapObject;
@@ -57,22 +54,18 @@ fn make_test_closure(
 /// Build a minimal LIR function consisting of a single block that
 /// loads a closure-valued ValueConst and returns it.
 fn make_lir_with_closure_value_const(closure_val: Value) -> LirFunction {
-    let mut lir = LirFunction::new(Arity::Exact(1));
-    lir.num_params = 1;
-    lir.num_locals = 1;
-    lir.num_regs = 1;
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::ValueConst {
-            dst: Reg(0),
-            value: closure_val,
-        },
-        Span::synthetic(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-    lir.blocks.push(block);
-    lir.entry = Label(0);
-    lir
+    LirFixture::new(Arity::Exact(1))
+        .num_params(1)
+        .num_locals(1)
+        .block(
+            0,
+            vec![LirInstr::ValueConst {
+                dst: Reg(0),
+                value: closure_val,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 /// Directly verifies the ClosureRef serialization path: a closure

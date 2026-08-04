@@ -5,102 +5,79 @@ use super::*;
 /// Build LIR: fn(x) { var s = 0; if x > 0 then s = 1.5 else s = 2; return s }
 /// This has a mixed-type local slot (Int in one branch, Float in another).
 fn make_mixed_type_slot() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("mixed_slot".to_string());
-    func.signal = Signal::errors();
-    func.num_locals = 1;
-
-    // Block 0: entry — load param, store 0 to slot, compare, branch
-    let mut b0 = BasicBlock::new(Label(0));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(1),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Gt,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    b0.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(2),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        s(),
-    );
-
-    // Block 1: then — store 1.5 (Float) to slot, jump to merge
-    let mut b1 = BasicBlock::new(Label(1));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(3),
-            value: LirConst::Float(1.5),
-        },
-        s(),
-    ));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(3),
-        },
-        s(),
-    ));
-    b1.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
-
-    // Block 2: else — store 2 (Int) to slot, jump to merge
-    let mut b2 = BasicBlock::new(Label(2));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(4),
-            value: LirConst::Int(2),
-        },
-        s(),
-    ));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(4),
-        },
-        s(),
-    ));
-    b2.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
-
-    // Block 3: merge — load slot, return
-    let mut b3 = BasicBlock::new(Label(3));
-    b3.instructions.push(SpannedInstr::new(
-        LirInstr::LoadLocal {
-            dst: Reg(5),
-            slot: 0,
-        },
-        s(),
-    ));
-    b3.terminator = SpannedTerminator::new(Terminator::Return(Reg(5)), s());
-
-    func.blocks = vec![b0, b1, b2, b3];
-    func.num_regs = 6;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("mixed_slot")
+        .signal(Signal::errors())
+        .num_locals(1)
+        // Block 0: entry — load param, store 0 to slot, compare, branch
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Int(0),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(1),
+                },
+                LirInstr::Compare {
+                    dst: Reg(2),
+                    op: CmpOp::Gt,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Branch {
+                cond: Reg(2),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+        )
+        // Block 1: then — store 1.5 (Float) to slot, jump to merge
+        .block(
+            1,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(3),
+                    value: LirConst::Float(1.5),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(3),
+                },
+            ],
+            Terminator::Jump(Label(3)),
+        )
+        // Block 2: else — store 2 (Int) to slot, jump to merge
+        .block(
+            2,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(4),
+                    value: LirConst::Int(2),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(4),
+                },
+            ],
+            Terminator::Jump(Label(3)),
+        )
+        // Block 3: merge — load slot, return
+        .block(
+            3,
+            vec![LirInstr::LoadLocal {
+                dst: Reg(5),
+                slot: 0,
+            }],
+            Terminator::Return(Reg(5)),
+        )
+        .build()
 }
 
 #[test]
@@ -127,50 +104,39 @@ fn test_reject_mixed_type_slot() {
 /// `StoreLocal slot=0 src=r0` mis-reads r0 as Float and the Float/Int
 /// conflict slips through undetected (a false negative).
 fn make_slot_reg_collision_hides_mixed_type() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.name = Some("collision_hides_mixed".to_string());
-    func.signal = Signal::errors();
-    func.num_locals = 1;
-
-    // Block 0: r0 = 5 (Int); r1 = 2.5 (Float); s = r1 (Float)
-    let mut b0 = BasicBlock::new(Label(0));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(5),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Float(2.5),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(1),
-        },
-        s(),
-    ));
-    b0.terminator = SpannedTerminator::new(Terminator::Jump(Label(1)), s());
-
-    // Block 1: s = r0 (Int) — conflicts with the Float store in block 0
-    let mut b1 = BasicBlock::new(Label(1));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(0),
-        },
-        s(),
-    ));
-    b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), s());
-
-    func.blocks = vec![b0, b1];
-    func.num_regs = 2;
-    func
+    LirFixture::new(Arity::Exact(0))
+        .name("collision_hides_mixed")
+        .signal(Signal::errors())
+        .num_locals(1)
+        // Block 0: r0 = 5 (Int); r1 = 2.5 (Float); s = r1 (Float)
+        .block(
+            0,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(0),
+                    value: LirConst::Int(5),
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Float(2.5),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(1),
+                },
+            ],
+            Terminator::Jump(Label(1)),
+        )
+        // Block 1: s = r0 (Int) — conflicts with the Float store in block 0
+        .block(
+            1,
+            vec![LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(0),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 #[test]
@@ -189,63 +155,45 @@ fn test_reject_mixed_type_slot_under_reg_collision() {
 /// Build LIR: fn(x) { var s = 0; s = 1.5; return s }
 /// Sequential reassignment within a single block — should succeed.
 fn make_sequential_reassign() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("seq_reassign".to_string());
-    func.signal = Signal::errors();
-    func.num_locals = 1;
-
-    let mut b0 = BasicBlock::new(Label(0));
-    // Load param (unused, just for arity)
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    // var s = 0 (Int)
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(1),
-        },
-        s(),
-    ));
-    // s = 1.5 (Float — same block, sequential reassignment)
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(2),
-            value: LirConst::Float(1.5),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(2),
-        },
-        s(),
-    ));
-    // Load and return s
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::LoadLocal {
-            dst: Reg(3),
-            slot: 0,
-        },
-        s(),
-    ));
-    b0.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
-
-    func.blocks = vec![b0];
-    func.num_regs = 4;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("seq_reassign")
+        .signal(Signal::errors())
+        .num_locals(1)
+        .block(
+            0,
+            vec![
+                // Load param (unused, just for arity)
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                // var s = 0 (Int)
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Int(0),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(1),
+                },
+                // s = 1.5 (Float — same block, sequential reassignment)
+                LirInstr::Const {
+                    dst: Reg(2),
+                    value: LirConst::Float(1.5),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(2),
+                },
+                // Load and return s
+                LirInstr::LoadLocal {
+                    dst: Reg(3),
+                    slot: 0,
+                },
+            ],
+            Terminator::Return(Reg(3)),
+        )
+        .build()
 }
 
 #[test]

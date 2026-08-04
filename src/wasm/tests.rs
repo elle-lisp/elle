@@ -10,39 +10,24 @@
 //! to parse. These tests pin the linear-in-slots invariant.
 
 use super::emit::{emit_module, emit_single_closure};
-use crate::lir::{
-    BasicBlock, Label, LirConst, LirFunction, LirInstr, LirModule, Reg, SpannedInstr,
-    SpannedTerminator, Terminator,
-};
+use crate::lir::testkit::LirFixture;
+use crate::lir::{ClosureId, Label, LirConst, LirFunction, LirInstr, LirModule, Reg, Terminator};
 use crate::signals::{Signal, SIG_YIELD};
-use crate::syntax::Span;
 use crate::value::Arity;
-
-fn spanned(instr: LirInstr) -> SpannedInstr {
-    SpannedInstr::new(instr, Span::synthetic())
-}
-
-fn block(label: u32, instrs: Vec<LirInstr>, term: Terminator) -> BasicBlock {
-    let mut b = BasicBlock::new(Label(label));
-    b.instructions = instrs.into_iter().map(spanned).collect();
-    b.terminator = SpannedTerminator::new(term, Span::synthetic());
-    b
-}
 
 /// A trivial non-suspending entry that just returns nil, so the module has a
 /// valid entry function alongside the closure under test.
 fn trivial_entry() -> LirFunction {
-    let mut f = LirFunction::new(Arity::Exact(0));
-    f.num_regs = 1;
-    f.blocks = vec![block(
-        0,
-        vec![LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Nil,
-        }],
-        Terminator::Return(Reg(0)),
-    )];
-    f
+    LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Nil,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 /// A suspending closure with `n_yields` yield points and `n_locals` declared
@@ -52,30 +37,27 @@ fn trivial_entry() -> LirFunction {
 /// them; a slot-count-blind emitter spills and restores all of them at every
 /// one of the `n_yields` points.
 fn suspending_closure(n_yields: u32, n_locals: u16) -> LirFunction {
-    let mut f = LirFunction::new(Arity::Exact(1));
-    f.closure_id = Some(crate::lir::ClosureId(0));
-    f.num_regs = 1;
-    f.num_locals = n_locals;
-    f.num_params = 1;
-    f.signal = Signal::yields();
-
-    let mut blocks = Vec::new();
-    // Block 0 defines the carried value, then yields to block 1.
-    blocks.push(block(
-        0,
-        vec![LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(1),
-        }],
-        Terminator::Emit {
-            signal: SIG_YIELD,
-            value: Reg(0),
-            resume_label: Label(1),
-        },
-    ));
+    let mut f = LirFixture::new(Arity::Exact(1))
+        .closure_id(ClosureId(0))
+        .num_locals(n_locals)
+        .num_params(1)
+        .signal(Signal::yields())
+        // Block 0 defines the carried value, then yields to block 1.
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(1),
+            }],
+            Terminator::Emit {
+                signal: SIG_YIELD,
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+        );
     // Middle yield blocks, each carrying Reg(0) forward.
     for i in 1..n_yields {
-        blocks.push(block(
+        f = f.block(
             i,
             vec![],
             Terminator::Emit {
@@ -83,12 +65,11 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirFunction {
                 value: Reg(0),
                 resume_label: Label(i + 1),
             },
-        ));
+        );
     }
     // Final block returns the carried value.
-    blocks.push(block(n_yields, vec![], Terminator::Return(Reg(0))));
-    f.blocks = blocks;
-    f
+    f.block(n_yields, vec![], Terminator::Return(Reg(0)))
+        .build()
 }
 
 /// Emit a module whose single closure is `func`, returning the module bytes.
@@ -162,68 +143,65 @@ fn static_region(id: u32) -> crate::hir::region::StaticRegion {
 /// A closure whose block carries one tail call (callee register is arbitrary —
 /// the gate is structural, it never resolves the callee).
 fn tail_calling_closure() -> LirFunction {
-    let mut f = LirFunction::new(Arity::Exact(1));
-    f.closure_id = Some(crate::lir::ClosureId(0));
-    f.num_regs = 2;
-    f.num_params = 1;
-    f.blocks = vec![block(
-        0,
-        vec![
-            LirInstr::Const {
-                dst: Reg(0),
-                value: LirConst::Int(1),
-            },
-            LirInstr::TailCall {
-                dst: Reg(1),
-                func: Reg(0),
-                args: vec![],
-                arity_checked: false,
-                region: static_region(2),
-                defer_callee_release: false,
-                deferred_release_slot: None,
-            },
-        ],
-        Terminator::Return(Reg(1)),
-    )];
-    f
+    LirFixture::new(Arity::Exact(1))
+        .closure_id(ClosureId(0))
+        .num_params(1)
+        .block(
+            0,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(0),
+                    value: LirConst::Int(1),
+                },
+                LirInstr::TailCall {
+                    dst: Reg(1),
+                    func: Reg(0),
+                    args: vec![],
+                    arity_checked: false,
+                    region: static_region(2),
+                    defer_callee_release: false,
+                    deferred_release_slot: None,
+                },
+            ],
+            Terminator::Return(Reg(1)),
+        )
+        .build()
 }
 
 /// A closure that constructs a nested closure (`MakeClosure`), resolvable only
 /// with module context.
 fn nested_closure_closure() -> LirFunction {
-    let mut f = LirFunction::new(Arity::Exact(1));
-    f.closure_id = Some(crate::lir::ClosureId(1));
-    f.num_regs = 1;
-    f.num_params = 1;
-    f.blocks = vec![block(
-        0,
-        vec![LirInstr::MakeClosure {
-            dst: Reg(0),
-            closure_id: crate::lir::ClosureId(0),
-            captures: vec![],
-            region: static_region(2),
-        }],
-        Terminator::Return(Reg(0)),
-    )];
-    f
+    LirFixture::new(Arity::Exact(1))
+        .closure_id(ClosureId(1))
+        .num_params(1)
+        .block(
+            0,
+            vec![LirInstr::MakeClosure {
+                dst: Reg(0),
+                closure_id: ClosureId(0),
+                captures: vec![],
+                region: static_region(2),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 /// A plain numeric closure — the positive control proving the gate is not
 /// over-broad.
 fn plain_closure() -> LirFunction {
-    let mut f = LirFunction::new(Arity::Exact(1));
-    f.closure_id = Some(crate::lir::ClosureId(0));
-    f.num_regs = 1;
-    f.num_params = 1;
-    f.blocks = vec![block(
-        0,
-        vec![LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(7),
-        }],
-        Terminator::Return(Reg(0)),
-    )];
-    f
+    LirFixture::new(Arity::Exact(1))
+        .closure_id(ClosureId(0))
+        .num_params(1)
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(7),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 #[test]

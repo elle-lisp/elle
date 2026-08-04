@@ -1,73 +1,53 @@
 use super::*;
-use crate::lir::{
-    BasicBlock, ClosureId, Label, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
-};
+use crate::lir::testkit::LirFixture;
+use crate::lir::{ClosureId, LirInstr, Reg, Terminator};
 use crate::signals::Signal;
-use crate::syntax::Span;
 use crate::value::fiber::SignalBits;
 use crate::value::Arity;
 
 /// Build a simple LIR function that calls a function loaded via ValueConst.
 fn make_caller(name: &str, _callee_sym: SymbolId) -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some(name.to_string());
-    func.num_regs = 4;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::ValueConst {
-            dst: Reg(1),
-            value: crate::value::Value::NIL,
-        },
-        Span::synthetic(),
-    ));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Call {
-            dst: Reg(2),
-            func: Reg(1),
-            args: vec![Reg(0)],
-            arity_checked: false,
-            region: crate::hir::region::StaticRegion::new(2).unwrap(),
-        },
-        Span::synthetic(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), Span::synthetic());
-
-    func.blocks.push(entry);
-    func.entry = Label(0);
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name(name)
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::ValueConst {
+                    dst: Reg(1),
+                    value: crate::value::Value::NIL,
+                },
+                LirInstr::Call {
+                    dst: Reg(2),
+                    func: Reg(1),
+                    args: vec![Reg(0)],
+                    arity_checked: false,
+                    region: crate::hir::region::StaticRegion::new(2).unwrap(),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 /// Build a simple identity LIR function (no calls).
 fn make_leaf() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("leaf".to_string());
-    func.num_regs = 1;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-
-    func.blocks.push(entry);
-    func.entry = Label(0);
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("leaf")
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 /// Build a mock closure Value with the given LIR function.
@@ -181,32 +161,26 @@ fn test_discover_skips_unsupported_instructions() {
         let caller = make_caller("f", sym_g);
 
         // Build a callee with MakeClosure (unsupported)
-        let mut callee = LirFunction::new(Arity::Exact(1));
-        callee.name = Some("callee_with_closure".to_string());
-        callee.num_regs = 3;
-        callee.num_captures = 0;
-        callee.signal = Signal::silent();
-
-        let mut entry = BasicBlock::new(Label(0));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            },
-            Span::synthetic(),
-        ));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::MakeClosure {
-                dst: Reg(1),
-                closure_id: ClosureId(0),
-                captures: vec![],
-                region: crate::hir::region::StaticRegion::new(2).unwrap(),
-            },
-            Span::synthetic(),
-        ));
-        entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
-        callee.blocks.push(entry);
-        callee.entry = Label(0);
+        let callee = LirFixture::new(Arity::Exact(1))
+            .name("callee_with_closure")
+            .signal(Signal::silent())
+            .block(
+                0,
+                vec![
+                    LirInstr::LoadCapture {
+                        dst: Reg(0),
+                        index: 0,
+                    },
+                    LirInstr::MakeClosure {
+                        dst: Reg(1),
+                        closure_id: ClosureId(0),
+                        captures: vec![],
+                        region: crate::hir::region::StaticRegion::new(2).unwrap(),
+                    },
+                ],
+                Terminator::Return(Reg(1)),
+            )
+            .build();
 
         let mut globals = vec![Value::NIL; 10];
         globals[5] = make_closure_value(callee);
@@ -321,42 +295,32 @@ fn test_find_targets_with_tail_call() {
         // Call targets reach the callee via `ValueConst`, not a `LoadGlobal`
         // opcode, so `find_global_call_targets` finds nothing and returns an
         // empty set.
-        let mut func = LirFunction::new(Arity::Exact(1));
-        func.num_regs = 3;
-        func.num_captures = 0;
-        func.signal = Signal::silent();
-
-        let mut entry = BasicBlock::new(Label(0));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            },
-            Span::synthetic(),
-        ));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::ValueConst {
-                dst: Reg(1),
-                value: crate::value::Value::NIL,
-            },
-            Span::synthetic(),
-        ));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::TailCall {
-                dst: Reg(2),
-                func: Reg(1),
-                args: vec![Reg(0)],
-                arity_checked: false,
-                region: crate::hir::region::StaticRegion::new(2).unwrap(),
-                defer_callee_release: false,
-                deferred_release_slot: None,
-            },
-            Span::synthetic(),
-        ));
-        entry.terminator = SpannedTerminator::new(Terminator::Unreachable, Span::synthetic());
-
-        func.blocks.push(entry);
-        func.entry = Label(0);
+        let func = LirFixture::new(Arity::Exact(1))
+            .signal(Signal::silent())
+            .block(
+                0,
+                vec![
+                    LirInstr::LoadCapture {
+                        dst: Reg(0),
+                        index: 0,
+                    },
+                    LirInstr::ValueConst {
+                        dst: Reg(1),
+                        value: crate::value::Value::NIL,
+                    },
+                    LirInstr::TailCall {
+                        dst: Reg(2),
+                        func: Reg(1),
+                        args: vec![Reg(0)],
+                        arity_checked: false,
+                        region: crate::hir::region::StaticRegion::new(2).unwrap(),
+                        defer_callee_release: false,
+                        deferred_release_slot: None,
+                    },
+                ],
+                Terminator::Unreachable,
+            )
+            .build();
 
         let targets = find_global_call_targets(&func);
         assert!(targets.is_empty());
@@ -434,23 +398,18 @@ fn test_has_unsupported_instructions_clean() {
 #[test]
 fn test_has_unsupported_instructions_with_eval() {
     crate::value::arena::with_test_region(|| {
-        let mut func = LirFunction::new(Arity::Exact(1));
-        func.num_regs = 3;
-        func.num_captures = 0;
-        func.signal = Signal::silent();
-
-        let mut entry = BasicBlock::new(Label(0));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::Eval {
-                dst: Reg(0),
-                expr: Reg(1),
-                env: Reg(2),
-            },
-            Span::synthetic(),
-        ));
-        entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-        func.blocks.push(entry);
-        func.entry = Label(0);
+        let func = LirFixture::new(Arity::Exact(1))
+            .signal(Signal::silent())
+            .block(
+                0,
+                vec![LirInstr::Eval {
+                    dst: Reg(0),
+                    expr: Reg(1),
+                    env: Reg(2),
+                }],
+                Terminator::Return(Reg(0)),
+            )
+            .build();
 
         assert!(has_unsupported_instructions(&func));
     });

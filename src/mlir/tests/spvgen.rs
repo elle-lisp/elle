@@ -2,37 +2,30 @@ use super::*;
 
 /// Build LIR: fn(x) { return x + 1.5 }  (float constant + mixed promotion)
 fn make_float_add() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("float_add".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Float(1.5),
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
-    func.blocks.push(block);
-    func.num_regs = 3;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("float_add")
+        .signal(Signal::errors())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Float(1.5),
+                },
+                LirInstr::BinOp {
+                    dst: Reg(2),
+                    op: BinOp::Add,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 #[test]
@@ -45,44 +38,34 @@ fn test_spirv_float_add() {
 
 /// Build LIR: fn(x) { return 2.0 * 3.0 }  (pure float arithmetic)
 fn make_float_mul() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("float_mul".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Float(2.0),
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(2),
-            value: LirConst::Float(3.0),
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(3),
-            op: BinOp::Mul,
-            lhs: Reg(1),
-            rhs: Reg(2),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
-    func.blocks.push(block);
-    func.num_regs = 4;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("float_mul")
+        .signal(Signal::errors())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Float(2.0),
+                },
+                LirInstr::Const {
+                    dst: Reg(2),
+                    value: LirConst::Float(3.0),
+                },
+                LirInstr::BinOp {
+                    dst: Reg(3),
+                    op: BinOp::Mul,
+                    lhs: Reg(1),
+                    rhs: Reg(2),
+                },
+            ],
+            Terminator::Return(Reg(3)),
+        )
+        .build()
 }
 
 #[test]
@@ -115,50 +98,39 @@ fn test_spirv_float_mul() {
 /// read by the trailing `r0 + r0`. Correct lowering adds the const-10
 /// value to itself; the conflated map adds the const-20 value instead.
 fn make_storelocal_clobbers_reg() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.name = Some("store_clobber".to_string());
-    func.signal = Signal::errors();
-    func.num_locals = 1;
-
-    let mut b0 = BasicBlock::new(Label(0));
-    // r0 = 10  → SSA name %c0_0
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(10),
-        },
-        s(),
-    ));
-    // r1 = 20  → SSA name %c0_1
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(20),
-        },
-        s(),
-    ));
-    // s = r1   (slot 0 ← r1); must leave r0 alone
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(1),
-        },
-        s(),
-    ));
-    // r2 = r0 + r0
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(0),
-        },
-        s(),
-    ));
-    b0.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
-    func.blocks.push(b0);
-    func.num_regs = 3;
-    func
+    LirFixture::new(Arity::Exact(0))
+        .name("store_clobber")
+        .signal(Signal::errors())
+        .num_locals(1)
+        .block(
+            0,
+            vec![
+                // r0 = 10  → SSA name %c0_0
+                LirInstr::Const {
+                    dst: Reg(0),
+                    value: LirConst::Int(10),
+                },
+                // r1 = 20  → SSA name %c0_1
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Int(20),
+                },
+                // s = r1   (slot 0 ← r1); must leave r0 alone
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(1),
+                },
+                // r2 = r0 + r0
+                LirInstr::BinOp {
+                    dst: Reg(2),
+                    op: BinOp::Add,
+                    lhs: Reg(0),
+                    rhs: Reg(0),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 #[test]
@@ -188,111 +160,87 @@ fn test_spirv_storelocal_does_not_clobber_reg() {
 /// conflated map clobbers r0. The trailing `s + x` must still read the
 /// param (`%arg0`) for its right operand, not the merged if-result.
 fn make_if_merge_clobbers_param() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("merge_clobber".to_string());
-    func.signal = Signal::errors();
-    func.num_locals = 1;
-
-    // Block 0: load x → r0 (%arg0); s=0; cmp x>0; branch
-    let mut b0 = BasicBlock::new(Label(0));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(1),
-        },
-        s(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Gt,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    b0.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(2),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        s(),
-    );
-
-    // Block 1: then — s = 100; jump merge
-    let mut b1 = BasicBlock::new(Label(1));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(3),
-            value: LirConst::Int(100),
-        },
-        s(),
-    ));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(3),
-        },
-        s(),
-    ));
-    b1.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
-
-    // Block 2: else — s = 200; jump merge
-    let mut b2 = BasicBlock::new(Label(2));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(4),
-            value: LirConst::Int(200),
-        },
-        s(),
-    ));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(4),
-        },
-        s(),
-    ));
-    b2.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
-
-    // Block 3: merge — s' = load slot 0; return s' + x
-    let mut b3 = BasicBlock::new(Label(3));
-    b3.instructions.push(SpannedInstr::new(
-        LirInstr::LoadLocal {
-            dst: Reg(5),
-            slot: 0,
-        },
-        s(),
-    ));
-    b3.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(6),
-            op: BinOp::Add,
-            lhs: Reg(5),
-            rhs: Reg(0),
-        },
-        s(),
-    ));
-    b3.terminator = SpannedTerminator::new(Terminator::Return(Reg(6)), s());
-
-    func.blocks = vec![b0, b1, b2, b3];
-    func.num_regs = 7;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("merge_clobber")
+        .signal(Signal::errors())
+        .num_locals(1)
+        // Block 0: load x → r0 (%arg0); s=0; cmp x>0; branch
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Int(0),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(1),
+                },
+                LirInstr::Compare {
+                    dst: Reg(2),
+                    op: CmpOp::Gt,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Branch {
+                cond: Reg(2),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+        )
+        // Block 1: then — s = 100; jump merge
+        .block(
+            1,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(3),
+                    value: LirConst::Int(100),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(3),
+                },
+            ],
+            Terminator::Jump(Label(3)),
+        )
+        // Block 2: else — s = 200; jump merge
+        .block(
+            2,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(4),
+                    value: LirConst::Int(200),
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(4),
+                },
+            ],
+            Terminator::Jump(Label(3)),
+        )
+        // Block 3: merge — s' = load slot 0; return s' + x
+        .block(
+            3,
+            vec![
+                LirInstr::LoadLocal {
+                    dst: Reg(5),
+                    slot: 0,
+                },
+                LirInstr::BinOp {
+                    dst: Reg(6),
+                    op: BinOp::Add,
+                    lhs: Reg(5),
+                    rhs: Reg(0),
+                },
+            ],
+            Terminator::Return(Reg(6)),
+        )
+        .build()
 }
 
 #[test]

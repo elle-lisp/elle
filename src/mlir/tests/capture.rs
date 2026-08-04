@@ -4,42 +4,35 @@ use super::*;
 
 /// Build LIR: fn(x) { return cap[0] + x } with num_captures=1
 fn make_capture_add() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("capture_add".to_string());
-    func.signal = Signal::errors();
-    func.num_captures = 1;
     // Env layout: [cap0, param0]
-    let mut block = BasicBlock::new(Label(0));
-    // Load capture (index 0 = first capture)
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    // Load param (index 1 = first param, since 1 capture)
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(1),
-            index: 1,
-        },
-        s(),
-    ));
-    // cap + param
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
-    func.blocks.push(block);
-    func.num_regs = 3;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("capture_add")
+        .signal(Signal::errors())
+        .num_captures(1)
+        .block(
+            0,
+            vec![
+                // Load capture (index 0 = first capture)
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                // Load param (index 1 = first param, since 1 capture)
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(1),
+                    index: 1,
+                },
+                // cap + param
+                LirInstr::BinOp {
+                    dst: Reg(2),
+                    op: BinOp::Add,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 #[test]
@@ -115,58 +108,44 @@ fn test_spirv_rejects_captures() {
 /// index=1) clobbers regs[0], causing the second LoadCaptureRaw
 /// (dst=r1, index=0) to read the wrong value.
 fn make_capture_param_collision() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("cap_param_collision".to_string());
-    func.signal = Signal::errors();
-    func.num_captures = 1;
-    func.num_locals = 1; // one local slot for param copy
-
-    let mut block = BasicBlock::new(Label(0));
-    // Copy param from env index 1 to local slot 0
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 1, // param y
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLocal {
-            slot: 0,
-            src: Reg(0),
-        },
-        s(),
-    ));
-    // Load capture from env index 0
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(1),
-            index: 0, // capture x
-        },
-        s(),
-    ));
-    // Load param from local slot
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadLocal {
-            dst: Reg(2),
-            slot: 0,
-        },
-        s(),
-    ));
-    // x + y
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(3),
-            op: BinOp::Add,
-            lhs: Reg(1),
-            rhs: Reg(2),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
-    func.blocks.push(block);
-    func.num_regs = 4;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("cap_param_collision")
+        .signal(Signal::errors())
+        .num_captures(1)
+        .num_locals(1) // one local slot for param copy
+        .block(
+            0,
+            vec![
+                // Copy param from env index 1 to local slot 0
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 1, // param y
+                },
+                LirInstr::StoreLocal {
+                    slot: 0,
+                    src: Reg(0),
+                },
+                // Load capture from env index 0
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(1),
+                    index: 0, // capture x
+                },
+                // Load param from local slot
+                LirInstr::LoadLocal {
+                    dst: Reg(2),
+                    slot: 0,
+                },
+                // x + y
+                LirInstr::BinOp {
+                    dst: Reg(3),
+                    op: BinOp::Add,
+                    lhs: Reg(1),
+                    rhs: Reg(2),
+                },
+            ],
+            Terminator::Return(Reg(3)),
+        )
+        .build()
 }
 
 #[test]

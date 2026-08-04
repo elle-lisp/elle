@@ -1,29 +1,23 @@
 //! Tests for LIR to bytecode emission
 
 use super::*;
-use crate::syntax::Span;
+use crate::lir::testkit::LirFixture;
 use crate::value::Arity;
-
-fn synthetic_span() -> Span {
-    Span::synthetic()
-}
 
 #[test]
 fn test_emit_simple() {
     let mut emitter = Emitter::new();
 
-    let mut func = LirFunction::new(Arity::Exact(0));
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        },
-        synthetic_span(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), synthetic_span());
-    func.blocks.push(block);
-    func.entry = Label(0);
+    let func = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(42),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
 
     let (bytecode, _, _) = emitter.emit(&func);
     assert!(!bytecode.instructions.is_empty());
@@ -33,52 +27,36 @@ fn test_emit_simple() {
 fn test_emit_branch() {
     let mut emitter = Emitter::new();
 
-    let mut func = LirFunction::new(Arity::Exact(0));
-
-    // Entry block
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Bool(true),
-        },
-        synthetic_span(),
-    ));
-    entry.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        synthetic_span(),
-    );
-    func.blocks.push(entry);
-
-    // Then block
-    let mut then_block = BasicBlock::new(Label(1));
-    then_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(1),
-        },
-        synthetic_span(),
-    ));
-    then_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), synthetic_span());
-    func.blocks.push(then_block);
-
-    // Else block
-    let mut else_block = BasicBlock::new(Label(2));
-    else_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(2),
-            value: LirConst::Int(2),
-        },
-        synthetic_span(),
-    ));
-    else_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), synthetic_span());
-    func.blocks.push(else_block);
-
-    func.entry = Label(0);
+    let func = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Bool(true),
+            }],
+            Terminator::Branch {
+                cond: Reg(0),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+        )
+        .block(
+            1,
+            vec![LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(1),
+            }],
+            Terminator::Return(Reg(1)),
+        )
+        .block(
+            2,
+            vec![LirInstr::Const {
+                dst: Reg(2),
+                value: LirConst::Int(2),
+            }],
+            Terminator::Return(Reg(2)),
+        )
+        .build();
 
     let (bytecode, _, _) = emitter.emit(&func);
     assert!(!bytecode.instructions.is_empty());
@@ -94,36 +72,26 @@ fn test_yield_point_info_collected() {
     let mut emitter = Emitter::new();
 
     // fn() { yield 42; resume_value }
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 2;
-    func.signal = crate::signals::Signal::yields();
-
-    let mut b0 = BasicBlock::new(Label(0));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        },
-        synthetic_span(),
-    ));
-    b0.terminator = SpannedTerminator::new(
-        Terminator::Emit {
-            signal: crate::value::fiber::SIG_YIELD,
-            value: Reg(0),
-            resume_label: Label(1),
-        },
-        synthetic_span(),
-    );
-
-    let mut b1 = BasicBlock::new(Label(1));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::LoadResumeValue { dst: Reg(1) },
-        synthetic_span(),
-    ));
-    b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), synthetic_span());
-
-    func.blocks = vec![b0, b1];
-    func.entry = Label(0);
+    let func = LirFixture::new(Arity::Exact(0))
+        .signal(crate::signals::Signal::yields())
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(42),
+            }],
+            Terminator::Emit {
+                signal: crate::value::fiber::SIG_YIELD,
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+        )
+        .block(
+            1,
+            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            Terminator::Return(Reg(1)),
+        )
+        .build();
 
     let (bytecode, yield_points, _call_sites) = emitter.emit(&func);
     assert!(!bytecode.instructions.is_empty());
@@ -160,79 +128,53 @@ fn test_yield_point_info_collected() {
 /// past the old one — then consume the old value. What remains is the new
 /// value's original cell, which no register names any more.
 fn orphan_across_merge_func() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_locals = 3;
-    func.num_regs = 6;
-    func.entry = Label(0);
+    let konst = |dst: Reg, n: i64| LirInstr::Const {
+        dst,
+        value: LirConst::Int(n),
+    };
+    let store = |slot: u16, src: Reg| LirInstr::StoreLocal { slot, src };
+    let load = |dst: Reg, slot: u16| LirInstr::LoadLocal { dst, slot };
 
-    let konst = |dst: Reg, n: i64| {
-        SpannedInstr::new(
-            LirInstr::Const {
-                dst,
-                value: LirConst::Int(n),
+    let mut func = LirFixture::new(Arity::Exact(0))
+        .num_locals(3)
+        // Entry: park the sentinel in slot 2, then manufacture the orphan.
+        .block(
+            0,
+            vec![
+                konst(Reg(0), 42),
+                store(2, Reg(0)),
+                konst(Reg(1), 7), // the "new" value
+                konst(Reg(2), 9), // the "old" value, pushed above it
+                store(0, Reg(1)), // DupN past the old value, then store
+                store(1, Reg(2)), // consume the old value
+                load(Reg(3), 0),  // stack is now [Reg(1)] — one orphan, on top
+            ],
+            Terminator::Branch {
+                cond: Reg(3),
+                then_label: Label(1),
+                else_label: Label(2),
             },
-            synthetic_span(),
         )
-    };
-    let store = |slot: u16, src: Reg| {
-        SpannedInstr::new(LirInstr::StoreLocal { slot, src }, synthetic_span())
-    };
-    let load = |dst: Reg, slot: u16| {
-        SpannedInstr::new(LirInstr::LoadLocal { dst, slot }, synthetic_span())
-    };
-    let jump = |label: Label| SpannedTerminator::new(Terminator::Jump(label), synthetic_span());
+        // The diamond's other arm: nothing but the jump to the merge.
+        .block(1, vec![], Terminator::Jump(Label(2)))
+        // The merge, which branches again into a second diamond.
+        .block(
+            2,
+            vec![load(Reg(4), 1)],
+            Terminator::Branch {
+                cond: Reg(4),
+                then_label: Label(3),
+                else_label: Label(4),
+            },
+        );
 
-    // Entry: park the sentinel in slot 2, then manufacture the orphan.
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(konst(Reg(0), 42));
-    entry.instructions.push(store(2, Reg(0)));
-    entry.instructions.push(konst(Reg(1), 7)); // the "new" value
-    entry.instructions.push(konst(Reg(2), 9)); // the "old" value, pushed above it
-    entry.instructions.push(store(0, Reg(1))); // DupN past the old value, then store
-    entry.instructions.push(store(1, Reg(2))); // consume the old value
-                                               // Simulated stack is now [Reg(1)] — one orphan, and it is on top.
-    entry.instructions.push(load(Reg(3), 0));
-    entry.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(3),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        synthetic_span(),
-    );
-    func.blocks.push(entry);
-
-    // The diamond's other arm: nothing but the jump to the merge.
-    let mut arm = BasicBlock::new(Label(1));
-    arm.terminator = jump(Label(2));
-    func.blocks.push(arm);
-
-    // The merge, which branches again into a second diamond.
-    let mut merge = BasicBlock::new(Label(2));
-    merge.instructions.push(load(Reg(4), 1));
-    merge.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(4),
-            then_label: Label(3),
-            else_label: Label(4),
-        },
-        synthetic_span(),
-    );
-    func.blocks.push(merge);
-
-    for label in [Label(3), Label(4)] {
-        let mut b = BasicBlock::new(label);
-        b.terminator = jump(Label(5));
-        func.blocks.push(b);
+    for label in [3, 4] {
+        func = func.block(label, vec![], Terminator::Jump(Label(5)));
     }
 
     // Exit: read the sentinel back out of the topmost local and return it.
-    let mut exit = BasicBlock::new(Label(5));
-    exit.instructions.push(load(Reg(5), 2));
-    exit.terminator = SpannedTerminator::new(Terminator::Return(Reg(5)), synthetic_span());
-    func.blocks.push(exit);
-
-    func
+    func.block(5, vec![load(Reg(5), 2)], Terminator::Return(Reg(5)))
+        .build()
 }
 
 #[test]
@@ -274,46 +216,36 @@ fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirFunction {
     let s_alloc = StaticRegion::new(alloc_slot).expect("alloc slot nonzero");
     let s_assert = StaticRegion::new(assert_slot).expect("assert slot nonzero");
 
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 3;
-    let mut block = BasicBlock::new(Label(0));
-    // r0 ← nil (pair head), r1 ← () (pair tail).
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Nil,
-        },
-        synthetic_span(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::EmptyList,
-        },
-        synthetic_span(),
-    ));
-    // r2 ← pair(r0, r1), born in `s_alloc` (records slot→phys in the activation map).
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::List {
-            dst: Reg(2),
-            head: Reg(0),
-            tail: Reg(1),
-            region: s_alloc,
-        },
-        synthetic_span(),
-    ));
-    // The oracle: assert `s_assert` names r2's physical region.
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::AssertRegionMatches {
-            region_id: s_assert,
-            src: Reg(2),
-        },
-        synthetic_span(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), synthetic_span());
-    func.blocks.push(block);
-    func.entry = Label(0);
-    func
+    LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![
+                // r0 ← nil (pair head), r1 ← () (pair tail).
+                LirInstr::Const {
+                    dst: Reg(0),
+                    value: LirConst::Nil,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::EmptyList,
+                },
+                // r2 ← pair(r0, r1), born in `s_alloc` (records slot→phys in the
+                // activation map).
+                LirInstr::List {
+                    dst: Reg(2),
+                    head: Reg(0),
+                    tail: Reg(1),
+                    region: s_alloc,
+                },
+                // The oracle: assert `s_assert` names r2's physical region.
+                LirInstr::AssertRegionMatches {
+                    region_id: s_assert,
+                    src: Reg(2),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 #[test]

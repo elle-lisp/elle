@@ -2,56 +2,35 @@ use super::*;
 
 /// Build LIR: fn(x) { return float(x) }
 fn make_int_to_float() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("int_to_float".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Convert {
-            dst: Reg(1),
-            op: ConvOp::IntToFloat,
-            src: Reg(0),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), s());
-    func.blocks.push(block);
-    func.num_regs = 2;
-    func
+    make_convert("int_to_float", ConvOp::IntToFloat)
 }
 
 /// Build LIR: fn(x) { return int(x) }
 fn make_float_to_int() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("float_to_int".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Convert {
-            dst: Reg(1),
-            op: ConvOp::FloatToInt,
-            src: Reg(0),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), s());
-    func.blocks.push(block);
-    func.num_regs = 2;
-    func
+    make_convert("float_to_int", ConvOp::FloatToInt)
+}
+
+/// Build LIR: fn(x) { return <op>(x) } — the shape both conversions share.
+fn make_convert(name: &str, op: ConvOp) -> LirFunction {
+    LirFixture::new(Arity::Exact(1))
+        .name(name)
+        .signal(Signal::errors())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Convert {
+                    dst: Reg(1),
+                    op,
+                    src: Reg(0),
+                },
+            ],
+            Terminator::Return(Reg(1)),
+        )
+        .build()
 }
 
 #[test]

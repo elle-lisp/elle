@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod func;
 mod instr;
+mod regs;
 pub use func::*;
 pub use instr::*;
+pub use regs::*;
 
 /// Number of closure-valued `ValueConst` instructions converted to
 /// `ClosureRef` by `convert_value_consts_for_send` during the lifetime

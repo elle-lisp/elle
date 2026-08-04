@@ -2,46 +2,36 @@ use super::*;
 
 /// Build LIR: fn(a, b) { return a * b + a }
 fn make_mul_add() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(2));
-    func.name = Some("mul_add".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(1),
-            index: 1,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Mul,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(3),
-            op: BinOp::Add,
-            lhs: Reg(2),
-            rhs: Reg(0),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
-    func.blocks.push(block);
-    func.num_regs = 4;
-    func
+    LirFixture::new(Arity::Exact(2))
+        .name("mul_add")
+        .signal(Signal::errors())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(1),
+                    index: 1,
+                },
+                LirInstr::BinOp {
+                    dst: Reg(2),
+                    op: BinOp::Mul,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+                LirInstr::BinOp {
+                    dst: Reg(3),
+                    op: BinOp::Add,
+                    lhs: Reg(2),
+                    rhs: Reg(0),
+                },
+            ],
+            Terminator::Return(Reg(3)),
+        )
+        .build()
 }
 
 #[test]

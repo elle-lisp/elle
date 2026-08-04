@@ -4,37 +4,30 @@ use super::*;
 
 /// Build LIR: fn(x) { return x > 0 }
 fn make_compare() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.name = Some("compare_gt".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Gt,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
-    func.blocks.push(block);
-    func.num_regs = 3;
-    func
+    LirFixture::new(Arity::Exact(1))
+        .name("compare_gt")
+        .signal(Signal::errors())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Int(0),
+                },
+                LirInstr::Compare {
+                    dst: Reg(2),
+                    op: CmpOp::Gt,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 #[test]

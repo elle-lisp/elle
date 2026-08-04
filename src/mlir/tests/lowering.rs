@@ -2,55 +2,45 @@ use super::*;
 
 /// Build LIR: fn(a, b) { return a + b }
 fn make_add() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(2));
-    func.name = Some("add".to_string());
-    func.signal = Signal::errors();
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(0),
-            index: 0,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCaptureRaw {
-            dst: Reg(1),
-            index: 1,
-        },
-        s(),
-    ));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
-    func.blocks.push(block);
-    func.num_regs = 3;
-    func
+    LirFixture::new(Arity::Exact(2))
+        .name("add")
+        .signal(Signal::errors())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::LoadCaptureRaw {
+                    dst: Reg(1),
+                    index: 1,
+                },
+                LirInstr::BinOp {
+                    dst: Reg(2),
+                    op: BinOp::Add,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 /// Build LIR: fn() { return 42 }
 fn make_const() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.name = Some("the_answer".to_string());
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        },
-        s(),
-    ));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), s());
-    func.blocks.push(block);
-    func.num_regs = 1;
-    func
+    LirFixture::new(Arity::Exact(0))
+        .name("the_answer")
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(42),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 // ── Lowering tests ──────────────────────────────────────────────

@@ -32,6 +32,53 @@ Does NOT:
 | `Lowerer` | HIR → LIR |
 | `ScopeStats` | Compile-time scope allocation statistics |
 | `Emitter` | LIR → (Bytecode, yield_points, call_sites) |
+| `for_each_def` / `for_each_use` / `for_each_terminator_use` | The registers an instruction or terminator writes and reads |
+| `testkit::LirFixture` | Builds a `LirFunction` by hand, for tests (`#[cfg(test)]`) |
+
+## Register defs and uses
+
+`for_each_def`, `for_each_use` and `for_each_terminator_use` (`types/regs.rs`)
+report the registers an instruction writes and reads. They are the single
+answer to that question for the whole crate: the WASM register allocator and
+its liveness analysis both walk them, and so does the test fixture below when
+it infers a register count. A new `LirInstr` variant must be added to all
+three — the matches are exhaustive, so the compiler names the omission.
+
+## Building LIR in tests
+
+`testkit::LirFixture` (`src/lir/testkit.rs`, `#[cfg(test)]`) assembles a
+`LirFunction` directly, for the unit tests of every consumer of LIR: the
+emitter, the JIT, the WASM backend, the MLIR and SPIR-V tiers, and the
+cross-thread send path. It mirrors `hir::testkit` (`src/hir/testkit.rs`),
+which does the same job for the front-end passes.
+
+```rust
+let func = LirFixture::new(Arity::Exact(1))
+    .name("abs")
+    .signal(Signal::errors())
+    .block(0, vec![LirInstr::LoadCaptureRaw { dst: Reg(0), index: 0 }],
+           Terminator::Return(Reg(0)))
+    .build();
+```
+
+The rules the fixture holds:
+
+1. **`block` appends.** Blocks land in call order, and the first one added
+   sets `entry`.
+2. **Every span is synthetic.** The fixture wraps each `LirInstr` in a
+   `SpannedInstr` and the terminator in a `SpannedTerminator`, both with
+   `Span::synthetic()`. A test that needs real spans builds its blocks itself.
+3. **`build` infers `num_regs`**: one past the highest register id the blocks
+   mention — a def, a use, a terminator use, or a `TailCall`'s result register.
+   The count is therefore a fact about the instructions rather than a constant
+   to maintain by hand.
+4. **`num_regs` overrides the inference**, for a test that wants a count the
+   instructions do not justify.
+
+The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
+`num_params`, `closure_id`, `yield_points` — write the like-named field.
+Fields with no setter are public on the built `LirFunction`: set them on the
+result, as the JIT's arity and `vararg_kind` tests do.
 
 ## Data flow
 

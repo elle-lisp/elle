@@ -1,17 +1,13 @@
 use super::*;
+use crate::lir::testkit::LirFixture;
 
 /// A single-block function whose body is `instr` followed by `Return(Reg(0))`,
 /// with the GPU-friendly defaults (`Arity::Exact`, silent signal, no capture
 /// cells) so the only variable under test is the instruction itself.
 fn one_instr_func(instr: LirInstr) -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    let mut block = BasicBlock::new(Label(0));
-    block
-        .instructions
-        .push(SpannedInstr::new(instr, Span::synthetic()));
-    block.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-    func.blocks.push(block);
-    func
+    LirFixture::new(Arity::Exact(1))
+        .block(0, vec![instr], Terminator::Return(Reg(0)))
+        .build()
 }
 
 #[test]

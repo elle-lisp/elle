@@ -1,7 +1,7 @@
 use super::*;
-use crate::lir::{BasicBlock, BinOp, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator};
+use crate::lir::testkit::LirFixture;
+use crate::lir::{BinOp, LirInstr, Reg, Terminator};
 use crate::signals::Signal;
-use crate::syntax::Span;
 use crate::value::Arity;
 
 fn make_simple_lir() -> LirFunction {
@@ -9,66 +9,46 @@ fn make_simple_lir() -> LirFunction {
     // fn(x) -> x
     // The LIR uses LoadCapture to access parameters.
     // With num_captures=0, LoadCapture index 0 loads from args[0].
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 1;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    // Load argument 0 into register 0
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-
-    func.blocks.push(entry);
-    func.entry = Label(0);
-    func
+    LirFixture::new(Arity::Exact(1))
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
 }
 
 fn make_add_lir() -> LirFunction {
     // Create a function that adds two arguments
     // fn(x, y) -> x + y
     // With num_captures=0, LoadCapture index 0 and 1 load from args[0] and args[1].
-    let mut func = LirFunction::new(Arity::Exact(2));
-    func.num_regs = 3;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    // Load arguments into registers
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(1),
-            index: 1,
-        },
-        Span::synthetic(),
-    ));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        Span::synthetic(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), Span::synthetic());
-
-    func.blocks.push(entry);
-    func.entry = Label(0);
-    func
+    LirFixture::new(Arity::Exact(2))
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::LoadCapture {
+                    dst: Reg(1),
+                    index: 1,
+                },
+                LirInstr::BinOp {
+                    dst: Reg(2),
+                    op: BinOp::Add,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Return(Reg(2)),
+        )
+        .build()
 }
 
 #[test]
@@ -126,35 +106,24 @@ fn test_compile_add() {
 /// fn(x) -> nil, adopting x's region into the current activation's owner node.
 /// The compiled body: load arg 0, `AdoptIntoActivation`, return nil.
 fn make_adopt_into_activation_lir() -> LirFunction {
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::AdoptIntoActivation { child: Reg(0) },
-        Span::synthetic(),
-    ));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: crate::lir::LirConst::Nil,
-        },
-        Span::synthetic(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
-
-    func.blocks.push(entry);
-    func.entry = Label(0);
-    func
+    LirFixture::new(Arity::Exact(1))
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::AdoptIntoActivation { child: Reg(0) },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: crate::lir::LirConst::Nil,
+                },
+            ],
+            Terminator::Return(Reg(1)),
+        )
+        .build()
 }
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the JIT
@@ -296,128 +265,94 @@ fn test_compile_batch_mutual_calls() {
     let sym_g = SymbolId(101);
 
     // Build f: if x <= 0 then x else call g(x - 1)
-    let mut f = LirFunction::new(Arity::Exact(1));
-    f.name = Some("f".to_string());
-    f.num_regs = 8;
-    f.num_captures = 0;
-    f.signal = Signal::silent();
-
-    // Block 0 (entry): load arg, check condition
-    let mut b0 = BasicBlock::new(Label(0));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        Span::synthetic(),
-    ));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Compare {
-            dst: Reg(2),
-            op: CmpOp::Le,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        },
-        Span::synthetic(),
-    ));
-    b0.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(2),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        Span::synthetic(),
-    );
-
-    // Block 1 (base case): return x
-    let mut b1 = BasicBlock::new(Label(1));
-    b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-
-    // Block 2 (recursive case): call g(x - 1)
-    let mut b2 = BasicBlock::new(Label(2));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(3),
-            value: LirConst::Int(1),
-        },
-        Span::synthetic(),
-    ));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::BinOp {
-            dst: Reg(4),
-            op: BinOp::Sub,
-            lhs: Reg(0),
-            rhs: Reg(3),
-        },
-        Span::synthetic(),
-    ));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::ValueConst {
-            dst: Reg(5),
-            value: crate::value::Value::NIL,
-        },
-        Span::synthetic(),
-    ));
-    b2.instructions.push(SpannedInstr::new(
-        LirInstr::Call {
-            dst: Reg(6),
-            func: Reg(5),
-            args: vec![Reg(4)],
-            arity_checked: false,
-            region: crate::hir::region::StaticRegion::new(2).unwrap(),
-        },
-        Span::synthetic(),
-    ));
-    b2.terminator = SpannedTerminator::new(Terminator::Return(Reg(6)), Span::synthetic());
-
-    f.blocks = vec![b0, b1, b2];
-    f.entry = Label(0);
+    let f = LirFixture::new(Arity::Exact(1))
+        .name("f")
+        .signal(Signal::silent())
+        // Block 0 (entry): load arg, check condition
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::Const {
+                    dst: Reg(1),
+                    value: LirConst::Int(0),
+                },
+                LirInstr::Compare {
+                    dst: Reg(2),
+                    op: CmpOp::Le,
+                    lhs: Reg(0),
+                    rhs: Reg(1),
+                },
+            ],
+            Terminator::Branch {
+                cond: Reg(2),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+        )
+        // Block 1 (base case): return x
+        .block(1, vec![], Terminator::Return(Reg(0)))
+        // Block 2 (recursive case): call g(x - 1)
+        .block(
+            2,
+            vec![
+                LirInstr::Const {
+                    dst: Reg(3),
+                    value: LirConst::Int(1),
+                },
+                LirInstr::BinOp {
+                    dst: Reg(4),
+                    op: BinOp::Sub,
+                    lhs: Reg(0),
+                    rhs: Reg(3),
+                },
+                LirInstr::ValueConst {
+                    dst: Reg(5),
+                    value: crate::value::Value::NIL,
+                },
+                LirInstr::Call {
+                    dst: Reg(6),
+                    func: Reg(5),
+                    args: vec![Reg(4)],
+                    arity_checked: false,
+                    region: crate::hir::region::StaticRegion::new(2).unwrap(),
+                },
+            ],
+            Terminator::Return(Reg(6)),
+        )
+        .build();
 
     // Build g: tail-call f(x)
-    let mut g = LirFunction::new(Arity::Exact(1));
-    g.name = Some("g".to_string());
-    g.num_regs = 4;
-    g.num_captures = 0;
-    g.signal = Signal::silent();
-
-    let mut gb0 = BasicBlock::new(Label(0));
-    gb0.instructions.push(SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst: Reg(0),
-            index: 0,
-        },
-        Span::synthetic(),
-    ));
-    gb0.instructions.push(SpannedInstr::new(
-        LirInstr::ValueConst {
-            dst: Reg(1),
-            value: crate::value::Value::NIL,
-        },
-        Span::synthetic(),
-    ));
-    gb0.instructions.push(SpannedInstr::new(
-        LirInstr::TailCall {
-            dst: Reg(2),
-            func: Reg(1),
-            args: vec![Reg(0)],
-            arity_checked: false,
-            region: crate::hir::region::StaticRegion::new(2).unwrap(),
-            defer_callee_release: false,
-            deferred_release_slot: None,
-        },
-        Span::synthetic(),
-    ));
-    gb0.terminator = SpannedTerminator::new(Terminator::Unreachable, Span::synthetic());
-
-    g.blocks = vec![gb0];
-    g.entry = Label(0);
+    let g = LirFixture::new(Arity::Exact(1))
+        .name("g")
+        .signal(Signal::silent())
+        .block(
+            0,
+            vec![
+                LirInstr::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                LirInstr::ValueConst {
+                    dst: Reg(1),
+                    value: crate::value::Value::NIL,
+                },
+                LirInstr::TailCall {
+                    dst: Reg(2),
+                    func: Reg(1),
+                    args: vec![Reg(0)],
+                    arity_checked: false,
+                    region: crate::hir::region::StaticRegion::new(2).unwrap(),
+                    defer_callee_release: false,
+                    deferred_release_slot: None,
+                },
+            ],
+            Terminator::Unreachable,
+        )
+        .build();
 
     // Compile both together
     let compiler = JitCompiler::new().expect("Failed to create compiler");
@@ -457,42 +392,31 @@ fn test_compile_batch_rejects_polymorphic() {
 fn test_compile_yielding_function() {
     use crate::lir::YieldPointInfo;
 
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::yields();
-
-    let mut b0 = BasicBlock::new(Label(0));
-    b0.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: crate::lir::LirConst::Int(42),
-        },
-        Span::synthetic(),
-    ));
-    b0.terminator = SpannedTerminator::new(
-        Terminator::Emit {
-            signal: crate::value::fiber::SIG_YIELD,
-            value: Reg(0),
-            resume_label: Label(1),
-        },
-        Span::synthetic(),
-    );
-
-    let mut b1 = BasicBlock::new(Label(1));
-    b1.instructions.push(SpannedInstr::new(
-        LirInstr::LoadResumeValue { dst: Reg(1) },
-        Span::synthetic(),
-    ));
-    b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
-
-    func.blocks = vec![b0, b1];
-    func.entry = Label(0);
-    func.yield_points = vec![YieldPointInfo {
-        resume_ip: 5,
-        stack_regs: vec![],
-        num_locals: 0,
-    }];
+    let func = LirFixture::new(Arity::Exact(0))
+        .signal(Signal::yields())
+        .yield_points(vec![YieldPointInfo {
+            resume_ip: 5,
+            stack_regs: vec![],
+            num_locals: 0,
+        }])
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: crate::lir::LirConst::Int(42),
+            }],
+            Terminator::Emit {
+                signal: crate::value::fiber::SIG_YIELD,
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+        )
+        .block(
+            1,
+            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            Terminator::Return(Reg(1)),
+        )
+        .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let result = compiler.compile(&func, None, HashMap::new(), Vec::new());
