@@ -286,6 +286,15 @@ At runtime, when a squelched closure is called, if it emits a squelched
 signal, a `signal-violation` error is raised instead. Non-squelched
 signals pass through normally. Errors are never affected by squelch.
 
+Four bit classes cross every boundary untouched, whatever the mask
+names: `:error`, `:halt`, the `:switch` trampoline, and the pause bits
+(`:fuel`). A pause is the VM's own suspension, injected at a charge
+site under whatever code runs there, and the metering parent owns it —
+so a boundary has nothing to enforce and `(squelch f :fuel)` is inert.
+The exemption removes the pause bits alone: a compound signal that
+carries a pause plus a squelched user bit still raises the violation
+for the user bit.
+
 At compile time, when both arguments are statically known, the analyzer
 computes the resulting signal using the same algebra as the runtime
 `effective_signal()`. This enables `(silence)` on functions that call

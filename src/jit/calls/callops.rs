@@ -157,26 +157,15 @@ pub extern "C" fn elle_jit_call(
             // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
             if let Some((sig, _)) = vm.fiber.signal {
                 if !sig.is_empty() && !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) {
-                    // Squelch enforcement on the JIT-to-JIT path
-                    if !closure_squelch_mask.is_empty() {
-                        let squelched = sig.intersection(closure_squelch_mask);
-                        if !squelched.is_empty() {
-                            let squelched_str = {
-                                let registry =
-                                    crate::signals::registry::global_registry().lock().unwrap();
-                                registry.format_signal_bits(squelched)
-                            };
-                            let err = vm.escaping_error(
-                                "signal-violation",
-                                format!("squelch: signal {} caught at boundary", squelched_str),
-                            );
-                            // The squelch discard chokepoint — frees each parked
-                            // frame's owner node, exactly as `enforce_squelch`
-                            // does on the interpreter path.
-                            vm.discard_suspended_frames();
-                            vm.fiber.signal = Some((SIG_ERROR, err));
-                            return JitValue::nil();
-                        }
+                    // Squelch enforcement on the JIT-to-JIT path, through the
+                    // predicate the interpreter's `enforce_squelch` asks.
+                    let squelched = crate::signals::squelched_bits(sig, closure_squelch_mask);
+                    if !squelched.is_empty() {
+                        // `squelch_violation` is the discard chokepoint — it frees
+                        // each parked frame's owner node before handing back the error.
+                        let err = vm.squelch_violation(squelched);
+                        vm.fiber.signal = Some((SIG_ERROR, err));
+                        return JitValue::nil();
                     }
                     return YIELD_SENTINEL;
                 }
@@ -247,26 +236,12 @@ pub extern "C" fn elle_jit_call(
         // Squelch enforcement: if the closure has a squelch mask and the callee
         // returned a suspending signal that matches, convert to signal-violation.
         let bits = result.bits;
-        if !closure_squelch_mask.is_empty()
-            && !bits.is_empty()
-            && !bits.intersects(SIG_ERROR)
-            && !bits.intersects(SIG_HALT)
-        {
-            let squelched = bits.intersection(closure_squelch_mask);
-            if !squelched.is_empty() {
-                let squelched_str = {
-                    let registry = crate::signals::registry::global_registry().lock().unwrap();
-                    registry.format_signal_bits(squelched)
-                };
-                let err = vm.escaping_error(
-                    "signal-violation",
-                    format!("squelch: signal {} caught at boundary", squelched_str),
-                );
-                // The squelch discard chokepoint (see the JIT-to-JIT arm above).
-                vm.discard_suspended_frames();
-                vm.fiber.signal = Some((SIG_ERROR, err));
-                return JitValue::nil();
-            }
+        let squelched = crate::signals::squelched_bits(bits, closure_squelch_mask);
+        if !squelched.is_empty() {
+            // The squelch discard chokepoint (see the JIT-to-JIT arm above).
+            let err = vm.squelch_violation(squelched);
+            vm.fiber.signal = Some((SIG_ERROR, err));
+            return JitValue::nil();
         }
 
         // Route through the shared converter, which parks the callee's inner

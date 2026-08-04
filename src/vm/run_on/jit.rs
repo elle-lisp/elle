@@ -151,28 +151,14 @@ impl VM {
         }
 
         if result_jv == crate::jit::YIELD_SENTINEL {
-            // Squelch enforcement: if the closure has a squelch mask
-            // covering the yield signal, produce :signal-violation.
-            let squelch_mask = closure.squelch_mask;
-            if !squelch_mask.is_empty() {
-                let yield_bits = if let Some((bits, _)) = &post_signal {
-                    *bits
-                } else {
-                    crate::value::SIG_YIELD
-                };
-                let squelched = yield_bits.intersection(squelch_mask);
-                if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
-                    self.discard_suspended_frames();
-                    let err = self.escaping_error(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                    );
-                    return (SIG_ERROR, err);
-                }
+            // Squelch enforcement on the suspension the sentinel reports. The
+            // signal is on `post_signal`, not `fiber.signal` — the caller's
+            // signal is back in place by here — so this asks the shared
+            // predicate directly instead of going through `enforce_squelch`.
+            let yield_bits = post_signal.map_or(crate::value::SIG_YIELD, |(bits, _)| bits);
+            let squelched = crate::signals::squelched_bits(yield_bits, closure.squelch_mask);
+            if !squelched.is_empty() {
+                return (SIG_ERROR, self.squelch_violation(squelched));
             }
 
             if let Some((bits, val)) = post_signal {
@@ -197,25 +183,11 @@ impl VM {
 
         // Error or halt set during execution wins over the return value.
         if let Some((bits, val)) = post_signal {
-            // Squelch enforcement for non-yield signals.
-            let squelch_mask = closure.squelch_mask;
-            if !squelch_mask.is_empty()
-                && !bits.intersects(SIG_ERROR)
-                && !bits.intersects(crate::value::SIG_HALT)
-            {
-                let squelched = bits.intersection(squelch_mask);
-                if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
-                    self.discard_suspended_frames();
-                    let err = self.escaping_error(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                    );
-                    return (SIG_ERROR, err);
-                }
+            // Squelch enforcement for non-yield signals — same predicate, same
+            // reason for not routing through `enforce_squelch`.
+            let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
+            if !squelched.is_empty() {
+                return (SIG_ERROR, self.squelch_violation(squelched));
             }
             if !bits.is_empty() {
                 return (bits, val);

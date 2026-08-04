@@ -105,24 +105,23 @@ not an information barrier.
 **Transparent to signal hygiene.** Three enforcement points must
 exempt tooling pauses:
 
-- `enforce_squelch` (`src/vm/core.rs`) exempts `:error`, `:halt`, and
-  `:switch` today (the first two by intersection, `:switch` by exact
-  equality); the pause bits `:debug|:fuel` join them. Without the
-  exemption, a boundary converts a tooling pause into a
-  signal-violation, discards the suspended frames, and leaves the
-  fiber paused-but-resumable over the wreckage — resume re-executes
-  the interrupted instruction against a torn-down stack.
-  `tests/elle/squelch-fuel.lisp` pins this today with `:fuel` alone:
-  one charge-site shape resumes into a Rust panic, the other into
-  nil-filled locals. The one function serves six call sites, but four
-  more copies are inlined in the JIT paths — two in
-  `src/vm/run_on/jit.rs` (the yield-sentinel arm has no exemption
-  guard at all) and two in `src/jit/calls/callops.rs` (neither
-  exempts `:switch`). The copies have already drifted; the exemption
-  lands as one shared predicate that all ten sites call. With `:fuel`
-  exempt, `(squelch f :fuel)` becomes inert — metering is the
-  parent's action, not the closure's behavior, so the boundary has
-  nothing to enforce.
+- Squelch/attune enforcement asks one predicate,
+  `signals::squelched_bits` (`src/signals/mod.rs`), at all ten sites:
+  the interpreter's `enforce_squelch` (`src/vm/core.rs`) serves six,
+  and four more are inlined in the JIT paths — two in
+  `src/vm/run_on/jit.rs` and two in `src/jit/calls/callops.rs`. One
+  predicate is what keeps the exemptions from drifting apart between
+  tiers. It exempts `:error` and `:halt` by intersection, `:switch` by
+  exact equality, and subtracts the pause bits (`SIG_PAUSE`). A
+  boundary that instead converts a tooling pause into a
+  signal-violation discards the suspended frames and leaves the fiber
+  paused-but-resumable over the wreckage — resume re-executes the
+  interrupted instruction against a torn-down stack.
+  `tests/elle/squelch-fuel.lisp` pins the rule for `:fuel` on both
+  tiers, one case per charge-site shape. `:debug` joins `SIG_PAUSE`
+  with the debug pause itself; the constant is the single place to add
+  it. `(squelch f :fuel)` is inert — metering is the parent's action,
+  not the closure's behavior, so the boundary has nothing to enforce.
 - The silence enforcement (`src/vm/call/inner.rs`) kills the process
   with `std::process::abort` when a statically-silent closure
   produces any signal. It has no exemption list today; it gains one:
@@ -637,8 +636,8 @@ before its implementation.
 | Phase | Contents | Status |
 |-------|----------|--------|
 | 1 | name plumbing (HIR → `LirFunction.name` → `Code.name`), `Code.local_names` with three-shape places and parameter entries, the `Bytecode` → `Code` repair (`num_locals` + `location_map`), `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | not started |
-| 2 | `debug/break`, attached flag, hygiene exemptions as one shared predicate (squelch × 10 sites, silence, silence bounds), denial semantics, JIT side-exit inspectability | not started |
-| 3 | fiber debug + skip-once fields, owning-key breakpoint table, `debug/break-at`, composed-bit pauses, `:fuel` squelch/attune exemption, per-instruction fuel, always-park re-execute frames, tier gate, error-path frame preservation | not started |
+| 2 | `debug/break`, attached flag, hygiene exemptions (`:debug` joins `SIG_PAUSE`; silence; silence bounds), denial semantics, JIT side-exit inspectability | not started |
+| 3 | fiber debug + skip-once fields, owning-key breakpoint table, `debug/break-at`, composed-bit pauses, per-instruction fuel, always-park re-execute frames, tier gate, error-path frame preservation | not started |
 | 4 | `lib/debug.lisp` driver, snapshot/outcome schemas | not started |
 | 5 | identity order (allocation-sequence ordering for reference-identity values), `PrimitiveDef.replay` classes + registry exhaustiveness test, deterministic tier promotion under recording, record/replay mode flag, thread/callback refusal, log schema, `debug:replay`, `debug:bisect` | not started |
 | 6 | MCP session tools (out of tree) | not started |
@@ -666,9 +665,9 @@ before its implementation.
    frames.
 3. `fiber/set-fuel 1` under the debug flag advances exactly one
    instruction; a pause at an instruction with an empty operand stack
-   parks and resumes correctly; a fuel pause inside `squelch` and
-   `attune` boundaries passes through and resumes
-   (`tests/elle/squelch-fuel.lisp` goes green); a `debug/break-at`
+   parks and resumes correctly; a step pause under the debug flag
+   inside a `squelch` boundary passes through (extends the pinned
+   `tests/elle/squelch-fuel.lisp`); a `debug/break-at`
    line pause resolves to that line's first instruction; resume past
    a breakpoint does not re-trigger it (skip-once); a dynamic break
    inside an inferred-silent function pauses instead of aborting; the

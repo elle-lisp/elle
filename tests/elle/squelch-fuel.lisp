@@ -1,30 +1,23 @@
 (elle/epoch 12)
-# squelch-fuel: a fuel pause must pass through squelch and attune boundaries.
-#
-# THIS TEST FAILS, identically under both tiers. It goes green when the
-# enforcement chokepoints exempt the VM's pause bits (docs/debugger.md
-# § "The :debug signal", "Transparent to signal hygiene").
+# squelch-fuel: a fuel pause passes through squelch and attune boundaries.
 #
 # :fuel is not program behavior. The VM injects it at the interpreter's
 # charge sites to meter a fiber, and the metering parent owns the pause:
 # lib/process.lisp preemption and the debugger's step engine both deliver
-# it under arbitrary user code. `enforce_squelch` (src/vm/core.rs) exempts
-# only :error, :halt, and :switch, so a boundary that names :fuel converts
-# the pause into a signal-violation instead. The conversion discards the
-# suspended frames — and leaves the fiber :paused and resumable over the
-# wreckage. Observed today when the violation is caught and the fiber is
-# resumed:
+# it under arbitrary user code. So the enforcement chokepoints exempt the
+# pause bits (`signals::squelched_bits`, src/signals/mod.rs) and a boundary
+# that names :fuel is inert — metering is the parent's action, not the
+# closure's behavior, so the boundary has nothing to enforce. The pause
+# propagates to the metering parent as plain :fuel with a nil payload, and
+# a refueled resume runs the body to completion.
 #
-#   - a TailCall charge site resumes into a Rust panic
-#     ("VM bug: Stack underflow on TailCall");
-#   - a backward-jump charge site resumes into nil-filled locals
-#     ("+: expected number, got nil").
-#
-# Correct behavior, asserted below: the pause propagates to the metering
-# parent as plain :fuel with a nil payload, and a refueled resume runs the
-# body to completion. A squelch of :fuel is then inert — metering is the
-# parent's action, not the closure's behavior, so the boundary has nothing
-# to enforce.
+# A boundary that converts the pause into a signal-violation instead
+# discards the suspended frames and leaves the fiber :paused and resumable
+# over the wreckage, so the resume runs the interrupted instruction against
+# a torn-down stack. The two charge-site shapes tear down different state,
+# hence one case each: a TailCall site (S1) and a backward jump (S2). The
+# interpreter and the JIT call paths share one predicate, so the assertions
+# hold identically under either tier.
 
 (def tail-looper
   (fn []
@@ -75,5 +68,30 @@
   (fiber/resume f)
   (assert (= (fiber/status f) :dead) "S3: the refueled fiber completes")
   (assert (= (fiber/value f) 45) "S3: the boundary did not perturb the result"))
+
+# S4: the exemption is for the pause bits alone. A boundary that names
+# both :fuel and a user signal keeps converting the user signal.
+(def yielder
+  (fn []
+    (yield 1)
+    7))
+
+(let [f (fiber/new (fn [] ((squelch tail-looper |:fuel :yield|)))
+                   |:fuel :yield :error|)]
+  (fiber/set-fuel f 3)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused) "S4: the fiber pauses at the meter")
+  (assert (= (fiber/value f) nil)
+          "S4: the boundary passes the :fuel pause through")
+  (fiber/set-fuel f 100000)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :dead) "S4: the refueled fiber completes")
+  (assert (= (fiber/value f) 45) "S4: the boundary did not perturb the result"))
+
+(let [caught (try
+               ((squelch yielder |:fuel :yield|))
+               (catch e (get e :error)))]
+  (assert (= caught :signal-violation)
+          "S4: the same boundary still converts the squelched :yield"))
 
 (println "squelch-fuel: ok")

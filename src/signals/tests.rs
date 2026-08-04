@@ -304,3 +304,64 @@ fn subprocess_names_the_dispatch_bit_and_the_capability_bit() {
     assert!(sig.bits.intersects(SIG_YIELD));
     assert!(sig.bits.intersects(SIG_ERROR));
 }
+
+// ── squelched_bits: what a squelch/attune boundary enforces ─────────
+//
+// The interpreter and both JIT call paths share this predicate, so its
+// exemption classes are the tier-independent statement of the rule.
+// `tests/elle/squelch-fuel.lisp` pins the pause exemption end to end.
+
+#[test]
+fn squelched_bits_names_the_bits_the_mask_covers() {
+    assert_eq!(squelched_bits(SIG_YIELD, SIG_YIELD), SIG_YIELD);
+    assert_eq!(
+        squelched_bits(SIG_YIELD.union(SIG_IO), SIG_IO),
+        SIG_IO,
+        "only the covered bit violates the boundary"
+    );
+}
+
+#[test]
+fn squelched_bits_is_empty_when_the_mask_misses() {
+    assert!(squelched_bits(SIG_YIELD, SIG_IO).is_empty());
+    assert!(squelched_bits(SIG_YIELD, SignalBits::EMPTY).is_empty());
+    assert!(squelched_bits(SignalBits::EMPTY, SignalBits::ALL).is_empty());
+}
+
+#[test]
+fn squelched_bits_exempts_error_and_halt_whole() {
+    // Both are the escapes every boundary lets out, so a compound carrying
+    // one passes entire — the squelched companion bit does not violate.
+    assert!(squelched_bits(SIG_ERROR, SignalBits::ALL).is_empty());
+    assert!(squelched_bits(SIG_HALT, SignalBits::ALL).is_empty());
+    assert!(squelched_bits(SIG_ERROR.union(SIG_YIELD), SIG_YIELD).is_empty());
+    assert!(squelched_bits(SIG_HALT.union(SIG_YIELD), SIG_YIELD).is_empty());
+}
+
+#[test]
+fn squelched_bits_exempts_switch_by_exact_match_only() {
+    assert!(squelched_bits(SIG_SWITCH, SignalBits::ALL).is_empty());
+    // A user signal riding alongside the trampoline bit stays enforceable.
+    assert_eq!(
+        squelched_bits(SIG_SWITCH.union(SIG_YIELD), SIG_YIELD),
+        SIG_YIELD
+    );
+}
+
+#[test]
+fn squelched_bits_exempts_the_pause_bits() {
+    // The VM injects a pause at its own charge sites; the metering parent
+    // owns it, so a boundary that names :fuel has nothing to enforce.
+    assert!(squelched_bits(SIG_FUEL, SIG_FUEL).is_empty());
+    assert!(squelched_bits(SIG_PAUSE, SignalBits::ALL).is_empty());
+}
+
+#[test]
+fn squelched_bits_subtracts_the_pause_rather_than_exempting_the_signal() {
+    // A pause riding with a squelched user bit still violates the boundary,
+    // and the violation names the user bit alone.
+    assert_eq!(
+        squelched_bits(SIG_FUEL.union(SIG_YIELD), SIG_FUEL.union(SIG_YIELD)),
+        SIG_YIELD
+    );
+}

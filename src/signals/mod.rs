@@ -81,6 +81,40 @@ const VM_INTERNAL: SignalBits = SIG_RESUME
     .union(SIG_SWITCH)
     .union(SIG_WAIT);
 
+/// Pause bits: suspensions the VM injects at its own charge sites, under
+/// whatever code happens to be running there. `:fuel` is the metering pause —
+/// the interpreter raises it when a fiber's instruction budget runs out, and
+/// the metering parent (`lib/process.lisp` preemption, a stepping debugger)
+/// owns the resume.
+///
+/// A pause is the VM's action, not the paused code's behavior, so it is
+/// exempt from squelch/attune enforcement — see [`squelched_bits`].
+pub const SIG_PAUSE: SignalBits = SIG_FUEL;
+
+/// The bits a `squelch`/`attune` boundary converts into a `signal-violation`
+/// when a closure carrying `mask` produces `bits`. An empty result means the
+/// signal crosses the boundary untouched.
+///
+/// This is the one predicate behind every enforcement site — the interpreter's
+/// `VM::enforce_squelch` and the JIT's call, tail-call, and sentinel paths —
+/// so the exemptions cannot drift apart between tiers.
+///
+/// Three classes never violate a boundary:
+///
+/// - `:error` and `:halt` are the escapes every boundary lets out, so a signal
+///   carrying either passes whole.
+/// - `:switch`, matched exactly, is the VM's fiber-switch trampoline. The exact
+///   match keeps a user signal that merely rides alongside enforceable.
+/// - The pause bits pass by subtraction rather than exempting the whole signal,
+///   so a compound `|:fuel :log|` still violates a squelch of `:log`.
+#[inline]
+pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
+    if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) || bits == SIG_SWITCH {
+        return SignalBits::EMPTY;
+    }
+    bits.intersection(mask).subtract(SIG_PAUSE)
+}
+
 /// Capability mask: all signals that user code can produce.
 ///
 /// Defined as the complement of VM-internal bits within the 64-bit signal

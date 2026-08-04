@@ -322,18 +322,27 @@ impl VM {
     /// Check a signal against a squelch mask. If the signal is squelched,
     /// sets the fiber to a signal-violation error and returns `true`.
     /// Callers handle any additional side effects (stack push, call_stack pop, etc.).
+    ///
+    /// Which bits a boundary enforces is `signals::squelched_bits`' answer, shared
+    /// with the JIT's inlined checks.
     pub(crate) fn enforce_squelch(&mut self, bits: SignalBits, mask: SignalBits) -> bool {
-        if mask.is_empty()
-            || bits.intersects(crate::value::SIG_ERROR)
-            || bits.intersects(crate::value::SIG_HALT)
-            || bits == crate::value::SIG_SWITCH
-        {
-            return false;
-        }
-        let squelched = bits.intersection(mask);
+        let squelched = crate::signals::squelched_bits(bits, mask);
         if squelched.is_empty() {
             return false;
         }
+        let err = self.squelch_violation(squelched);
+        self.fiber.signal = Some((crate::value::SIG_ERROR, err));
+        true
+    }
+
+    /// Build the `signal-violation` error a squelch/attune boundary raises for
+    /// `squelched`, and discard the suspended frames the boundary abandons.
+    ///
+    /// The error value is returned rather than stored: each enforcement site
+    /// delivers it differently — the interpreter sets `fiber.signal`, the
+    /// `compile/run-on` entry returns it as the call's result. `squelched` must
+    /// be non-empty, the answer `signals::squelched_bits` gives.
+    pub(crate) fn squelch_violation(&mut self, squelched: SignalBits) -> Value {
         let squelched_str = {
             let registry = crate::signals::registry::global_registry().lock().unwrap();
             registry.format_signal_bits(squelched)
@@ -343,8 +352,7 @@ impl VM {
             format!("squelch: signal {} caught at boundary", squelched_str),
         );
         self.discard_suspended_frames();
-        self.fiber.signal = Some((crate::value::SIG_ERROR, err));
-        true
+        err
     }
 
     /// Discard the LIVE fiber's suspended frames (squelch / abort) — the
