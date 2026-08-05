@@ -1336,15 +1336,25 @@ fn port_write_timeout_threadpool() {
 }
 
 // `:timeout` on the looping reads, on the OTHER backend. io_uring re-arms a
-// linked timeout on each resubmission; the thread-pool worker holds
-// `SO_RCVTIMEO` on the fd for the operation. The pool half needs its own
-// coverage twice over: it is the sole mechanism on macOS, and it was the
-// weaker of the two before — measured on this file, io_uring already bounded a
-// single `port/read` while the pool backend bounded no read at all.
+// linked timeout on each resubmission; the thread-pool worker takes the fd
+// non-blocking and waits in `poll(2)`. The pool half needs its own coverage
+// twice over: it is the sole mechanism on macOS, and it was the weaker of the
+// two before — measured on this file, io_uring already bounded a single
+// `port/read` while the pool backend bounded no read at all.
 // See src/io/AGENTS.md § Operation timeouts.
 #[test]
 fn port_read_timeout_threadpool() {
     run_elle_script_with_args("port-read-timeout", &["--no-uring"]);
+}
+
+// Two timed operations on one descriptor, on the OTHER backend. The bound the
+// pool worker uses is descriptor state the operations share, so the file only
+// measures anything where that mechanism runs: io_uring gives each operation
+// its own linked timeout and shares nothing. See the fixture header and
+// src/io/AGENTS.md § Operation timeouts.
+#[test]
+fn port_timeout_shared_fd_threadpool() {
+    run_elle_script_with_args("port-timeout-shared-fd", &["--no-uring"]);
 }
 
 // (Hygiene for syntax-case bindings is carried structurally — synthetic-ness

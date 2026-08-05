@@ -139,4 +139,33 @@
 
 (println "  5. a slow but progressing peer does not trip the timeout")
 
+## ── 6. A pipe peer that stays silent ─────────────────────────────────
+##
+## The write-direction twin of this case is `port-write-timeout.lisp` case 3.
+## A pipe rejects the socket options that bound a socket, so the bound has to
+## belong to the operation rather than to the descriptor. The child prints
+## nothing and exits after 3 s, which closes its end of the pipe: an unbounded
+## read returns the EOF that produced, about 3 s in, so `elapsed` is again the
+## discriminator.
+
+(ev/run (fn []
+          (let* [child (subprocess/exec "sleep" ["3"])
+                 started (clock/monotonic)
+                 [ok? result] (protect (port/read (get child :stdout) 1000
+                                       :timeout 500))
+                 elapsed (- (clock/monotonic) started)]
+            (protect (subprocess/kill child :sigterm))
+            (protect (subprocess/wait child))
+            (assert (< elapsed 2)
+                    (concat "port/read on a pipe ran " (string elapsed)
+                            "s against a :timeout 500 — the read waited for the"
+                            " child's exit instead of its own deadline"))
+            (assert (not ok?)
+                    (concat "a silent child must signal, got " (string result)))
+            (assert (= (get result :error) :timeout)
+                    (concat "expected a :timeout error from the pipe read, got "
+                            (string result))))))
+
+(println "  6. read stops at its deadline against a silent pipe")
+
 (println "port-read-timeout: all tests passed")

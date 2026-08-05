@@ -165,6 +165,9 @@ pub(super) enum RawCompletion {
 /// Maximum concurrent thread-pool operations.
 pub(super) const MAX_THREAD_POOL_OPS: usize = 64;
 
+mod opbound;
+use opbound::*;
+
 mod submitop;
 
 /// The single completion channel every background worker feeds.

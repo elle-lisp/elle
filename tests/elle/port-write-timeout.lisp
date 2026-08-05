@@ -91,4 +91,36 @@
 
 (println "  2. a slow but progressing peer does not trip the timeout")
 
+## A pipe stalls on an absent reader exactly as a socket does, and it rejects
+## the socket options that bound a socket. So the bound has to belong to the
+## operation rather than to the descriptor: the child below never reads its
+## stdin, the pipe buffer fills, and the rest of the payload has nowhere to go.
+##
+## The child exits after 4 s and its end of the pipe closes with it, so an
+## unbounded write does not hang the suite — it returns about 4 s in with the
+## EPIPE that close produced. `elapsed` separates the two: a bounded write
+## returns at its own 500 ms deadline, and the error kind says it ended for its
+## deadline rather than for the peer's exit.
+
+(ev/run (fn []
+          (let* [child (subprocess/exec "sleep" ["4"])
+                 started (clock/monotonic)
+                 [ok? err] (protect (port/write (get child :stdin)
+                                    (bytes (string/repeat "x" 1000000))
+                                    :timeout 500))
+                 elapsed (- (clock/monotonic) started)]
+            (protect (subprocess/kill child :sigterm))
+            (protect (subprocess/wait child))
+            (assert (< elapsed 2)
+                    (concat "port/write to a pipe ran " (string elapsed)
+                            "s against a :timeout 500 — the write waited for the"
+                            " child's exit instead of its own deadline"))
+            (assert (not ok?)
+                    "port/write to a child that never reads must signal, not succeed")
+            (assert (= (get err :error) :timeout)
+                    (concat "expected a :timeout error from the pipe write, got "
+                            (string err))))))
+
+(println "  3. :timeout bounds a write to a pipe nobody reads")
+
 (println "port-write-timeout: all tests passed")

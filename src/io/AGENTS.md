@@ -218,18 +218,29 @@ Each backend carries the bound its own way:
 | Backend | Mechanism | Expiry |
 |---------|-----------|--------|
 | io_uring | `push_resubmit` re-arms a `LinkTimeout` on every resubmission; `PendingOp::Port.timeout` carries the duration | `ECANCELED` |
-| thread pool | `SocketTimeout` holds `SO_SNDTIMEO`/`SO_RCVTIMEO` on the fd for the operation and restores it on drop | `ETIMEDOUT` |
+| thread pool | `OpBound` holds the fd in non-blocking mode for the operation and waits for readiness in `poll(2)`, re-armed after every transfer | `ETIMEDOUT` |
 
 `complete_port_op` maps both errnos to the `:timeout` error kind.
 
-The pool worker cannot poll for readiness instead: its fds are blocking, so the
-syscall can park after a poll reports the fd ready. The socket's own timeout is
-what makes the syscall itself return. A non-socket fd rejects these options and
-is left unbounded, which is correct — a file or pipe never stalls on an absent
-peer.
+The bound holds for every kind of descriptor, which is why the pool worker owns
+the wait rather than delegating it to the fd. `SO_RCVTIMEO`/`SO_SNDTIMEO` bound
+a socket, and a pipe, a fifo and a tty all reject them — yet a reader that stops
+reading fills a pipe exactly as it fills a socket, and the write that follows
+parks in the kernel forever. `poll(2)` accepts every descriptor, so `OpBound`
+bounds every descriptor. Non-blocking mode is what makes the wait sufficient: a
+blocking syscall can park again after a poll reports the fd ready, while a
+non-blocking one reports `EAGAIN` and hands the wait back to `OpBound`.
+
+`O_NONBLOCK` lives on the open file description, so two operations on one
+descriptor share it. `OpBound` counts them: the first operation sets the flag
+and records what it found, the last one puts that back. Every read and write
+loop treats `EAGAIN` as a readiness wait whether or not it asked for a timeout,
+so an untimed operation that meets a descriptor another operation made
+non-blocking waits rather than failing.
 
 Pinned by `tests/elle/port-write-timeout.lisp` and
-`tests/elle/port-read-timeout.lisp`, both run on each backend.
+`tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
+socket peer and a pipe peer.
 
 ## The submission frame
 

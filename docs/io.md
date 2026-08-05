@@ -128,8 +128,21 @@ Both readings stop a hang; only the per-operation one keeps a slow transfer
 working. `port/read` is unaffected either way: it is a single "up to n bytes"
 operation.
 
+The bound covers every kind of port. A socket peer that stops reading, a child
+process that never reads its stdin, and a fifo nobody opens for reading all
+stall the same way, and `:timeout` returns from all three.
+
+```lisp
+# The child sleeps and never reads. The pipe buffer fills, and the rest of
+# the payload has nowhere to go.
+(def proc (subprocess/exec "sleep" ["30"]))
+(port/write (get proc :stdin) payload :timeout 500)
+#   — signals :timeout
+```
+
 The pinning tests are `tests/elle/port-write-timeout.lisp` and
-`tests/elle/port-read-timeout.lisp`, both run on each backend.
+`tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
+socket peer and a pipe peer.
 
 ### Streams from ports
 
