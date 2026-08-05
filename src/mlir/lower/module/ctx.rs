@@ -2,8 +2,8 @@
 //! per-terminator emitters.
 //!
 //! `lower_to_module` builds the MLIR blocks and argument bindings, then walks
-//! the LIR driving [`instr::lower_instr`](super::instr::lower_instr) and
-//! [`term::lower_terminator`](super::term::lower_terminator) for each block.
+//! the LIR driving [`instr::lower_instr`] and [`term::lower_terminator`] for
+//! each block.
 //! Both need the same bundle of SSA/type maps plus the interned MLIR type
 //! handles; `LowerCtx` carries them so the emitters take one context argument
 //! instead of a dozen positional parameters.

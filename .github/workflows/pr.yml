@@ -50,6 +50,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
+          targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - name: Install LLVM 22 (for mlir feature)
         run: |
@@ -61,6 +62,18 @@ jobs:
         run: cargo fmt -- --check
       - name: Run clippy on workspace
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The clippy step above only ever sees the Linux arm of every
+      # `cfg(target_os)`, so a binding used solely by the io_uring backend reads
+      # as dead code on macOS and reaches the Mac runner as a warning. Clippy
+      # checks (no codegen, no link), so the macOS arms compile here without an
+      # SDK. `--no-default-features` is forced: `ffi` and the `zstd` dependency
+      # build C for the host toolchain and cannot cross. That also drops the
+      # variant that keeps `HeapObject` balanced, so allow that one lint —
+      # the default-features builds still enforce it.
+      - name: Cross-check macOS
+        run: >
+          cargo clippy --target x86_64-apple-darwin --no-default-features -p elle
+          -- -D warnings -A clippy::large_enum_variant
       - name: Check documentation
         run: cargo doc --no-deps --document-private-items
         env:
@@ -241,6 +254,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: macos
@@ -250,6 +265,11 @@ jobs:
         # Homebrew installs it under /opt/homebrew/lib, which library_candidates
         # probes explicitly (dyld does not search there for a bare soname).
         run: brew install parallel coreutils zstd
+      # The QA job's cross-check covers the macOS arms that build without an
+      # SDK; this one is the same gate over `ffi` and `jit`, which only a real
+      # Mac can compile. Run it before `make elle` so a warning fails fast.
+      - name: Run clippy
+        run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
       - name: make doctest

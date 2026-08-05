@@ -10,6 +10,8 @@ use crate::value::{
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
+// `jit_cache` is the only `Arc` holder in this module.
+#[cfg(feature = "jit")]
 use std::sync::Arc;
 
 #[cfg(feature = "jit")]

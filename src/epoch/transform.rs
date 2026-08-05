@@ -47,7 +47,11 @@ impl Rules<'static> {
 
 impl Rules<'_> {
     /// No rules at all — the walk rewrites nothing.
-    #[cfg(test)]
+    ///
+    /// `doc` joins `test` in the gate because a doc build does not set `test`,
+    /// so rustdoc would not see the item the `Rules` docs link to. CI runs
+    /// rustdoc with `-D warnings`, which turns that dangling link into an error.
+    #[cfg(any(test, doc))]
     pub(super) fn none() -> Self {
         Rules::default()
     }

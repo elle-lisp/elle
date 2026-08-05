@@ -35,6 +35,11 @@ impl PortKey {
     /// POSIX numbers they name; `Fd` carries its own. Backends re-derive the
     /// fd from the key whenever they resubmit an operation, so this mapping
     /// lives in one place.
+    ///
+    /// Only `io::uring::drain` resubmits from a key, so a release build on the
+    /// pool platform links no caller; the unit tests below still cover it
+    /// everywhere.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn raw_fd(&self) -> RawFd {
         match self {
             PortKey::Stdin => 0,

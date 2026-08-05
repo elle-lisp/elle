@@ -66,6 +66,10 @@ impl VM {
     /// callee, which releases it at the param's last use — so no `CallArgument`
     /// incref here. Uses `tail_call_env_cache` (it must not alias `env_cache`).
     /// Returns `None` (error set on fiber) on bad keyword args.
+    ///
+    /// The interpreter's own tail calls go through `tail_call_inner`, so the
+    /// JIT's array-call helper is the only caller.
+    #[cfg(feature = "jit")]
     pub(crate) fn build_tail_call_env(
         &mut self,
         closure: &crate::value::Closure,

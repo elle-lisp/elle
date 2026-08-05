@@ -428,9 +428,9 @@ mod platform {
 
                 let path = inner.fd_to_path.get(&fd).cloned().unwrap_or_default();
 
-                let kind = if fflags & libc::NOTE_DELETE as u32 != 0 {
+                let kind = if fflags & libc::NOTE_DELETE != 0 {
                     WatchEventKind::Remove
-                } else if fflags & libc::NOTE_RENAME as u32 != 0 {
+                } else if fflags & libc::NOTE_RENAME != 0 {
                     WatchEventKind::Rename
                 } else {
                     // NOTE_WRITE, NOTE_EXTEND, NOTE_ATTRIB → Modify

@@ -1,4 +1,4 @@
-.PHONY: all elle docs docgen smoke test clean space help \
+.PHONY: all elle docs docgen smoke test crosscheck clean space help \
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir \
        doctest elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
@@ -60,7 +60,7 @@ docs/pipeline.svg: docs/pipeline.dot
 	dot -Tsvg $< -o $@
 
 docgen: elle  ## Generate documentation site (Rust docs + Elle site)
-	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 	$(ELLE) demos/docgen/generate.lisp
 
 # ── Format ─────────────────────────────────────────────────────────
@@ -245,12 +245,31 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
                MLIR_SYS_220_PREFIX=$(MLIR_PREFIX) \
                TABLEGEN_220_PREFIX=$(MLIR_PREFIX)
 
-test: smoke  ## Rust unit + integration tests + clippy + fmt + rustdoc after smoke
+# CI documents private items too, and most of this crate is private — without
+# the flag rustdoc never resolves a link into a `pub(crate)` item, so a broken
+# one reaches CI unseen. Keep the flag here and in .github/workflows in step.
+test: smoke crosscheck  ## Rust unit + integration tests + clippy + fmt + crosscheck + rustdoc after smoke
 	cargo fmt --check
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
-	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 	$(MLIR_ENV) cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
+
+# Clippy over the macOS arm of every `cfg(target_os)`. A Linux-only gate sees
+# only the io_uring side, so a binding the thread-pool backend never reads
+# stays invisible until the Mac runner reports it. Clippy does not codegen or
+# link, so this needs no macOS SDK — only the target's std. `ffi` and `zstd`
+# build C for the host and cannot cross, hence `--no-default-features`; that
+# also drops the variant balancing `HeapObject`, so allow that one lint (the
+# default-features gates above still enforce it). CI's QA job runs the same
+# command, so a missing target here only costs local feedback.
+CROSS_TARGET := x86_64-apple-darwin
+
+crosscheck:  ## Clippy the macOS cfg arms (cross-target, no SDK needed)
+	@rustup target list --installed | grep -qx '$(CROSS_TARGET)' || { \
+		echo "SKIPPED crosscheck: rustup target add $(CROSS_TARGET)"; exit 0; }; \
+	cargo clippy --target $(CROSS_TARGET) --no-default-features -p elle \
+		-- -D warnings -A clippy::large_enum_variant
 
 # ── Clean ───────────────────────────────────────────────────────────
 

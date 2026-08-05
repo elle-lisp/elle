@@ -94,7 +94,11 @@ impl AsyncBackend {
                         )?;
                     }
                     PlatformBackend::ThreadPool => {
+                        // The pool worker recvs into its own buffer and hands
+                        // the bytes back through the hub, so neither the pool
+                        // nor the destination value is needed at submit time.
                         let _ = buffer_pool;
+                        let _ = result;
                         hub.submit(id, PoolOp::RecvFrom { fd, size: *count })?;
                     }
                 },

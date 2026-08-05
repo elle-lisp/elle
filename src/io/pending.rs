@@ -36,6 +36,10 @@ pub(crate) enum PendingOp {
         /// completes over several SQEs, and `:timeout` means "give up after
         /// this long" for each of them rather than for the first alone.
         /// `None` leaves the operation unbounded.
+        ///
+        /// Only the io_uring backend re-arms a `LinkTimeout`; the thread pool
+        /// bounds the op in the worker, so on that platform every submit site
+        /// still fills this field and nothing reads it back.
         timeout: Option<Duration>,
     },
     /// Connect to a remote address.
@@ -129,6 +133,10 @@ impl PendingOp {
 
     /// The request's timeout, for a backend re-arming the bound on a
     /// resubmission. `None` for ops that carry no deadline.
+    ///
+    /// Only `io::uring::drain` calls this, so the allow is narrowed to the
+    /// platforms that compile that module out rather than blanket `dead_code`.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(super) fn timeout(&self) -> Option<Duration> {
         match self {
             PendingOp::Port { timeout, .. } => *timeout,

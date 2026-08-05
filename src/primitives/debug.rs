@@ -120,7 +120,7 @@ fn get_memory_usage() -> (u64, u64) {
     {
         Ok(output) => {
             if let Ok(output_str) = String::from_utf8(output.stdout) {
-                let parts: Vec<&str> = output_str.trim().split_whitespace().collect();
+                let parts: Vec<&str> = output_str.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let rss_kb = parts[0].parse::<u64>().unwrap_or(0);
                     let vsz_kb = parts[1].parse::<u64>().unwrap_or(0);

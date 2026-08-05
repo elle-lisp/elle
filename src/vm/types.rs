@@ -17,8 +17,12 @@ use crate::vm::core::VM;
 pub(crate) use intrinsic::{
     handle_intr_bytes_push, handle_intr_del, handle_intr_freeze, handle_intr_get, handle_intr_has,
     handle_intr_pop, handle_intr_push, handle_intr_put, handle_intr_string_push, handle_intr_thaw,
-    run_alloc_intrinsic,
 };
+// The interpreter reaches the shared allocating bodies through the handlers
+// above; `jit::runtime::ops` is the one caller that runs the region discipline
+// itself, so this re-export exists only for the JIT.
+#[cfg(feature = "jit")]
+pub(crate) use intrinsic::run_alloc_intrinsic;
 pub(crate) use predicate::{
     handle_array_len, handle_bit_not_intr, handle_identical, handle_is_array, handle_is_array_mut,
     handle_is_bool, handle_is_box, handle_is_bytes, handle_is_closure, handle_is_empty_list,

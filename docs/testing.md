@@ -18,7 +18,8 @@ specification is [`docs/test-runner.md`](test-runner.md).
 | Command | What it does |
 |---------|--------------|
 | `make smoke` | The corpus through `elle test` + doctests + the embedding demo |
-| `make test` | `make smoke` + Rust fmt/clippy/rustdoc/unit/integration |
+| `make test` | `make smoke` + Rust fmt/clippy/crosscheck/rustdoc/unit/integration |
+| `make crosscheck` | Clippy the macOS `cfg(target_os)` arms from Linux (no SDK needed) |
 | `elle test tests/elle/*.lisp` | Run those files; print a summary; gate on exit code |
 | `elle test --summary` | Re-print the last run's summary (no re-run) |
 | `elle test --query 'SQL'` | Run ad-hoc SQL |
@@ -214,8 +215,8 @@ an activation is carried across yield, tail call, or value handoff.
 ## The Rust suite
 
 `make test` runs the Rust gate after the corpus: `cargo fmt --check`, clippy,
-rustdoc, `cargo test --lib`, and the integration tests. For what kind of Rust test
-to write and where, see [`tests/AGENTS.md`](../tests/AGENTS.md) and
+`make crosscheck`, rustdoc, `cargo test --lib`, and the integration tests. For
+what kind of Rust test to write and where, see [`tests/AGENTS.md`](../tests/AGENTS.md) and
 [`docs/analysis/testing.md`](analysis/testing.md). (`elle test --rust`, which folds
 the cargo suite into the same DB, is specced but not yet implemented.)
 

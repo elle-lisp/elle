@@ -15,7 +15,7 @@ Which *kind* of test to write, and where it belongs.
 |------|------|---------|
 | 1 | `make smoke` → `elle test tests/elle/*.lisp` | The Elle corpus (semantics) across the vm and jit policies, in one process, recorded to a session DB |
 | 2 | doctests + the embedding demo | Documentation examples and the C/Rust host |
-| 3 | `cargo test` (fmt, clippy, rustdoc, unit, integration) | Rust tests (compile errors, error messages, type inspection) |
+| 3 | `cargo test` (fmt, clippy, crosscheck, rustdoc, unit, integration) | Rust tests (compile errors, error messages, type inspection); the cross-check compiles the macOS `cfg(target_os)` arms this box never builds |
 | 4 | `cargo test property::` | Property tests (invariants across generated inputs) |
 
 The Elle corpus is the cheapest full-pipeline check: reader, expander, analyzer,

@@ -91,7 +91,8 @@ tests and zero assertions, the session was wasted.
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
 | `make smoke` | ~30min release | Elle corpus (VM, JIT) + doctests + embedding |
-| `make test` | smoke + ~5min | smoke + fmt + clippy + rustdoc + unit + integration tests |
+| `make test` | smoke + ~5min | smoke + fmt + clippy + macOS cross-check + rustdoc + unit + integration tests |
+| `make crosscheck` | ~1min | Clippy over the macOS `cfg(target_os)` arms a Linux build never compiles |
 
 Pass the release binary to anything that runs the corpus — the debug default
 takes hours rather than ~30 minutes:

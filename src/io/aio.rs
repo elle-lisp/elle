@@ -364,7 +364,11 @@ impl AsyncBackendInner {
     /// the next blocking wait would have no armed poll watching the bridge and a
     /// hub worker's wake would be lost.
     fn drain_uring_completions(&mut self) {
+        // Only the ring arm below consumes these; the pool platform compiles
+        // that arm out and would see three unused bindings.
+        #[cfg(target_os = "linux")]
         let origin_heap = self.origin_heap;
+        #[cfg(target_os = "linux")]
         let gen = self.unicode_generation;
         #[cfg(target_os = "linux")]
         let eventfd = self.hub.eventfd();
