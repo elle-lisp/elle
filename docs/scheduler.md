@@ -54,6 +54,28 @@ for spawned fibers).
 `ev/sleep` and `ev/timeout` use `io_uring` timeout operations for
 precise timer support without polling.
 
+## Park queues
+
+`ev/futex-wait` parks a fiber on a key. `ev/futex-wake` wakes up to
+`count` of the fibers parked on that key. The scheduler keeps one queue
+per key.
+
+Two invariants govern the queues:
+
+- **Only live fibers wait.** A fiber that reaches `:dead` or `:error`
+  leaves every queue it sits in. A terminated fiber left in a queue takes
+  a wake slot from a live waiter, so `(ev/futex-wake key 1)` reports a
+  wake that no fiber received. The single-permit wake is the common case:
+  `lib/http2/stream.lisp` wakes one taker per channel put, and
+  `lib/http2/session.lisp` wakes one waiter per SETTINGS ACK.
+- **An empty queue has no key.** The scheduler drops a key once its queue
+  empties. The event loop reports `:done` only when no fiber waits on
+  I/O, a join, a select, or a park, so a key that outlives its last
+  waiter keeps the loop running with nothing left to run.
+
+`ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
+both rely on these invariants. `tests/elle/park-abort.lisp` pins them.
+
 ---
 
 ## See also

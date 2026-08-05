@@ -1723,6 +1723,7 @@
         runnable @[]
         pending @{}  # id → fiber (I/O submissions)
         fiber-io @{}  # fiber → id (reverse lookup for io/cancel)
+        fiber-park @{}  # fiber → park key (reverse lookup for queue eviction)
         waiters @{}  # target-fiber → @[waiting-fibers...]
         select-sets @{}  # waiting-fiber → @{:candidates [...] :woken @[false]}
         completed @{}  # fiber → :ok | :error (already-completed fibers)
@@ -1751,7 +1752,19 @@
       "Handle fiber completion: wake join and select waiters."  # Record completion
       (put completed fiber status)  # Clean up fiber-io mapping
       (let [id (get fiber-io fiber)]
-        (when (not (nil? id)) (del fiber-io fiber)))  # Wake join waiters with [ok? value] pair
+        (when (not (nil? id)) (del fiber-io fiber)))  # Leave the park queue. A terminated fiber that stays queued takes
+      # a wake permit from a live waiter — `(ev/futex-wake key 1)` would
+      # grant its one permit to a fiber that can never use it — and its
+      # key keeps `step` from ever reporting :done.
+      (let [key (get fiber-park fiber)]
+        (when (not (nil? key))
+          (del fiber-park fiber)
+          (let [q (get park-queues key)]
+            (when (not (nil? q))
+              (let [@i 0]
+                (while (< i (length q))
+                  (if (= (get q i) fiber) (remove q i) (assign i (+ i 1)))))
+              (when (= (length q) 0) (del park-queues key))))))  # Wake join waiters with [ok? value] pair
       (let [ws (get waiters fiber)]
         (when (not (nil? ws))
           (del waiters fiber)
@@ -1839,6 +1852,7 @@
                       (let [q @[]]
                         (put park-queues key q)
                         q))]
+            (put fiber-park caller key)
             (push q caller))  # Value changed — spurious wakeup avoidance, resume immediately
           (begin
             (fiber/resume caller :ok)
@@ -1856,6 +1870,7 @@
         (while (< i n)
           (let [fiber (q 0)]
             (remove q 0)
+            (del fiber-park fiber)
             (fiber/resume fiber true)
             (handle-fiber-after-resume fiber))
           (assign i (inc i)))
