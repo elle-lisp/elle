@@ -116,12 +116,71 @@ deadline, while a peer that is merely slow keeps making progress and the call
 finishes however long that takes.
 
 ```lisp
-# (port/read-line conn :timeout 5000)
-#   — signals :timeout; the peer is connected but sends nothing
-# (port/write conn payload :timeout 5000)
-#   — signals :timeout; the peer accepted the connection and never read
-# (port/read-exact conn 1000000 :timeout 5000)
-#   — succeeds, and may take far longer than 5 s; the peer is slow, not stalled
+(defn listener-port [listener]
+  "The port number a listener bound to an ephemeral port received."
+  (let [path (port/path listener)]
+    (parse-int (slice path (+ 1 (string/find path ":"))))))
+
+(defn with-quiet-peer [body]
+  "Run `body` against a peer that accepts the connection and then neither
+   reads nor writes. A small send buffer makes it stall the writer quickly."
+  (ev/run (fn []
+            (let [listener (tcp/listen "127.0.0.1" 0)]
+              (ev/spawn (fn []
+                          (let [conn (tcp/accept listener)]
+                            (ev/sleep 2)
+                            (port/close conn))))
+              (let [conn (tcp/connect "127.0.0.1" (listener-port listener)
+                                      :sndbuf 4096 :timeout 5000)]
+                (defer (begin (port/close conn) (port/close listener))
+                  (body conn)))))))
+
+(defn timed-out? [thunk]
+  "True when `thunk` signals the :timeout error."
+  (let [[ok? err] (protect (thunk))]
+    (and (not ok?) (= (get err :error) :timeout))))
+
+# The peer is connected and sends nothing, so the read gives up at its deadline.
+(assert (with-quiet-peer (fn [conn]
+                           (timed-out? (fn [] (port/read-line conn :timeout 200)))))
+        "a peer that sends nothing must trip the read's deadline")
+
+# The peer never reads, so the send buffer fills and the write gives up too.
+(assert (with-quiet-peer
+          (fn [conn]
+            (timed-out? (fn []
+                          (port/write conn (bytes (string/repeat "x" 2000000))
+                                      :timeout 200)))))
+        "a peer that never reads must trip the write's deadline")
+```
+
+A peer that is merely slow is the opposite case, and it is what the
+per-operation reading buys. Every gap here stays inside the deadline while the
+whole call runs well past it:
+
+```lisp
+(ev/run (fn []
+          (let* [listener (tcp/listen "127.0.0.1" 0)
+                 chunk 4096
+                 chunks 10]
+            (ev/spawn (fn []
+                        (let [conn (tcp/accept listener)]
+                          (repeat chunks
+                                  (port/write conn (bytes (string/repeat "z" chunk)))
+                                  (ev/sleep 0.1))
+                          (port/close conn))))
+            (let* [conn (tcp/connect "127.0.0.1" (listener-port listener)
+                                     :timeout 5000)
+                   want (* chunk chunks)
+                   started (clock/monotonic)
+                   got (port/read-exact conn want :timeout 300)
+                   elapsed (- (clock/monotonic) started)]
+              (port/close conn)
+              (port/close listener)
+              (assert (= (length got) want)
+                      "a slow peer still delivers every byte")
+              (assert (> elapsed 0.3)
+                      "and the call outlives its own :timeout while doing it")))))
 ```
 
 Both readings stop a hang; only the per-operation one keeps a slow transfer
@@ -133,11 +192,17 @@ process that never reads its stdin, and a fifo nobody opens for reading all
 stall the same way, and `:timeout` returns from all three.
 
 ```lisp
-# The child sleeps and never reads. The pipe buffer fills, and the rest of
+# The child never reads its stdin, so the pipe buffer fills and the rest of
 # the payload has nowhere to go.
-(def proc (subprocess/exec "sleep" ["30"]))
-(port/write (get proc :stdin) payload :timeout 500)
-#   — signals :timeout
+(ev/run (fn []
+          (let [child (subprocess/exec "sleep" ["30"])]
+            (assert (timed-out? (fn []
+                                  (port/write (get child :stdin)
+                                              (bytes (string/repeat "x" 1000000))
+                                              :timeout 200)))
+                    "a child that never reads must trip the write's deadline")
+            (subprocess/kill child :sigterm)
+            (subprocess/wait child))))
 ```
 
 The pinning tests are `tests/elle/port-write-timeout.lisp` and
