@@ -95,6 +95,21 @@ fn a_timed_out_form_keeps_the_output_it_produced() {
     );
 }
 
+/// The problem list is what a CI log shows. `join: deadline exceeded` names the
+/// budget that ran out; the last line the form printed names the call it was in
+/// when that happened, so the timeout carries it and the log can be read
+/// without a query.
+#[test]
+fn the_problem_list_names_the_last_line_a_timed_out_form_printed() {
+    let (runner_output, _db, _dir) = run_wedged_fixture("timeout-capture-report");
+
+    assert!(
+        runner_output.contains(MARKER),
+        "the timeout's problem line must carry the form's last output, got:\n{}",
+        runner_output
+    );
+}
+
 #[test]
 fn a_timed_out_form_leaves_no_capture_files_behind() {
     let (_runner_output, db, _dir) = run_wedged_fixture("timeout-capture-litter");

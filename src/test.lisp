@@ -196,6 +196,31 @@
         (file/delete err-path)
         (struct :result v :stdout so :stderr se)))))
 
+(defn last-output-line [text]
+  "The last non-empty line of `text`, or nil when it has none. Long lines are
+   cut so one problem row stays one row."
+  (if (= text nil)
+    nil
+    (let [lines (filter (fn [l] (> (length l) 0)) (string/split text "\n"))]
+      (if (empty? lines)
+        nil
+        (let [l (get lines (- (length lines) 1))]
+          (if (> (length l) 200) (concat (slice l 0 200) "…") l))))))
+
+# A timeout's reason names the budget that ran out — `join: deadline exceeded`
+# — and says nothing about where the form was when it did. The last line the
+# form printed says exactly that, so carry it in the reason: the problem list
+# is what a terminal-only reader (a CI log) gets, and it should not need a
+# query to name the call that hung. The full output stays in the assets.
+(defn note-last-output [c cap]
+  (if (= (get c :status) :timeout)
+    (let [tail (let [e (last-output-line (get cap :stderr))]
+                 (if e e (last-output-line (get cap :stdout))))]
+      (if tail
+        (put c :reason (concat (get c :reason) " · last output: " tail))
+        c))
+    c))
+
 (defn slurp-partial [path]
   "What `path` holds, or an empty string when it holds nothing readable."
   (let [[ok? content] (protect (slurp path))]
@@ -518,7 +543,7 @@
           ts (get tp 1)
           base (string scratch-dir "/" run-id "_" h "_" ts)
           cap (exec-fn tk (string base ".out") (string base ".err"))
-          c (classify (get cap :result))
+          c (note-last-output (classify (get cap :result)) cap)
           rid (insert-result conn run-id h ts c)]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))

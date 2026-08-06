@@ -184,7 +184,19 @@ is not loaded by default).
   says only that a form ran out of budget, while its output says which call it
   was in when the budget ran out. Reading the partial files also deletes them,
   so an abandoned worker leaves nothing behind in the temp root.
-  `tests/integration/timeout_capture.rs` pins both.
+
+  The timeout's `reason` carries that last line, so the problem list reads:
+
+  ```
+  timeout  tests/elle/port-write-timeout.lisp  [vm]  join: deadline exceeded ·
+      last output:     · 1: write it with :timeout 500
+  ```
+
+  A terminal-only reader — a CI log, which is the one place a wedge on a
+  machine you do not have is visible — then names the call without a query. The
+  whole output stays in the assets for the reader that can query.
+  `tests/integration/timeout_capture.rs` pins the asset, the reason, and the
+  cleanup.
 
   **Prerequisite (the load-bearing part), now in the runtime.** A test thunk that
   calls `println` closes over the `*stdout*` **parameter**; `os/spawn`'s
