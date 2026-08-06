@@ -137,6 +137,9 @@ mod scratch {
 mod truncation {
     include!("truncation.rs");
 }
+mod timeout_capture {
+    include!("timeout_capture.rs");
+}
 mod trace_isolation {
     include!("trace_isolation.rs");
 }

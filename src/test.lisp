@@ -196,6 +196,27 @@
         (file/delete err-path)
         (struct :result v :stdout so :stderr se)))))
 
+(defn slurp-partial [path]
+  "What `path` holds, or an empty string when it holds nothing readable."
+  (let [[ok? content] (protect (slurp path))]
+    (if ok? content "")))
+
+# Recover the output of a run that never came back.
+#
+# `capture-run` slurps and deletes the redirect files once the tiered call
+# returns; a form killed by the join deadline never reaches that. Its output is
+# the only account of which call it was in when the deadline struck, and the
+# form wrote it before it wedged — so read the files here and record them
+# against the timeout. Deleting them also keeps an abandoned worker from
+# leaving its redirect pair in the scratch directory; the worker may still hold
+# its end open, which POSIX allows.
+(defn salvage-capture [result out-path err-path]
+  (let [so (slurp-partial out-path)
+        se (slurp-partial err-path)]
+    (protect (file/delete out-path))
+    (protect (file/delete err-path))
+    (struct :result result :stdout so :stderr se)))
+
 # A spawn that can't deep-copy the test thunk — because it captures an
 # unsendable value (FFI handle, compile/* artifact, fiber, file/socket port) —
 # raises :thread-error whose message mentions sending/serializing. Distinguished
@@ -226,7 +247,7 @@
               r (capture-run tier thunk out-path err-path)]
           (vm/config-set :trace saved-trace)
           r)
-        (struct :result [false (get outcome 1)] :stdout "" :stderr "")))))
+        (salvage-capture [false (get outcome 1)] out-path err-path)))))
 
 # Run THUNK as a scheduled, PUMPED fiber and capture its stdout/stderr. Elle has
 # NO synchronous I/O — every port/socket/subprocess op yields an io-request — so
@@ -308,7 +329,7 @@
             # :trace and aborts before clearing must not bleed into the runner.
             (vm/config-set :trace saved-trace)
             r))
-        (struct :result [false (get outcome 1)] :stdout "" :stderr "")))))
+        (salvage-capture [false (get outcome 1)] out-path err-path)))))
 
 (defn sig-of [payload]
   (let [e (get payload :error)]

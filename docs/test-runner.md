@@ -176,6 +176,16 @@ is not loaded by default).
   form that prints is I/O, so it is `:ineligible`→skip on the JIT tier, where a
   yield cannot cross `compile/run-on` — the same documented per-tier rule.)
 
+  **A form that never returns keeps its output too.** The worker slurps and
+  marshals its temp files only when the tiered call comes back, and a form
+  killed by the join deadline never gets there — so `exec-thunk-capture` reads
+  the partial files itself and attaches them to the `timeout` result. This is
+  the case where the capture matters most: `timeout … join: deadline exceeded`
+  says only that a form ran out of budget, while its output says which call it
+  was in when the budget ran out. Reading the partial files also deletes them,
+  so an abandoned worker leaves nothing behind in the temp root.
+  `tests/integration/timeout_capture.rs` pins both.
+
   **Prerequisite (the load-bearing part), now in the runtime.** A test thunk that
   calls `println` closes over the `*stdout*` **parameter**; `os/spawn`'s
   serializer (`src/value/send.rs`) used to reject parameters (and the stdio ports
