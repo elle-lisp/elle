@@ -22,19 +22,30 @@
   (let [parts (string/split (port/path listener) ":")]
     (parse-int (get parts (- (length parts) 1)))))
 
+## Every step of a case announces itself before it runs, so a run that does not
+## finish names the call it stopped in. A case that completes prints its own
+## line to stdout; these go to stderr, and only the last one printed matters.
+(defn step [label]
+  (eprintln "    · " label))
+
 (ev/run (fn []
-          (let* [listener (tcp/listen "127.0.0.1" 0)
+          (let* [_ (step "1: listen")
+                 listener (tcp/listen "127.0.0.1" 0)
                  port-num (listen-port listener)
                  @peer nil]
             ## Accept, then hold the connection open without ever reading from it.
             (ev/spawn (fn [] (assign peer (tcp/accept listener))))
+            (step "1: connect")
             (let* [conn (tcp/connect "127.0.0.1" port-num :sndbuf 4096
                                      :timeout 5000)
+                   _ (step "1: build an 8 MB payload")
+                   payload (bytes (string/repeat "x" 8000000))
+                   _ (step "1: write it with :timeout 500")
                    started (clock/monotonic)
-                   [ok? err] (protect (port/write conn
-                                      (bytes (string/repeat "x" 8000000))
-                                      :timeout 500))
+                   [ok? err] (protect (port/write conn payload :timeout 500))
                    elapsed (- (clock/monotonic) started)]
+              (step (concat "1: the write returned after " (string elapsed)
+                            "s, ok?=" (string ok?) " err=" (string err)))
               (assert (not ok?)
                       "port/write to a peer that never reads must signal, not succeed")
               (assert (= (get err :error) :timeout)
@@ -64,7 +75,8 @@
 ## reads and the call cannot finish inside its 1000 ms timeout.
 
 (ev/run (fn []
-          (let* [listener (tcp/listen "127.0.0.1" 0)
+          (let* [_ (step "2: listen")
+                 listener (tcp/listen "127.0.0.1" 0)
                  port-num (listen-port listener)]
             (ev/spawn (fn []
                         (let [conn (tcp/accept listener)]
@@ -73,12 +85,15 @@
                               (when (nil? chunk) (break))
                               (ev/sleep 0.15)))
                           (port/close conn))))
+            (step "2: connect")
             (let* [conn (tcp/connect "127.0.0.1" port-num :sndbuf 4096
                                      :timeout 5000)
+                   _ (step "2: write 400 KB to a peer that reads slowly")
                    started (clock/monotonic)
                    returned (port/write conn (bytes (string/repeat "x" 400000))
                                         :timeout 1000)
                    elapsed (- (clock/monotonic) started)]
+              (step "2: the write returned")
               (assert (= returned 400000)
                       (concat "a slow peer must still receive every byte, returned "
                               (string returned)))
@@ -103,12 +118,15 @@
 ## deadline rather than for the peer's exit.
 
 (ev/run (fn []
-          (let* [child (subprocess/exec "sleep" ["4"])
+          (let* [_ (step "3: spawn a child that never reads its stdin")
+                 child (subprocess/exec "sleep" ["4"])
+                 _ (step "3: write 1 MB into its stdin with :timeout 500")
                  started (clock/monotonic)
                  [ok? err] (protect (port/write (get child :stdin)
                                     (bytes (string/repeat "x" 1000000))
                                     :timeout 500))
-                 elapsed (- (clock/monotonic) started)]
+                 elapsed (- (clock/monotonic) started)
+                 _ (step "3: the write returned")]
             (protect (subprocess/kill child :sigterm))
             (protect (subprocess/wait child))
             (assert (< elapsed 2)
