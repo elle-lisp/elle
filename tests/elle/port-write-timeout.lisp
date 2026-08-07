@@ -71,8 +71,23 @@
 ## This case exists because case 1 alone does not constrain the fix. Treating
 ## `:timeout` as a deadline for the entire call also stops the hang, and also
 ## reports `:timeout` — and breaks every healthy transfer to a slow reader.
-## Here the peer reads 32 KiB every 150 ms, so the payload needs more than ten
-## reads and the call cannot finish inside its 1000 ms timeout.
+##
+## The peer's pacing only gates the call if the payload cannot simply sit in
+## the kernel's buffers: a write the buffers swallow whole returns before the
+## peer has read anything, and this case would then be measuring nothing. How
+## much they swallow is a per-platform number and `:sndbuf` is a request, not a
+## setting — macOS caps a socket's buffers at 8 MiB by default. So the payload
+## is 12 MiB, above any of them, and the several megabytes that cannot fit have
+## to cross at the peer's pace against a 1000 ms per-operation deadline.
+##
+## The peer paces with `port/read-exact`, not `port/read`: `port/read` returns
+## up to what was asked for, so the rate it sets is whatever the kernel happens
+## to hand over per call, and the case's runtime would follow that rather than
+## the sleep. `read-exact` consumes the same 256 KiB per tick on any backend,
+## which keeps this bounded well inside the corpus budget.
+
+(def slow-peer-payload (* 12 1024 1024))
+(def slow-peer-chunk 262144)
 
 (ev/run (fn []
           (let* [_ (step "2: listen")
@@ -81,20 +96,22 @@
             (ev/spawn (fn []
                         (let [conn (tcp/accept listener)]
                           (forever
-                            (let [chunk (port/read conn 32768)]
+                            (let [chunk (port/read-exact conn slow-peer-chunk)]
                               (when (nil? chunk) (break))
-                              (ev/sleep 0.15)))
+                              (ev/sleep 0.1)))
                           (port/close conn))))
             (step "2: connect")
             (let* [conn (tcp/connect "127.0.0.1" port-num :sndbuf 4096
                                      :timeout 5000)
-                   _ (step "2: write 400 KB to a peer that reads slowly")
+                   _ (step "2: write 12 MiB to a peer that reads slowly")
                    started (clock/monotonic)
-                   returned (port/write conn (bytes (string/repeat "x" 400000))
-                                        :timeout 1000)
+                   returned (port/write conn
+                                        (bytes (string/repeat "x"
+                                        slow-peer-payload)) :timeout 1000)
                    elapsed (- (clock/monotonic) started)]
-              (step "2: the write returned")
-              (assert (= returned 400000)
+              (step (concat "2: the write returned after " (string elapsed)
+                            "s, returned=" (string returned)))
+              (assert (= returned slow-peer-payload)
                       (concat "a slow peer must still receive every byte, returned "
                               (string returned)))
               (assert (> elapsed 1.0)

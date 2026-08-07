@@ -66,6 +66,24 @@ delivering a recovery value — this enables restart-style error handling.
 Uncaught errors crash the runtime; no `ev/join` is needed for error
 propagation.
 
+So a failed fiber answers `:paused` — the same keyword as a fiber waiting to
+resume — and only `SIG_ERROR` in `fiber/bits` tells the two apart. That makes
+"is this fiber finished?" a question about intent rather than state, and it
+has two different answers:
+
+- **A resumer** decides. `fiber/error?` and `fiber/done?` answer for the
+  terminal statuses alone, because a paused fiber holding an error is a
+  fiber you may still resume with a recovery value. `port/lines` and the
+  other generators rely on this: a read error suspends the generator, and
+  the stream resumes it to surface that error as an element.
+- **A scheduler** already decided, when it routed the fiber to completion.
+  It records that in its own completion map, so it reads that map rather
+  than re-deriving from a status that cannot distinguish the two cases. A
+  status test there reads a failed program as still running, and then waits
+  for it against orphans that can never finish on their own.
+
+`tests/elle/ev-run-error-teardown.lisp` pins the distinction and the wait.
+
 `try`/`catch` is a prelude macro that wraps this pattern (`src/prelude.lisp`).
 
 

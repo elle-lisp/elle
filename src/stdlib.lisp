@@ -1241,6 +1241,19 @@
   "True if fiber is terminal (dead or errored)."
   (let [s (fiber/status f)]
     (or (= s :dead) (= s :error))))
+(defn fiber-failed? [f]
+  "True when `f` stopped on an uncaught error.
+
+   Not the same question as `fiber/error?`. An error does not unwind a
+   fiber: it suspends holding the error signal, so `fiber/status` answers
+   :paused — what a fiber waiting to resume answers — and only the SIG_ERROR
+   bit tells the two apart. Whether that fiber is finished is the resumer's
+   decision (docs/signals/primitives.md): a parent can resume it with a
+   recovery value, which is how the stream generators surface a read error as
+   an element. This answers the narrower question a scheduler asks about its
+   own program: did this fiber stop because it failed?"
+  (let [s (fiber/status f)]
+    (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
 
 ## ── Arena introspection ─────────────────────────────────────────────
 
@@ -2077,12 +2090,18 @@
      # is globally idle (legacy behaviour, e.g. ev/run-on).
      (fn (& entry)
        (let [have-entry (> (length entry) 0)
+             # `completed` is the scheduler's own record of every fiber it
+             # has finished with — `complete-fiber` writes it from
+             # `handle-fiber-after-resume`, which is where the paused-carrying-
+             # SIG_ERROR case is already decided. Asking the fiber's status
+             # again here would ask a different question and get a different
+             # answer: a fiber that stopped on an error still reports :paused,
+             # so a status test reads a failed program as one still running and
+             # waits for it against orphans that can never finish on their own.
              all-done? (fn (fs)
                          (let [@d true]
                            (each f in fs
-                             (let [s (fiber/status f)]
-                               (unless (or (= s :dead) (= s :error))
-                                 (assign d false))))
+                             (when (nil? (get completed f)) (assign d false)))
                            d))]
          (block :loop
            (forever  # Drain all currently-runnable work without blocking on I/O.
@@ -2171,10 +2190,8 @@
         (def @result nil)
         (def @first-error nil)
         (each f in fibers
-          (let [s (fiber/status f)]
-            (when (and (nil? first-error)
-                       (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1)))))
-              (assign first-error (fiber/value f)))))
+          (when (and (nil? first-error) (fiber-failed? f))
+            (assign first-error (fiber/value f))))
         (when (not (nil? first-error)) (error first-error))  # Return the last fiber's value
         (when (> (length fibers) 0)
           (assign result (fiber/value (get fibers (- (length fibers) 1)))))
