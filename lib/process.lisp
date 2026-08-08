@@ -1070,17 +1070,26 @@
               (each pid in batch
                 (run-one pid)))
 
-            # Yield to root scheduler when I/O is pending but only
-            # spinning (fuel-preempted) processes are ready. Without this,
-            # a spinning process keeps ready non-empty and the idle handler
-            # never parks, starving the root scheduler from delivering
-            # I/O completions.
+            # Give the root scheduler a turn when forwarded I/O is pending
+            # and every ready process is merely refueling. The root can only
+            # deliver a completion while this scheduler is suspended, and a
+            # process that computes without pause keeps `ready` non-empty
+            # forever, so the idle handler above never runs.
+            #
+            # The turn is a zero-length sleep, not a park on the completion
+            # futex: these processes are ready, and a forwarded completion
+            # can DEPEND on one of them running. An h2 client sub-fiber
+            # parked in `read` waits for the request its own process has
+            # not finished sending, so a park here waits on work only the
+            # parked scheduler can do (tests/elle/process-io-park.lisp,
+            # tests/elle/h2-headers-in-process.lisp). The sleep suspends
+            # long enough for the root to pump, then returns whether a
+            # completion arrived or not.
             (when (and (> (length io-pending) 0) (= (length io-completions) 0)
                        (not (empty? ready))
                        (= (length ready) (length fuel-preempted)))
-              (let [expected (unbox io-wakeup-box)]
-                (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
-                (reap-io))))
+              (ev/sleep 0)
+              (reap-io)))
 
           # Propagate PID 0 errors to caller
           (let [err (get (proc-get 0) :exit-reason)]

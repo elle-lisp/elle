@@ -546,6 +546,35 @@ scheduler (see [concurrency.md](concurrency.md)).
 A sub-fiber the body **joins** (`ev/join`) is not an orphan: the process
 stays alive until the join returns, so the sub-fiber completes first.
 
+## Forwarded I/O and the root scheduler
+
+A process scheduler owns no I/O backend. It runs inside one fiber of the
+root scheduler, so an I/O request from a process — or from one of its
+sub-fibers — is *forwarded*: the process scheduler hands the request up,
+the root scheduler submits it, and the completion comes back down.
+
+The root scheduler can only deliver a completion while the process
+scheduler is suspended. So the process scheduler yields to the root
+whenever every ready process is merely refueling after fuel preemption.
+Without that yield, a process that computes without pause holds the root
+off and no completion ever arrives.
+
+The yield is bounded, and a ready process always gets to run again. The
+scheduler never blocks until a forwarded completion arrives while a
+process can still make progress, because the completion can *depend* on
+that progress: an h2 client sub-fiber parked in `read` is waiting for the
+request its own process has not finished sending. A process that never
+gets to finish sending it would wait forever.
+
+```text
+(process:start (fn []
+  ## The sleeper's completion is 30 s away; the loop below must not wait
+  ## for it. Both finish, and the process ends as soon as the loop does.
+  (let [sleeper (ev/spawn (fn [] (ev/sleep 30)))]
+    (each i in (range 0 20000) (compute i))
+    (ev/abort sleeper))))
+```
+
 
 # Process API reference
 
