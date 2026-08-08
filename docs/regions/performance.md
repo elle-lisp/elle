@@ -34,6 +34,24 @@ merges when it can prove lifetimes coincide, so a failure to merge costs
 performance and **never** correctness — at worst a value's region is kept as long
 as its own last use rather than shared, never freed too early.
 
+## Passing arguments costs one pass over them
+
+A call's region bookkeeping is linear in the number of arguments. Each argument
+is classified once — which region it lives in — and retained or released once.
+Nothing compares arguments against each other.
+
+This holds for every calling convention, and the one that has to work hardest
+for it is the tail call to a variadic callee. There the caller's reference to
+each argument *moves* to the callee, the rest arguments land in a collected
+list that took its own reference, and the moved-in reference is surplus. Only a
+value that appears exactly once across the whole argument list may be released;
+one that appears twice shares a single moved reference, and a second release
+would free it out from under a live use. So the release step needs each
+value's occurrence count — and it takes them from one counting pass, not from
+comparing every argument with every other. `(apply f xs)` in tail position over
+a 40000-element `xs` is a 40000-step operation, not a 1.6-billion-step one
+(`tests/elle/apply-tail-linear.lisp`).
+
 ## What you can do
 
 You do not control merging directly, but the same habits that make code clear

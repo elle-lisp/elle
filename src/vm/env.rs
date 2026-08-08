@@ -386,20 +386,39 @@ impl VM {
     /// appears exactly once across ALL arg positions (`all_args`) — an aliased value
     /// shares one transferred reference a fixed slot / earlier cons already consumes,
     /// so a second release would over-free (leak-safe: never mis-free).
+    ///
+    /// The occurrence counts come from ONE pass over `all_args`, so the whole
+    /// step is linear in the argument count. Counting per rest arg instead —
+    /// rescanning `all_args` for each — is quadratic, and every comparison is a
+    /// `region_of` page-header walk, so a large `(apply f xs)` in tail position
+    /// pays it in full (`tests/elle/apply-tail-linear.lisp`,
+    /// docs/regions/performance.md § "Passing arguments costs one pass over
+    /// them").
+    ///
+    /// Counting first and releasing second gives the same answers as
+    /// interleaving them. A release here can only FREE regions (its own and
+    /// whatever its cascade reaches), and a free leaves the page's stamped
+    /// region id alone — only recycling a page into a fresh region changes it,
+    /// and nothing in this function allocates a region. So every value's
+    /// `region_of` reads the same id throughout, and a count taken up front
+    /// equals one taken part-way through.
     fn release_moved_rest_args(
         rest_args: &[Value],
         all_args: &[Value],
         heap: &mut crate::value::fiberheap::FiberHeap,
     ) {
+        let mut occurrences: rustc_hash::FxHashMap<RuntimeRegion, usize> =
+            rustc_hash::FxHashMap::default();
+        for arg in all_args {
+            if let Some(r) = crate::value::arena::region_of(heap, *arg) {
+                *occurrences.entry(r).or_insert(0) += 1;
+            }
+        }
         for arg in rest_args {
             let Some(arg_region) = crate::value::arena::region_of(heap, *arg) else {
                 continue; // an immediate carries no region
             };
-            let occurrences = all_args
-                .iter()
-                .filter(|a| crate::value::arena::region_of(heap, **a) == Some(arg_region))
-                .count();
-            if occurrences == 1 {
+            if occurrences.get(&arg_region) == Some(&1) {
                 heap.decref_region(arg_region);
             }
         }
