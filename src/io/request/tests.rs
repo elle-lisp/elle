@@ -44,10 +44,11 @@ fn test_stdio_disposition_derives() {
 
 #[test]
 fn test_process_handle_pid() {
-    // Spawn /bin/true, verify pid() returns a nonzero value.
-    // This test requires /bin/true to exist.
+    // Spawn `true`, verify pid() returns a nonzero value.
+    // Resolved through PATH: the binary is /bin/true on Linux and
+    // /usr/bin/true on macOS.
     use std::process::Command;
-    let child = Command::new("/bin/true").spawn().unwrap();
+    let child = Command::new("true").spawn().unwrap();
     let pid = child.id();
     let handle = ProcessHandle::new(pid, child);
     assert_eq!(handle.pid(), pid);
@@ -58,7 +59,7 @@ fn test_process_handle_pid() {
 fn test_process_handle_drop_does_not_panic() {
     // Drop with a running child should not panic.
     use std::process::Command;
-    let child = Command::new("/bin/true").spawn().unwrap();
+    let child = Command::new("true").spawn().unwrap();
     let pid = child.id();
     let handle = ProcessHandle::new(pid, child);
     drop(handle); // should not panic

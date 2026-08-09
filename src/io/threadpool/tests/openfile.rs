@@ -2,7 +2,7 @@ use super::super::*;
 
 #[test]
 fn test_threadpool_open_existing_file_returns_valid_fd() {
-    let path = "/dev/shm/elle-test-threadpool-open-success";
+    let path = &*std::env::temp_dir().join("elle-tp-open-success").to_string_lossy().into_owned();
     std::fs::write(path, "test").unwrap();
 
     let mut pool = CompletionHub::new();
@@ -31,7 +31,7 @@ fn test_threadpool_open_existing_file_returns_valid_fd() {
 
 #[test]
 fn test_threadpool_open_nonexistent_path_returns_negative_errno() {
-    let path = "/dev/shm/elle-test-threadpool-open-nonexistent-dir/nofile";
+    let path = &*std::env::temp_dir().join("elle-tp-no-such-dir/nofile").to_string_lossy().into_owned();
 
     let mut pool = CompletionHub::new();
     let c_path = std::ffi::CString::new(path).unwrap();
