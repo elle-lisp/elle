@@ -78,6 +78,34 @@ both rely on these invariants. `tests/elle/park-abort.lisp` pins them.
 
 ---
 
+## ev/report
+
+`ev/report` returns what the running scheduler is waiting for, as a
+struct:
+
+| Field | Meaning |
+|---|---|
+| `:runnable` | fibers queued to run on the next drain |
+| `:io` | submitted I/O operations with no completion yet |
+| `:joins` | fibers with at least one join waiter |
+| `:selects` | fibers parked on a select set |
+| `:forwarded` | I/O submitted for a child scheduler |
+| `:parks` | one `[key count]` pair per non-empty park queue |
+
+The loop blocks when `:runnable` is empty and everything else is not, so
+a report taken from a fiber the scheduler still runs names the waits that
+outlived the work. A timer is the reliable way to take one: a sleep
+completion arrives on its own and needs no other fiber to make progress,
+so a watchdog spawned as `(ev/spawn (fn [] (ev/sleep n) (ev/report)))`
+reports even when every other fiber is parked.
+
+The park keys are whatever the caller of `ev/futex-wait` passed —
+`lib/http2` uses a `(gensym)` per channel and per flow-control window, so
+a count above one on a single key means several fibers wait on one
+channel.
+
+`tests/elle/sched-report.lisp` pins the shape.
+
 ## See also
 
 - [concurrency.md](concurrency.md) — user-facing async primitives

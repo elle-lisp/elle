@@ -2071,11 +2071,26 @@
         (process-completions timeout-ms)
         :pending))
 
+    (defn report []
+      "What the loop is waiting for right now. The loop blocks when
+       `runnable` is empty and the rest is not, so this names the waits
+       that outlived the work."
+      (let [parks @[]]
+        (each [key q] in (pairs park-queues)
+          (push parks [key (length q)]))
+        {:runnable (length runnable)
+         :io (length pending)
+         :joins (length waiters)
+         :selects (length select-sets)
+         :forwarded (length forwarded-pending)
+         :parks (freeze parks)}))
+
     {:spawn  # scheduler-fn: register fiber
       (fn (fiber)
         (push runnable fiber)
         fiber)
      :step step
+     :report report
      :pump  # pump-fn: event loop.
       # Program-completion teardown: when called with the program's
      # fibers (its thunks), the loop ends as soon as THEY have all
@@ -2135,6 +2150,11 @@
               :reason :no-event-loop
               :message "not inside an event loop"}))
     (shutdown-fn timeout-ms)))
+
+(defn ev/report []
+  "What the running scheduler is waiting for: {:runnable :io :joins
+   :selects :forwarded :parks}. See docs/scheduler.md."
+  ((get (*scheduler*) :report)))
 
 (defn ev/step [& args]
   "Step the current event loop once. timeout-ms defaults to 0 (non-blocking).
@@ -2670,6 +2690,7 @@
    :make-async-scheduler make-async-scheduler
    :ev/run ev/run
    :ev/step ev/step
+   :ev/report ev/report
    :ev/with-scheduler ev/with-scheduler
    :ev/join ev/join
    :ev/join-protected ev/join-protected
