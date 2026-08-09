@@ -76,6 +76,32 @@ Two invariants govern the queues:
 `ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
 both rely on these invariants. `tests/elle/park-abort.lisp` pins them.
 
+## Completion delivery
+
+A completion names the operation, not the fiber. The scheduler holds the
+pairing in two halves: a submission id maps to the fiber that asked for
+it, and the fiber maps to the one submission it waits on. Both halves go
+away together — when the completion arrives, when `ev/abort` cancels the
+operation, and when the scheduler finishes with the fiber.
+
+Two invariants govern delivery:
+
+- **A completion reaches only a fiber still waiting for it.** A fiber can
+  terminate by a path the scheduler did not route. `fiber/abort` injects
+  an error the fiber's own `protect` may catch, so the fiber runs to
+  `:dead` while its read is still in flight. When that operation
+  completes, the scheduler records the fiber's completion and drops the
+  result instead of resuming it. Resuming a fiber that already finished
+  raises `fiber/resume: cannot resume completed fiber` out of the event
+  loop, which reaches the program as a runtime error with no connection
+  to the fiber that died.
+- **A finished fiber holds no operation.** Completing a fiber cancels the
+  submission it still waits on. Otherwise that submission keeps a worker
+  and a descriptor for a fiber that can never read the result, and the
+  loop keeps waiting on a completion nobody wants.
+
+`tests/elle/io-late-completion.lisp` pins both.
+
 ---
 
 ## ev/report

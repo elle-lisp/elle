@@ -1763,9 +1763,17 @@
 
     (defn complete-fiber [fiber status]
       "Handle fiber completion: wake join and select waiters."  # Record completion
-      (put completed fiber status)  # Clean up fiber-io mapping
+      (put completed fiber status)  # Give back the operation this fiber was waiting on. `pending` and
+      # `fiber-io` are the two halves of one pairing, so both go; the
+      # submission itself is cancelled because the only fiber that could
+      # read its result is this one, and it is finished. Left behind, the
+      # operation holds a worker and a descriptor, and keeps `step` from
+      # ever reporting :done.
       (let [id (get fiber-io fiber)]
-        (when (not (nil? id)) (del fiber-io fiber)))  # Leave the park queue. A terminated fiber that stays queued takes
+        (when (not (nil? id))
+          (del fiber-io fiber)
+          (del pending id)
+          (io/cancel backend id)))  # Leave the park queue. A terminated fiber that stays queued takes
       # a wake permit from a live waiter — `(ev/futex-wake key 1)` would
       # grant its one permit to a fiber that can never use it — and its
       # key keeps `step` from ever reporting :done.
@@ -1979,14 +1987,23 @@
             (if (not (nil? fiber))
               (begin
                 (del pending id)
-                (del fiber-io fiber)
-                (if (nil? (get c :error))
-                  (begin
-                    (fiber/resume fiber (get c :value))
-                    (handle-fiber-after-resume fiber))
-                  (begin
-                    (fiber/abort fiber (get c :error))
-                    (handle-fiber-after-resume fiber))))
+                (del fiber-io fiber)  # Deliver only to a fiber still waiting for this result. A
+                # fiber can terminate by a path the scheduler did not
+                # route — `fiber/abort` injects an error the fiber's own
+                # `protect` catches, so it runs to :dead with this
+                # operation still in flight. `get-completion` records
+                # such a death the first time we look, and the result
+                # goes nowhere. Resuming instead raises "cannot resume
+                # completed fiber" out of the loop, at whatever line the
+                # program is pumping from.
+                (when (nil? (get-completion fiber))
+                  (if (nil? (get c :error))
+                    (begin
+                      (fiber/resume fiber (get c :value))
+                      (handle-fiber-after-resume fiber))
+                    (begin
+                      (fiber/abort fiber (get c :error))
+                      (handle-fiber-after-resume fiber)))))
               (let [fwd (get forwarded-pending id)]
                 (when fwd
                   (del forwarded-pending id)
