@@ -131,8 +131,8 @@ On top of the core process API, the module provides:
 
 (process:start (fn []
   # Ping-pong between two processes
-  (let* ([me (process:self)]
-         [peer (process:spawn (fn []
+  (let* [me (process:self)
+         peer (process:spawn (fn []
                  (match (process:recv)
                    [from :ping] (process:send from :pong)
                    _ nil)))]
@@ -164,7 +164,7 @@ On top of the core process API, the module provides:
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :worker :restart :permanent
         :start (fn []

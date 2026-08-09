@@ -40,7 +40,7 @@ until one arrives.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:send me :hello)
     (assert (= (process:recv) :hello) "got :hello"))))
 ```
@@ -55,11 +55,11 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let* ([me (process:self)]
-         [peer (process:spawn (fn []
+  (let* [me (process:self)
+         peer (process:spawn (fn []
                  (match (process:recv)
                    [from :ping] (process:send from :pong)
-                   _ nil)))])
+                   _ nil)))]
     (process:send peer [me :ping])
     (assert (= (process:recv) :pong) "ping-pong works"))))
 ```
@@ -73,7 +73,7 @@ matches, leaving non-matching messages in the mailbox in order.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:send me :a)
     (process:send me :b)
     (process:send me :c)
@@ -104,8 +104,8 @@ crashes too — unless the parent is trapping exits.
 
 (process:start (fn []
   (process:trap-exit true)
-  (let ([child (process:spawn-link (fn []
-                 (error {:error :boom :message "crash"})))])
+  (let [child (process:spawn-link (fn []
+                 (error {:error :boom :message "crash"})))]
     (match (process:recv)
       [:EXIT pid reason]
         (begin
@@ -125,7 +125,7 @@ process dies, without affecting the monitoring process.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([[child-pid ref] (process:spawn-monitor (fn [] :done))])
+  (let [[child-pid ref] (process:spawn-monitor (fn [] :done))]
     (match (process:recv)
       [:DOWN got-ref got-pid reason]
         (begin
@@ -145,10 +145,10 @@ by name; `send-named` sends to a registered name.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:spawn (fn []
       (process:register :greeter)
-      (let ([msg (process:recv)])
+      (let [msg (process:recv)]
         (match msg
           [from name] (process:send from (string "hello, " name))
           _ nil))))
@@ -185,10 +185,10 @@ processes to run.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     # Busy-looper gets preempted
-    (let ([busy (process:spawn (fn []
-            (letrec ([loop (fn [n] (loop (+ n 1)))]) (loop 0))))])
+    (let [busy (process:spawn (fn []
+            (letrec [loop (fn [n] (loop (+ n 1)))] (loop 0))))]
       (process:spawn (fn [] (process:send me :done)))
       (assert (= (process:recv) :done) "worker runs despite busy-looper")
       (process:exit busy :kill))))
@@ -222,7 +222,7 @@ down after replying.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [_] @{})
                 :handle-call (fn [request _from state]
                   (match request
@@ -230,7 +230,7 @@ down after replying.
                     [:put key val] (begin (put state key val)
                                     [:reply :ok state])
                     _              [:reply :unknown state]))}
-               nil :name :kv)])
+               nil :name :kv)]
     (process:gen-server-call :kv [:put :lang "elle"])
     (assert (= "elle" (process:gen-server-call :kv [:get :lang]))
             "kv store works"))))
@@ -245,7 +245,7 @@ callback runs before it exits.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:gen-server-start-link
       {:init        (fn [_] :running)
        :handle-call (fn [req _from state] [:reply state state])
@@ -301,10 +301,10 @@ result. Like `ev/spawn` but the work has a PID and can be monitored.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let* ([t1 (process:task-async (fn [] (* 6 7)))]
-         [t2 (process:task-async (fn [] (+ 10 20)))]
-         [r1 (process:task-await t1)]
-         [r2 (process:task-await t2)])
+  (let* [t1 (process:task-async (fn [] (* 6 7)))
+         t2 (process:task-async (fn [] (+ 10 20)))
+         r1 (process:task-await t1)
+         r2 (process:task-await t2)]
     (assert (= r1 42) "task 1")
     (assert (= r2 30) "task 2"))))
 ```
@@ -343,7 +343,7 @@ Each child is a struct with:
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :worker :restart :permanent
         :start (fn []
@@ -469,9 +469,9 @@ This replaces the manual bridge pattern:
 # Before: every user writes this glue
 {:id :my-daemon :restart :permanent
  :start (fn []
-   (let ([proc (subprocess/exec "/usr/bin/my-daemon" [])])
-     (let ([code (subprocess/wait proc)])
-       (error {:error :subprocess-exit :code code})))}
+   (let [proc (subprocess/exec "/usr/bin/my-daemon" [])]
+     (let [code (subprocess/wait proc)]
+       (error {:error :subprocess-exit :code code}))))}
 
 # After: one-liner
 (process:make-subprocess-child :my-daemon "/usr/bin/my-daemon" [])
@@ -515,10 +515,10 @@ tracked by the scheduler and participate in I/O completion.
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let* ([f1 (ev/spawn (fn [] (+ 10 20)))]
-         [f2 (ev/spawn (fn [] (+ 30 40)))]
-         [r1 (ev/join f1)]
-         [r2 (ev/join f2)])
+  (let* [f1 (ev/spawn (fn [] (+ 10 20)))
+         f2 (ev/spawn (fn [] (+ 30 40)))
+         r1 (ev/join f1)
+         r2 (ev/join f2)]
     (assert (= r1 30) "f1 = 30")
     (assert (= r2 70) "f2 = 70"))))
 ```

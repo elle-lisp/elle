@@ -78,7 +78,7 @@ capability space that is NOT withheld:
 (fiber/caps)
 # => |:error :yield :debug :ffi :halt :io :exec|
 
-(let ([f (fiber/new (fn [] 42) |:error| :deny |:io :ffi|)])
+(let [f (fiber/new (fn [] 42) |:error| :deny |:io :ffi|)]
   (fiber/caps f))
 # => |:error :yield :debug :halt :exec|
 ```
@@ -89,14 +89,14 @@ Withheld capabilities propagate from parent to child at resume time.
 A child inherits its parent's restrictions plus any `:deny` of its own:
 
 ```text
-(let ([outer (fiber/new
+(let [outer (fiber/new
                (fn []
                  # inner denies :ffi, inherits :io denial from outer
-                 (let ([inner (fiber/new (fn [] (fiber/caps))
-                                        |:error| :deny |:ffi|)])
+                 (let [inner (fiber/new (fn [] (fiber/caps))
+                                        |:error| :deny |:ffi|)]
                    (fiber/resume inner)))
                |:error|
-               :deny |:io|)])
+               :deny |:io|)]
   (fiber/resume outer))
 # => |:error :yield :debug :halt :exec|
 # (missing :io from parent, missing :ffi from own deny)
@@ -112,14 +112,14 @@ The parent can catch a denial, perform the operation on the child's
 behalf, and resume the child with the result:
 
 ```text
-(let ([f (fiber/new
+(let [f (fiber/new
            (fn [] (length "hello"))
            |:error|
-           :deny |:error|)])
-  (let ([denial (fiber/resume f)])
+           :deny |:error|)]
+  (let [denial (fiber/resume f)]
     # denial is {:error :capability-denied :primitive "length" ...}
-    (let ([val (fiber/value f)])
-      (let ([result (apply length (val :args))])
+    (let [val (fiber/value f)]
+      (let [result (apply length (val :args))]
         (fiber/resume f result)))))
 ```
 
@@ -134,25 +134,25 @@ blocks `length` but not `+`.
 
 ```text
 # Pure computation sandbox — no IO, no FFI, no subprocess
-(let ([f (fiber/new compute |:io :ffi :exec :error|
-                    :deny |:io :ffi :exec|)])
+(let [f (fiber/new compute |:io :ffi :exec :error|
+                    :deny |:io :ffi :exec|)]
   (fiber/resume f))
 
 # Capability-check a plugin before running it
-(let ([f (fiber/new plugin-init |:error| :deny |:exec :ffi|)])
-  (let ([result (fiber/resume f)])
+(let [f (fiber/new plugin-init |:error| :deny |:exec :ffi|)]
+  (let [result (fiber/resume f)]
     (if (= (fiber/status f) :dead)
       result
       (do (println "plugin tried:" ((fiber/value f) :primitive))
           (fiber/cancel f)))))
 
 # Nested sandbox: outer denies IO, inner denies errors
-(let ([outer (fiber/new
+(let [outer (fiber/new
                (fn []
-                 (let ([inner (fiber/new worker |:error| :deny |:error|)])
+                 (let [inner (fiber/new worker |:error| :deny |:error|)]
                    (fiber/resume inner)))
                |:io :error|
-               :deny |:io|)])
+               :deny |:io|)]
   (fiber/resume outer))
 # inner has neither IO (from outer) nor error (from own deny)
 ```
