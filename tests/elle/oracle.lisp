@@ -278,6 +278,14 @@
 # Its control `recur-local-foreign-mint` is not self-recursive, so nothing strands it
 # in the first place and the gap isolates the strand rather than the retain.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
+# F6 — the displaced value that owns its replacement. The fn-local slot's
+# drop-on-overwrite channel is pinned closed by `struct-outer`/`yield-reassign`,
+# where each displaced prior is unrelated to the one replacing it. `list-cursor`
+# is the case those two do not reach: the incoming value is reachable FROM the
+# displaced one, through the very edge that funds it, so the displaced value's
+# release must cascade along an edge it is simultaneously losing. It retains one
+# object per step instead.
+(declare-root :f6 ["list-cursor"])
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -867,8 +875,28 @@
         (def @k 0)
         (while (%lt k 3)
           (get a k)
-          (assign k (%add k 1))))) 0]
-   ["format" (fn [j] (string "iter " j " of " 100)) 0]
+          (assign k (%add k 1))))) 0]  # A CURSOR walked over a cons chain retains one cons per step it takes.
+   # `(assign r (rest r))` lowers to an incref of the incoming value's region
+   # and a decref of the displaced one, and here the incoming value is
+   # REACHABLE FROM the displaced cons — it is what that cons's `rest` edge
+   # points at. So the displaced cons's release has to cascade through the
+   # very edge that funds its replacement, and the measured rate says it does
+   # not: the cons the cursor moved off stays live.
+   #
+   # `each-manual` directly above is the same `while` loop over an ARRAY, and
+   # reads 0 — an index walk names nothing it moves off, so the rate here is
+   # the cursor's and not the loop's. The retention is one per cons the cursor
+   # passes: a 4-element chain reads 4, and the same walk over a rest list
+   # reads one less, the head the caller's move already accounted for.
+   ["list-cursor"
+    (fn [j]
+      (let [xs (list 1 2 3 4)
+            @r xs
+            @n 0]
+        (while (not (empty? r))
+          (assign n (%add n 1))
+          (assign r (rest r)))
+        n)) 4] ["format" (fn [j] (string "iter " j " of " 100)) 0]
    ["pipeline"
     (fn [j]
       (string/join (filter (fn [x] (not= x ""))
