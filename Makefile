@@ -152,8 +152,21 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp
 # batching by file does not weaken it, and every batch appends to the one session
 # DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
 CORPUS_BATCH ?= 25
+
+# The files are dealt to the batches in hash-of-name order, not alphabetically.
+# Sibling files share a name prefix and a subject, and a subject's files cost
+# about the same, so alphabetical order gathers the whole corpus's heaviest
+# files into one or two batches and leaves the rest nearly empty. Ordering by a
+# hash of the path spreads each subject across the run, which flattens the peak
+# every batch has to fit. The hash is a plain djb2 over the path, so the order
+# is the same on every box and every run: a batch that fits today fits
+# tomorrow, and a batch that does not can be reproduced. Both stages run under
+# LC_ALL=C so the byte table and the sort do not follow the caller's locale.
+DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i } { h = 5381; for (i = 1; i <= length($$0); i++) h = (h * 33 + ord[substr($$0, i, 1)]) % 1000003; printf "%07d\t%s\n", h, $$0 }' | LC_ALL=C sort | cut -f2-
+
 define RUN_CORPUS
 	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
+		| $(DEAL_CORPUS) \
 		| xargs -n $(CORPUS_BATCH) $(ELLE) test \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 endef
