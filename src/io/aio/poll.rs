@@ -7,11 +7,13 @@ impl AsyncBackend {
     /// generate a CQE with result = -ECANCELED; the cancel SQE's CQE is
     /// tagged and skipped by drain_cqes.
     ///
-    /// For the thread pool: just remove the pending entry. The worker still
-    /// runs to completion and its `RawCompletion` decrements the hub's
-    /// `in_flight` once at the drain site; the cooked completion is then
-    /// discarded because the pending entry is gone. We must NOT also decrement
-    /// `in_flight` here — that would underflow the combined count.
+    /// For the thread pool: ask the operation to stop if it is one that can
+    /// (only a timer is), and mark the id so its result is dropped when it
+    /// arrives. The `pending` entry stays. The worker's `RawCompletion` then
+    /// still decrements the hub's `in_flight` at the drain site and still
+    /// releases the descriptor the operation named; removing the entry here
+    /// would strand both. We must NOT decrement `in_flight` here — the drain
+    /// site does it, and doing it twice would underflow the combined count.
     pub(crate) fn cancel(&self, id: SubmissionId) -> Result<(), String> {
         let mut inner = self.inner.borrow_mut();
         match inner.platform {
@@ -20,7 +22,10 @@ impl AsyncBackend {
                 crate::io::uring::submit_uring_cancel(ring, id)?;
             }
             PlatformBackend::ThreadPool => {
-                inner.pending.remove(&id);
+                inner.hub.stop(id);
+                if inner.pending.contains_key(&id) {
+                    inner.cancelled.insert(id);
+                }
             }
         }
         Ok(())
@@ -62,6 +67,7 @@ impl AsyncBackend {
                 ref mut platform,
                 ref mut hub,
                 ref mut pending,
+                ref mut cancelled,
                 ref mut buffer_pool,
                 ref mut fd_states,
                 ref mut completions,
@@ -107,9 +113,21 @@ impl AsyncBackend {
                             Some(ms) => hub.recv_blocking(Some(Duration::from_millis(ms))),
                         };
                         if let Some(rc) = waited {
-                            if let Some(c) =
-                                cook_raw(rc, pending, fd_states, buffer_pool, origin_heap, gen)
-                            {
+                            let id = SubmissionId::from_raw(match &rc {
+                                crate::io::threadpool::RawCompletion::Pool(pc) => pc.id,
+                                crate::io::threadpool::RawCompletion::Stdin(sc) => sc.id,
+                            });
+                            let cooked = cook_raw(
+                                rc,
+                                pending,
+                                cancelled,
+                                fd_states,
+                                buffer_pool,
+                                origin_heap,
+                                gen,
+                            );
+                            hub.forget_stop(id);
+                            if let Some(c) = cooked {
                                 completions.push_back(c);
                             }
                         }
@@ -144,5 +162,14 @@ impl AsyncBackend {
     pub(crate) fn has_pending(&self) -> bool {
         let inner = self.inner.borrow();
         !inner.pending.is_empty()
+    }
+
+    /// Background worker operations submitted but not yet reaped — the OS
+    /// threads this backend currently has out. An operation that is cancelled,
+    /// or whose port is closed under it, is meant to give its worker back;
+    /// this is what says whether it did. Zero on io_uring, which runs its
+    /// operations in the kernel rather than on threads.
+    pub(crate) fn workers(&self) -> usize {
+        self.inner.borrow().hub.in_flight()
     }
 }

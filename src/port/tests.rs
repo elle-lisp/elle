@@ -154,3 +154,65 @@ fn test_pipe_display_closed() {
     p.close();
     assert!(format!("{}", p).contains("[closed]"));
 }
+
+/// Retiring a port hands its descriptor out instead of closing it.
+///
+/// The I/O backend uses this to keep a descriptor number out of circulation
+/// while a worker still holds it — a number reissued under a running worker
+/// gets read by that worker, and its bytes reach no fiber. So the port must
+/// report closed at once while the descriptor stays open in the caller's
+/// hands. See src/io/AGENTS.md § "Descriptor retirement".
+#[test]
+fn retire_fd_hands_out_the_descriptor_and_closes_the_port() {
+    use std::os::unix::io::AsRawFd;
+
+    let file = File::open("/dev/null").unwrap();
+    let fd: OwnedFd = file.into();
+    let raw = fd.as_raw_fd();
+    let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+
+    let retired = port
+        .retire_fd()
+        .expect("an open port yields its descriptor");
+    assert_eq!(retired.as_raw_fd(), raw, "the same descriptor comes back");
+    assert!(port.is_closed(), "the port reports closed once retired");
+    assert!(
+        port.with_fd(|_| ()).is_none(),
+        "the port no longer holds it"
+    );
+
+    // Still open: the caller owns it now, and closing is the caller's to do.
+    let flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
+    assert!(flags >= 0, "the descriptor is still open after retirement");
+}
+
+#[test]
+fn retire_fd_yields_nothing_twice_or_after_close() {
+    let file = File::open("/dev/null").unwrap();
+    let fd: OwnedFd = file.into();
+    let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+    assert!(port.retire_fd().is_some());
+    assert!(
+        port.retire_fd().is_none(),
+        "a retired port has no second descriptor to give"
+    );
+
+    let file = File::open("/dev/null").unwrap();
+    let closed = Port::new_file(
+        file.into(),
+        Direction::Read,
+        Encoding::Text,
+        "/dev/null".to_string(),
+    );
+    closed.close();
+    assert!(
+        closed.retire_fd().is_none(),
+        "a closed port's descriptor is already gone"
+    );
+}
+
+/// Stdio ports do not own their descriptor, so there is nothing to retire.
+#[test]
+fn retire_fd_yields_nothing_for_a_stdio_port() {
+    assert!(Port::stdin().retire_fd().is_none());
+}

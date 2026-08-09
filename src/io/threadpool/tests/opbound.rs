@@ -62,6 +62,7 @@ fn write_to_a_pipe_nobody_reads_returns_at_its_deadline() {
             fd: pipe.write_fd,
             data: payload,
             timeout: Some(Duration::from_millis(200)),
+            stop: None,
         },
     )
     .unwrap();
@@ -98,6 +99,7 @@ fn read_from_a_pipe_nobody_writes_returns_at_its_deadline() {
             fd: pipe.read_fd,
             size: 1024,
             timeout: Some(Duration::from_millis(200)),
+            stop: None,
         },
     )
     .unwrap();
@@ -128,14 +130,14 @@ fn the_last_bound_on_a_descriptor_restores_its_blocking_mode() {
         "a fresh pipe end is blocking"
     );
 
-    let first = OpBound::new(pipe.write_fd, Some(Duration::from_millis(50)));
+    let first = OpBound::new(pipe.write_fd, Some(Duration::from_millis(50)), None);
     assert!(
         is_nonblocking(pipe.write_fd),
         "a timed operation takes the descriptor non-blocking"
     );
 
     {
-        let _second = OpBound::new(pipe.write_fd, Some(Duration::from_millis(50)));
+        let _second = OpBound::new(pipe.write_fd, Some(Duration::from_millis(50)), None);
         assert!(is_nonblocking(pipe.write_fd), "the second holder joins it");
     }
     // The duplex case: one operation finishing must leave the flag alone
@@ -160,7 +162,7 @@ fn a_descriptor_that_was_already_non_blocking_stays_that_way() {
     unsafe { libc::fcntl(pipe.read_fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
 
     {
-        let _bound = OpBound::new(pipe.read_fd, Some(Duration::from_millis(50)));
+        let _bound = OpBound::new(pipe.read_fd, Some(Duration::from_millis(50)), None);
         assert!(is_nonblocking(pipe.read_fd));
     }
     assert!(
@@ -174,7 +176,7 @@ fn an_untimed_operation_leaves_the_descriptor_alone() {
     let pipe = Pipe::new();
 
     {
-        let _bound = OpBound::new(pipe.read_fd, None);
+        let _bound = OpBound::new(pipe.read_fd, None, None);
         assert!(
             !is_nonblocking(pipe.read_fd),
             "an operation with no deadline asks to wait indefinitely, so it \

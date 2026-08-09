@@ -238,6 +238,21 @@ impl Port {
         }
     }
 
+    /// Mark the port closed and hand its descriptor to the caller instead of
+    /// dropping it. The caller then decides when the descriptor is handed back
+    /// to the OS — which the I/O backend delays while an operation still names
+    /// it, so the number cannot be given to a new port under a running worker.
+    /// Returns `None` for a port that owns no descriptor (stdio) or is already
+    /// closed.
+    pub(crate) fn retire_fd(&self) -> Option<OwnedFd> {
+        if self.closed.get() {
+            return None;
+        }
+        let fd = self.fd.borrow_mut().take()?;
+        self.closed.set(true);
+        Some(fd)
+    }
+
     /// Whether this port has been closed.
     pub fn is_closed(&self) -> bool {
         self.closed.get()

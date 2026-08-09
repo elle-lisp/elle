@@ -3,6 +3,7 @@
 use crate::io::grapheme_count_in_valid_prefix;
 use crate::io::request::SocketOptions;
 use crate::io::SubmissionId;
+use std::collections::HashMap;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ pub(super) enum PoolOp {
         fd: RawFd,
         size: usize,
         timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     /// Read exactly `size` units, looping until full or EOF/error.
     /// Units are bytes when `graphemes` is false and grapheme clusters
@@ -33,6 +35,7 @@ pub(super) enum PoolOp {
         /// request build on the VM thread, applied on the worker thread.
         gen: crate::segment::Generation,
         timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     /// Write every byte of `data`, looping over short writes. `timeout`
     /// bounds the wait for the fd to become writable on each pass, so a peer
@@ -42,6 +45,7 @@ pub(super) enum PoolOp {
         fd: RawFd,
         data: Vec<u8>,
         timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     Flush {
         fd: RawFd,
@@ -71,8 +75,13 @@ pub(super) enum PoolOp {
         fd: RawFd,
         how: i32,
     },
+    /// Wait `nanos`, or until stopped. The wait watches the stop pipe rather
+    /// than sleeping so `io/cancel` can end it: `ev/timeout` cancels its timer
+    /// on every call the body wins, and a timer that ran to its full duration
+    /// would hold a pool slot for that long.
     Sleep {
         nanos: u64,
+        stop: Option<RawFd>,
     },
     ProcessWait {
         pid: u32,
@@ -96,11 +105,13 @@ pub(super) enum PoolOp {
     ReadLine {
         fd: RawFd,
         timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     /// Read until EOF. Loops internally, accumulating all data.
     ReadAll {
         fd: RawFd,
         timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     /// Blocking read on an inotify/kqueue fd for filesystem watch events.
     WatchRead {
@@ -143,6 +154,22 @@ pub(super) enum PoolOp {
     },
 }
 
+impl PoolOp {
+    /// The read end of this operation's stop pipe, for the paths that must
+    /// dispose of an operation no worker will run.
+    pub(super) fn stop_fd(&self) -> Option<RawFd> {
+        match self {
+            PoolOp::Read { stop, .. }
+            | PoolOp::ReadExact { stop, .. }
+            | PoolOp::ReadLine { stop, .. }
+            | PoolOp::ReadAll { stop, .. }
+            | PoolOp::Write { stop, .. }
+            | PoolOp::Sleep { stop, .. } => *stop,
+            _ => None,
+        }
+    }
+}
+
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
 pub(super) struct PoolCompletion {
     pub(super) id: u64,
@@ -162,9 +189,6 @@ pub(super) enum RawCompletion {
     Stdin(StdinCompletion),
 }
 
-/// Maximum concurrent thread-pool operations.
-pub(super) const MAX_THREAD_POOL_OPS: usize = 64;
-
 mod opbound;
 use opbound::*;
 
@@ -181,14 +205,21 @@ pub(super) struct CompletionHub {
     receiver: crossbeam_channel::Receiver<RawCompletion>,
     /// Combined count of submitted-but-unreaped worker ops (pool + stdin): +1
     /// per worker submit, −1 once per `RawCompletion` reaped at the single drain
-    /// site. Read only to decide whether the scheduler should block at all. A
-    /// cancelled op's reaped completion still decrements here; `io/cancel` only
-    /// removes the `pending` entry and must not also touch this counter.
+    /// site. Read to decide whether the scheduler should block at all, and to
+    /// cap concurrency — a submission that meets the cap reaps first, since a
+    /// finished operation counts here until its completion is taken. A
+    /// cancelled op reports completion like any other and decrements here;
+    /// `io/cancel` marks the id and must not also touch this counter.
     in_flight: usize,
     /// Linux/uring bridge fd. `None` on the pool-only platforms, where the hub
     /// channel is itself the sole waitable. When `Some`, a worker writes it
     /// after `send` so the ring's single wait observes the edge.
     eventfd: Option<RawFd>,
+    /// The write end of every submitted operation's stop pipe, by id. A worker
+    /// polls the read end alongside its own descriptor, so a byte written here
+    /// ends the operation without disturbing the descriptor — which a port the
+    /// caller still holds would not survive.
+    stops: HashMap<u64, RawFd>,
 }
 
 impl CompletionHub {
@@ -199,6 +230,35 @@ impl CompletionHub {
             receiver,
             in_flight: 0,
             eventfd: None,
+            stops: HashMap::new(),
+        }
+    }
+
+    /// A stop pipe for one operation. The read end goes to the worker, which
+    /// owns it for the operation's lifetime; the write end stays here until
+    /// the completion is reaped. `None` when no descriptor was available, in
+    /// which case the operation runs uncancellable.
+    pub(super) fn stop_pipe(&mut self, id: SubmissionId) -> Option<RawFd> {
+        let pipe = opbound::open_stop_pipe()?;
+        self.stops.insert(id.as_u64(), pipe.write_fd);
+        Some(pipe.read_fd)
+    }
+
+    /// Ask an operation to stop. A second byte would say nothing the first has
+    /// not, so a full pipe is success.
+    pub(super) fn stop(&mut self, id: SubmissionId) {
+        if let Some(&fd) = self.stops.get(&id.as_u64()) {
+            let byte = 1u8;
+            // SAFETY: `fd` is this hub's write end, closed only by `forget_stop`.
+            unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+        }
+    }
+
+    /// Close an operation's stop pipe once its completion has been reaped.
+    pub(super) fn forget_stop(&mut self, id: SubmissionId) {
+        if let Some(fd) = self.stops.remove(&id.as_u64()) {
+            // SAFETY: the hub owns the write end; the worker owns the read end.
+            unsafe { libc::close(fd) };
         }
     }
 
@@ -258,6 +318,12 @@ impl CompletionHub {
 
 impl Drop for CompletionHub {
     fn drop(&mut self) {
+        // Every operation still in flight owns the read end of its stop pipe
+        // and closes it with itself; the write ends are ours.
+        for (_, fd) in self.stops.drain() {
+            // SAFETY: the hub is the sole owner of each write end.
+            unsafe { libc::close(fd) };
+        }
         // The hub owns the bridge eventfd (Linux/uring); close it on teardown.
         // The backend's `AsyncBackendInner` declares `platform` before `hub`, so
         // the ring (and the standing POLL_ADD referencing this fd) is already

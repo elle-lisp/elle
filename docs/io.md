@@ -54,6 +54,43 @@ in flight when the backend value goes out of scope. Thread-pool and stdin
 operations need no such handling — their workers copy results through
 channels and never write into a freed pooled buffer.
 
+### Cancelling an operation
+
+`ev/timeout` cancels an operation on every call — the body's or the
+timer's, whichever lost — so cancellation runs constantly rather than at
+the edges. Two things come back when it does, on either backend:
+
+- **The worker.** A thread-pool operation runs on an OS thread. A
+  cancelled operation reports completion like any other, so its thread is
+  released; only the result is thrown away. `(ev/report):workers` counts
+  the threads currently out.
+- **The descriptor.** A cancelled read stops rather than going on
+  reading. Whatever arrives next belongs to whoever reads the port next:
+
+  ```lisp
+  (ev/timeout 0.1 (fn [] (port/read p 64)))   # the deadline wins
+  (port/read p 64)                            # still sees the peer's bytes
+  ```
+
+  And a port closed while an operation still runs keeps its descriptor
+  number until that operation ends, so the number cannot be handed to a
+  new port while a worker holds it.
+
+`tests/elle/io-cancel-releases.lisp` pins both. See `src/io/AGENTS.md`
+§ "I/O Cancellation" for how the thread pool delivers them.
+
+### How many operations run at once
+
+However many the OS allows. The thread-pool backend runs each operation
+on its own thread, so the ceiling is `RLIMIT_NPROC`, `kernel.threads-max`
+and the memory for the stacks; when the OS refuses a thread, `port/read`
+and friends signal that refusal rather than the runtime pre-empting it
+with a smaller number of its own. io_uring runs its operations in the
+kernel and has no such ceiling.
+
+`(io/workers backend)` reports how many worker threads a backend has out,
+and `ev/report` carries the running scheduler's count as `:workers`.
+
 ## Ports
 
 Ports are bidirectional file descriptors. Open with `port/open`, close

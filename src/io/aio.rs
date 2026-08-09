@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use convert::cook_raw;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -36,6 +36,18 @@ struct AsyncBackendInner {
     unicode_generation: crate::segment::Generation,
     fd_states: HashMap<PortKey, FdState>,
     pending: HashMap<SubmissionId, PendingOp>,
+    /// Submissions whose result no fiber will receive. The `pending` entry
+    /// stays, so the worker's completion is still matched, counted and
+    /// released; only the cooked value is dropped. Dropping the entry instead
+    /// would strand the submission — the worker it runs on and the descriptor
+    /// it names would never come back. See src/io/AGENTS.md
+    /// § "I/O Cancellation".
+    cancelled: std::collections::HashSet<SubmissionId>,
+    /// Descriptors kept open past their port's close because a submitted
+    /// operation still names them. A worker resolves its fd when it runs, so a
+    /// number handed back to the OS while an operation holds it can be given
+    /// to a new socket that the stale operation then reads.
+    retired: HashMap<RawFd, std::os::unix::io::OwnedFd>,
     completions: VecDeque<Completion>,
     next_id: u64,
     // `platform` is declared before `buffer_pool` so it drops first: tearing
@@ -115,6 +127,8 @@ impl AsyncBackend {
                 unicode_generation: gen,
                 fd_states: HashMap::new(),
                 pending: HashMap::new(),
+                cancelled: std::collections::HashSet::new(),
+                retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
                 buffer_pool: BufferPool::new(),
@@ -230,6 +244,10 @@ impl crate::io::IoBackend for AsyncBackend {
 
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String> {
         self.wait(timeout_ms)
+    }
+
+    fn workers(&self) -> usize {
+        self.workers()
     }
 
     fn cancel(&self, id: SubmissionId) -> Result<(), String> {
@@ -416,16 +434,59 @@ impl AsyncBackendInner {
         let AsyncBackendInner {
             ref mut hub,
             ref mut pending,
+            ref mut cancelled,
+            ref mut retired,
             ref mut fd_states,
             ref mut buffer_pool,
             ref mut completions,
             ..
         } = *self;
         for rc in hub.drain_raw() {
-            if let Some(c) = cook_raw(rc, pending, fd_states, buffer_pool, origin_heap, gen) {
+            let id = SubmissionId::from_raw(match &rc {
+                crate::io::threadpool::RawCompletion::Pool(pc) => pc.id,
+                crate::io::threadpool::RawCompletion::Stdin(sc) => sc.id,
+            });
+            let cooked = cook_raw(
+                rc,
+                pending,
+                cancelled,
+                fd_states,
+                buffer_pool,
+                origin_heap,
+                gen,
+            );
+            hub.forget_stop(id);
+            if let Some(c) = cooked {
                 completions.push_back(c);
             }
         }
+        Self::close_drained_fds(pending, fd_states, retired);
+    }
+
+    /// Close every retired descriptor no submitted operation names any more.
+    ///
+    /// A descriptor reaches `retired` when its port was closed while an
+    /// operation still held it; this is where it is finally handed back to the
+    /// OS. Its `fd_states` entry goes with it, so per-fd buffering never spans
+    /// two ports that happened to share a number.
+    fn close_drained_fds(
+        pending: &HashMap<SubmissionId, PendingOp>,
+        fd_states: &mut HashMap<PortKey, FdState>,
+        retired: &mut HashMap<RawFd, std::os::unix::io::OwnedFd>,
+    ) {
+        if retired.is_empty() {
+            return;
+        }
+        retired.retain(|fd, _owned| {
+            let still_named = pending.values().any(|op| {
+                matches!(op, PendingOp::Port { port_key, .. } if *port_key == PortKey::Fd(*fd))
+            });
+            if !still_named {
+                fd_states.remove(&PortKey::Fd(*fd));
+            }
+            // Dropping the `OwnedFd` with the entry is what closes it.
+            still_named
+        });
     }
 
     /// Submit a stdin operation.

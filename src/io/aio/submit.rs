@@ -137,6 +137,7 @@ impl AsyncBackend {
                     })
                     .collect();
 
+                let still_running = !ids_to_cancel.is_empty();
                 for _op_id in ids_to_cancel {
                     match inner.platform {
                         #[cfg(target_os = "linux")]
@@ -153,13 +154,34 @@ impl AsyncBackend {
                     }
                 }
 
-                // Remove fd state
-                inner.fd_states.remove(&PortKey::Fd(*fd));
+                // A pool worker resolves its descriptor when it runs, so the
+                // number must not go back to the OS while an operation still
+                // names it — a new socket handed that number would be read by
+                // the stale operation, and its bytes would reach no fiber.
+                // Hold the descriptor here instead; `close_drained_fds` closes
+                // it, and drops its `fd_states` entry, once the last operation
+                // naming it has completed.
+                let retired =
+                    if still_running && matches!(inner.platform, PlatformBackend::ThreadPool) {
+                        match port.retire_fd() {
+                            Some(owned) => {
+                                inner.retired.insert(*fd, owned);
+                                true
+                            }
+                            None => false,
+                        }
+                    } else {
+                        false
+                    };
+                if !retired {
+                    inner.fd_states.remove(&PortKey::Fd(*fd));
+                }
 
                 drop(inner);
             }
 
-            // Now actually close the port (drops the fd).
+            // Close the port. Already a no-op when the descriptor was retired:
+            // `retire_fd` marked the port closed when it took the descriptor.
             port.close();
 
             // Queue immediate completion.
@@ -422,19 +444,40 @@ impl AsyncBackend {
                     }
                     PlatformBackend::ThreadPool => {
                         let _ = buffer_pool;
+                        // A read takes a stop pipe: `io/cancel` must end it
+                        // rather than abandon it, or the abandoned read goes on
+                        // consuming bytes meant for whoever reads the port next.
+                        //
+                        // A write does not. Nothing it holds is contended —
+                        // stopping one would only cut the payload short, and a
+                        // peer decoding a stream cannot use half a message. It
+                        // runs to the end of its payload as the full-write
+                        // invariant promises, and gives its slot back then.
+                        // `Flush` transfers nothing and cannot park; a pipe it
+                        // never receives is one whose read end nothing closes.
+                        let stop = match op {
+                            PortOp::Read { .. }
+                            | PortOp::ReadExact { .. }
+                            | PortOp::ReadLine { .. }
+                            | PortOp::ReadAll => hub.stop_pipe(id),
+                            _ => None,
+                        };
                         let pool_op = match op {
                             PortOp::ReadLine { .. } => PoolOp::ReadLine {
                                 fd,
                                 timeout: request.timeout,
+                                stop,
                             },
                             PortOp::ReadAll => PoolOp::ReadAll {
                                 fd,
                                 timeout: request.timeout,
+                                stop,
                             },
                             PortOp::Read { count, .. } => PoolOp::Read {
                                 fd,
                                 size: *count - read_buffered,
                                 timeout: request.timeout,
+                                stop,
                             },
                             PortOp::ReadExact { count, .. } => {
                                 let is_text = matches!(port.encoding(), Encoding::Text);
@@ -451,6 +494,7 @@ impl AsyncBackend {
                                         graphemes: true,
                                         gen,
                                         timeout: request.timeout,
+                                        stop,
                                     }
                                 } else {
                                     PoolOp::ReadExact {
@@ -459,6 +503,7 @@ impl AsyncBackend {
                                         graphemes: false,
                                         gen,
                                         timeout: request.timeout,
+                                        stop,
                                     }
                                 }
                             }
@@ -468,6 +513,7 @@ impl AsyncBackend {
                                     fd,
                                     data: bytes,
                                     timeout: request.timeout,
+                                    stop,
                                 }
                             }
                             PortOp::Flush => PoolOp::Flush { fd },

@@ -24,14 +24,56 @@ struct NonBlockShare {
     clear_on_release: bool,
 }
 
-/// Bounds one worker operation by the caller's `:timeout`, whatever kind of
-/// descriptor it runs on.
+/// Why a readiness wait ended.
+pub(super) enum Wake {
+    /// The descriptor reported the events asked for. Retry the syscall.
+    Ready,
+    /// The caller's `:timeout` elapsed.
+    TimedOut,
+    /// `io/cancel` asked this operation to stop.
+    Stopped,
+}
+
+/// One operation's stop pipe.
+///
+/// A worker blocked in a syscall cannot be interrupted from another thread,
+/// and the alternatives destroy state the port still owns: shutting the
+/// descriptor down would break a socket the caller keeps using, and a signal
+/// would land wherever the kernel chose. So a cancellable operation waits for
+/// readiness and for this pipe together, and cancelling writes one byte.
+pub(in crate::io) struct StopPipe {
+    /// Polled by the worker alongside its own descriptor.
+    pub(in crate::io) read_fd: RawFd,
+    /// Written by `CompletionHub::stop`.
+    pub(in crate::io) write_fd: RawFd,
+}
+
+/// Open a stop pipe, or `None` when the process is out of descriptors — in
+/// which case the operation runs uncancellable, exactly as it did before.
+pub(in crate::io) fn open_stop_pipe() -> Option<StopPipe> {
+    let mut fds = [0 as RawFd; 2];
+    // `pipe2` is not on macOS, so set FD_CLOEXEC after the fact.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } < 0 {
+        return None;
+    }
+    for fd in fds {
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    Some(StopPipe {
+        read_fd: fds[0],
+        write_fd: fds[1],
+    })
+}
+
+/// Bounds one worker operation by the caller's `:timeout` and by
+/// cancellation, whatever kind of descriptor it runs on.
 ///
 /// The bound belongs to the operation rather than to the descriptor.
 /// `SO_RCVTIMEO`/`SO_SNDTIMEO` bound a socket and a pipe, a fifo and a tty
 /// reject them, yet a reader that stops reading fills a pipe exactly as it
 /// fills a socket. `poll(2)` accepts every descriptor, so the worker waits
-/// there and every descriptor is bounded alike.
+/// there and every descriptor is bounded alike — and the same wait watches the
+/// stop pipe, so cancelling ends the operation rather than abandoning it.
 ///
 /// Non-blocking mode is what makes that wait sufficient: a blocking syscall can
 /// park again after a poll reports the descriptor ready, while a non-blocking
@@ -49,27 +91,33 @@ pub(super) struct OpBound {
     timeout: Option<Duration>,
     /// True while this operation counts as a holder of the non-blocking flag.
     holding: bool,
+    /// The read end of this operation's stop pipe, owned for the operation's
+    /// lifetime and closed with it.
+    stop_fd: Option<RawFd>,
 }
 
 impl OpBound {
-    /// Bound an operation on `fd`. A timed operation takes the descriptor
-    /// non-blocking for its lifetime; an untimed one leaves the descriptor as
-    /// it found it and blocks in the kernel, which is the wait it asked for.
-    pub(super) fn new(fd: RawFd, timeout: Option<Duration>) -> Self {
-        let holding = timeout.is_some() && acquire_nonblocking(fd);
+    /// Bound an operation on `fd`. An operation that can time out or be
+    /// stopped takes the descriptor non-blocking for its lifetime, so its
+    /// syscall reports `EAGAIN` and hands the wait back here where both
+    /// endings can be observed. An operation with neither leaves the
+    /// descriptor as it found it and blocks in the kernel.
+    pub(super) fn new(fd: RawFd, timeout: Option<Duration>, stop_fd: Option<RawFd>) -> Self {
+        let holding = (timeout.is_some() || stop_fd.is_some()) && acquire_nonblocking(fd);
         OpBound {
             fd,
             timeout,
             holding,
+            stop_fd,
         }
     }
 
-    /// Wait until the descriptor reports `events`. False is the caller's
-    /// timeout expiring, and the only reason this reports false.
+    /// Wait until the descriptor reports `events`, the caller's timeout
+    /// elapses, or the operation is stopped.
     ///
-    /// A descriptor `poll(2)` rejects reports true: it cannot report readiness,
-    /// so the syscall retries and names the failure itself.
-    pub(super) fn wait(&self, events: libc::c_short) -> bool {
+    /// A descriptor `poll(2)` rejects reports `Ready`: it cannot report
+    /// readiness, so the syscall retries and names the failure itself.
+    pub(super) fn wait(&self, events: libc::c_short) -> Wake {
         let deadline = self.timeout.map(|t| Instant::now() + t);
         loop {
             let timeout_ms = match deadline {
@@ -77,7 +125,7 @@ impl OpBound {
                 Some(at) => {
                     let left = at.saturating_duration_since(Instant::now());
                     if left.is_zero() {
-                        return false;
+                        return Wake::TimedOut;
                     }
                     // Round up: a remainder under a millisecond is still time
                     // the caller granted, and rounding it away would report a
@@ -86,23 +134,48 @@ impl OpBound {
                     ms.min(libc::c_int::MAX as u128) as libc::c_int
                 }
             };
-            let mut pfd = libc::pollfd {
-                fd: self.fd,
-                events,
-                revents: 0,
-            };
-            let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+            let mut pfds = [
+                libc::pollfd {
+                    fd: self.fd,
+                    events,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: self.stop_fd.unwrap_or(-1),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            let n = if self.stop_fd.is_some() { 2 } else { 1 };
+            let ret = unsafe { libc::poll(pfds.as_mut_ptr(), n, timeout_ms) };
             if ret > 0 {
-                return true;
+                // The stop is checked first: a descriptor that is ready and an
+                // operation that was cancelled both happened, and the caller
+                // asked for the cancellation.
+                if pfds[1].revents != 0 {
+                    return Wake::Stopped;
+                }
+                return Wake::Ready;
             }
             if ret == 0 {
-                return false;
+                return Wake::TimedOut;
             }
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
             if errno == libc::EINTR {
                 continue;
             }
-            return true;
+            return Wake::Ready;
+        }
+    }
+
+    /// Wait out `duration`, or until the operation is stopped. The timer's
+    /// whole wait — there is no descriptor to poll.
+    pub(super) fn sleep(&self) -> Wake {
+        match self.wait(0) {
+            // No descriptor events were asked for, so readiness cannot be why
+            // this returned; only the timeout can.
+            Wake::Ready => Wake::TimedOut,
+            other => other,
         }
     }
 }
@@ -111,6 +184,10 @@ impl Drop for OpBound {
     fn drop(&mut self) {
         if self.holding {
             release_nonblocking(self.fd);
+        }
+        if let Some(fd) = self.stop_fd {
+            // SAFETY: the worker owns the read end for the operation's lifetime.
+            unsafe { libc::close(fd) };
         }
     }
 }

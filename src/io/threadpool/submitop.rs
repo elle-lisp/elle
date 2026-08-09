@@ -3,23 +3,35 @@ use super::*;
 impl CompletionHub {
     /// Submit a blocking I/O operation on a background worker thread; the worker
     /// reports its result back through the hub channel as a `RawCompletion::Pool`.
+    /// How many operations may run at once is the OS's to say. The worker is
+    /// started with `Builder::spawn` rather than `thread::spawn` for exactly
+    /// that reason: `thread::spawn` panics when the OS refuses a thread, and a
+    /// refusal is something the calling fiber can be told about and handle.
+    /// So the ceiling here is `RLIMIT_NPROC`, `threads-max` and the memory for
+    /// the stacks — the limits the operator set — reported where they bind
+    /// rather than guessed at in advance.
     pub(in crate::io) fn submit(&mut self, id: SubmissionId, op: PoolOp) -> Result<(), String> {
+        // Taken before `op` moves into the worker: a spawn that fails leaves
+        // this operation's stop pipe with no worker to own its read end.
+        let stop_fd = op.stop_fd();
         // The pool carries the id as an opaque round-tripped token.
-        let id = id.as_u64();
-        if self.in_flight() >= MAX_THREAD_POOL_OPS {
-            return Err("async I/O: too many concurrent operations (max 64)".into());
-        }
+        let raw_id = id.as_u64();
         let sender = self.sender();
         let eventfd = self.eventfd();
-        self.note_submit();
-        std::thread::spawn(move || {
+        let started = std::thread::Builder::new().spawn(move || {
+            let id = raw_id;
             // Block all signals on this worker so the kernel never selects
             // it as the delivery target for a watched POSIX signal.
             // See src/io/sigfd.rs and docs/posix-signals.md.
             crate::io::sigfd::mask_all_signals_on_this_thread();
             let (result_code, data) = match op {
-                PoolOp::Read { fd, size, timeout } => {
-                    let bound = OpBound::new(fd, timeout);
+                PoolOp::Read {
+                    fd,
+                    size,
+                    timeout,
+                    stop,
+                } => {
+                    let bound = OpBound::new(fd, timeout, stop);
                     let mut buf = vec![0u8; size];
                     loop {
                         let ret =
@@ -33,10 +45,11 @@ impl CompletionHub {
                             continue;
                         }
                         if is_would_block(errno) {
-                            if bound.wait(libc::POLLIN) {
-                                continue;
+                            match bound.wait(libc::POLLIN) {
+                                Wake::Ready => continue,
+                                Wake::Stopped => break (-libc::ECANCELED, Vec::new()),
+                                Wake::TimedOut => break (-libc::ETIMEDOUT, Vec::new()),
                             }
-                            break (-libc::ETIMEDOUT, Vec::new());
                         }
                         break (-errno, Vec::new());
                     }
@@ -47,8 +60,9 @@ impl CompletionHub {
                     graphemes,
                     gen,
                     timeout,
+                    stop,
                 } => {
-                    let bound = OpBound::new(fd, timeout);
+                    let bound = OpBound::new(fd, timeout, stop);
                     // Buffer grows as we go — graphemes mode can't preallocate
                     // because we don't know the byte count in advance.  In
                     // bytes mode we still grow into a `size`-capacity Vec so
@@ -91,15 +105,16 @@ impl CompletionHub {
                                 continue;
                             }
                             if is_would_block(errno) {
-                                if bound.wait(libc::POLLIN) {
-                                    continue;
+                                match bound.wait(libc::POLLIN) {
+                                    Wake::Ready => continue,
+                                    Wake::Stopped => break (-libc::ECANCELED, Vec::new()),
+                                    // The deadline passed with nothing more
+                                    // arriving. That is the caller's timeout,
+                                    // not the end of the stream — surfacing
+                                    // the partial here would read as EOF and
+                                    // the completion would map it to nil.
+                                    Wake::TimedOut => break (-libc::ETIMEDOUT, Vec::new()),
                                 }
-                                // The deadline passed with nothing more
-                                // arriving. That is the caller's timeout, not
-                                // the end of the stream — surfacing the
-                                // partial here would read as EOF and the
-                                // completion would map it to nil.
-                                break (-libc::ETIMEDOUT, Vec::new());
                             }
                             if total == 0 {
                                 break (-errno, Vec::new());
@@ -116,9 +131,9 @@ impl CompletionHub {
                         total += ret as usize;
                     }
                 }
-                PoolOp::ReadLine { fd, timeout } | PoolOp::ReadAll { fd, timeout } => {
+                PoolOp::ReadLine { fd, timeout, stop } | PoolOp::ReadAll { fd, timeout, stop } => {
                     let until_newline = matches!(op, PoolOp::ReadLine { .. });
-                    let bound = OpBound::new(fd, timeout);
+                    let bound = OpBound::new(fd, timeout, stop);
                     let mut accumulated = Vec::new();
                     let mut chunk = vec![0u8; 4096];
                     loop {
@@ -131,14 +146,15 @@ impl CompletionHub {
                                 continue;
                             }
                             if is_would_block(errno) {
-                                if bound.wait(libc::POLLIN) {
-                                    continue;
+                                match bound.wait(libc::POLLIN) {
+                                    Wake::Ready => continue,
+                                    Wake::Stopped => break (-libc::ECANCELED, Vec::new()),
+                                    // The deadline passed with nothing more
+                                    // arriving. Report the timeout rather than
+                                    // the partial, which the completion would
+                                    // treat as a line or a stream that ended.
+                                    Wake::TimedOut => break (-libc::ETIMEDOUT, Vec::new()),
                                 }
-                                // The deadline passed with nothing more
-                                // arriving. Report the timeout rather than the
-                                // partial, which the completion would treat as
-                                // a line or a stream that ended.
-                                break (-libc::ETIMEDOUT, Vec::new());
                             }
                             if accumulated.is_empty() {
                                 break (-errno, Vec::new());
@@ -156,7 +172,12 @@ impl CompletionHub {
                         }
                     }
                 }
-                PoolOp::Write { fd, data, timeout } => {
+                PoolOp::Write {
+                    fd,
+                    data,
+                    timeout,
+                    stop,
+                } => {
                     // `port/write` writes every byte before it returns
                     // (docs/io.md), so loop until the payload is gone. One
                     // write(2) transfers only what fits in the fd's send
@@ -169,7 +190,7 @@ impl CompletionHub {
                     // progress and the transfer finishes however long it
                     // takes. That mirrors the io_uring path, which re-arms its
                     // LinkTimeout on each resubmission.
-                    let bound = OpBound::new(fd, timeout);
+                    let bound = OpBound::new(fd, timeout, stop);
                     let mut total = 0usize;
                     loop {
                         let ret = unsafe {
@@ -193,14 +214,15 @@ impl CompletionHub {
                             continue;
                         }
                         if ret < 0 && is_would_block(errno) {
-                            if bound.wait(libc::POLLOUT) {
-                                continue;
+                            match bound.wait(libc::POLLOUT) {
+                                Wake::Ready => continue,
+                                Wake::Stopped => break (-libc::ECANCELED, Vec::new()),
+                                // The wait for room expired. Report it as the
+                                // caller's timeout, which `complete_port_op`
+                                // maps to a `:timeout` error rather than a
+                                // generic I/O one.
+                                Wake::TimedOut => break (-libc::ETIMEDOUT, Vec::new()),
                             }
-                            // The wait for room expired. Report it as the
-                            // caller's timeout, which `complete_port_op` maps
-                            // to a `:timeout` error rather than a generic I/O
-                            // one.
-                            break (-libc::ETIMEDOUT, Vec::new());
                         }
                         // Surface the failure rather than the bytes that did
                         // get through: a count smaller than the payload reads
@@ -386,8 +408,14 @@ impl CompletionHub {
                         (0, Vec::new())
                     }
                 }
-                PoolOp::Sleep { nanos } => {
-                    std::thread::sleep(std::time::Duration::from_nanos(nanos));
+                PoolOp::Sleep { nanos, stop } => {
+                    // Either ending reports the same completion: a stopped
+                    // timer's result is discarded, and a fiber that wanted the
+                    // elapsed timer cannot tell the two apart anyway. There is
+                    // no descriptor to watch, so the bound polls the stop pipe
+                    // alone with the duration as its deadline.
+                    let bound = OpBound::new(-1, Some(Duration::from_nanos(nanos)), stop);
+                    let _ = bound.sleep();
                     (0, Vec::new())
                 }
                 PoolOp::ProcessWait { pid } => {
@@ -484,6 +512,24 @@ impl CompletionHub {
                 }),
             );
         });
-        Ok(())
+        match started {
+            Ok(_) => {
+                // Counted only once the worker exists, so a refused spawn
+                // leaves nothing behind to reap. Nothing can reap between the
+                // two either: the drain runs on this thread.
+                self.note_submit();
+                Ok(())
+            }
+            Err(e) => {
+                // No worker took the stop pipe, so close both ends here rather
+                // than leave the read end with no owner.
+                if let Some(fd) = stop_fd {
+                    // SAFETY: the read end is still this operation's, unshared.
+                    unsafe { libc::close(fd) };
+                }
+                self.forget_stop(id);
+                Err(format!("async I/O: cannot start a worker thread: {}", e))
+            }
+        }
     }
 }

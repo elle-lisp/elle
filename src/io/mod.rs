@@ -246,6 +246,13 @@ pub(crate) trait IoBackend {
     /// calls this; other builds compile it but never invoke it.
     #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
     fn quiesce(&self) {}
+
+    /// Background worker operations submitted but not yet reaped — the OS
+    /// threads this backend has out. A backend that runs its operations in the
+    /// kernel (io_uring) or inline (the mock) has none.
+    fn workers(&self) -> usize {
+        0
+    }
 }
 
 /// Type-erased async I/O backend, stored as `Value::external("io-backend", ...)`.

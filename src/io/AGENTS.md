@@ -183,9 +183,74 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 
 ## I/O Cancellation
 
-`io/cancel` submits `IORING_OP_ASYNC_CANCEL` on io_uring, or removes the pending entry on thread pool. The cancel SQE's CQE uses the high-bit tag (same as timeout CQEs) and is skipped by `drain_cqes`. The cancelled operation generates a CQE with `result = -ECANCELED`.
+`io/cancel` submits `IORING_OP_ASYNC_CANCEL` on io_uring. The cancel SQE's CQE uses the high-bit tag (same as timeout CQEs) and is skipped by `drain_cqes`. The cancelled operation generates a CQE with `result = -ECANCELED`.
 
-Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling fibers.
+Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling fibers, and by `ev/timeout`, which cancels whichever of the body and the timer lost.
+
+### What cancellation promises on the thread pool
+
+A pool operation runs on its own worker thread, which holds a plain
+descriptor number and calls a blocking syscall on it. Nothing outside that
+thread can retract the syscall, so cancellation on this backend promises
+two things rather than an immediate stop:
+
+- **The submission is accounted for.** `cancel` marks the id in
+  `cancelled` and leaves the `pending` entry in place. The worker's
+  completion still arrives, still finds its entry, and still decrements
+  `in_flight`; the cooked result is then thrown away instead of being
+  handed to a fiber. Removing the entry instead would strand the
+  submission: the worker's thread would never be accounted for again,
+  and cancellation is a path `ev/timeout` takes on every call.
+- **The descriptor outlives the operation.** See "Descriptor retirement"
+  below.
+
+A timer is the one operation that does stop at once: `PoolOp::Sleep`
+waits on a channel with `recv_timeout` rather than sleeping, and `cancel`
+sends on that channel. This is what keeps `ev/timeout` cheap — every
+`ev/timeout` whose body wins cancels its timer, so a timer that ran to
+its full duration would hold a slot for that long.
+
+An operation on a descriptor keeps running. That is safe because of
+retirement, and it ends when the descriptor's peer or its own timeout
+ends it; `port/close` shuts the descriptor down, which ends it at once
+for a socket.
+
+### Descriptor retirement
+
+**A descriptor number is not reused while any submitted operation still
+names it.** A worker resolves its fd at syscall entry, not at submit
+time, so a number returned to the OS while a worker still holds it can be
+handed to a new socket before that worker runs — and the worker then
+reads the new socket, and its bytes go to a completion no fiber is
+waiting for.
+
+`port/close` therefore hands the port's `OwnedFd` to the backend rather
+than dropping it whenever `pending` still holds an operation on that key.
+The port reports closed immediately, so Elle's semantics do not change;
+the descriptor itself is closed by `retire_fd_if_drained` once the last
+operation naming it has completed. `fd_states` for the key is dropped at
+the same moment, so per-fd buffering never spans two ports either.
+
+Pinned by `tests/elle/io-cancel-releases.lisp`.
+
+### How many operations run at once
+
+The OS decides. A pool operation is one `std::thread::Builder::spawn`, so
+the ceiling is `RLIMIT_NPROC`, `kernel.threads-max` and the memory for the
+stacks — limits the operator set, on a machine the runtime cannot survey.
+`Builder::spawn` rather than `thread::spawn` is what makes deferring to
+them possible: `thread::spawn` panics when the OS refuses, while a
+`Builder` refusal becomes the error `io/submit` returns and the calling
+fiber can handle.
+
+`io/workers` reports how many operations are submitted and not yet reaped
+— the threads out right now — and `ev/report` carries it as `:workers`.
+That is a measurement, not a budget: nothing consults it to decide whether
+a submission may proceed.
+
+io_uring has no equivalent count. Its operations run in the kernel, so
+`workers()` is zero there and the only limit is the 256-entry submission
+queue, which drains as it is submitted.
 
 ## Buffer Drain Invariant
 

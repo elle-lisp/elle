@@ -1,22 +1,77 @@
 use super::*;
 
 /// Cook one `RawCompletion` reaped from the hub into a `Completion`, dispatching
-/// on the variant. Returns `None` when the op was cancelled (its `pending` entry
-/// is already gone) — the caller discards it; the hub's `in_flight` was already
-/// decremented at the drain site, so a discarded item still balances the count.
+/// on the variant. Returns `None` when no fiber is waiting for the result —
+/// either the op was cancelled, or its `pending` entry is already gone. The
+/// caller discards it; the hub's `in_flight` was already decremented at the
+/// drain site, so a discarded item still balances the count.
+///
+/// A cancelled op is discarded *before* cooking. Cooking a read writes the
+/// worker's bytes into the buffer the requesting fiber pre-allocated, and a
+/// cancelled read's fiber is gone — the write would land in a freed heap.
 pub(super) fn cook_raw(
     rc: RawCompletion,
     pending: &mut HashMap<SubmissionId, PendingOp>,
+    cancelled: &mut std::collections::HashSet<SubmissionId>,
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
+    let id = SubmissionId::from_raw(match &rc {
+        RawCompletion::Pool(pc) => pc.id,
+        RawCompletion::Stdin(sc) => sc.id,
+    });
+    if cancelled.remove(&id) {
+        let result_fd = match &rc {
+            RawCompletion::Pool(pc) => pc.result_code,
+            RawCompletion::Stdin(_) => 0,
+        };
+        discard_pending(id, result_fd, pending, buffer_pool);
+        return None;
+    }
     match rc {
         RawCompletion::Pool(pc) => {
             pool_to_completion(pc, pending, fd_states, buffer_pool, origin_heap, gen)
         }
         RawCompletion::Stdin(sc) => stdin_to_completion(sc, pending, buffer_pool, origin_heap),
+    }
+}
+
+/// Retire a cancelled operation's entry, releasing everything it owns without
+/// building a value for it. `result_fd` is the raw completion's result code,
+/// which for a connect is the descriptor the worker opened — nobody will take
+/// it now, so it is closed here rather than leaked.
+fn discard_pending(
+    id: SubmissionId,
+    result_fd: i32,
+    pending: &mut HashMap<SubmissionId, PendingOp>,
+    buffer_pool: &mut BufferPool,
+) {
+    let Some(op) = pending.remove(&id) else {
+        return;
+    };
+    if let Some(bh) = op.buffer_handle() {
+        buffer_pool.release(bh);
+    }
+    match op {
+        PendingOp::Connect { connect_fd, .. } => {
+            // io_uring pre-creates the socket; the pool reports it here.
+            if let Some(fd) = connect_fd.or(if result_fd > 0 { Some(result_fd) } else { None }) {
+                // SAFETY: nothing else holds this descriptor — the port that
+                // would have owned it is never built.
+                unsafe { libc::close(fd) };
+            }
+        }
+        PendingOp::Open { .. } if result_fd > 0 => {
+            // SAFETY: as above — the port for this descriptor is never built.
+            unsafe { libc::close(result_fd) };
+        }
+        PendingOp::ProcessWait { siginfo, .. } if !siginfo.is_null() => {
+            // SAFETY: allocated by `Box::into_raw` at submit; reclaimed once.
+            drop(unsafe { Box::from_raw(siginfo) });
+        }
+        _ => {}
     }
 }
 

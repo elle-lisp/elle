@@ -17,8 +17,14 @@ fn hub_in_flight_increments_on_submit_decrements_on_reap() {
     let mut hub = CompletionHub::new();
     assert_eq!(hub.in_flight(), 0, "fresh hub has no in-flight work");
 
-    hub.submit(SubmissionId::from_raw(1), PoolOp::Sleep { nanos: 0 })
-        .unwrap();
+    hub.submit(
+        SubmissionId::from_raw(1),
+        PoolOp::Sleep {
+            nanos: 0,
+            stop: None,
+        },
+    )
+    .unwrap();
     assert_eq!(hub.in_flight(), 1, "submit raises the combined counter");
 
     // The worker runs a zero-length sleep and reports back. recv_blocking is
@@ -64,8 +70,14 @@ fn hub_task_result_round_trips_as_pool_completion() {
 fn hub_drains_a_burst_without_leaking_in_flight() {
     let mut hub = CompletionHub::new();
     for id in 1..=3 {
-        hub.submit(SubmissionId::from_raw(id), PoolOp::Sleep { nanos: 0 })
-            .unwrap();
+        hub.submit(
+            SubmissionId::from_raw(id),
+            PoolOp::Sleep {
+                nanos: 0,
+                stop: None,
+            },
+        )
+        .unwrap();
     }
     assert_eq!(hub.in_flight(), 3);
 
@@ -100,8 +112,14 @@ fn hub_drains_a_burst_without_leaking_in_flight() {
 #[test]
 fn hub_reap_decrements_even_when_result_is_discarded() {
     let mut hub = CompletionHub::new();
-    hub.submit(SubmissionId::from_raw(9), PoolOp::Sleep { nanos: 0 })
-        .unwrap();
+    hub.submit(
+        SubmissionId::from_raw(9),
+        PoolOp::Sleep {
+            nanos: 0,
+            stop: None,
+        },
+    )
+    .unwrap();
     assert_eq!(hub.in_flight(), 1);
 
     // Reap but drop the RawCompletion on the floor (as a cancelled op's cook

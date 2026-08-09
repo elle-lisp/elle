@@ -184,7 +184,8 @@ impl AsyncBackend {
                 }
                 PlatformBackend::ThreadPool => {
                     let nanos = duration.as_nanos() as u64;
-                    d.hub.submit(d.id, PoolOp::Sleep { nanos })
+                    let stop = d.hub.stop_pipe(d.id);
+                    d.hub.submit(d.id, PoolOp::Sleep { nanos, stop })
                 }
             },
             |buffer, ()| PendingOp::Sleep {

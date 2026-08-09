@@ -87,6 +87,7 @@ struct:
 |---|---|
 | `:runnable` | fibers queued to run on the next drain |
 | `:io` | submitted I/O operations with no completion yet |
+| `:workers` | background worker threads out for those operations (zero on io_uring, which runs them in the kernel) |
 | `:joins` | fibers with at least one join waiter |
 | `:selects` | fibers parked on a select set |
 | `:forwarded` | I/O submitted for a child scheduler |

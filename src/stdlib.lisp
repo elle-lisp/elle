@@ -2080,6 +2080,7 @@
           (push parks [key (length q)]))
         {:runnable (length runnable)
          :io (length pending)
+         :workers (io/workers backend)
          :joins (length waiters)
          :selects (length select-sets)
          :forwarded (length forwarded-pending)

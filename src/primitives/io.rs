@@ -100,6 +100,26 @@ fn prim_io_submit(
     }
 }
 
+/// (io/workers backend) → integer
+fn prim_io_workers(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let backend = match args[0].as_external::<AnyBackend>() {
+        Some(b) => b,
+        None => {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    "io/workers: expected async io-backend (created with :async or :mock)",
+                ),
+            )
+        }
+    };
+    (SIG_OK, Value::int(backend.0.workers() as i64))
+}
+
 /// (io/reap backend) → array-of-completion-structs
 fn prim_io_reap(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -349,6 +369,15 @@ primitive! {
         params: &["backend", "request"],
         category: "io",
         example: "(io/submit backend request)",
+        effect: RegionEffect::Immediate,
+    }
+    "io/workers" => prim_io_workers {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Background worker operations this backend has submitted but not yet reaped. Zero for a backend that runs its operations in the kernel (io_uring) rather than on threads.",
+        params: &["backend"],
+        category: "io",
+        example: "(io/workers backend)",
         effect: RegionEffect::Immediate,
     }
     "io/reap" => prim_io_reap {
