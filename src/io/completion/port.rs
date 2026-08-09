@@ -41,10 +41,6 @@ pub(super) fn complete_port_op(
                     format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                let state = fd_states
-                    .entry(port_key.clone())
-                    .or_insert_with(FdState::new);
-                state.status = FdStatus::Error;
                 return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
             }
 
@@ -61,7 +57,6 @@ pub(super) fn complete_port_op(
                 let state = fd_states
                     .entry(port_key.clone())
                     .or_insert_with(FdState::new);
-                state.status = FdStatus::Eof;
 
                 // For ReadLine: check buffer for a partial last line
                 // (file content without trailing newline).

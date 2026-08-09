@@ -50,25 +50,19 @@ impl PortKey {
     }
 }
 
-/// Per-fd buffered state.
+/// Bytes read past what an operation asked for, held for the next read on
+/// the same descriptor. A `ReadLine` that overshoots the newline and a
+/// `ReadExact` that overshoots the grapheme count both leave a remainder
+/// here, and the next operation on the key consumes it before it reaches
+/// the kernel. The entry is dropped when the descriptor closes, so the
+/// remainder never spans two owners of one descriptor number.
 pub(crate) struct FdState {
     pub(crate) buffer: Vec<u8>,
-    pub(crate) status: FdStatus,
-}
-
-/// Fd lifecycle status.
-pub(crate) enum FdStatus {
-    Open,
-    Eof,
-    Error,
 }
 
 impl FdState {
     pub(crate) fn new() -> Self {
-        FdState {
-            buffer: Vec::new(),
-            status: FdStatus::Open,
-        }
+        FdState { buffer: Vec::new() }
     }
 }
 

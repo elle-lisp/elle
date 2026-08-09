@@ -11,7 +11,7 @@ to a backend for execution.
 
 | Module | Responsibility |
 |--------|----------------|
-| `types.rs` | Shared types: `PortKey`, `FdState`, `FdStatus` — used by both backends |
+| `types.rs` | Shared types: `PortKey`, `FdState` — used by both backends |
 | `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
 | `pending.rs` | `PendingOp` enum — in-flight async operation tracking, one variant per operation shape |
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
