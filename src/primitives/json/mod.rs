@@ -95,9 +95,21 @@ pub(crate) fn prim_json_serialize_pretty(
     (SIG_OK, ctx.string(json_str))
 }
 
+// All three JSON primitives signal at runtime: `json/parse` on malformed
+// input, and the two serializers on a value they cannot encode, such as a
+// closure. Declaring them `Signal::silent()` therefore contradicts what they
+// do. Effect inference marks any function whose body holds only silent
+// primitives as silent, so a lambda that merely wraps one of these calls is
+// inferred pure. When the primitive then signals, the runtime raises a
+// `silence violation` panic and aborts the process with SIGABRT. No `try` at
+// the call site can intercept that, because the abort happens inside the
+// callee.
+//
+// `Signal::errors()` states the truth and makes the error catchable at any
+// call site. The success path is unchanged.
 primitive! {
     "json/parse" => prim_json_parse {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Range(1, 3),
         doc: "Parse a JSON string into Elle values. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
         params: &["json-string", ":keys", ":keyword"],
@@ -107,7 +119,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "json/serialize" => prim_json_serialize {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to compact JSON",
         params: &["value"],
@@ -117,7 +129,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "json/pretty" => prim_json_serialize_pretty {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
         params: &["value"],
