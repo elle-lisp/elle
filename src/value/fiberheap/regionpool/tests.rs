@@ -135,6 +135,30 @@ fn teardown_returns_pages() {
 }
 
 #[test]
+fn teardown_returns_a_page_that_still_names_its_region() {
+    // A region hands each page back through the cursors it filled
+    // (docs/impl/region/model.md § "Page recycling"). The pool caches the page
+    // as it stands, header included, so a pointer that outlived this region
+    // still resolves to region 42 and trips the generation check rather than
+    // reading a page that names nothing (docs/impl/region/generations.md).
+    let mut pool = PagePool::default();
+    let mut rp = pool_for(42);
+    rp.alloc_obj(cons_obj(), &mut pool);
+    rp.alloc_region_slice(b"inline payload", &mut pool);
+    rp.teardown(&mut pool);
+
+    let cached = pool
+        .peek_cached(BASE_PAGE)
+        .expect("teardown must return the page to the cache");
+    let rid = unsafe { region_of_page_ptr(cached.as_ptr() as *const (), BASE_PAGE) };
+    assert_eq!(
+        rid, 42,
+        "the cached page lost the stamp of the region that died on it, so a \
+         stale pointer into it no longer names region 42",
+    );
+}
+
+#[test]
 fn teardown_runs_dtors() {
     use std::cell::RefCell;
     use std::rc::Rc;

@@ -90,6 +90,15 @@ impl RegionStore {
         self.pool.initial_page_size()
     }
 
+    /// Pages this store has claimed from its pool, fresh mappings and recycled
+    /// pages alike — monotonic, never decremented on release. The backend of
+    /// the `arena/page-claims` gauge (docs/impl/region/diagnostics.md): a delta
+    /// across a fixed window is a shape's *page* cost, which the object and
+    /// region gauges do not show.
+    pub fn page_claims(&self) -> u64 {
+        self.pool.counters().claims()
+    }
+
     /// Number of active (non-empty) regions.
     pub fn active_region_count(&self) -> usize {
         self.regions.iter().filter(|r| r.is_some()).count()

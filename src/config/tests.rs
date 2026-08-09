@@ -96,7 +96,7 @@ fn trace_keywords_are_known() {
     // Region/free diagnostics: functional today but checked via the
     // string `has_trace` (cold free paths in fiberheap/freelog.rs),
     // so they deliberately carry no `trace_bits` entry.
-    const STRING_TRACED: &[&str] = &["free", "guardfree", "freebt"];
+    const STRING_TRACED: &[&str] = &["free", "guardfree", "freebt", "scrub"];
     for kw in TRACE_KEYWORDS {
         let recognized = trace_bits::from_name(kw) != 0
             || FORWARD_COMPAT.contains(kw)

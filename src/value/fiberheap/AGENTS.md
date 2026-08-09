@@ -29,7 +29,7 @@ heap and region explicitly through `arena`.
 | `regionstore/mintscope.rs` | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | `regionpool.rs` | `RegionPool`: dual-ended pages, page-header stamp, `header_of_page_ptr` |
 | `regionpool/introspect.rs` | `find_object_cross_refs` content scan (cascade + diagnostics) |
-| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; guardfree leak hook |
+| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook |
 | `freelog.rs` | `--trace=free`/`freebt` free-log; guardfree arming |
 | `tests.rs` | `FiberHeap` unit tests |
 
@@ -76,3 +76,9 @@ bypasses the check via the generation-blind `region_of_page_ptr`.
 5. **Reserved ids.** 0 = no region (unrepresentable as `RuntimeRegion`), 1 =
    reserved (never minted). Minting starts at 2, so every live region is mortal
    and RC-reclaimable.
+6. **The page body belongs to the region, the header to the pool.**
+   `PagePool::claim` hands out a page whose body is zero and does nothing to
+   make it so — `release` blanked the spans the dying region wrote, and left
+   offset 0 alone. So a claim is a free-list pop, and a page waiting in the
+   cache still carries the stamp invariant 4 depends on. See
+   docs/impl/region/model.md § "Page recycling".

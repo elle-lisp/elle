@@ -172,6 +172,12 @@ impl FiberHeap {
         self.region_store.page_size()
     }
 
+    /// Pages claimed from the region store's page pool since this heap was
+    /// created — monotonic. The backend of the `arena/page-claims` gauge.
+    pub fn page_claims(&self) -> u64 {
+        self.region_store.page_claims()
+    }
+
     /// Region id stamped on the page `ptr` points into (0 = no region page),
     /// with the debug-build stale-deref generation check (docs/impl/region/generations.md
     /// § "Region generations"). The backend of `arena::region_of`.

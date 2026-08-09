@@ -117,6 +117,64 @@ consumer-facing performance account is in
 - **sibling page-amortization** — collapse sibling regions with coincident
   lifetimes and no edge between them. A later rider, not yet implemented.
 
+## Page recycling: a claim is a free-list pop
+
+**A page moves between a region and the pool untouched, in both directions.**
+`release` pushes it onto a size-class free list; `claim` pops it and hands it
+straight back. Neither reads nor writes a byte of it, and neither makes a
+system call. The hot path of a small short-lived region — mint, claim, write
+one object, free — therefore costs the write and nothing else, which matters
+because that is the *common* path: one region per value is the baseline above,
+so a program allocates regions at the rate it allocates values.
+
+Nothing needs the page prepared. `RegionPage::new` stamps the header, sets the
+object cursor to `HEADER_SIZE` and the data cursor to the page top; every
+object slot is written before it is read, and every inline-data slice is fully
+copied before its `RegionSlice` is handed out. **A claimed page's body is
+therefore unspecified, not blank** — it holds whatever the previous occupant
+left, and no reader is entitled to look.
+
+Two consequences worth stating, because both are easy to get wrong:
+
+- **Do not discard the page's frames at claim.** `madvise(MADV_DONTNEED)` on a
+  page about to be written hands memory back that the very next store faults
+  straight in — a system call and a fault per claim, for no resident-memory
+  reduction. Cached bytes are bounded by the pool's `max_cached`, and a page
+  past that bound is `munmap`ed on release; that is where memory genuinely
+  returns to the OS.
+- **A page in the free list keeps its header.** A cached page still carries the
+  `(region_id, generation, store)` stamp of the region that died on it, which
+  is exactly what a pointer outliving that region finds: the ids match, the
+  generations do not, and the debug-build check panics at the deref site
+  ([generations.md](generations.md)). Blanking offset 0 would take that
+  detector away and leave the stale pointer with no self-validating header at
+  its own page size, so `region_of_ptr`'s page-base walk would mask past this
+  page into memory the store does not own.
+
+### `--trace=scrub`: make a stale read wrong on purpose
+
+The one thing that writes a released page. Under `--trace=scrub`, `release`
+zeroes the spans the dying region wrote — the object slots
+`[HEADER_SIZE, obj_cursor)` and the inline-data suffix `[data_cursor, len)`,
+together one `PageDirty` pair, sparing the header for the reason above. The gap
+between the two cursors was never written by that region, so it is not scrubbed
+either; a region holding one 48-byte cons costs 48 bytes of work.
+
+The point is not hygiene. A read through a pointer that outlived its region
+normally finds the dead region's bytes — plausible, well-typed, and silently
+wrong. Scrubbed, it finds an all-zero `HeapObject` slot, whose tag matches no
+live value, so `arena::deref` panics naming the deref site. It is the cheap
+member of the family: `--trace=guardfree` never reuses a page and so catches a
+stale read at any distance, at a mapping per freed page; the generation check
+catches a stale *region resolution*, but only in debug builds and only while
+the page is unclaimed; scrub catches a stale *content* read, in release builds
+too, for one `memset` per freed page. A page on its way to `munmap` is never
+scrubbed — an unmapped address faults on its own.
+
+`tests/elle/region-page-recycle.lisp` measures what the claim path costs per
+call from Elle, through the `arena/page-claims` gauge; `pagepool::tests` pins
+the untouched-recycle contract and the scrub's spans.
+
 ## RegionSlice contents share their object's region
 
 Non-obvious and load-bearing: immutable aggregates (string, array, struct, and a

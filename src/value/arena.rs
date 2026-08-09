@@ -300,10 +300,11 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
     // If you hit this in debug, walk back to find what freed the region
     // while a Value still referenced it.
     // The first 8-byte block of the payload is dumped so a UAF panic
-    // shows what's actually at the slot: all-zero distinguishes
-    // "page reclaimed by madvise(MADV_DONTNEED) and re-zeroed" from
-    // stale-data (slab slot reused for a different HeapObject with
-    // its own discriminant bits in place). Without it the variant
+    // shows what's actually at the slot: all-zero distinguishes "the
+    // region died and the page pool blanked its body" (docs/impl/
+    // region/model.md § "Page recycling") from stale-data (slot reused
+    // for a different HeapObject with its own discriminant bits in
+    // place). Without it the variant
     // reported by `type_name()` is misleading — a zero-filled page
     // reads as whichever variant Rust's enum repr assigns to the
     // all-zero discriminant.

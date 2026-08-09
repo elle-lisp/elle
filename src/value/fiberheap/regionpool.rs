@@ -23,7 +23,7 @@
 
 use std::mem::{align_of, size_of};
 
-use super::pagepool::{MmapPage, PagePool};
+use super::pagepool::{MmapPage, PageDirty, PagePool};
 use super::{holds_value_refs, needs_drop};
 use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
@@ -160,6 +160,22 @@ impl RegionPage {
         }
         self.data_cursor = start;
         Some(unsafe { self.page.as_mut_ptr().add(start) })
+    }
+
+    /// Hand this page back to the pool along with the spans this region wrote —
+    /// the only route a region page takes out of a region, so the cursors that
+    /// describe it can never be read off a different page
+    /// (docs/impl/region/model.md § "Page recycling").
+    ///
+    /// The object span starts *after* the header, so the page keeps the
+    /// `(region_id, generation, store)` stamp written at claim while it waits
+    /// in the cache. That stamp is what a pointer outliving this region finds,
+    /// and what makes the generation mismatch a debug-build panic at the deref
+    /// site instead of a plausible read (docs/impl/region/generations.md).
+    fn release_into(self, pool: &mut PagePool) {
+        let len = self.page.len();
+        let dirty = PageDirty::new(HEADER_SIZE..self.obj_cursor, self.data_cursor..len);
+        pool.release(self.page, dirty);
     }
 
     /// Check if a pointer falls within this page.
@@ -319,10 +335,10 @@ impl RegionPool {
         self.dtors.clear();
         self.ref_objs.clear();
 
-        // Return all pages to the pool.
+        // Return all pages to the pool, each with the spans it was filled to.
         let pages = std::mem::take(&mut self.pages);
         for rp in pages {
-            pool.release(rp.page);
+            rp.release_into(pool);
         }
         let freed = self.obj_count;
         self.obj_count = 0;

@@ -34,6 +34,34 @@ merges when it can prove lifetimes coincide, so a failure to merge costs
 performance and **never** correctness — at worst a value's region is kept as long
 as its own last use rather than shared, never freed too early.
 
+## Recycling a page is free
+
+A region's pages go back to a per-thread cache when the region dies, and the
+next region claims them from there. Both directions are a free-list operation:
+no system call, and nothing reads or writes the page. So a short-lived region
+costs what it writes and nothing more, which is what keeps the one-region-per-
+value baseline affordable.
+
+The cache is bounded. Past that bound a released page is unmapped instead of
+kept, which is where memory returns to the OS; a page inside the bound stays
+resident because it is about to be handed out again. The implementor's account
+is in [impl/region/model.md](../impl/region/model.md) § "Page recycling".
+
+## A call into a variadic stdlib operator allocates
+
+The arithmetic and comparison wrappers are ordinary variadic Elle functions:
+`+` is `(defn + [& args] (letrec [go …] (go 0 args)))`. Calling one with two
+arguments builds the two-cons rest list and the `letrec` closure that the
+definition asks for, and each of those objects is born in its own region, which
+owns a page. `(+ a b)` therefore claims three pages, where `(%add a b)` is one
+VM instruction and claims none.
+
+That is the price of the wrapper's polymorphism, its runtime type checks, and
+its `:error` signal — and it is the reason
+[docs/intrinsics.md](../intrinsics.md) tells you to reach for `%add` in a hot
+loop and for `+` everywhere else. `tests/elle/region-page-recycle.lisp` pins
+the per-call page count, so the number above is measured rather than asserted.
+
 ## Passing arguments costs one pass over them
 
 A call's region bookkeeping is linear in the number of arguments. Each argument

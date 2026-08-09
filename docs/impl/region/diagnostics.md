@@ -28,12 +28,33 @@ the region rules ([rules.md](rules.md)) honest.
 - `--trace=free` / `--trace=freebt`: a free-log recording each `free_runtime_region_pages`'s pages
   and a reason; `freebt` adds a Rust backtrace at a `DecrefRegion` about to drop
   a region to 0.
+- `--trace=scrub`: zero a released page's body — the spans the dying region
+  wrote, sparing the header — before the pool caches it
+  ([model.md](model.md) § "Page recycling"). A read through a pointer that
+  outlived its region then lands on an all-zero `HeapObject` slot, whose tag
+  matches no live value, so `arena::deref` panics naming the deref site. The
+  cheap member of the family: `guardfree` catches a stale read at any distance
+  but costs a mapping per freed page, the generation check catches a stale
+  region *resolution* but only in debug builds and only while the page is
+  unclaimed, and scrub catches a stale *content* read in release builds too,
+  for one `memset` per freed page. Reach for it when a program returns a
+  well-typed wrong answer and the leak gauges are clean.
 - `(arena/dump)`: a Lisp-level leak localiser — prints every live mortal region
   (id, RC, object count, and the object *tags* it holds) to stderr. Where
   `arena/count` / `arena/region-count` say *that* memory grew across a loop, the
   per-region tags name *what* leaked (a stray `Fiber` / `Closure` region pinning
   an unfreed value). The companion `(arena/region-info)` returns the same id / RC
   / count as data (no tags) for assertions.
+- `(arena/page-claims)`: the live count of pages this heap's `RegionStore` has
+  claimed from its page pool, monotonic and never decremented on release. A
+  delta across a fixed window is the *page* cost of a shape, the dimension
+  `arena/count` and `arena/region-count` do not show: three regions holding one
+  object each own three pages, so a shape can be leak-free by object count and
+  still claim a page per call ([model.md](model.md) § "Page recycling",
+  [regions/performance.md](../../regions/performance.md) § "A call into a
+  variadic stdlib operator allocates"). `tests/elle/region-page-recycle.lisp`
+  reads it. Immediate, so sampling it allocates nothing and does not perturb
+  the measurement.
 - **Direct vs cascade free** — the two have different fixes. A *direct* free of a
   still-live value is a liveness bug: a `decref_point` fired while the value was still
   reachable. A *cascade* free of a still-referenced region is a missing incref on
@@ -104,8 +125,9 @@ trustworthy UAF oracle — plain-VM green is not evidence), not by the slope ver
 
 ## The backend-tier gauge
 
-The arena gauges (`arena/count`, `arena/region-count`, `arena/bytes` —
-src/primitives/arena.rs) are **host-side and tier-transparent**: a primitive call
+The arena gauges (`arena/count`, `arena/region-count`, `arena/bytes`,
+`arena/page-claims` — src/primitives/arena.rs) are **host-side and
+tier-transparent**: a primitive call
 executes on the host against the driving instance's own heap on every tier — the
 VM and JIT natively, the WASM host through `call_primitive` with a `NativeCtx`
 built on `vm.heap_ptr` (src/wasm/host.rs), and the MLIR tier admits no calls at

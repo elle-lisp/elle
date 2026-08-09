@@ -110,6 +110,24 @@ pub(crate) fn guard_armed() -> bool {
     crate::config::get().has_trace("guardfree") && GUARD_ARMED.with(|g| g.get())
 }
 
+/// Whether a released page's body should be blanked before the pool caches it
+/// (`--trace=scrub`).
+///
+/// The third instrument in this family, and the cheap one. `guardfree` never
+/// reuses a page, so it catches a stale read at any distance but costs a
+/// mapping per freed page; the generation check catches a stale *region
+/// resolution* but only in debug builds and only while the page is still
+/// unclaimed. Scrub instead makes the page's contents wrong on purpose: a
+/// stale read lands on an all-zero `HeapObject` slot, whose tag matches no
+/// live value, so `arena::deref` panics naming the deref site — in release
+/// builds too, at the cost of one `memset` of the bytes the dying region
+/// wrote. Off by default, because the ordinary contract is that a claimed
+/// page's body is unspecified, not blank (docs/impl/region/model.md
+/// § "Page recycling").
+pub(crate) fn scrub_armed() -> bool {
+    crate::config::get().has_trace("scrub")
+}
+
 /// Set the reason attributed to the next free (the call site about to
 /// trigger a decref).
 pub(crate) fn set_reason(reason: &'static str) {

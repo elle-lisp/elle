@@ -35,6 +35,7 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "free",
     "guardfree",
     "freebt",
+    "scrub",
 ];
 
 // ── Dump keywords ─────────────────────────────────────────────────

@@ -81,6 +81,20 @@ pub(crate) fn prim_arena_bytes(
     (SIG_OK, Value::int(bytes as i64))
 }
 
+/// (arena/page-claims) — pages claimed from the heap's page pool, monotonic.
+///
+/// The page dimension the object and region gauges do not show: regions never
+/// share pages, so a shape can hold its object count flat and still claim a
+/// page per call. A delta across a fixed window is that shape's page cost
+/// (docs/impl/region/model.md § "Page recycling").
+pub(crate) fn prim_arena_page_claims(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let claims = ctx.heap_mut().page_claims();
+    (SIG_OK, Value::int(claims as i64))
+}
+
 /// (arena/allocs thunk) — run thunk, return (result . net-allocs)
 pub(crate) fn prim_arena_allocs(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -217,6 +231,15 @@ primitive! {
         category: "debug",
         example: "(debug/arena-bytes)",
         aliases: &["arena/bytes"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-page-claims" => prim_arena_page_claims {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return pages claimed from the heap's page pool (monotonic, never decremented on release).",
+        category: "debug",
+        example: "(debug/arena-page-claims)",
+        aliases: &["arena/page-claims"],
         effect: RegionEffect::Immediate,
     }
     "debug/arena-allocs" => prim_arena_allocs {
