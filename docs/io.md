@@ -67,10 +67,14 @@ the edges. Two things come back when it does, on either backend:
 - **The descriptor.** A cancelled read stops rather than going on
   reading. Whatever arrives next belongs to whoever reads the port next:
 
-  ```lisp
+  ```text
   (ev/timeout 0.1 (fn [] (port/read p 64)))   # the deadline wins
   (port/read p 64)                            # still sees the peer's bytes
   ```
+
+  That sketch needs a peer slow enough for the deadline to win, so it is
+  written out rather than run here; `tests/elle/io-cancel-releases.lisp`
+  builds the peer and asserts both lines.
 
   And a port closed while an operation still runs keeps its descriptor
   number until that operation ends, so the number cannot be handed to a
