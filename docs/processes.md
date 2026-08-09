@@ -8,7 +8,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 
 ## Loading
 
-```text
+```lisp
 (def process ((import "std/process")))
 ```
 
@@ -17,7 +17,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 `process:start` creates a scheduler and runs a closure as the first
 process. It blocks until all processes complete and returns the scheduler.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -36,7 +36,7 @@ Use `process:run` when you need a pre-configured or shared scheduler:
 Every process has a mailbox. `send` delivers a message; `recv` blocks
 until one arrives.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -51,7 +51,7 @@ until one arrives.
 parent (crash propagation). `spawn-monitor` monitors without linking
 (death notification without crashing the parent).
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -69,7 +69,7 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 `recv-match` takes a predicate and returns the first message that
 matches, leaving non-matching messages in the mailbox in order.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -87,7 +87,7 @@ matches, leaving non-matching messages in the mailbox in order.
 `recv-timeout` returns `:timeout` if no message arrives within the
 given number of scheduler ticks.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -99,7 +99,7 @@ given number of scheduler ticks.
 Linked processes crash together. When a linked child crashes, the parent
 crashes too — unless the parent is trapping exits.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -121,7 +121,7 @@ crashes too — unless the parent is trapping exits.
 Monitors deliver a `[:DOWN ref pid reason]` message when the monitored
 process dies, without affecting the monitoring process.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -141,7 +141,7 @@ process dies, without affecting the monitoring process.
 Processes can register under a keyword name. `whereis` looks up PIDs
 by name; `send-named` sends to a registered name.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -164,7 +164,7 @@ by name; `send-named` sends to a registered name.
 Each process has a private key-value store. Useful for per-process
 configuration that doesn't belong in the main state.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -181,7 +181,7 @@ Processes are cooperatively scheduled with fuel budgets. A CPU-bound
 process gets preempted after exhausting its fuel, allowing other
 processes to run.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -218,7 +218,7 @@ down after replying.
 
 ## Key-value store example
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -241,7 +241,7 @@ down after replying.
 `gen-server-stop` requests graceful shutdown. The server's `:terminate`
 callback runs before it exits.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -279,7 +279,7 @@ from `handle-call` and use `gen-server-reply` later:
 Actor wraps GenServer with a simpler API: just an init function and
 get/update operations on state.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -297,7 +297,7 @@ get/update operations on state.
 Task runs a one-shot function as a supervised process and returns the
 result. Like `ev/spawn` but the work has a PID and can be monitored.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -339,7 +339,7 @@ Each child is a struct with:
 
 ## Basic supervisor
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -511,7 +511,7 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 `ev/spawn` and `ev/join` work inside processes. Sub-fibers are
 tracked by the scheduler and participate in I/O completion.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []

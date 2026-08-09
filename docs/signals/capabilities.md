@@ -74,7 +74,7 @@ The parent catches this signal through the normal mask routing.
 Returns a keyword set of active capabilities — everything in the
 capability space that is NOT withheld:
 
-```text
+```lisp
 (fiber/caps)
 # => |:error :yield :debug :ffi :halt :io :exec|
 
@@ -88,7 +88,7 @@ capability space that is NOT withheld:
 Withheld capabilities propagate from parent to child at resume time.
 A child inherits its parent's restrictions plus any `:deny` of its own:
 
-```text
+```lisp
 (let [outer (fiber/new
                (fn []
                  # inner denies :ffi, inherits :io denial from outer
@@ -111,7 +111,7 @@ absorbed).
 The parent can catch a denial, perform the operation on the child's
 behalf, and resume the child with the result:
 
-```text
+```lisp
 (let [f (fiber/new
            (fn [] (length "hello"))
            |:error|
