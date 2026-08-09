@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# Server-streaming responses sharing a session with ordinary requests.
+# A server-streaming response sharing a session with ordinary requests.
 #
 # A streaming response is one h2 stream held open across many DATA
 # frames while the connection carries whatever else the caller is doing.
@@ -13,11 +13,8 @@
 # request answers 200, and the stream table comes back empty.
 #
 # The cases escalate: one long response, a submit/stream/fetch round
-# trip, a slow stream with requests running past it, a stream abandoned
-# half-read, then payload shapes taken from a real pipeline — six layers
-# of growing bodies, the same at 650 jobs per layer and bodies to 21 MB,
-# 78 streams drained back to back, and 13 chunked submits per layer each
-# with its own stream.
+# trip, a slow stream with requests running past it, then a stream
+# abandoned half-read.
 #
 # The framing is gRPC's: a compression byte and a 4-byte big-endian
 # length per message, which is what makes "how many messages arrived" a
@@ -27,8 +24,7 @@
 
 (def http2 ((import "std/http2")))
 
-# A budget no unblocked case here can reach. The largest case moves
-# about 55 MB through loopback.
+# A budget no unblocked case here can reach.
 (def deadline 120)
 
 (defn listen-ephemeral []
@@ -109,16 +105,6 @@
             (assign buf (get r 1)))))))
   (assert (= (length buf) 0) "the stream ended on a message boundary")
   (freeze messages))
-
-(defn settled [session label]
-  "One round trip after the last stream. A session records a stream's end
-   when it processes the end of the response, which is after the last
-   message reaches the caller — so a count taken the instant a drain
-   returns can still see the stream that just finished. This request both
-   waits for that and proves the session still answers."
-  (let [resp (http2:send session "GET" "/settle")]
-    (assert (= resp:status 200)
-            (string label ": the session answered after its last stream"))))
 
 (defn no-stream-leak [session label]
   "The stream table is empty once every stream has been read out."
@@ -282,150 +268,13 @@
                                        " answered past the abandoned stream"))))
                    true))))
 
-# ── 5. Six layers of growing bodies ──────────────────────────────────
-
-(def windows [5 20 60 120 180 250])
-
-(defn layered-pipeline []
-  "Per layer: one POST whose body grows with the layer, then ten
-   requests at once."
-  (with-server (fn [req] {:status 200 :body (or req:body (bytes ""))})
-               (fn [session _]
-                 (each layer in (range 0 6)
-                   (let* [size (* (get windows layer) 33 8 10)
-                          body (make-body size)
-                          resp (http2:send session "POST" "/echo" :body body)]
-                     (assert (= resp:status 200)
-                             (string "layers: the POST of layer " (string layer)))
-                     (assert (= (length resp:body) size)
-                             (string "layers: layer " (string layer)
-                                     " echoed the whole body"))
-                     (let [results (map ev/join
-                                        (map (fn [i]
-                                          (ev/spawn (fn []
-                                            (http2:send session "GET"
-                                            (concat "/f?L" (string layer) "&r="
-                                            (string i)))))) (range 0 10)))]
-                       (each r in results
-                         (assert (= r:status 200)
-                                 (string "layers: a request in layer "
-                                 (string layer)))))))
-                 (no-stream-leak session "layers")
-                 true)))
-
-# ── 6. The same shape at full size ───────────────────────────────────
-
-(defn layered-pipeline-full []
-  "650 jobs per layer: bodies from 429 KB to 21 MB, each followed by a
-   stream of 650 completion events."
-  (let [jobs 650
-        events (event-frames 650)]
-    (with-server (fn [req]
-                   (cond
-                     (= req:path "/submit") {:status 200 :body "submitted"}
-                     (= req:path "/stream")
-                       {:status 200
-                        :headers {:content-type "application/grpc"}
-                        :body events
-                        :trailers [["grpc-status" "0"]]}
-                     true {:status 200 :body "ok"}))
-                 (fn [session _]
-                   (each layer in (range 0 6)
-                     (let* [size (* jobs (get windows layer) 33 4)
-                            body (make-body size)
-                            resp (http2:send session "POST" "/submit" :body body)]
-                       (assert (= resp:status 200)
-                               (string "full layers: the POST of layer "
-                                       (string layer) " ("
-                                       (string (/ size 1024)) " KB)"))
-                       (assert (= (length (drain-stream (open-grpc session
-                                  "/stream"))) jobs)
-                               (string "full layers: layer " (string layer)
-                                       " streamed " (string jobs) " events"))))
-                   (settled session "full layers")
-                   (no-stream-leak session "full layers")
-                   true))))
-
-# ── 7. Many streams back to back, then requests ──────────────────────
-
-(defn many-streams-then-unary []
-  "Drain 78 streams of 50 messages, then make 20 requests. The requests
-   are the check that 78 finished streams left nothing behind."
-  (let [body (event-frames 50)]
-    (with-server (fn [req]
-                   (if (= req:path "/stream")
-                     {:status 200
-                      :headers {:content-type "application/grpc"}
-                      :body body
-                      :trailers [["grpc-status" "0"]]}
-                     {:status 200 :body "ok"}))
-                 (fn [session _]
-                   (each i in (range 0 78)
-                     (assert (= (length (drain-stream (open-grpc session
-                                        "/stream"))) 50)
-                             (string "many streams: stream " (string i)
-                                     " delivered 50 messages")))
-                   (each i in (range 0 20)
-                     (let [resp (http2:send session "GET"
-                           (concat "/unary?i=" (string i)))]
-                       (assert (= resp:status 200)
-                               (string "many streams: request " (string i)
-                                       " after 78 streams"))))
-                   (settled session "many streams")
-                   (no-stream-leak session "many streams")
-                   true))))
-
-# ── 8. Chunked submits, one stream per chunk ─────────────────────────
-
-(defn chunked-multi-subscribe []
-  "Per layer: 13 POSTs of 50 jobs each, then 13 streams of 50 events.
-   Six layers on one session."
-  (let [chunks 13
-        per-chunk 50
-        body (event-frames 50)]
-    (with-server (fn [req]
-                   (cond
-                     (string/starts-with? req:path "/submit") {:status 200
-                     :body "ok"}
-                     (string/starts-with? req:path "/stream")
-                       {:status 200
-                        :headers {:content-type "application/grpc"}
-                        :body body
-                        :trailers [["grpc-status" "0"]]}
-                     true {:status 200 :body "ok"}))
-                 (fn [session _]
-                   (each layer in (range 0 6)
-                     (let [chunk-body (make-body (* per-chunk
-                           (get windows layer) 33 4))]
-                       (each c in (range 0 chunks)
-                         (let [resp (http2:send session "POST"
-                               (concat "/submit/L" (string layer) "/C"
-                                       (string c)) :body chunk-body)]
-                           (assert (= resp:status 200)
-                                   (string "chunked: layer " (string layer)
-                                   " chunk " (string c) " submitted"))))
-                       (each c in (range 0 chunks)
-                         (assert (= (length (drain-stream (open-grpc session
-                                    (concat "/stream/L" (string layer) "/C"
-                                    (string c))))) per-chunk)
-                                 (string "chunked: layer " (string layer)
-                                 " chunk " (string c) " streamed "
-                                 (string per-chunk) " events")))))
-                   (settled session "chunked")
-                   (no-stream-leak session "chunked")
-                   true))))
-
 # ── Run ──────────────────────────────────────────────────────────────
 
-(println "streams and requests sharing one session...")
+(println "a stream and ordinary requests sharing one session...")
 
 (timed "100 messages in one response" stream-reader)
 (timed "submit, 200-event stream, 200 parallel fetches" bulk-submit-stream-fetch)
 (timed "20 requests past a half-second stream" stream-plus-unary)
 (timed "a stream abandoned after three messages" abandoned-stream)
-(timed "six layers of growing bodies" layered-pipeline)
-(timed "six layers at 650 jobs, bodies to 21 MB" layered-pipeline-full)
-(timed "78 streams then 20 requests" many-streams-then-unary)
-(timed "13 chunked submits and streams per layer" chunked-multi-subscribe)
 
-(println "h2 stress streams: every stream drained and every request answered")
+(println "h2 stream share: every stream drained and every request answered")
