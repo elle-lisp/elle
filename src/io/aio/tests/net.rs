@@ -15,7 +15,7 @@ fn test_accept_wait_does_not_return_zero_completions_spuriously() {
         use std::sync::{Arc, Barrier};
 
         let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            let fd = tcp_listener_socket();
             assert!(fd >= 0);
             let opt: libc::c_int = 1;
             libc::setsockopt(
@@ -118,7 +118,7 @@ fn test_accept_via_uring() {
 
         // Create a TCP listener via libc
         let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            let fd = tcp_listener_socket();
             assert!(fd >= 0, "socket() failed");
 
             let opt: libc::c_int = 1;
@@ -300,7 +300,7 @@ fn test_accept_and_connect_concurrent() {
 
         // Create a non-blocking TCP listener via libc
         let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            let fd = tcp_listener_socket();
             assert!(fd >= 0);
             let opt: libc::c_int = 1;
             libc::setsockopt(
