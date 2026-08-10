@@ -35,7 +35,7 @@ JSON parsing and serialization primitives.
 |------|-------|--------|---------|
 | `json/parse` | 1–3 | Silent | Parse JSON string to Elle value; accepts `:keys :keyword` option |
 | `json/serialize` | 1 | Silent | Serialize Elle value to compact JSON |
-| `json/serialize-pretty` | 1 | Silent | Serialize Elle value to pretty JSON |
+| `json/pretty` | 1 | Silent | Serialize Elle value to pretty JSON |
 
 ### json/parse options
 
@@ -46,17 +46,24 @@ JSON parsing and serialization primitives.
 - 2 args is never valid and returns `arity-error`.
 - 3 args with an unrecognized key name or value returns `argument-error`.
 
-## JSON ↔ Elle value mapping
+## JSON → Elle value mapping (`json/parse`)
 
-| JSON | Elle |
-|------|------|
-| `null` | `nil` |
-| `true` / `false` | `true` / `false` |
-| Number (int) | `Value::int()` |
-| Number (float) | `Value::float()` |
-| String | `Value::string()` |
-| Array | `Value::array()` (@array, mutable) |
-| Object | `Value::table()` (@struct, mutable) |
+| JSON | Elle | Constructor |
+|------|------|-------------|
+| `null` | `nil` | `Value::NIL` |
+| `true` / `false` | `true` / `false` | `Value::bool()` |
+| Number (int) | Integer | `Value::int()` |
+| Number (float) | Float | `Value::float()` |
+| String | String | `ctx.string()` |
+| Array | Immutable array (`[...]`) | `ctx.array()` |
+| Object | Immutable struct (`{...}`) | `ctx.struct_from()` |
+
+## Elle → JSON value mapping (`json/serialize`, `json/pretty`)
+
+The serializer accepts more types than the parser produces. Lists,
+`@arrays`, and immutable arrays all write as JSON arrays; sets and
+`@sets` write as JSON arrays; `@structs` and immutable structs both
+write as JSON objects; keywords write as JSON strings.
 
 ## Parser implementation
 
@@ -81,16 +88,23 @@ JSON parsing and serialization primitives.
 
 1. **JSON null maps to Elle nil.** `Value::NIL` serializes to `null` and `null` parses to `Value::NIL`.
 
-2. **JSON arrays map to Elle @arrays.** @arrays are mutable (`Value::array()`), not immutable arrays.
+2. **A parsed value is immutable at every depth.** `JsonParser` builds only
+   immutable arrays and immutable structs, so no part of a parsed document can
+   be changed in place. Callers share one parsed document without copying it,
+   and `put`/`del` on any part of it return a new value.
 
-3. **JSON objects map to Elle @structs.** @structs are mutable (`Value::table()`), not immutable structs.
+3. **JSON arrays map to immutable Elle arrays.** `ctx.array()`, not the
+   mutable `ctx.array_mut()` and not a cons list.
 
-4. **String escaping is bidirectional.** `serialize_value()` escapes special characters; `JsonParser` unescapes them.
+4. **JSON objects map to immutable Elle structs.** `ctx.struct_from()`, not
+   the mutable `ctx.struct_mut_from()`.
 
-5. **No external JSON library.** All parsing and serialization is hand-written to avoid dependencies.
+5. **String escaping is bidirectional.** `serialize_value()` escapes special characters; `JsonParser` unescapes them.
+
+6. **No external JSON library.** All parsing and serialization is hand-written to avoid dependencies.
 
 ## Dependents
 
 - `primitives/registration.rs` — registers JSON primitives
 - `primitives/module_init.rs` — initializes JSON module
-- Elle code — via `json/parse`, `json/serialize`, `json/serialize-pretty`
+- Elle code — via `json/parse`, `json/serialize`, `json/pretty`

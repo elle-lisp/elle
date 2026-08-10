@@ -4,6 +4,11 @@ use std::collections::BTreeMap;
 
 /// JSON parser using recursive descent. Holds the `NativeCtx` capability so
 /// every freshly-parsed heap value is born in the call's region (Rule 3).
+///
+/// The value it builds is immutable at every depth: a JSON array becomes an
+/// immutable Elle array and a JSON object an immutable struct. Callers can
+/// therefore share one parsed document without copying it, and `put`/`del`
+/// on any part of it yield a new value instead of editing the document.
 pub struct JsonParser<'a, 'h> {
     input: Vec<char>,
     pos: usize,
@@ -317,7 +322,7 @@ impl<'a, 'h> JsonParser<'a, 'h> {
 
         if self.pos < self.input.len() && self.input[self.pos] == ']' {
             self.pos += 1;
-            return Ok(self.ctx.list(elements));
+            return Ok(self.ctx.array(elements));
         }
 
         loop {
@@ -335,7 +340,7 @@ impl<'a, 'h> JsonParser<'a, 'h> {
                 }
                 ']' => {
                     self.pos += 1;
-                    return Ok(self.ctx.list(elements));
+                    return Ok(self.ctx.array(elements));
                 }
                 c => {
                     return Err(format!(
@@ -362,7 +367,7 @@ impl<'a, 'h> JsonParser<'a, 'h> {
 
         if self.pos < self.input.len() && self.input[self.pos] == '}' {
             self.pos += 1;
-            return Ok(self.ctx.struct_mut_from(map));
+            return Ok(self.ctx.struct_from(map));
         }
 
         loop {
@@ -417,7 +422,7 @@ impl<'a, 'h> JsonParser<'a, 'h> {
                 }
                 '}' => {
                     self.pos += 1;
-                    return Ok(self.ctx.struct_mut_from(map));
+                    return Ok(self.ctx.struct_from(map));
                 }
                 c => {
                     return Err(format!(
