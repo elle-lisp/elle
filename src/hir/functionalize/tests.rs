@@ -160,6 +160,91 @@ fn cond_in_let_tail_is_unchanged() {
     assert_eq!(result, Value::int(1));
 }
 
+// ── A short-circuited and/or operand must not leak a rename either ──────
+//
+// Only the first operand of `and`/`or` always runs. Neither form has a
+// phi-insertion path at all, so a rename forked in a later operand escaped to
+// code that never evaluated it.
+
+#[test]
+fn skipped_or_operand_assign_does_not_apply() {
+    // `or` stops at the first truthy operand, so the begin never runs.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (or true (begin (assign x 9))))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn skipped_and_operand_assign_does_not_apply() {
+    // `and` stops at the first falsy operand, so the begin never runs.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (and false (begin (assign x 9))))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn skipped_or_operand_preserves_prior_value() {
+    // The uninitialized-slot form: the forked initializer reads the let
+    // binding, so past that scope it read a dead slot and x came back nil.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 100] (or true (begin (assign x (%add y 5)))))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn evaluated_or_operand_assign_still_applies() {
+    // The other direction: an operand that IS reached must still assign.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (or false (begin (assign x 9))))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(9));
+}
+
+#[test]
+fn evaluated_and_operand_assign_still_applies() {
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (and true (begin (assign x 9))))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(9));
+}
+
+#[test]
+fn first_and_operand_assign_propagates() {
+    // The first operand always runs, so a rename from an assign inside it must
+    // still reach the code after the form.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (and (begin (assign x 7) true) true))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(7));
+}
+
 #[test]
 fn bare_assign_in_let_tail_branch_is_unchanged() {
     // A branch body that is an Assign rather than a Begin never reached

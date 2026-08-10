@@ -308,12 +308,12 @@ impl<'a> FnCtx<'a> {
             }
 
             HirKind::And(exprs) => {
-                let new: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
+                let new = self.transform_short_circuit(exprs);
                 Hir::new(HirKind::And(new), span, signal)
             }
 
             HirKind::Or(exprs) => {
-                let new: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
+                let new = self.transform_short_circuit(exprs);
                 Hir::new(HirKind::Or(new), span, signal)
             }
 
@@ -526,5 +526,42 @@ impl<'a> FnCtx<'a> {
             | HirKind::QuoteConst(_)
             | HirKind::Error => hir.clone(),
         }
+    }
+
+    /// Transform the operands of a short-circuiting `and`/`or`.
+    ///
+    /// Only the first operand always executes; each later one is conditional on
+    /// the ones before it. Neither form has a phi-insertion path —
+    /// `transform_begin_at` handles Assign, If, Cond, Match and While, and never
+    /// And or Or — so a fresh SSA version forked inside a later operand would
+    /// escape to code that did not evaluate it. Keep those assigns as runtime
+    /// slot mutations, as the If and Cond arms do.
+    ///
+    /// The first operand is transformed before the save: it always runs, so a
+    /// rename from an assign inside it must propagate outward.
+    fn transform_short_circuit(&mut self, exprs: &[Hir]) -> Vec<Hir> {
+        let mut out: Vec<Hir> = Vec::with_capacity(exprs.len());
+        if exprs.is_empty() {
+            return out;
+        }
+        out.push(self.transform(&exprs[0]));
+
+        let saved = self.renames.clone();
+        let saved_preserved = self.assign_preserved.clone();
+        for e in &exprs[1..] {
+            let mut operand_assigns = BTreeSet::new();
+            self.collect_assigned_bindings(e, &mut operand_assigns);
+            for b in &operand_assigns {
+                let resolved = self.resolve(*b);
+                self.assign_preserved.insert(resolved);
+            }
+        }
+        for e in &exprs[1..] {
+            self.renames = saved.clone();
+            out.push(self.transform(e));
+        }
+        self.renames = saved;
+        self.assign_preserved = saved_preserved;
+        out
     }
 }
