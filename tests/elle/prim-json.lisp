@@ -132,4 +132,57 @@
 (let [v (json/parse "[]" :keys :keyword)]
   (assert (= v ()) "parse array keyword keys unaffected"))
 
+## ── signal declaration ─────────────────────────────────────────────
+## Each primitive declares the signals it may raise, and effect inference
+## copies that declaration into every function that calls it. The assertions
+## below pin the declaration of all three JSON primitives to exactly
+## |:error|, and admit no other declaration:
+##
+##   - A silent declaration leaves a wrapper inferred pure, so `silent?` is
+##     true, `fn/errors?` is false, and the inferred bits are empty.
+##   - Any wider declaration adds a bit to the set, so the equality fails.
+
+(assert (not (silent? (fn [s] (json/parse s))))
+        "a function wrapping json/parse is not silent")
+(assert (fn/errors? (fn [s] (json/parse s)))
+        "json/parse propagates :error to its caller")
+
+(assert (not (silent? (fn [v] (json/serialize v))))
+        "a function wrapping json/serialize is not silent")
+(assert (fn/errors? (fn [v] (json/serialize v)))
+        "json/serialize propagates :error to its caller")
+
+(assert (not (silent? (fn [v] (json/pretty v))))
+        "a function wrapping json/pretty is not silent")
+(assert (fn/errors? (fn [v] (json/pretty v)))
+        "json/pretty propagates :error to its caller")
+
+(let [a (compile/analyze "
+  (defn wrap-parse [s] (json/parse s))
+  (defn wrap-serialize [v] (json/serialize v))
+  (defn wrap-pretty [v] (json/pretty v))
+")]
+  (assert (= (get (compile/signal a :wrap-parse) :bits) |:error|)
+          "json/parse contributes exactly :error")
+  (assert (= (get (compile/signal a :wrap-serialize) :bits) |:error|)
+          "json/serialize contributes exactly :error")
+  (assert (= (get (compile/signal a :wrap-pretty) :bits) |:error|)
+          "json/pretty contributes exactly :error"))
+
+## The declaration is what carries the error out to the caller, where `try`
+## reaches it. Both directions report the same kind.
+
+(assert (= (get (try
+                  (json/parse "not json")
+                  (catch e e)) :error) :serde-error)
+        "malformed input signals :serde-error at the call site")
+(assert (= (get (try
+                  (json/serialize (fn [] 1))
+                  (catch e e)) :error) :serde-error)
+        "an unencodable value signals :serde-error from json/serialize")
+(assert (= (get (try
+                  (json/pretty (fn [] 1))
+                  (catch e e)) :error) :serde-error)
+        "an unencodable value signals :serde-error from json/pretty")
+
 (println "prim-json: all tests passed")

@@ -95,18 +95,11 @@ pub(crate) fn prim_json_serialize_pretty(
     (SIG_OK, ctx.string(json_str))
 }
 
-// All three JSON primitives signal at runtime: `json/parse` on malformed
-// input, and the two serializers on a value they cannot encode, such as a
-// closure. Declaring them `Signal::silent()` therefore contradicts what they
-// do. Effect inference marks any function whose body holds only silent
-// primitives as silent, so a lambda that merely wraps one of these calls is
-// inferred pure. When the primitive then signals, the runtime raises a
-// `silence violation` panic and aborts the process with SIGABRT. No `try` at
-// the call site can intercept that, because the abort happens inside the
-// callee.
-//
-// `Signal::errors()` states the truth and makes the error catchable at any
-// call site. The success path is unchanged.
+// All three raise `serde-error` — `json/parse` on malformed input, the two
+// serializers on a value JSON cannot represent — so all three declare
+// `Signal::errors()`. Effect inference copies that declaration into every
+// caller, which is what keeps the error catchable by `try` at any call depth.
+// `tests/elle/prim-json.lisp` pins the declaration.
 primitive! {
     "json/parse" => prim_json_parse {
         signal: Signal::errors(),
