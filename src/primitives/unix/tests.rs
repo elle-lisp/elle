@@ -15,7 +15,6 @@ fn sock_path(tag: &str) -> String {
         .into_owned()
 }
 
-
 #[test]
 fn test_unix_listen_returns_ok() {
     crate::value::arena::with_test_region(|| {
