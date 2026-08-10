@@ -140,6 +140,40 @@ impl AsyncBackend {
         })
     }
 
+    /// A backend on the THREAD-POOL platform, whatever this host would pick.
+    ///
+    /// The pool is what every non-Linux build runs (`create_platform_backend`
+    /// has no other arm there) and what a Linux host runs when io_uring is
+    /// unavailable or `--no-uring` is set. Its wait path differs from the ring's,
+    /// so the properties that hold on one are not evidence about the other. A
+    /// test that built the host's default backend would exercise the ring on a
+    /// Linux dev box and the pool on CI — silently checking different code on
+    /// each, which is how a pool-only defect stays invisible. This constructor
+    /// makes the platform an explicit choice of the test rather than a property
+    /// of the box it runs on.
+    /// No eventfd bridge is wired: the pool platform has no ring to bridge into,
+    /// so its hub channel is the sole waitable — the same shape a non-Linux build
+    /// comes up with.
+    #[cfg(test)]
+    pub(crate) fn new_thread_pool() -> Result<Self, String> {
+        Ok(AsyncBackend {
+            inner: RefCell::new(AsyncBackendInner {
+                unicode_generation: crate::config::get().unicode_generation(),
+                fd_states: HashMap::new(),
+                pending: HashMap::new(),
+                cancelled: std::collections::HashSet::new(),
+                retired: HashMap::new(),
+                completions: VecDeque::new(),
+                next_id: 1,
+                buffer_pool: BufferPool::new(),
+                stdin_thread: None,
+                platform: PlatformBackend::ThreadPool,
+                hub: CompletionHub::new(),
+                origin_heap: std::ptr::null_mut(),
+            }),
+        })
+    }
+
     /// Create the bridge eventfd, hand it to the hub (which owns and closes it),
     /// and arm the standing `POLL_ADD` on the ring. Only the uring platform has
     /// a ring to bridge into; every other platform leaves the hub eventfd-less
