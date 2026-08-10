@@ -389,6 +389,10 @@ fn sigusr1_absorbed_when_unwatched() {
 /// handler. Counter-factual: without the watcher-override
 /// mechanism (i.e. if the sigaction handler fires regardless), the
 /// child terminates with code 143 before it can read the receiver.
+///
+/// Linux-only: the body reads the receiver's fd as a buffer of
+/// `signalfd_siginfo`, which `libc` defines on Linux alone.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn watcher_overrides_builtin_for_sigterm() {
     let status = fork_run(5, || {
