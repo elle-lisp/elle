@@ -30,7 +30,8 @@
 #     elle --trace=scrub tests/elle/region-capture-cell-borrow.lisp
 #
 # Run it that way when changing capture-cell release placement. In the plain
-# corpus this file pins the results only.
+# corpus this file pins the results only; `tests/region_cell_borrow.rs` runs the
+# same shapes with scrub armed, so the gate carries the amplified check.
 
 (defn uncalled-closure []
   "The captured binding is read after a closure captures it, never calling it."
