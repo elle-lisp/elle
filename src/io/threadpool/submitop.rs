@@ -243,22 +243,51 @@ impl CompletionHub {
                         (0, Vec::new())
                     }
                 }
-                PoolOp::Accept { fd } => {
+                PoolOp::Accept { fd, stop } => {
+                    // Wait for the listener to be readable OR for the operation
+                    // to be stopped, and only then take the connection. Calling
+                    // `accept` first would park this thread in the kernel where
+                    // no cancellation can reach it: closing the listener does
+                    // not wake a thread already inside the syscall, so the
+                    // worker would be lost for the life of the process and the
+                    // fiber waiting on it never resumed.
+                    let bound = OpBound::new(fd, None, stop);
                     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
                     let mut addr_len: libc::socklen_t =
                         std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-                    let new_fd = unsafe {
-                        libc::accept(
-                            fd,
-                            &mut addr_storage as *mut _ as *mut libc::sockaddr,
-                            &mut addr_len,
-                        )
+                    let new_fd = loop {
+                        match bound.wait(libc::POLLIN) {
+                            Wake::Stopped => break -libc::ECANCELED,
+                            Wake::TimedOut => break -libc::ETIMEDOUT,
+                            Wake::Ready => {}
+                        }
+                        let mut len: libc::socklen_t =
+                            std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+                        let r = unsafe {
+                            libc::accept(
+                                fd,
+                                &mut addr_storage as *mut _ as *mut libc::sockaddr,
+                                &mut len,
+                            )
+                        };
+                        if r >= 0 {
+                            addr_len = len;
+                            break r;
+                        }
+                        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                        // `OpBound` takes the listener non-blocking, so a
+                        // readiness another thread consumed first reports EAGAIN
+                        // rather than parking. That and EINTR both mean "nothing
+                        // taken yet" — wait again rather than report a failure.
+                        if errno != libc::EAGAIN
+                            && errno != libc::EWOULDBLOCK
+                            && errno != libc::EINTR
+                        {
+                            break -errno;
+                        }
                     };
                     if new_fd < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
+                        (new_fd, Vec::new())
                     } else {
                         unsafe {
                             libc::fcntl(new_fd, libc::F_SETFD, libc::FD_CLOEXEC);

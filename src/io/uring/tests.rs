@@ -305,14 +305,36 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     );
 }
 
+/// The smallest value getsockopt can report after a successful SO_SNDBUF or
+/// SO_RCVBUF setsockopt: the kernel clamps the request to the net.core
+/// ceiling (`wmem_max` or `rmem_max`), stores double the clamped value to
+/// account for bookkeeping overhead, and reports the doubled figure.
+///
+/// Asserting against this bound measures the code on any host. Asserting
+/// against the raw request measures the host's sysctl instead: the stock
+/// ceiling is 212992, so a megabyte-scale request comes back as 425984 on a
+/// default-configured kernel — including GitHub CI runners. The bound stays
+/// counter-factual even when fully clamped, because a socket that never saw
+/// the setsockopt reports the un-doubled default and fails it.
+fn min_reported_bufsize(requested: i32, ceiling_knob: &str) -> i32 {
+    let path = format!("/proc/sys/net/core/{}", ceiling_knob);
+    let ceiling: i32 = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {}", path, e))
+        .trim()
+        .parse()
+        .unwrap_or_else(|e| panic!("parse {}: {}", path, e));
+    2 * requested.min(ceiling)
+}
+
 /// Verify apply_socket_options actually sets SO_SNDBUF on a socket fd.
 #[test]
 fn test_apply_sndbuf() {
     let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
     assert!(fd >= 0, "socket() failed");
 
+    let requested = 1048576;
     let opts = SocketOptions {
-        sndbuf: Some(1048576),
+        sndbuf: Some(requested),
         ..Default::default()
     };
     apply_socket_options(fd, &opts);
@@ -330,10 +352,11 @@ fn test_apply_sndbuf() {
     };
     unsafe { libc::close(fd) };
     assert_eq!(ret, 0, "getsockopt failed");
-    // Linux doubles the value (adds overhead accounting)
+    let want = min_reported_bufsize(requested, "wmem_max");
     assert!(
-        val >= 1048576,
-        "SO_SNDBUF should be >= requested: got {}",
+        val >= want,
+        "SO_SNDBUF should be >= 2 x min(requested, wmem_max) = {}: got {}",
+        want,
         val
     );
 }
@@ -344,8 +367,9 @@ fn test_apply_rcvbuf() {
     let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
     assert!(fd >= 0, "socket() failed");
 
+    let requested = 524288;
     let opts = SocketOptions {
-        rcvbuf: Some(524288),
+        rcvbuf: Some(requested),
         ..Default::default()
     };
     apply_socket_options(fd, &opts);
@@ -363,9 +387,11 @@ fn test_apply_rcvbuf() {
     };
     unsafe { libc::close(fd) };
     assert_eq!(ret, 0, "getsockopt failed");
+    let want = min_reported_bufsize(requested, "rmem_max");
     assert!(
-        val >= 524288,
-        "SO_RCVBUF should be >= requested: got {}",
+        val >= want,
+        "SO_RCVBUF should be >= 2 x min(requested, rmem_max) = {}: got {}",
+        want,
         val
     );
 }
@@ -480,9 +506,11 @@ fn test_all_combined() {
     let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
     assert!(fd >= 0, "socket() failed");
 
+    let sndbuf_req = 2097152;
+    let rcvbuf_req = 1048576;
     let opts = SocketOptions {
-        sndbuf: Some(2097152),
-        rcvbuf: Some(1048576),
+        sndbuf: Some(sndbuf_req),
+        rcvbuf: Some(rcvbuf_req),
         nodelay: Some(true),
         keepalive: Some(true),
     };
@@ -503,8 +531,12 @@ fn test_all_combined() {
         val
     };
 
-    assert!(read_opt(libc::SOL_SOCKET, libc::SO_SNDBUF) >= 2097152);
-    assert!(read_opt(libc::SOL_SOCKET, libc::SO_RCVBUF) >= 1048576);
+    assert!(
+        read_opt(libc::SOL_SOCKET, libc::SO_SNDBUF) >= min_reported_bufsize(sndbuf_req, "wmem_max")
+    );
+    assert!(
+        read_opt(libc::SOL_SOCKET, libc::SO_RCVBUF) >= min_reported_bufsize(rcvbuf_req, "rmem_max")
+    );
     assert_eq!(read_opt(libc::IPPROTO_TCP, libc::TCP_NODELAY), 1);
     assert_eq!(read_opt(libc::SOL_SOCKET, libc::SO_KEEPALIVE), 1);
     unsafe { libc::close(fd) };

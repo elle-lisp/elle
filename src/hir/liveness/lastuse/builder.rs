@@ -206,7 +206,19 @@ impl LastUseBuilder<'_> {
                 self.walk(value, true, hir.id);
             }
             HirKind::MakeCell { value } => self.walk(value, true, hir.id),
-            HirKind::DerefCell { cell } => self.walk(cell, true, hir.id),
+            // DerefCell reads a value OUT of a cell and emits no instruction of
+            // its own, so it does not consume the cell — it borrows from it. The
+            // value handed back is still the cell's content and the load raises
+            // no count on it, so the cell must live until the node that consumes
+            // the BORROW: `my_last`, the enclosing call / binder / statement,
+            // which is the same point the identical read of an uncaptured local
+            // reaches with no wrapper in between. Passing `hir.id` instead ends
+            // the cell's life at the load, one node ahead of its reader, and the
+            // cell's free cascade then reclaims the borrowed value under that
+            // reader — latent on a plain build, a deref-site panic under
+            // `--trace=scrub` (docs/impl/region/bindings.md § "A read through an
+            // env cell is an uncounted borrow"; tests/region_cell_borrow.rs).
+            HirKind::DerefCell { cell } => self.walk(cell, true, my_last),
             HirKind::Destructure { pattern, value, .. } => {
                 // Register each destructured binding as bound to this
                 // value's init id so the last-use override picks up

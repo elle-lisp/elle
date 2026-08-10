@@ -175,6 +175,20 @@ OOMs the corpus run and does not dedup (test-runner.md § CAS asset capture) —
 today only stdout/stderr assets exist; the LIR of a failing form still needs a
 re-run until that capture is re-enabled.
 
+A form that misses its deadline prints a native backtrace of every thread in
+the runner process to stderr, under `── threads at the deadline ──`. `sys/join`
+abandons a timed-out worker rather than killing it — an OS thread cannot be
+safely killed — so the wedged thread is still parked in whatever call stopped
+it, and this reads its stack while that is still true. It is what separates a
+hang from a slow test, and it is the only account available for a form that
+hangs on one machine and nowhere else: re-running the file cannot stand in for
+it, because the runner puts each form on its own worker thread and a hang that
+needs that thread does not reproduce under a plain run.
+
+The sampler is `sample` on macOS and `eu-stack` on a Linux box with elfutils. A
+box with neither prints nothing and the run is unaffected; a passing form never
+pays for it.
+
 A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
 `finished_at` stays NULL, `--summary` labels it `DID NOT COMPLETE` with the live
 partial tally (computed from `result` rows — the stored counters are written

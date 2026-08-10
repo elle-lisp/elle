@@ -46,10 +46,10 @@ When a fiber emits a signal, the parent catches it if the signal bits
 overlap the fiber's mask:
 
 ```text
-(let ([f (fiber/new (fn [] (emit :yield 42)) |:yield|)])
+(let [f (fiber/new (fn [] (emit :yield 42)) |:yield|)]
   (fiber/resume f))   # => 42
 
-(let ([f (fiber/new (fn [] (emit :yield 42)) 0)])
+(let [f (fiber/new (fn [] (emit :yield 42)) 0)]
   (fiber/resume f))   # signal propagates (mask doesn't catch :yield)
 ```
 
@@ -68,7 +68,7 @@ overlap the fiber's mask:
 
 ```text
 # Suspension: emit :yield, get resume value back
-(let ([x (emit :yield :waiting)])
+(let [x (emit :yield :waiting)]
   # x is whatever the parent passes to fiber/resume
   (+ x 1))
 
