@@ -28,6 +28,43 @@ user:name                  # => "Alice"
 user:role                  # => :admin
 ```
 
+### The receiver must be a symbol
+
+`obj:field` is one token. The reader absorbs the `:` while reading a
+symbol, so the sugar never applies to an expression. After a closing
+parenthesis the `:field` lexes as a plain keyword instead, and the form
+becomes callable-struct syntax — with the remaining arguments read as the
+default value.
+
+For a plain lookup the two agree, so nothing looks wrong:
+
+```lisp
+(def user {:name "Alice" :age 30})
+(def outer {:inner user})
+
+user:name                    # => "Alice"
+((get outer :inner):name)    # => "Alice"
+```
+
+They part company when the field holds a function. With a symbol receiver
+the sugar calls it. With an expression receiver there is no call: the
+field comes back, and the arguments are silently discarded.
+
+```lisp
+(def obj {:double (fn [x] (* x 2))})
+(def holder {:obj obj})
+
+(obj:double 21)                  # => 42, called
+((get holder :obj):double 21)    # => <closure>, NOT called
+```
+
+Bind the receiver to a name before using the sugar:
+
+```lisp
+(let [o (get holder :obj)]
+  (o:double 21))                 # => 42
+```
+
 ## Immutable updates
 
 Operations on immutable structs return new structs. The original is unchanged.
