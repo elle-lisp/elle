@@ -38,7 +38,12 @@ impl AsyncBackend {
                         }
                         PlatformBackend::ThreadPool => {
                             let _ = buffer_pool;
-                            hub.submit(id, PoolOp::Accept { fd })?;
+                            // An accept waits as long as no peer connects, so it
+                            // needs the stop pipe every other open-ended pool op
+                            // carries: `hub.stop` cannot reach a thread already
+                            // inside `accept(2)`.
+                            let stop = hub.stop_pipe(id);
+                            hub.submit(id, PoolOp::Accept { fd, stop })?;
                         }
                     }
                 }

@@ -446,8 +446,12 @@ fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
         let h = crate::primitives::ctx::TestHeap::new();
         use std::os::unix::io::FromRawFd;
 
+        // A BLOCKING listener, deliberately. With SOCK_NONBLOCK the worker's
+        // `accept` returns EAGAIN at once and the operation ends whatever the
+        // cancel path does — the test would pass without ever putting a worker
+        // in the blocking `accept` this is about.
         let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             assert!(fd >= 0, "socket() failed");
             let mut addr: libc::sockaddr_in = std::mem::zeroed();
             addr.sin_family = libc::AF_INET as libc::sa_family_t;
