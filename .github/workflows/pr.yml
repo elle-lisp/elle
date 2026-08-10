@@ -276,16 +276,6 @@ jobs:
         run: make doctest
       - name: make smoke
         run: make smoke
-      # `tests/elle/process-io.lisp` has wedged on this runner and nowhere else.
-      # The corpus runner bounds each form with its own deadline, so it records
-      # the timeout and moves on — the stacks are gone before the tally prints,
-      # and the reason names the budget rather than the call. This re-runs that
-      # file directly, so a wedge is a live process the probe can photograph
-      # with `sample`. It never fails the job: `make smoke` above is the gate,
-      # and it already fails on the timeout.
-      - name: Probe the process-io wedge
-        if: ${{ !cancelled() }}
-        run: ELLE=./target/release/elle .github/hangprobe.sh tests/elle/process-io.lisp 5 45
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
       - name: Run property tests
