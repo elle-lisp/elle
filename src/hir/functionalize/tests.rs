@@ -76,3 +76,100 @@ fn if_phi_merge_with_continuation_still_works() {
     .unwrap();
     assert_eq!(result, Value::int(42));
 }
+
+// ── An if in a non-begin context must not leak a branch rename ──────────
+//
+// A `let` tail is a non-begin context, so transform_begin_at emits no phi
+// there. A branch whose body is a `begin` used to fork a fresh SSA version of
+// an outer `var` anyway, and the rename escaped to code the branch does not
+// dominate. `(when c ...)` expands to `(if c (begin ...) nil)`, so every `when`
+// in a let tail hit this.
+
+#[test]
+fn branch_begin_assign_does_not_escape_let_tail() {
+    // The branch does not run, so x must keep its prior value. It read 9:
+    // the assign was lifted out of the branch by the escaping rename.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (if false (begin (assign x 9)) nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn branch_begin_assign_reads_the_taken_branch() {
+    // Both arms assign, so both forked a version and the renames chained:
+    // the outer read resolved to the LAST arm transformed rather than the arm
+    // that ran. With the condition true this read 2 — the else-arm's value.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5]
+                        (if true
+                            (begin (assign x 9))
+                            (begin (assign x 2))))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(9));
+}
+
+#[test]
+fn branch_begin_assign_preserves_prior_value() {
+    // The forked version's initializer reads `y`, a binding of the let the
+    // rename escaped. Hoisted past that scope it read a dead slot, so x came
+    // back nil — destroying the value x held before the if.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 100] (if false (begin (assign x (%add y 5))) nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn branch_begin_assign_still_applies_when_taken() {
+    // The other direction: preserving the assign as a slot mutation must not
+    // lose it. The branch runs, so x must be 9.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (if true (begin (assign x 9)) nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(9));
+}
+
+#[test]
+fn cond_in_let_tail_is_unchanged() {
+    // The Cond arm already saved and restored. Guard that it still does, since
+    // the If arm now shares the treatment.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (cond false (begin (assign x 9)) true nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
+
+#[test]
+fn bare_assign_in_let_tail_branch_is_unchanged() {
+    // A branch body that is an Assign rather than a Begin never reached
+    // transform_begin, so it was already a slot mutation and already correct.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5] (if false (assign x 9) nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(1));
+}
