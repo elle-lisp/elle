@@ -258,3 +258,100 @@ fn bare_assign_in_let_tail_branch_is_unchanged() {
     .unwrap();
     assert_eq!(result, Value::int(1));
 }
+
+// ── Interactions between the preserved-branch rule and its neighbors ────
+//
+// The rule: a rename may leave a conditional region only when the region
+// always executes, or a phi guards the merge. These tests pin the boundary
+// from both sides — regions that must still propagate renames outward, and
+// preserved regions composed with the constructs that surround them.
+
+#[test]
+fn if_condition_assign_propagates() {
+    // The condition always executes, so its rename must escape the if even
+    // though the branches' renames must not. The read after the let sees the
+    // condition's value, not the untaken branch's.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5]
+                        (if (begin (assign x 7) false)
+                            (begin (assign x 9))
+                            nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(7));
+}
+
+#[test]
+fn preserved_assign_targets_let_init_ssa_version() {
+    // A let-init begin forks an SSA version of x (the init always runs), so
+    // the branch's preserved assign resolves to that fresh version — a slot
+    // mutation aimed at an SSA let binding. The taken branch must both read
+    // the forked value (3) and write through the slot: 3 + 5 = 8.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y (begin (assign x 3) 5)]
+                        (if true (begin (assign x (%add x y))) nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(8));
+}
+
+#[test]
+fn nested_if_inside_preserved_branch() {
+    // Inside a taken branch, an untaken inner if must not leak its assign,
+    // while the taken branch's own later assign must land. Only the write
+    // that executed (4) survives.
+    let result = eval_bare(
+        r#"(do
+                    (var x 1)
+                    (let [y 5]
+                        (if true
+                            (begin
+                                (if false (begin (assign x 9)) nil)
+                                (assign x 4))
+                            nil))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(4));
+}
+
+#[test]
+fn while_inside_preserved_branch_arm() {
+    // A while in a branch arm of a let tail: the loop threads k as a slot
+    // mutation under the preserved rule rather than promoting it to a loop
+    // parameter whose rename would escape the arm.
+    let result = eval_bare(
+        r#"(do
+                    (var k 0)
+                    (let [y 5]
+                        (if true
+                            (begin (while (%lt k 3) (assign k (%add k 1))))
+                            nil))
+                    k)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(3));
+}
+
+#[test]
+fn or_operand_assign_feeds_later_loop() {
+    // A preserved or-operand assign must leave x readable by a subsequent
+    // while: the operand runs (or short-circuits on truthy, so the second
+    // operand of (or false …) executes), writes 2, and the loop counts on
+    // from there to 4.
+    let result = eval_bare(
+        r#"(do
+                    (var x 0)
+                    (let [y 5] (or false (begin (assign x 2) true)))
+                    (while (%lt x 4) (assign x (%add x 1)))
+                    x)"#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(4));
+}
