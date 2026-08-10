@@ -8,7 +8,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 
 ## Loading
 
-```text
+```lisp
 (def process ((import "std/process")))
 ```
 
@@ -17,7 +17,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 `process:start` creates a scheduler and runs a closure as the first
 process. It blocks until all processes complete and returns the scheduler.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -36,11 +36,11 @@ Use `process:run` when you need a pre-configured or shared scheduler:
 Every process has a mailbox. `send` delivers a message; `recv` blocks
 until one arrives.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:send me :hello)
     (assert (= (process:recv) :hello) "got :hello"))))
 ```
@@ -51,15 +51,15 @@ until one arrives.
 parent (crash propagation). `spawn-monitor` monitors without linking
 (death notification without crashing the parent).
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let* ([me (process:self)]
-         [peer (process:spawn (fn []
+  (let* [me (process:self)
+         peer (process:spawn (fn []
                  (match (process:recv)
                    [from :ping] (process:send from :pong)
-                   _ nil)))])
+                   _ nil)))]
     (process:send peer [me :ping])
     (assert (= (process:recv) :pong) "ping-pong works"))))
 ```
@@ -69,11 +69,11 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 `recv-match` takes a predicate and returns the first message that
 matches, leaving non-matching messages in the mailbox in order.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:send me :a)
     (process:send me :b)
     (process:send me :c)
@@ -87,7 +87,7 @@ matches, leaving non-matching messages in the mailbox in order.
 `recv-timeout` returns `:timeout` if no message arrives within the
 given number of scheduler ticks.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -99,13 +99,13 @@ given number of scheduler ticks.
 Linked processes crash together. When a linked child crashes, the parent
 crashes too — unless the parent is trapping exits.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
   (process:trap-exit true)
-  (let ([child (process:spawn-link (fn []
-                 (error {:error :boom :message "crash"})))])
+  (let [child (process:spawn-link (fn []
+                 (error {:error :boom :message "crash"})))]
     (match (process:recv)
       [:EXIT pid reason]
         (begin
@@ -121,11 +121,11 @@ crashes too — unless the parent is trapping exits.
 Monitors deliver a `[:DOWN ref pid reason]` message when the monitored
 process dies, without affecting the monitoring process.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([[child-pid ref] (process:spawn-monitor (fn [] :done))])
+  (let [[child-pid ref] (process:spawn-monitor (fn [] :done))]
     (match (process:recv)
       [:DOWN got-ref got-pid reason]
         (begin
@@ -141,14 +141,14 @@ process dies, without affecting the monitoring process.
 Processes can register under a keyword name. `whereis` looks up PIDs
 by name; `send-named` sends to a registered name.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:spawn (fn []
       (process:register :greeter)
-      (let ([msg (process:recv)])
+      (let [msg (process:recv)]
         (match msg
           [from name] (process:send from (string "hello, " name))
           _ nil))))
@@ -164,7 +164,7 @@ by name; `send-named` sends to a registered name.
 Each process has a private key-value store. Useful for per-process
 configuration that doesn't belong in the main state.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -181,14 +181,14 @@ Processes are cooperatively scheduled with fuel budgets. A CPU-bound
 process gets preempted after exhausting its fuel, allowing other
 processes to run.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     # Busy-looper gets preempted
-    (let ([busy (process:spawn (fn []
-            (letrec ([loop (fn [n] (loop (+ n 1)))]) (loop 0))))])
+    (let [busy (process:spawn (fn []
+            (letrec [loop (fn [n] (loop (+ n 1)))] (loop 0))))]
       (process:spawn (fn [] (process:send me :done)))
       (assert (= (process:recv) :done) "worker runs despite busy-looper")
       (process:exit busy :kill))))
@@ -218,11 +218,11 @@ down after replying.
 
 ## Key-value store example
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [_] @{})
                 :handle-call (fn [request _from state]
                   (match request
@@ -230,7 +230,7 @@ down after replying.
                     [:put key val] (begin (put state key val)
                                     [:reply :ok state])
                     _              [:reply :unknown state]))}
-               nil :name :kv)])
+               nil :name :kv)]
     (process:gen-server-call :kv [:put :lang "elle"])
     (assert (= "elle" (process:gen-server-call :kv [:get :lang]))
             "kv store works"))))
@@ -241,11 +241,11 @@ down after replying.
 `gen-server-stop` requests graceful shutdown. The server's `:terminate`
 callback runs before it exits.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:gen-server-start-link
       {:init        (fn [_] :running)
        :handle-call (fn [req _from state] [:reply state state])
@@ -279,7 +279,7 @@ from `handle-call` and use `gen-server-reply` later:
 Actor wraps GenServer with a simpler API: just an init function and
 get/update operations on state.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -297,14 +297,14 @@ get/update operations on state.
 Task runs a one-shot function as a supervised process and returns the
 result. Like `ev/spawn` but the work has a PID and can be monitored.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let* ([t1 (process:task-async (fn [] (* 6 7)))]
-         [t2 (process:task-async (fn [] (+ 10 20)))]
-         [r1 (process:task-await t1)]
-         [r2 (process:task-await t2)])
+  (let* [t1 (process:task-async (fn [] (* 6 7)))
+         t2 (process:task-async (fn [] (+ 10 20)))
+         r1 (process:task-await t1)
+         r2 (process:task-await t2)]
     (assert (= r1 42) "task 1")
     (assert (= r2 30) "task 2"))))
 ```
@@ -339,11 +339,11 @@ Each child is a struct with:
 
 ## Basic supervisor
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :worker :restart :permanent
         :start (fn []
@@ -469,9 +469,9 @@ This replaces the manual bridge pattern:
 # Before: every user writes this glue
 {:id :my-daemon :restart :permanent
  :start (fn []
-   (let ([proc (subprocess/exec "/usr/bin/my-daemon" [])])
-     (let ([code (subprocess/wait proc)])
-       (error {:error :subprocess-exit :code code})))}
+   (let [proc (subprocess/exec "/usr/bin/my-daemon" [])]
+     (let [code (subprocess/wait proc)]
+       (error {:error :subprocess-exit :code code}))))}
 
 # After: one-liner
 (process:make-subprocess-child :my-daemon "/usr/bin/my-daemon" [])
@@ -511,14 +511,14 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 `ev/spawn` and `ev/join` work inside processes. Sub-fibers are
 tracked by the scheduler and participate in I/O completion.
 
-```text
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
-  (let* ([f1 (ev/spawn (fn [] (+ 10 20)))]
-         [f2 (ev/spawn (fn [] (+ 30 40)))]
-         [r1 (ev/join f1)]
-         [r2 (ev/join f2)])
+  (let* [f1 (ev/spawn (fn [] (+ 10 20)))
+         f2 (ev/spawn (fn [] (+ 30 40)))
+         r1 (ev/join f1)
+         r2 (ev/join f2)]
     (assert (= r1 30) "f1 = 30")
     (assert (= r2 70) "f2 = 70"))))
 ```
