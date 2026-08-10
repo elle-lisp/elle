@@ -67,7 +67,7 @@ pub(crate) fn prim_json_parse(
     };
     match result {
         Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, ctx.error("parse-error", e)),
+        Err(e) => (SIG_ERROR, ctx.error("serde-error", e)),
     }
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn prim_json_serialize(
 ) -> (SignalBits, Value) {
     let json_str = match serialize_value(&args[0]) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, ctx.error("parse-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("serde-error", e)),
     };
     (SIG_OK, ctx.string(json_str))
 }
@@ -90,7 +90,7 @@ pub(crate) fn prim_json_serialize_pretty(
 ) -> (SignalBits, Value) {
     let json_str = match serialize_value_pretty(&args[0], 0) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, ctx.error("parse-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("serde-error", e)),
     };
     (SIG_OK, ctx.string(json_str))
 }

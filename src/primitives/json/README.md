@@ -37,11 +37,14 @@ JSON serialization and deserialization primitives for Elle. Converts between Ell
 
 ## Error Handling
 
-JSON primitives return errors for:
+JSON primitives signal `:serde-error` for:
 
 - **Invalid JSON**: Malformed input to `json/parse`
 - **Unsupported types**: Values that can't be serialized (e.g., closures)
 - **Circular references**: Tables that reference themselves
+
+Catch one with `try` or `protect`. Parsing and serializing report the same
+kind, so one `catch` covers both directions.
 
 ## See Also
 
