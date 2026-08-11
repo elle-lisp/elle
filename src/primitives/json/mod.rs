@@ -67,7 +67,7 @@ pub(crate) fn prim_json_parse(
     };
     match result {
         Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, ctx.error("parse-error", e)),
+        Err(e) => (SIG_ERROR, ctx.error("serde-error", e)),
     }
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn prim_json_serialize(
 ) -> (SignalBits, Value) {
     let json_str = match serialize_value(&args[0]) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, ctx.error("parse-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("serde-error", e)),
     };
     (SIG_OK, ctx.string(json_str))
 }
@@ -90,14 +90,19 @@ pub(crate) fn prim_json_serialize_pretty(
 ) -> (SignalBits, Value) {
     let json_str = match serialize_value_pretty(&args[0], 0) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, ctx.error("parse-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("serde-error", e)),
     };
     (SIG_OK, ctx.string(json_str))
 }
 
+// All three raise `serde-error` — `json/parse` on malformed input, the two
+// serializers on a value JSON cannot represent — so all three declare
+// `Signal::errors()`. Effect inference copies that declaration into every
+// caller, which is what keeps the error catchable by `try` at any call depth.
+// `tests/elle/prim-json.lisp` pins the declaration.
 primitive! {
     "json/parse" => prim_json_parse {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Range(1, 3),
         doc: "Parse a JSON string into Elle values. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
         params: &["json-string", ":keys", ":keyword"],
@@ -107,7 +112,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "json/serialize" => prim_json_serialize {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to compact JSON",
         params: &["value"],
@@ -117,7 +122,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "json/pretty" => prim_json_serialize_pretty {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
         params: &["value"],

@@ -68,13 +68,14 @@ preserved, as JSON requires.
 
 ## Error Handling
 
-The JSON primitives signal an error for:
+JSON primitives signal `:serde-error` for:
 
 - **Invalid JSON**: Malformed input to `json/parse`
 - **Unsupported types**: Values that can't be serialized (e.g., closures)
 - **Circular references**: Tables that reference themselves
 
-Catch one with `try` or `protect`, as with any other error.
+Catch one with `try` or `protect`. Parsing and serializing report the same
+kind, so one `catch` covers both directions.
 
 ## See Also
 

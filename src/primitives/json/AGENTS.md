@@ -33,9 +33,9 @@ JSON parsing and serialization primitives.
 
 | Name | Arity | Signal | Purpose |
 |------|-------|--------|---------|
-| `json/parse` | 1–3 | Silent | Parse JSON string to Elle value; accepts `:keys :keyword` option |
-| `json/serialize` | 1 | Silent | Serialize Elle value to compact JSON |
-| `json/serialize-pretty` | 1 | Silent | Serialize Elle value to pretty JSON |
+| `json/parse` | 1–3 | Errors | Parse JSON string to Elle value; accepts `:keys :keyword` option |
+| `json/serialize` | 1 | Errors | Serialize Elle value to compact JSON |
+| `json/serialize-pretty` | 1 | Errors | Serialize Elle value to pretty JSON |
 
 ### json/parse options
 
@@ -43,8 +43,18 @@ JSON parsing and serialization primitives.
 
 `(json/parse json-string :keys :keyword)` — parse JSON objects using keyword keys (`:field`) instead of string keys (`"field"`). The option applies recursively to nested objects. Arrays are unaffected.
 
-- 2 args is never valid and returns `arity-error`.
-- 3 args with an unrecognized key name or value returns `argument-error`.
+### Error kinds
+
+| Condition | Kind |
+|-----------|------|
+| Malformed input to `json/parse` | `serde-error` |
+| A value neither serializer can encode, such as a closure | `serde-error` |
+| A non-string first argument to `json/parse` | `type-error` |
+| 2 args to `json/parse` | `arity-error` |
+| 3 args to `json/parse` with an unrecognized key name or value | `argument-error` |
+
+Both directions of the codec report `serde-error`, so one `catch` covers the
+whole module.
 
 ## JSON ↔ Elle value mapping
 
@@ -88,6 +98,8 @@ JSON parsing and serialization primitives.
 4. **String escaping is bidirectional.** `serialize_value()` escapes special characters; `JsonParser` unescapes them.
 
 5. **No external JSON library.** All parsing and serialization is hand-written to avoid dependencies.
+
+6. **All three primitives declare `Signal::errors()`.** The declaration matches the `SIG_ERROR` each returns, so effect inference propagates `:error` to callers and `try` reaches the failure at any call depth. `tests/elle/prim-json.lisp` pins this.
 
 ## Dependents
 
