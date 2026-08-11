@@ -33,9 +33,9 @@ JSON parsing and serialization primitives.
 
 | Name | Arity | Signal | Purpose |
 |------|-------|--------|---------|
-| `json/parse` | 1–3 | Silent | Parse JSON string to Elle value; accepts `:keys :keyword` option |
-| `json/serialize` | 1 | Silent | Serialize Elle value to compact JSON |
-| `json/pretty` | 1 | Silent | Serialize Elle value to pretty JSON |
+| `json/parse` | 1–3 | Errors | Parse JSON string to Elle value; accepts `:keys :keyword` option |
+| `json/serialize` | 1 | Errors | Serialize Elle value to compact JSON |
+| `json/pretty` | 1 | Errors | Serialize Elle value to pretty JSON |
 
 ### json/parse options
 
