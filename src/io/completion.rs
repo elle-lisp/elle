@@ -34,6 +34,18 @@ fn errno_message(errno: i32) -> String {
     std::io::Error::from_raw_os_error(errno).to_string()
 }
 
+/// True when this errno says the caller's `:timeout` elapsed rather than the
+/// operation failing.
+///
+/// Three paths arrive here. io_uring cancels an operation whose linked timeout
+/// fired, which reports `ECANCELED`. A thread-pool worker whose own bounded
+/// wait expired reports `ETIMEDOUT`, and so does a kernel that gave up on a
+/// TCP handshake. The caller asked one question of all three, so they carry one
+/// answer: the `:timeout` error kind rather than a generic `:io-error`.
+fn is_timeout_errno(errno: i32) -> bool {
+    errno == libc::ECANCELED || errno == libc::ETIMEDOUT
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_raw_completion(
     id: SubmissionId,
@@ -130,7 +142,7 @@ pub(super) fn process_raw_completion(
         } => {
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = errno == 125; // ECANCELED from linked timeout
+                let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
@@ -156,7 +168,7 @@ pub(super) fn process_raw_completion(
         } => {
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = errno == 125;
+                let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
@@ -313,7 +325,7 @@ pub(super) fn process_raw_completion(
             // result_code is the revents mask (positive) or negative errno.
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = errno == 125; // ECANCELED from linked timeout
+                let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
                     "ev/poll-fd: timed out".to_string()
                 } else {

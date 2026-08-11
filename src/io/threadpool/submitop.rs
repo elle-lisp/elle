@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 impl CompletionHub {
     /// Submit a blocking I/O operation on a background worker thread; the worker
@@ -243,24 +244,12 @@ impl CompletionHub {
                         (0, Vec::new())
                     }
                 }
-                PoolOp::Accept { fd, stop } => {
-                    // Wait for the listener to be readable OR for the operation
-                    // to be stopped, and only then take the connection. Calling
-                    // `accept` first would park this thread in the kernel where
-                    // no cancellation can reach it: closing the listener does
-                    // not wake a thread already inside the syscall, so the
-                    // worker would be lost for the life of the process and the
-                    // fiber waiting on it never resumed.
-                    let bound = OpBound::new(fd, None, stop);
+                PoolOp::Accept { fd, timeout, stop } => {
+                    let bound = OpBound::new(fd, timeout, stop);
                     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
                     let mut addr_len: libc::socklen_t =
                         std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-                    let new_fd = loop {
-                        match bound.wait(libc::POLLIN) {
-                            Wake::Stopped => break -libc::ECANCELED,
-                            Wake::TimedOut => break -libc::ETIMEDOUT,
-                            Wake::Ready => {}
-                        }
+                    let new_fd = take_when_ready(&bound, libc::POLLIN, || {
                         let mut len: libc::socklen_t =
                             std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
                         let r = unsafe {
@@ -272,20 +261,9 @@ impl CompletionHub {
                         };
                         if r >= 0 {
                             addr_len = len;
-                            break r;
                         }
-                        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
-                        // `OpBound` takes the listener non-blocking, so a
-                        // readiness another thread consumed first reports EAGAIN
-                        // rather than parking. That and EINTR both mean "nothing
-                        // taken yet" — wait again rather than report a failure.
-                        if errno != libc::EAGAIN
-                            && errno != libc::EWOULDBLOCK
-                            && errno != libc::EINTR
-                        {
-                            break -errno;
-                        }
-                    };
+                        r as isize
+                    }) as i32;
                     if new_fd < 0 {
                         (new_fd, Vec::new())
                     } else {
@@ -305,59 +283,52 @@ impl CompletionHub {
                         (new_fd, result_data)
                     }
                 }
-                PoolOp::ConnectTcp { addr, options } => match std::net::TcpStream::connect(&addr) {
-                    Ok(stream) => {
-                        let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or(addr);
-                        let new_fd = stream.into_raw_fd();
-                        crate::io::request::apply_socket_options(new_fd, &options);
-                        (new_fd, peer.into_bytes())
+                PoolOp::ConnectTcp {
+                    addr,
+                    options,
+                    timeout,
+                    stop,
+                } => {
+                    let family = if addr.is_ipv6() {
+                        libc::AF_INET6
+                    } else {
+                        libc::AF_INET
+                    };
+                    let (sa, sa_len) = crate::io::sockaddr::build_inet(&addr);
+                    connect_socket(
+                        family,
+                        sa.as_ptr() as *const libc::sockaddr,
+                        sa_len,
+                        &options,
+                        timeout,
+                        stop,
+                        addr.to_string(),
+                    )
+                }
+                PoolOp::ConnectUnix {
+                    path,
+                    options,
+                    timeout,
+                    stop,
+                } => match crate::io::sockaddr::build_unix(&path) {
+                    Err(msg) => {
+                        // A path the kernel could never accept, caught before a
+                        // descriptor is opened for it.
+                        if let Some(fd) = stop {
+                            unsafe { libc::close(fd) };
+                        }
+                        (-libc::EINVAL, msg.into_bytes())
                     }
-                    Err(e) => (
-                        -(e.raw_os_error().unwrap_or(1)),
-                        format!("{}", e).into_bytes(),
+                    Ok((sun, addr_len)) => connect_socket(
+                        libc::AF_UNIX,
+                        &sun as *const _ as *const libc::sockaddr,
+                        addr_len,
+                        &options,
+                        timeout,
+                        stop,
+                        path.clone(),
                     ),
                 },
-                PoolOp::ConnectUnix { path, options } => {
-                    let sock_fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
-                    if sock_fd < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
-                    } else {
-                        crate::io::request::apply_socket_options(sock_fd, &options);
-                        match crate::io::sockaddr::build_unix(&path) {
-                            Err(msg) => {
-                                unsafe { libc::close(sock_fd) };
-                                (-1, msg.into_bytes())
-                            }
-                            Ok((sun, addr_len)) => {
-                                let ret = unsafe {
-                                    libc::connect(
-                                        sock_fd,
-                                        &sun as *const _ as *const libc::sockaddr,
-                                        addr_len,
-                                    )
-                                };
-                                if ret < 0 {
-                                    let err = std::io::Error::last_os_error();
-                                    unsafe {
-                                        libc::close(sock_fd);
-                                    }
-                                    (
-                                        -(err.raw_os_error().unwrap_or(1)),
-                                        format!("{}", err).into_bytes(),
-                                    )
-                                } else {
-                                    unsafe {
-                                        libc::fcntl(sock_fd, libc::F_SETFD, libc::FD_CLOEXEC);
-                                    }
-                                    (sock_fd, path.into_bytes())
-                                }
-                            }
-                        }
-                    }
-                }
                 PoolOp::SendTo {
                     fd,
                     addr,
@@ -390,26 +361,37 @@ impl CompletionHub {
                         Err(e) => (-1, format!("bad address: {}", e).into_bytes()),
                     }
                 }
-                PoolOp::RecvFrom { fd, size } => {
+                PoolOp::RecvFrom {
+                    fd,
+                    size,
+                    timeout,
+                    stop,
+                } => {
+                    let bound = OpBound::new(fd, timeout, stop);
                     let mut buf = vec![0u8; size];
                     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
                     let mut addr_len: libc::socklen_t =
                         std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-                    let ret = unsafe {
-                        libc::recvfrom(
-                            fd,
-                            buf.as_mut_ptr() as *mut libc::c_void,
-                            buf.len(),
-                            0,
-                            &mut addr_storage as *mut _ as *mut libc::sockaddr,
-                            &mut addr_len,
-                        )
-                    };
+                    let ret = take_when_ready(&bound, libc::POLLIN, || {
+                        let mut len: libc::socklen_t =
+                            std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+                        let r = unsafe {
+                            libc::recvfrom(
+                                fd,
+                                buf.as_mut_ptr() as *mut libc::c_void,
+                                buf.len(),
+                                0,
+                                &mut addr_storage as *mut _ as *mut libc::sockaddr,
+                                &mut len,
+                            )
+                        };
+                        if r >= 0 {
+                            addr_len = len;
+                        }
+                        r
+                    });
                     if ret < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
+                        (ret as i32, Vec::new())
                     } else {
                         buf.truncate(ret as usize);
                         // Encode: addr_len(4 bytes LE) + sockaddr_storage + data
@@ -560,5 +542,170 @@ impl CompletionHub {
                 Err(format!("async I/O: cannot start a worker thread: {}", e))
             }
         }
+    }
+}
+
+/// Take from a descriptor that may have nothing yet: wait for `events` under
+/// the operation's bound, attempt the syscall, and repeat while the attempt
+/// reports that nothing was there. Returns what `attempt` returned, or
+/// `-ECANCELED` / `-ETIMEDOUT` for the two ways an operation ends without it.
+///
+/// The wait comes first because the syscall must never park. A worker inside a
+/// blocking `accept(2)` or `recvfrom(2)` is unreachable — closing the socket
+/// does not wake a thread already in the syscall — so the operation would
+/// outlive both its deadline and the fiber that asked for it.
+///
+/// `OpBound` takes the descriptor non-blocking for the operation's lifetime, so
+/// a readiness another operation consumed first reports `EAGAIN` instead of
+/// parking. That and `EINTR` both mean "nothing taken yet": wait again rather
+/// than report a failure.
+fn take_when_ready(
+    bound: &OpBound,
+    events: libc::c_short,
+    mut attempt: impl FnMut() -> isize,
+) -> isize {
+    loop {
+        match bound.wait(events) {
+            Wake::Stopped => return -(libc::ECANCELED as isize),
+            Wake::TimedOut => return -(libc::ETIMEDOUT as isize),
+            Wake::Ready => {}
+        }
+        let r = attempt();
+        if r >= 0 {
+            return r;
+        }
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+        if !is_would_block(errno) && errno != libc::EINTR {
+            return -(errno as isize);
+        }
+    }
+}
+
+/// How long a connect that reported `EAGAIN` waits before trying again.
+/// AF_UNIX reports a listener whose backlog is full that way, and offers no
+/// readiness to wait on, so that retry is paced rather than driven by an event.
+const CONNECT_RETRY_PACE: Duration = Duration::from_millis(10);
+
+/// Open a socket, connect it to `sa`, and report the connected descriptor —
+/// or `-errno`. `label` describes the peer for the completion's data.
+///
+/// The descriptor belongs to this operation, so the bound can take it
+/// non-blocking for the whole connect. That is what makes the connect
+/// answerable: a blocking `connect(2)` holds this worker through the peer's
+/// entire retry sequence, where neither the caller's deadline nor a
+/// cancellation can reach it.
+#[allow(clippy::too_many_arguments)]
+fn connect_socket(
+    family: libc::c_int,
+    sa: *const libc::sockaddr,
+    sa_len: libc::socklen_t,
+    options: &SocketOptions,
+    timeout: Option<Duration>,
+    stop: Option<RawFd>,
+    label: String,
+) -> (i32, Vec<u8>) {
+    let fd = unsafe { libc::socket(family, libc::SOCK_STREAM, 0) };
+    if fd < 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+        // No bound was built, so nothing else owns the stop pipe's read end.
+        if let Some(stop_fd) = stop {
+            // SAFETY: the read end is this operation's, unshared.
+            unsafe { libc::close(stop_fd) };
+        }
+        return (-errno, Vec::new());
+    }
+    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    // Before the handshake, as the io_uring path does: a TCP window is
+    // negotiated while the handshake runs.
+    crate::io::request::apply_socket_options(fd, options);
+
+    // The bound is dropped before the failure close below. It clears the
+    // non-blocking flag through the descriptor number, which a closed
+    // descriptor could have handed to another thread's socket by then.
+    let outcome = {
+        let bound = OpBound::new(fd, timeout, stop);
+        connect_bounded(fd, sa, sa_len, &bound, timeout)
+    };
+    if outcome < 0 {
+        unsafe { libc::close(fd) };
+        return (outcome, Vec::new());
+    }
+    (fd, label.into_bytes())
+}
+
+/// Drive one non-blocking connect to its outcome under `bound`: 0 once the
+/// peer answers, or `-errno` — `-ECANCELED` when stopped, `-ETIMEDOUT` at the
+/// caller's deadline.
+///
+/// The deadline spans the whole connect rather than each retry, because a
+/// connect is one operation however many times the kernel makes us ask.
+fn connect_bounded(
+    fd: RawFd,
+    sa: *const libc::sockaddr,
+    sa_len: libc::socklen_t,
+    bound: &OpBound,
+    timeout: Option<Duration>,
+) -> i32 {
+    let deadline = timeout.map(|t| Instant::now() + t);
+    loop {
+        if unsafe { libc::connect(fd, sa, sa_len) } == 0 {
+            return 0;
+        }
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+        match errno {
+            // The handshake is under way, and reports its outcome by making
+            // the socket writable.
+            libc::EINPROGRESS | libc::EALREADY | libc::EINTR => {
+                return match bound.wait(libc::POLLOUT) {
+                    Wake::Ready => connect_result(fd),
+                    Wake::Stopped => -libc::ECANCELED,
+                    Wake::TimedOut => -libc::ETIMEDOUT,
+                }
+            }
+            // A second call after the connection is up says so this way.
+            libc::EISCONN => return 0,
+            // The peer's backlog is full (AF_UNIX). There is no readiness to
+            // wait for, so pace the retry — the pause still watches the stop.
+            libc::EAGAIN => {
+                let slice = match deadline {
+                    None => CONNECT_RETRY_PACE,
+                    Some(at) => {
+                        let left = at.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return -libc::ETIMEDOUT;
+                        }
+                        left.min(CONNECT_RETRY_PACE)
+                    }
+                };
+                if matches!(bound.pause(slice), Wake::Stopped) {
+                    return -libc::ECANCELED;
+                }
+            }
+            e => return -e,
+        }
+    }
+}
+
+/// The outcome of a connect that reported writability, read from the socket's
+/// own error slot — where a handshake that failed leaves its reason.
+fn connect_result(fd: RawFd) -> i32 {
+    let mut err: libc::c_int = 0;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    let got = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ERROR,
+            &mut err as *mut _ as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if got < 0 {
+        return -std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+    }
+    if err == 0 {
+        0
+    } else {
+        -err
     }
 }

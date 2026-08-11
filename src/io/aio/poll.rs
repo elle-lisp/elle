@@ -7,8 +7,9 @@ impl AsyncBackend {
     /// generate a CQE with result = -ECANCELED; the cancel SQE's CQE is
     /// tagged and skipped by drain_cqes.
     ///
-    /// For the thread pool: ask the operation to stop if it is one that can
-    /// (only a timer is), and mark the id so its result is dropped when it
+    /// For the thread pool: write the operation's stop pipe if it carries one
+    /// (every operation that can wait indefinitely does — see src/io/AGENTS.md
+    /// § "The stop pipe"), and mark the id so its result is dropped when it
     /// arrives. The `pending` entry stays. The worker's `RawCompletion` then
     /// still decrements the hub's `in_flight` at the drain site and still
     /// releases the descriptor the operation named; removing the entry here

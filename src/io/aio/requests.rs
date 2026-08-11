@@ -142,6 +142,11 @@ impl AsyncBackend {
                     .map(Some)
                 }
                 PlatformBackend::ThreadPool => {
+                    // A connect waits on a peer that need never answer — a
+                    // dropped handshake, a listener whose backlog is full — so
+                    // it carries the caller's deadline and a stop pipe, like
+                    // every other open-ended pool operation.
+                    let stop = d.hub.stop_pipe(d.id);
                     let pool_op = match addr {
                         ConnectAddr::Tcp {
                             addr: ip,
@@ -149,15 +154,16 @@ impl AsyncBackend {
                             options,
                             ..
                         } => PoolOp::ConnectTcp {
-                            // `TcpStream::connect` on a numeric address resolves to
-                            // itself without touching DNS; the bracketing keeps IPv6
-                            // parseable.
-                            addr: crate::io::sockaddr::format_host_port(&ip.to_string(), *port),
+                            addr: std::net::SocketAddr::new(*ip, *port),
                             options: options.clone(),
+                            timeout,
+                            stop,
                         },
                         ConnectAddr::Unix { path, options, .. } => PoolOp::ConnectUnix {
                             path: path.clone(),
                             options: options.clone(),
+                            timeout,
+                            stop,
                         },
                     };
                     d.hub.submit(d.id, pool_op)?;

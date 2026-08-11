@@ -4,7 +4,7 @@ use crate::io::grapheme_count_in_valid_prefix;
 use crate::io::request::SocketOptions;
 use crate::io::SubmissionId;
 use std::collections::HashMap;
-use std::os::unix::io::{IntoRawFd, RawFd};
+use std::os::unix::io::RawFd;
 use std::time::Duration;
 
 /// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
@@ -50,22 +50,33 @@ pub(super) enum PoolOp {
     Flush {
         fd: RawFd,
     },
-    /// `stop` is what makes a parked accept cancellable. A listener with no
-    /// caller waits indefinitely, so without it the worker sits in `accept(2)`
-    /// until a connection happens to arrive — closing the listener does not
-    /// wake a thread already inside the syscall. The worker is then unreapable
-    /// and the fiber that asked for the accept is never resumed.
+    /// Take one connection from a listener. `timeout` and `stop` are what bound
+    /// it: a listener with no caller waits indefinitely, so without them the
+    /// worker sits in `accept(2)` until a connection happens to arrive —
+    /// closing the listener does not wake a thread already inside the syscall.
+    /// The worker is then unreapable and the fiber that asked for the accept is
+    /// never resumed.
     Accept {
         fd: RawFd,
+        timeout: Option<Duration>,
         stop: Option<RawFd>,
     },
+    /// Connect to `addr`. The worker opens the socket itself, so the descriptor
+    /// it reports back is the connection. Bounded like every other open-ended
+    /// operation: a handshake whose packets are dropped waits on the kernel's
+    /// whole retry sequence, and an AF_UNIX peer whose backlog is full waits
+    /// until it accepts, which it need never do.
     ConnectTcp {
-        addr: String,
+        addr: std::net::SocketAddr,
         options: SocketOptions,
+        timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     ConnectUnix {
         path: String,
         options: SocketOptions,
+        timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     SendTo {
         fd: RawFd,
@@ -73,9 +84,13 @@ pub(super) enum PoolOp {
         port: u16,
         data: Vec<u8>,
     },
+    /// Take one datagram. Bounded for the same reason as `Accept`: a socket
+    /// nobody sends to waits exactly as long as a listener nobody calls.
     RecvFrom {
         fd: RawFd,
         size: usize,
+        timeout: Option<Duration>,
+        stop: Option<RawFd>,
     },
     Shutdown {
         fd: RawFd,
@@ -171,6 +186,9 @@ impl PoolOp {
             | PoolOp::ReadAll { stop, .. }
             | PoolOp::Write { stop, .. }
             | PoolOp::Accept { stop, .. }
+            | PoolOp::RecvFrom { stop, .. }
+            | PoolOp::ConnectTcp { stop, .. }
+            | PoolOp::ConnectUnix { stop, .. }
             | PoolOp::Sleep { stop, .. } => *stop,
             _ => None,
         }

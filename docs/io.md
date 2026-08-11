@@ -250,6 +250,27 @@ The pinning tests are `tests/elle/port-write-timeout.lisp` and
 `tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
 socket peer and a pipe peer.
 
+### The calls that wait for a peer
+
+`tcp/accept`, `unix/accept`, `tcp/connect`, `unix/connect` and
+`udp/recv-from` take the same `:timeout`, and they need it most: each waits
+on a peer that may never appear. A listener nobody calls, a datagram socket
+nobody sends to, and a connect to an address that drops the packet all wait
+alike.
+
+```lisp
+(ev/run (fn []
+          (let [listener (tcp/listen "127.0.0.1" 0)]
+            (assert (timed-out? (fn [] (tcp/accept listener :timeout 200)))
+                    "an accept nobody calls must trip its own deadline")
+            (port/close listener))))
+```
+
+`ev/timeout` and `io/cancel` end these calls too, on either backend. The
+pinning tests are `tests/elle/net-wait-timeout.lisp` for the deadline and
+the `a_cancelled_pool_*` tests in `src/io/aio/tests/net.rs` for the
+cancellation.
+
 ### Streams from ports
 
 ```lisp

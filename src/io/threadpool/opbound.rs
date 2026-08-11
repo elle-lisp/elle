@@ -168,6 +168,36 @@ impl OpBound {
         }
     }
 
+    /// Wait out `slice`, or until the operation is stopped, whichever comes
+    /// first. Only the stop pipe is polled, so `Ready` is impossible.
+    ///
+    /// This is for a syscall the kernel offers no readiness for: an AF_UNIX
+    /// `connect` to a listener whose backlog is full reports `EAGAIN` and gives
+    /// nothing to wait on, so its retry has to be paced. The stop stays visible
+    /// throughout, which a plain sleep would not allow.
+    pub(super) fn pause(&self, slice: Duration) -> Wake {
+        let mut pfd = libc::pollfd {
+            fd: self.stop_fd.unwrap_or(-1),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // With no stop pipe there is nothing to watch, and `poll` over zero
+        // descriptors is the portable sleep.
+        let n = if self.stop_fd.is_some() { 1 } else { 0 };
+        let ms = slice
+            .as_micros()
+            .div_ceil(1000)
+            .min(libc::c_int::MAX as u128) as libc::c_int;
+        let ret = unsafe { libc::poll(&mut pfd, n, ms) };
+        if ret > 0 && pfd.revents != 0 {
+            Wake::Stopped
+        } else {
+            // A signal cuts the pause short. The caller re-checks its own
+            // deadline before pausing again, so a short slice costs nothing.
+            Wake::TimedOut
+        }
+    }
+
     /// Wait out `duration`, or until the operation is stopped. The timer's
     /// whole wait — there is no descriptor to poll.
     pub(super) fn sleep(&self) -> Wake {

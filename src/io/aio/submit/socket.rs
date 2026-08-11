@@ -39,11 +39,19 @@ impl AsyncBackend {
                         PlatformBackend::ThreadPool => {
                             let _ = buffer_pool;
                             // An accept waits as long as no peer connects, so it
-                            // needs the stop pipe every other open-ended pool op
-                            // carries: `hub.stop` cannot reach a thread already
-                            // inside `accept(2)`.
+                            // takes both bounds every other open-ended pool op
+                            // carries: the caller's deadline, and the stop pipe
+                            // `hub.stop` writes — neither of which can reach a
+                            // thread already inside `accept(2)`.
                             let stop = hub.stop_pipe(id);
-                            hub.submit(id, PoolOp::Accept { fd, stop })?;
+                            hub.submit(
+                                id,
+                                PoolOp::Accept {
+                                    fd,
+                                    timeout: request.timeout,
+                                    stop,
+                                },
+                            )?;
                         }
                     }
                 }
@@ -104,7 +112,19 @@ impl AsyncBackend {
                         // nor the destination value is needed at submit time.
                         let _ = buffer_pool;
                         let _ = result;
-                        hub.submit(id, PoolOp::RecvFrom { fd, size: *count })?;
+                        // A datagram socket waits on a sender the same way a
+                        // listener waits on a caller, so the receive carries the
+                        // same two bounds as the accept above.
+                        let stop = hub.stop_pipe(id);
+                        hub.submit(
+                            id,
+                            PoolOp::RecvFrom {
+                                fd,
+                                size: *count,
+                                timeout: request.timeout,
+                                stop,
+                            },
+                        )?;
                     }
                 },
                 PortOp::Shutdown { how } => match platform {

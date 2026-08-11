@@ -1357,6 +1357,17 @@ fn port_timeout_shared_fd_threadpool() {
     run_elle_script_with_args("port-timeout-shared-fd", &["--no-uring"]);
 }
 
+// `:timeout` on the calls that wait for a peer, on the OTHER backend. io_uring
+// links a timeout SQE to the accept and the receive; the pool worker has to
+// bound them itself, waiting in `poll(2)` for the listener or the socket to be
+// readable rather than parking in `accept(2)`/`recvfrom(2)` where no deadline
+// can reach it. That mechanism is the only one on macOS, and it is the half
+// this file measures — on io_uring the same script passes either way.
+#[test]
+fn net_wait_timeout_threadpool() {
+    run_elle_script_with_args("net-wait-timeout", &["--no-uring"]);
+}
+
 // (Hygiene for syntax-case bindings is carried structurally — synthetic-ness
 // lives on PatternBinding (src/syntax/expand/syntaxcase.rs) rather than being
 // inferred from a name's string prefix. The regression for it lives in

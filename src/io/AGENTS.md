@@ -110,7 +110,7 @@ alone must remember:
 
 Typed thread-pool submission and completion:
 
-- `PoolOp` — enum with 11 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses, or closures): a typed submission.
+- `PoolOp` — one variant per operation the pool runs. Each carries exactly the data that operation needs (fd, buffers, addresses, or closures): a typed submission. A variant that can wait indefinitely also carries `timeout` and `stop`, the two ends of its `OpBound`; `PoolOp::stop_fd` reports the stop end for the paths that must dispose of an operation no worker will run.
 - `PoolCompletion { id, result_code, data }` — typed completion from a thread-pool worker.
 - `RawCompletion` — `Pool(PoolCompletion)` | `Stdin(StdinCompletion)`. The single
   shape every background worker ships through the hub. A worker cannot build a
@@ -179,7 +179,10 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 
 **Async backend (io_uring):** Linked timeout SQEs provide true preemptive timeout for all operations (stream, network, and timer). A `LinkTimeout` SQE is submitted immediately after the operation SQE with the `IO_LINK` flag. If the timeout fires first, the kernel cancels the linked operation. The operation CQE has `result = -ECANCELED` (errno 125). The timeout CQE is identified by a high-bit tag (`id | (1 << 63)`) and skipped during completion processing.
 
-**Thread-pool fallback:** `SO_RCVTIMEO`/`SO_SNDTIMEO` on the fd, or `poll()` with timeout.
+**Thread-pool fallback:** `OpBound` (`threadpool/opbound.rs`) takes the
+descriptor non-blocking and waits in `poll(2)` for readiness, for the
+caller's `:timeout`, or for the stop pipe. See § "Operation timeouts" for
+the mechanism and § "The stop pipe" for the cancellation half.
 
 ## I/O Cancellation
 
@@ -190,9 +193,9 @@ Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling
 ### What cancellation promises on the thread pool
 
 A pool operation runs on its own worker thread, which holds a plain
-descriptor number and calls a blocking syscall on it. Nothing outside that
-thread can retract the syscall, so cancellation on this backend promises
-two things rather than an immediate stop:
+descriptor number and calls a syscall on it. No other thread can retract a
+syscall already running, so a cancel asks rather than interrupts: the stop
+pipe below is how it asks, and two things hold however the worker answers:
 
 - **The submission is accounted for.** `cancel` marks the id in
   `cancelled` and leaves the `pending` entry in place. The worker's
@@ -204,16 +207,38 @@ two things rather than an immediate stop:
 - **The descriptor outlives the operation.** See "Descriptor retirement"
   below.
 
-A timer is the one operation that does stop at once: `PoolOp::Sleep`
-waits on a channel with `recv_timeout` rather than sleeping, and `cancel`
-sends on that channel. This is what keeps `ev/timeout` cheap — every
-`ev/timeout` whose body wins cancels its timer, so a timer that ran to
-its full duration would hold a slot for that long.
+### The stop pipe
 
-An operation on a descriptor keeps running. That is safe because of
-retirement, and it ends when the descriptor's peer or its own timeout
-ends it; `port/close` shuts the descriptor down, which ends it at once
-for a socket.
+An operation that can wait indefinitely carries a **stop pipe**, and that
+is what lets it stop at once rather than when its peer happens to act.
+`CompletionHub::stop_pipe` opens one per submission: the worker owns the
+read end for the operation's lifetime and polls it alongside its own
+descriptor through `OpBound`, while `CompletionHub::stop` writes one byte
+into the write end. The operation then completes with `-ECANCELED`, which
+gives the worker thread back like any other completion.
+
+Polling a pipe is what keeps the descriptor intact. Shutting the socket
+down would reach the worker too, and would break a port the caller still
+holds; a signal would land on whichever thread the kernel chose.
+
+Two conditions decide which operations carry one:
+
+- **It can wait for something that may never happen.** The reads, `Sleep`,
+  `Accept`, `RecvFrom`, and both connects wait on a peer. A `Write` runs to
+  the end of its payload as the full-write invariant promises, and `Flush`
+  transfers nothing, so neither takes a pipe.
+- **Stopping it must not park it instead.** `OpBound` takes the descriptor
+  non-blocking for the operation's lifetime, so the syscall reports
+  `EAGAIN` and hands the wait back to the poll where the stop is visible. A
+  worker that calls the blocking syscall first is unreachable: closing the
+  listener does not wake a thread already inside `accept(2)`.
+
+`ev/timeout` cancels on every call — the body's operation or the timer's,
+whichever lost — so this path runs constantly rather than at the edges.
+
+When the process is out of descriptors, `stop_pipe` returns `None` and the
+operation runs uncancellable. It still bounds itself by the caller's
+`:timeout`, which `OpBound` enforces with the same poll.
 
 ### Descriptor retirement
 
@@ -278,6 +303,12 @@ call that loops: `Write` until the payload is gone, `ReadExact` until its count,
 stalled must trip the deadline while one that is merely slow must not — a
 per-call deadline would satisfy the first and break the second.
 
+`Accept`, `RecvFrom` and both connects are single operations, and the bound
+matters to them most: each waits on a peer that may never appear, so the
+deadline is the only thing that ends them. A `connect` measures its deadline
+across its retries, because one connect is one operation however many times the
+kernel makes the worker ask.
+
 Each backend carries the bound its own way:
 
 | Backend | Mechanism | Expiry |
@@ -305,7 +336,10 @@ non-blocking waits rather than failing.
 
 Pinned by `tests/elle/port-write-timeout.lisp` and
 `tests/elle/port-read-timeout.lisp`, both run on each backend, each covering a
-socket peer and a pipe peer.
+socket peer and a pipe peer. `tests/elle/net-wait-timeout.lisp` covers the
+calls that wait for a peer, and `a_pool_connect_reports_its_own_deadline_as_a_timeout`
+(`src/io/aio/tests/net.rs`) covers the connect, whose stall needs a listener
+backlog an Elle script cannot set.
 
 ## The submission frame
 

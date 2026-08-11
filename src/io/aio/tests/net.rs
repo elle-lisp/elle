@@ -416,7 +416,8 @@ fn test_accept_and_connect_concurrent() {
     });
 }
 
-/// A cancelled accept must END on the thread-pool backend, not be abandoned.
+/// Cancel a pool operation and assert it RETIRES: its worker comes back and
+/// its `pending` entry goes, within a bounded number of waits.
 ///
 /// The pool's `wait` blocks on the hub channel only `if hub.in_flight() > 0`.
 /// The io_uring arm has no such guard — it waits on the ring unconditionally,
@@ -426,15 +427,132 @@ fn test_accept_and_connect_concurrent() {
 /// nothing without blocking, and whoever is parked on that operation is never
 /// woken again.
 ///
-/// Closing a listener under a parked accept is how a program reaches that
-/// state, so this pins that such an accept RETIRES: its worker comes back and
-/// its `pending` entry goes, within a bounded number of waits.
+/// No completion is delivered for a cancelled operation, and that is the design
+/// rather than an omission — `cook_raw` discards a cancelled op before cooking
+/// it, because the fiber that requested it is already gone and cooking a read
+/// would write the worker's bytes into a freed heap. What must not happen is
+/// the entry outliving the worker.
+fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
+    // `workers()` counts a submission from the moment its thread spawns, so
+    // this says the operation is out rather than that the worker has reached
+    // its syscall. The pause that follows makes the interesting order the
+    // likely one: a cancel arriving while the worker already waits.
+    let mut submitted = false;
+    for _ in 0..200 {
+        if backend.workers() > 0 {
+            submitted = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(
+        submitted,
+        "the pool never took the {} out to a worker",
+        what
+    );
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    backend.cancel(id).unwrap();
+
+    // A bounded number of waits, because the property under test is exactly
+    // that this terminates: an operation left in `pending` with no worker out
+    // would leave `wait` returning nothing for as long as it is asked.
+    for _ in 0..40 {
+        let _ = backend.wait(50).unwrap();
+        if !backend.has_pending() && backend.workers() == 0 {
+            break;
+        }
+    }
+
+    assert!(
+        !backend.has_pending(),
+        "the cancelled {} is still pending with {} worker(s) out — an \
+         operation that keeps its `pending` entry after its worker is gone \
+         can never be reaped, because the pool's `wait` blocks only while \
+         `in_flight() > 0`",
+        what,
+        backend.workers(),
+    );
+    assert_eq!(
+        backend.workers(),
+        0,
+        "the cancelled {} never gave its worker back",
+        what,
+    );
+}
+
+/// Take a descriptor non-blocking, whatever the platform spells the flag.
+/// `SOCK_NONBLOCK` is a Linux extension to `socket(2)`; `fcntl` is everywhere.
+fn set_nonblocking(fd: libc::c_int) {
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        assert!(flags >= 0, "F_GETFL failed");
+        assert_eq!(libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK), 0);
+    }
+}
+
+/// A loopback TCP listener with a backlog of one, and the port it took.
 ///
-/// No completion is delivered for it, and that is the design rather than an
-/// omission — `cook_raw` discards a cancelled op before cooking it, because the
-/// fiber that requested it is already gone and cooking a read would write the
-/// worker's bytes into a freed heap. What must not happen is the entry
-/// outliving the worker.
+/// The small backlog is the point: paired with `fill_tcp_backlog`, it gives a
+/// listener the kernel refuses further connections to, which is a peer that
+/// never answers without needing a network to reach one.
+fn full_backlog_listener() -> (libc::c_int, u16) {
+    unsafe {
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+        assert!(fd >= 0, "socket() failed");
+        let mut addr: libc::sockaddr_in = std::mem::zeroed();
+        addr.sin_family = libc::AF_INET as libc::sa_family_t;
+        addr.sin_port = 0;
+        addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+        assert_eq!(
+            libc::bind(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+            ),
+            0,
+            "bind() failed"
+        );
+        assert_eq!(libc::listen(fd, 1), 0, "listen() failed");
+        let mut bound: libc::sockaddr_in = std::mem::zeroed();
+        let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+        libc::getsockname(fd, &mut bound as *mut _ as *mut libc::sockaddr, &mut len);
+        (fd, u16::from_be(bound.sin_port))
+    }
+}
+
+/// Fill the accept queue of the listener on `port`, and return the descriptors
+/// that hold it full. Nobody accepts these, so the kernel has nowhere to put a
+/// further connection and drops its SYNs.
+///
+/// The caller holds the descriptors for the length of its test: closing one
+/// frees a queue slot, and the connect under test would then complete.
+fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
+    let mut queued = Vec::new();
+    for _ in 0..8 {
+        let c = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(c >= 0, "socket() failed");
+        set_nonblocking(c);
+        unsafe {
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = port.to_be();
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            libc::connect(
+                c,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+        }
+        queued.push(c);
+    }
+    queued
+}
+
+/// A cancelled accept must END on the thread-pool backend, not be abandoned.
+///
+/// Closing a listener under a parked accept is how a program reaches the state
+/// `assert_cancel_retires` describes: an entry whose worker is gone for good.
 ///
 /// Built on `new_thread_pool` rather than `AsyncBackend::new` on purpose: on a
 /// Linux host with io_uring the default backend is the ring, and this property
@@ -502,46 +620,303 @@ fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
             )
             .unwrap();
 
-        // Let the worker actually pick the accept up and park in accept(), so
-        // the cancel below interrupts a blocked syscall rather than racing the
-        // hand-off.
-        let picked_up = {
-            let mut spun = false;
-            for _ in 0..200 {
-                if backend.workers() > 0 {
-                    spun = true;
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            spun
+        assert_cancel_retires(&backend, accept_id, "accept");
+    });
+}
+
+/// A cancelled datagram receive must END on the thread-pool backend.
+///
+/// The accept test's twin on the other open-ended socket operation: a socket
+/// nobody sends to waits exactly as long as a listener nobody calls. `ev/timeout`
+/// around a `udp/recv-from` is the caller that meets it — `lib/dns.lisp` sends a
+/// query and waits for a reply that a lossy network need never deliver.
+///
+/// The socket is deliberately BLOCKING, for the reason the accept test gives:
+/// a non-blocking one returns EAGAIN at once and the operation ends whatever
+/// the cancel path does.
+#[test]
+fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+        use std::os::unix::io::FromRawFd;
+
+        let sock_fd = unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
+            assert!(fd >= 0, "socket() failed");
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = 0;
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            assert_eq!(
+                libc::bind(
+                    fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+                ),
+                0
+            );
+            fd
         };
-        assert!(picked_up, "the pool never took the accept out to a worker");
+        let sock_port = h.ctx().external(
+            "port",
+            Port::new_udp_socket(
+                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(sock_fd) },
+                "127.0.0.1:0".to_string(),
+            ),
+        );
 
-        backend.cancel(accept_id).unwrap();
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let recv_id = backend
+            .submit(
+                &IoRequest {
+                    // The pool worker receives into its own buffer, so the
+                    // destination struct a fiber would pass is not needed here.
+                    op: PortOp::RecvFrom {
+                        count: 64,
+                        result: Value::NIL,
+                    }
+                    .into(),
+                    port: sock_port,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
 
-        // A bounded number of waits, because the property under test is exactly
-        // that this terminates: an operation left in `pending` with no worker
-        // out would leave `wait` returning nothing for as long as it is asked.
+        assert_cancel_retires(&backend, recv_id, "recvfrom");
+    });
+}
+
+/// A cancelled TCP connect must END on the thread-pool backend.
+///
+/// The stall is a listener whose accept queue is full: the kernel drops further
+/// SYNs, so the handshake never completes and the connect waits on a peer that
+/// will not answer. A blocking `connect(2)` holds its worker through the whole
+/// SYN-retry sequence — minutes, with no way for a cancel to reach it.
+#[test]
+fn a_cancelled_pool_tcp_connect_ends_rather_than_being_abandoned() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+
+        let (listener_fd, bound_port) = full_backlog_listener();
+        let queued = fill_tcp_backlog(bound_port);
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let connect_port = h.ctx().external(
+            "port",
+            Port::new_unopened(
+                PortKind::TcpStream,
+                Direction::ReadWrite,
+                Encoding::Binary,
+                format!("127.0.0.1:{}", bound_port),
+            ),
+        );
+        let connect_id = backend
+            .submit(
+                &IoRequest {
+                    op: IoOp::Connect {
+                        addr: crate::io::request::ConnectAddr::Tcp {
+                            addr: "127.0.0.1".parse().unwrap(),
+                            port: bound_port,
+                            options: Default::default(),
+                            encoding: crate::port::Encoding::Binary,
+                        },
+                    },
+                    port: connect_port,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        assert_cancel_retires(&backend, connect_id, "tcp connect");
+
+        for c in queued {
+            unsafe { libc::close(c) };
+        }
+        unsafe { libc::close(listener_fd) };
+    });
+}
+
+/// A pool connect must stop at the caller's `:timeout`, and say so.
+///
+/// The same full accept queue as the cancellation test above, waited on with a
+/// deadline instead of cancelled. Two things are pinned: the connect ends near
+/// its deadline rather than at the kernel's own, minutes later; and it reports
+/// `:timeout`, the kind `ev/timeout` and every caller that distinguishes a
+/// deadline from a broken connection matches on.
+#[test]
+fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+
+        let (listener_fd, bound_port) = full_backlog_listener();
+        let queued = fill_tcp_backlog(bound_port);
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let connect_port = h.ctx().external(
+            "port",
+            Port::new_unopened(
+                PortKind::TcpStream,
+                Direction::ReadWrite,
+                Encoding::Binary,
+                format!("127.0.0.1:{}", bound_port),
+            ),
+        );
+        let started = std::time::Instant::now();
+        let connect_id = backend
+            .submit(
+                &IoRequest {
+                    op: IoOp::Connect {
+                        addr: crate::io::request::ConnectAddr::Tcp {
+                            addr: "127.0.0.1".parse().unwrap(),
+                            port: bound_port,
+                            options: Default::default(),
+                            encoding: crate::port::Encoding::Binary,
+                        },
+                    },
+                    port: connect_port,
+                    timeout: Some(std::time::Duration::from_millis(200)),
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        let mut completions = Vec::new();
         for _ in 0..40 {
-            let _ = backend.wait(50).unwrap();
-            if !backend.has_pending() && backend.workers() == 0 {
+            completions.extend(backend.wait(200).unwrap());
+            if !completions.is_empty() {
                 break;
             }
         }
-
-        assert!(
-            !backend.has_pending(),
-            "the cancelled accept is still pending with {} worker(s) out — an \
-             operation that keeps its `pending` entry after its worker is gone \
-             can never be reaped, because the pool's `wait` blocks only while \
-             `in_flight() > 0`",
-            backend.workers(),
-        );
         assert_eq!(
-            backend.workers(),
-            0,
-            "the cancelled accept never gave its worker back",
+            completions.len(),
+            1,
+            "the connect never completed within 8s of a 200ms deadline",
         );
+        assert_eq!(completions[0].id, connect_id);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "the connect took {:?} against a 200ms deadline — it waited on the \
+             kernel's own retry sequence instead of its own bound",
+            elapsed,
+        );
+
+        let err = completions[0]
+            .result
+            .as_ref()
+            .expect_err("a connect to a full accept queue must not succeed");
+        let fields = err.as_struct().expect("an io error is a struct");
+        assert_eq!(
+            crate::value::sorted_struct_get(fields, &TableKey::Keyword("error".into()))
+                .unwrap()
+                .as_keyword_name()
+                .as_deref(),
+            Some("timeout"),
+            "a connect that ran out its deadline must report :timeout, not a \
+             generic :io-error — `ev/timeout` and `timed-out?` match on the kind",
+        );
+
+        for c in queued {
+            unsafe { libc::close(c) };
+        }
+        unsafe { libc::close(listener_fd) };
+    });
+}
+
+/// A cancelled Unix connect must END on the thread-pool backend.
+///
+/// AF_UNIX reports a full backlog differently from TCP, which is why it is
+/// pinned separately: a non-blocking connect returns EAGAIN with no readiness
+/// to poll for, so the operation paces its retries and watches for the stop
+/// between them. A blocking one waits inside the kernel until the listener
+/// accepts, which a listener that has stopped accepting never does.
+#[test]
+fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+
+        let path = temp_path("unix-connect-cancel");
+        let (sun, addr_len) = crate::io::sockaddr::build_unix(&path).unwrap();
+        let listener_fd = unsafe {
+            let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0);
+            assert!(fd >= 0, "socket() failed");
+            assert_eq!(
+                libc::bind(fd, &sun as *const _ as *const libc::sockaddr, addr_len),
+                0,
+                "bind({}) failed",
+                path
+            );
+            assert_eq!(libc::listen(fd, 1), 0);
+            fd
+        };
+
+        // Fill the backlog. AF_UNIX says so directly — a non-blocking connect
+        // to a full queue reports EAGAIN — so the setup can prove the connect
+        // under test really has nothing to complete against.
+        let mut queued: Vec<libc::c_int> = Vec::new();
+        let mut full = false;
+        for _ in 0..8 {
+            let c = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+            assert!(c >= 0, "socket() failed");
+            set_nonblocking(c);
+            let r =
+                unsafe { libc::connect(c, &sun as *const _ as *const libc::sockaddr, addr_len) };
+            if r == 0 {
+                queued.push(c);
+                continue;
+            }
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            unsafe { libc::close(c) };
+            assert!(
+                errno == libc::EAGAIN || errno == libc::EWOULDBLOCK,
+                "connect({}) failed with errno {}",
+                path,
+                errno
+            );
+            full = true;
+            break;
+        }
+        assert!(
+            full,
+            "the listener's backlog never filled, so the connect under test \
+             would complete instead of waiting"
+        );
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let connect_port = h.ctx().external(
+            "port",
+            Port::new_unopened(
+                PortKind::UnixStream,
+                Direction::ReadWrite,
+                Encoding::Binary,
+                path.clone(),
+            ),
+        );
+        let connect_id = backend
+            .submit(
+                &IoRequest {
+                    op: IoOp::Connect {
+                        addr: crate::io::request::ConnectAddr::Unix {
+                            path: path.clone(),
+                            options: Default::default(),
+                            encoding: crate::port::Encoding::Binary,
+                        },
+                    },
+                    port: connect_port,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        assert_cancel_retires(&backend, connect_id, "unix connect");
+
+        for c in queued {
+            unsafe { libc::close(c) };
+        }
+        unsafe { libc::close(listener_fd) };
+        let _ = std::fs::remove_file(&path);
     });
 }

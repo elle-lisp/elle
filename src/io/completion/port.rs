@@ -30,11 +30,7 @@ pub(super) fn complete_port_op(
             if result_code < 0 {
                 // Error
                 let errno = -result_code;
-                // ECANCELED is io_uring cancelling an op whose linked timeout
-                // fired; ETIMEDOUT is a thread-pool worker whose own bounded
-                // wait expired. Both are the caller's `:timeout` elapsing, so
-                // they carry the same error kind.
-                let is_timeout = errno == libc::ECANCELED || errno == libc::ETIMEDOUT;
+                let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {

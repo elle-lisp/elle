@@ -172,6 +172,49 @@ fn a_descriptor_that_was_already_non_blocking_stays_that_way() {
 }
 
 #[test]
+fn a_pause_ends_at_once_when_the_operation_is_stopped() {
+    let stop = open_stop_pipe().expect("a stop pipe");
+    let bound = OpBound::new(-1, None, Some(stop.read_fd));
+    let byte = 1u8;
+    assert_eq!(
+        unsafe { libc::write(stop.write_fd, &byte as *const u8 as *const libc::c_void, 1) },
+        1,
+    );
+
+    let started = Instant::now();
+    assert!(
+        matches!(bound.pause(Duration::from_secs(5)), Wake::Stopped),
+        "a paced retry must see the stop rather than wait out its slice"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "the pause ran {:?} with a stop already written",
+        started.elapsed()
+    );
+
+    drop(bound); // closes the read end it owns
+    unsafe { libc::close(stop.write_fd) };
+}
+
+#[test]
+fn a_pause_with_nothing_to_stop_it_waits_out_its_slice() {
+    let bound = OpBound::new(-1, None, None);
+
+    let started = Instant::now();
+    assert!(matches!(
+        bound.pause(Duration::from_millis(100)),
+        Wake::TimedOut
+    ));
+    // A pause that returns at once is no pace at all: the connect it belongs
+    // to would spin on `EAGAIN` for its whole deadline.
+    assert!(
+        started.elapsed() >= Duration::from_millis(50),
+        "the pause returned after {:?} of a 100 ms slice",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn an_untimed_operation_leaves_the_descriptor_alone() {
     let pipe = Pipe::new();
 
