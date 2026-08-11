@@ -111,26 +111,39 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // If: transform branches without save/restore. SSA renames
-            // from assigns in branches propagate outward. When the If
-            // is directly in a begin sequence, transform_begin_at handles
-            // phi-insertion for proper merge semantics. When nested
-            // (e.g. inside let body), assigns in branches are either:
-            // - cell-backed (letrec mutated bindings) → set-cell is correct
-            // - in a begin context that handles phi-insertion
-            // - simple cases where propagation is harmless
+            // If: an SSA rename created inside a branch may escape only when a
+            // phi guarded by the same condition is emitted at the merge, and
+            // transform_begin_at is the only place that emits one. Every If
+            // that reaches this arm is one it will NOT emit a phi for: the
+            // begin path intercepts an If with unpreserved branch assigns and
+            // routes it through transform_if_with_phi, which never dispatches
+            // here. So a rename escaping this arm would reach code the branch
+            // does not dominate. Keep those assigns as runtime slot mutations
+            // instead, exactly as the Cond arm below does for the same reason.
             //
-            // Cond/Match DO save/restore because they have multiple
-            // alternative branches; If has exactly two branches and the
-            // begin-level phi handles the merge.
+            // The cond is transformed BEFORE the save: it always executes, so a
+            // rename from an assign inside it must propagate outward.
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
                 let new_cond = self.transform(cond);
+                let saved = self.renames.clone();
+                let saved_preserved = self.assign_preserved.clone();
+                for branch in [then_branch, else_branch] {
+                    let mut branch_assigns = BTreeSet::new();
+                    self.collect_assigned_bindings(branch, &mut branch_assigns);
+                    for b in &branch_assigns {
+                        let resolved = self.resolve(*b);
+                        self.assign_preserved.insert(resolved);
+                    }
+                }
                 let new_then = self.transform(then_branch);
+                self.renames = saved.clone();
                 let new_else = self.transform(else_branch);
+                self.renames = saved;
+                self.assign_preserved = saved_preserved;
                 Hir::new(
                     HirKind::If {
                         cond: Box::new(new_cond),
@@ -295,12 +308,12 @@ impl<'a> FnCtx<'a> {
             }
 
             HirKind::And(exprs) => {
-                let new: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
+                let new = self.transform_short_circuit(exprs);
                 Hir::new(HirKind::And(new), span, signal)
             }
 
             HirKind::Or(exprs) => {
-                let new: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
+                let new = self.transform_short_circuit(exprs);
                 Hir::new(HirKind::Or(new), span, signal)
             }
 
@@ -513,5 +526,42 @@ impl<'a> FnCtx<'a> {
             | HirKind::QuoteConst(_)
             | HirKind::Error => hir.clone(),
         }
+    }
+
+    /// Transform the operands of a short-circuiting `and`/`or`.
+    ///
+    /// Only the first operand always executes; each later one is conditional on
+    /// the ones before it. Neither form has a phi-insertion path —
+    /// `transform_begin_at` handles Assign, If, Cond, Match and While, and never
+    /// And or Or — so a fresh SSA version forked inside a later operand would
+    /// escape to code that did not evaluate it. Keep those assigns as runtime
+    /// slot mutations, as the If and Cond arms do.
+    ///
+    /// The first operand is transformed before the save: it always runs, so a
+    /// rename from an assign inside it must propagate outward.
+    fn transform_short_circuit(&mut self, exprs: &[Hir]) -> Vec<Hir> {
+        let mut out: Vec<Hir> = Vec::with_capacity(exprs.len());
+        if exprs.is_empty() {
+            return out;
+        }
+        out.push(self.transform(&exprs[0]));
+
+        let saved = self.renames.clone();
+        let saved_preserved = self.assign_preserved.clone();
+        for e in &exprs[1..] {
+            let mut operand_assigns = BTreeSet::new();
+            self.collect_assigned_bindings(e, &mut operand_assigns);
+            for b in &operand_assigns {
+                let resolved = self.resolve(*b);
+                self.assign_preserved.insert(resolved);
+            }
+        }
+        for e in &exprs[1..] {
+            self.renames = saved.clone();
+            out.push(self.transform(e));
+        }
+        self.renames = saved;
+        self.assign_preserved = saved_preserved;
+        out
     }
 }

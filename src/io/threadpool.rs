@@ -50,8 +50,14 @@ pub(super) enum PoolOp {
     Flush {
         fd: RawFd,
     },
+    /// `stop` is what makes a parked accept cancellable. A listener with no
+    /// caller waits indefinitely, so without it the worker sits in `accept(2)`
+    /// until a connection happens to arrive — closing the listener does not
+    /// wake a thread already inside the syscall. The worker is then unreapable
+    /// and the fiber that asked for the accept is never resumed.
     Accept {
         fd: RawFd,
+        stop: Option<RawFd>,
     },
     ConnectTcp {
         addr: String,
@@ -164,6 +170,7 @@ impl PoolOp {
             | PoolOp::ReadLine { stop, .. }
             | PoolOp::ReadAll { stop, .. }
             | PoolOp::Write { stop, .. }
+            | PoolOp::Accept { stop, .. }
             | PoolOp::Sleep { stop, .. } => *stop,
             _ => None,
         }

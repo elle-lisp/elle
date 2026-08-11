@@ -207,6 +207,49 @@
         (let [l (get lines (- (length lines) 1))]
           (if (> (length l) 200) (concat (slice l 0 200) "…") l))))))
 
+# A timed-out worker is ABANDONED, not killed — `sys/join` says so, because an
+# OS thread cannot be safely killed. So at the moment the deadline is declared
+# the wedged thread is still in THIS process, parked in whatever call stopped
+# it, and its stack is still readable. Photograph every thread here, while that
+# is true: after the run the process exits and the only account left is which
+# budget ran out.
+#
+# This is the difference between a stack and a guess for a form that hangs on
+# one machine and nowhere else. Re-running the file cannot stand in for it —
+# the runner puts each form on its own worker thread, so a hang that needs that
+# thread never reproduces under a plain run of the same file.
+#
+# stderr, because a terminal-only reader (a CI log) is who needs it, and the
+# problem list above is already too narrow to hold a backtrace. Best-effort by
+# construction: a box with no sampler prints nothing and the run is unaffected.
+# `$PPID` inside `sh` is this process — the runner has no pid of its own to
+# pass. Both samplers bound their own runtime (`sample` by its duration
+# argument), so neither can wedge the run that is already in trouble.
+(defn photograph-threads []
+  "A native backtrace of every thread in this process, or nil when the box has
+   no sampler. `sample` is macOS's and always present there; `eu-stack` covers
+   a Linux box that has elfutils."
+  (let [[ok? proc] (protect (subprocess/exec "sh"
+                            ["-c"
+                             "sample $PPID 2 2>/dev/null || eu-stack -p $PPID 2>/dev/null"]))]
+    (when ok?
+      (let [[read-ok? out] (protect (string (port/read-all (get proc :stdout))))]
+        (protect (subprocess/wait proc))
+        (when (and read-ok? (> (length out) 0))
+          (if (> (length out) 20000)
+            (concat (slice out 0 20000) "\n…truncated")
+            out))))))
+
+(defn note-timeout-stacks [c]
+  "Print the wedged process's threads when a form misses its deadline."
+  (when (= (get c :status) :timeout)
+    (let [[ok? shot] (protect (photograph-threads))]
+      (when (and ok? shot)
+        (eprintln "── threads at the deadline ──────────────────────────────")
+        (eprintln shot)
+        (eprintln "── end threads ──────────────────────────────────────────"))))
+  c)
+
 # A timeout's reason names the budget that ran out — `join: deadline exceeded`
 # — and says nothing about where the form was when it did. The last line the
 # form printed says exactly that, so carry it in the reason: the problem list
@@ -543,7 +586,8 @@
           ts (get tp 1)
           base (string scratch-dir "/" run-id "_" h "_" ts)
           cap (exec-fn tk (string base ".out") (string base ".err"))
-          c (note-last-output (classify (get cap :result)) cap)
+          c (note-timeout-stacks (note-last-output (classify (get cap :result))
+                                 cap))
           rid (insert-result conn run-id h ts c)]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))

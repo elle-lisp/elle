@@ -322,6 +322,33 @@ genuinely fn-local captured binding — defined inside a lambda — is unaffecte
 either way: its cell is a `populate_env` env cell reached by `StoreCapture`, a
 path that never consults this set.
 
+**A read through an env cell is an uncounted borrow: the cell's last use is the
+READER's.** `DerefCell` wraps every read of a captured binding, and it emits no
+instruction of its own — `lower_deref_cell` delegates to the cell operand and
+`lower_var` unwraps the `CaptureCell` through `LoadCapture`. The value it hands
+back is still the cell's content, and the load raises no count on it, so the
+cell's own lifetime is the borrow's only protection. The cell owns that content
+outright (`AdoptCellRegion` links it into the cell's region), so releasing the
+cell cascade-frees exactly what the read borrowed out of it.
+
+That makes the wrapper transparent to last-use, not a consumer of it. A
+`DerefCell` in operand position hands its `Var` the *deref's* effective last use
+— the enclosing call, `let` binding, or statement that consumes the borrow —
+which is the same value the identical read of an *uncaptured* local gets, where
+no wrapper stands in between. Treating the wrapper as the consumer instead ends
+the cell's life at the load, one node ahead of the reader, and the reader then
+derefs a page the cell's free cascade already reclaimed. This is the env-cell
+statement of the rule [rules.md](rules.md) Rule 4 makes for container reads, and
+the mechanism is the one `uncounted_read_sites` uses for `%get`/`%first`/`%rest`:
+the container's last use is the READER's, not the read's.
+
+The hazard is latent by construction. A freed page keeps its bytes, so the stale
+read returns the right answer and the program looks correct; `--trace=scrub`
+blanks a released page's body and turns the same read into a panic at the deref
+site ([diagnostics.md](diagnostics.md)). `tests/region_cell_borrow.rs` runs the
+shapes with scrub armed, and `tests/elle/region-capture-cell-borrow.lisp` holds
+them for the plain corpus.
+
 **Env cells in loops: release once per activation, not per iteration.** A
 captured local (`needs_capture` binding defined inside a lambda) and a captured
 param are materialized as a per-value env cell by `populate_env` — a
