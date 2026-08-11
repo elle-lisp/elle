@@ -15,7 +15,8 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 
-/// Parse a JSON string into Elle values
+/// Parse a JSON string into an immutable Elle value: a JSON array becomes an
+/// immutable array, a JSON object an immutable struct.
 pub(crate) fn prim_json_parse(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -104,7 +105,7 @@ primitive! {
     "json/parse" => prim_json_parse {
         signal: Signal::errors(),
         arity: Arity::Range(1, 3),
-        doc: "Parse a JSON string into Elle values. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
+        doc: "Parse a JSON string into an immutable Elle value: a JSON array becomes an immutable array and a JSON object an immutable struct. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
         params: &["json-string", ":keys", ":keyword"],
         category: "json",
         example: r#"(json/parse "{\"name\": \"Alice\", \"age\": 30}" :keys :keyword)"#,

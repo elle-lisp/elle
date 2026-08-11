@@ -101,24 +101,73 @@ fn test_json_parse_arrays() {
     let h = elle::primitives::ctx::TestHeap::new();
 
     let result = call_primitive(&json_parse, &[h.ctx().string("[]")]);
-    assert_eq!(result.unwrap(), Value::EMPTY_LIST);
+    assert_eq!(result.unwrap(), h.ctx().array(vec![]));
 
     let result = call_primitive(&json_parse, &[h.ctx().string("[1,2,3]")]);
-    let list = result.unwrap();
-    let vec = list.list_to_vec().unwrap();
-    assert_eq!(vec.len(), 3);
-    assert_eq!(vec[0], Value::int(1));
-    assert_eq!(vec[1], Value::int(2));
-    assert_eq!(vec[2], Value::int(3));
+    let array = result.unwrap();
+    assert!(
+        array.as_array_mut().is_none(),
+        "a parsed JSON array is immutable"
+    );
+    let elements = array.as_array().expect("JSON array parses to an array");
+    assert_eq!(elements.len(), 3);
+    assert_eq!(elements[0], Value::int(1));
+    assert_eq!(elements[1], Value::int(2));
+    assert_eq!(elements[2], Value::int(3));
 
     let result = call_primitive(&json_parse, &[h.ctx().string("[1,\"two\",true,null]")]);
-    let list = result.unwrap();
-    let vec = list.list_to_vec().unwrap();
-    assert_eq!(vec.len(), 4);
-    assert_eq!(vec[0], Value::int(1));
-    assert_eq!(vec[1], h.ctx().string("two"));
-    assert_eq!(vec[2], Value::bool(true));
-    assert_eq!(vec[3], Value::NIL);
+    let array = result.unwrap();
+    let elements = array.as_array().expect("JSON array parses to an array");
+    assert_eq!(elements.len(), 4);
+    assert_eq!(elements[0], Value::int(1));
+    assert_eq!(elements[1], h.ctx().string("two"));
+    assert_eq!(elements[2], Value::bool(true));
+    assert_eq!(elements[3], Value::NIL);
+}
+
+/// Read one string-keyed field out of an immutable struct.
+fn json_field(owner: Value, name: &str) -> Value {
+    use elle::value::TableKey;
+    owner
+        .as_struct()
+        .unwrap_or_else(|| panic!("expected an immutable struct, looking for {:?}", name))
+        .iter()
+        .find(|(k, _)| matches!(k, TableKey::String(s) if s == name))
+        .map(|(_, v)| *v)
+        .unwrap_or_else(|| panic!("no field {:?}", name))
+}
+
+/// Every collection inside a parsed document is immutable too, not just the
+/// value the parser returns at the top.
+#[test]
+fn test_json_parse_is_immutable_at_every_depth() {
+    let (_vm, mut symbols, meta) = setup();
+    let json_parse = get_primitive(&meta, &mut symbols, "json-parse");
+    let h = elle::primitives::ctx::TestHeap::new();
+
+    let result = call_primitive(&json_parse, &[h.ctx().string("{\"a\": [1, {\"b\": [2]}]}")]);
+    let root = result.unwrap();
+    assert!(root.as_struct_mut().is_none(), "root object is immutable");
+
+    let outer = json_field(root, "a");
+    assert!(outer.as_array_mut().is_none(), "nested array is immutable");
+    let outer = outer.as_array().expect("nested array parses to an array");
+
+    let inner = outer[1];
+    assert!(
+        inner.as_struct_mut().is_none(),
+        "nested object is immutable"
+    );
+
+    let deepest = json_field(inner, "b");
+    assert!(
+        deepest.as_array_mut().is_none(),
+        "deepest array is immutable"
+    );
+    assert_eq!(
+        deepest.as_array().expect("deepest value is an array"),
+        &[Value::int(2)]
+    );
 }
 
 #[test]
@@ -128,26 +177,32 @@ fn test_json_parse_objects() {
     let h = elle::primitives::ctx::TestHeap::new();
 
     let result = call_primitive(&json_parse, &[h.ctx().string("{}")]);
-    match result.unwrap() {
-        v if v.as_struct_mut().is_some() => {
-            let t = v.as_struct_mut().unwrap();
-            assert_eq!(t.borrow().len(), 0);
-        }
-        _ => panic!("Expected table"),
-    }
+    let empty = result.unwrap();
+    assert!(
+        empty.as_struct_mut().is_none(),
+        "a parsed JSON object is immutable"
+    );
+    assert_eq!(
+        empty
+            .as_struct()
+            .expect("JSON object parses to a struct")
+            .len(),
+        0
+    );
 
     let result = call_primitive(
         &json_parse,
         &[h.ctx().string("{\"name\":\"Alice\",\"age\":30}")],
     );
-    match result.unwrap() {
-        v if v.as_struct_mut().is_some() => {
-            let t = v.as_struct_mut().unwrap();
-            let table = t.borrow();
-            assert_eq!(table.len(), 2);
-        }
-        _ => panic!("Expected table"),
-    }
+    let parsed = result.unwrap();
+    assert!(
+        parsed.as_struct_mut().is_none(),
+        "a parsed JSON object is immutable"
+    );
+    let fields = parsed.as_struct().expect("JSON object parses to a struct");
+    assert_eq!(fields.len(), 2);
+    assert_eq!(json_field(parsed, "name"), h.ctx().string("Alice"));
+    assert_eq!(json_field(parsed, "age"), Value::int(30));
 }
 
 #[test]
@@ -160,9 +215,11 @@ fn test_json_parse_whitespace() {
     assert_eq!(result.unwrap(), Value::int(42));
 
     let result = call_primitive(&json_parse, &[h.ctx().string("[ 1 , 2 , 3 ]")]);
-    let list = result.unwrap();
-    let vec = list.list_to_vec().unwrap();
-    assert_eq!(vec.len(), 3);
+    assert_eq!(
+        result.unwrap(),
+        h.ctx()
+            .array(vec![Value::int(1), Value::int(2), Value::int(3)])
+    );
 }
 
 #[test]
@@ -271,7 +328,10 @@ fn test_json_serialize_roundtrip() {
     let json_serialize = get_primitive(&meta, &mut symbols, "json-serialize");
     let h = elle::primitives::ctx::TestHeap::new();
 
-    let original = h.ctx().list(vec![
+    // An immutable array is the fixed point of the roundtrip: it serializes to
+    // a JSON array, and a JSON array parses back to an immutable array. A list
+    // serializes the same way but does not survive the return trip unchanged.
+    let original = h.ctx().array(vec![
         Value::int(1),
         h.ctx().string("test"),
         Value::bool(true),
@@ -287,6 +347,24 @@ fn test_json_serialize_roundtrip() {
 
     let deserialized = call_primitive(&json_parse, &[h.ctx().string(json_str)]).unwrap();
     assert_eq!(original, deserialized);
+}
+
+/// A JSON document with nested objects and arrays survives a serialize/parse
+/// roundtrip with its shape intact.
+#[test]
+fn test_json_nested_roundtrip() {
+    let (_vm, mut symbols, meta) = setup();
+    let json_parse = get_primitive(&meta, &mut symbols, "json-parse");
+    let json_serialize = get_primitive(&meta, &mut symbols, "json-serialize");
+    let h = elle::primitives::ctx::TestHeap::new();
+
+    let source = "{\"a\":[1,[2,3]],\"b\":{\"c\":null}}";
+    let parsed = call_primitive(&json_parse, &[h.ctx().string(source)]).unwrap();
+    let serialized = call_primitive(&json_serialize, std::slice::from_ref(&parsed)).unwrap();
+    assert_eq!(serialized, h.ctx().string(source));
+
+    let reparsed = call_primitive(&json_parse, &[serialized]).unwrap();
+    assert_eq!(parsed, reparsed);
 }
 
 #[test]
