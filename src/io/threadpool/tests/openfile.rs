@@ -1,12 +1,13 @@
 use super::super::*;
+use super::file_path;
 
 #[test]
 fn test_threadpool_open_existing_file_returns_valid_fd() {
-    let path = "/dev/shm/elle-test-threadpool-open-success";
-    std::fs::write(path, "test").unwrap();
+    let path = file_path("open-success");
+    std::fs::write(&path, "test").unwrap();
 
     let mut pool = CompletionHub::new();
-    let c_path = std::ffi::CString::new(path).unwrap();
+    let c_path = std::ffi::CString::new(path.as_str()).unwrap();
     pool.submit(
         SubmissionId::from_raw(10),
         PoolOp::Open {
@@ -26,15 +27,16 @@ fn test_threadpool_open_existing_file_returns_valid_fd() {
     // Close the fd to avoid leaking it
     unsafe { libc::close(fd) };
 
-    std::fs::remove_file(path).ok();
+    std::fs::remove_file(&path).ok();
 }
 
 #[test]
 fn test_threadpool_open_nonexistent_path_returns_negative_errno() {
-    let path = "/dev/shm/elle-test-threadpool-open-nonexistent-dir/nofile";
+    // A file under a directory that no test creates, so the open must fail.
+    let path = format!("{}/nofile", file_path("no-such-dir"));
 
     let mut pool = CompletionHub::new();
-    let c_path = std::ffi::CString::new(path).unwrap();
+    let c_path = std::ffi::CString::new(path.as_str()).unwrap();
     pool.submit(
         SubmissionId::from_raw(11),
         PoolOp::Open {

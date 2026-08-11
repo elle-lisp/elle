@@ -156,7 +156,7 @@ fn sig_read_child_logic() -> i32 {
     );
     #[cfg(target_os = "macos")]
     let submit = pool.submit(
-        1,
+        crate::io::SubmissionId::from_raw(1),
         PoolOp::KqSigRead {
             fd,
             signals: vec![libc::SIGUSR1],
@@ -265,7 +265,7 @@ fn close_drain_child_logic() -> i32 {
     );
     #[cfg(target_os = "macos")]
     let submit = pool.submit(
-        1,
+        crate::io::SubmissionId::from_raw(1),
         PoolOp::KqSigRead {
             fd,
             signals: vec![libc::SIGUSR1],

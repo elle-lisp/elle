@@ -107,7 +107,7 @@ hash serialized output depend on this property.
 
 ## Errors
 
-The JSON primitives signal an error for:
+JSON primitives signal a `:serde-error` for:
 
 - **Malformed JSON** — bad tokens, unterminated strings, trailing
   content, trailing commas, leading zeros, and lone surrogates.
@@ -116,7 +116,10 @@ The JSON primitives signal an error for:
 - **Non-finite floats** — `json/serialize` rejects NaN and infinity,
   which JSON cannot represent.
 
-## See also
+Catch one with `try` or `protect`. Parsing and serializing report the same
+kind, so one `catch` covers both directions.
+
+## See Also
 
 - [AGENTS.md](AGENTS.md) — technical reference for LLM agents
 - [`tests/elle/prim-json.lisp`](../../../tests/elle/prim-json.lisp) — the
