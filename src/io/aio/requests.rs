@@ -49,15 +49,11 @@ impl Dispatch<'_> {
                 crate::io::uring::submit_uring_poll_add(ring, self.id, fd, events, timeout)
             }
             PlatformBackend::ThreadPool => {
-                let timeout_ms = timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
-                self.hub.submit(
-                    self.id,
-                    PoolOp::PollFd {
-                        fd,
-                        events,
-                        timeout_ms,
-                    },
-                )
+                // The wait is open-ended when no timeout was named, and a park
+                // `ev/timeout` cannot reach outlives the fiber that wanted it.
+                let bounds = self.hub.bounds(self.id, timeout);
+                self.hub
+                    .submit(self.id, PoolOp::PollFd { fd, events }, bounds)
             }
         }
     }
@@ -146,7 +142,7 @@ impl AsyncBackend {
                     // dropped handshake, a listener whose backlog is full — so
                     // it carries the caller's deadline and a stop pipe, like
                     // every other open-ended pool operation.
-                    let stop = d.hub.stop_pipe(d.id);
+                    let bounds = d.hub.bounds(d.id, timeout);
                     let pool_op = match addr {
                         ConnectAddr::Tcp {
                             addr: ip,
@@ -156,17 +152,13 @@ impl AsyncBackend {
                         } => PoolOp::ConnectTcp {
                             addr: std::net::SocketAddr::new(*ip, *port),
                             options: options.clone(),
-                            timeout,
-                            stop,
                         },
                         ConnectAddr::Unix { path, options, .. } => PoolOp::ConnectUnix {
                             path: path.clone(),
                             options: options.clone(),
-                            timeout,
-                            stop,
                         },
                     };
-                    d.hub.submit(d.id, pool_op)?;
+                    d.hub.submit(d.id, pool_op, bounds)?;
                     Ok(None)
                 }
             },
@@ -189,9 +181,12 @@ impl AsyncBackend {
                     crate::io::uring::submit_uring_sleep(ring, d.id, duration)
                 }
                 PlatformBackend::ThreadPool => {
-                    let nanos = duration.as_nanos() as u64;
-                    let stop = d.hub.stop_pipe(d.id);
-                    d.hub.submit(d.id, PoolOp::Sleep { nanos, stop })
+                    // The duration is the bound: a timer has nothing else to
+                    // wait for. `ev/timeout` cancels its timer on every call
+                    // the body wins, and a timer that ran on to its full
+                    // duration would hold a worker for that long.
+                    let bounds = d.hub.bounds(d.id, Some(duration));
+                    d.hub.submit(d.id, PoolOp::Sleep, bounds)
                 }
             },
             |buffer, ()| PendingOp::Sleep {
@@ -240,6 +235,12 @@ impl AsyncBackend {
 
     /// Submit a DNS resolution. getaddrinfo(3) has no io_uring form, so this
     /// always goes to the thread pool.
+    ///
+    /// It is also the one operation nothing can bound. `getaddrinfo(3)` runs to
+    /// the resolver's own end — through every retry `resolv.conf` asks for —
+    /// and offers no descriptor to wait on and no way to be interrupted. A
+    /// cancel therefore discards the answer without giving the worker thread
+    /// back any sooner.
     pub(super) fn submit_resolve(&self, hostname: &str) -> Result<SubmissionId, String> {
         self.submit_op(
             0,
@@ -249,6 +250,7 @@ impl AsyncBackend {
                     PoolOp::Resolve {
                         hostname: hostname.to_string(),
                     },
+                    Bounds::uninterruptible(),
                 )
             },
             |buffer, ()| PendingOp::Resolve {
@@ -277,7 +279,13 @@ impl AsyncBackend {
                     d.buffer_pool,
                     d.buffer,
                 ),
-                PlatformBackend::ThreadPool => d.hub.submit(d.id, PoolOp::WatchRead { fd }),
+                PlatformBackend::ThreadPool => {
+                    // A watcher on a directory nothing touches waits forever,
+                    // so the read carries a stop pipe. `fs/watch` names no
+                    // deadline, so the stop is the whole bound.
+                    let bounds = d.hub.bounds(d.id, None);
+                    d.hub.submit(d.id, PoolOp::WatchRead { fd }, bounds)
+                }
             },
             |buffer, ()| PendingOp::WatchNext {
                 watcher: *watcher_val,
@@ -323,21 +331,34 @@ impl AsyncBackend {
                         )?;
                     }
                     PlatformBackend::ThreadPool => {
+                        // A signal that never arrives waits forever, so the
+                        // read carries a stop pipe. `os/sig-watch` names no
+                        // deadline, so the stop is the whole bound. Each arm
+                        // opens its own, because a platform with no signal read
+                        // at all must not open a pipe it will never hand over.
                         #[cfg(any(target_os = "linux", target_os = "android"))]
-                        d.hub.submit(d.id, PoolOp::SigfdRead { fd, trace })?;
+                        {
+                            let bounds = d.hub.bounds(d.id, None);
+                            d.hub
+                                .submit(d.id, PoolOp::SigfdRead { fd, trace }, bounds)?;
+                        }
                         #[cfg(target_os = "macos")]
-                        d.hub.submit(
-                            d.id,
-                            PoolOp::KqSigRead {
-                                fd,
-                                // Worker pthread_sigmask-unblocks these so kqueue's
-                                // EVFILT_SIGNAL has a thread the kernel can pick
-                                // as the delivery target — see kq_sig_read_blocking
-                                // in src/io/threadpool.rs.
-                                signals: receiver.signals(),
-                                trace,
-                            },
-                        )?;
+                        {
+                            let bounds = d.hub.bounds(d.id, None);
+                            d.hub.submit(
+                                d.id,
+                                PoolOp::KqSigRead {
+                                    fd,
+                                    // The worker pthread_sigmask-unblocks these
+                                    // so kqueue's EVFILT_SIGNAL has a thread the
+                                    // kernel can pick as the delivery target —
+                                    // see `event::kq_sig_read`.
+                                    signals: receiver.signals(),
+                                    trace,
+                                },
+                                bounds,
+                            )?;
+                        }
                         #[cfg(not(any(
                             target_os = "linux",
                             target_os = "android",
@@ -360,7 +381,14 @@ impl AsyncBackend {
 
     /// Submit a file open operation. Open creates the port its completion
     /// fills, so `port` arrives pre-allocated rather than in `request.port`.
-    #[allow(unused_variables)]
+    ///
+    /// This is a thread-pool operation on every platform, io_uring included.
+    /// An `open(2)` on a fifo waits for the other end, and a wait is only
+    /// answerable where the worker can hold it: `IORING_OP_OPENAT` blocks an
+    /// io-wq thread that a linked timeout marks cancelled but cannot retract,
+    /// so the kernel keeps the thread and the caller's `:timeout` buys nothing.
+    /// One implementation also means one answer — the fifo behaviour below is
+    /// the same whichever platform is underneath.
     pub(super) fn submit_open(
         &self,
         path: &str,
@@ -374,26 +402,17 @@ impl AsyncBackend {
 
         self.submit_op(
             0,
-            |d| match &mut *d.platform {
-                #[cfg(target_os = "linux")]
-                PlatformBackend::Uring(ring) => crate::io::uring::submit_uring_open(
-                    ring,
-                    d.id,
-                    &c_path,
-                    flags,
-                    mode,
-                    timeout,
-                    d.buffer_pool,
-                    d.buffer,
-                ),
-                PlatformBackend::ThreadPool => d.hub.submit(
+            |d| {
+                let bounds = d.hub.bounds(d.id, timeout);
+                d.hub.submit(
                     d.id,
                     PoolOp::Open {
                         path: c_path,
                         flags,
                         mode,
                     },
-                ),
+                    bounds,
+                )
             },
             |buffer, ()| PendingOp::Open {
                 path: path.to_string(),
@@ -427,6 +446,10 @@ impl AsyncBackend {
     /// Run an arbitrary closure on a background thread. A closure has no
     /// io_uring equivalent, so a Task always goes to the thread pool — on
     /// every platform.
+    ///
+    /// Nothing here can bound the closure: it is opaque Rust that runs until it
+    /// returns. A cancel discards its result without giving the worker thread
+    /// back, so a `Task` that must be interruptible has to arrange that itself.
     pub(super) fn submit_task(&self, task_fn: &TaskFn) -> Result<SubmissionId, String> {
         let closure = task_fn
             .take()
@@ -434,7 +457,10 @@ impl AsyncBackend {
 
         self.submit_op(
             0,
-            |d| d.hub.submit(d.id, PoolOp::Task(closure)),
+            |d| {
+                d.hub
+                    .submit(d.id, PoolOp::Task(closure), Bounds::uninterruptible())
+            },
             |buffer, ()| PendingOp::Task {
                 buffer_handle: buffer,
             },
@@ -488,7 +514,11 @@ impl AsyncBackend {
                     }
                 }
                 PlatformBackend::ThreadPool => {
-                    d.hub.submit(d.id, PoolOp::ProcessWait { pid })?;
+                    // A child that never exits waits forever, so the wait
+                    // carries a stop pipe. `subprocess/wait` names no deadline,
+                    // so the stop is the whole bound.
+                    let bounds = d.hub.bounds(d.id, None);
+                    d.hub.submit(d.id, PoolOp::ProcessWait { pid }, bounds)?;
                     Ok(std::ptr::null_mut())
                 }
             },

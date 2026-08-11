@@ -4,27 +4,27 @@
 //! the combined `in_flight` invariant the single-channel design rests on: +1
 //! per worker submit, −1 once per `RawCompletion` reaped at the drain site, and
 //! nothing else touches the counter (so a cancel — which only removes the
-//! pending entry — cannot double-decrement). They use `PoolOp::Sleep { nanos:
-//! 0 }` and `PoolOp::Task` because those need no file descriptor, so the hub is
-//! exercised on any platform without a real I/O resource.
+//! pending entry — cannot double-decrement). They use a zero-length
+//! `PoolOp::Sleep` and `PoolOp::Task` because those need no file descriptor, so
+//! the hub is exercised on any platform without a real I/O resource.
 
 use super::super::*;
 use crate::io::SubmissionId;
 use std::time::Duration;
+
+/// A sleep's duration is its bound, so a zero-length one is a worker that
+/// finishes at once. No stop pipe: these tests never cancel.
+fn instant() -> Bounds {
+    Bounds::new(Some(Duration::ZERO), None)
+}
 
 #[test]
 fn hub_in_flight_increments_on_submit_decrements_on_reap() {
     let mut hub = CompletionHub::new();
     assert_eq!(hub.in_flight(), 0, "fresh hub has no in-flight work");
 
-    hub.submit(
-        SubmissionId::from_raw(1),
-        PoolOp::Sleep {
-            nanos: 0,
-            stop: None,
-        },
-    )
-    .unwrap();
+    hub.submit(SubmissionId::from_raw(1), PoolOp::Sleep, instant())
+        .unwrap();
     assert_eq!(hub.in_flight(), 1, "submit raises the combined counter");
 
     // The worker runs a zero-length sleep and reports back. recv_blocking is
@@ -49,6 +49,7 @@ fn hub_task_result_round_trips_as_pool_completion() {
     hub.submit(
         SubmissionId::from_raw(42),
         PoolOp::Task(Box::new(|| (7, b"hello".to_vec()))),
+        Bounds::uninterruptible(),
     )
     .unwrap();
 
@@ -70,14 +71,8 @@ fn hub_task_result_round_trips_as_pool_completion() {
 fn hub_drains_a_burst_without_leaking_in_flight() {
     let mut hub = CompletionHub::new();
     for id in 1..=3 {
-        hub.submit(
-            SubmissionId::from_raw(id),
-            PoolOp::Sleep {
-                nanos: 0,
-                stop: None,
-            },
-        )
-        .unwrap();
+        hub.submit(SubmissionId::from_raw(id), PoolOp::Sleep, instant())
+            .unwrap();
     }
     assert_eq!(hub.in_flight(), 3);
 
@@ -112,14 +107,8 @@ fn hub_drains_a_burst_without_leaking_in_flight() {
 #[test]
 fn hub_reap_decrements_even_when_result_is_discarded() {
     let mut hub = CompletionHub::new();
-    hub.submit(
-        SubmissionId::from_raw(9),
-        PoolOp::Sleep {
-            nanos: 0,
-            stop: None,
-        },
-    )
-    .unwrap();
+    hub.submit(SubmissionId::from_raw(9), PoolOp::Sleep, instant())
+        .unwrap();
     assert_eq!(hub.in_flight(), 1);
 
     // Reap but drop the RawCompletion on the floor (as a cancelled op's cook

@@ -215,8 +215,8 @@ kernel fd based on platform and CLI flags:
 
 | Platform | Default | `--no-uring` |
 |----------|---------|--------------|
-| Linux | `IORING_OP_READ` on the signalfd, via the dedicated `submit_uring_sig_next` SQE helper. The read is queued on the io_uring instance and the kernel completes a CQE when one or more `signalfd_siginfo` records become available. No worker thread is involved on the elle side. | The threadpool worker calls `poll(POLLIN, -1)` and then `read(2)` on the signalfd. Uses one OS thread per outstanding `os/sig-next`. |
-| macOS | n/a — io_uring is Linux-only | A threadpool worker calls `kevent()` on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker temporarily `pthread_sigmask`-unblocks the watched signals on itself so the kernel can pick it as the delivery target (see "macOS: per-receive worker unblock + no-op handler" above). |
+| Linux | `IORING_OP_READ` on the signalfd, via the dedicated `submit_uring_sig_next` SQE helper. The read is queued on the io_uring instance and the kernel completes a CQE when one or more `signalfd_siginfo` records become available. No worker thread is involved on the elle side. | The threadpool worker waits for the signalfd and for the operation's stop pipe together, then `read(2)`s the signalfd. Uses one OS thread per outstanding `os/sig-next`, given back when the read completes or is cancelled. |
+| macOS | n/a — io_uring is Linux-only | A threadpool worker waits for the kqueue and the stop pipe together, then calls `kevent()` with a zero timeout on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker temporarily `pthread_sigmask`-unblocks the watched signals on itself so the kernel can pick it as the delivery target (see "macOS: per-receive worker unblock + no-op handler" above). |
 
 The threadpool path on Linux is exercised only when `--no-uring` is
 passed on the CLI or `io_uring_setup(2)` fails on the host kernel
@@ -280,16 +280,21 @@ This is the intended behaviour. If you want a quiet REPL again,
 ## Cancel semantics
 
 A fiber cancelled while parked in `os/sig-next` follows the same path
-as a fiber cancelled in `watch-next`:
+as a fiber cancelled in `watch-next`, and on both backends the receiver
+survives and can be reused:
 
 - On the io_uring backend (Linux), the underlying read is cancelled
-  with `IORING_OP_ASYNC_CANCEL`; the receiver survives and can be
-  reused.
-- On the thread-pool backend (macOS, CI, older Linux), there is no
-  `shutdown(2)` equivalent to wake a blocking `read()` on signalfd,
-  so cancel closes the receiver. The next `os/sig-next` on it will
-  fail. Wrap with `(ev/race timer (os/sig-next r))` and you must
-  re-create the receiver on each timeout.
+  with `IORING_OP_ASYNC_CANCEL`.
+- On the thread-pool backend (macOS, CI, older Linux), the worker waits
+  for the descriptor and for the operation's stop pipe together, so
+  cancelling writes one byte and the read ends with `ECANCELED`. The
+  descriptor is untouched, which is what lets the receiver be reused —
+  shutting it down would reach the worker too, and would break a
+  receiver the caller still holds. See `src/io/AGENTS.md` § "The stop
+  pipe".
+
+So `(ev/race timer (os/sig-next r))` may be repeated on the same
+receiver; nothing needs re-creating on a timeout.
 
 ## Patterns
 

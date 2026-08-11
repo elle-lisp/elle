@@ -1368,6 +1368,16 @@ fn net_wait_timeout_threadpool() {
     run_elle_script_with_args("net-wait-timeout", &["--no-uring"]);
 }
 
+// What a cancelled operation gives back, on the OTHER backend. `:workers`
+// counts thread-pool operations submitted and not yet reaped, and io_uring runs
+// most of these in the kernel — so it is zero there whatever the pool does. The
+// worker half of the promise is only measurable here.
+// See src/io/AGENTS.md § "I/O Cancellation".
+#[test]
+fn io_cancel_releases_threadpool() {
+    run_elle_script_with_args("io-cancel-releases", &["--no-uring"]);
+}
+
 // (Hygiene for syntax-case bindings is carried structurally — synthetic-ness
 // lives on PatternBinding (src/syntax/expand/syntaxcase.rs) rather than being
 // inferred from a name's string prefix. The regression for it lives in

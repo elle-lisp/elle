@@ -21,6 +21,9 @@ to a backend for execution.
 | `sigmap.rs` | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
 | `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
 | `threadpool.rs` | `CompletionHub` (the one shared completion channel), `RawCompletion`, `PoolOp`, `PoolCompletion`, `StdinThread` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
+| `threadpool/opbound.rs` | `Bounds` and `OpBound` — the declared and the live half of one operation's bound — plus `Wake`, the stop pipe, `take_when_ready` and `pace_retry`. |
+| `threadpool/submitop.rs` | `CompletionHub::submit`: spawn the worker, run the operation, publish the result. The `match` there names each operation's runner and the descriptor its bound watches. |
+| `threadpool/{stream,net,event,child,open}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open. |
 | `uring.rs` | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
 | `eventfd.rs` | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
 
@@ -110,7 +113,9 @@ alone must remember:
 
 Typed thread-pool submission and completion:
 
-- `PoolOp` — one variant per operation the pool runs. Each carries exactly the data that operation needs (fd, buffers, addresses, or closures): a typed submission. A variant that can wait indefinitely also carries `timeout` and `stop`, the two ends of its `OpBound`; `PoolOp::stop_fd` reports the stop end for the paths that must dispose of an operation no worker will run.
+- `PoolOp` — one variant per operation the pool runs. Each carries exactly the data that operation needs (fd, buffers, addresses, or closures) and nothing about waiting: a typed submission.
+- `Bounds` — how long an operation may wait and how `io/cancel` ends it, passed alongside the `PoolOp` to every `CompletionHub::submit`. Three constructors, and a submission must pick one: `CompletionHub::bounds(id, timeout)` pairs the caller's deadline with a fresh stop pipe, `Bounds::prompt()` says the syscalls wait on nothing outside this process, and `Bounds::uninterruptible()` says the syscall cannot be stopped once entered. Because the bound is an argument rather than a field, a variant cannot forget it. The `Bounds` own the stop pipe's read end and close it with themselves, so a submission no worker runs — a refused `Builder::spawn`, a path the kernel rejects — disposes of the pipe by being dropped.
+- `OpBound` — what a worker runs under: it holds the descriptor non-blocking for the operation's lifetime and turns the declared `Bounds` into waits. `OpBound::new(fd, ..)` for an operation that reads or writes `fd`, `OpBound::watching(fd, ..)` for one that only polls a descriptor somebody else owns, `OpBound::detached(..)` for one with no descriptor at all.
 - `PoolCompletion { id, result_code, data }` — typed completion from a thread-pool worker.
 - `RawCompletion` — `Pool(PoolCompletion)` | `Stdin(StdinCompletion)`. The single
   shape every background worker ships through the hub. A worker cannot build a
@@ -211,11 +216,12 @@ pipe below is how it asks, and two things hold however the worker answers:
 
 An operation that can wait indefinitely carries a **stop pipe**, and that
 is what lets it stop at once rather than when its peer happens to act.
-`CompletionHub::stop_pipe` opens one per submission: the worker owns the
-read end for the operation's lifetime and polls it alongside its own
-descriptor through `OpBound`, while `CompletionHub::stop` writes one byte
-into the write end. The operation then completes with `-ECANCELED`, which
-gives the worker thread back like any other completion.
+`CompletionHub::bounds` opens one per submission and hands it to the worker
+inside the operation's `Bounds`: the worker owns the read end for the
+operation's lifetime and polls it alongside its own descriptor through
+`OpBound`, while `CompletionHub::stop` writes one byte into the write end. The
+operation then completes with `-ECANCELED`, which gives the worker thread back
+like any other completion.
 
 Polling a pipe is what keeps the descriptor intact. Shutting the socket
 down would reach the worker too, and would break a port the caller still
@@ -224,21 +230,36 @@ holds; a signal would land on whichever thread the kernel chose.
 Two conditions decide which operations carry one:
 
 - **It can wait for something that may never happen.** The reads, `Sleep`,
-  `Accept`, `RecvFrom`, and both connects wait on a peer. A `Write` runs to
-  the end of its payload as the full-write invariant promises, and `Flush`
-  transfers nothing, so neither takes a pipe.
+  `Accept`, `RecvFrom`, both connects, `PollFd`, `WatchRead`, the signal reads,
+  `ProcessWait` and `Open` all wait on something outside this process — a peer,
+  an event, a child, a fifo's other end. A `Write` runs to the end of its
+  payload as the full-write invariant promises, and `Flush`, `SendTo` and
+  `Shutdown` transfer what the process already handed over, so those four take
+  no pipe (`Bounds::prompt`).
 - **Stopping it must not park it instead.** `OpBound` takes the descriptor
   non-blocking for the operation's lifetime, so the syscall reports
   `EAGAIN` and hands the wait back to the poll where the stop is visible. A
   worker that calls the blocking syscall first is unreachable: closing the
   listener does not wake a thread already inside `accept(2)`.
 
+Two operations meet the first condition and cannot meet the second, because the
+kernel reports no readiness for what they wait on: an `Open` of a fifo for
+writing, and a `ProcessWait` on a child that has not exited. Both ask with a
+non-blocking form — `O_NONBLOCK`, `WNOHANG` — and `pace_retry` waits between
+asks with the stop pipe visible throughout. `connect_bounded` does the same for
+an AF_UNIX peer whose backlog is full.
+
+`Resolve` and `Task` meet neither, and say so with `Bounds::uninterruptible`.
+`getaddrinfo(3)` runs to the resolver's own end and an opaque closure runs until
+it returns; a cancel discards the result without giving the worker thread back
+any sooner. Every use of that constructor names the call that behaves this way.
+
 `ev/timeout` cancels on every call — the body's operation or the timer's,
 whichever lost — so this path runs constantly rather than at the edges.
 
-When the process is out of descriptors, `stop_pipe` returns `None` and the
-operation runs uncancellable. It still bounds itself by the caller's
-`:timeout`, which `OpBound` enforces with the same poll.
+When the process is out of descriptors, `bounds` returns a `Bounds` with no
+stop pipe and the operation runs uncancellable. It still bounds itself by the
+caller's `:timeout`, which `OpBound` enforces with the same poll.
 
 ### Descriptor retirement
 
@@ -361,7 +382,11 @@ builds a different `PoolOp`, and the ring type does not exist off Linux, so a
 shared helper would need a `#[cfg]`'d signature for no gain.
 `Dispatch::poll_fd` is the one exception: `ev/poll-fd` and the
 `chan/wait-ready` park wait on a bare descriptor the same way and differ only
-in what they remember.
+in what they remember. Both watch that descriptor without changing it — it
+belongs to whoever passed it in — so the pool worker takes `OpBound::watching`
+rather than `OpBound::new`.
+
+`Open` names no platform at all: it always goes to the pool. See invariant 14.
 
 `dispatch` returns what the platform decided and the pending entry must record
 — the pre-created socket fd for a connect, the `siginfo_t` allocation for a
@@ -393,7 +418,9 @@ the next `ring.submit()`.
 
 **`AsyncBackend::submit_spawn()`** — Calls `spawn_to_struct()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
 
-**`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+). Fast path: if the process has already exited (cached in `ProcessHandle`), returns immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation.
+**`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the process has already exited (cached in `ProcessHandle`), returns immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation.
+
+**`child::process_wait()`** (in `src/io/threadpool/child.rs`) — the thread-pool half. `waitpid(pid, .., WNOHANG)` asks whether the child has exited and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Pinned by `src/io/threadpool/tests/process.rs`.
 
 **`submit_uring_process_wait()`** (in `src/io/uring.rs`) — Low-level io_uring submission for `IORING_OP_WAITID`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit; completion processing extracts the exit code from `si_code` and `si_status`.
 
@@ -421,8 +448,9 @@ the next `ring.submit()`.
 9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
-13. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
-14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.
+12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
+13. **IORING_OP_WAITID requirement:** Linux 6.7+; older kernels return `-EINVAL` in the CQE. The thread-pool backend reaps the child itself, asking with `WNOHANG` and pacing the asks under the operation's bound.
+14. **Open runs on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behaviour in `docs/io.md` is the same whichever platform is underneath. Pinned by `src/io/threadpool/tests/openfile.rs`.
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
 16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). There is no io_uring equivalent for an arbitrary closure, so a `Task` always runs on the thread pool (feeding the `CompletionHub`) on every platform. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
 17. **One submission, one pending entry, one id.** `submit_op` files the

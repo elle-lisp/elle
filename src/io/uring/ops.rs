@@ -86,54 +86,6 @@ pub(crate) fn submit_uring_process_wait(
     // immediately here, and the kernel will fill siginfo on child exit.
     unsafe { submit_linked(ring, id, entry, None) }
 }
-/// Submit IORING_OP_OPENAT via io_uring.
-///
-/// The null-terminated path is stored in the buffer pool slot so it stays
-/// pinned until the CQE completes. Caller passes `buf_handle` which is already
-/// allocated (with 0 bytes). The path bytes are extended into it here.
-///
-/// On success, the CQE result is the new file descriptor (>= 0).
-/// On failure, the CQE result is -errno.
-/// On timeout (linked timeout fires first), result is -ECANCELED (errno 125).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn submit_uring_open(
-    ring: &mut io_uring::IoUring,
-    id: SubmissionId,
-    path: &std::ffi::CStr,
-    flags: i32,
-    mode: u32,
-    timeout: Option<Duration>,
-    buffer_pool: &mut BufferPool,
-    buf_handle: BufferHandle,
-) -> Result<(), String> {
-    use io_uring::opcode;
-    use io_uring::types::Fd;
-
-    // Store the null-terminated path bytes in the buffer pool slot.
-    // The path must remain valid until ring.submit() returns: the kernel reads the
-    // pathname pointer during the io_uring_enter(2) syscall and copies it into kernel
-    // memory before returning (kernels >= 5.5; we require a modern kernel for io_uring).
-    // We keep the buffer allocated until the CQE arrives (via drain_cqes releasing
-    // buf_handle) as a conservative strategy, consistent with submit_uring_connect
-    // stashing sockaddr bytes.
-    //
-    // Safety invariant: path_ptr is valid from this point until ring.submit() returns.
-    // The buffer pool Vec<u8> is not dropped or reallocated between buf.as_ptr() capture
-    // and ring.submit() because: (a) no other buffer_pool mutation occurs in this
-    // function after buf.as_ptr(); (b) Vec<u8> heap data is stable even if the outer
-    // pool Vec<Option<Vec<u8>>> reallocates on subsequent alloc() calls.
-    let buf = buffer_pool.get_mut(buf_handle);
-    buf.extend_from_slice(path.to_bytes_with_nul());
-    let path_ptr = buf.as_ptr() as *const libc::c_char;
-
-    let open_sqe = opcode::OpenAt::new(Fd(libc::AT_FDCWD), path_ptr)
-        .flags(flags)
-        .mode(mode)
-        .build()
-        .user_data(id.as_u64());
-
-    unsafe { submit_linked(ring, id, open_sqe, timeout) }
-}
 /// Submit an AsyncCancel SQE to cancel a pending operation.
 ///
 /// The cancelled operation will generate a CQE with result = -ECANCELED.

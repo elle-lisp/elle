@@ -271,6 +271,42 @@ pinning tests are `tests/elle/net-wait-timeout.lisp` for the deadline and
 the `a_cancelled_pool_*` tests in `src/io/aio/tests/net.rs` for the
 cancellation.
 
+### The calls that wait for something other than a peer
+
+Four more calls wait on something that may never happen, and each takes the
+same two endings — its own `:timeout` where it has one, and `ev/timeout` or
+`io/cancel` from outside.
+
+| Call | Waits for | Ends on |
+|---|---|---|
+| `port/open` on a fifo for writing | a reader opening the other end | `:timeout`, cancel |
+| `subprocess/wait` | the child exiting | cancel |
+| `watch-next` | a filesystem event | cancel |
+| `os/sig-next` | a signal arriving | cancel |
+| `ev/poll-fd` | the descriptor becoming ready | its `timeout` argument, cancel |
+
+`ev/poll-fd` answers an expired wait with `0` rather than signalling, which is
+what lets a caller poll in a loop — `lib/wayland.lisp` polls with a 33 ms bound
+on every iteration.
+
+```lisp
+(ev/run (fn []
+          (let [child (subprocess/exec "sleep" ["30"])]
+            (assert (nil? (ev/timeout 0.2 (fn [] (subprocess/wait child))))
+                    "a child that outlives the deadline must not hold the wait")
+            (subprocess/kill child :sigkill)
+            (subprocess/wait child))))
+```
+
+`port/open` is the one with a direction to it. POSIX blocks an `open(2)` on a
+fifo until the other end is open, and Elle keeps that for the write side: the
+open waits for a reader, and `:timeout` bounds the wait. On the read side the
+port comes back at once and the first `port/read` is what waits for a writer,
+which is where a reader's `:timeout` applies anyway.
+
+Each of these is pinned in `tests/elle/io-cancel-releases.lisp`, which measures
+what a cancelled operation gives back, and in `src/io/aio/tests/park.rs`.
+
 ### Streams from ports
 
 ```lisp

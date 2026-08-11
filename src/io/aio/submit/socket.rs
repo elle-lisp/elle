@@ -43,15 +43,8 @@ impl AsyncBackend {
                             // carries: the caller's deadline, and the stop pipe
                             // `hub.stop` writes — neither of which can reach a
                             // thread already inside `accept(2)`.
-                            let stop = hub.stop_pipe(id);
-                            hub.submit(
-                                id,
-                                PoolOp::Accept {
-                                    fd,
-                                    timeout: request.timeout,
-                                    stop,
-                                },
-                            )?;
+                            let bounds = hub.bounds(id, request.timeout);
+                            hub.submit(id, PoolOp::Accept { fd }, bounds)?;
                         }
                     }
                 }
@@ -79,6 +72,8 @@ impl AsyncBackend {
                         }
                         PlatformBackend::ThreadPool => {
                             let _ = buffer_pool;
+                            // A datagram leaves for the network as soon as the
+                            // kernel takes it; there is no peer to wait on.
                             hub.submit(
                                 id,
                                 PoolOp::SendTo {
@@ -87,6 +82,7 @@ impl AsyncBackend {
                                     port: *port_num,
                                     data: bytes,
                                 },
+                                Bounds::prompt(),
                             )?;
                         }
                     }
@@ -115,16 +111,8 @@ impl AsyncBackend {
                         // A datagram socket waits on a sender the same way a
                         // listener waits on a caller, so the receive carries the
                         // same two bounds as the accept above.
-                        let stop = hub.stop_pipe(id);
-                        hub.submit(
-                            id,
-                            PoolOp::RecvFrom {
-                                fd,
-                                size: *count,
-                                timeout: request.timeout,
-                                stop,
-                            },
-                        )?;
+                        let bounds = hub.bounds(id, request.timeout);
+                        hub.submit(id, PoolOp::RecvFrom { fd, size: *count }, bounds)?;
                     }
                 },
                 PortOp::Shutdown { how } => match platform {
@@ -141,7 +129,9 @@ impl AsyncBackend {
                     }
                     PlatformBackend::ThreadPool => {
                         let _ = buffer_pool;
-                        hub.submit(id, PoolOp::Shutdown { fd, how: *how })?;
+                        // `shutdown(2)` tears the direction down and returns; it
+                        // does not wait for the peer to notice.
+                        hub.submit(id, PoolOp::Shutdown { fd, how: *how }, Bounds::prompt())?;
                     }
                 },
                 PortOp::ReadLine { .. }

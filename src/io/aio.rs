@@ -9,7 +9,7 @@ use crate::io::request::{
     ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{
-    CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
+    Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
 };
 use crate::io::types::{FdState, PortKey};
 use crate::io::{Completion, SubmissionId};

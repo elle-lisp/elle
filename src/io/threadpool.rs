@@ -8,16 +8,17 @@ use std::os::unix::io::RawFd;
 use std::time::Duration;
 
 /// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
+///
+/// A variant carries only what its syscall needs. How long the operation may
+/// wait, and how `io/cancel` ends it, are not a variant's business: they arrive
+/// alongside as [`Bounds`], which every `CompletionHub::submit` demands. That
+/// is what makes an operation that parks without a bound unwritable rather than
+/// merely discouraged.
 pub(super) enum PoolOp {
-    /// Read up to `size` bytes. `timeout` bounds the wait for data to arrive,
-    /// via the fd's own receive timeout; `None` waits indefinitely. Every read
-    /// variant carries it — these worker fds are blocking, so without it a
-    /// peer that goes quiet parks the worker forever.
+    /// Read up to `size` bytes.
     Read {
         fd: RawFd,
         size: usize,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     /// Read exactly `size` units, looping until full or EOF/error.
     /// Units are bytes when `graphemes` is false and grapheme clusters
@@ -34,49 +35,28 @@ pub(super) enum PoolOp {
         /// The generation that segments cluster-counted reads; captured at
         /// request build on the VM thread, applied on the worker thread.
         gen: crate::segment::Generation,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
-    /// Write every byte of `data`, looping over short writes. `timeout`
-    /// bounds the wait for the fd to become writable on each pass, so a peer
-    /// that stops reading cannot hang the write past the caller's deadline;
-    /// `None` waits indefinitely.
+    /// Write every byte of `data`, looping over short writes.
     Write {
         fd: RawFd,
         data: Vec<u8>,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     Flush {
         fd: RawFd,
     },
-    /// Take one connection from a listener. `timeout` and `stop` are what bound
-    /// it: a listener with no caller waits indefinitely, so without them the
-    /// worker sits in `accept(2)` until a connection happens to arrive —
-    /// closing the listener does not wake a thread already inside the syscall.
-    /// The worker is then unreapable and the fiber that asked for the accept is
-    /// never resumed.
+    /// Take one connection from a listener.
     Accept {
         fd: RawFd,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     /// Connect to `addr`. The worker opens the socket itself, so the descriptor
-    /// it reports back is the connection. Bounded like every other open-ended
-    /// operation: a handshake whose packets are dropped waits on the kernel's
-    /// whole retry sequence, and an AF_UNIX peer whose backlog is full waits
-    /// until it accepts, which it need never do.
+    /// it reports back is the connection.
     ConnectTcp {
         addr: std::net::SocketAddr,
         options: SocketOptions,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     ConnectUnix {
         path: String,
         options: SocketOptions,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     SendTo {
         fd: RawFd,
@@ -84,31 +64,28 @@ pub(super) enum PoolOp {
         port: u16,
         data: Vec<u8>,
     },
-    /// Take one datagram. Bounded for the same reason as `Accept`: a socket
-    /// nobody sends to waits exactly as long as a listener nobody calls.
+    /// Take one datagram.
     RecvFrom {
         fd: RawFd,
         size: usize,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     Shutdown {
         fd: RawFd,
         how: i32,
     },
-    /// Wait `nanos`, or until stopped. The wait watches the stop pipe rather
-    /// than sleeping so `io/cancel` can end it: `ev/timeout` cancels its timer
-    /// on every call the body wins, and a timer that ran to its full duration
-    /// would hold a pool slot for that long.
-    Sleep {
-        nanos: u64,
-        stop: Option<RawFd>,
-    },
+    /// Wait out the bound's own timeout, or until stopped. The duration is the
+    /// bound, so a timer has nothing else to carry.
+    Sleep,
+    /// Reap a child. The worker asks with `WNOHANG` and waits between asks, so
+    /// `io/cancel` reaches it and a child that never exits costs no thread past
+    /// the fiber that wanted it.
     ProcessWait {
         pid: u32,
     },
-    /// Open a file asynchronously. Returns the fd (>= 0) on success, or -errno on failure.
-    /// O_CLOEXEC is included in `flags` by the primitive — no post-hoc fcntl needed.
+    /// Open a file. Returns the fd (>= 0) on success, or -errno on failure.
+    /// O_CLOEXEC is included in `flags` by the primitive — no post-hoc fcntl
+    /// needed. The worker adds `O_NONBLOCK` so the open reports rather than
+    /// parks, and restores the caller's flags on the descriptor it hands back.
     Open {
         path: std::ffi::CString,
         flags: i32,
@@ -125,20 +102,17 @@ pub(super) enum PoolOp {
     /// always receives data containing `\n` (or the final chunk at EOF).
     ReadLine {
         fd: RawFd,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
     /// Read until EOF. Loops internally, accumulating all data.
     ReadAll {
         fd: RawFd,
-        timeout: Option<Duration>,
-        stop: Option<RawFd>,
     },
-    /// Blocking read on an inotify/kqueue fd for filesystem watch events.
+    /// Read one batch of filesystem watch events from an inotify (Linux) or
+    /// kqueue (macOS) descriptor.
     WatchRead {
         fd: RawFd,
     },
-    /// Blocking read on a signalfd (Linux) for POSIX signal deliveries.
+    /// Read one batch of POSIX signal deliveries from a signalfd (Linux).
     /// On macOS the corresponding op is `KqSigRead`.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     SigfdRead {
@@ -147,8 +121,9 @@ pub(super) enum PoolOp {
         /// thread so its `posix_trace` diagnostics gate per-instance.
         trace: crate::config::TraceCell,
     },
-    /// Blocking kevent() on a kqueue fd registered with EVFILT_SIGNAL (macOS).
-    /// On Linux the corresponding op is `SigfdRead`.
+    /// Read one batch of POSIX signal deliveries from a kqueue fd registered
+    /// with EVFILT_SIGNAL (macOS). On Linux the corresponding op is
+    /// `SigfdRead`.
     ///
     /// `signals` is the set the watcher is interested in. The worker
     /// unblocks them on its own thread before calling kevent() because
@@ -167,32 +142,11 @@ pub(super) enum PoolOp {
         /// thread so its `posix_trace` diagnostics gate per-instance.
         trace: crate::config::TraceCell,
     },
-    /// Poll a raw fd for readiness via libc::poll(). Returns revents mask.
+    /// Wait for a raw fd to report readiness. Returns the revents mask.
     PollFd {
         fd: RawFd,
         events: u32,
-        timeout_ms: i32,
     },
-}
-
-impl PoolOp {
-    /// The read end of this operation's stop pipe, for the paths that must
-    /// dispose of an operation no worker will run.
-    pub(super) fn stop_fd(&self) -> Option<RawFd> {
-        match self {
-            PoolOp::Read { stop, .. }
-            | PoolOp::ReadExact { stop, .. }
-            | PoolOp::ReadLine { stop, .. }
-            | PoolOp::ReadAll { stop, .. }
-            | PoolOp::Write { stop, .. }
-            | PoolOp::Accept { stop, .. }
-            | PoolOp::RecvFrom { stop, .. }
-            | PoolOp::ConnectTcp { stop, .. }
-            | PoolOp::ConnectUnix { stop, .. }
-            | PoolOp::Sleep { stop, .. } => *stop,
-            _ => None,
-        }
-    }
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -215,9 +169,20 @@ pub(super) enum RawCompletion {
 }
 
 mod opbound;
+/// The declared half of an operation's bound travels out to every submit site,
+/// which is where the choice between the three kinds is made.
+pub(super) use opbound::Bounds;
 use opbound::*;
 
+// `submitop` is the frame every operation shares — spawn, run, publish. The
+// rest are the runners it dispatches to, grouped by what they wait on.
 mod submitop;
+
+mod child;
+mod event;
+mod net;
+mod open;
+mod stream;
 
 /// The single completion channel every background worker feeds.
 ///
@@ -259,14 +224,20 @@ impl CompletionHub {
         }
     }
 
-    /// A stop pipe for one operation. The read end goes to the worker, which
-    /// owns it for the operation's lifetime; the write end stays here until
-    /// the completion is reaped. `None` when no descriptor was available, in
-    /// which case the operation runs uncancellable.
-    pub(super) fn stop_pipe(&mut self, id: SubmissionId) -> Option<RawFd> {
-        let pipe = opbound::open_stop_pipe()?;
-        self.stops.insert(id.as_u64(), pipe.write_fd);
-        Some(pipe.read_fd)
+    /// The bound for an operation that can wait for something that may never
+    /// happen: the caller's deadline, plus a fresh stop pipe. The read end goes
+    /// to the worker inside the `Bounds`, which owns it for the operation's
+    /// lifetime; the write end stays here until the completion is reaped.
+    ///
+    /// When the process is out of descriptors there is no stop pipe, and the
+    /// operation runs uncancellable — still bounded by the caller's `:timeout`,
+    /// which the same wait enforces.
+    pub(super) fn bounds(&mut self, id: SubmissionId, timeout: Option<Duration>) -> Bounds {
+        let stop = opbound::open_stop_pipe().map(|pipe| {
+            self.stops.insert(id.as_u64(), pipe.write_fd);
+            pipe.read_fd
+        });
+        Bounds::new(timeout, stop)
     }
 
     /// Ask an operation to stop. A second byte would say nothing the first has

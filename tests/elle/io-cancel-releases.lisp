@@ -144,4 +144,50 @@
       (assert (= (length got) 8) (string "round " i ": all eight bytes arrived")))
     (close-all [client server listener])))
 
+# ── 5. A cancelled wait on a child gives its worker back ─────────────
+#
+# `subprocess/wait` on a child that never exits waits for the life of the
+# process. A supervisor gives it a deadline, and the cancel that deadline
+# issues has to reach the wait — a `waitpid` the worker is already inside
+# cannot be retracted.
+
+(println "waits on a child that outlives them...")
+
+(each i in (range 0 10)
+  (let [child (subprocess/exec "sleep" ["30"])]
+    (assert (nil? (ev/timeout 0.05 (fn [] (subprocess/wait child))))
+            (string "wait " i ": the deadline won"))
+    (subprocess/kill child :sigkill)
+    (subprocess/wait child)))
+
+(let [left (settled-workers)]
+  (assert (<= left settled)
+          (string "the cancelled waits gave their workers back, but "
+                  (string left) " are still out")))
+
+# ── 6. A cancelled open of a fifo gives its worker back ──────────────
+#
+# `open(2)` on a fifo for writing waits until a reader opens the other
+# end, which it need never do. Nothing here ever opens the read end, so
+# the deadline is the only thing that ends each open.
+
+(println "opens of a fifo nobody reads...")
+
+(let* [dir (file/mktempdir)
+       path (concat dir "/fifo")]
+  (assert (= 0 (subprocess/wait (subprocess/exec "mkfifo" [path])))
+          "mkfifo made the fifo")
+  (each i in (range 0 10)
+    (let [outcome (protect (port/open path :write :timeout 50))]
+      (assert (not (get outcome 0))
+              (string "open " i ": a fifo nobody reads must signal"))
+      (assert (= (get (get outcome 1) :error) :timeout)
+              (string "open " i ": expected a :timeout error, got "
+                      (string (get outcome 1))))))
+  (let [left (settled-workers)]
+    (assert (<= left settled)
+            (string "the timed-out opens gave their workers back, but "
+                    (string left) " are still out")))
+  (file/delete-dir-all dir))
+
 (println "io cancel: every cancelled operation gave back what it held")

@@ -1,5 +1,12 @@
 use super::super::*;
 
+/// Bounds for a signal read in a forked child. Every case here sends the signal
+/// it waits for, so the deadline is only there to make a regression a failed
+/// assertion rather than a child that hangs until the parent's own timeout.
+fn watch_bounds() -> Bounds {
+    Bounds::new(Some(std::time::Duration::from_secs(5)), None)
+}
+
 /// Outcome of running a forked child to completion (or killing it on timeout).
 enum ForkOutcome {
     /// Child called `_exit(code)`.
@@ -153,6 +160,7 @@ fn sig_read_child_logic() -> i32 {
             fd,
             trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         },
+        watch_bounds(),
     );
     #[cfg(target_os = "macos")]
     let submit = pool.submit(
@@ -162,6 +170,7 @@ fn sig_read_child_logic() -> i32 {
             signals: vec![libc::SIGUSR1],
             trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         },
+        watch_bounds(),
     );
     if submit.is_err() {
         return 13;
@@ -262,6 +271,7 @@ fn close_drain_child_logic() -> i32 {
             fd,
             trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         },
+        watch_bounds(),
     );
     #[cfg(target_os = "macos")]
     let submit = pool.submit(
@@ -271,6 +281,7 @@ fn close_drain_child_logic() -> i32 {
             signals: vec![libc::SIGUSR1],
             trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         },
+        watch_bounds(),
     );
     if submit.is_err() {
         return 24;
@@ -303,5 +314,92 @@ fn close_drain_child_logic() -> i32 {
     // the process dies here.
     r.close();
     std::thread::sleep(Duration::from_millis(10));
+    0
+}
+
+/// A signal read that nobody satisfies must end when the operation is stopped.
+///
+/// `os/sig-watch` names no deadline, so a watcher for a signal that never
+/// arrives waits for the life of the process. `io/cancel` — which `ev/timeout`
+/// issues on every call the body wins — is the only thing that ends it, and it
+/// can only reach a worker that watches its stop pipe alongside the descriptor.
+///
+/// Forked for the reason the tests above are: `SignalReceiver::new` changes
+/// process-wide signal disposition, which peer test threads share.
+#[test]
+fn a_stopped_sig_read_ends_rather_than_waiting_for_a_signal() {
+    forked_child_must_succeed(stopped_sig_read_child_logic, "stopped_sig_read");
+}
+
+/// Body of the forked child for `a_stopped_sig_read_ends_rather_than_waiting`.
+/// Returns a small positive exit code identifying which step failed, or 0.
+fn stopped_sig_read_child_logic() -> i32 {
+    use crate::io::sigfd::SignalReceiver;
+    use std::time::{Duration, Instant};
+
+    let r = match SignalReceiver::new(
+        vec![libc::SIGUSR1],
+        std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+    ) {
+        Ok(r) => r,
+        Err(_) => return 31,
+    };
+    let fd = match r.raw_fd() {
+        Ok(f) => f,
+        Err(_) => return 32,
+    };
+
+    let mut pool = CompletionHub::new();
+    let id = SubmissionId::from_raw(1);
+    // No deadline, exactly as `submit_sig_next` builds it: the stop pipe is the
+    // whole bound, so this measures the stop and nothing else.
+    let bounds = pool.bounds(id, None);
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let submit = pool.submit(
+        id,
+        PoolOp::SigfdRead {
+            fd,
+            trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        },
+        bounds,
+    );
+    #[cfg(target_os = "macos")]
+    let submit = pool.submit(
+        id,
+        PoolOp::KqSigRead {
+            fd,
+            signals: vec![libc::SIGUSR1],
+            trace: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        },
+        bounds,
+    );
+    if submit.is_err() {
+        return 33;
+    }
+
+    // Let the worker reach its wait, so the stop arrives at a worker already
+    // waiting — the order a cancel meets in production.
+    std::thread::sleep(Duration::from_millis(50));
+    let started = Instant::now();
+    pool.stop(id);
+
+    let completions = match pool.wait_pool(Some(5000)) {
+        Ok(c) => c,
+        Err(_) => return 34,
+    };
+    if completions.is_empty() {
+        return 35;
+    }
+    if completions[0].result_code != -libc::ECANCELED {
+        return 36;
+    }
+    // No signal was ever sent, so a read that returned for any other reason
+    // returned for the wrong one. The elapsed check separates "ended on the
+    // stop" from "ended on something else that happened to be quick".
+    if started.elapsed() > Duration::from_secs(2) {
+        return 37;
+    }
+    pool.forget_stop(id);
+    r.close();
     0
 }

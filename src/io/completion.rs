@@ -323,16 +323,28 @@ pub(super) fn process_raw_completion(
         }
         PendingOp::PollFd { .. } => {
             // result_code is the revents mask (positive) or negative errno.
+            //
+            // `ev/poll-fd` answers an expired wait with 0 rather than an error,
+            // which is what lets a caller poll in a loop — `wayland/event-loop`
+            // and `glib-wait` both do. Both backends report the expiry as an
+            // errno, so both are mapped back to that 0 here: `ETIMEDOUT` from
+            // the pool worker's bound, `ECANCELED` from the ring's linked
+            // timeout, which cannot say which of the two ended the wait. A
+            // genuine `io/cancel` also lands on `ECANCELED`, and its completion
+            // is discarded before it reaches a fiber.
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = is_timeout_errno(errno);
-                let msg = if is_timeout {
-                    "ev/poll-fd: timed out".to_string()
-                } else {
-                    format!("ev/poll-fd: poll error: errno {}", errno)
-                };
-                let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
+                if is_timeout_errno(errno) {
+                    return Completion::ok(id, Value::int(0));
+                }
+                return Completion::err(
+                    id,
+                    crate::io::io_error(
+                        "io-error",
+                        format!("ev/poll-fd: poll error: errno {}", errno),
+                        origin_heap,
+                    ),
+                );
             }
             Completion::ok(id, Value::int(result_code as i64))
         }

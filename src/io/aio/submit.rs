@@ -448,36 +448,29 @@ impl AsyncBackend {
                         // rather than abandon it, or the abandoned read goes on
                         // consuming bytes meant for whoever reads the port next.
                         //
-                        // A write does not. Nothing it holds is contended —
-                        // stopping one would only cut the payload short, and a
-                        // peer decoding a stream cannot use half a message. It
-                        // runs to the end of its payload as the full-write
-                        // invariant promises, and gives its slot back then.
-                        // `Flush` transfers nothing and cannot park; a pipe it
-                        // never receives is one whose read end nothing closes.
-                        let stop = match op {
+                        // A write takes the deadline without one. Nothing it
+                        // holds is contended — stopping one would only cut the
+                        // payload short, and a peer decoding a stream cannot
+                        // use half a message. It runs to the end of its payload
+                        // as the full-write invariant promises, and gives its
+                        // worker back then.
+                        //
+                        // `Flush` waits on nobody: `fsync(2)` transfers what
+                        // this process already handed the kernel.
+                        let bounds = match op {
                             PortOp::Read { .. }
                             | PortOp::ReadExact { .. }
                             | PortOp::ReadLine { .. }
-                            | PortOp::ReadAll => hub.stop_pipe(id),
-                            _ => None,
+                            | PortOp::ReadAll => hub.bounds(id, request.timeout),
+                            PortOp::Write { .. } => Bounds::new(request.timeout, None),
+                            _ => Bounds::prompt(),
                         };
                         let pool_op = match op {
-                            PortOp::ReadLine { .. } => PoolOp::ReadLine {
-                                fd,
-                                timeout: request.timeout,
-                                stop,
-                            },
-                            PortOp::ReadAll => PoolOp::ReadAll {
-                                fd,
-                                timeout: request.timeout,
-                                stop,
-                            },
+                            PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
+                            PortOp::ReadAll => PoolOp::ReadAll { fd },
                             PortOp::Read { count, .. } => PoolOp::Read {
                                 fd,
                                 size: *count - read_buffered,
-                                timeout: request.timeout,
-                                stop,
                             },
                             PortOp::ReadExact { count, .. } => {
                                 let is_text = matches!(port.encoding(), Encoding::Text);
@@ -493,8 +486,6 @@ impl AsyncBackend {
                                         size: *count,
                                         graphemes: true,
                                         gen,
-                                        timeout: request.timeout,
-                                        stop,
                                     }
                                 } else {
                                     PoolOp::ReadExact {
@@ -502,20 +493,13 @@ impl AsyncBackend {
                                         size: *count - read_buffered,
                                         graphemes: false,
                                         gen,
-                                        timeout: request.timeout,
-                                        stop,
                                     }
                                 }
                             }
-                            PortOp::Write { data } => {
-                                let bytes = Self::extract_write_bytes(data);
-                                PoolOp::Write {
-                                    fd,
-                                    data: bytes,
-                                    timeout: request.timeout,
-                                    stop,
-                                }
-                            }
+                            PortOp::Write { data } => PoolOp::Write {
+                                fd,
+                                data: Self::extract_write_bytes(data),
+                            },
                             PortOp::Flush => PoolOp::Flush { fd },
                             // The socket arm above claims these.
                             PortOp::Accept { .. }
@@ -523,7 +507,7 @@ impl AsyncBackend {
                             | PortOp::RecvFrom { .. }
                             | PortOp::Shutdown { .. } => unreachable!(),
                         };
-                        hub.submit(id, pool_op)?;
+                        hub.submit(id, pool_op, bounds)?;
                     }
                 }
 
