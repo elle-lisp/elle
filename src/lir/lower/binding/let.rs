@@ -75,6 +75,7 @@ impl<'a> Lowerer<'a> {
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             self.emit_counted_cell_read_retain(init.id, init_reg);
+            self.emit_counted_cell_init_retain(init.id, init_reg);
             let needs_capture = self.arena.get(*binding).needs_capture();
 
             if self.in_lambda && needs_capture {
@@ -239,6 +240,7 @@ impl<'a> Lowerer<'a> {
             // phantom-decref panic / double-free).
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
+            self.emit_counted_cell_init_retain(init.id, init_reg);
             self.current_function_binding = None;
             self.current_function_params = None;
 

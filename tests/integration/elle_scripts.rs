@@ -734,6 +734,24 @@ fn region_cell_forward_chain_uaf() {
     );
 }
 
+// A fn-local 1-slot container whose INIT value carries a second name takes that
+// value by a COUNTED store rather than by donation, so the alias keeps the
+// producer's reference and the decref that releases it
+// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
+// what it counts it need not"). Green pins that every later read through the
+// alias — after the cell has displaced the init, or after a cursor has walked
+// off the chain head the alias names — still reads a live page. Subprocess
+// guardfree run, same rationale as the twin above; the leak and read-back faces
+// are in tests/elle/region-cell-aliased-init.lisp. Full shape in the fixture
+// header.
+#[test]
+fn region_cell_aliased_init_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-cell-aliased-init-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // The CASCADE / stored-member twin of region_capture_cell_string_accum_uaf, and
 // the e2e witness of the drop-time external-reference rescue
 // (docs/impl/region/ownership.md § "The incoming edge table and the external-

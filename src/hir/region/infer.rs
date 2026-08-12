@@ -88,6 +88,19 @@ struct RegionInference {
     /// cell — the reader half of the 1-slot container. See
     /// `RegionInfo::counted_cell_read_sites`.
     counted_cell_read_sites: rustc_hash::FxHashSet<HirId>,
+    /// Binding → the HirId of the init a BINDER stores into its slot
+    /// (`Let`/`Letrec`/`Define`). The reassign gate reads this to place the
+    /// counted-init retain of a 1-slot container whose init value is aliased:
+    /// the retain has to sit where the value is on the operand stack, just ahead
+    /// of that store. A binding whose value arrives some other way — a
+    /// parameter, a `Loop` parameter's forwarding init — has no entry, and the
+    /// gate keeps donate-or-refuse for it (docs/impl/region/bindings.md § "What
+    /// the cell donates it must hold alone; what it counts it need not"). The
+    /// three arms that record here are exactly the three lowering sites that
+    /// emit the retain. `None` records a binding bound by more than one binder
+    /// (file-scope duplicate `def`s share a `Binding`): two stores would take
+    /// two retains against one release, so the gate refuses rather than guess.
+    binder_init_sites: HashMap<Binding, Option<HirId>>,
     /// The subset of `call_result_regions` whose callee declares
     /// `RegionEffect::Fresh` — a result freshly allocated in the call's own
     /// region, genuinely caller-owned. See `RegionInfo::fresh_result_regions`.
@@ -282,6 +295,7 @@ impl RegionInference {
             hard_edge_sites: rustc_hash::FxHashSet::default(),
             call_result_regions: rustc_hash::FxHashSet::default(),
             counted_cell_read_sites: rustc_hash::FxHashSet::default(),
+            binder_init_sites: HashMap::new(),
             fresh_result_regions: rustc_hash::FxHashSet::default(),
             fiber_result_regions: rustc_hash::FxHashSet::default(),
             mutable_container_regions: rustc_hash::FxHashSet::default(),
@@ -562,6 +576,24 @@ impl RegionInference {
         self.call_result_regions.insert(read_r);
         self.counted_cell_read_sites.insert(init.id);
         vec![read_r]
+    }
+
+    /// Record that a binder stores `init`'s value into `b`'s slot — the one
+    /// position a counted-init retain can take, since the value is on the
+    /// operand stack there and nowhere else (`binder_init_sites`). Called from
+    /// the `Let`/`Letrec`/`Define` arms, which mirror the three lowering sites
+    /// that emit it. A second, DIFFERENT binder for the same binding marks the
+    /// entry ambiguous; an inline re-walk of the same binder re-records the same
+    /// HirId and leaves it alone.
+    pub(super) fn record_binder_init_site(&mut self, b: Binding, init: HirId) {
+        self.binder_init_sites
+            .entry(b)
+            .and_modify(|slot| {
+                if *slot != Some(init) {
+                    *slot = None;
+                }
+            })
+            .or_insert(Some(init));
     }
 
     /// A captured (`needs_capture`) binding introduced INSIDE a lambda body is

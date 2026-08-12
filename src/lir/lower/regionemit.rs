@@ -48,6 +48,26 @@ impl<'a> Lowerer<'a> {
             self.emit(LirInstr::IncrefValueRegion { src });
         }
     }
+
+    /// The writer half of a fn-local 1-slot container whose INIT value carries a
+    /// second name (`RegionInfo::counted_cell_init_sites`): the cell takes that
+    /// value by a COUNTED store rather than by donation, so the alias keeps the
+    /// producer's reference and the ordinary decref that releases it
+    /// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
+    /// what it counts it need not"). The retain is balanced by the same
+    /// drop-on-overwrite that balances every later store — the cell's own
+    /// reference, dropped at the first overwrite or at the content drop.
+    ///
+    /// Emitted while the init value is on the operand-stack top, right after
+    /// `lower_expr(init)` and before the slot store: `IncrefValueRegion` peeks the
+    /// top and does not pop, so the value stays in place for the store. No-op
+    /// unless `hir_id` is a counted-init site. Pinned by
+    /// tests/elle/region-cell-aliased-init.lisp.
+    pub(super) fn emit_counted_cell_init_retain(&mut self, hir_id: HirId, src: Reg) {
+        if self.region_info.counted_cell_init_sites.contains(&hir_id) {
+            self.emit(LirInstr::IncrefValueRegion { src });
+        }
+    }
     /// Store a top-level captured binding's init value into its pre-allocated
     /// `MakeCaptureCell` (the binding `slot` holds the CELL, created nil by the
     /// `lower_begin`/`lower_letrec` pre-pass).

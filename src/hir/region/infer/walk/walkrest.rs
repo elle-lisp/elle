@@ -290,6 +290,7 @@ impl RegionInference {
                         entry.push(r);
                     }
                 }
+                self.record_binder_init_site(*binding, value.id);
                 // Captured local materialized as a `populate_env` env cell:
                 // ADD a cell placeholder so the lowerer releases the CELL at the
                 // binding's last use (`DecrefCellRegion`), WITHOUT dropping the

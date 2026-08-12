@@ -277,15 +277,17 @@
 # (docs/impl/selfrec.md § "The deferral's escape gate is the fiber frontier alone").
 # Its control `recur-local-foreign-mint` is not self-recursive, so nothing strands it
 # in the first place and the gap isolates the strand rather than the retain.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
-# F6 — the displaced value that owns its replacement. The fn-local slot's
-# drop-on-overwrite channel is pinned closed by `struct-outer`/`yield-reassign`,
-# where each displaced prior is unrelated to the one replacing it. `list-cursor`
-# is the case those two do not reach: the incoming value is reachable FROM the
-# displaced one, through the very edge that funds it, so the displaced value's
-# release must cascade along an edge it is simultaneously losing. It retains one
-# object per step instead.
-(declare-root :f6 ["list-cursor"])
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"
+                   "cell-alias-after"])
+# F6 has NO declared probe: a cursor walk's rate was the ALIASED INIT, not the
+# cursor. `list-cursor` is now a CLOSED control (undeclared, like
+# `rest-array-copy`) for the counted-init half of the 1-slot container: a cell
+# whose init value carries a second name counts that value instead of donating
+# it, so it keeps the model — and with it the store-site pin that holds each
+# step's release inside the loop (docs/impl/region/bindings.md § "What the cell
+# donates it must hold alone; what it counts it need not"). `each-manual` is its
+# array control: an index walk names nothing it moves off and reads 0 either way,
+# so the gap between the two isolates the cell rather than the loop.
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -875,19 +877,18 @@
         (def @k 0)
         (while (%lt k 3)
           (get a k)
-          (assign k (%add k 1))))) 0]  # A CURSOR walked over a cons chain retains one cons per step it takes.
-   # `(assign r (rest r))` lowers to an incref of the incoming value's region
-   # and a decref of the displaced one, and here the incoming value is
-   # REACHABLE FROM the displaced cons — it is what that cons's `rest` edge
-   # points at. So the displaced cons's release has to cascade through the
-   # very edge that funds its replacement, and the measured rate says it does
-   # not: the cons the cursor moved off stays live.
+          (assign k (%add k 1))))) 0]  # A CURSOR walked over a cons chain, whose cell's INIT carries a second
+   # name: `xs` holds the chain head for the whole call. A cell donates its init
+   # only where it is that value's sole holder, so the alias costs the donation —
+   # and the cell counts the init instead, keeping the container model and the
+   # STORE-SITE PIN it carries (docs/impl/region/bindings.md § "What the cell
+   # donates it must hold alone; what it counts it need not"). Refusing the model
+   # instead rides each step's release out to the cell's last use, so one release
+   # covers the whole walk and every cons the cursor passed stays live.
    #
-   # `each-manual` directly above is the same `while` loop over an ARRAY, and
-   # reads 0 — an index walk names nothing it moves off, so the rate here is
-   # the cursor's and not the loop's. The retention is one per cons the cursor
-   # passes: a 4-element chain reads 4, and the same walk over a rest list
-   # reads one less, the head the caller's move already accounted for.
+   # `each-manual` directly above is the same `while` loop over an ARRAY and
+   # reads 0 either way — an index walk holds no cell — so the gap between the
+   # two isolates the cell rather than the loop.
    ["list-cursor"
     (fn [j]
       (let [xs (list 1 2 3 4)
@@ -896,7 +897,26 @@
         (while (not (empty? r))
           (assign n (%add n 1))
           (assign r (rest r)))
-        n)) 4] ["format" (fn [j] (string "iter " j " of " 100)) 0]
+        n)) 0]  # The same walk with the alias taken AFTER the cell binding, so the CELL's own
+   # binder is what allocated the init. The counted-init route applies either way
+   # — the model runs and every step's release stays inside the loop — but the
+   # producer's own reference is released by a value route through the slot that
+   # names the init region, and that slot is the reassigned cell's, which no
+   # release may route through (docs/impl/region/bindings.md § "a mutated slot is
+   # not a release route"). One region per call, the chain's whole object graph
+   # with it. `list-cursor` directly above is the same walk with the alias taken
+   # BEFORE, where the alias's own slot carries the route and the rate is 0, so
+   # the gap between the two isolates the route rather than the model.
+   ["cell-alias-after"
+    (fn [j]
+      (let [@r (list 1 2 3 4)]
+        (let [keep r]
+          (def @n 0)
+          (while (not (empty? r))
+            (assign n (%add n 1))
+            (assign r (rest r)))
+          (list n (first keep))))) 4]
+   ["format" (fn [j] (string "iter " j " of " 100)) 0]
    ["pipeline"
     (fn [j]
       (string/join (filter (fn [x] (not= x ""))

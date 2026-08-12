@@ -41,8 +41,11 @@ agree with which of the value's ordinary decrefs are suppressed:
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
   needs a release of its own — which means a reference of its own. The compiler
-  therefore suppresses only the init region's decref (the init is stored
-  uncounted at the define, so drop-on-overwrite is its release) and the lowerer
+  therefore suppresses at most the init region's decref (the init is stored
+  uncounted at the define, so drop-on-overwrite is its release; where another
+  binding names that same value the init takes a counted store as well, and the
+  suppression goes away with the donation — see "What the cell donates it must
+  hold alone", below) and the lowerer
   **increfs on store** for every assign, whatever produced the value. That one
   reference is released by drop-on-overwrite for each displaced prior and by the
   **content drop** for the final one — the two channels a container's holding
@@ -107,10 +110,10 @@ discipline as `lower_call`'s borrowed-arg retain; pinned by
 `region-reassign-callresult-store.lisp`.
 
 **The gate.** The model trades static releases for suppression plus a
-value-based store/overwrite pair, so it is sound only when the cell's claim
-on each value region's single compiler-owned reference is exclusive. Every
-region the cell may hold (init and every assign value) must be, and the
-solver must verify both before applying the model:
+value-based store/overwrite pair, so it is sound only when the cell's claim on a
+value region's single compiler-owned reference is exclusive — and the two
+questions below are asked per region, over the regions each one governs (the
+next section splits them):
 
 - **sole-held** — no other *read, user* binding may hold the region (a
   synthetic ANF producer temp or a write-only statement wrapper is not an
@@ -120,6 +123,43 @@ solver must verify both before applying the model:
   whose value-based release consumes it; the cell claims the same reference
   for drop-on-overwrite/teardown. Two static owners of one reference is a
   double-free.
+
+**What the cell donates it must hold alone; what it counts it need not.**
+The sole-held question is asked on behalf of exactly one thing: the
+**donation**. The init is the only value a fn-local cell takes uncounted — the
+define stores it and the model suppresses its region's ordinary decref, so the
+producer's one reference becomes the cell's, and a second binding naming that
+value is left with no release of its own and a read that outlives the first
+overwrite. Every *assign*, by contrast, takes a counted store, which claims
+nothing from anyone: the region keeps its ordinary decref and the cell's
+reference is its own.
+
+So an alias of the init is a reason to stop donating, not a reason to refuse the
+model. Where another read binding names the init value — `(let [xs (list …)
+@r xs] …)`, a cursor walk's shape — the cell **counts its init too**: an
+`IncrefValueRegion` ahead of the binder's store, balanced by the same
+drop-on-overwrite that balances every later store, while the init region keeps
+its ordinary decref — routed, as any release is, through the slot recorded for
+it, which is the *allocating* binder's. Nothing is suppressed, so nothing is
+claimed twice, and the alias's own read stays safe however late it sits. (Where
+the allocating binder is the cell itself, that route meets "a mutated slot is not
+a release route" below and the release is skipped, which over-keeps and never
+mis-frees.)
+
+Refusing instead costs the **store-site pin**, not merely the donation. On the
+unsuppressed baseline the cell holds no reference at all, so each stored value is
+protected only by its producer's — whose release the binding chain then extends
+out to the cell's last use, one release for a region that names a different
+runtime value every iteration. A loop that stores N values then releases one
+(`tests/elle/region-cell-aliased-init.lisp`).
+
+The requirement that survives is over the regions the model still *moves*: the
+stored values, whose producer release is pinned back to the store site. A cell
+whose assign value is aliased keeps refusing, whole. The counted init also needs
+a store to retain at, which the chain's source binder supplies; a chain whose
+source is a parameter has no such store, so it keeps donate-or-refuse. The
+reference is the test: `reassign_gate_counts_an_aliased_init` for the admission,
+`reassign_gate_refuses_an_aliased_assign_value` for the decline.
 
 **A loop parameter's init source is not a second holder.** `sole_held` counts
 distinct *bindings*, and functionalization gives a cell carried across a loop a
@@ -141,8 +181,10 @@ that is the binding's own loop-init source does not count as an alias of it.
 
 The exclusion is that edge and nothing wider. A **genuine alias** — a *different*
 source name bound to the same value, `(var keep last)` — is not a forwarding edge
-and keeps refusing, which it must: the region-keyed suppression would cancel that
-name's own decref while it still holds the value.
+and keeps refusing the fold, which it must: the region-keyed suppression would
+cancel that name's own decref while it still holds the value. What such an alias
+costs is the donation alone (above): the cell counts that init instead, and the
+alias keeps the decref the fold would have cancelled.
 
 **A chain of forwarding edges hands one reference along, so the fold follows it
 whole.** Two sequential loops over one binding give the name three versions —

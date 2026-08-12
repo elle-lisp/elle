@@ -189,6 +189,19 @@ pub struct RegionInfo {
     /// under the reader. Pinned by
     /// tests/elle/region-reassign-captured-cell-reader.lisp.
     pub counted_cell_read_sites: FxHashSet<HirId>,
+    /// HirIds of the binder init whose value a fn-local 1-slot container takes by
+    /// a COUNTED store instead of by donation — one per admitted cell (or per
+    /// admitted forwarding chain, at the chain source's binder). A cell donates
+    /// its init only where it is the value's sole holder: the donation consumes
+    /// the producer's reference and suppresses that region's ordinary decref, so
+    /// a second name for the same value would be left with no release and a read
+    /// that outlives the first overwrite. Where such an alias exists the lowerer
+    /// emits an `IncrefValueRegion` here instead, giving the cell a reference of
+    /// its own that drop-on-overwrite releases, and nothing is suppressed
+    /// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
+    /// what it counts it need not"). Disjoint from `suppressed_decref_regions`'s
+    /// init entries by construction — the two are the alternatives.
+    pub counted_cell_init_sites: FxHashSet<HirId>,
     /// The subset of `call_result_regions` whose callee declares
     /// [`RegionEffect::Fresh`](crate::primitives::def::RegionEffect::Fresh): the
     /// result is freshly allocated in the call's own region, so it is genuinely
@@ -703,6 +716,7 @@ impl RegionInfo {
             binding_last_use: HashMap::new(),
             call_result_regions: FxHashSet::default(),
             counted_cell_read_sites: FxHashSet::default(),
+            counted_cell_init_sites: FxHashSet::default(),
             fresh_result_regions: FxHashSet::default(),
             fiber_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),

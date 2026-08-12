@@ -217,6 +217,7 @@ impl RegionInference {
                     self.binding_region.insert(*b, scope_region);
                     let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
                     self.binding_regions.insert(*b, init_regions);
+                    self.record_binder_init_site(*b, init.id);
                 }
 
                 // `cell ⊇ content`: the cells minted above hold their init value by an
@@ -316,6 +317,7 @@ impl RegionInference {
                             entry.push(r);
                         }
                     }
+                    self.record_binder_init_site(*b, init.id);
                 }
 
                 // `cell ⊇ content`: a compiled forward cell holds its closure (or other

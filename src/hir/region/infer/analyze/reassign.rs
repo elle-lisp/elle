@@ -35,6 +35,12 @@ pub(super) struct Reassigns {
     /// Loop parameter → the binding its init `Var` forwards from
     /// (`RegionInference::loop_forwarded_params`).
     pub(super) loop_forwarded: HashMap<Binding, Binding>,
+    /// Binding → where a `Let`/`Letrec`/`Define` stores its init value, or `None`
+    /// where more than one binder does (`RegionInference::binder_init_sites`).
+    /// Read only for a cell whose init the gate declines to donate: the counted
+    /// store's retain has to sit at that binder, and a chain whose source is a
+    /// parameter has no such position.
+    pub(super) binder_init_sites: HashMap<Binding, Option<HirId>>,
 }
 
 impl Reassigns {
@@ -115,15 +121,55 @@ impl Reassigns {
             .filter(|&(src, last)| src != last)
             .collect()
     }
+
+    /// Where the binder of `versions`' chain stores the init value, or `None`
+    /// when no single such position exists.
+    ///
+    /// The chain's INIT arrives through one store, at the version a
+    /// `Let`/`Letrec`/`Define` binds; every later version is a `Loop` parameter,
+    /// whose init is a bare `Var` read that mints nothing and emits no store. So
+    /// a well-formed chain offers exactly one retain position, and anything else
+    /// — a chain rooted at a parameter, a version bound twice — leaves the
+    /// counted-init route without one.
+    fn init_store_site(
+        versions: &[Binding],
+        binder_init_sites: &HashMap<Binding, Option<HirId>>,
+    ) -> Option<HirId> {
+        let mut found = None;
+        for b in versions {
+            match binder_init_sites.get(b) {
+                None => continue,
+                Some(None) => return None,
+                Some(&Some(id)) => {
+                    if found.replace(id).is_some_and(|prev| prev != id) {
+                        return None;
+                    }
+                }
+            }
+        }
+        found
+    }
 }
 
-/// One fn-local reassigned binding's answers to the two gate questions, kept
-/// apart from the application because the whole-chain rule needs every link's
-/// answer before any link may act on its own.
+/// One fn-local reassigned binding's answers to the gate questions, kept apart
+/// from the application because the whole-chain rule needs every link's answer
+/// before any link may act on its own.
 struct LocalVerdict {
-    /// Every region the cell may hold has no other holder (after the forwarding
-    /// fold). Cleared for every link of a chain that any link fails.
-    sole: bool,
+    /// Every region the model PINS to a store site — the values this chain
+    /// stores — has no other holder (after the forwarding fold). The pin moves a
+    /// producer release EARLIER, so a second name reading the value would be
+    /// left holding a freed one. Cleared for every link of a chain any link
+    /// fails.
+    stored_sole: bool,
+    /// Every region the model would SUPPRESS — the init, which the cell takes
+    /// uncounted — has no other holder, so the donation is available. Where it
+    /// is not, the cell counts its init instead and suppresses nothing
+    /// (docs/impl/region/bindings.md § "What the cell donates it must hold
+    /// alone; what it counts it need not").
+    donates_init: bool,
+    /// Where the chain's binder stores the init value — the one position the
+    /// counted-init retain can take. `None` leaves donate-or-refuse.
+    init_site: Option<HirId>,
     /// The binding's value reaches a tail, so the return transfers the reference
     /// the cell would also claim.
     returned: bool,
@@ -133,7 +179,15 @@ impl LocalVerdict {
     /// The binding takes the full container model: drop-on-overwrite for each
     /// displaced prior, and a content drop for the final one.
     fn is_cell(&self) -> bool {
-        self.sole && !self.returned
+        self.takes_model() && !self.returned
+    }
+
+    /// The binding takes the model at all — as a container, or (when returned)
+    /// for its suppression alone. The init's claim must be discharged one way or
+    /// the other, and the counted route is a container-only channel: its retain
+    /// is balanced by drop-on-overwrite, which a returned binding does not get.
+    fn takes_model(&self) -> bool {
+        self.stored_sole && (self.donates_init || (!self.returned && self.init_site.is_some()))
     }
 }
 
@@ -150,6 +204,7 @@ pub(super) fn apply_reassign_containers(
     let Reassigns {
         top_level: top_level_reassigns,
         local: local_reassigns,
+        binder_init_sites,
         ..
     } = reassigns;
     // A holder is a real alias only if it is a USER binding that is READ:
@@ -312,18 +367,58 @@ pub(super) fn apply_reassign_containers(
     // accounting holds for a cell written once and for one re-minted every
     // iteration of a loop alike.
     //
-    // The gate is sole-held (BOTH not-returned and returned — see the split
-    // below and docs/impl/region/bindings.md "Reassigned mutable bindings are
-    // 1-slot containers" § "Returned fn-local reassigned mutables"). Distinct
+    // The gate is sole-held, asked per region over the half it decides (BOTH
+    // not-returned and returned — see the split below and
+    // docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
+    // containers" § "Returned fn-local reassigned mutables"). Distinct
     // mechanism: a `@`-mutable PARAMETER (a captured cell the callee owns)
     // reassigned then moved into a tail call is released by the callee's own cell
     // `DecrefCellRegion`, and the tail move's borrowed-arg retain must order ahead
     // of that release's cascade — enforced in `lower_call` (pinned by
     // region-mutable-reassign-param.lisp), not by this gate.
+    //
+    // The chains, and what each KEEPS the ordinary decref of: each link's own
+    // assign-value regions, which are the producer releases pinned to the store
+    // sites. A downstream link's source regions contain every upstream link's
+    // (the `Loop` init copies them), so suppressing by one link's `regions` alone
+    // would cancel an upstream link's producer releases and strand every value
+    // that link displaced. Computed before the verdicts, because the split
+    // between what the model PINS and what it SUPPRESSES is exactly `kept` vs
+    // the rest, and each half answers a different question.
+    let mut chains: HashMap<Binding, Vec<Binding>> = HashMap::new();
+    for &b in local_reassigns.keys() {
+        chains
+            .entry(Reassigns::last_of_chain(&next, b))
+            .or_default()
+            .push(b);
+    }
+    let chain_kept: HashMap<Binding, Vec<Region>> = chains
+        .values()
+        .flat_map(|links| {
+            let kept: Vec<Region> = links
+                .iter()
+                .flat_map(|b| local_reassigns[b].1.iter().copied())
+                .collect();
+            links.iter().map(move |&b| (b, kept.clone()))
+        })
+        .collect();
+    // Every VERSION of a chain, keyed by the link the fold resolves to — the
+    // reassigned links plus the upstream source names that only forward. A
+    // pre-loop version is never assigned, so `local_reassigns` does not name it,
+    // yet it is the version whose binder stores the chain's init.
+    let mut chain_versions: HashMap<Binding, Vec<Binding>> = HashMap::new();
+    for &b in next.keys().chain(local_reassigns.keys()) {
+        let last = Reassigns::last_of_chain(&next, b);
+        let versions = chain_versions.entry(last).or_default();
+        if !versions.contains(&b) {
+            versions.push(b);
+        }
+    }
+
     // Pass 1: each binding's own answers. Recorded before any binding acts,
     // because a chain's links stand or fall together (pass 2).
     let mut verdicts: HashMap<Binding, LocalVerdict> = HashMap::new();
-    for b in local_reassigns.keys() {
+    for (b, (_sites, regions)) in local_reassigns {
         // Record the binding so the lowerer can refuse a value-route decref +
         // nil-stamp that names this binding's stack slot. `allocate_slot` gives a
         // fn-local reassigned mutable its own never-reused slot that holds a live
@@ -336,10 +431,29 @@ pub(super) fn apply_reassign_containers(
             .get(b)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
+        // The sole-held question, asked separately of the two halves it decides.
+        // `kept` — the chain's stored values — is what the model PINS back to a
+        // store site, and moving a producer release earlier is unsafe under a
+        // second name. Everything else the binding holds is what the model would
+        // SUPPRESS, which is only ever the donation's business: an aliased init
+        // costs the donation, not the model (docs/impl/region/bindings.md § "What
+        // the cell donates it must hold alone; what it counts it need not").
+        let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(regions);
+        let last = Reassigns::last_of_chain(&next, *b);
         verdicts.insert(
             *b,
             LocalVerdict {
-                sole: binding_regs.iter().all(|&r| sole_held(*b, r)),
+                stored_sole: binding_regs
+                    .iter()
+                    .filter(|r| kept.contains(r))
+                    .all(|&r| sole_held(*b, r)),
+                donates_init: binding_regs
+                    .iter()
+                    .filter(|r| !kept.contains(r))
+                    .all(|&r| sole_held(*b, r)),
+                init_site: chain_versions
+                    .get(&last)
+                    .and_then(|vs| Reassigns::init_store_site(vs, binder_init_sites)),
                 // Does the binding's value escape via the function's tail (read
                 // in return position)? `EscapeInfo`'s return facet
                 // (`binding_escapes_via_return`), read per-binding — see the
@@ -360,38 +474,25 @@ pub(super) fn apply_reassign_containers(
     // drop-on-overwrite would then release it a second time. So a chain is
     // admitted or declined whole (docs/impl/region/bindings.md § "A chain of
     // forwarding edges hands one reference along, so the fold follows it whole").
-    let mut chains: HashMap<Binding, Vec<Binding>> = HashMap::new();
-    for &b in local_reassigns.keys() {
-        chains
-            .entry(Reassigns::last_of_chain(&next, b))
-            .or_default()
-            .push(b);
-    }
+    //
+    // Donation is a whole-chain answer for the same reason: the init region is
+    // the one every link's source set shares, and the suppression is keyed by
+    // REGION, so one link donating while another counts would suppress the
+    // release the counting link's alias still needs.
     for links in chains.values() {
-        if links.len() < 2 || links.iter().all(|b| verdicts[b].is_cell()) {
+        if links.len() < 2 {
             continue;
         }
+        let donates = links.iter().all(|b| verdicts[b].donates_init);
         for b in links {
-            verdicts.get_mut(b).unwrap().sole = false;
+            verdicts.get_mut(b).unwrap().donates_init = donates;
+        }
+        if !links.iter().all(|b| verdicts[b].is_cell()) {
+            for b in links {
+                verdicts.get_mut(b).unwrap().stored_sole = false;
+            }
         }
     }
-
-    // Every region a chain KEEPS the ordinary decref of: each link's own
-    // assign-value regions, which are the producer releases pinned to the store
-    // sites. A downstream link's source regions contain every upstream link's
-    // (the `Loop` init copies them), so suppressing by one link's `regions` alone
-    // would cancel an upstream link's producer releases and strand every value
-    // that link displaced.
-    let chain_kept: HashMap<Binding, Vec<Region>> = chains
-        .values()
-        .flat_map(|links| {
-            let kept: Vec<Region> = links
-                .iter()
-                .flat_map(|b| local_reassigns[b].1.iter().copied())
-                .collect();
-            links.iter().map(move |&b| (b, kept.clone()))
-        })
-        .collect();
 
     // Pass 3: apply.
     for (b, (sites, regions)) in local_reassigns {
@@ -399,16 +500,22 @@ pub(super) fn apply_reassign_containers(
             .get(b)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-        let LocalVerdict { sole, returned } = verdicts[b];
+        let LocalVerdict {
+            returned,
+            donates_init,
+            init_site,
+            ..
+        } = verdicts[b];
+        let takes_model = verdicts[b].takes_model();
         // The cell's final content is handed to the next link, which releases it
         // at its own first overwrite (or at its own content drop). The chain rule
         // above makes that link a cell whenever this one is.
         let forwards_content = next.contains_key(b);
         let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(regions);
 
-        if sole {
+        if takes_model {
             if !returned {
-                // Not returned (and sole-held): the cell's content dies at the
+                // Not returned (and admitted): the cell's content dies at the
                 // overwrite (priors) and at the cell's scope demise (the final
                 // value). The first overwrite is the init value's owning demise,
                 // so drop-on-overwrite is its release channel too.
@@ -464,12 +571,25 @@ pub(super) fn apply_reassign_containers(
             // suppresses nothing there — the mint-plus-lone-decref baseline the
             // scheduler-park guard depends on
             // (`region-reassign-return-park-uaf.lisp`) is untouched.
-            for &r in binding_regs {
-                if !kept.contains(&r) {
-                    info.suppressed_decref_regions.insert(r);
+            //
+            // All of that is the DONATION, and it is available only where the
+            // cell is the init value's sole holder. Where a second name reads
+            // that value, the cell takes a counted reference at the chain
+            // source's binder instead — balanced by the same drop-on-overwrite
+            // that balances every later store — and suppresses nothing, leaving
+            // the alias the ordinary decref that releases the producer's
+            // reference (docs/impl/region/bindings.md § "What the cell donates
+            // it must hold alone; what it counts it need not").
+            if donates_init {
+                for &r in binding_regs {
+                    if !kept.contains(&r) {
+                        info.suppressed_decref_regions.insert(r);
+                    }
                 }
+            } else if let Some(site) = init_site {
+                info.counted_cell_init_sites.insert(site);
             }
         }
-        // else (not sole-held): leave the unsuppressed baseline.
+        // else: leave the unsuppressed baseline.
     }
 }

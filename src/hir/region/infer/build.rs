@@ -102,6 +102,8 @@ impl RegionInference {
             binding_last_use: HashMap::new(),
             call_result_regions: self.call_result_regions,
             counted_cell_read_sites: self.counted_cell_read_sites,
+            // Recorded by the reassign gate, which runs after `build_info`.
+            counted_cell_init_sites: rustc_hash::FxHashSet::default(),
             fresh_result_regions: self.fresh_result_regions,
             fiber_result_regions: self.fiber_result_regions,
             containment_edges,

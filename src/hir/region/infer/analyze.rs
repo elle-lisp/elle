@@ -60,6 +60,7 @@ pub fn analyze_regions_with(
         top_level: std::mem::take(&mut ri.top_level_reassigns),
         local: std::mem::take(&mut ri.local_reassigns),
         loop_forwarded: std::mem::take(&mut ri.loop_forwarded_params),
+        binder_init_sites: std::mem::take(&mut ri.binder_init_sites),
     };
     let captured_reassigns = std::mem::take(&mut ri.captured_reassigns);
     let mut info = ri.build_info();

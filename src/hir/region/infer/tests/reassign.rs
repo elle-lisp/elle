@@ -569,15 +569,32 @@ fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
          (regs={regs:?}, suppressed={:?})",
         info.suppressed_decref_regions,
     );
+    // Donation and counted init are the two alternatives, so a donated init
+    // records no retain: the cell takes the producer's reference, and a retain
+    // on top of the suppression would hold the value to teardown.
+    assert!(
+        info.counted_cell_init_sites.is_empty(),
+        "a donated init takes no retain (got {:?})",
+        info.counted_cell_init_sites,
+    );
 }
 
-/// Counterfactual against over-exclusion: a GENUINE alias still refuses. `keep`
-/// is a different source name bound to the same value, not the loop's own
-/// init-forwarding edge, so the pair really is two holders of one reference —
-/// and the region-keyed suppression would cancel `keep`'s decref while `keep`
-/// still holds the value. Only the loop parameter's own init source is excluded.
+/// A GENUINE alias of the INIT costs the DONATION, not the model
+/// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
+/// what it counts it need not"). `keep` is a different source name bound to the
+/// same value, not the loop's own init-forwarding edge, so the pair really is
+/// two holders — and suppressing the init region, which is keyed by region,
+/// would cancel `keep`'s own decref and free the value under a read that
+/// outlives the first overwrite. The cell counts its init instead: a retain at
+/// the binder's store, balanced by the same drop-on-overwrite that balances
+/// every later store, with nothing suppressed and nothing claimed twice.
+///
+/// Refusing outright would cost the store-site pin as well, so each stored
+/// value's release would ride the cell binding's uses out past the loop — one
+/// release for a region that names a different runtime value every iteration
+/// (`tests/elle/region-cell-aliased-init.lisp`).
 #[test]
-fn reassign_gate_refuses_loop_carried_cell_with_aliased_init() {
+fn reassign_gate_counts_an_aliased_init() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
            (begin (var last (array 0 0))\n\
@@ -590,22 +607,72 @@ fn reassign_gate_refuses_loop_carried_cell_with_aliased_init() {
          (h 3)",
     );
     let (last, last_sites) = heap_carrying_reassign(&hir, &info);
-    for site in &last_sites {
-        assert!(
-            !info.drop_on_overwrite_sites.contains(site),
-            "an aliased init must refuse the container model at @{} — the \
-             alias holds a reference the cell would claim a second time",
-            site.0
-        );
-    }
+    assert!(
+        info.cell_containers.contains_key(&last),
+        "an aliased init must still take the container model — the store-site \
+         pin it carries is what keeps a loop's releases inside the loop"
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "an aliased init keeps drop-on-overwrite: that is the release of the \
+         cell's OWN counted reference, not of the alias's"
+    );
     let regs = &info.binding_source_regions[&last];
     for r in regs {
         assert!(
             !info.suppressed_decref_regions.contains(r),
-            "an aliased init must suppress nothing (region {r:?} of {regs:?} was \
-             suppressed)",
+            "a counted init suppresses nothing — the alias keeps the decref that \
+             releases the producer's reference (region {r:?} of {regs:?})",
         );
     }
+    assert_eq!(
+        info.counted_cell_init_sites.len(),
+        1,
+        "exactly one retain, at the chain source's binder store (got {:?})",
+        info.counted_cell_init_sites,
+    );
+}
+
+/// Counterfactual against over-admission: an aliased STORED value still refuses
+/// the model whole. The model moves each stored value's producer release back to
+/// the store site, and `v` is a second name reading the same value — a release
+/// pinned to the store would fire under it. Only the init, whose claim the cell
+/// can replace with a counted reference of its own, is exempt from the
+/// sole-held question.
+#[test]
+fn reassign_gate_refuses_an_aliased_assign_value() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (begin (var last (array 0 0))\n\
+                  (var i 0)\n\
+                  (while (%lt i n)\n\
+                    (let [v (array i 7)]\n\
+                      (assign last v)\n\
+                      (%length v)\n\
+                      (assign i (%add i 1))))\n\
+                  0)))\n\
+         (h 3)",
+    );
+    let (last, last_sites) = heap_carrying_reassign(&hir, &info);
+    for site in &last_sites {
+        assert!(
+            !info.drop_on_overwrite_sites.contains(site),
+            "an aliased stored value must refuse the container model at @{}",
+            site.0
+        );
+    }
+    assert!(
+        !info.cell_containers.contains_key(&last),
+        "a refused cell records no container — the store-site pin it carries \
+         would move a release ahead of the alias's read"
+    );
+    assert!(
+        info.counted_cell_init_sites.is_empty(),
+        "a refused cell takes no init retain (got {:?})",
+        info.counted_cell_init_sites,
+    );
 }
 
 /// Two sequential loops over one binding, with an extra `keep` alias or a
@@ -757,6 +824,11 @@ fn reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell() {
 /// loops — is a second name holding the reference, so no link may claim it.
 /// Declining only that link would leave the next one's drop-on-overwrite
 /// releasing a reference the baseline already released at its ordinary decref.
+///
+/// The alias sits after the first loop, so it names that loop's STORED value
+/// and not merely the chain's init: the counted-init route cannot rescue it,
+/// because the model would still pin that value's release to a store site the
+/// alias's read outlives.
 #[test]
 fn reassign_gate_refuses_forwarding_chain_with_an_aliased_link() {
     let (hir, info) = two_loop_chain("(var keep last)", "(%length keep)");

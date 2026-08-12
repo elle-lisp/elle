@@ -59,6 +59,7 @@ impl<'a> Lowerer<'a> {
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
+        self.emit_counted_cell_init_retain(value.id, value_reg);
         self.current_function_binding = None;
         self.current_function_params = None;
 
