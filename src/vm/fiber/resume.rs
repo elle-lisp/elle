@@ -253,7 +253,9 @@ impl VM {
     ///
     /// For `FiberResume` frames (protect/defer children blocked on I/O),
     /// the inner fiber is aborted recursively so that protect/defer sees
-    /// the child error and runs cleanup code.
+    /// the child error and runs cleanup code. Unwinding that suspends again
+    /// leaves the chain parked and propagates the suspension — the abort ends
+    /// this fiber only once the innermost unwinding runs to its end.
     ///
     /// For `Bytecode` frames (direct bytecode suspension), the error is
     /// set on `fiber.signal` so the dispatch loop returns it immediately.
@@ -302,6 +304,25 @@ impl VM {
                         f.signal = Some((SIG_ERROR, error_value));
                     });
                     let (inner_bits, inner_result) = vm.do_fiber_abort(&inner_handle, inner_value);
+
+                    // The inner fiber's own unwinding is ordinary code, so it
+                    // can suspend again — a `protect` body that continues into
+                    // an I/O call after it captures the injected error, a
+                    // `defer` cleanup that writes to a port. The inner fiber
+                    // then still owes its continuation, and this fiber's
+                    // continuation must not run ahead of it: park the chain as
+                    // it stands and propagate, exactly as the trampoline's
+                    // unwind does for the same signal on a plain resume. The
+                    // resume re-enters the inner fiber first, and only its
+                    // completion delivers the value the frames below wait for.
+                    let inner_mask = inner_handle.with(|f| f.mask);
+                    if !super::catch::mask_catches(inner_mask, inner_bits)
+                        && !super::is_terminal_signal(inner_bits)
+                    {
+                        vm.fiber.signal = Some((inner_bits, inner_result));
+                        vm.fiber.suspended = Some(frames);
+                        return inner_bits;
+                    }
 
                     // Resume remaining frames so protect/defer cleanup runs.
                     let remaining: Vec<SuspendedFrame> = frames[1..].to_vec();

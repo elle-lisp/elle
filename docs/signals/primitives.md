@@ -148,6 +148,22 @@ child's actual outcome determines what the parent sees.
 (fiber/abort f :reason)   # :cleanup printed, f is now :error
 ```
 
+#### Unwinding that suspends
+
+An abort ends the fiber only when the unwinding runs to its end. The
+unwinding is ordinary code, so it can suspend: a `defer` cleanup that
+writes to a port emits `:io`, and so does a `protect` body that continues
+into an I/O call after it captures the injected error. The abort then
+returns that signal, and the fiber stays `:paused` with the request in
+`fiber/value` — the same result `fiber/resume` gives for the same call.
+The next resume continues the unwinding from where it stopped.
+
+The rule holds at every depth. A fiber parked at `(fiber/resume child)`
+runs its own continuation only after the child's unwinding finishes, so a
+`defer` inside a `defer` still runs the inner body before the outer
+cleanup. `tests/elle/unwind-suspend.lisp` pins the four shapes —
+`protect`, `try`, `defer`, and one `defer` inside another.
+
 ### Aliases
 
 `cancel` is an alias for `fiber/cancel`. `abort` is an alias for `fiber/abort`.

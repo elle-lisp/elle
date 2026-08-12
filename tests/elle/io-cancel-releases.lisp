@@ -173,21 +173,24 @@
 
 (println "opens of a fifo nobody reads...")
 
-(let* [dir (file/mktempdir)
-       path (concat dir "/fifo")]
-  (assert (= 0 (subprocess/wait (subprocess/exec "mkfifo" [path])))
-          "mkfifo made the fifo")
-  (each i in (range 0 10)
-    (let [outcome (protect (port/open path :write :timeout 50))]
-      (assert (not (get outcome 0))
-              (string "open " i ": a fifo nobody reads must signal"))
-      (assert (= (get (get outcome 1) :error) :timeout)
-              (string "open " i ": expected a :timeout error, got "
-                      (string (get outcome 1))))))
-  (let [left (settled-workers)]
-    (assert (<= left settled)
-            (string "the timed-out opens gave their workers back, but "
-                    (string left) " are still out")))
-  (file/delete-dir-all dir))
+(defn opens-that-only-a-deadline-ends [dir]
+  "Ten opens of a fresh fifo in DIR, each ended by its own deadline."
+  (let [path (concat dir "/fifo")
+        made (subprocess/wait (subprocess/exec "mkfifo" [path]))]
+    (assert (= 0 made) "mkfifo made the fifo")
+    (each i in (range 0 10)
+      (let [outcome (protect (port/open path :write :timeout 50))]
+        (assert (not (get outcome 0))
+                (string "open " i ": a fifo nobody reads must signal"))
+        (assert (= (get (get outcome 1) :error) :timeout)
+                (string "open " i ": expected a :timeout error, got "
+                        (string (get outcome 1))))))))
+
+(with-temp-dir dir (opens-that-only-a-deadline-ends dir))
+
+(let [left (settled-workers)]
+  (assert (<= left settled)
+          (string "the timed-out opens gave their workers back, but "
+                  (string left) " are still out")))
 
 (println "io cancel: every cancelled operation gave back what it held")

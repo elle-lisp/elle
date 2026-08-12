@@ -204,9 +204,9 @@
 ## Does not propagate errors — captures them as data.
 ## :dead means normal completion; anything else means error.
 ##
-## WARNING: protect is synchronous. The body must not perform async I/O
-## (port/open, port/read-line, tcp/connect, etc.). Use protect inside
-## ev/spawn if you need error capture around async work.
+## The body may perform async I/O: an I/O request travels out to the
+## scheduler through this fiber, and the completion's error comes back to
+## it as [false err]. See docs/errors.md § "Cleanup around async I/O".
 (defmacro protect (& body)
   `(let [f (fiber/new (fn () ,;body) 1)]
      (fiber/resume f nil)
