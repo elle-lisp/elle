@@ -26,16 +26,41 @@ pub struct CellContainer {
     pub value_regions: Vec<Region>,
     /// The node whose exit is the cell's scope demise — the enclosing scope
     /// node, so a loop-carried cell drops once after the loop and a cell bound
-    /// inside a loop body drops once per iteration.
+    /// inside a loop body drops once per iteration. Read only when the cell
+    /// keeps its content drop (`forwards_content` false).
     pub demise: HirId,
+    /// The cell's final content is FORWARDED into the next cell of a
+    /// functionalized loop chain (`(loop [last#2 last#1] …)` after
+    /// `(loop [last#1 last#0] …)`), which takes the one reference over. That
+    /// cell releases it — at its first overwrite, or at its own content drop —
+    /// so this one emits none, and keeps only the channels that name a value it
+    /// still holds: drop-on-overwrite per displaced prior, and the store-site
+    /// pin per producer claim (docs/impl/region/bindings.md § "A chain of
+    /// forwarding edges hands one reference along, so the fold follows it
+    /// whole").
+    pub forwards_content: bool,
 }
 
 impl CellContainer {
+    /// A cell that keeps both channels: drop-on-overwrite for each displaced
+    /// prior, and the content drop at `demise` for the final one.
     pub fn new(stores: Vec<HirId>, value_regions: Vec<Region>, demise: HirId) -> Self {
         Self {
             stores,
             value_regions,
             demise,
+            forwards_content: false,
+        }
+    }
+
+    /// A cell whose final content is handed to the next link of a forwarding
+    /// chain, so the content drop belongs to that link and not to this one.
+    /// `demise` still rides along because the placement passes compute it for
+    /// every container; nothing reads it here.
+    pub fn forwarding(stores: Vec<HirId>, value_regions: Vec<Region>, demise: HirId) -> Self {
+        Self {
+            forwards_content: true,
+            ..Self::new(stores, value_regions, demise)
         }
     }
 }

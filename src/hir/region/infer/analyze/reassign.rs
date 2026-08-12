@@ -22,8 +22,9 @@ type ReassignSites = HashMap<Binding, (Vec<HirId>, Vec<Region>)>;
 /// Everything the walk recorded about reassigned bindings. One value rather than
 /// three parameters because no consumer wants a subset: the scope split decides
 /// which half of the 1-slot model applies, and `loop_forwarded` is only
-/// interpretable against BOTH halves — a forwarding source that carries a cell of
-/// its own is not a bare forwarding version (see `forwarded_init_aliases`).
+/// interpretable against BOTH halves — which side a forwarding edge's endpoints
+/// fall on decides whether the edge carries a reference at all (see
+/// `forwarding_edges`).
 pub(super) struct Reassigns {
     /// Module-scope (file-letrec) reassigns — the cell adopts the producer
     /// reference; the final content is freed by frame teardown.
@@ -37,9 +38,8 @@ pub(super) struct Reassigns {
 }
 
 impl Reassigns {
-    /// The `forwarded-from → carries-forward` map the gate's holder index folds by
-    /// (`RegionHolders::with_aliases`): one entry per loop parameter whose init
-    /// hands it the reference the pre-loop version of the same source name held.
+    /// `forwarded-from → forwards-into`: one edge per loop parameter whose init
+    /// hands it the reference the previous version of the same source name held.
     ///
     /// Functionalization splits a binding assigned inside a `while` into two — an
     /// outer version and a `Loop` parameter initialized from it, which stands in
@@ -52,18 +52,22 @@ impl Reassigns {
     /// vanish together — leaving drop-on-overwrite (or the content drop) as its
     /// one release.
     ///
-    /// A source that is **itself a reassigned binding** is refused, because it is
-    /// not a bare forwarding version: it carries a 1-slot cell of its own whose
-    /// content drop is a release channel the region-keyed suppression does not
-    /// cancel, so folding it would put two channels against the one reference.
-    /// That is the second of two sequential loops over one cell
-    /// (`last#2 ← last#1 ← last#0`), and it is why the fold is one step and never
-    /// chained.
-    fn forwarded_init_aliases(&self) -> HashMap<Binding, Binding> {
-        let mut aliases: HashMap<Binding, Binding> = HashMap::new();
+    /// Two edges are left out, each because the reference it forwards has no
+    /// single channel on the far side:
+    ///
+    /// - a **module-scope** source, whose cell is released by the file-letrec
+    ///   frame teardown rather than by a downstream cell's overwrite;
+    /// - a source that carries a cell into a parameter that does **not** — the
+    ///   parameter records no container, so it has no drop-on-overwrite and no
+    ///   content drop to take the reference over.
+    fn forwarding_edges(&self) -> HashMap<Binding, Binding> {
+        let mut next: HashMap<Binding, Binding> = HashMap::new();
         let mut ambiguous: Vec<Binding> = Vec::new();
         for (&param, &src) in &self.loop_forwarded {
-            if self.top_level.contains_key(&src) || self.local.contains_key(&src) {
+            if self.top_level.contains_key(&src) {
+                continue;
+            }
+            if self.local.contains_key(&src) && !self.local.contains_key(&param) {
                 continue;
             }
             // One source feeding two parameters would mean two live names sharing
@@ -71,14 +75,65 @@ impl Reassigns {
             // deny. Functionalization does not produce it (each loop renames the
             // source to its own parameter, so a later loop forwards from THAT
             // parameter); drop the entry rather than assume it.
-            if aliases.insert(src, param).is_some() {
+            if next.insert(src, param).is_some() {
                 ambiguous.push(src);
             }
         }
         for src in ambiguous {
-            aliases.remove(&src);
+            next.remove(&src);
         }
-        aliases
+        next
+    }
+
+    /// The binding every forwarding edge out of `b` ends at — the LAST version of
+    /// the chain `b` belongs to, `b` itself when nothing forwards out of it.
+    ///
+    /// Two sequential loops over one binding chain the edges
+    /// (`last#2 ← last#1 ← last#0`), and each link hands the one reference on, so
+    /// the whole chain resolves to its final version
+    /// (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
+    /// reference along, so the fold follows it whole"). The walk is bounded by
+    /// the edge count so a malformed map cannot spin.
+    fn last_of_chain(next: &HashMap<Binding, Binding>, b: Binding) -> Binding {
+        let mut cur = b;
+        for _ in 0..next.len() {
+            match next.get(&cur) {
+                Some(&n) => cur = n,
+                None => break,
+            }
+        }
+        cur
+    }
+
+    /// The `forwarded-from → carries-forward` map the gate's holder index folds
+    /// by (`RegionHolders::with_aliases`). Every version of a chain resolves to
+    /// its last one, so the index reads one entry rather than a sequence, and
+    /// each link asks `sole_held` about the same folded name.
+    fn forwarded_init_aliases(next: &HashMap<Binding, Binding>) -> HashMap<Binding, Binding> {
+        next.keys()
+            .map(|&src| (src, Self::last_of_chain(next, src)))
+            .filter(|&(src, last)| src != last)
+            .collect()
+    }
+}
+
+/// One fn-local reassigned binding's answers to the two gate questions, kept
+/// apart from the application because the whole-chain rule needs every link's
+/// answer before any link may act on its own.
+struct LocalVerdict {
+    /// Every region the cell may hold has no other holder (after the forwarding
+    /// fold). Cleared for every link of a chain that any link fails.
+    sole: bool,
+    /// The binding's value reaches a tail, so the return transfers the reference
+    /// the cell would also claim.
+    returned: bool,
+}
+
+impl LocalVerdict {
+    /// The binding takes the full container model: drop-on-overwrite for each
+    /// displaced prior, and a content drop for the final one.
+    fn is_cell(&self) -> bool {
+        self.sole && !self.returned
     }
 }
 
@@ -106,11 +161,12 @@ pub(super) fn apply_reassign_containers(
     // applies the universal synthetic exclusion on top, so the admitted set is
     // exactly the old `counts_as_alias` (read AND non-synthetic).
     let is_read = |b: Binding| -> bool { du.uses.get(&b).is_some_and(|u| !u.is_empty()) };
+    let next = reassigns.forwarding_edges();
     let mut region_holders = RegionHolders::with_aliases(
         inference_binding_regions,
         arena,
         &is_read,
-        reassigns.forwarded_init_aliases(),
+        Reassigns::forwarded_init_aliases(&next),
     );
     for (b, (_sites, regions)) in top_level_reassigns.iter().chain(local_reassigns.iter()) {
         if is_read(*b) {
@@ -264,7 +320,10 @@ pub(super) fn apply_reassign_containers(
     // `DecrefCellRegion`, and the tail move's borrowed-arg retain must order ahead
     // of that release's cascade — enforced in `lower_call` (pinned by
     // region-mutable-reassign-param.lisp), not by this gate.
-    for (b, (sites, regions)) in local_reassigns {
+    // Pass 1: each binding's own answers. Recorded before any binding acts,
+    // because a chain's links stand or fall together (pass 2).
+    let mut verdicts: HashMap<Binding, LocalVerdict> = HashMap::new();
+    for b in local_reassigns.keys() {
         // Record the binding so the lowerer can refuse a value-route decref +
         // nil-stamp that names this binding's stack slot. `allocate_slot` gives a
         // fn-local reassigned mutable its own never-reused slot that holds a live
@@ -277,14 +336,75 @@ pub(super) fn apply_reassign_containers(
             .get(b)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-        let sole = binding_regs.iter().all(|&r| sole_held(*b, r));
-        // Does the binding's value escape via the function's tail (read in
-        // return position)? `EscapeInfo`'s return facet
-        // (`binding_escapes_via_return`), read per-binding — see the top-level
-        // gate's note on why this is atom-level, not a region projection, and
-        // why the recorded class-3 divergences leave the gate outcome unchanged.
-        // Guarded by "carries a heap region" (immediate cells carry no reference).
-        let returned = !binding_regs.is_empty() && escape_info.binding_escapes_via_return(*b);
+        verdicts.insert(
+            *b,
+            LocalVerdict {
+                sole: binding_regs.iter().all(|&r| sole_held(*b, r)),
+                // Does the binding's value escape via the function's tail (read
+                // in return position)? `EscapeInfo`'s return facet
+                // (`binding_escapes_via_return`), read per-binding — see the
+                // top-level gate's note on why this is atom-level, not a region
+                // projection, and why the recorded class-3 divergences leave the
+                // gate outcome unchanged. Guarded by "carries a heap region"
+                // (immediate cells carry no reference).
+                returned: !binding_regs.is_empty() && escape_info.binding_escapes_via_return(*b),
+            },
+        );
+    }
+
+    // Pass 2: the whole-chain rule. A chain of forwarding edges hands ONE
+    // reference from link to link, so exactly one link may release it — the one
+    // holding it at its own overwrite, or the last link at its demise. A link the
+    // gate refuses keeps the unsuppressed baseline, where each value's ordinary
+    // decref releases the producer's reference, and the next link's
+    // drop-on-overwrite would then release it a second time. So a chain is
+    // admitted or declined whole (docs/impl/region/bindings.md § "A chain of
+    // forwarding edges hands one reference along, so the fold follows it whole").
+    let mut chains: HashMap<Binding, Vec<Binding>> = HashMap::new();
+    for &b in local_reassigns.keys() {
+        chains
+            .entry(Reassigns::last_of_chain(&next, b))
+            .or_default()
+            .push(b);
+    }
+    for links in chains.values() {
+        if links.len() < 2 || links.iter().all(|b| verdicts[b].is_cell()) {
+            continue;
+        }
+        for b in links {
+            verdicts.get_mut(b).unwrap().sole = false;
+        }
+    }
+
+    // Every region a chain KEEPS the ordinary decref of: each link's own
+    // assign-value regions, which are the producer releases pinned to the store
+    // sites. A downstream link's source regions contain every upstream link's
+    // (the `Loop` init copies them), so suppressing by one link's `regions` alone
+    // would cancel an upstream link's producer releases and strand every value
+    // that link displaced.
+    let chain_kept: HashMap<Binding, Vec<Region>> = chains
+        .values()
+        .flat_map(|links| {
+            let kept: Vec<Region> = links
+                .iter()
+                .flat_map(|b| local_reassigns[b].1.iter().copied())
+                .collect();
+            links.iter().map(move |&b| (b, kept.clone()))
+        })
+        .collect();
+
+    // Pass 3: apply.
+    for (b, (sites, regions)) in local_reassigns {
+        let binding_regs = inference_binding_regions
+            .get(b)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let LocalVerdict { sole, returned } = verdicts[b];
+        // The cell's final content is handed to the next link, which releases it
+        // at its own first overwrite (or at its own content drop). The chain rule
+        // above makes that link a cell whenever this one is.
+        let forwards_content = next.contains_key(b);
+        let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(regions);
 
         if sole {
             if !returned {
@@ -299,17 +419,24 @@ pub(super) fn apply_reassign_containers(
                 // that is after every write — and `decref::populate_decref_points`
                 // moves it out to the cell's last read and past any loop the
                 // cell is carried across, both of which need the structural
-                // order this pass runs before.
+                // order this pass runs before. A FORWARDING link records the
+                // container all the same — the store-site pins and the
+                // hold-back from the binding chain are its business too — but
+                // without the content drop the next link takes over.
                 if let Some(&seed) = sites.last() {
-                    info.cell_containers
-                        .insert(*b, CellContainer::new(sites.clone(), regions.clone(), seed));
+                    let cell = if forwards_content {
+                        CellContainer::forwarding(sites.clone(), regions.clone(), seed)
+                    } else {
+                        CellContainer::new(sites.clone(), regions.clone(), seed)
+                    };
+                    info.cell_containers.insert(*b, cell);
                 }
             }
-            // KEEP the assign-value regions' (`regions`) decrefs and suppress
-            // every OTHER region the binding may hold (`binding_regs \ regions`
-            // — the init region, and, for a binding accumulated in a LOOP, the
-            // loop-carried binding region that aliases whatever value the slot
-            // currently holds).
+            // KEEP the CHAIN's assign-value regions' (`kept`) decrefs and
+            // suppress every OTHER region the binding may hold
+            // (`binding_regs \ kept` — the init region, and, for a binding
+            // accumulated in a LOOP, the loop-carried binding region that
+            // aliases whatever value the slot currently holds).
             //
             // Not returned: the kept assign-value decref is the PRODUCER's
             // release of each stored value (pinned to the store site, where the
@@ -338,7 +465,7 @@ pub(super) fn apply_reassign_containers(
             // scheduler-park guard depends on
             // (`region-reassign-return-park-uaf.lisp`) is untouched.
             for &r in binding_regs {
-                if !regions.contains(&r) {
+                if !kept.contains(&r) {
                     info.suppressed_decref_regions.insert(r);
                 }
             }

@@ -31,7 +31,11 @@
 //! the forwarded-from binding's holdings onto the binding that carries them
 //! forward before the index is queried. The argument that justifies an entry is
 //! the consumer's; the index only guarantees the fold is applied on every insert
-//! path.
+//! path, and on the query side too: an alias entry makes the two bindings
+//! indistinguishable to [`RegionHolders::sole_held`], so either name asks about
+//! the one holding. A consumer whose bindings form a *chain* resolves it to its
+//! last member before handing the map over — the index reads one entry, never a
+//! sequence of them.
 
 use super::*;
 use rustc_hash::FxHashSet;
@@ -98,15 +102,27 @@ impl RegionHolders {
 
     /// `r` is *sole-held by `b`*: no holder other than `b`. A region with no
     /// recorded holder is sole-held by anything (nothing aliases it).
+    ///
+    /// The query resolves through the alias map exactly as an insert does. An
+    /// alias entry says the two bindings hold one reference between them, so
+    /// each of them must be able to ask about it — otherwise the folded-away
+    /// name reads its own holding as somebody else's.
     pub(super) fn sole_held(&self, b: Binding, r: Region) -> bool {
+        let b = self.resolve(b);
         self.map.get(&r).is_none_or(|hs| hs.iter().all(|&h| h == b))
     }
 
+    /// The binding an alias entry folds `b` onto, or `b` itself. Resolved ONE
+    /// step, not transitively: an entry asserts that this pair holds a single
+    /// reference, and chaining two such assertions is a different claim, which
+    /// the consumer states by mapping every member of its chain to the same
+    /// binding (see `with_aliases`).
+    fn resolve(&self, b: Binding) -> Binding {
+        self.aliases.get(&b).copied().unwrap_or(b)
+    }
+
     fn insert(&mut self, b: Binding, regions: &[Region]) {
-        // Resolved ONE step, not transitively: an alias entry asserts that this
-        // pair holds a single reference, and chaining two such assertions is a
-        // different claim the consumer has not made (see `with_aliases`).
-        let b = self.aliases.get(&b).copied().unwrap_or(b);
+        let b = self.resolve(b);
         for &r in regions {
             self.map.entry(r).or_default().insert(b);
         }

@@ -717,6 +717,23 @@ fn region_capture_cell_string_accum_uaf() {
     );
 }
 
+// Two sequential loops over ONE reassigned mutable chain the versions
+// functionalization gives the name (`last#2 <- last#1 <- last#0`), so a middle
+// version carries a 1-slot cell whose content is the reference the chain
+// forwards on (docs/impl/region/bindings.md § "A chain of forwarding edges hands
+// one reference along, so the fold follows it whole"). Green pins that exactly
+// one link releases that reference: the cell holding it when its own slot is
+// overwritten, or the last link at its scope demise. Subprocess guardfree run,
+// same rationale as the twin above; the leak and read-back faces are in
+// tests/elle/region-cell-forward-chain.lisp. Full shape in the fixture header.
+#[test]
+fn region_cell_forward_chain_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-cell-forward-chain-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // The CASCADE / stored-member twin of region_capture_cell_string_accum_uaf, and
 // the e2e witness of the drop-time external-reference rescue
 // (docs/impl/region/ownership.md § "The incoming edge table and the external-

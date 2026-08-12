@@ -608,58 +608,171 @@ fn reassign_gate_refuses_loop_carried_cell_with_aliased_init() {
     }
 }
 
-/// Counterfactual against a TRANSITIVE exclusion: two sequential loops over one
-/// cell chain the forwarding (`last#2 ← last#1 ← last#0`), and the middle link
-/// carries a cell of its own. Its content drop is a release channel the
-/// region-keyed suppression does not cancel, so folding it would put two channels
-/// against the one reference the value carries — a double-free.
-///
-/// So the chain refuses at BOTH links, from the two directions the fold is
-/// narrow in. The second loop's parameter forwards from a reassigned binding,
-/// which is not a bare forwarding version. And the first loop's parameter, whose
-/// own source IS folded, still holds the init region alongside the second
-/// parameter — a holder no fold covers. Both fall back to the unsuppressed
-/// baseline, which over-keeps and never mis-frees.
-#[test]
-fn reassign_gate_refuses_loop_carried_cell_forwarded_from_a_cell() {
-    let (hir, _, info) = pipeline(
+/// Two sequential loops over one binding, with an extra `keep` alias or a
+/// trailing read spliced in by the caller. Every shape below is the same chain:
+/// functionalization gives the source name one version per loop and initializes
+/// each from the previous, so the middle version carries a cell of its own
+/// (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
+/// reference along, so the fold follows it whole").
+fn two_loop_chain(between: &str, tail: &str) -> (Hir, RegionInfo) {
+    let (hir, _, info) = pipeline(&format!(
         "(def @h (fn (n)\n\
            (begin (var last (array 0 0))\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
                     (begin (assign last (array i 7))\n\
                            (assign i (%add i 1))))\n\
+                  {between}\n\
                   (while (%lt i (%mul n 2))\n\
                     (begin (assign last (array i 9))\n\
                            (assign i (%add i 1))))\n\
-                  0)))\n\
-         (h 3)",
-    );
-    // The chain's two links are the two heap-carrying reassigned bindings; the
-    // immediate loop counter carries no region and is not one of them.
-    let sites = find_reassign_sites(&hir);
-    let links: Vec<Binding> = sites
-        .iter()
-        .map(|(_, b)| *b)
-        .filter(|b| {
-            info.binding_source_regions
-                .get(b)
-                .is_some_and(|rs| !rs.is_empty())
-        })
-        .collect();
-    assert!(
-        links.len() >= 2,
+                  {tail})))\n\
+         (h 3)"
+    ));
+    (hir, info)
+}
+
+/// The chain's links, upstream first — the heap-carrying reassigned bindings, in
+/// tree order. The immediate loop counter carries no region and is not one.
+fn chain_links(hir: &Hir, info: &RegionInfo) -> Vec<Binding> {
+    let mut links: Vec<Binding> = Vec::new();
+    for (_, b) in find_reassign_sites(hir) {
+        let heap = info
+            .binding_source_regions
+            .get(&b)
+            .is_some_and(|rs| !rs.is_empty());
+        if heap && !links.contains(&b) {
+            links.push(b);
+        }
+    }
+    links
+}
+
+/// Two sequential loops over one cell chain the forwarding
+/// (`last#2 ← last#1 ← last#0`), and the fold follows the chain to its last
+/// version: a plain `Var` init mints nothing, so the three versions hold ONE
+/// reference between them. Both links take the container model, and the
+/// reference has exactly one release channel at a time — the upstream link
+/// FORWARDS its content drop to the link that receives the reference, keeping
+/// only drop-on-overwrite for the priors it displaces.
+///
+/// The suppression is read over the whole chain: each link keeps its own
+/// assign-value regions' decrefs (one producer release per stored value) and
+/// only the shared init region is suppressed. Suppressing the upstream link's
+/// value regions — which the downstream link's source set contains, because the
+/// `Loop` init copies them — would leave every value that link displaced with a
+/// store incref and no producer release.
+#[test]
+fn reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell() {
+    let (hir, info) = two_loop_chain("", "0");
+    let links = chain_links(&hir, &info);
+    assert_eq!(
+        links.len(),
+        2,
         "precondition: two sequential loops give the cell two forwarding links \
          (got {links:?})"
     );
-    for (site, b) in &sites {
-        if !links.contains(b) {
+    let (up, down) = (links[0], links[1]);
+    let up_regs = info.binding_source_regions[&up].clone();
+    let down_regs = info.binding_source_regions[&down].clone();
+    assert!(
+        up_regs.iter().all(|r| down_regs.contains(r)) && down_regs.len() > up_regs.len(),
+        "precondition: the downstream link's source regions are the upstream \
+         link's plus its own (up={up_regs:?}, down={down_regs:?})"
+    );
+
+    let up_cell = info
+        .cell_containers
+        .get(&up)
+        .expect("the upstream link must take the container model");
+    let down_cell = info
+        .cell_containers
+        .get(&down)
+        .expect("the downstream link must take the container model");
+    assert!(
+        up_cell.forwards_content,
+        "the upstream link hands its content drop to the link it forwards into \
+         — emitting one here would release the forwarded reference twice"
+    );
+    assert!(
+        !down_cell.forwards_content,
+        "the last link of the chain keeps the content drop: nothing forwards on \
+         from it, so its final content has no other release"
+    );
+
+    // Every link's own assign-value regions keep their decrefs — those are the
+    // producer releases, pinned to the store sites.
+    let kept: Vec<Region> = up_cell
+        .value_regions
+        .iter()
+        .chain(down_cell.value_regions.iter())
+        .copied()
+        .collect();
+    assert!(
+        kept.len() >= 2,
+        "precondition: each loop stores a value region of its own (kept={kept:?})"
+    );
+    for r in &kept {
+        assert!(
+            !info.suppressed_decref_regions.contains(r),
+            "region {r:?} is a link's assign-value region: suppressing it strands \
+             the producer's reference of every value that link displaced",
+        );
+    }
+    // …and the region no link stores into — the shared init, forwarded down the
+    // chain uncounted — is the one that is suppressed.
+    let init: Vec<Region> = up_regs
+        .iter()
+        .copied()
+        .filter(|r| !kept.contains(r))
+        .collect();
+    assert_eq!(
+        init.len(),
+        1,
+        "precondition: the chain shares exactly one init region (up={up_regs:?}, \
+         kept={kept:?})"
+    );
+    assert!(
+        info.suppressed_decref_regions.contains(&init[0]),
+        "the forwarded init region's ordinary decref must be suppressed — \
+         drop-on-overwrite is its one release (suppressed={:?})",
+        info.suppressed_decref_regions,
+    );
+
+    for (site, b) in find_reassign_sites(&hir) {
+        if b != up && b != down {
             continue;
         }
         assert!(
-            !info.drop_on_overwrite_sites.contains(site),
-            "a chained forwarding link must refuse the container model at @{} — \
-             the source cell's content drop already releases the reference",
+            info.drop_on_overwrite_sites.contains(&site),
+            "every link of an admitted chain keeps drop-on-overwrite at @{} — \
+             the channel that releases each displaced prior",
+            site.0
+        );
+    }
+}
+
+/// Counterfactual against over-admission: the chain is admitted or declined
+/// WHOLE. A genuine alias of a middle link — `(var keep last)` between the two
+/// loops — is a second name holding the reference, so no link may claim it.
+/// Declining only that link would leave the next one's drop-on-overwrite
+/// releasing a reference the baseline already released at its ordinary decref.
+#[test]
+fn reassign_gate_refuses_forwarding_chain_with_an_aliased_link() {
+    let (hir, info) = two_loop_chain("(var keep last)", "(%length keep)");
+    let links = chain_links(&hir, &info);
+    assert!(
+        links.len() >= 2,
+        "precondition: the shape still chains two links (got {links:?})"
+    );
+    for (site, b) in find_reassign_sites(&hir) {
+        if !links.contains(&b) {
+            continue;
+        }
+        assert!(
+            !info.drop_on_overwrite_sites.contains(&site),
+            "an aliased link declines the whole chain at @{} — the alias holds a \
+             reference a link would claim a second time",
             site.0
         );
     }
@@ -667,10 +780,40 @@ fn reassign_gate_refuses_loop_carried_cell_forwarded_from_a_cell() {
         for r in &info.binding_source_regions[b] {
             assert!(
                 !info.suppressed_decref_regions.contains(r),
-                "a chained forwarding link must suppress nothing (region {r:?} \
-                 of {b:?} was suppressed)",
+                "a declined chain must suppress nothing (region {r:?} of {b:?} \
+                 was suppressed)",
             );
         }
+    }
+}
+
+/// The other half of the whole-chain rule: a link the RETURN facet refuses
+/// declines the chain too. Returning the binding transfers its reference to the
+/// caller, so the last link cannot also drop it — and with that link declined,
+/// nothing would release what the upstream link forwarded on.
+#[test]
+fn reassign_gate_refuses_forwarding_chain_whose_last_link_is_returned() {
+    let (hir, info) = two_loop_chain("", "last");
+    let links = chain_links(&hir, &info);
+    assert!(
+        links.len() >= 2,
+        "precondition: the shape still chains two links (got {links:?})"
+    );
+    for b in &links {
+        assert!(
+            !info.cell_containers.contains_key(b),
+            "no link of a returned chain may record a container ({b:?})"
+        );
+    }
+    for (site, b) in find_reassign_sites(&hir) {
+        if !links.contains(&b) {
+            continue;
+        }
+        assert!(
+            !info.drop_on_overwrite_sites.contains(&site),
+            "a returned last link declines the whole chain at @{}",
+            site.0
+        );
     }
 }
 
@@ -701,4 +844,50 @@ fn reassign_gate_keeps_selfref_accumulator() {
         !info.suppressed_decref_regions.is_empty(),
         "self-referential accumulator must keep its suppression"
     );
+}
+
+/// A value stored into a 1-slot container is released at its STORE site, and a
+/// reader the cell's own reference already outlives may not drag that release
+/// forward — neither a cell binding's uses nor an uncounted opcode read of the
+/// cell (`%get`/`%first`/`%rest`), whose borrow the cell protects. Both routes
+/// reach past the loop that stores a fresh value every iteration, so one release
+/// would cover N allocations (docs/impl/region/bindings.md § "A chain of
+/// forwarding edges hands one reference along, so the fold follows it whole").
+#[test]
+fn a_cell_stored_value_is_not_extended_by_a_read_of_the_cell() {
+    // The read sits in statement position: an uncounted read in TAIL position
+    // returns a borrow out of the container, which transfers the cell's
+    // reference and refuses the model outright.
+    let (hir, info) = two_loop_chain("", "(begin (%get last 1) 0)");
+    let links = chain_links(&hir, &info);
+    assert_eq!(links.len(), 2, "precondition: the chain has two links");
+    let read_regions: Vec<Region> = info
+        .uncounted_read_sites
+        .values()
+        .flatten()
+        .copied()
+        .collect();
+    assert!(
+        !read_regions.is_empty(),
+        "precondition: the `%get` records an uncounted read of the cell"
+    );
+    for b in &links {
+        let cell = info
+            .cell_containers
+            .get(b)
+            .unwrap_or_else(|| panic!("precondition: {b:?} takes the container model"));
+        let store = *cell.stores.last().expect("the link stores at least once");
+        for r in &cell.value_regions {
+            assert!(
+                read_regions.contains(r),
+                "precondition: the read names the cell's stored value region {r:?}"
+            );
+            assert_eq!(
+                info.region_data[r].decref_point, store,
+                "a stored value's release stays at its store site: the reader \
+                 borrows through the cell's own reference, and one release at \
+                 the read cannot cover a loop's worth of stores",
+            );
+        }
+    }
 }

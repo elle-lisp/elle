@@ -116,11 +116,42 @@ pub(super) fn populate_decref_points(
     // Snapshot both cell views before the passes below start mutating
     // `region_data`: the value regions to hold back from the binding chain, and
     // the store-site pins that replace them.
-    let cell_value_regions: HashMap<Binding, rustc_hash::FxHashSet<Region>> = info
+    //
+    // The hold-back is keyed on "is this binding a cell", not on "is this cell's
+    // own value region", because a cell binding names a SLOT rather than any one
+    // value — so no cell's stored value may ride any cell binding's uses. A chain
+    // of forwarding loop parameters is where the two readings diverge: the
+    // downstream link's source regions include the upstream link's value regions
+    // (the `Loop` init copies them), and its own last use sits past the loop that
+    // stores them, so one release would cover N allocations
+    // (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
+    // reference along, so the fold follows it whole"). An ANF producer temp is
+    // not a cell binding and still extends normally, which is what keeps the
+    // release after the allocation it names.
+    let cell_value_regions: rustc_hash::FxHashSet<Region> = info
         .cell_containers
-        .iter()
-        .map(|(&b, c)| (b, c.value_regions.iter().copied().collect()))
+        .values()
+        .flat_map(|c| c.value_regions.iter().copied())
         .collect();
+    // Each stored value region beside the point its CELL stops holding it, which
+    // the uncounted-read pass reads to tell a borrow the cell already covers from
+    // one it does not. Every link of a forwarding chain records only the values it
+    // stores itself, so this names the link that stored the value rather than the
+    // one that finally drops it — the earlier of the two, and the safe direction
+    // to be wrong in. The max is defensive: one region, one storing cell.
+    let mut cell_drop_point: HashMap<Region, HirId> = HashMap::new();
+    for c in info.cell_containers.values() {
+        for &r in &c.value_regions {
+            cell_drop_point
+                .entry(r)
+                .and_modify(|cur| {
+                    if porder.is_after(c.demise, *cur) {
+                        *cur = c.demise;
+                    }
+                })
+                .or_insert(c.demise);
+        }
+    }
     let cell_store_pins: Vec<(HirId, Vec<Region>)> = info
         .cell_containers
         .values()
@@ -133,7 +164,7 @@ pub(super) fn populate_decref_points(
         if regions.is_empty() {
             continue;
         }
-        let held_as_cell = cell_value_regions.get(b);
+        let names_a_cell = info.cell_containers.contains_key(b);
         let mut max_use = binding_uses
             .get(b)
             .into_iter()
@@ -152,19 +183,17 @@ pub(super) fn populate_decref_points(
         }
         if let Some(lu) = max_use {
             for &r in regions {
-                // A fn-local 1-slot container's stored values do NOT ride the
-                // CELL binding's uses: the binding names the slot, not any one
+                // A fn-local 1-slot container's stored values do NOT ride a CELL
+                // binding's uses: such a binding names the slot, not any one
                 // value, so extending here would put one release at the cell's
                 // last use — which, in a loop that re-mints the content every
                 // iteration, can only reach whichever value the producer slot
                 // happens to hold last. The cell's own counted reference covers
                 // the value from the store onward, so the producer's claim is
-                // dead AT the store and is pinned there below. An ANF producer
-                // temp that also holds the region still extends normally, which
-                // is what keeps the release after the allocation it names
+                // dead AT the store and is pinned there below
                 // (docs/impl/region/bindings.md § "Reassigned mutable bindings
                 // are 1-slot containers").
-                if !held_as_cell.is_some_and(|vs| vs.contains(&r)) {
+                if !(names_a_cell && cell_value_regions.contains(&r)) {
                     info.region_data.pin_to(r, lu, porder);
                 }
                 // Record the binding-resolved (tight) last-use per region, for the
@@ -266,10 +295,30 @@ pub(super) fn populate_decref_points(
     // (`counted_read_aliases`, region/adopt.md § "The lifetime obligation the root
     // carries"). A moves-out REMOVE is excluded from both: it extracts its element
     // instead of borrowing it.
+    //
+    // A value stored into a fn-local 1-slot container has a SECOND protector the
+    // extension does not need to duplicate: the producer's claim is discharged at
+    // the store, and from there the cell's own counted reference is what keeps
+    // the value — and any borrow out of it — alive. Where the cell drops that
+    // reference at or after the borrow dies, the extension buys nothing and costs
+    // a great deal: it drags the producer's release past a loop that stores a
+    // fresh value every iteration, so one release covers N allocations
+    // (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
+    // reference along, so the fold follows it whole"). Where the cell drops it
+    // EARLIER — the borrow flows on past the cell's own last access — the
+    // producer's reference is the borrow's only protection and keeps the
+    // extension.
     for (read_id, container_regions) in &info.uncounted_read_sites {
         let lu = last_use.get(read_id).copied().unwrap_or(*read_id);
-        info.region_data
-            .pin_all_to(container_regions.iter().copied(), lu, porder);
+        info.region_data.pin_all_to(
+            container_regions.iter().copied().filter(|r| {
+                cell_drop_point
+                    .get(r)
+                    .is_none_or(|&drop| porder.is_after(lu, drop))
+            }),
+            lu,
+            porder,
+        );
     }
 
     // Pin each value stored into a fn-local 1-slot container to its STORE site.

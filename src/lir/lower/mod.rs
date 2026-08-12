@@ -587,6 +587,12 @@ impl<'a> Lowerer<'a> {
         // node, indexed the same way and for the same reason as the two above.
         let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();
         for (&b, c) in &info.cell_containers {
+            // A cell that forwards its final content into the next link of a
+            // loop chain has no content drop of its own: that link took the one
+            // reference over and releases it (`CellContainer::forwards_content`).
+            if c.forwards_content {
+                continue;
+            }
             cell_drops_by_demise.entry(c.demise).or_default().push(b);
         }
         // Deterministic emission order across runs (the map's iteration is not).

@@ -46,7 +46,9 @@ agree with which of the value's ordinary decrefs are suppressed:
   **increfs on store** for every assign, whatever produced the value. That one
   reference is released by drop-on-overwrite for each displaced prior and by the
   **content drop** for the final one — the two channels a container's holding
-  needs, recorded per binding in `RegionInfo::cell_containers`.
+  needs, recorded per binding in `RegionInfo::cell_containers`. A cell that
+  forwards its final content into a second cell hands that second channel over
+  with it (see "A chain of forwarding edges", below).
 
   The producer's reference is a *separate* claim, and it is dead at the store:
   from there on the cell's own reference keeps the value alive. So each stored
@@ -137,19 +139,61 @@ leaving exactly one release channel (drop-on-overwrite for a displaced init, the
 content drop for one never displaced) against exactly one reference. So a holder
 that is the binding's own loop-init source does not count as an alias of it.
 
-The exclusion is that edge and nothing wider, on both sides:
+The exclusion is that edge and nothing wider. A **genuine alias** — a *different*
+source name bound to the same value, `(var keep last)` — is not a forwarding edge
+and keeps refusing, which it must: the region-keyed suppression would cancel that
+name's own decref while it still holds the value.
 
-- It is **refused when the init source is itself a reassigned binding** — the
-  second of two loops over one cell, `(loop [last#2 last#1] …)` following
-  `(loop [last#1 last#0] …)`. There `last#1` carries a cell of its own whose
-  content drop is a release channel the region-keyed suppression does not cancel,
-  so excluding it would put two channels against one reference. Requiring the
-  source to carry no cell keeps the "one reference, one channel" accounting
-  true by construction rather than by coincidence.
-- A **genuine alias** — a *different* source name bound to the same value,
-  `(var keep last)` — is not a forwarding edge and keeps refusing, which it must:
-  the region-keyed suppression would cancel that name's own decref while it still
-  holds the value.
+**A chain of forwarding edges hands one reference along, so the fold follows it
+whole.** Two sequential loops over one binding give the name three versions —
+`last#2 ← last#1 ← last#0`, each `Loop` init the bare `Var` read that mints
+nothing — so the three still hold **one** reference between them. The fold
+resolves every version to the chain's **last** one, and it resolves the *queried*
+binding too: each link asks the gate about the one folded name, which is what
+lets a middle link take the model at all.
+
+A middle link differs from `last#0` in the one way that matters: it carries a
+1-slot cell of its own, so its content drop is a second channel for the reference
+the chain forwards. The link that **receives** that reference already releases it
+— at its first overwrite, where its slot still names the forwarded value, or at
+its own content drop when nothing overwrites it. So a **forwarding** link emits
+no content drop. It keeps the two other things a cell owes: drop-on-overwrite for
+each prior it displaces, and the store-site pin that discharges each producer's
+separate claim.
+
+The suppression is read over the chain rather than over one link. Every link
+keeps its **own** assign-value regions' decrefs — one producer release per stored
+value — and a downstream link's source regions include every upstream link's,
+because the `Loop` init copies them. So a link suppresses only what **no** link
+in the chain keeps: the init region, and nothing else. Suppressing an upstream
+link's value regions would leave each value that link displaced with a store
+incref and no producer release.
+
+The same fact decides *where* those regions are released, against two routes
+that would each drag one release past a loop that stores N values. A cell binding
+names the slot rather than any one value, so no cell's stored value rides **any**
+cell binding's uses — the downstream link's uses sit past the loop the upstream
+link stores in. And an **uncounted opcode read** of a cell (`%get`/`%first`/
+`%rest`) borrows out of whatever the cell holds now, and the *cell's* reference
+is a second protector of that borrow: where the cell drops it at or after the
+borrow dies, extending the producer's release to the reader buys nothing, so the
+stored value keeps the store-site pin. Where the borrow flows on past the cell's
+own last access, the producer's reference is its only protection and the
+extension stands. An ANF producer temp is neither a cell binding nor a stored
+value, and still extends normally, which is what keeps the release after the
+allocation it names. (An uncounted read in **tail** position is a different
+question and keeps its own answer: the borrow leaves the activation, so the
+return claims the cell's reference and the gate refuses the model.)
+
+The chain is admitted or declined **whole**. A link the gate refuses stays at the
+unsuppressed baseline, where each value's ordinary decref is the release of the
+producer's reference — and the next link's drop-on-overwrite would then release
+that reference a second time. Declining every link together keeps the "one
+reference, one channel" accounting true by construction rather than by
+coincidence. The reference is the test:
+`reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell` for the admission,
+`reassign_gate_refuses_forwarding_chain_with_an_aliased_link` for the decline, and
+`tests/elle/region-cell-forward-chain.lisp` for the measured shape.
 
 Module scope never reaches this edge: a top-level reassigned mutable compiles to
 a capture cell, and functionalization does not promote a capture cell to a loop
