@@ -339,6 +339,7 @@ primitive! {
         category: "compile",
         example: r#"(compile/barrier-module "(assert (= 1 1) \"ok\")" "<eval>")"#,
         effect: RegionEffect::Mixed,
+        result_minted: true,
     }
     "compile/whole-module" => prim_compile_whole_module {
         signal: Signal::query_errors(),
@@ -348,6 +349,7 @@ primitive! {
         category: "compile",
         example: r#"(compile/whole-module "(def x 1)\n(assert (= x 1) \"ok\")" "<eval>")"#,
         effect: RegionEffect::Mixed,
+        result_minted: true,
     }
     "compile/read-forms" => prim_compile_read_forms {
         signal: Signal::of(SIG_OK.union(SIG_ERROR)),
@@ -366,6 +368,7 @@ primitive! {
         category: "compile",
         example: r#"(compile/whole-module-syntax (compile/read-forms "(+ 1 2)" "<eval>") "<eval>")"#,
         effect: RegionEffect::Mixed,
+        result_minted: true,
     }
     "compile/dumps" => prim_compile_dumps {
         signal: Signal::query_errors(),

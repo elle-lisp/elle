@@ -390,6 +390,12 @@ impl VM {
         match bits {
             SIG_OK => {
                 let (_, v) = self.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
+                // The setup module's accumulator left its compiled top level
+                // through the return convention — it carries its return mint,
+                // exactly as `import`'s module value does. The raising
+                // primitives declare `result_minted`, so the invoking
+                // `dispatch_native_call` skips the pass-through retain for
+                // this answer.
                 (SIG_OK, v)
             }
             SIG_ERROR => {

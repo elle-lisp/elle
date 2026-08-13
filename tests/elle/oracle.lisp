@@ -2165,6 +2165,50 @@
                                 (%struct? x)))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 
+# ── Thunk-run native results ──────────────────────────────────────────
+# A native can produce its result by running compiled code on the driving VM:
+# `import` runs the module body, and `arena/allocs` runs the measured thunk.
+# Such a result already carries its return mint. The dispatch pass-through
+# retain must not fund the caller a second time (`result_minted`,
+# docs/impl/region/effects.md § "Native region effects"). `arena/allocs`
+# embeds its thunk's result in a fresh pair, so the boundary consumes the
+# mint after the pair's alloc-scan counts the embedding. Both probes are
+# CLOSED controls (undeclared, like `rest-array-copy`). Before the
+# accounting fix each read ~3/op — the returned closure, its letrec arena,
+# and a capture cell, stranded per call — so a regression to open trips the
+# completeness gate loudly. The discarded-statement shape needs the DIRECT
+# while run-block (a thunk's return convention would mask the over-keep).
+(def import-module-dir (file/mktempdir))
+(def import-module-path (string import-module-dir "/oracle-import-mod.lisp"))
+(spit import-module-path
+      (string "(elle/epoch 12)\n" "(defn f1 [x] (+ x 1))\n"
+              "(fn [] {\"f1\" f1})\n"))
+(defn import-thunk []
+  (defn g1 [x]
+    (+ x 1))
+  (fn [] {"g1" g1}))
+(println "── folded suite: thunk-run native results ──")
+(pin (measure-core "import-result"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (begin
+                         (import import-module-path)
+                         nil)
+                       (assign j (%add j 1)))) count-gauge 25 6 40 0.4 0.5) 0)
+(pin (measure-core "allocs-result"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (begin
+                         (arena/allocs import-thunk)
+                         nil)
+                       (assign j (%add j 1)))) count-gauge 50 6 40 0.4 0.5) 0)
+(delete-file import-module-path)
+(delete-directory import-module-dir)
+
 # ── Byte-gauge ────────────────────────────────────────────────────────
 # Bump-arena bytes, not object count: a scope-dropped string must return its
 # BYTES. Pinned as a range, shrink-only — catches a regression back to

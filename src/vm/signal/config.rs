@@ -281,6 +281,19 @@ impl VM {
         let after = unsafe { (*self.heap_ptr).visible_len() };
 
         let net = (after as i64) - (before as i64);
-        (SIG_OK, ctx.pair(result, Value::int(net)))
+        let answer = ctx.pair(result, Value::int(net));
+        // The thunk's result left its compiled body through the return
+        // convention carrying one owed reference — this boundary's to consume,
+        // since the pair (fresh in the call's own region) is the value the
+        // caller releases, not the result inside it. The pair's alloc-time
+        // scan already counted the embedding, so consuming the mint after the
+        // pair is built leaves the result held by the pair and freed by its
+        // cascade (the `allocs-result` oracle probe).
+        let heap = unsafe { &mut *self.heap_ptr };
+        let region = crate::value::arena::region_of(heap, result);
+        if let Some(region) = region {
+            heap.decref_region_if_present(region);
+        }
+        (SIG_OK, answer)
     }
 }

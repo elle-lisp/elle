@@ -257,6 +257,14 @@ impl VM {
         // or a sole-owned element would be freed under the returned Value
         // (`arena::pop_with_decref`). Retaining again here would double-count (one
         // leaked region per op — the `raw-pop` oracle probe).
+        // AND EXCEPT a `result_minted` native (`import`, the `compile/*-module`
+        // test loaders): its result was produced by compiled code run on this VM,
+        // so it left that code through the return convention already carrying the
+        // one owed reference the caller's release consumes — and the declarant
+        // supplies that reference itself on any path that did not run a thunk
+        // (`import`'s plugin-cache retain). Retaining again here is the same
+        // double-count — one stranded region graph per call (the
+        // `import-result` oracle probe).
         // AND EXCEPT a fiber-carrier signal (`fiber/resume`/`fiber/abort`/
         // `fiber/propagate` returning its fiber ARGUMENT as the payload): the
         // signal handler replaces the carrier with the child's actual outcome
@@ -272,7 +280,7 @@ impl VM {
                 | crate::signals::dispatch::SignalAction::Abort
                 | crate::signals::dispatch::SignalAction::Propagate
         ) && value.as_fiber().is_some();
-        if !def.moves_out && !is_fiber_carrier {
+        if !def.moves_out && !def.result_minted && !is_fiber_carrier {
             crate::value::arena::pass_through_retain(
                 unsafe { &mut *self.heap_ptr },
                 value,

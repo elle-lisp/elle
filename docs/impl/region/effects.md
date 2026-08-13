@@ -170,6 +170,35 @@ machinery for every heap-returning effect; `Immediate` calls contribute no
 result regions to the walk (the solver's `call_returns_immediate` check,
 keyed on this declaration).
 
+**The dispatch pass-through retain, and the two declarations that waive it.**
+`dispatch_native_call` funds the caller's release: a heap result living outside
+the call's own minted region gets one owning reference (the pass-through
+retain), so the caller's `DecrefValueRegion` balances against it instead of
+freeing a region owned elsewhere. Two `PrimitiveDef` flags declare "the body
+already supplied that reference," and the dispatch then skips the retain —
+taking it anyway would hand the caller two references against one release, one
+stranded region graph per call:
+
+- **`moves_out`** — the result is an element REMOVED from a container argument,
+  and the body took the retain in place, necessarily before releasing the
+  container's own reference (`arena::pop_with_decref`; the `raw-pop` oracle
+  probe pins the double-count).
+- **`result_minted`** — the result was produced by compiled code run on the
+  driving VM (`import`'s module body, the `compile/*-module` test loaders'
+  setup accumulator, each via `run_thunk_to_completion`), so it left that code
+  through the return convention already carrying the caller's reference — a
+  **thunk-run result**. The claim binds every normally-completing path: a
+  declarant path that runs no thunk supplies the reference itself (`import`'s
+  plugin paths take an explicit `EscapeSite::NativeCallResult` retain).
+  Consumed at dispatch only — no solver site reads it. Pinned by the
+  `import-result` probe in `tests/elle/oracle.lisp`.
+
+A thunk-run value that is *embedded* in a fresh result rather than returned
+bare needs no flag but still owes the mint's consumption: the fresh container's
+alloc-time scan counts the embedding, so the boundary consumes the mint after
+the container is built and the cascade frees the value with it
+(`handle_arena_allocs`; the `allocs-result` oracle probe).
+
 What the result side *does* derive is an **alias** fact for the ownership
 forest. `Fresh`, `Stores` and `Sends` each claim a heap result in the call's
 own minted region — the claim the declaration oracle below checks — and

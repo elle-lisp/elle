@@ -140,6 +140,24 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
     None
 }
 
+/// Mint the caller's owning reference for a plugin value `import` hands along.
+///
+/// `import` declares [`result_minted`](crate::primitives::def::PrimitiveDef::result_minted),
+/// so `dispatch_native_call` takes no pass-through retain for it; on the
+/// `.lisp` path the module body's return mint is that reference, and on the
+/// plugin paths — which run no thunk — this retain is. It balances the
+/// caller's `DecrefValueRegion` exactly as the dispatch retain would have,
+/// leaving the plugin cache's own reference untouched.
+fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
+    let heap = unsafe { &mut *vm.heap_ptr };
+    let region = crate::value::arena::region_of(heap, value);
+    crate::value::arena::incref_for_escape(
+        heap,
+        region,
+        crate::value::arena::EscapeSite::NativeCallResult,
+    );
+}
+
 /// Import a module file
 pub(crate) fn prim_import_file(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -205,11 +223,17 @@ pub(crate) fn prim_import_file(
             // Return cached value if already loaded (avoids re-registering primitives)
             if let Some(&cached) = vm.loaded_plugins.get(&path) {
                 vm.unmark_module_loading(&path);
+                // `import` declares `result_minted`, so the dispatch retain is
+                // skipped; this call did not run a thunk to produce the cached
+                // value, so mint the caller's reference here (the retain the
+                // dispatch would have taken for a pass-through result).
+                retain_plugin_result(vm, cached);
                 return (SIG_OK, cached);
             }
             let result = match crate::plugin::load_plugin(&path, vm, symbols) {
                 Ok(value) => {
                     vm.loaded_plugins.insert(path.clone(), value);
+                    retain_plugin_result(vm, value);
                     (SIG_OK, value)
                 }
                 Err(e) => crate::rich_error!(
@@ -231,6 +255,7 @@ pub(crate) fn prim_import_file(
                 let result = match crate::plugin::load_plugin(&path, vm, symbols) {
                     Ok(value) => {
                         vm.loaded_plugins.insert(path.clone(), value);
+                        retain_plugin_result(vm, value);
                         (SIG_OK, value)
                     }
                     Err(plugin_err) => crate::rich_error!(
@@ -305,6 +330,12 @@ pub(crate) fn prim_import_file(
                     .signal
                     .take()
                     .unwrap_or((SIG_OK, crate::value::Value::NIL));
+                // The module value left its compiled top level through the
+                // return convention, so it already carries the one owed
+                // reference the caller's release consumes — the
+                // `result_minted` declaration's claim on this path. The plugin
+                // paths above return a value no thunk minted, and take the
+                // reference explicitly (`retain_plugin_result`).
                 (SIG_OK, value)
             }
             SIG_ERROR => {
@@ -341,5 +372,6 @@ primitive! {
         example: "(import \"std/http\")",
         aliases: &["import-file", "module/import"],
         effect: RegionEffect::Mixed,
+        result_minted: true,
     }
 }

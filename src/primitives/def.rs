@@ -208,6 +208,25 @@ pub struct PrimitiveDef {
     /// store/result-shape claim, so it rides its own flag. Empty/false (the
     /// default) for every non-removing native.
     pub moves_out: bool,
+    /// Every heap result of this native already carries the caller's one owing
+    /// reference, so `dispatch_native_call` must SKIP its pass-through retain —
+    /// applying it would hand the caller two references against one release,
+    /// stranding the result's region graph per call. Declared by the
+    /// re-entrant natives whose result is produced by running compiled code on
+    /// the driving VM (`import`'s module body, the `compile/*-module` test
+    /// loaders' setup accumulator — each via `run_thunk_to_completion`): the
+    /// value leaves that code through the return convention, and its return
+    /// mint IS the caller's reference. A declarant must uphold the claim on
+    /// every normally-completing path — `import`'s plugin path returns a cached
+    /// value no thunk minted, so it takes an explicit
+    /// `EscapeSite::NativeCallResult` retain in the body. The `moves_out`
+    /// sibling states the same "body already supplied the reference" fact for
+    /// container removal; this flag states it for thunk-run production
+    /// (docs/impl/region/effects.md § "Native region effects").
+    /// Consumed only at dispatch — no solver site reads it (a thunk-run result
+    /// is a call result like any other on the compile side). False (the
+    /// default) for every native whose result the dispatch retain must fund.
+    pub result_minted: bool,
 }
 
 impl PrimitiveDef {
@@ -227,6 +246,7 @@ impl PrimitiveDef {
         embeds: &[],
         ret: RetType::Unknown,
         moves_out: false,
+        result_minted: false,
     };
 }
 
