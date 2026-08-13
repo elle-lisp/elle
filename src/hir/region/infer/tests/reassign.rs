@@ -491,6 +491,50 @@ fn letrec_wrapper_read_of_restorable_cell_is_counted() {
     }
 }
 
+/// Facet C: the module-scope container NO closure captures, so it lives in a
+/// plain slot rather than a compiled cell. Its content is re-stored all the same
+/// — the top-level model donates the producer's reference and drop-on-overwrite
+/// is that reference's ONLY release — so a whole-value read of it is exposed
+/// exactly as a read of the celled realization is, and takes the same counted
+/// reference (docs/impl/region/bindings.md § "A whole-value read of a 1-slot
+/// container takes a counted reference").
+///
+/// Keying the reader rule on the cell rather than on the re-store would leave
+/// this half uncounted, and the gate would then refuse the donation to protect
+/// the alias — leaving each displaced value released by nothing but a value route
+/// through the container's own mutated slot, which is no route at all.
+#[test]
+fn toplevel_uncelled_container_read_is_counted() {
+    let (hir, arena, info) = pipeline(
+        "(var x (%pair 1 2))\n\
+         (def keep x)\n\
+         (assign x (%pair 3 4))\n\
+         (%first keep)",
+    );
+    let sites = find_reassign_sites(&hir);
+    assert!(!sites.is_empty(), "shape must contain a reassign of x");
+    assert!(
+        !arena.get(sites[0].1).is_restorable_capture_cell(),
+        "precondition: no closure captures x, so it has no compiled cell"
+    );
+    assert!(
+        !info.counted_cell_read_sites.is_empty(),
+        "a whole-value read of an uncelled module-scope container must be counted"
+    );
+    assert!(
+        sites
+            .iter()
+            .any(|(site, _)| info.drop_on_overwrite_sites.contains(site)),
+        "with the reader counted, the container is its init's sole holder and \
+         keeps the container model"
+    );
+    assert!(
+        !info.suppressed_decref_regions.is_empty(),
+        "the donation is available again — the producer's reference becomes the \
+         container's, released by drop-on-overwrite"
+    );
+}
+
 /// The heap-carrying reassigned binding of a shape and its assign sites. Every
 /// loop-carried-cell shape below also reassigns an immediate loop counter, whose
 /// own gate always succeeds (it holds no region to be double-claimed); asserting
@@ -581,13 +625,20 @@ fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
 
 /// A GENUINE alias of the INIT costs the DONATION, not the model
 /// (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
-/// what it counts it need not"). `keep` is a different source name bound to the
+/// what it counts it need not"). `xs` is a different source name bound to the
 /// same value, not the loop's own init-forwarding edge, so the pair really is
 /// two holders — and suppressing the init region, which is keyed by region,
-/// would cancel `keep`'s own decref and free the value under a read that
+/// would cancel `xs`'s own decref and free the value under a read that
 /// outlives the first overwrite. The cell counts its init instead: a retain at
 /// the binder's store, balanced by the same drop-on-overwrite that balances
 /// every later store, with nothing suppressed and nothing claimed twice.
+///
+/// `xs` ALLOCATES the value and the cell's init merely reads it, which is the
+/// ordering this route serves: the alias's ordinary decref routes through the
+/// allocating binder's slot, and that slot is `xs`'s, which no `assign` repoints.
+/// The opposite ordering — the cell's own binder allocating and the alias reading
+/// out of it — has no such slot, and the alias takes a counted reference of its
+/// own instead (`reassign_gate_counts_a_read_of_an_uncelled_cell`).
 ///
 /// Refusing outright would cost the store-site pin as well, so each stored
 /// value's release would ride the cell binding's uses out past the loop — one
@@ -597,13 +648,13 @@ fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
 fn reassign_gate_counts_an_aliased_init() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (begin (var last (array 0 0))\n\
-                  (var keep last)\n\
+           (begin (var xs (array 0 0))\n\
+                  (var last xs)\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
                     (begin (assign last (array i 7))\n\
                            (assign i (%add i 1))))\n\
-                  (%length keep))))\n\
+                  (%length xs))))\n\
          (h 3)",
     );
     let (last, last_sites) = heap_carrying_reassign(&hir, &info);
@@ -632,6 +683,87 @@ fn reassign_gate_counts_an_aliased_init() {
         1,
         "exactly one retain, at the chain source's binder store (got {:?})",
         info.counted_cell_init_sites,
+    );
+}
+
+/// A whole-value read of an UNCELLED 1-slot container takes a counted reference,
+/// exactly as a read of the celled realization does (docs/impl/region/bindings.md
+/// § "A whole-value read of a 1-slot container takes a counted reference"). The
+/// container releases what it held at every overwrite — here the compiler's own
+/// drop-on-overwrite rather than `capture_store_with_rebind` — so `keep` borrows
+/// a reference that dies at the first `(assign last …)`, and the release the
+/// borrow needs is one no other name can supply.
+///
+/// The reference `keep` takes is its own, so `keep` is no longer a holder of the
+/// init region and the cell donates its init as an unaliased one would. That is
+/// what makes the shape reclaimable at all: the counted-init route would leave
+/// the producer's reference to be released through the slot recorded for the init
+/// region, which here is the CELL's own — a mutated slot, and no release route.
+///
+/// The discriminator is the ordering. `reassign_gate_counts_an_aliased_init`
+/// above is the same program with the alias bound FIRST, so the alias allocates,
+/// its own untainted slot carries the release, and the counted-init route runs
+/// instead.
+#[test]
+fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
+    let (hir, arena, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@last (array 0 0)]\n\
+             (let [keep last]\n\
+               (var i 0)\n\
+               (while (%lt i n)\n\
+                 (begin (assign last (array i 7))\n\
+                        (assign i (%add i 1))))\n\
+               (%length keep)))))\n\
+         (h 3)",
+    );
+    let (last, last_sites) = heap_carrying_reassign(&hir, &info);
+    assert!(
+        !arena.get(last).is_restorable_capture_cell(),
+        "precondition: the container must be UNCELLED — no closure captures it, \
+         so its content is re-stored by the compiler's drop-on-overwrite"
+    );
+    assert!(
+        !info.counted_cell_read_sites.is_empty(),
+        "a whole-value read of a 1-slot container takes a counted reference \
+         whether or not the container is celled"
+    );
+    // Every counted read is value-resolved: the placeholder rides
+    // `call_result_regions`, so the reader releases through its OWN slot rather
+    // than inheriting the container's static source region.
+    for site in &info.counted_cell_read_sites {
+        let r = info
+            .alloc_region
+            .get(site)
+            .expect("counted read site mints a placeholder region");
+        assert!(
+            info.call_result_regions.contains(r),
+            "counted-read placeholder {r:?} must be a call-result region",
+        );
+    }
+    assert!(
+        info.cell_containers.contains_key(&last),
+        "the container model still runs — the counted read changes who holds the \
+         init, not whether the cell is a container"
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "drop-on-overwrite is the release of the reference the cell was donated"
+    );
+    assert!(
+        info.counted_cell_init_sites.is_empty(),
+        "with the reader counted the cell is the init's sole holder, so the \
+         donation is available and no init retain is needed (got {:?})",
+        info.counted_cell_init_sites,
+    );
+    let regs = &info.binding_source_regions[&last];
+    assert!(
+        regs.iter()
+            .any(|r| info.suppressed_decref_regions.contains(r)),
+        "the donated init region's ordinary decref is suppressed — its release is \
+         the cell's drop-on-overwrite (regs={regs:?})",
     );
 }
 

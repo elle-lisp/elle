@@ -526,14 +526,13 @@ impl RegionInference {
         r
     }
 
-    /// The reader half of a reassigned-captured-cell 1-slot container: when a
-    /// binding `reader` is initialised from a WHOLE-VALUE read of an
-    /// `is_restorable_capture_cell` binding, give the reader a COUNTED reference
-    /// of its own instead of aliasing the cell's value uncounted. The cell's
-    /// overwrite (`capture_store_with_rebind`) decrefs the displaced prior
-    /// unconditionally, so an uncounted alias is freed under the reader by the
-    /// next overwrite — the captured-alias use-after-free
-    /// (docs/impl/region/bindings.md § "Captured reassigned cells").
+    /// The reader half of the 1-slot container: when a binding `reader` is
+    /// initialised from a WHOLE-VALUE read of a container binding, give the reader
+    /// a COUNTED reference of its own instead of aliasing the container's value
+    /// uncounted. The container releases what it held at every re-store, so an
+    /// uncounted alias is freed under the reader by the next overwrite
+    /// (docs/impl/region/bindings.md § "A whole-value read of a 1-slot container
+    /// takes a counted reference").
     ///
     /// Realised as Rule 5's "new reference" pass-through: mint a placeholder
     /// region at the read node (it lands in `call_result_regions`, so the reader
@@ -542,14 +541,19 @@ impl RegionInference {
     /// `[read_r]` for the reader's `binding_regions`, or the unmodified
     /// `init_regions` when the treatment does not apply.
     ///
-    /// Applies to BOTH scopes (fn-local upvalue read and module-scope cell read),
-    /// which the `is_restorable_capture_cell` predicate covers uniformly. Skipped
-    /// when the reader is itself a capture cell — its own store/overwrite
+    /// The source test is `is_one_slot_container`, which reads the re-store fact
+    /// without the realization: a captured cell whose update opcode decrefs the
+    /// displaced prior, and an uncelled `@`-mutable local whose drop-on-overwrite
+    /// does the same, expose a reader identically. It covers both scopes (fn-local
+    /// upvalue read and module-scope cell read) for the same reason.
+    ///
+    /// Skipped when the reader is itself a capture cell — its own store/overwrite
     /// accounting owns its references (the alias-of-a-mutable-by-a-mutable
     /// pairing) — and for an immediate-valued read (no heap reference to count).
     /// Element reads (`first`/`get`/destructure) never reach here: they are not a
-    /// bare `Var`/`DerefCell` of the cell, and an element is independently counted
-    /// by its parent's alloc-scan (it cascades, never frees under the reader).
+    /// bare `Var`/`DerefCell` of the container, and an element is independently
+    /// counted by its parent's alloc-scan (it cascades, never frees under the
+    /// reader).
     fn counted_cell_read_regions(
         &mut self,
         reader: Binding,
@@ -567,7 +571,7 @@ impl RegionInference {
             _ => return init_regions,
         };
         if init_regions.is_empty()
-            || !self.arena().get(source).is_restorable_capture_cell()
+            || !self.arena().get(source).is_one_slot_container()
             || self.arena().get(reader).needs_capture()
         {
             return init_regions;

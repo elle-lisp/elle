@@ -127,6 +127,24 @@ impl BindingInner {
         }
     }
 
+    /// A **1-slot container**: a binding whose holder is re-pointed during its
+    /// life, so it releases what it held at every re-store
+    /// (docs/impl/region/bindings.md).
+    ///
+    /// This is the same fact as [`is_restorable_capture_cell`](Self::is_restorable_capture_cell)
+    /// with the realization dropped from the question. A captured binding
+    /// re-stores through the cell's update opcode, which decrefs the displaced
+    /// prior; an `@`-mutable local no closure captures re-stores through a plain
+    /// slot store, whose displaced prior the compiler drops at the same point.
+    /// Both release the reference a whole-value read of the binding borrowed, so
+    /// both oblige the reader to take a counted one
+    /// (`RegionInfo::counted_cell_read_sites`). Splitting the obligation by
+    /// realization would leave the uncelled half relying on a producer reference
+    /// the container may itself have been donated.
+    pub fn is_one_slot_container(&self) -> bool {
+        self.is_restorable_capture_cell() || self.is_mutated
+    }
+
     /// Mark this binding as captured by a nested closure. The analyzer's sole
     /// writer (`analyze::scopes::lookup`), called when a name resolves across a
     /// function boundary. Routing the write through a setter keeps the field

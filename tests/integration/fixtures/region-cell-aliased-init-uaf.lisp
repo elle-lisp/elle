@@ -70,9 +70,11 @@
     (list (get xs 1) (length out))))
 
 # The alias taken AFTER the cell binding, so the CELL's own binder is what
-# allocated the init. The counted store still runs, so the cell's reference and
-# the alias's are still distinct; only which slot carries the producer's release
-# changes.
+# allocated the init. A whole-value read of a 1-slot container takes a COUNTED
+# reference of its own here (docs/impl/region/bindings.md § "A whole-value read of
+# a 1-slot container takes a counted reference"), which hands the donation back to
+# the cell — so the cell's reference and the alias's are still distinct, and the
+# alias's release routes through its own slot rather than the cell's.
 (defn alias-after [n]
   (var r (list 1 2 3 4 5))
   (let [keep r]

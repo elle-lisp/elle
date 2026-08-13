@@ -50,9 +50,9 @@
   b48(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
 [return_frontier]
-  [r51]
+  [r52]
 [suppressed_decref_regions]
-  []
+  [r36, r40]
 [region_instrs]
   ; entry <anon>
     block0: DecrefRegion s0
@@ -89,23 +89,26 @@
     block54: DecrefValueRegion v315
     block53: DecrefValueRegion v319
     block53: DecrefValueRegion v321
-    block65: DecrefValueRegion v353
+    block65: IncrefValueRegion v339
+    block65: DecrefValueRegion v350
     block65: DecrefValueRegion v355
-    block65: IncrefRegion s2
-    block64: DecrefValueRegion v364
-    block69: DecrefValueRegion v366
-    block69: DecrefRegion s3
-    block70: DecrefValueRegion v379
-    block1: DecrefValueRegion v381
-    block1: DecrefValueRegion v391
-    block72: DecrefValueRegion v417
-    block72: DecrefValueRegion v422
+    block65: DecrefValueRegion v357
+    block65: IncrefValueRegion v362
+    block65: DecrefValueRegion v363
+    block64: DecrefValueRegion v367
+    block69: DecrefValueRegion v369
+    block69: DecrefRegion s2
+    block70: DecrefValueRegion v382
+    block1: DecrefValueRegion v384
+    block1: DecrefValueRegion v394
+    block72: DecrefValueRegion v420
+    block72: DecrefValueRegion v425
+    block72: DecrefRegion s3
+    block72: DecrefValueRegion v438
     block72: DecrefRegion s4
-    block72: DecrefValueRegion v435
-    block72: DecrefRegion s5
-    block74: DecrefValueRegion v439
-    block73: DecrefValueRegion v441
-    block73: IncrefValueRegion v446
-    block73: DecrefValueRegion v447
-    block73: DecrefValueRegion v449
-    block73: DecrefValueRegion v451
+    block74: DecrefValueRegion v442
+    block73: DecrefValueRegion v444
+    block73: IncrefValueRegion v449
+    block73: DecrefValueRegion v450
+    block73: DecrefValueRegion v452
+    block73: DecrefValueRegion v454

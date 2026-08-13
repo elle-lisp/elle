@@ -277,8 +277,7 @@
 # (docs/impl/selfrec.md § "The deferral's escape gate is the fiber frontier alone").
 # Its control `recur-local-foreign-mint` is not self-recursive, so nothing strands it
 # in the first place and the gap isolates the strand rather than the retain.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"
-                   "cell-alias-after"])
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
 # F6 has NO declared probe: a cursor walk's rate was the ALIASED INIT, not the
 # cursor. `list-cursor` is now a CLOSED control (undeclared, like
 # `rest-array-copy`) for the counted-init half of the 1-slot container: a cell
@@ -288,6 +287,13 @@
 # donates it must hold alone; what it counts it need not"). `each-manual` is its
 # array control: an index walk names nothing it moves off and reads 0 either way,
 # so the gap between the two isolates the cell rather than the loop.
+# `cell-alias-after` is its ORDERING control (undeclared, like `rest-array-copy`):
+# the same walk with the alias taken after the cell, so a whole-value read of the
+# container takes a counted reference of its own and the cell donates its init
+# (docs/impl/region/bindings.md § "A whole-value read of a 1-slot container takes
+# a counted reference"). The two must stay a PAIR — each isolates one of the two
+# routes the init's producer reference can take — so a regression of either trips
+# the completeness gate rather than hiding behind its sibling.
 
 (def @n-defects 0)
 (def @n-by-design 0)
@@ -898,15 +904,18 @@
           (assign n (%add n 1))
           (assign r (rest r)))
         n)) 0]  # The same walk with the alias taken AFTER the cell binding, so the CELL's own
-   # binder is what allocated the init. The counted-init route applies either way
-   # — the model runs and every step's release stays inside the loop — but the
-   # producer's own reference is released by a value route through the slot that
-   # names the init region, and that slot is the reassigned cell's, which no
-   # release may route through (docs/impl/region/bindings.md § "a mutated slot is
-   # not a release route"). One region per call, the chain's whole object graph
-   # with it. `list-cursor` directly above is the same walk with the alias taken
-   # BEFORE, where the alias's own slot carries the route and the rate is 0, so
-   # the gap between the two isolates the route rather than the model.
+   # binder is what allocated the init and the counted-init route has no untainted
+   # slot to release the producer's reference through — the only one recorded for
+   # the init region is the reassigned cell's, and no release may route through a
+   # mutated slot. What reclaims it is the reader instead: `keep` is a whole-value
+   # read of a 1-slot container, so it takes a COUNTED reference of its own,
+   # released through its own never-repointed slot, which withdraws it from the
+   # sole-held question and hands the donation back to the cell
+   # (docs/impl/region/bindings.md § "A whole-value read of a 1-slot container
+   # takes a counted reference"). `list-cursor` directly above is the same walk
+   # with the alias taken BEFORE, where the alias allocates and the counted-INIT
+   # route runs, so the gap between the two isolates the route rather than the
+   # model.
    ["cell-alias-after"
     (fn [j]
       (let [@r (list 1 2 3 4)]
@@ -915,7 +924,7 @@
           (while (not (empty? r))
             (assign n (%add n 1))
             (assign r (rest r)))
-          (list n (first keep))))) 4]
+          (list n (first keep))))) 0]
    ["format" (fn [j] (string "iter " j " of " 100)) 0]
    ["pipeline"
     (fn [j]

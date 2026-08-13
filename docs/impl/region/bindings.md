@@ -141,10 +141,17 @@ model. Where another read binding names the init value — `(let [xs (list …)
 drop-on-overwrite that balances every later store, while the init region keeps
 its ordinary decref — routed, as any release is, through the slot recorded for
 it, which is the *allocating* binder's. Nothing is suppressed, so nothing is
-claimed twice, and the alias's own read stays safe however late it sits. (Where
-the allocating binder is the cell itself, that route meets "a mutated slot is not
-a release route" below and the release is skipped, which over-keeps and never
-mis-frees.)
+claimed twice, and the alias's own read stays safe however late it sits.
+
+That route is the allocating binder's slot, so the shape it serves is the one
+whose init the **alias** allocated — `xs` above, whose slot no `assign`
+repoints. An alias of a value the **cell's own** binder allocated has no such
+slot to offer: the only recorded one is the cell's, which "a mutated slot is not
+a release route" (below) refuses. Such an alias instead takes a reference of its
+own wherever its read is a whole-value one (next section), which withdraws it
+from the sole-held question and hands the donation back. Where it is not — a
+branch over the cell, `(let [k (if c r r)] …)` — the alias stays a holder, the
+counted-init route runs, and the init region over-keeps to scope exit.
 
 Refusing instead costs the **store-site pin**, not merely the donation. On the
 unsuppressed baseline the cell holds no reference at all, so each stored value is
@@ -160,6 +167,39 @@ a store to retain at, which the chain's source binder supplies; a chain whose
 source is a parameter has no such store, so it keeps donate-or-refuse. The
 reference is the test: `reassign_gate_counts_an_aliased_init` for the admission,
 `reassign_gate_refuses_an_aliased_assign_value` for the decline.
+
+**A whole-value read of a 1-slot container takes a counted reference.** The
+container releases what it held at every re-store, so a name bound to a bare
+`Var` (or `DerefCell`-wrapped) read of it borrows a reference that dies at the
+next overwrite. Rule 5's "new reference" pass-through answers it: the read mints
+a placeholder region — a call-result region, so the reader carries a value-based
+release at its own last use — and takes an `IncrefValueRegion` at the binder
+(`RegionInfo::counted_cell_read_sites`, `emit_counted_cell_read_retain`).
+
+The predicate is **re-stored content**, not the container's realization
+(`BindingInner::is_one_slot_container`). A captured cell re-stores through
+`capture_store_with_rebind`, which decrefs the displaced prior; an uncelled
+`@`-mutable local re-stores through the compiler's own drop-on-overwrite. Both
+release the reference the read borrowed, so both expose a reader identically, and
+splitting the rule by realization would leave the uncelled half relying on a
+producer reference the cell may not even own. A reader that is itself celled is
+exempt — its own store opcode owns its references.
+
+Counting the read is also what keeps the **donation** available. The reader holds
+a reference of its own, so it is not a holder of the container's init region, and
+that region's one remaining claim is the cell's — which drop-on-overwrite and the
+content drop already release. The reader's own release routes through the
+reader's slot, which is bound once and never repointed, so it has an untainted
+route by construction where the init region has none. The reference is the test:
+`reassign_gate_counts_a_read_of_an_uncelled_cell` for the admission,
+`reassign_gate_counts_an_aliased_init` for the alias that is *not* such a read and
+so keeps the counted-init route, and
+`tests/elle/region-cell-alias-after.lisp` for the measured shape.
+
+An **element** read (`first`/`get`/destructuring) is not a whole-value read and
+needs no counting: an element's region is independently counted by its parent's
+alloc-time scan, so the parent's demise cascades rather than freeing the element
+under the reader.
 
 **A loop parameter's init source is not a second holder.** `sole_held` counts
 distinct *bindings*, and functionalization gives a cell carried across a loop a
@@ -361,28 +401,17 @@ by the callee's owned-param release, which always fires.
 binding is the same 1-slot container realized at runtime — the capture
 cell's update increfs the new content and decrefs the displaced prior
 unconditionally; there is no fallback to suppress, because the cell's RC
-semantics live in the update opcode itself. The soundness obligation
-therefore falls on readers: **a direct whole-value binding read out of a
-reassigned captured cell takes a counted reference** — incref at the bind,
-value-based release at the reader's last use, exactly Rule 5's "new
-reference" pass-through discipline. An uncounted alias would be freed under
-the reader by the next reassignment's overwrite-release (the captured-alias
-double-free). The obligation is scope-independent — a fn-local
-`is_restorable_capture_cell` read through an upvalue by a nested closure
-(the std/process scheduler's `sched-run` `(let [batch ready] (assign ready
-@[]) (each pid in batch …))`, where `ready` is a `make-scheduler` local) is
-exactly as exposed as a top-level `def @cell` read, and both are pinned by
-`region-reassign-captured-cell-reader.lisp`. The read is recognised at the
-binding init (`RegionInfo::counted_cell_read_sites`: a bare `Var`/`DerefCell`
-of an `is_restorable_capture_cell` source), minted a placeholder region so it
-rides `call_result_regions` for the value-based release, and retained by an
-`IncrefValueRegion` at the read (`emit_counted_cell_read_retain`). Element
-reads (`first`/`get`/destructuring) need no counting: an element's region is
-independently counted by its parent's alloc-time scan, so the parent's demise
-cascades rather than freeing the element under the reader. A reader that is
-itself a capture cell is not counted (its own cell machinery owns its
-references); the alias-of-a-mutable-by-a-mutable pairing stays within the
-cells' own store/overwrite accounting.
+semantics live in the update opcode itself. Its readers are covered by the
+general rule above ("A whole-value read of a 1-slot container takes a counted
+reference"): the overwrite-release is `capture_store_with_rebind`'s here rather
+than the compiler's drop-on-overwrite, and an uncounted alias would be freed
+under the reader by it (the captured-alias double-free). The obligation is
+scope-independent — a fn-local `is_restorable_capture_cell` read through an
+upvalue by a nested closure (the std/process scheduler's `sched-run`
+`(let [batch ready] (assign ready @[]) (each pid in batch …))`, where `ready`
+is a `make-scheduler` local) is exactly as exposed as a top-level `def @cell`
+read, and both are pinned by
+`region-reassign-captured-cell-reader.lisp`.
 
 The writer side owes one rule of its own, at the **init**. A compiled-cell
 binding's slot holds the CELL, so routing the init value's release through that
