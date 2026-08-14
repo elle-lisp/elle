@@ -2,8 +2,9 @@ use super::*;
 
 /// The sweep must be *observable* and *idempotent*. The residual live-region
 /// count is the standing oracle: it is the set of regions whose RC never reached
-/// zero — the open leaks (the leak-suite canaries, tests/elle/leak*.lisp) — and
-/// falls to zero as those are fixed, with no change to the teardown itself.
+/// zero — and falls to zero as those are fixed, with no change to the teardown
+/// itself. `tests/elle/oracle.lisp` measures the same residue as a per-op rate
+/// on a running program; this counts what is left once the process is gone.
 #[test]
 fn process_teardown_is_observable_and_idempotent() {
     let mut rt = Runtime::new();
@@ -160,8 +161,8 @@ fn teardown_residue_census_nested_list() {
 }
 
 /// Diagnostic: residue census for a concat loop — decomposes the dominant
-/// runtime leak class (the leak*.lisp residue) by tag. `concat` is a core.lisp
-/// closure that folds per-call lambdas over a mutable accumulator.
+/// runtime residue class by tag. `concat` is a core.lisp closure that folds
+/// per-call lambdas over a mutable accumulator.
 ///   `cargo test --test region_process_teardown teardown_residue_census_concat_loop -- --ignored --nocapture`
 #[test]
 #[ignore = "diagnostic: residue census for a concat loop (runtime leak class)"]

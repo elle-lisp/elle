@@ -323,9 +323,10 @@ Two non-negotiable properties:
 
 2. **Observable.** The sweep reports the live region census afterward
    (`Runtime::teardown` returns it; `--stats` prints it). The target is **zero**
-   regions remaining. A non-zero residue is the standing list of open leaks (the
-   leak-suite suspects, `tests/elle/leak*.lisp`): the number *is* the remaining
-   work, not a tuning knob.
+   regions remaining. A non-zero residue is the standing list of open leaks: the
+   number *is* the remaining work, not a tuning knob. `tests/elle/oracle.lisp`
+   measures the same property as a per-op leak rate while a program runs;
+   `tests/region_process_teardown` counts what survives the process.
 
 Because the sweep is RC-driven, the residue equals the set of regions whose RC
 never reached zero — the true leaks — rather than being hidden by a blanket free.

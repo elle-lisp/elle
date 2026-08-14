@@ -171,12 +171,16 @@ fn macro_expansion_output_pairs_are_reclaimed() {
 }
 
 /// The end-state target, pinned but not yet reachable: zero regions survive a
-/// full run + teardown. RED until the leak-suite canaries are fixed; the
-/// teardown scaffolding does not change when it greens — only the leaks do.
-/// Kept as an `#[ignore]`'d standing oracle so `cargo test -- --ignored` reports
-/// the current residue as the remaining-work number.
+/// full run + teardown. The teardown scaffolding does not change when this
+/// greens — only the residue does.
+///
+/// `tests/elle/oracle.lisp` measures the same property as a per-op leak RATE on
+/// a running program, and is the gate that has to stay green. This one is the
+/// absolute end state: not one region left after the process tears down. Kept
+/// `#[ignore]`'d so `cargo test -- --ignored` reports the current residue as
+/// the remaining-work number without failing the suite.
 #[test]
-#[ignore = "RED until the leak-suite canaries (tests/elle/leak*.lisp) are fixed; reports current residue"]
+#[ignore = "standing oracle: reports the current teardown residue, target is zero"]
 fn process_teardown_frees_all_regions() {
     let mut rt = Runtime::new();
     {
