@@ -117,8 +117,9 @@
 
 # with-traits on a mutable type creates a new value with its own data copy.
 # The data is independent from the original after construction.
-# (The heap storage model uses RefCell<Vec<...>>, not Rc<RefCell<...>>,
-# so cloning creates an independent copy, not a shared reference.)
+# (The store is `Rc<RefCell<Vec<...>>>`; independence comes from
+# `clone_with_traits` building a FRESH Rc over a cloned store, not from the
+# absence of an Rc.)
 (begin
   (def orig @[1 2 3])
   (def traited (with-traits orig {:tag :x}))  # Both start with length 3
@@ -348,3 +349,44 @@
   (assert (not ok?) "with-traits rejects NativeFn (infrastructure type)")
   (assert (= (get err :error) :type-error)
           "with-traits rejects NativeFn (infrastructure type)"))
+
+# ============================================================================
+# Wrapper identity — with-traits over a handle-backed value
+# ============================================================================
+
+# Most heap types OWN their data, so `with-traits` yields a genuinely distinct
+# entity and identity is the heap slot. Three types instead WRAP a handle that
+# outlives any one slot — fiber, thread handle, and plugin external — so their
+# traited wrapper names the SAME entity and must compare, hash, and order as
+# that entity. Four impls encode this (PartialEq in value/repr/eq.rs, Hash in
+# value/repr/traits.rs, Ord in value/repr/traits/ord.rs, TableKey in
+# value/types.rs) and a map needs all four to agree; this pins them together.
+#
+# Were identity the slot instead, a scheduler map keyed on fibers (`waiters`,
+# `completed`) would treat a traited fiber as a different fiber and desync.
+
+# A fiber and its traited wrapper are one fiber.
+(begin
+  (def f (fiber/new (fn [] 42) |:yield|))
+  (def tf (with-traits f {:tag :x}))
+  (assert (identical? f tf) "a traited fiber is identical? to the fiber")
+  (assert (= f tf) "a traited fiber is = to the fiber")
+  (assert (= (get (traits tf) :tag) :x) "the wrapper still carries its table"))
+
+# They collapse to ONE key: Hash and Ord agree with PartialEq.
+(begin
+  (def f (fiber/new (fn [] 42) |:yield|))
+  (def tf (with-traits f {:tag :x}))
+  (def m @{})
+  (put m f :first)
+  (put m tf :second)
+  (assert (= (length (keys m)) 1)
+          "a fiber and its traited wrapper are one map key, not two")
+  (assert (= (get m f) :second)
+          "the wrapper's write lands on the fiber's own entry"))
+
+# The data-owning contrast: a closure's wrapper IS a distinct entity.
+(begin
+  (def c (fn [] 1))
+  (assert (not (identical? c (with-traits c {:tag :x})))
+          "a traited closure is a distinct entity (it owns its data)"))

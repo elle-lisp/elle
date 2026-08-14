@@ -17,7 +17,8 @@ use crate::value::Value;
 /// - value must be one of the 19 traitable heap types
 /// - table must be an immutable struct (LStruct)
 /// - returns a new heap object with the same data and traits = table
-/// - for mutable types, data storage is shared (same RefCell)
+/// - for mutable collections the store is COPIED, so the result is
+///   independent of the original (see `clone_with_traits`)
 pub(crate) fn prim_with_traits(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -66,9 +67,20 @@ pub(crate) fn prim_with_traits(
 
 /// Clone a heap value, replacing the traits field with `table`.
 ///
-/// For mutable types (LArrayMut, LStructMut, LStringMut, LBytesMut, LSetMut,
-/// LBox), the data is shared (same RefCell Rc). Mutations to the original are
-/// visible through the traited copy.
+/// The copy is independent for every type that owns its data: mutable
+/// collections (LArrayMut, LStructMut, LStringMut, LBytesMut, LBox,
+/// CaptureCell) get a fresh `Rc` over a cloned store, and slice-backed
+/// immutables get their payload copied into the clone's own region.
+///
+/// Fiber, ThreadHandle, and External are the exception, and must be: they
+/// wrap a shared handle rather than owning data, so the clone names the same
+/// fiber, thread, or plugin object. Value identity follows the handle, so the
+/// two wrappers stay equal (`repr/eq.rs`, "Wrapper variants take their
+/// identity from the handle").
+///
+/// KNOWN DIVERGENCE: LSetMut clones the `Rc` instead of the store, so
+/// `(with-traits @set tbl)` aliases the original — unlike every sibling
+/// collection above.
 ///
 /// For infrastructure types (Float, NativeFn, LibHandle, FFISignature,
 /// FFIType), returns Err.
@@ -101,11 +113,10 @@ unsafe fn clone_with_traits(
             rest: pair.rest,
             traits: table,
         }))),
-        // Mutable collections wrap their backing storage in Rc<RefCell<_>>
-        // so cross-fiber sharing survives deep_copy_to_outbox. But
-        // with-traits is documented as returning an INDEPENDENT copy: a
-        // push to the original must not be visible through the traited
-        // copy. So we materialize a fresh Rc with a cloned inner value.
+        // Mutable collections: materialize a fresh Rc over a cloned inner
+        // value, so the traited copy is INDEPENDENT — a push to the original
+        // is not visible through it. Cloning the Rc instead would share one
+        // store between two values the user sees as separate.
         HeapObject::LArrayMut { data, .. } => Ok(ctx.alloc(HeapObject::LArrayMut {
             data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,

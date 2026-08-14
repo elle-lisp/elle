@@ -64,7 +64,7 @@ impl VM {
         // ── Direct fiber resumption optimization ───────────────────
         //
         // For subsequent resumes whose first suspended frame is FiberResume,
-        // the full swap protocol (take/wire/swap/install-heap/outbox/execute/
+        // the full swap protocol (take/wire/swap/execute/status/extract/
         // swap-back/put) is wasted: resume_suspended would immediately set
         // pending_fiber_resume and return SIG_SWITCH without executing any
         // bytecode. Short-circuit: consume the FiberResume frame, wire the

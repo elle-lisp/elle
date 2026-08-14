@@ -16,6 +16,25 @@
 //! Key equivalence (Value::Hash, Value::Ord, TableKey) is a third,
 //! separate relation: number-coercive like `Numeric` but NaN-reflexive
 //! like `Identity`, so NaN-holding values stay findable in sets.
+//!
+//! ## Wrapper variants take their identity from the handle
+//!
+//! Most heap variants *are* the entity they hold — the slot is the value,
+//! so the slot pointer is its identity. Three are wrappers around a handle
+//! that outlives any single slot: `Fiber` (an `Rc`-backed `FiberHandle`),
+//! `ThreadHandle` (the `Arc<Mutex<_>>` behind `result`), and `External`
+//! (an `Rc<dyn Any>`).
+//!
+//! Two slots can name one such entity, because `with-traits` mints a fresh
+//! wrapper over a clone of the same handle (`primitives/traits.rs`,
+//! `clone_with_traits`). So these three compare, hash, and order by the
+//! handle, never by the slot address. Keyed on the slot, `(with-traits f
+//! tbl)` would be a different fiber from `f`, and every scheduler map keyed
+//! on fibers (`waiters`, `completed`) would desync.
+//!
+//! Four impls encode this relation and a map needs all four to agree:
+//! `PartialEq` here, `Hash` in `repr/traits.rs`, `Ord` in
+//! `repr/traits/ord.rs`, and `TableKey` in `value/types.rs`.
 
 use super::Value;
 use crate::value::cycle;
@@ -198,23 +217,21 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
             // LibHandle comparison
             (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1 == h2,
 
-            // ThreadHandle comparison: stable identity via the `Arc`
-            // backing `result`. Comparing slot pointers would break
-            // when a ThreadHandle value is relocated (e.g., copied to
-            // another fiber's outbox on yield) — the same underlying
-            // handle would then become a distinct map key.
+            // ThreadHandle comparison: identity is the `Arc` backing
+            // `result` (see the module doc, "Wrapper variants take their
+            // identity from the handle"). Comparing slot pointers would
+            // make the `with-traits` wrapper a distinct map key from the
+            // thread it names.
             (
                 HeapObject::ThreadHandle { handle: h1, .. },
                 HeapObject::ThreadHandle { handle: h2, .. },
             ) => std::sync::Arc::ptr_eq(&h1.result, &h2.result),
 
-            // Fiber comparison: stable identity via the `Rc` inside
-            // the `FiberHandle`. Slot-pointer equality is wrong here
-            // because `deep_copy_to_outbox` re-allocates the Fiber
-            // slot on yield; both slots wrap clones of the same
-            // handle and must be treated as the same fiber so that
-            // scheduler maps keyed on fibers (`waiters`, `completed`)
-            // don't desync.
+            // Fiber comparison: identity is the `FiberHandle` id (see
+            // the module doc, "Wrapper variants take their identity from
+            // the handle"). Two slots wrapping clones of one handle are
+            // the same fiber, so scheduler maps keyed on fibers
+            // (`waiters`, `completed`) never desync.
             (HeapObject::Fiber { handle: h1, .. }, HeapObject::Fiber { handle: h2, .. }) => {
                 h1.id() == h2.id()
             }
@@ -235,10 +252,9 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
                 std::ptr::eq(a_obj as *const _, b_obj as *const _)
             }
 
-            // External object comparison: stable identity via the
-            // `Rc<dyn Any>` backing `data`. See Fiber/ThreadHandle
-            // rationale — slot pointers are unstable across outbox
-            // relocation.
+            // External object comparison: identity is the `Rc<dyn Any>`
+            // backing `data` — the same wrapper rule as Fiber and
+            // ThreadHandle above.
             (HeapObject::External { obj: o1, .. }, HeapObject::External { obj: o2, .. }) => {
                 std::rc::Rc::ptr_eq(&o1.data, &o2.data)
             }

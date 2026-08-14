@@ -77,14 +77,11 @@ impl VM {
             super::release_fiber_owned(unsafe { &mut *self.heap_ptr }, owned);
         }
 
-        // 6. Extract the result before swapping back.
-        //    Deep-copy any private-pool values to the outbox so the parent
-        //    doesn't read dangling pointers.  Two cases:
-        //      a) result_value itself is in the private pool — deep-copy it.
-        //      b) result_value is in the outbox but contains nested references
-        //         to the private pool (e.g. yield [:send target msg] where
-        //         msg was allocated before OutboxEnter) — deep-copy it so
-        //         nested values are relocated too.
+        // 6. Extract the result before swapping back. No copy is needed:
+        //    parent and child share the VM's single heap (step 3a), so the
+        //    result Value the parent reads is the very object the child
+        //    produced. Keeping it alive is a region question, not a copying
+        //    one — step 6a answers it for the terminal case.
         let result_value = self
             .fiber
             .signal

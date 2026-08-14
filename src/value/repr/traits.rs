@@ -109,11 +109,12 @@ impl Hash for Value {
                 HeapObject::FFISignature(sig, _) => sig.hash(state),
                 HeapObject::FFIType(desc) => desc.hash(state),
 
-                // Stable-identity types: hash by the backing Rc/Arc
-                // pointer, NOT by the slot address. Slot pointers are
-                // unstable under outbox relocation on fiber yield;
-                // hashing them would break map lookups across yields.
-                // Keep these in sync with the PartialEq arms above.
+                // Wrapper types: hash the backing Rc/Arc pointer, NOT the
+                // slot address, because `with-traits` mints a second slot
+                // over the same handle (see `repr/eq.rs`, "Wrapper variants
+                // take their identity from the handle"). Hashing the slot
+                // would put the two wrappers in different buckets.
+                // Keep these in sync with the PartialEq arms in eq.rs.
                 HeapObject::Fiber { handle, .. } => handle.id().hash(state),
                 HeapObject::ThreadHandle { handle, .. } => {
                     (std::sync::Arc::as_ptr(&handle.result) as usize).hash(state)
@@ -124,10 +125,11 @@ impl Hash for Value {
 
                 // Remaining reference-identity types (Closure,
                 // ManagedPointer, Parameter, Syntax): hash by payload (the
-                // slot pointer). These are not subject to outbox relocation
-                // under the current model. (Native-fn is an immediate whose
-                // payload is its prim id, so it never reaches this arm with
-                // an address.)
+                // slot pointer). These wrap no shared handle — their
+                // `with-traits` copy duplicates the data outright, so it is
+                // a genuinely distinct entity and the slot IS the identity.
+                // (Native-fn is an immediate whose payload is its prim id,
+                // so it never reaches this arm with an address.)
                 _ => self.payload.hash(state),
             }
         }

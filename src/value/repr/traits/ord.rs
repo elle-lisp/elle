@@ -230,10 +230,10 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         // LibHandle — by u32 ID
         (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1.cmp(h2),
 
-        // Fiber — stable identity via FiberHandle's Rc pointer.
-        // Matches PartialEq; slot pointers are unstable across outbox
-        // relocation on yield, so BTreeMap keyed on Fiber values would
-        // lose entries if compared by slot address.
+        // Fiber — identity is the FiberHandle id, matching PartialEq (see
+        // `repr/eq.rs`, "Wrapper variants take their identity from the
+        // handle"). A BTreeMap keyed on Fiber values would lose entries if
+        // it ordered by slot address instead.
         (HeapObject::Fiber { handle: h1, .. }, HeapObject::Fiber { handle: h2, .. }) => {
             h1.id().cmp(&h2.id())
         }

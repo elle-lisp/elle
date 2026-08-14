@@ -327,13 +327,6 @@ one read path that still allocates on the scheduler's heap. ReadAll is
 typically called once per file (not in a loop), so the leak is bounded by
 file count, not iteration count. The optimization can be deferred.
 
-### SharedAllocator / Outbox
-
-Pre-allocated buffers live on the fiber's heap. If the fiber has a
-SharedAllocator (yielding child), the buffer is on the SharedAllocator's
-pool — which is the parent's pool. The parent can read it directly.
-No conflict with existing inter-fiber routing.
-
 ## Buffer lifetime safety
 
 The fiber allocates the buffer before yielding. The fiber is parked while

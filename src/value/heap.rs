@@ -144,20 +144,20 @@ pub enum HeapObject {
 
     /// Mutable array.
     ///
-    /// `data` is `Rc<RefCell<...>>` so that cross-fiber sharing survives
-    /// `deep_copy_to_outbox`: when a fiber yields an `@[]` through a
-    /// request (e.g. `{:op :select :fibers pool}`), the outbox copy
-    /// shares the same backing `Vec<Value>` as the original. Mutations
-    /// made by one side are visible to the other — without this, the
-    /// scheduler would see a snapshot of the pool at yield time and
-    /// miss fibers pushed after it parked in `select-sets`.
+    /// The store is a growable `Vec` on the Rust heap behind a `RefCell`,
+    /// not a region-inline `RegionSlice` like its immutable twin `LArray`:
+    /// `push` grows it, and a region slice is fixed-length once allocated.
+    /// The `RefCell` is the mutable-store seam — every write goes through a
+    /// tracked funnel (`push_with_incref`, …) so the region's outgoing edges
+    /// stay recorded (docs/impl/region/rules.md Rule 5, mutable store; see
+    /// `value/AGENTS.md` § "The mutable-store seam").
     LArrayMut {
         data: std::rc::Rc<RefCell<Vec<Value>>>,
         traits: Value,
     },
 
-    /// Mutable struct (hash map). See `LArrayMut` for the Rc-sharing
-    /// rationale (cross-fiber live updates through yield).
+    /// Mutable struct (hash map). See `LArrayMut` for the growable-store
+    /// rationale.
     LStructMut {
         data: std::rc::Rc<RefCell<BTreeMap<TableKey, Value>>>,
         traits: Value,
@@ -183,8 +183,8 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable @string (byte sequence). Rc-shared for cross-fiber
-    /// live-update semantics across `deep_copy_to_outbox`.
+    /// Mutable @string (byte sequence). See `LArrayMut` for the
+    /// growable-store rationale.
     LStringMut {
         data: std::rc::Rc<RefCell<Vec<u8>>>,
         traits: Value,
@@ -196,16 +196,16 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable byte sequence (binary data workspace). Rc-shared for
-    /// cross-fiber live-update semantics across `deep_copy_to_outbox`.
+    /// Mutable byte sequence (binary data workspace). See `LArrayMut` for
+    /// the growable-store rationale.
     LBytesMut {
         data: std::rc::Rc<RefCell<Vec<u8>>>,
         traits: Value,
     },
 
     /// User-facing mutable box, created via `(box v)`.
-    /// Not auto-unwrapped by LoadUpvalue. Rc-shared for cross-fiber
-    /// live-update semantics across `deep_copy_to_outbox`.
+    /// Not auto-unwrapped by LoadUpvalue. The `RefCell` is the mutable-store
+    /// seam — see `LArrayMut`.
     LBox {
         cell: std::rc::Rc<RefCell<Value>>,
         traits: Value,
@@ -213,8 +213,10 @@ pub enum HeapObject {
 
     /// Compiler-created capture cell for mutable captured variables.
     /// Auto-unwrapped by LoadUpvalue; never visible to user code.
-    /// Rc-shared so a mutation in a child fiber is visible to the parent
-    /// when the closure crosses a yield boundary.
+    /// Every closure capturing the variable holds this one slot, so a write
+    /// through any of them is visible to all — that is what makes a captured
+    /// mutable binding shared rather than copied. Stores go through
+    /// `capture_store_with_rebind` (see `LArrayMut`).
     CaptureCell {
         cell: std::rc::Rc<RefCell<Value>>,
         traits: Value,
@@ -280,8 +282,8 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable set (BTreeSet wrapped in `Rc<RefCell>`) — Rc-shared for
-    /// cross-fiber live-update semantics across `deep_copy_to_outbox`.
+    /// Mutable set (BTreeSet wrapped in `Rc<RefCell>`). See `LArrayMut` for
+    /// the growable-store rationale.
     LSetMut {
         data: std::rc::Rc<RefCell<BTreeSet<Value>>>,
         traits: Value,

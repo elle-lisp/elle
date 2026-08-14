@@ -240,10 +240,6 @@ impl WasmEmitter {
             LirInstr::IncrefValueRegion { .. } => {}
             // The coalescing oracle is a VM-interp-only debug instrument.
             LirInstr::AssertRegionMatches { .. } => {}
-            // Outbox routing is VM-only.
-            // Region stamps carry the boundary; there is no toggle bytecode.
-            // Flip rotation is VM-only (the WASM backend uses its own
-            // GC strategy).
             LirInstr::List {
                 dst, head, tail, ..
             } => {

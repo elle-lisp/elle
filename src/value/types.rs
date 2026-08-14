@@ -275,11 +275,11 @@ impl std::hash::Hash for TableKey {
             TableKey::Keyword(s) => s.hash(state),
             TableKey::Array(keys) => keys.hash(state),
             // Delegate to Value's Hash. For Fiber/ThreadHandle/External
-            // that encodes a stable Rc/Arc-backed identity rather than
-            // the slot pointer, so outbox relocation on fiber yield
-            // doesn't turn the same fiber into a different map key.
-            // For cons/set/struct/bytes/empty-list, gives structural
-            // hashing based on the value's content.
+            // that hashes the backing Rc/Arc rather than the slot pointer,
+            // so a `with-traits` wrapper is the same map key as the value
+            // it wraps (see `repr/eq.rs`, "Wrapper variants take their
+            // identity from the handle"). For cons/set/struct/bytes/
+            // empty-list, gives structural hashing based on the content.
             TableKey::Heap(v) => v.hash(state),
         }
     }

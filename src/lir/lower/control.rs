@@ -366,7 +366,9 @@ impl<'a> Lowerer<'a> {
         value: &Hir,
     ) -> Result<Reg, String> {
         // Region inference stamps yield-bound allocations with the Parent
-        // region via alloc_region. No OutboxEnter/OutboxExit toggle needed.
+        // region via alloc_region, so the value the resumer reads is already
+        // born where it must outlive this fiber's suspension. Nothing is
+        // emitted here to mark the boundary.
         let value_reg = self.lower_expr(value)?;
 
         let resume_label = self.fresh_label();
