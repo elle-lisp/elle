@@ -560,19 +560,9 @@ impl RegionInference {
         init: &Hir,
         init_regions: Vec<Region>,
     ) -> Vec<Region> {
-        // A whole-value read is a bare `Var(b)`, or the `DerefCell`-wrapped form
-        // `functionalize` puts around a needs-capture read (the fn-local upvalue).
-        let source = match &init.kind {
-            HirKind::Var(b) => *b,
-            HirKind::DerefCell { cell } => match &cell.kind {
-                HirKind::Var(b) => *b,
-                _ => return init_regions,
-            },
-            _ => return init_regions,
-        };
         if init_regions.is_empty()
-            || !self.arena().get(source).is_one_slot_container()
             || self.arena().get(reader).needs_capture()
+            || !self.is_whole_container_read(init, self.arena().get(reader).name)
         {
             return init_regions;
         }
@@ -580,6 +570,79 @@ impl RegionInference {
         self.call_result_regions.insert(read_r);
         self.counted_cell_read_sites.insert(init.id);
         vec![read_r]
+    }
+
+    /// Does `h` produce, on **every** path, the whole current content of some
+    /// 1-slot container *other than* a container the binding named `reader_name`
+    /// is a version of? The leaves are a bare `Var(b)` over such a container and
+    /// the `DerefCell`-wrapped form `functionalize` puts around a needs-capture
+    /// read (the fn-local upvalue).
+    ///
+    /// A **branch** every arm of which is such a read is one too
+    /// (docs/impl/region/bindings.md § "A branch whose every arm is such a read is
+    /// one too"). The reader's obligation is about the value it ends up holding,
+    /// and one `IncrefValueRegion` at the binder names the runtime value — so it
+    /// covers whichever arm ran, over one container or several.
+    ///
+    /// `reader_name` excludes the reader's OWN source name, because a binding that
+    /// shares a container's name is a **version** of that container rather than a
+    /// second name for its content: functionalization's `fresh_version` keeps the
+    /// name, so `(let [x (if c x x)] …)` is the SSA phi carrying `x`'s content
+    /// forward past a conditional `assign`, and every later read of the name
+    /// resolves to it. A version hands the one reference along exactly as a loop
+    /// parameter's init edge does (docs/impl/region/bindings.md § "A loop
+    /// parameter's init source is not a second holder"); counting it would claim a
+    /// second reference for a single holding. A user rebinding that shadows the
+    /// container declines by the same test, which costs promptness only — the
+    /// decline is the conservative baseline, where the reader keeps holding the
+    /// container's region and the container keeps the counted-init route.
+    ///
+    /// Every other init declines, including a MIXED branch, and the decline is
+    /// load-bearing: the caller replaces the reader's source regions with the
+    /// placeholder, and for an arm that ALLOCATES those source regions are what
+    /// extend the allocated value's last use out to the reader. Cutting them would
+    /// put the arm's own release ahead of the binder's retain. A bare read
+    /// allocates nothing, so no arm's release depends on the reader holding it.
+    /// A path that produces no arm's value at all — a `Cond` with no else clause —
+    /// is likewise not a read of anything.
+    fn is_whole_container_read(&self, h: &Hir, reader_name: crate::value::SymbolId) -> bool {
+        match &h.kind {
+            HirKind::Var(b) => {
+                let info = self.arena().get(*b);
+                info.is_one_slot_container() && info.name != reader_name
+            }
+            HirKind::DerefCell { cell } => self.is_whole_container_read(cell, reader_name),
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.is_whole_container_read(then_branch, reader_name)
+                    && self.is_whole_container_read(else_branch, reader_name)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                else_branch
+                    .as_ref()
+                    .is_some_and(|e| self.is_whole_container_read(e, reader_name))
+                    && clauses
+                        .iter()
+                        .all(|(_, body)| self.is_whole_container_read(body, reader_name))
+            }
+            // A `Match` needs no else: an unmatched value signals rather than
+            // falling through to a value, so the arms are every value-producing
+            // path. An arm's pattern names are irrelevant — what is asked of the
+            // arm is what its BODY produces.
+            HirKind::Match { arms, .. } => {
+                !arms.is_empty()
+                    && arms
+                        .iter()
+                        .all(|(_, _, body)| self.is_whole_container_read(body, reader_name))
+            }
+            _ => false,
+        }
     }
 
     /// Record that a binder stores `init`'s value into `b`'s slot — the one

@@ -149,9 +149,10 @@ repoints. An alias of a value the **cell's own** binder allocated has no such
 slot to offer: the only recorded one is the cell's, which "a mutated slot is not
 a release route" (below) refuses. Such an alias instead takes a reference of its
 own wherever its read is a whole-value one (next section), which withdraws it
-from the sole-held question and hands the donation back. Where it is not — a
-branch over the cell, `(let [k (if c r r)] …)` — the alias stays a holder, the
-counted-init route runs, and the init region over-keeps to scope exit.
+from the sole-held question and hands the donation back. Where it is not — an
+init that on some path produces something other than a container's content,
+`(let [k (if c r (list))] …)` — the alias stays a holder, the counted-init route
+runs, and the init region over-keeps to scope exit.
 
 Refusing instead costs the **store-site pin**, not merely the donation. On the
 unsuppressed baseline the cell holds no reference at all, so each stored value is
@@ -200,6 +201,50 @@ An **element** read (`first`/`get`/destructuring) is not a whole-value read and
 needs no counting: an element's region is independently counted by its parent's
 alloc-time scan, so the parent's demise cascades rather than freeing the element
 under the reader.
+
+**A branch whose every arm is such a read is one too.** What obliges the reader
+is the value it ends up holding, not the syntax that selected it: in
+`(let [k (if c r s)] …)` the name `k` is, on every path, a borrow out of a
+container that re-stores, and the retain the binder takes protects whichever
+container's content arrived — `IncrefValueRegion` names the runtime value, so one
+instruction covers every arm. The two containers each keep their donation, and
+correctly: on the path that did not run, the reader never became a holder of that
+container's init. The descent is over the branch forms and stops at the first arm
+that is not itself a whole-value read, so a mixed branch — one arm reading a
+container, another allocating — is declined **whole** and keeps the counted-init
+route.
+
+Declining the mixed branch is a requirement, not conservatism. What the counted
+read does is *replace* the reader's source regions with the placeholder, which is
+how the reader stops being a holder — and for an allocating arm those source
+regions are the only thing extending that value's last use out to the reader. Cut
+them and the arm's own release fires inside the arm, ahead of the binder's
+retain, so the retain names a freed value. A branch every arm of which reads a
+container has nothing to cut: a bare read allocates nothing, so no arm's release
+depends on the reader's holding.
+
+A branch with no value on some path is declined by the same rule: a `Cond`
+without an else clause leaves a path whose result no arm produced. A `Match`
+needs no else — an unmatched value signals rather than falling through to one —
+so its arms *are* every value-producing path, and only an armless one has none.
+
+**A version of the container is not an alias of it.** The reader's own source
+name is excluded from the arms, because functionalization's `fresh_version` keeps
+the name: `(let [x (if c x x)] …)` is the SSA phi carrying `x`'s content past a
+conditional `assign`, and every later read of `x` resolves to it. That is the
+same forwarding edge "A loop parameter's init source is not a second holder"
+(below) describes at a loop — the versions hold **one** reference between them
+because a `Var` read mints nothing — so counting the phi would claim a second
+reference for a single holding, and the container's returned-binding suppression
+would then run against a reader that had not paid for it. A user rebinding that
+shadows the container reads as a version too and declines with it, which costs
+promptness only: the decline is the conservative baseline, where the reader keeps
+holding the container's region and the container keeps the counted-init route.
+
+The reference is the test: `reassign_gate_counts_a_branch_read_of_a_container`
+for the admission, `reassign_gate_declines_a_mixed_branch_init` for the decline,
+`reassign_gate_refuses_returned_value` for the phi that must stay uncounted, and
+`tests/elle/region-cell-alias-branch.lisp` for the measured shape.
 
 **Every binder form that records the read must emit the retain.** The analysis
 side is one function reached from both binder arms of the walk, and what it

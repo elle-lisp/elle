@@ -767,6 +767,115 @@ fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
     );
 }
 
+/// A BRANCH whose every arm is a whole-value read of a 1-slot container is a
+/// whole-value read (docs/impl/region/bindings.md § "A branch whose every arm is
+/// such a read is one too"). What obliges the reader is the value it holds, not
+/// the syntax that selected it: `keep` names, on every path, a borrow out of a
+/// container that re-stores, and one `IncrefValueRegion` at the binder covers
+/// every arm because it names the runtime value.
+///
+/// The discriminator against
+/// `reassign_gate_counts_a_read_of_an_uncelled_cell` is the branch alone — the
+/// same program with the alias's init wrapped in an `if` both of whose arms read
+/// the container. Reading the branch as an ordinary alias instead leaves `keep` a
+/// holder of the init region, so the container falls back to the counted-init
+/// route, whose release routes through the CELL's own slot — a mutated slot, and
+/// no release route, so the init strands per call
+/// (`tests/elle/region-cell-alias-branch.lisp`).
+#[test]
+fn reassign_gate_counts_a_branch_read_of_a_container() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@last (array 0 0)]\n\
+             (let [keep (if (%lt n 0) last last)]\n\
+               (var i 0)\n\
+               (while (%lt i n)\n\
+                 (begin (assign last (array i 7))\n\
+                        (assign i (%add i 1))))\n\
+               (%length keep)))))\n\
+         (h 3)",
+    );
+    let (last, last_sites) = heap_carrying_reassign(&hir, &info);
+    assert!(
+        !info.counted_cell_read_sites.is_empty(),
+        "a branch every arm of which reads the container is a whole-value read"
+    );
+    // Value-resolved exactly as a bare read is: the placeholder rides
+    // `call_result_regions`, so the reader releases through its OWN slot.
+    for site in &info.counted_cell_read_sites {
+        let r = info
+            .alloc_region
+            .get(site)
+            .expect("counted read site mints a placeholder region");
+        assert!(
+            info.call_result_regions.contains(r),
+            "counted-read placeholder {r:?} must be a call-result region",
+        );
+    }
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "the container keeps the model — drop-on-overwrite releases the \
+         reference it was donated"
+    );
+    assert!(
+        info.counted_cell_init_sites.is_empty(),
+        "with the branch counted the container is its init's sole holder, so the \
+         donation is available and no init retain is needed (got {:?})",
+        info.counted_cell_init_sites,
+    );
+    let regs = &info.binding_source_regions[&last];
+    assert!(
+        regs.iter()
+            .any(|r| info.suppressed_decref_regions.contains(r)),
+        "the donated init region's ordinary decref is suppressed (regs={regs:?})",
+    );
+}
+
+/// Counterfactual against over-admission of the branch: one arm that is NOT a
+/// whole-value read declines the whole init. What the counted read does is
+/// REPLACE the reader's source regions with the placeholder, and for an
+/// allocating arm those regions are the only thing extending that value's last
+/// use out to the reader — cutting them would put the arm's own release ahead of
+/// the binder's retain. So the container falls back to counting its init, and
+/// `keep` keeps the ordinary decref that releases the producer's reference.
+#[test]
+fn reassign_gate_declines_a_mixed_branch_init() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@last (array 0 0)]\n\
+             (let [keep (if (%lt n 0) last (array 5 5))]\n\
+               (var i 0)\n\
+               (while (%lt i n)\n\
+                 (begin (assign last (array i 7))\n\
+                        (assign i (%add i 1))))\n\
+               (%length keep)))))\n\
+         (h 3)",
+    );
+    let (_, last_sites) = heap_carrying_reassign(&hir, &info);
+    assert!(
+        info.counted_cell_read_sites.is_empty(),
+        "an arm that allocates is not a whole-value read, so the branch is \
+         declined whole (got {:?})",
+        info.counted_cell_read_sites,
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "the container still takes the model — the decline changes who holds the \
+         init, not whether the container is a container"
+    );
+    assert_eq!(
+        info.counted_cell_init_sites.len(),
+        1,
+        "the alias stays a holder, so the container counts its init instead \
+         (got {:?})",
+        info.counted_cell_init_sites,
+    );
+}
+
 /// Counterfactual against over-admission: an aliased STORED value still refuses
 /// the model whole. The model moves each stored value's producer release back to
 /// the store site, and `v` is a second name reading the same value — a release
