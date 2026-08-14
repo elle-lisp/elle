@@ -26,23 +26,29 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// The reader half of a reassigned-captured-cell 1-slot container: when a
-    /// binding init at `hir_id` is a whole-value read of an
-    /// `is_restorable_capture_cell` binding (`RegionInfo::counted_cell_read_sites`),
-    /// the reader takes its OWN counted reference — Rule 5's "new reference"
-    /// pass-through — so the cell's next overwrite
-    /// (`capture_store_with_rebind`, which decrefs the displaced prior
-    /// unconditionally) cannot free the value under the reader
-    /// (docs/impl/region/bindings.md § "Captured reassigned cells"). The
+    /// The reader half of the 1-slot container: when a binding init at `hir_id`
+    /// is a whole-value read of an `is_one_slot_container` binding
+    /// (`RegionInfo::counted_cell_read_sites`), the reader takes its OWN counted
+    /// reference — Rule 5's "new reference" pass-through — so the container's
+    /// next overwrite cannot free the value under the reader. Both realizations
+    /// re-store the same way as far as the reader is concerned: a capture cell
+    /// through `capture_store_with_rebind`, an uncelled `@`-mutable local through
+    /// the compiler's own drop-on-overwrite (docs/impl/region/bindings.md § "A
+    /// whole-value read of a 1-slot container takes a counted reference"). The
     /// balancing `DecrefValueRegion` fires at the reader's last use: the walk
     /// minted the read's placeholder region at `hir_id`, so it lands in
     /// `call_result_regions` and its `decref_point` is the reader's last use.
     ///
     /// Emitted while the read value is on the operand-stack top (right after
     /// `lower_expr(init)`, before the slot store) — `IncrefValueRegion` peeks the
-    /// top and does not pop, so the value stays in place for the store.
-    /// No-op unless `hir_id` is a counted read site. Pinned by
-    /// tests/elle/region-reassign-captured-cell-reader.lisp.
+    /// top and does not pop, so the value stays in place for the store. Both
+    /// binder arms that record a read call this, `lower_let` and `lower_letrec`:
+    /// the container's donation is granted on the strength of the reader's own
+    /// reference, so a binder that recorded the read and retained nothing frees
+    /// the value under its reader. No-op unless `hir_id` is a counted read site.
+    /// Pinned by tests/elle/region-reassign-captured-cell-reader.lisp (the
+    /// fn-local binder) and `region_container_read_toplevel_uaf` (the
+    /// file-letrec binder).
     pub(super) fn emit_counted_cell_read_retain(&mut self, hir_id: HirId, src: Reg) {
         if self.region_info.counted_cell_read_sites.contains(&hir_id) {
             self.emit(LirInstr::IncrefValueRegion { src });

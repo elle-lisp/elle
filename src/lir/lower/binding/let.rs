@@ -240,6 +240,12 @@ impl<'a> Lowerer<'a> {
             // phantom-decref panic / double-free).
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
+            // The walk's `Letrec` arm records a whole-value container read exactly
+            // as its `Let` arm does, and the container's donation is granted on
+            // the strength of the reader's own reference — so the retain belongs
+            // at both binders (docs/impl/region/bindings.md § "Every binder form
+            // that records the read must emit the retain").
+            self.emit_counted_cell_read_retain(init.id, init_reg);
             self.emit_counted_cell_init_retain(init.id, init_reg);
             self.current_function_binding = None;
             self.current_function_params = None;

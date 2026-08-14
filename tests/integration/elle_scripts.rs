@@ -853,6 +853,25 @@ fn region_container_read_borrow_uaf() {
     );
 }
 
+// Guard — the counted container read is retained by every BINDER FORM that records
+// it (docs/impl/region/bindings.md § "Every binder form that records the read must
+// emit the retain"). A name bound to a whole-value read of a re-storing container
+// borrows a reference the next overwrite releases, so the reader takes one of its
+// own — and the container is handed its donation on the strength of that. The
+// analysis records the read from both binder arms of the walk, so a module-scope
+// reader (the file-letrec binder) is as exposed as the fn-local `let` reader
+// tests/elle/region-reassign-captured-cell-reader.lisp pins. Emitting the retain in
+// only one of them runs both halves of the bargain against a reference nobody took:
+// the overwrite frees the value under the reader, and the reader's own placeholder
+// release decrefs it again. Full shape in the fixture header.
+#[test]
+fn region_container_read_toplevel_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-container-read-toplevel-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — the opaque CALL between a container and the value read out of it. A funnel
 // adopt freezes its member's RC, so the forest owes a bound on every alias that can name
 // the member; it reads those bounds off a native read whose container argument IS the

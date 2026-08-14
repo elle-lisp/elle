@@ -201,6 +201,22 @@ needs no counting: an element's region is independently counted by its parent's
 alloc-time scan, so the parent's demise cascades rather than freeing the element
 under the reader.
 
+**Every binder form that records the read must emit the retain.** The analysis
+side is one function reached from both binder arms of the walk, and what it
+records is worth a *release* — the placeholder's value-based decref at the
+reader's last use — plus, at the container, a *donation* the reader's own
+reference is what pays for. A binder that recorded the read and emitted no retain
+would therefore run both halves of the bargain against a reference nobody took:
+the container's first overwrite frees the value under the reader, and the
+reader's own release then decrefs it a second time. So `lower_let` and
+`lower_letrec` each call `emit_counted_cell_read_retain` at the same point — with
+the read value on the operand-stack top, ahead of the slot store — and the
+file-letrec binder that carries a module-scope reader is covered exactly as a
+fn-local `let` is. `Define` records no read site at all, so a `def`-bound reader
+stays a holder of the container's init region and the container keeps the
+counted-init route. The reference is the test:
+`region_container_read_toplevel_uaf` for the module-scope binder.
+
 **A loop parameter's init source is not a second holder.** `sole_held` counts
 distinct *bindings*, and functionalization gives a cell carried across a loop a
 second binding for one source name: the `while` becomes a `Loop` whose parameter
