@@ -329,7 +329,13 @@ primitive! {
         params: &["tier", "f"],
         category: "compile",
         example: r#"(compile/run-on :bytecode (fn [a b] (+ a b)) 3 4)"#,
-        effect: RegionEffect::Mixed,
+        // Re-enters the VM to run the caller's closure, so the RESULT is whatever
+        // that closure returns — unbounded. The store side is not: the tier
+        // dispatch reads the closure, and the Elle code it runs stores only
+        // through the runtime-counted funnel, exactly as an opaque user fn does.
+        // Unbounded result + no store is `Opaque` — no arg clique
+        // (docs/impl/region/effects.md § Opaque).
+        effect: RegionEffect::Opaque,
     }
     "compile/barrier-module" => prim_compile_barrier_module {
         signal: Signal::query_errors(),
@@ -338,7 +344,13 @@ primitive! {
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/barrier-module "(assert (= 1 1) \"ok\")" "<eval>")"#,
-        effect: RegionEffect::Mixed,
+        // SOURCE and NAME are copied out to Rust `&str` by the front end, and the
+        // setup thunk this runs is compiled FROM the source — it holds no
+        // reference to either argument Value. So nothing is stored; what the
+        // thunk run makes unbounded is the RESULT, which `result_minted` below
+        // already accounts for at dispatch. `Opaque`, not `Mixed`
+        // (docs/impl/region/effects.md § Opaque).
+        effect: RegionEffect::Opaque,
         result_minted: true,
     }
     "compile/whole-module" => prim_compile_whole_module {
@@ -348,7 +360,11 @@ primitive! {
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/whole-module "(def x 1)\n(assert (= x 1) \"ok\")" "<eval>")"#,
-        effect: RegionEffect::Mixed,
+        // `Opaque` for the same reason as `compile/barrier-module` above: both
+        // arguments are copied out to `&str`, the thunk is compiled from the
+        // source rather than from the argument Values, and only the result is
+        // unbounded.
+        effect: RegionEffect::Opaque,
         result_minted: true,
     }
     "compile/read-forms" => prim_compile_read_forms {
@@ -367,7 +383,11 @@ primitive! {
         params: &["forms", "name"],
         category: "compile",
         example: r#"(compile/whole-module-syntax (compile/read-forms "(+ 1 2)" "<eval>") "<eval>")"#,
-        effect: RegionEffect::Mixed,
+        // FORMS arrives as Values, and every one of them is CLONED into an owned
+        // Rust `Syntax` before compilation (`dispatch_whole_module_syntax`), so no
+        // argument Value reaches the compiled module. NAME is copied to `&str`.
+        // Nothing stored, unbounded thunk-run result — `Opaque`.
+        effect: RegionEffect::Opaque,
         result_minted: true,
     }
     "compile/dumps" => prim_compile_dumps {
@@ -377,6 +397,11 @@ primitive! {
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/dumps "(+ 1 2)" "<eval>")"#,
-        effect: RegionEffect::Mixed,
+        // Both arguments are copied out to `&str` and the artifacts are rendered
+        // into fresh strings, so nothing is stored; the struct is minted by the
+        // query dispatch rather than in this call's own region, so the result is
+        // unbounded. `Opaque` — the table's clean face, pinned at 0 by
+        // tests/elle/region-compile-clique-leak.lisp.
+        effect: RegionEffect::Opaque,
     }
 }
