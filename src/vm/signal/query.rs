@@ -19,6 +19,13 @@ impl VM {
     /// - (:"arena/stats" . fiber) — return unified stats struct for a suspended/dead fiber
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
+    ///
+    /// Every operation here READS its argument or copies it out; none retains it
+    /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
+    /// that (docs/impl/region/effects.md § `Opaque`), so an operation added here
+    /// that retains its argument must move the declaration back to `Mixed` — the
+    /// arg clique is what covers an uncounted store, and `Opaque` withdraws it
+    /// (`tests/elle/region-query-clique-leak.lisp`).
     pub(crate) fn dispatch_query(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,

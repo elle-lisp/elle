@@ -116,6 +116,18 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   `Opaque`. Declaring `Mixed` there buys nothing and costs one never-balancing
   `IncrefRegion` per heap-argument pair per call
   (`tests/elle/region-has-clique-leak.lisp`).
+
+  **A native that re-enters the VM is `Opaque` on the store side.** `vm/query`
+  selects an operation by a runtime string; `compile/run-on` dispatches a
+  caller-supplied closure on a chosen tier; the `compile/*-module` loaders run a
+  compiled thunk. None of that reaches the store side: each copies its arguments
+  out (a Rust `String`, a cloned `Syntax`) and the Elle code it re-enters can
+  store only through the runtime-counted funnel, exactly as an opaque user fn
+  can. The *result* is what the re-entry makes unbounded, so the answer is again
+  `Opaque` — and the obligation it carries is on the dispatch, not the primitive:
+  an operation added behind one of these gateways that RETAINS an argument past
+  the call invalidates the declaration and must move it back to `Mixed`
+  (`tests/elle/region-query-clique-leak.lisp`).
 - **`Mixed`** — examined, and the native stores arguments *uncounted*
   (the property the arg clique exists to cover) — and/or returns a result
   that is neither always-fresh nor always-pass-through (a trait-dispatching

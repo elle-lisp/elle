@@ -406,7 +406,16 @@ primitive! {
         params: &["op", "arg"],
         category: "meta",
         example: "(vm/query \"call-count\" some-fn)",
-        effect: RegionEffect::Mixed,
+        // The gateway picks its operation by a runtime string, so the RESULT is
+        // unbounded — minted by whatever `VM::dispatch_query` reached. The store
+        // side is not: every operation there reads its argument or copies it out,
+        // and the Elle code some of them re-enter stores only through the
+        // runtime-counted funnel. Unbounded result + no store is `Opaque` — no arg
+        // clique (docs/impl/region/effects.md § Opaque;
+        // tests/elle/region-query-clique-leak.lisp). The obligation rides
+        // `dispatch_query`: an operation that RETAINS its argument past the call
+        // moves this declaration back to `Mixed`.
+        effect: RegionEffect::Opaque,
     }
     "signals" => prim_signals {
         signal: Signal::errors(),
