@@ -2,9 +2,8 @@
 ## Traits test suite
 ##
 ## Tests for the per-value trait table mechanism: `with-traits` and `traits`.
-## These tests are written BEFORE the implementation (Chunk 2 of the plan).
-## They WILL FAIL until Chunk 3 is complete — that is expected and correct.
-## Issue #563: Traits (per-value dispatch tables).
+## See docs/traits.md for the model — default traitsets, the trait table
+## schema, and which types carry which protocols.
 
 
 # ============================================================================
@@ -142,6 +141,32 @@
   (put orig :b 2)
   (assert (= (length traited) 1)
           "mutable struct copy is independent: put to original does not affect traited copy"))
+
+# Every mutable collection copies — @set included. `clone_with_traits` must
+# build a FRESH Rc over a cloned store for each of them; cloning the Rc would
+# make the traited value a second name for the original instead of the
+# independent value with-traits promises.
+(begin
+  (def orig @|1 2|)
+  (def traited (with-traits orig {:tag :x}))
+  (add orig 99)
+  (assert (= (length traited) 2)
+          "mutable set copy is independent: add to original does not affect traited copy")
+  (assert (= (length orig) 3) "the original set still took the add"))
+
+(begin
+  (def orig @"ab")
+  (def traited (with-traits orig {:tag :x}))
+  (push orig "c")
+  (assert (= (length traited) 2)
+          "mutable string copy is independent: push to original does not affect traited copy"))
+
+(begin
+  (def orig @b[1 2])
+  (def traited (with-traits orig {:tag :x}))
+  (push orig 3)
+  (assert (= (length traited) 2)
+          "mutable bytes copy is independent: push to original does not affect traited copy"))
 
 # ============================================================================
 # Constructor pattern — shared table, identical? fast path

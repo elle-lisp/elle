@@ -68,19 +68,17 @@ pub(crate) fn prim_with_traits(
 /// Clone a heap value, replacing the traits field with `table`.
 ///
 /// The copy is independent for every type that owns its data: mutable
-/// collections (LArrayMut, LStructMut, LStringMut, LBytesMut, LBox,
+/// collections (LArrayMut, LStructMut, LStringMut, LBytesMut, LSetMut, LBox,
 /// CaptureCell) get a fresh `Rc` over a cloned store, and slice-backed
-/// immutables get their payload copied into the clone's own region.
+/// immutables get their payload copied into the clone's own region. A write
+/// to the original is never visible through the traited copy — the user asked
+/// for a value with different traits, not a second name for this one.
 ///
 /// Fiber, ThreadHandle, and External are the exception, and must be: they
 /// wrap a shared handle rather than owning data, so the clone names the same
 /// fiber, thread, or plugin object. Value identity follows the handle, so the
 /// two wrappers stay equal (`repr/eq.rs`, "Wrapper variants take their
 /// identity from the handle").
-///
-/// KNOWN DIVERGENCE: LSetMut clones the `Rc` instead of the store, so
-/// `(with-traits @set tbl)` aliases the original — unlike every sibling
-/// collection above.
 ///
 /// For infrastructure types (Float, NativeFn, LibHandle, FFISignature,
 /// FFIType), returns Err.
@@ -187,7 +185,7 @@ unsafe fn clone_with_traits(
             traits: table,
         })),
         HeapObject::LSetMut { data, .. } => Ok(ctx.alloc(HeapObject::LSetMut {
-            data: data.clone(),
+            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,
         })),
         // Infrastructure types — no trait field; return error. A closure

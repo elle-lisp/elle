@@ -148,6 +148,24 @@ Per-instance override via `with-traits`:
 (first [1 2 3])  # => 1 (default, unaffected)
 ```
 
+### `with-traits` returns an independent value
+
+For a mutable collection — `@array`, `@struct`, `@string`, `@bytes`, `@set`,
+a box — the store is **copied**, not shared. A later write to the original is
+not visible through the traited value:
+
+```
+(def a @[1 2])
+(def b (with-traits a {:tag :x}))
+(push a 99)
+a                # => @[1 2 99]
+b                # => @[1 2]
+```
+
+The exceptions are fibers, thread handles, and plugin externals. Those wrap a
+handle rather than owning data, so the traited value names the *same* entity
+and stays `identical?` to it — a traited fiber is that fiber, not a copy of it.
+
 ## Custom sequence types
 
 Any value can implement `:Sequence` via `with-traits`:
