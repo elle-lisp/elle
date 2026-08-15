@@ -309,10 +309,12 @@ pub extern "C" fn elle_jit_resolve_tail_call(
     }
 }
 
-/// Release heap objects at a self-tail-call boundary in JIT code.
+/// No-op. Regions reclaim at `FreeRegion`, so a self-tail-call boundary has
+/// nothing to release here.
 ///
-/// Called from the JIT self-tail-call loop after reading argument values
-/// JIT pool rotation — now a no-op (regions handle deallocation via FreeRegion).
+/// Retained only because the JIT vtable declares and exports the symbol
+/// (`vtable.rs`, `vtable/helpers.rs`); no emit site calls it, which is why its
+/// `FuncId` carries `#[allow(dead_code)]`.
 #[no_mangle]
 pub extern "C" fn elle_jit_rotate_pools(_vm: *mut ()) {}
 

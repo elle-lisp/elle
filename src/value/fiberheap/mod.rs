@@ -177,8 +177,8 @@ impl FiberHeap {
 
     /// Live object count for `arena/count`: the sum of every active
     /// region's current object count. This reflects real reclamation
-    /// (scope-region resets, flip/rotation page recycling, and RC frees
-    /// alike), unlike the `alloc_count` running counter which only moves
+    /// (scope-region resets, page recycling, and RC frees alike),
+    /// unlike the `alloc_count` running counter which only moves
     /// on the decref/decref_if_present paths and so over-reports phantom
     /// "leaks" that RSS contradicts.
     pub fn visible_len(&self) -> usize {

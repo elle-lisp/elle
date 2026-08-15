@@ -457,11 +457,12 @@ the operand stack.
 - JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
 - Benchmarks and profiling
 
-### Flip* bytecodes (no-ops)
+### Reclamation
 
-Flip* bytecodes (`FlipEnter`, `FlipSwap`, `FlipExit`) are accepted no-ops in
-both the interpreter and JIT.
-While/loop reclamation uses `RegionRotate` (refcounted release).
-Self-tail-call reclamation uses `mark()`/`release()` in both the
-interpreter trampoline and the JIT self-tail-call loop
-(`elle_jit_rotate_pools` → `rotate_pools_jit`).
+Regions reclaim: a region frees at `FreeRegion(ρ)` when its RC reaches 0.
+The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /
+`DecrefCellRegion` accounting the interpreter does, so a loop body or a
+self-tail-call boundary needs no separate release step.
+
+`elle_jit_rotate_pools` survives as an exported no-op that nothing calls —
+its vtable `FuncId` carries `#[allow(dead_code)]`. See `jit/calls/callops.rs`.

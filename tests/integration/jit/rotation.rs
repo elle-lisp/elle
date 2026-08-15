@@ -1,37 +1,35 @@
 use super::*;
 
-// ── Nested self-tail-call rotation base tests ──────────────────────────
+// ── Nested self-tail-call reclamation tests ────────────────────────────
 //
-// Hypothesis: `jit_rotation_base` is a single field on `FiberHeap`.
-// When an inner JIT function's self-tail-call loop calls
-// `rotate_pools_jit()`, it sets this field.  The value persists after
-// the inner function returns.  If the outer function then self-tail-
-// calls with its own `rotate_pools_jit()`, it rotates relative to the
-// inner's stale base mark — freeing objects allocated between the
-// inner's base and the outer's iteration, including the outer's live
-// heap values.
+// These pin the shape, not a mechanism. An outer self-tail-call loop holds
+// live values across an inner self-tail-call loop that allocates. Reclaim
+// too eagerly at the inner loop's boundary and the outer's live values go
+// with it — a SIGSEGV or a silently wrong result.
 //
-// Fix: save `jit_rotation_base` to `None` before every JIT call and
-// restore after it returns (`call_jit` and `elle_jit_call`).
+// They were written against a pool-rotation scheme that regions have since
+// replaced (reclamation is now `FreeRegion(ρ)` at RC 0), so no `rotate_pools`
+// call or rotation base exists to corrupt any more. The shapes survive the
+// rewrite because they are where a reclamation bug shows: nesting is what
+// makes one loop's boundary land inside another's live range.
 //
 // Test design:
-//   - Tests 1–2: nested self-tail-call patterns that exercise the
-//     hypothesis.  Without the fix these SIGSEGV or corrupt values.
-//   - Test 3: control — single (non-nested) self-tail-call loop.
-//     Passes regardless of whether the fix is present because there
-//     is no inner call to corrupt the rotation base.
+//   - Tests 1–2: two- and three-deep nested self-tail-call loops, the outer
+//     one allocating pair cells that must outlive every inner iteration.
+//   - Test 3: control — a single, non-nested self-tail-call loop. No inner
+//     boundary falls inside a live range, so it passes under any scheme.
 
 #[test]
 fn test_jit_nested_rotation_base_two_deep() {
     // Outer (`outer-loop`): self-tail-call loop that builds a list via
     //   pair and passes the growing list to the next iteration.
-    // Inner (`inner-loop`): self-tail-call loop that traverses a list.
-    //   This triggers `rotate_pools_jit()`, setting `jit_rotation_base`.
+    // Inner (`inner-loop`): self-tail-call loop that traverses that list,
+    //   running to completion inside every outer iteration.
     //
-    // Without save/restore, the outer's next `rotate_pools_jit()` uses
-    // the inner's stale base, which was captured deep inside the call
-    // stack.  Objects the outer allocated after that mark (pair cells)
-    // get swept into the swap pool and freed one rotation later.
+    // The outer's pair cells are live across each inner run, so reclaiming
+    // at the inner loop's boundary would free the list the outer is still
+    // building. The result is checked, not just the exit status: a freed
+    // cell that happens not to fault still sums wrong.
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -62,10 +60,10 @@ fn test_jit_nested_rotation_base_two_deep() {
 
 #[test]
 fn test_jit_nested_rotation_base_three_deep() {
-    // Three levels of nested self-tail-call loops:
-    //   c → b → a, each with self-tail-call + rotation.
-    // c allocates pair cells; a and b just do integer arithmetic.
-    // Without save/restore, a's rotation base leaks through b into c.
+    // Three levels of nested self-tail-call loops: c → b → a.
+    // c allocates pair cells; a and b only do integer arithmetic, so any
+    // over-eager reclamation two levels down can only be observed through
+    // c's list. Depth is the point — one level of nesting is test 1.
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -106,8 +104,9 @@ fn test_jit_nested_rotation_base_three_deep() {
 #[test]
 fn test_jit_single_self_tail_rotation_control() {
     // Control: single self-tail-call loop traversing a list.
-    // No nested JIT calls → no rotation base corruption possible.
-    // Must pass regardless of whether the save/restore fix is present.
+    // No nested JIT call, so no loop boundary lands inside another's live
+    // range. Must pass under any reclamation scheme — if this one ever
+    // fails, the defect is in self-tail-calls generally, not in nesting.
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;

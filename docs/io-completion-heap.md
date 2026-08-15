@@ -1,38 +1,44 @@
-# I/O Completion Heap Routing
+# I/O Completion Region Routing
+
+All fibers share the VM's single heap; isolation is per **region**
+(`src/value/fiber.rs` — "The heap lives on the VM, not on individual
+fibers"). So the question below is never which heap a completion value lands
+on, but which region it is born in — that is what decides when it is
+reclaimed.
 
 ## Problem
 
 When a fiber submits an I/O read, the completion value (string, bytes) is
 constructed in `process_raw_completion()` (`src/io/completion.rs`, which
-delegates port I/O to `complete_port_op` in `src/io/completion/port.rs`) on
-the **scheduler's heap** — not the requesting fiber's heap. The fiber receives a cross-heap pointer via
-`fiber/resume`. This has two consequences:
+delegates port I/O to `complete_port_op` in `src/io/completion/port.rs`) —
+in the **scheduler's region**, not the calling fiber's. The fiber receives
+it via `fiber/resume`. This has two consequences:
 
-1. **Leak.** Every byte of I/O performed by every fiber accumulates on the
-   scheduler's heap until thread death. A server fiber processing 10,000
-   HTTP requests holds ~40 MB of dead strings on the scheduler's heap. The
-   fiber's scope machinery cannot reclaim them because they're not on its
-   heap.
+1. **Leak.** Every byte of I/O performed by every fiber accumulates in the
+   scheduler's region. A server fiber processing 10,000 HTTP requests holds
+   ~40 MB of dead strings there. The calling fiber's scope exit cannot
+   reclaim them, because reclamation follows the region that owns the value
+   and that region is not the fiber's.
 
 2. **Coupling.** The I/O subsystem allocates Values. When
-   `process_raw_completion` runs, the only heap it has in hand is the
-   scheduler's — so a completion value is built on the scheduler's heap, not
-   the requesting fiber's.
+   `process_raw_completion` runs, the only allocation context it has in hand
+   is the scheduler's — so a completion value is born in the scheduler's
+   region, not the calling fiber's.
 
 ## Solution: Pre-allocated buffer Values
 
-The fiber allocates a buffer Value (`LBytes`) on its own heap before
+The fiber allocates a buffer Value (`LBytes`) in its own region before
 yielding. The buffer travels with the IoRequest. The kernel fills it. The
 completion returns it. No Value construction in the I/O subsystem.
 
 ```
 Before:
   fiber → yield IoOp::Read{count} → scheduler → backend → kernel
-       ← Value::bytes(data) on scheduler heap ← process_raw_completion
-       ← fiber/resume(cross-heap pointer)
+       ← Value::bytes(data) in scheduler region ← process_raw_completion
+       ← fiber/resume(value owned by the wrong region)
 
 After:
-  fiber → allocate LBytes(N) on own heap
+  fiber → allocate LBytes(N) in own region
        → yield IoOp::Read{count, buffer} → scheduler → backend → kernel
        ← kernel writes into fiber's bump arena
        ← Completion{buffer} (same Value, already filled)
@@ -48,7 +54,7 @@ fn prim_stream_read(ctx: &mut NativeCtx, args: &[Value]) -> (SignalBits, Value) 
     let port = extract_port_value(&args[0], "port/read", ctx)?;
     let count = /* parse args[1], must be > 0 */;
     let timeout = extract_keyword_timeout(args, 2, "port/read", ctx)?;
-    let buffer = ctx.bytes(vec![0u8; count]);  // ← on fiber's heap, via NativeCtx
+    let buffer = ctx.bytes(vec![0u8; count]);  // ← in the caller's region, via NativeCtx
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(IoOp::Read { count, buffer }, port, timeout),
@@ -57,10 +63,10 @@ fn prim_stream_read(ctx: &mut NativeCtx, args: &[Value]) -> (SignalBits, Value) 
 ```
 
 The buffer is allocated via `ctx.bytes(vec![0u8; N])` — a `NativeCtx` method
-that places `HeapObject::LBytes` on the fiber's heap, with inline data in the
-fiber's bump arena (the fiber's own region). The allocation must go through the
-region-aware `NativeCtx`, not a context-free `Value::bytes`, so it lands on the
-fiber's own heap.
+that places `HeapObject::LBytes` in the calling fiber's region, with inline
+data in that region's bump arena. The allocation must go through the
+region-aware `NativeCtx`, not a context-free `Value::bytes`, so it is born in
+the caller's region rather than whichever region happens to be ambient.
 
 ### 2. Buffer pointer extraction (`src/io/request.rs`)
 
@@ -204,8 +210,8 @@ IoOp::Read { ref buffer, .. } | IoOp::ReadExact { ref buffer, .. } => {
 ### 7. Fiber resume
 
 The scheduler calls `(fiber/resume fiber (get c :value))` with the buffer
-Value. Since the buffer is on the fiber's own heap, this is an identity
-operation — the fiber receives back a Value it created.
+Value. Since the buffer already lives in the calling fiber's region, this is
+an identity operation — the fiber receives back a Value it created.
 
 ### 8. UTF-8 interpretation
 
@@ -220,8 +226,8 @@ Encoding is decided in the completion path from the port's `Encoding`
   backend, then `bytes_to_string_in_place`), or `nil` at EOF.
 - A UTF-8 error surfaces as an `encoding-error` from `bytes_to_string_in_place`.
 
-The buffer still lives on the fiber's heap throughout, so the re-tagged
-string is in the fiber's own region — no cross-heap pointer.
+The buffer stays in the calling fiber's region throughout, so the re-tagged
+string is owned by that same region — never the scheduler's.
 
 ## Changes by file
 
@@ -322,23 +328,24 @@ into the same RegionSlice — no copy, no `fd_states.buffer` intermediate.
 ### ReadAll (deferred)
 
 ReadAll loops until EOF, accumulating in `fd_states.buffer`. The final Value
-is constructed via `ctx.bytes(data)` on the scheduler heap. This is the
-one read path that still allocates on the scheduler's heap. ReadAll is
+is constructed via `ctx.bytes(data)` in the scheduler's region. This is the
+one read path that still allocates there. ReadAll is
 typically called once per file (not in a loop), so the leak is bounded by
 file count, not iteration count. The optimization can be deferred.
 
 ## Buffer lifetime safety
 
 The fiber allocates the buffer before yielding. The fiber is parked while
-the I/O is in flight. The fiber's heap is not torn down (parked, not dead).
-The bump arena page containing the buffer's inline data remains valid.
-The kernel writes into a stable mmap'd page.
+the I/O is in flight. A parked fiber is not dead, so the region owning the
+buffer is still live and is not freed. The bump arena page containing the
+buffer's inline data remains valid. The kernel writes into a stable mmap'd
+page.
 
 If the fiber is cancelled (killed) while I/O is pending:
 - The scheduler cancels the pending I/O operation (`io/cancel`).
-- The fiber's heap is torn down (`FiberHeap::clear()`).
+- Fiber teardown releases everything the fiber owns, freeing its regions.
 - The kernel's SQE is cancelled before the fd is closed.
-- The buffer's inline data is freed with the rest of the fiber's heap.
+- The buffer's inline data is freed with the region that owns it.
 - No dangling kernel write — the cancellation ensures the kernel won't
   touch the buffer after cancellation.
 
@@ -350,8 +357,8 @@ a parked fiber. This is already the behavior in `do-shutdown`.
 1. Fresh data-Value construction (`ctx.bytes(...)` / string allocation) in the
    completion path for Read/ReadLine/ReadExact operations — the pre-allocated
    buffer is returned (re-tagged in place for text ports) instead.
-2. Cross-heap pointers from scheduler to fiber for read completions.
-3. Unbounded scheduler-heap accumulation from read-heavy fibers (Read/ReadLine).
+2. Read completions owned by the scheduler's region instead of the caller's.
+3. Unbounded scheduler-region accumulation from read-heavy fibers (Read/ReadLine).
 4. `BufferPool` allocation for Read/ReadLine operations.
 5. Intermediate buffers (`fd_states.buffer` as accumulator) for bounded reads.
 
@@ -361,9 +368,9 @@ a parked fiber. This is already the behavior in `do-shutdown`.
   data Values as today.
 - Accept, Connect, Open — these create new ports, not read buffers.
 - Flush, Shutdown, Sleep, PollFd, Resolve, WatchNext — no read data.
-- Spawn, ProcessWait — already use `origin_heap` for heap routing.
-- ReadAll — still accumulates in `fd_states.buffer`, constructs Value on
-  scheduler heap. Deferred optimization.
+- Spawn, ProcessWait — already route their result to the origin region.
+- ReadAll — still accumulates in `fd_states.buffer`, constructs the Value in
+  the scheduler's region. Deferred optimization.
 - The `BufferPool` — still used for non-read operations (write data,
   RecvFrom sockaddr, etc.) and for ReadAll accumulation.
 
@@ -375,7 +382,7 @@ a parked fiber. This is already the behavior in `do-shutdown`.
 2. **Integration test:** Read from a known file via both uring and thread
    pool paths. Verify returned bytes match expected content.
 3. **Leak test:** Read 10,000 times from a port in a tight loop. Verify the
-   fiber's heap does not grow beyond one buffer's worth of live data.
+   fiber's region does not grow beyond one buffer's worth of live data.
 4. **Short-read test:** Read from a source that returns short reads. Verify
    the cursor advances correctly and the final buffer contains all data.
 5. **ReadLine test:** Read lines from a source with and without newlines.

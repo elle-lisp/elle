@@ -1,10 +1,13 @@
 // `--flip=on` CLI surface tests.
 //
-// The `--flip=on/off` flag is accepted for compatibility but is a no-op:
-// the lowerer emits no flip bytecodes (FlipEnter/FlipSwap/FlipExit).
+// The `--flip=on/off` flag is accepted for compatibility but is a no-op.
+// Flip reclamation is gone: no flip bytecode exists for the lowerer to
+// emit, and nothing consults the flag. Regions reclaim instead — a region
+// frees at `FreeRegion(ρ)` when its RC reaches 0, in every loop and
+// tail-call shape alike.
 //
-// While/loop reclamation uses RegionRotate.
-// Self-tail-call reclamation uses mark/release in the trampoline.
+// These tests exist to keep the flag inert. Accepting it costs nothing;
+// having it silently start meaning something again would not.
 
 use std::process::Command;
 

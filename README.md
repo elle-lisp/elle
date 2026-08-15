@@ -268,7 +268,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
 ## Types
 
-Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a raw pointer into a bump-allocated `HeapObject` owned by the fiber's heap.
+Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a raw pointer into a bump-allocated `HeapObject` owned by a region. Fibers do not own heaps — an Elle instance has one heap, and every fiber in it allocates into regions on that heap.
 
 ### Immediate types
 
