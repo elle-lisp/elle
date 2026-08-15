@@ -80,27 +80,15 @@ fn test_polymorphic_inference_my_map() {
     );
 }
 
-// KNOWN BUG (deferred): within-file signal inference does not converge for
-// *mutually* recursive functions. The spec (docs/signals/inference.md, "Mutual
-// Recursion Across Files") states the fixpoint converges for mutually recursive
-// definitions within a single file, yet the analyzer under-approximates them.
-//
-// `(letrec [foo<->bar] (foo 3))` where `bar` calls `first` (an errors
-// primitive) infers `silent` for the whole expression instead of `errors`; the
-// closure-template path (file-letrec → lowering, e.g. the nqueens
-// `try-cols-helper`/`solve-helper` pair) infers `unknown()`. A SELF-recursive
-// function with the same `first` call converges correctly to `errors`, so the
-// gap is specifically the mutual cycle.
-//
-// Root cause (partial): the final fixpoint pass in `src/hir/analyze/fileletrec/
-// letrec.rs` re-analyzes only lambda bindings; bare expression entries keep
-// their stale callee signals, and the file-letrec/lowering path leaks
-// `unknown()` for the mutual pair. See docs/signals/inference.md for the
-// intended fixpoint; the related closure-template assertions live in
-// `pipeline::test_nqueens_functions_are_pure` and
-// `jit::test_nqueens_eval_signals_are_silent`.
+// A mutual cycle must converge to the same signal a self-recursive function
+// with the same body converges to. The seed is optimistic (`Signal::silent()`),
+// so a loop that stops before the cycle settles under-approximates — and an
+// under-approximated signal is the direction that costs a guarantee: a function
+// that can raise `:error` but reads as silent satisfies a compile-time
+// `(silence)` check and aborts at runtime instead. `docs/pipeline.md`
+// § The fixpoint loop states the rule; `silence_survives_a_mutual_cycle` below
+// pins the consequence end to end.
 #[test]
-#[ignore = "known bug: within-file mutual-recursion signal fixpoint does not converge"]
 fn test_mutual_recursion_signal_converges() {
     let (mut symbols, mut vm) = setup();
     // foo <-> bar; bar calls `first` (errors). Both must converge to errors.
@@ -132,6 +120,74 @@ fn test_mutual_recursion_signal_converges() {
         selfrec.hir.signal,
         Signal::errors(),
         "self-recursive control must be errors"
+    );
+}
+
+/// Direction matters: the cycle must converge whichever order its members are
+/// written in. `test_mutual_recursion_signal_converges` calls the member that
+/// is *not* the one raising; this calls the raiser first, so a loop that
+/// happens to settle only because the last binding analyzed was the raising one
+/// still fails here.
+#[test]
+fn test_mutual_recursion_converges_from_either_entry() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(letrec [foo (fn (n) (if (%eq n 0) (first (list 1)) (bar (%sub n 1)))) \
+                  bar (fn (n) (if (%eq n 0) 0 (foo (%sub n 1))))] \
+           (bar 3))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.signal,
+        Signal::errors(),
+        "entering the cycle at the non-raising member must still see errors"
+    );
+}
+
+/// A three-way cycle: the raiser is two edges away from the entry point, so one
+/// re-analysis pass is not enough to carry the signal back around.
+#[test]
+fn test_three_way_mutual_recursion_converges() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(letrec [a (fn (n) (if (%eq n 0) 0 (b (%sub n 1)))) \
+                  b (fn (n) (if (%eq n 0) 0 (c (%sub n 1)))) \
+                  c (fn (n) (if (%eq n 0) (first (list 1)) (a (%sub n 1))))] \
+           (a 3))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.signal,
+        Signal::errors(),
+        "a three-way cycle must propagate the raiser's signal all the way round"
+    );
+}
+
+/// Convergence must not invent signals either. A mutual cycle whose members all
+/// stay silent has to remain silent — an over-approximation would reject
+/// correct `(silence)` code, which is the opposite failure and just as wrong.
+#[test]
+fn test_silent_mutual_recursion_stays_silent() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(letrec [foo (fn (n) (if (%eq n 0) 0 (bar (%sub n 1)))) \
+                  bar (fn (n) (if (%eq n 0) 1 (foo (%sub n 1))))] \
+           (foo 3))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    )
+    .unwrap();
+    assert_eq!(
+        result.hir.signal,
+        Signal::silent(),
+        "a silent mutual cycle must not be inflated to a signalling one"
     );
 }
 

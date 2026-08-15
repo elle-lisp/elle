@@ -762,9 +762,17 @@ enough at each boundary that truncation is self-evident:
 - **Per result:** rows land incrementally (autocommit), so everything up to the
   kill survives.
 - **At completion only:** the `n_*` tallies are aggregated and `finished_at` is
-  stamped, in the same statement. A run row with `finished_at IS NULL` therefore
-  *is* the kill marker: its stored counters read zero because they were never
-  written, not because nothing failed.
+  stamped, in the same statement. A run row with `finished_at IS NULL` has
+  therefore not reached its end: its stored counters read zero because they were
+  never written, not because nothing failed.
+
+  `finished_at IS NULL` means "did not finish", which covers *died* and *still
+  running* alike — the row looks the same either way. The DB lives at
+  `$ELLE_CACHE/elle-tests.db`, one file shared by every checkout on the machine,
+  so a second worktree running its own corpus at the same time leaves in-flight
+  rows that the first one reports as killed. Before treating the warning as a
+  real kill, check whether another `elle test` is live; a row that is still NULL
+  once every runner has exited is the kill marker.
 
 The views refuse to launder that: `--summary` and the post-run summary compute
 their tallies **live** from `result` (never from the stored counters) and label

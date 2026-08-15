@@ -17,13 +17,13 @@ Module: `src/pipeline/` (7 files, ~540 lines of implementation).
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `mod.rs` | 28 | Module declarations, re-exports, type definitions |
-| `cache.rs` | 395 | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
-| `scan.rs` | 97 | Pre-scanning for forward declarations (`prescan_forms`, `scan_define_lambda`, `scan_const_binding`) |
-| `fixpoint.rs` | 81 | Shared fixpoint loop (`run_fixpoint`) parameterized by post-analyze closure |
-| `compile.rs` | 115 | `compile()`, `compile_file()` |
-| `analyze.rs` | 65 | `analyze()`, `analyze_file()` |
-| `eval.rs` | 90 | `eval()`, `eval_all()`, `eval_syntax()` |
+| `mod.rs` | `CompileResult`, `AnalyzeResult`, re-exports |
+| `cache.rs` | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
+| `compile.rs` | `compile()`, `compile_file()`, and the whole-module entry points |
+| `compile/frontend.rs` | Read, expand, and classify forms ahead of analysis |
+| `compile/transforms.rs` | Post-analysis HIR transforms |
+| `analyze.rs` | `analyze()`, `analyze_file()` |
+| `eval.rs` | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
 ## Public API
 
@@ -117,8 +117,12 @@ is intentional — Expanders are not cached or reused across top-level calls.
 
 ## The fixpoint loop
 
-Used by `compile_file`, `eval_all` (via `compile_file`), and `analyze_file` to
-correctly infer signals for mutually recursive top-level definitions.
+Signal inference for mutually recursive definitions converges by fixpoint. The
+loop lives in `analyze_file_letrec` (`src/hir/analyze/fileletrec/letrec.rs`),
+not in the pipeline module: `compile_file` and `analyze_file` both classify a
+file's forms and hand them to that one function, so the file *is* a letrec and
+the file-level fixpoint and the letrec fixpoint are the same mechanism. Local
+`(letrec ...)` forms run the same loop in `src/hir/analyze/letrec.rs`.
 
 The signal inference computed here is exposed to tools and agents via:
 - **`compile/signal`** — Get the inferred signal of a function
@@ -129,105 +133,61 @@ See [MCP server documentation](../docs/mcp.md) and [Agent Reasoning](../docs/ana
 
 ### Problem
 
-When compiling `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (f x)))`,
-the analyzer sees `f` before `g` exists. Without pre-scanning, `g` would be
-treated as an unknown name with `Polymorphic` signal, making `f` also
-`Polymorphic` — even if both are actually `Silent`.
+In `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (yield x)))`, a single
+sequential pass analyzes `f` while `g` is still unanalyzed. `f` therefore reads
+whatever `g`'s seed says rather than what `g` turns out to be, and a second
+name in the cycle can make the first one's answer wrong in either direction:
+too low if the seed is optimistic, too high if it is conservative.
 
-### Algorithm (in `src/pipeline/fixpoint.rs`)
+### Algorithm
 
-The algorithm has five phases (not to be confused with the max iteration
-count of 10 within phase 4):
+1. **Pre-bind** every name in the letrec, so each initializer can resolve its
+   siblings. Seed each one's signal with `Signal::silent()`.
 
-1. **Parse and expand** all forms upfront. Expansion is idempotent so this
-   only happens once. (In `compile_file` and `analyze_file` before calling
-   `run_fixpoint`.)
+2. **Analyze initializers** in order. Record each lambda's `inferred_signals`
+   in `signal_env` and its arity in `arity_env` as it is analyzed. Bindings
+   analyzed early in this pass may have read stale sibling signals; the next
+   step is what repairs that.
 
-2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
-    For each match, seed `def_signals` with `Signal::silent()` (optimistic —
-    assume silent) and extract syntactic arity into `def_arities`.
+3. **Iterate to a fixpoint** (bounded at 10 iterations). Re-analyze every
+   lambda binding against the current `signal_env`. If any lambda's
+   `inferred_signals` differs from what `signal_env` holds, record the new
+   value and iterate again. Stop on the first iteration that changes nothing.
 
-3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
-   `def` bindings as immutable for cross-form immutability checking.
+4. **Analyze the body** (or, for a file-letrec, the remaining expression
+   entries) only after the loop has converged, so calls into the cycle read
+   settled signals.
 
-4. **Fixpoint iteration** (in `run_fixpoint()`, max 10 iterations):
-   - Clear `analysis_results`
-   - For each form, create a fresh `Analyzer` seeded with:
-     - `def_signals` from previous iteration (or pre-scan)
-     - `def_arities` from pre-scan + previous forms
-     - `immutable_defs` from pre-scan + previous forms
-   - Analyze the form, collect actual inferred signals via
-     `analyzer.take_defined_signals()`
-   - After all forms: compare `new_def_signals` with `def_signals`
-   - If equal → converged, break
-   - If different → update `def_signals`, re-analyze all forms
+5. **Combine** the aggregate signal from the post-fixpoint binding and body
+   HIR, not from the values step 2 produced.
 
-5. **Post-analysis callback** (parameterized by `post_analyze` closure):
-   - `compile_file` passes `|a| mark_tail_calls(&mut a.hir)` to mark tail calls
-   - `analyze_file` passes `|_| {}` (no-op, returns HIR as-is)
-
-6. **Lower and emit** (only in `compile_file`, after convergence).
+Re-analysis is safe to repeat: its side effects on bindings (`mark_captured`,
+`mark_mutated`) only ever add flags, so an extra iteration can make the result
+more conservative but never wrong. Errors raised inside lambda bodies are
+collected from the final iteration only, so a body that fails to analyze does
+not report the same error once per iteration.
 
 ### Convergence
 
-The algorithm converges because signals form a lattice: `Silent` < `Yields` <
-`Polymorphic`. Each iteration can only move signals upward (from the optimistic
-`Silent` seed toward the true signal). Once no signal changes, the fixpoint is
-reached. The max of 10 iterations is a safety bound — in practice, convergence
-happens in 1–3 iterations.
+Signals form a lattice and the seed is the bottom element, so each iteration
+can only move a signal upward. A signal that stops moving is at its least
+fixed point. Termination is therefore guaranteed by the lattice height; the
+10-iteration bound is a safety net against a lattice bug, not part of the
+argument. In practice convergence takes 1–3 iterations.
 
-### Deduplication
+Because the seed is optimistic, a loop that stops early reports signals that
+are too *low* — it under-approximates. That is the dangerous direction: a
+function that can raise `:error` but is inferred silent will pass a
+compile-time `(silence)` check and fail at runtime instead. The runtime
+enforcement in `attune`/`silence` is the backstop, not the guarantee.
 
-The fixpoint loop lives in `run_fixpoint()` (in `src/pipeline/fixpoint.rs`),
-parameterized by a `post_analyze` closure. Both `compile_file` and
-`analyze_file` call through it.
+### Scope
 
-## Pre-scanning functions (in `src/pipeline/scan.rs`)
+Convergence is per-file. Mutual recursion across a file boundary does not
+converge, because each import is a separate compilation — see
+[signals/inference.md](signals/inference.md) § Mutual Recursion Across Files
+for why that is a design choice and what `squelch` does about it.
 
-### `prescan_forms()`
-
-```rust
-pub(super) fn prescan_forms(
-    forms: &[Syntax],
-    symbols: &mut SymbolTable,
-) -> (HashMap<SymbolId, Signal>, HashMap<SymbolId, Arity>, HashSet<SymbolId>)
-```
-
-Unified pre-scan that processes all forms in a single pass, calling both
-`scan_define_lambda` and `scan_const_binding` for each form. Returns:
-- `def_signals`: `(def name (fn ...))` patterns seeded with `Signal::silent()`
-- `def_arities`: syntactic arities from lambda parameter lists
-- `immutable_defs`: all `(def name ...)` patterns
-
-### `scan_define_lambda()`
-
-```rust
-pub(super) fn scan_define_lambda(
-    syntax: &Syntax,
-    symbols: &mut SymbolTable,
-) -> Option<(SymbolId, Option<Arity>)>
-```
-
-Matches expanded syntax of the form `(var/def name (fn ...))`. Returns the
-interned `SymbolId` and the syntactic arity (number of parameters, if the
-parameter list is a simple list). Used to seed the fixpoint loop with
-optimistic `Signal::silent()` and known arities before analysis begins.
-
-This operates on **expanded** syntax — `defn` has already been desugared to
-`(def name (fn ...))` by the Expander.
-
-### `scan_const_binding()`
-
-```rust
-pub(super) fn scan_const_binding(
-    syntax: &Syntax,
-    symbols: &mut SymbolTable,
-) -> Option<SymbolId>
-```
-
-Matches `(def name ...)` patterns (not `var`). Returns the `SymbolId`. Used to
-populate `immutable_defs` so the analyzer can reject `(assign name ...)` on
-`def`-bound names across form boundaries.
 
 ## Compilation phases (single-form)
 
