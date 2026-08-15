@@ -328,9 +328,13 @@ fn tail_call_slot_release_layout(
     None
 }
 
-/// Position of the first `TailCall` in the function that contains one, with the
-/// indices of that block's `DecrefCellRegion`s — the env-cell twin of
-/// [`tail_call_release_layout`], which reads the value route.
+/// Position of the first `TailCall` in the first block that has one AND releases
+/// a cell there, with the indices of that block's `DecrefCellRegion`s — the
+/// env-cell twin of [`tail_call_release_layout`], which reads the value route.
+///
+/// A block with no cell release is skipped rather than returned: its empty
+/// release list would satisfy a placement assertion in either direction, so
+/// returning it would let a pin pass while measuring nothing.
 fn tail_call_cell_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
     let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
     for f in funcs {
@@ -342,17 +346,41 @@ fn tail_call_cell_release_layout(module: &crate::lir::LirModule) -> Option<(usiz
             else {
                 continue;
             };
-            let releases = b
+            let releases: Vec<usize> = b
                 .instructions
                 .iter()
                 .enumerate()
                 .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
                 .map(|(idx, _)| idx)
                 .collect();
+            if releases.is_empty() {
+                continue;
+            }
             return Some((at, releases));
         }
     }
     None
+}
+
+/// The `DecrefCellRegion` counts of the blocks that make no `TailCall` at all —
+/// where a branch arm's head compensation lands when its sibling leaves through a
+/// callee.
+fn cell_releases_in_fallthrough_blocks(module: &crate::lir::LirModule) -> Vec<usize> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    funcs
+        .flat_map(|f| f.blocks.iter())
+        .filter(|b| {
+            !b.instructions
+                .iter()
+                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+        })
+        .map(|b| {
+            b.instructions
+                .iter()
+                .filter(|i| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
+                .count()
+        })
+        .collect()
 }
 
 #[test]
@@ -380,15 +408,16 @@ fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
 
 #[test]
 fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
-    // The decline face: the closure holding the cell is RETURNED by the sibling
-    // arm, so escape's capture facet marks `c` escaping and the sole-holder
-    // admission refuses the box. Only the mutated refusal is scoped to the value
-    // route; every escape facet still refuses, and the release keeps its place in
-    // the dead block.
+    // The decline face: the closure holding the cell crosses the FIBER frontier
+    // before the body tail-calls it, so escape's capture facet marks `c` escaping
+    // beyond return and both admissions refuse the box — a resumer holds the
+    // closure through a hold the compiler did not place. Only the mutated refusal
+    // is scoped to the value route; an escape facet no edge at the point replaces
+    // still refuses, and the release keeps its place in the dead block.
     let module = compile_to_lir(
-        "(begin (def s (fn () 0)) \
-         (def f (fn (t) (def @c 0) \
-         (let [g (fn () (assign c (%add c 1)) c)] (if t g (s))))) (f false))",
+        "(begin (def f (fn () (def @c 0) \
+         (let [g (fn () (assign c (%add c 1)) c)] (begin (emit :yield g) (g))))) \
+         (fiber/new f |:yield|))",
     );
     let (at, releases) =
         tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
@@ -396,6 +425,38 @@ fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
         releases.iter().all(|&r| r > at),
         "an escaping holder's env cell was hoisted ahead of the TailCall \
          (at={at}, releases={releases:?}) — the closure leaves carrying the cell",
+    );
+}
+
+#[test]
+fn a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated() {
+    // `(if t (g) 0)` — the box's one `DecrefCellRegion` relocates into the arm that
+    // tail-calls `g`, so the arm that falls through to the merge would release
+    // nothing. That arm names `c` nowhere, so branch compensation's head route
+    // covers it; the two are mutually exclusive by arm structure, which is what a
+    // cell release needs because it leaves no nil-stamp to make a replica no-op
+    // (docs/impl/region/mechanism.md § "A compensating release of an env cell names
+    // the box, not the holder's slot").
+    let module = compile_to_lir(
+        "(begin (def f (fn (t) (def @c 0) \
+         (let [g (fn () (assign c (%add c 1)) c)] (if t (g) 0)))) (f false))",
+    );
+    let (at, releases) =
+        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().all(|&r| r < at),
+        "the tail-calling arm must keep its relocated cell release ahead of the \
+         TailCall (at={at}, releases={releases:?})",
+    );
+    let fallthrough = cell_releases_in_fallthrough_blocks(&module);
+    assert!(
+        fallthrough.contains(&1),
+        "some block that makes no tail call must release the cell exactly once — \
+         the falling-through arm's head compensation; per-block counts={fallthrough:?}",
+    );
+    assert!(
+        fallthrough.iter().all(|&n| n <= 1),
+        "no block may release the cell twice; per-block counts={fallthrough:?}",
     );
 }
 

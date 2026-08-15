@@ -273,6 +273,104 @@ fn the_walk_base_case_releases_at_its_return() {
     );
 }
 
+// ── The env cell's compensating release ───────────────────────────────
+//
+// docs/impl/region/mechanism.md § "A compensating release of an env cell names the
+// box, not the holder's slot". An env cell's box is minted once per activation and
+// released through `LoadCaptureRaw` + `DecrefCellRegion`, which names the box
+// rather than the holder's slot — so neither the holder's reassignment nor a
+// capturer's alias reaches that release, and the head route's own premise (the arm
+// names the binding nowhere) carries it. The `tail` route stays refused: its count
+// argument is a retain on the release's own node, which no cell release has.
+
+/// The env-cell region of the binding named `name` — the `cell_release_regions`
+/// member among its source regions.
+fn env_cell_region(
+    hir: &Hir,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+    info: &RegionInfo,
+    name: &str,
+) -> Region {
+    let b = find_binding_by_name(hir, name, arena, symbols)
+        .unwrap_or_else(|| panic!("no binding named {name}"));
+    info.binding_source_regions
+        .get(&b)
+        .into_iter()
+        .flatten()
+        .copied()
+        .find(|r| info.cell_release_regions.contains(r))
+        .unwrap_or_else(|| {
+            panic!(
+                "binding `{name}` must hold an env-cell region; source={:?} cell_release={:?}",
+                info.binding_source_regions.get(&b),
+                info.cell_release_regions,
+            )
+        })
+}
+
+#[test]
+fn a_falling_through_arm_compensates_the_env_cell_its_sibling_relocated() {
+    // `(if t (g) 0)` — `g` captures the in-lambda mutable `c`, so the box is an env
+    // cell whose one `DecrefCellRegion` sits in the THEN arm (the frame-exit
+    // relocation moves it ahead of that arm's `TailCall`). The ELSE arm reaches the
+    // merge and names `c` nowhere, so it is a dead sibling arm and owes the head
+    // release; without it the box strands once per call.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (n t) (def @c n) (let [g (fn () c)] (if t (g) 0)))");
+    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let cell = env_cell_region(&hir, &arena, &symbols, &info, "c");
+    assert!(
+        info.branch_compensation
+            .get(&else_id)
+            .is_some_and(|comp| comp.contains(&cell)),
+        "the falling-through arm must release the env cell r{}; branch_compensation={:?}",
+        cell.0,
+        info.branch_compensation,
+    );
+}
+
+#[test]
+fn a_reassigned_holder_does_not_withdraw_its_env_cell_compensation() {
+    // The mutated face. A reassigned holder poisons a release routed through its
+    // SLOT, and this release names the box no `assign` repoints — so the same head
+    // release is owed. Pins that the refusal is read per region, not per holder.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (n t) (def @c n) (let [g (fn () (assign c (%add c 1)) c)] (if t (g) 0)))",
+    );
+    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let cell = env_cell_region(&hir, &arena, &symbols, &info, "c");
+    assert!(
+        info.branch_compensation
+            .get(&else_id)
+            .is_some_and(|comp| comp.contains(&cell)),
+        "a reassigned holder's env cell r{} must still take the head release; \
+         branch_compensation={:?}",
+        cell.0,
+        info.branch_compensation,
+    );
+}
+
+#[test]
+fn an_env_cell_never_takes_the_per_arm_tail_route() {
+    // The over-free counterfactual. The `tail` route fires on an arm that USES the
+    // region, and is sound only where a retain on the release's own node funds it —
+    // a store's, a `-mut` container's, or a return mint's. A cell release has none
+    // of those, so no arm may carry one however its uses fall.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (n t) (def @c n) (let [g (fn () c)] (if t (g) c)))");
+    let cell = env_cell_region(&hir, &arena, &symbols, &info, "c");
+    assert!(
+        info.branch_arm_decrefs
+            .values()
+            .all(|rs| !rs.contains(&cell)),
+        "no per-arm `tail` release may name the env cell r{} — nothing on its node \
+         retains it; branch_arm_decrefs={:?}",
+        cell.0,
+        info.branch_arm_decrefs,
+    );
+}
+
 #[test]
 fn the_arm_that_returns_the_value_takes_no_compensation() {
     // The over-free counterfactual: the arm that DOES hand the value to the

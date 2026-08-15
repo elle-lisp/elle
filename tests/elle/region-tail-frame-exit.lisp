@@ -36,6 +36,13 @@
 # value-routed release nil-stamps the slot it read, so the copy a path reaches
 # second loads `nil` and no-ops.
 #
+# An ENV CELL's release leaves no such stamp, so it takes the other route to the
+# same place: the relocation keeps it in the arm whose tail call it was placed in,
+# and the sibling arm — which names the cell's binding nowhere — takes branch
+# compensation's HEAD release. Exactly one of the two runs per path, because the
+# arms are mutually exclusive (§ "A compensating release of an env cell names the
+# box, not the holder's slot").
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each subject, and for the exemptions and the boundary,
 # whose releases must stay exactly where they are. The soundness complement is
@@ -200,12 +207,26 @@
     (g)))
 
 # (d11) the reassigned cell where the tail call sits in a branch ARM, so the box's
-# release is relocated at that arm's own point.
+# release is relocated at that arm's own point. The SIBLING arm reaches the merge
+# instead and finds no release there — the box's one `DecrefCellRegion` went into
+# the arm the relocation moved it into. The sibling names the cell's binding
+# nowhere, so it is a dead sibling arm and compensation's HEAD route covers it: the
+# release names the cell BOX, which no `assign` repoints and no capturer aliases
+# uncounted (docs/impl/region/mechanism.md § "A compensating release of an env cell
+# names the box, not the holder's slot"). Both arms are driven, since the whole
+# claim is that exactly one release runs on each.
 (defn arm-cell (n t)
   (def @c n)
   (let [g (fn ()
             (assign c (%add c 1))
             c)]
+    (if t (g) 0)))
+
+# (d11b) the immutable face of the same shape: the strand is per env cell, not per
+# reassignment, so a capture the body never rewrites takes the same head release.
+(defn arm-cell-ro (n t)
+  (def @c n)
+  (let [g (fn () c)]
     (if t (g) 0)))
 
 # (d12) a sibling's compiled FORWARD CELL. A one-way sibling capture is not a
@@ -450,22 +471,19 @@
 (defn handback-unfunded (v t)
   (if t v (tail-sink)))
 
-# residual: an env cell whose branch has a FALLING-THROUGH arm ─────────────────
-# `arm-cell` above relocates its box at the tail-calling arm's own point, which is
-# where the box's only `DecrefCellRegion` sits — so the sibling arm, which reaches
-# the merge instead, releases nothing. The branch-arm release window is what
-# anchors a single release where every arm reaches it, and it excludes cell
-# regions: re-anchoring the box to the merge would take it back out of the arm it
-# relocates in, and the merge's replica placement needs a self-cancelling run,
-# which `LoadCaptureRaw` + `DecrefCellRegion` is not (it leaves the holder as it
-# was, so a second copy would count twice). The strand is per env cell, not per
-# reassignment — `arm-cell-ro` is the immutable face of the same shape. Driven for
-# VALUE: both arms must still compute correctly.
+# residual: an env cell whose sibling arm READS its binding ────────────────────
+# `arm-cell` above is covered because the falling-through arm names `c` nowhere,
+# which is what makes it a dead sibling arm. An arm that READS `c` while the
+# sibling holds the `decref_point` is a USED sibling arm, and that route needs a
+# retain on the release's own node to fund it — a store's, a `-mut` container's, a
+# return mint's — which no `LoadCaptureRaw` + `DecrefCellRegion` run has. So the
+# box strands on the reading path. Driven for its VALUE, not its delta: it strands
+# by design, and what must hold is that both arms still compute correctly.
 
-(defn arm-cell-ro (n t)
+(defn arm-cell-read (n t)
   (def @c n)
   (let [g (fn () c)]
-    (if t (g) 0)))
+    (if t c (g))))
 
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def walk-moved-d
@@ -477,6 +495,9 @@
 (def cell-reassigned-d (measure (fn () (cell-reassigned 1)) 200 window))
 (def cell-heap-d (measure (fn () (cell-heap cell-src)) 200 window))
 (def arm-cell-t-d (measure (fn () (arm-cell 1 true)) 200 window))
+(def arm-cell-f-d (measure (fn () (arm-cell 1 false)) 200 window))
+(def arm-cell-ro-t-d (measure (fn () (arm-cell-ro 1 true)) 200 window))
+(def arm-cell-ro-f-d (measure (fn () (arm-cell-ro 1 false)) 200 window))
 (def fwd-cell-d (measure (fn () (fwd-cell 3)) 200 window))
 (def fwd-cell-plain-d (measure (fn () (fwd-cell-plain 3)) 200 window))
 (def fwd-cell-ret-d (measure (fn () (fwd-cell-ret 3)) 200 window))
@@ -538,7 +559,8 @@
          moved-and-stranded-d "  callee-local " callee-local-d "  arm-moved "
          arm-moved-t-d "/" arm-moved-f-d)
 (println "  cells: immutable " cell-immutable-d "  reassigned "
-         cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d)
+         cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d "/"
+         arm-cell-f-d "  arm-ro " arm-cell-ro-t-d "/" arm-cell-ro-f-d)
 (println "  fwd cells: plain " fwd-cell-plain-d "  selfrec-control " fwd-cell-d
          "  returned " fwd-cell-ret-d "/" fwd-cell-ret-sib-d
          "  sibling-captures-member " fwd-cell-sib-d)
@@ -602,6 +624,9 @@
 (bounded? cell-heap-d "the env cell of a reassigned capture with a heap init")
 (bounded? arm-cell-t-d
           "the reassigned cell relocated at a branch arm's tail call")
+(bounded? arm-cell-f-d "the falling-through sibling of that arm")
+(bounded? arm-cell-ro-t-d "the immutable cell relocated at the same arm")
+(bounded? arm-cell-ro-f-d "the falling-through sibling of the immutable arm")
 
 (bounded? fwd-cell-plain-d
           "a sibling's forward cell past a frame-replacing body")
@@ -649,9 +674,10 @@
 (assert (= (cell-heap cell-src) 3) "heap-init cell result lost")
 (assert (= (arm-cell 7 true) 8) "arm reassigned cell result lost")
 (assert (= (arm-cell 7 false) 0) "arm reassigned cell sibling arm lost")
-(assert (= (arm-cell-ro 7 true) 7) "residual: arm immutable cell result lost")
-(assert (= (arm-cell-ro 7 false) 0)
-        "residual: arm immutable cell sibling arm lost")
+(assert (= (arm-cell-ro 7 true) 7) "arm immutable cell result lost")
+(assert (= (arm-cell-ro 7 false) 0) "arm immutable cell sibling arm lost")
+(assert (= (arm-cell-read 7 true) 7) "residual: arm cell read result lost")
+(assert (= (arm-cell-read 7 false) 7) "residual: arm cell read sibling arm lost")
 (assert (= (fwd-cell 3) :done) "forward-cell walker result lost")
 (assert (= (fwd-cell-sib 3) :done) "sibling-captures-member result lost")
 (assert (= (def-arg-call 3) -1) "def-binder arg-call result lost")

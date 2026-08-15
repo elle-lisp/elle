@@ -55,8 +55,25 @@
 //!
 //! Regions whose release is owned by another mechanism are excluded, since
 //! compensating would double-free: merge children (the root's single decref frees
-//! them), co-owned-group members, capture cells, mutated-slot 1-slot containers,
-//! and the already-`suppressed_decref_regions`.
+//! them), co-owned-group members, mutated-slot 1-slot containers, and the
+//! already-`suppressed_decref_regions`.
+//!
+//! An **env cell** — a `cell_release_regions` member — is excluded from the `tail`
+//! route alone. Its release names the cell BOX (`LoadCaptureRaw` +
+//! `DecrefCellRegion`), so the two taints below — a MUTATED holder, whose slot is
+//! repointed, and a CAPTURED holder, reachable through a closure's env — are claims
+//! about a slot route that never touches it: the box is minted once per activation
+//! by `populate_env` and an `assign` writes its content, while a capturer reaches it
+//! through the counted `closure ⊇ cell` edge the funnel took. Both refusals are
+//! therefore read per region, exactly as the frame-exit admission reads them, and
+//! the `head` route covers the arm a frame-replacing sibling's relocation leaves
+//! empty (docs/impl/region/mechanism.md § "A compensating release of an env cell
+//! names the box, not the holder's slot"). The `tail` route keeps refusing it: that
+//! route's count argument is a retain on the release's own node, and no cell release
+//! has one. A compiled FORWARD cell is a different region and stays refused by both
+//! routes — its holder binding is captured by construction, so the capture taint
+//! reaches it, and its release is a `DecrefRegion` by static slot rather than a box
+//! load.
 //!
 //! The **return frontier** is an exclusion of a different kind, and it is
 //! *per-path*: a returned region is the caller's to free only on the paths that
@@ -191,6 +208,15 @@ pub(super) fn compute_branch_compensation(
     // forest's own reachability question, read from the region capture-graph
     // (`super::escape::captured_bindings`), never the lexical proxy `is_captured`
     // the solver is locked out of; mutation stays a direct structural read.
+    //
+    // Both taints are claims about a release routed through the holder's SLOT, so
+    // neither reaches an env cell, whose release names the cell BOX instead — a box
+    // `populate_env` mints once per activation, that an `assign` never repoints (it
+    // writes the cell's content), and that a capturer holds by the funnel's counted
+    // `closure ⊇ cell` edge rather than through this frame's slot. Read per region,
+    // exactly as the frame-exit admission reads the same two facts (module doc;
+    // docs/impl/region/mechanism.md § "A compensating release of an env cell names
+    // the box, not the holder's slot").
     let captured = super::escape::captured_bindings(hir);
     let mut tainted: std::collections::HashSet<Region> = std::collections::HashSet::new();
     for (b, regions) in binding_regions {
@@ -206,7 +232,7 @@ pub(super) fn compute_branch_compensation(
             if let Some(&d) = def {
                 region_anchors.entry(r).or_default().push(d);
             }
-            if unsafe_holder {
+            if unsafe_holder && !info.cell_release_regions.contains(&r) {
                 tainted.insert(r);
             }
         }
@@ -250,7 +276,6 @@ pub(super) fn compute_branch_compensation(
     let excluded = |r: Region| -> bool {
         info.suppressed_decref_regions.contains(&r)
             || info.owned_group_members.contains(&r)
-            || info.cell_release_regions.contains(&r)
             || info.mutated_binding_value_regions.contains(&r)
             || info.merged_root(r) != r
             || tainted.contains(&r)
@@ -416,8 +441,15 @@ pub(super) fn compute_branch_compensation(
                     // cross-arm interaction is not value-route-safe; such a region
                     // keeps the conservative single-`decref_point` baseline
                     // (leak-preserving, never a double-free).
+                    //
+                    // An env cell is refused here however its uses fall: this
+                    // route's count argument is a retain on the release's own node,
+                    // and a `LoadCaptureRaw` + `DecrefCellRegion` run has none. The
+                    // `head` route needs no such retain and covers the cell (module
+                    // doc).
                     Some(node)
                         if info.call_result_regions.contains(&r)
+                            && !info.cell_release_regions.contains(&r)
                             && holder_count.get(&r).copied().unwrap_or(0) == 1
                             && tail_admitted(r, node) =>
                     {
@@ -444,6 +476,10 @@ pub(super) fn compute_branch_compensation(
                     // Dead sibling arm (no use at all): head release. Admitted on
                     // every arm of every branch kind — the arm creates no reference
                     // to `r`, so the callee's own is the only one in existence here.
+                    // For an env cell that reference is the frame's env slot, and
+                    // every other holder's is the funnel's counted `closure ⊇ cell`
+                    // edge (or, under a capture adopt, an owning one whose decref is
+                    // a structural no-op).
                     None => head.entry(arm_id).or_default().push(r),
                 }
             }

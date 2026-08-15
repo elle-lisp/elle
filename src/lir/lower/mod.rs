@@ -177,9 +177,11 @@ impl ValueSlot {
 
     /// The stack slot, or `None` for an env index. Use at sites whose emission
     /// is stack-only (`AdoptRegion`, `FreeRegionGroup`, the branch-arm
-    /// compensations): skipping an env-celled region there leaves it
+    /// compensations' value route): skipping an env-celled region there leaves it
     /// independently reference-counted, which is each of those cuts' documented
-    /// always-legal fallback.
+    /// always-legal fallback. A `cell_release_regions` member is the one env-indexed
+    /// release those compensations do emit, and it reads [`Self::index`] instead —
+    /// it names the cell BOX, which `LoadCaptureRaw` reaches by index alone.
     pub(super) fn local(self) -> Option<u16> {
         match self {
             ValueSlot::Local(i) => Some(i),

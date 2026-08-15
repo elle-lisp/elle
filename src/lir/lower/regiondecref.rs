@@ -168,6 +168,12 @@ impl<'a> Lowerer<'a> {
                         }
                         return;
                     }
+                    // A captured env cell releases the BOX at its env index, never
+                    // the inner value's caller-owned region.
+                    if self.region_info.cell_release_regions.contains(&r) {
+                        self.emit_cell_region_release(slot, hir_id);
+                        return;
+                    }
                     // Load the value from its slot and release by its
                     // runtime region. The slot still holds a dangling
                     // Value after this but is never read again
@@ -177,27 +183,6 @@ impl<'a> Lowerer<'a> {
                     // the value's actual runtime region, which the escape
                     // incref already balanced.
                     let val_reg = self.fresh_reg();
-                    if self.region_info.cell_release_regions.contains(&r) {
-                        // Captured env cell (an `@x` lbox / captured-local cell):
-                        // `slot` is the upvalue/env index. Load the CELL itself
-                        // (raw, no deref) and free the CELL's OWN region via
-                        // `DecrefCellRegion` (region_of) — never unwrap to the
-                        // inner value's caller-owned region. The closure-capture
-                        // incref keeps the cell alive past this release until the
-                        // capturing closure's region cascade-frees it.
-                        self.emit(LirInstr::LoadCaptureRaw {
-                            dst: val_reg,
-                            index: slot,
-                        });
-                        self.emit(LirInstr::DecrefCellRegion { src: val_reg });
-                        if crate::config::get().has_trace("rc") {
-                            eprintln!(
-                                "[trace:rc:emit] emit_decref_cell_region hir_id={:?} upvalue_slot={} span={}",
-                                hir_id, slot, self.current_span
-                            );
-                        }
-                        return;
-                    }
                     // Read the value from the space its slot was minted in
                     // ([`super::ValueSlot`]). An env-celled binding loads its
                     // cell RAW and lets `DecrefValueRegion` unwrap it:
@@ -329,6 +314,37 @@ impl<'a> Lowerer<'a> {
             }
             let rid = self.static_slot(r);
             self.emit_decref_region(rid);
+        }
+    }
+
+    /// Release a captured env cell (an `@x` lbox / captured-local cell) at
+    /// `index`, the upvalue/env slot the binding's cell lives in.
+    ///
+    /// Load the CELL itself (raw, no deref) and free the CELL's OWN region via
+    /// `DecrefCellRegion` (`region_of`) — never unwrap to the inner value's
+    /// caller-owned region. The capturing closure's counted `closure ⊇ cell` edge
+    /// keeps the box alive past this release until that closure's region cascade
+    /// frees it.
+    ///
+    /// The run leaves the env slot exactly as it was, which is why it is not
+    /// self-cancelling and cannot be replicated across a branch merge
+    /// (`self_cancelling_run`). Its two emission sites are therefore mutually
+    /// exclusive by arm structure rather than by a nil-stamp: the region's own
+    /// `decref_point`, and a dead sibling arm's head compensation
+    /// (docs/impl/region/mechanism.md § "A compensating release of an env cell
+    /// names the box, not the holder's slot").
+    fn emit_cell_region_release(&mut self, index: u16, site: HirId) {
+        let val_reg = self.fresh_reg();
+        self.emit(LirInstr::LoadCaptureRaw {
+            dst: val_reg,
+            index,
+        });
+        self.emit(LirInstr::DecrefCellRegion { src: val_reg });
+        if crate::config::get().has_trace("rc") {
+            eprintln!(
+                "[trace:rc:emit] emit_decref_cell_region hir_id={:?} upvalue_slot={} span={}",
+                site, index, self.current_span
+            );
         }
     }
 
@@ -505,9 +521,21 @@ impl<'a> Lowerer<'a> {
             // doubled here (the analysis already excludes these).
             if self.region_info.suppressed_decref_regions.contains(&r)
                 || self.region_info.owned_group_members.contains(&r)
-                || self.region_info.cell_release_regions.contains(&r)
                 || self.region_info.merged_root(r) != r
             {
+                continue;
+            }
+            // An env cell: this arm names the cell's binding nowhere, so the box's
+            // own `decref_point` release sits in a mutually-exclusive sibling arm
+            // and this head copy is the only one this path runs. Routed to the box
+            // rather than through the holder's slot, which is what keeps the
+            // holder's reassignment and its capturers out of the question
+            // (docs/impl/region/mechanism.md § "A compensating release of an env
+            // cell names the box, not the holder's slot").
+            if self.region_info.cell_release_regions.contains(&r) {
+                if let Some(&value_slot) = self.region_to_slot.get(&r) {
+                    self.emit_cell_region_release(value_slot.index(), hir_id);
+                }
                 continue;
             }
             if self.region_info.call_result_regions.contains(&r) {
