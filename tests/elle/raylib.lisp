@@ -1,13 +1,15 @@
 (elle/epoch 12)
-# tests/elle/lib/raylib.lisp — raylib module smoke tests
+# tests/elle/raylib.lisp — raylib module smoke tests
 #
 # Tests module loading, constructors, constants, struct sizes, and accessors.
 # Does NOT open a window — all tests are non-graphical.
-
-(def [ok rl] (protect ((import "std/raylib"))))
-(unless ok
-  (println "raylib: skipping — libraylib.so not available")
-  (exit 0))
+#
+# Every test needs the `std/raylib` module, which needs FFI and
+# libraylib.so, so gate the module binding itself. See gtk4.lisp for why
+# this is `gate!` and never `(exit 0)`.
+(def rl
+  (let [r (protect ((import "std/raylib")))]
+    (gate! (get r 0) "raylib: FFI or libraylib.so is unavailable" (get r 1))))
 
 (println "raylib: module loaded")
 
