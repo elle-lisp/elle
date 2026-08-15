@@ -1085,6 +1085,22 @@ fn region_squelch_fiber_uaf() {
     run_elle_script_with_args("region-squelch-fiber-uaf", &["--trace=guardfree"]);
 }
 
+// Guard — a caught `fiber/abort` hands its injected payload straight back to the
+// caller, whose `DecrefValueRegion` on the abort RESULT fires alongside the separate
+// one it already owes the payload as an ARGUMENT — and the unwinding child runs no
+// `Return` to fund the second. `handle_fiber_abort_signal` mints it on that arm.
+// Without the mint the payload's region is freed while the fiber and the caller still
+// point into it — a stale read the harness's ordinary vm/jit policies see as an intact
+// recycled page, and which only guardfree faults on deterministically. The file also
+// pins the mint's PLACEMENT: an in-body handler consumes the payload inside the fiber,
+// so minting at the delivery instead would strand a region per abort. The
+// bounded-growth face of the same declaration is
+// tests/elle/region-fiber-install-clique-leak.lisp.
+#[test]
+fn region_fiber_abort_delivery_uaf() {
+    run_elle_script_with_args("region-fiber-abort-delivery-uaf", &["--trace=guardfree"]);
+}
+
 // Guard — a `@`-mutable parameter reassigned in its body, whose (post-reassign)
 // value is MOVED into a tail call. The param is materialized as a capture cell the
 // callee owns; the tail-call move must retain the moved value (the borrowed-tail-arg

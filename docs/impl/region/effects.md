@@ -128,6 +128,55 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   an operation added behind one of these gateways that RETAINS an argument past
   the call invalidates the declaration and must move it back to `Mixed`
   (`tests/elle/region-query-clique-leak.lisp`).
+- **`Delivers { args }`** — the listed (0-based) arguments are handed to
+  **another fiber** by installing them in its signal slot, and the result is
+  unbounded. The fiber value installers are the declarants: `fiber/resume`'s
+  resume value, `fiber/abort`'s and `fiber/cancel`'s error payload, and
+  `fiber/emit`'s emitted value. Each carries both of the properties `Mixed`
+  conflates, so `Delivers` answers them separately:
+
+  - **The argument side is `Funnel`'s answer — no clique.** Every install seam
+    accounts for its own reference at runtime. An install that OUTLIVES the call
+    takes the park-retain and records the `fiber → signal` outgoing edge
+    (`record_terminal_signal_park`: the hard kill's, and the completing resume's
+    step-6a park), so the fiber's free-time signal scan balances it. An install
+    the next step CONSUMES is a transient handover — `do_fiber_resume_single`
+    takes the value straight back out of the slot and hands it to the resumed
+    frame as a borrowed operand, while the caller's own frame stays parked
+    underneath the resume, holding the reference that keeps it alive. A
+    compile-time incref would double-count the first against its single cascade
+    decref and never balance the second, which is exactly the arg-clique leak
+    (`tests/elle/region-fiber-install-clique-leak.lisp`).
+  - **The argument side is also `Sends`'s answer — a frontier crossing.** The
+    value goes to a fiber this activation does not bound, so escape seeds each
+    listed argument on its **fiber** facet (`hir::escape`), never the store
+    facet: an installed value is never Owned by the installing activation's
+    subtree.
+  - **The result side is `Opaque`'s answer — unbounded.** A resume hands back
+    whatever the resumed fiber yields or returns, minted on that fiber's own
+    activation; an abort of a dead fiber hands back a value read out of the fiber
+    argument. So the result may live anywhere, the declaration oracle makes no
+    result-side check, and the walk records `result ⊒ each argument`.
+
+  The distinction from `Sends` is *who counts the store*: `chan/send` leaves its
+  message in a channel buffer external to the region system, which nothing
+  cascades, so the send-site incref IS the message's reference and `chan/recv`
+  lowers it. A fiber's signal slot is not external — it is a scanned field of a
+  region-managed fiber object — so the seam counts it and a solver edge would
+  double-count.
+
+  **What a delivered value still owes is owed by its RESULT.** A caught
+  `fiber/abort` hands the injected payload straight back to its caller, whose
+  `DecrefValueRegion` then fires on it alongside the separate release the caller
+  already owes it as an *argument* — and the unwinding child runs no `Return` to
+  fund the second. So the caught arm mints that reference
+  (`handle_fiber_abort_signal`), and only that arm: the uncaught arm pushes `nil`
+  and routes the payload through the signal, where no caller release targets it,
+  and an in-body handler that catches the error consumes the payload inside the
+  fiber and hands the caller a value of its own. Minting at the delivery instead
+  would strand a region per abort on both of those paths
+  (`tests/elle/region-fiber-abort-delivery-uaf.lisp` carries the over-free face
+  and the two placement faces).
 - **`Mixed`** — examined, and the native stores arguments *uncounted*
   (the property the arg clique exists to cover) — and/or returns a result
   that is neither always-fresh nor always-pass-through (a trait-dispatching
@@ -162,6 +211,10 @@ Declarations shrink the clique to where it can be real:
   region — but it shares "stores nothing," so it carries no clique.)
 - `Funnel`: stores happen but are runtime-counted at the store site — **no
   edges** (an edge would double-count against the single cascade decref).
+- `Delivers { args }`: the install into another fiber's signal slot is
+  runtime-counted or transient, so — like `Funnel` — **no edges**. What the
+  declaration still carries is the *frontier*: escape seeds the listed args on
+  its fiber facet, so an installed value is never Owned.
 - `Stores { args }` (and `Sends { args }`, identically for edges): a directed
   may-store edge from each listed argument's regions to each *other* heap
   argument's regions (the possible in-argument targets). A store into the
@@ -197,14 +250,31 @@ machinery for every heap-returning effect; `Immediate` calls contribute no
 result regions to the walk (the solver's `call_returns_immediate` check,
 keyed on this declaration).
 
-**The dispatch pass-through retain, and the two declarations that waive it.**
-`dispatch_native_call` funds the caller's release: a heap result living outside
-the call's own minted region gets one owning reference (the pass-through
-retain), so the caller's `DecrefValueRegion` balances against it instead of
-freeing a region owned elsewhere. Two `PrimitiveDef` flags declare "the body
-already supplied that reference," and the dispatch then skips the retain —
-taking it anyway would hand the caller two references against one release, one
-stranded region graph per call:
+**The dispatch pass-through retain, what it is for, and the declarations that
+waive it.** `dispatch_native_call` funds the caller's release: a heap result
+living outside the call's own minted region gets one owning reference (the
+pass-through retain), so the caller's `DecrefValueRegion` balances against it
+instead of freeing a region owned elsewhere.
+
+The retain is for a **result**, so it is taken only when the native returns one —
+`SIG_OK`. A native that returns a value as a **signal payload** hands it to the
+signal machinery, which accounts for it on the path that payload actually takes:
+a fiber carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate` returning their
+fiber ARGUMENT) is replaced by the child's outcome before any caller release
+runs; a suspending payload rides `fiber.signal` under the `SuspendEscape` /
+`EmitEscape` retain and is released on the resume path; an error or halt payload
+is read through the signal, never through the caller's result slot, which the
+handler stamps `nil`. There is no consumer for a retain on any of those, so
+taking one strands a region per call — the emitted value of every `fiber/emit`
+(`tests/elle/region-fiber-install-clique-leak.lisp`), or a
+parked-then-discarded fiber's whole region graph (the `multi-resume` /
+`yield-discard` oracle probes). This is the same exemption the declaration oracle
+makes for a signal-carrying return, stated on the accounting side.
+
+Beyond that, two `PrimitiveDef` flags declare "the body already supplied that
+reference," and the dispatch then skips the retain — taking it anyway would hand
+the caller two references against one release, one stranded region graph per
+call:
 
 - **`moves_out`** — the result is an element REMOVED from a container argument,
   and the body took the retain in place, necessarily before releasing the
@@ -231,7 +301,7 @@ forest. `Fresh`, `Stores` and `Sends` each claim a heap result in the call's
 own minted region — the claim the declaration oracle below checks — and
 `Immediate` claims no region at all, so none of the four can hand back a value
 living inside an *argument*. Every other effect can (`PassThrough` by
-definition, `Funnel`'s in-place container return, `Opaque`, `Mixed`,
+definition, `Funnel`'s in-place container return, `Opaque`, `Delivers`, `Mixed`,
 `Unknown`), and a non-primitive callee is under no claim whatsoever. For those
 the walk records `result ⊒ each argument`
 (`RegionInfo::opaque_result_aliases`), so a subtree whose member such a result
@@ -289,10 +359,10 @@ declared effect against `region_of(result)` after every native call that
 completes normally — `Immediate` ⇒ the result has no region; `Fresh` /
 `Stores` / `Sends` ⇒ a heap result lives in the call's own minted region;
 `PassThrough` ⇒ a heap result lives anywhere *but* the call's own minted
-region; `Funnel` / `Mixed` / `Unknown` / `Opaque` ⇒ no check (`Opaque`'s
-result may live anywhere — that is the point of the variant). A violation panics
-deterministically, naming
-the primitive. Signal-carrying returns (error/yield payloads) are exempt —
+region; `Funnel` / `Mixed` / `Unknown` / `Opaque` / `Delivers` ⇒ no check (an
+`Opaque` or `Delivers` result may live anywhere — that is the point of both
+variants). A violation panics deterministically, naming the primitive.
+Signal-carrying returns (error/yield payloads) are exempt —
 their payloads ride the signal machinery's own accounting. The oracle
 cannot see the store side (that is the mutable-store funnel's and
 guardfree's territory); it polices the result claim on every debug run, so

@@ -174,7 +174,9 @@ impl RegionInference {
     /// is not repeated here.
     ///
     /// Everything else can: `PassThrough` by definition, `Funnel`'s in-place container
-    /// return, `Opaque`'s live-anywhere result, `Mixed`/`Unknown`'s unexamined one, and
+    /// return, `Opaque`'s and `Delivers`'s live-anywhere result (`fiber/abort` on a
+    /// dead fiber hands back a value read out of its fiber argument),
+    /// `Mixed`/`Unknown`'s unexamined one, and
     /// every non-primitive callee — which is under no claim whatsoever, and which
     /// `call_effect` reports as `None` alongside a shadowed or computed callee. The
     /// ownership forest must treat such a result as an alias into the argument's subtree

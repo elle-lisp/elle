@@ -194,4 +194,14 @@ fn native_store_spec() {
         "(def f (fn () (let [s \"x\"] (let [body (fn () s)] (fiber/new body |:yield|)))))",
         &[("s", true, true), ("body", false, false)],
     );
+    // fiber/resume declares `Delivers { args: [1] }`: the resume value is installed
+    // in another fiber's signal slot, so it crosses the fiber frontier and escapes —
+    // the same facet `Sends` seeds, though the solver records no edge for it (the
+    // install seam counts its own reference). The fiber itself (arg 0) is the
+    // delivery TARGET, not a source, so it does not escape — the same positive /
+    // negative pair `chan/send` makes above.
+    assert_binding_escape(
+        "(def f (fn (fb) (let [v \"hi\"] (fiber/resume fb v))))",
+        &[("v", true, false), ("fb", false, false)],
+    );
 }

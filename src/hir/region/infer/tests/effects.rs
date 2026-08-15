@@ -30,17 +30,17 @@ fn effect_immediate_call_emits_no_arg_clique() {
 
 #[test]
 fn effect_mixed_call_keeps_arg_clique() {
-    // `fiber/resume` is declared `Mixed`, and genuinely so: it installs its resume
-    // value (arg 1) into the target fiber's `signal` field — a store into a structure
-    // outside the region system, uncounted at compile time — so the conservative full
-    // mutual may-store clique between its two heap args is the right answer (over-keep,
-    // never mis-free). Tests the REAL classification (a primitive *declared* Mixed →
-    // clique), the boundary against over-deletion — not a forced effect, which would
-    // merely re-exercise the solver's Mixed arm already covered by
-    // `effect_unknown_call_keeps_arg_clique`.
-    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
+    // `git` is declared `Mixed`, and genuinely so: it hands its closure argument to
+    // the GPU compile path and caches the compiled SPIR-V on that closure's
+    // template — a retention no compile-time seam records — so the conservative full
+    // mutual may-store clique between its two heap args is the right answer
+    // (over-keep, never mis-free). Tests the REAL classification (a primitive
+    // *declared* Mixed → clique), the boundary against over-deletion — not a forced
+    // effect, which would merely re-exercise the solver's Mixed arm already covered
+    // by `effect_unknown_call_keeps_arg_clique`.
+    let (hir, arena, symbols, info) = analyze_with_class("(git \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (git ...) call");
     let edges = edges_at_site(&info, calls[0]);
     let mutual = edges
         .iter()
@@ -48,6 +48,28 @@ fn effect_mixed_call_keeps_arg_clique() {
     assert!(
         mutual,
         "a Mixed native call must keep the mutual arg clique; got {:?}",
+        edges
+    );
+}
+
+#[test]
+fn effect_delivers_call_emits_no_arg_clique() {
+    // `fiber/resume` is declared `Delivers { args: [1] }`: it installs the resume
+    // value into the target fiber's signal slot, a seam that counts its own
+    // reference — the park-retain and its recorded `fiber → signal` edge for an
+    // install that outlives the call, a transient handover the resume consumes
+    // otherwise. So the call records NO may-store edge, exactly as `Funnel` does for
+    // the mutable-store funnel; a compile-time incref would never balance
+    // (tests/elle/region-fiber-install-clique-leak.lisp). Uses the REAL
+    // classification, so a regression that re-declares an installer `Mixed` fails
+    // here as well as on the rate.
+    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
+    let edges = edges_at_site(&info, calls[0]);
+    assert!(
+        edges.is_empty(),
+        "a Delivers native call must not record arg-clique edges; got {:?}",
         edges
     );
 }
@@ -170,15 +192,15 @@ fn effect_sends_emits_same_edges_as_stores() {
 
 #[test]
 fn hard_edge_sites_marks_native_uncounted_store_sites() {
-    // `fiber/resume` is declared `Mixed` (it installs its resume value into the target
-    // fiber's `signal` field, uncounted at compile time), so its clique edges are HARD —
-    // the lowerer emits the incref value-based for a call-result source
+    // `git` is declared `Mixed` (it caches compiled SPIR-V on its closure argument's
+    // template, a retention no compile-time seam records), so its clique edges are
+    // HARD — the lowerer emits the incref value-based for a call-result source
     // (docs/impl/region/effects.md "Hard edges: how a may-store edge is emitted"). Pins
     // the inclusion side of the hard/soft split, the Mixed companion of
     // `hard_edge_sites_marks_declared_stores_sites`, through the REAL classification.
-    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
+    let (hir, arena, symbols, info) = analyze_with_class("(git \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (git ...) call");
     assert!(
         info.hard_edge_sites.contains(&calls[0]),
         "a Mixed native call site must be a hard-edge site"

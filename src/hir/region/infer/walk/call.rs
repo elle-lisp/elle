@@ -286,6 +286,22 @@ impl RegionInference {
                     }
                 }
             }
+            Some(RegionEffect::Delivers { .. }) => {
+                // A fiber value installer (`fiber/resume`'s resume value,
+                // `fiber/abort`/`fiber/cancel`'s payload, `fiber/emit`'s emitted
+                // value). The install goes into another fiber's signal slot, whose
+                // seam counts its own reference — the park-retain plus its recorded
+                // `fiber → signal` outgoing edge for an install that outlives the
+                // call, and a transient handover the next step consumes otherwise —
+                // so NO may-store edge, exactly as for `Funnel`. A compile-time
+                // incref would double-count the first against its single free-time
+                // cascade decref and never balance the second
+                // (region-fiber-install-clique-leak.lisp). The frontier crossing the
+                // declaration also carries is escape's to record (its fiber facet,
+                // `hir::escape`), not a solver-recorded source set — the same split
+                // `Sends` makes. The result is unbounded, so it falls through to the
+                // alias recording below (`result_may_alias_args`).
+            }
             Some(RegionEffect::Immediate | RegionEffect::PassThrough | RegionEffect::Opaque) => {
                 // `Opaque` stores no argument (every arg is copied out —
                 // to a Rust String/Vec, the kernel, a fresh structure),

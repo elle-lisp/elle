@@ -240,7 +240,8 @@ impl VM {
                 RegionEffect::Funnel
                 | RegionEffect::Mixed
                 | RegionEffect::Unknown
-                | RegionEffect::Opaque => {}
+                | RegionEffect::Opaque
+                | RegionEffect::Delivers { .. } => {}
             }
         }
         // Skip the escape incref when the result is fresh in this call's own
@@ -265,22 +266,26 @@ impl VM {
         // (`import`'s plugin-cache retain). Retaining again here is the same
         // double-count — one stranded region graph per call (the
         // `import-result` oracle probe).
-        // AND EXCEPT a fiber-carrier signal (`fiber/resume`/`fiber/abort`/
-        // `fiber/propagate` returning its fiber ARGUMENT as the payload): the
-        // signal handler replaces the carrier with the child's actual outcome
-        // before any caller release runs, so a retain here would have no
-        // consumer — one dangling retain per suspending resume, pinning every
-        // parked-then-discarded fiber's region forever (docs/impl/region/owner.md
-        // § "Park/unpark symmetry"; the `multi-resume`/`yield-discard` oracle
-        // probes). A parked fiber's liveness holds are its holders' ordinary
-        // counted references, never this retain.
-        let is_fiber_carrier = matches!(
-            crate::signals::dispatch::classify(bits, &value),
-            crate::signals::dispatch::SignalAction::Resume
-                | crate::signals::dispatch::SignalAction::Abort
-                | crate::signals::dispatch::SignalAction::Propagate
-        ) && value.as_fiber().is_some();
-        if !def.moves_out && !def.result_minted && !is_fiber_carrier {
+        // AND ONLY for a value the native returns as a RESULT. The retain funds
+        // the caller's `DecrefValueRegion` on the call result, and that release
+        // targets the call result — so a value the native returns as a SIGNAL
+        // PAYLOAD has no consumer for it. The signal machinery accounts for a
+        // payload itself, on the path each payload actually takes: a fiber
+        // carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate` returning its
+        // fiber ARGUMENT) is replaced by the child's outcome before any caller
+        // release runs; a suspending payload rides `fiber.signal` under the
+        // `SuspendEscape`/`EmitEscape` retain and is released on the resume path;
+        // an error or halt payload is read through the signal, never through the
+        // caller's result slot, which the handler stamps `nil`. Retaining any of
+        // them here strands one region per call — a parked-then-discarded fiber's
+        // whole region graph (docs/impl/region/owner.md § "Park/unpark symmetry";
+        // the `multi-resume`/`yield-discard` oracle probes), or the emitted value
+        // of every `fiber/emit` (`region-fiber-install-clique-leak.lisp`). This is
+        // the same exemption the declaration oracle above makes for a
+        // signal-carrying return, stated on the accounting side.
+        let is_result = crate::signals::dispatch::classify(bits, &value)
+            == crate::signals::dispatch::SignalAction::Ok;
+        if !def.moves_out && !def.result_minted && is_result {
             crate::value::arena::pass_through_retain(
                 unsafe { &mut *self.heap_ptr },
                 value,

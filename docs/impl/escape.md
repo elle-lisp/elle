@@ -66,10 +66,12 @@ A value escapes its activation through any of four facets:
   (`(%pair v …)` every arg, `(%array-push coll v)` arg 1, `(%put obj k v)` arg 2 —
   the value embeds in the fresh aggregate), and **native calls that declare a
   store** via their `RegionEffect` (read from the `CallClassification` the lowerer
-  supplies): `Stores{args}`/`Sends{args}` escape those args, `Mixed`/`Unknown`
-  escapes every arg (the solver's full mutual clique), and `Fresh`/`Immediate`/
-  `PassThrough`/`Funnel` escape nothing. (`Sends` is a `Stores` that also crosses a
-  fiber boundary; the two escape identically here.)
+  supplies): `Stores{args}`/`Sends{args}`/`Delivers{args}` escape those args,
+  `Mixed`/`Unknown` escapes every arg (the solver's full mutual clique), and
+  `Fresh`/`Immediate`/`PassThrough`/`Funnel`/`Opaque` escape nothing. (`Sends` and
+  `Delivers` are stores that also cross a fiber boundary; all three escape
+  identically here, and differ only in what the SOLVER records — `Delivers` no
+  edge, because its install seam counts its own reference.)
 - **capture** — a value *captured by a closure that itself escapes* escapes too,
   transitively. The capture facet has **no seed of its own**: a closure escapes
   its definition ONLY when its value returns/stores/crosses a fiber boundary (the
@@ -82,6 +84,9 @@ A value escapes its activation through any of four facets:
   - *terminal value* — the return facet (above).
   - *send* — the store facet: `chan/send` declares `Sends{[1]}` (a `Stores` that
     also crosses the fiber frontier), so its message escapes.
+  - *install* — the fiber value installers (`fiber/resume`, `fiber/abort`,
+    `fiber/cancel`, `fiber/emit`) declare `Delivers{[1]}`: the delivered value goes
+    into another fiber's signal slot, so it escapes on this facet too.
   - *spawn* — `fiber/new` is `Fresh`: the spawned closure rides the fresh fiber
     result and escapes only if that result does (ordinary result-flow), so it
     needs no separate rule. (`ev/spawn` is a stdlib fn, accounted in its own

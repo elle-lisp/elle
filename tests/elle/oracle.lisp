@@ -726,8 +726,22 @@
    ["fiber-resume"
     (fn [j]
       (let [f (fiber/new (fn [] 7) 2)]
-        (fiber/resume f))) 0] ["array-literal" (fn [j] [j (+ j 1) (+ j 2)]) 0]
-   ["mut-array" (fn [j] @[]) 0]
+        (fiber/resume f))) 0]  # The fiber value installers (`fiber/resume`/`abort`/`cancel`/`emit`) declare
+   # `Delivers`: the install into another fiber's signal slot counts its own
+   # reference at runtime, so no arg clique. `Mixed` charged one never-balancing
+   # `IncrefRegion` per heap-argument pair, which a HEAP payload is what arms —
+   # an immediate one leaves the pair unformed and measures nothing either way.
+   # The control for the class (docs/impl/region/effects.md § `Delivers`); the
+   # four installers' inline faces are pinned by
+   # tests/elle/region-fiber-install-clique-leak.lisp.
+   ["fiber-deliver"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (yield 1)
+                           2) |:yield|)]
+        (fiber/resume f)
+        (fiber/resume f [j]))) 0]
+   ["array-literal" (fn [j] [j (+ j 1) (+ j 2)]) 0] ["mut-array" (fn [j] @[]) 0]
    ["mut-array-push"
     (fn [j]
       (let [a @[]]

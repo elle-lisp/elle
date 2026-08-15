@@ -57,7 +57,7 @@ pub(crate) fn prim_fiber_mask(
 /// `decref_point` (`docs/impl/region/rules.md` Rule 4), so dereferencing the cache
 /// after the parent is gone reads freed pages. Resolving through the weak handle
 /// keeps that pointer from being followed once the parent's region is reclaimed
-/// (see `release_completed_resume_carrier`). The weak handle upgrades iff the
+/// (`tests/elle/region-fiber-resume-leak.lisp`). The weak handle upgrades iff the
 /// parent's `Fiber` state is still alive *somewhere* (a live region, the
 /// scheduler's tables, the VM); when it does, a fresh fiber `Value` is
 /// rebuilt from the upgraded handle (same `handle.id()`, so identity is
@@ -292,7 +292,12 @@ primitive! {
         category: "fiber",
         example: "(fiber/cancel f)\n(fiber/cancel f :reason)",
         aliases: &["cancel"],
-        effect: RegionEffect::Mixed,
+        // The kill parks the payload as the fiber's terminal signal and takes
+        // the park-retain plus its recorded `fiber → signal` outgoing edge
+        // (`kill_fiber`), so the install counts its own reference — no clique.
+        // A self-cancel hands the payload back instead, so the result may live
+        // in an argument's region: unbounded.
+        effect: RegionEffect::Delivers { args: &[1] },
     }
     "fiber/child" => prim_fiber_child {
         signal: Signal::errors(),
@@ -344,6 +349,14 @@ primitive! {
         category: "fiber",
         example: "(fiber/abort f)\n(fiber/abort f :reason)",
         aliases: &["abort"],
-        effect: RegionEffect::Mixed,
+        // The injected error is installed in the fiber's signal slot and taken
+        // straight back out by `do_fiber_abort`; where the fiber was never
+        // started, `kill_fiber` parks it under the park-retain instead. Either
+        // way the install counts its own reference — no clique. Where the value
+        // comes back OUT as the abort's result, `handle_fiber_abort_signal`
+        // mints the caller's reference (the unwinding exit runs no `Return` to
+        // mint it). Aborting an already-dead fiber hands back that fiber's
+        // terminal value, read out of the fiber argument: unbounded.
+        effect: RegionEffect::Delivers { args: &[1] },
     }
 }

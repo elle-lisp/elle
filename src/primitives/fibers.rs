@@ -243,7 +243,13 @@ primitive! {
         category: "fiber",
         example: "(fiber/resume f)",
         aliases: &["resume"],
-        effect: RegionEffect::Mixed,
+        // The resume value is installed in the target fiber's signal slot and
+        // taken straight back out by `do_fiber_resume_single`, which hands it to
+        // the resumed frame as a borrowed operand while this caller's frame stays
+        // parked underneath holding it alive — a transient handover that owes no
+        // reference of its own, so no clique. The result is whatever the resumed
+        // fiber hands back, minted on its activation: unbounded.
+        effect: RegionEffect::Delivers { args: &[1] },
     }
     "fiber/emit" => prim_emit {
         signal: Signal::yields_errors(),
@@ -253,7 +259,11 @@ primitive! {
         category: "fiber",
         example: "(emit 2 42)",
         aliases: &["emit"],
-        effect: RegionEffect::Mixed,
+        // The emitted value rides `fiber.signal` to the resumer, and the
+        // suspension takes its own `SuspendEscape` retain
+        // (`handle_primitive_signal`), so no clique. The result is what the
+        // resumer delivers back: unbounded.
+        effect: RegionEffect::Delivers { args: &[1] },
     }
     "fiber/status" => prim_fiber_status {
         signal: Signal::errors(),

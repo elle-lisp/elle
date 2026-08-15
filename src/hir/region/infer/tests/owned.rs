@@ -160,16 +160,16 @@ fn owned_subtree_refuses_region_level_alias() {
 
 #[test]
 fn owned_subtree_refuses_may_store_clique() {
-    // `fiber/resume` is declared `Mixed` (it installs its resume value into the target
-    // fiber's `signal` field, uncounted at compile time), so it records a may-store
+    // `git` is declared `Mixed` (it caches compiled SPIR-V on its closure argument's
+    // template, a retention no compile-time seam records), so it records a may-store
     // clique between its two heap (string-literal) args. A clique edge is a may-store, so
     // it builds no subtree (ineligible) — but it DOES defeat external uniqueness: rooting
     // at one arg's region, the clique edge to the other arg is a reference from outside
     // into the subtree. The result is discarded (`begin … nil`) so neither arg is a return
     // seed — the refusal is the hard-edge check alone. Counterfactual against a walk that
     // ignores hard edges in the outside-references-in check. Uses the REAL classification
-    // (`fiber/resume` genuinely Mixed), not a forced effect.
-    let (hir, info, owned) = owned_subtrees_with_effects("(begin (fiber/resume \"a\" \"b\") nil)");
+    // (`git` genuinely Mixed), not a forced effect.
+    let (hir, info, owned) = owned_subtrees_with_effects("(begin (git \"a\" \"b\") nil)");
     let r_a = string_literal_region(&hir, &info, "a");
     let r_b = string_literal_region(&hir, &info, "b");
     assert!(

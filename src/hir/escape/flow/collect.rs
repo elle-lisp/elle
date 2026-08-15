@@ -325,8 +325,11 @@ pub(in crate::hir::escape) fn collect_flow(
         // exactly the solver's opaque-call `cross_region_refs` edge sources
         // (`regions/walk/walkrest.rs`'s `Call` arm). Keyed on the callee's declared
         // `RegionEffect`: `Stores{args}`/`Sends{args}` seed those args (the edge
-        // sources); `Mixed`/`Unknown` seeds every arg (the solver's full mutual
-        // clique — any arg may be stored); `Fresh`/`Immediate`/`PassThrough`/`Funnel`/
+        // sources), and `Delivers{args}` seeds them on the fiber facet even though it
+        // records no edge (its install seam counts its own reference, but the value
+        // still crosses to another fiber); `Mixed`/`Unknown` seeds every arg (the
+        // solver's full mutual clique — any arg may be stored);
+        // `Fresh`/`Immediate`/`PassThrough`/`Funnel`/
         // `Opaque` and an opaque user fn (`None`) seed nothing (no uncounted store the
         // caller must account for — `Opaque` copies every arg out, storing none). This is how `chan/send` (`Sends{[1]}`) marks its message
         // escaping while `fiber/new`/`chan/recv` (`Fresh`) do not — the spawned
@@ -347,10 +350,17 @@ pub(in crate::hir::escape) fn collect_flow(
                         }
                     }
                 }
-                Some(RegionEffect::Sends { args: stored }) => {
+                Some(
+                    RegionEffect::Sends { args: stored } | RegionEffect::Delivers { args: stored },
+                ) => {
                     // Fiber facet (send half) — `chan/send`'s message crosses to the
-                    // receiving fiber, so it is a frontier crossing (fiber seeds +
-                    // region-level fiber sites), distinct from a `Stores` containment.
+                    // receiving fiber, and a `Delivers` install (`fiber/resume`'s
+                    // resume value) goes into another fiber's signal slot, so both are
+                    // frontier crossings (fiber seeds + region-level fiber sites),
+                    // distinct from a `Stores` containment. The two differ only in what
+                    // the SOLVER records — `Sends` an edge, `Delivers` none, because
+                    // the install seam counts its own reference — which is not this
+                    // analysis's question.
                     for &i in stored {
                         if let Some(a) = args.get(i) {
                             tail_sources(ctx, &a.expr, fiber_seeds);

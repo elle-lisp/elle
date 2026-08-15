@@ -65,7 +65,8 @@ pub enum RetType {
 /// (the default) keep the full mutual clique — the conservative worst case
 /// (over-keep, never mis-free). `Sends` additionally marks the listed args
 /// as fiber-frontier crossings for the ownership forest (the **send** Shared
-/// seed) — see the variant doc.
+/// seed) — see the variant doc. `Delivers` marks the same crossing but records
+/// no edges, because a fiber signal-slot install counts its own reference.
 ///
 /// A declaration is a soundness claim, so it is checked forever: in debug
 /// builds `dispatch_native_call` compares the declared effect against
@@ -131,6 +132,34 @@ pub enum RegionEffect {
     /// opaque-result native is `Opaque`, never `Mixed`
     /// (docs/impl/region/effects.md § Opaque).
     Opaque,
+    /// The listed (0-based) arguments are DELIVERED to another fiber — installed
+    /// into that fiber's signal slot — and the result is unbounded. The fiber
+    /// value installers declare it: `fiber/resume`'s resume value,
+    /// `fiber/abort`'s and `fiber/cancel`'s error payload, `fiber/emit`'s
+    /// emitted value. Each carries both properties `Mixed` conflates, so this
+    /// variant answers them separately:
+    ///
+    /// - **No arg clique** (`Funnel`'s answer). Every install seam accounts for
+    ///   its own reference at runtime: an install that OUTLIVES the call takes
+    ///   the park-retain and records the `fiber → signal` outgoing edge
+    ///   (`record_terminal_signal_park`), and an install the next step CONSUMES
+    ///   is a transient handover the caller's own parked frame keeps alive. A
+    ///   compile-time incref would double-count the first against its single
+    ///   free-time cascade decref and never balance the second.
+    /// - **A fiber-frontier escape seed** for the listed args (`Sends`'s
+    ///   answer): the value goes to a fiber this activation does not bound, so
+    ///   it is never Owned by the installing subtree.
+    /// - **An unbounded result** (`Opaque`'s answer): a resume hands back
+    ///   whatever the resumed fiber yields, and an abort of a dead fiber hands
+    ///   back a value read out of the fiber argument. No result-side oracle
+    ///   check, and the walk records `result ⊒ each argument`.
+    ///
+    /// The distinction from `Sends` is who counts the store: a channel buffer is
+    /// external to the region system and nothing cascades it, so `chan/send`'s
+    /// edge IS the message's reference. A fiber's signal slot is a scanned field
+    /// of a region-managed fiber object, so the seam counts it and a solver edge
+    /// would double-count (docs/impl/region/effects.md § `Delivers`).
+    Delivers { args: &'static [usize] },
     /// Examined, and the native stores arguments *uncounted* (the property
     /// the arg clique exists to cover) — and/or returns a result that is
     /// neither always-fresh nor always-pass-through. A positive declaration —

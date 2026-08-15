@@ -2,17 +2,16 @@ use super::*;
 
 #[test]
 fn merge_self_edge_refuses_clique() {
-    // `fiber/resume` is declared `Mixed` (it installs its resume value into the target
-    // fiber's `signal` field, uncounted at compile time), so it keeps the full may-store
-    // clique between its two heap (string-literal) args. A clique edge is not a
-    // `%pair` immutable store, so the merge seed never touches it — its endpoints keep
+    // `git` is declared `Mixed` (it caches compiled SPIR-V on its closure argument's
+    // template, a retention no compile-time seam records), so it keeps the full
+    // may-store clique between its two heap (string-literal) args. A clique edge is not
+    // a `%pair` immutable store, so the merge seed never touches it — its endpoints keep
     // distinct merge roots and the predicate must refuse it. Its balancing decref is the
     // target's runtime content scan; eliminating it trades a known leak for a possible
-    // UAF. Uses the REAL classification (`fiber/resume` genuinely Mixed), not a forced
-    // effect.
-    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
+    // UAF. Uses the REAL classification (`git` genuinely Mixed), not a forced effect.
+    let (hir, arena, symbols, info) = analyze_with_class("(git \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (git ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
         !edges.is_empty(),

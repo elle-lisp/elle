@@ -114,6 +114,7 @@ impl VM {
             // Abort is terminal — set child to :error even when caught
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
+                self.mint_abort_error_result(result_value);
             }
             self.fiber.child = None;
             self.fiber.child_value = None;
