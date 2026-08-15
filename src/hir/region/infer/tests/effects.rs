@@ -30,16 +30,17 @@ fn effect_immediate_call_emits_no_arg_clique() {
 
 #[test]
 fn effect_mixed_call_keeps_arg_clique() {
-    // `has?` is declared `Mixed`, and genuinely so: it dispatches a `Collection/has?`
-    // trait method (`dispatch_trait_method`), re-entering the VM, so it may store any
-    // heap argument — the conservative full mutual may-store clique between its two heap
-    // (string-literal) args is the right answer (over-keep, never mis-free). Tests the
-    // REAL classification (a primitive *declared* Mixed → clique), the boundary against
-    // over-deletion — not a forced effect, which would merely re-exercise the solver's
-    // Mixed arm already covered by `effect_unknown_call_keeps_arg_clique`.
-    let (hir, arena, symbols, info) = analyze_with_class("(has? \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "has?", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (has? ...) call");
+    // `fiber/resume` is declared `Mixed`, and genuinely so: it installs its resume
+    // value (arg 1) into the target fiber's `signal` field — a store into a structure
+    // outside the region system, uncounted at compile time — so the conservative full
+    // mutual may-store clique between its two heap args is the right answer (over-keep,
+    // never mis-free). Tests the REAL classification (a primitive *declared* Mixed →
+    // clique), the boundary against over-deletion — not a forced effect, which would
+    // merely re-exercise the solver's Mixed arm already covered by
+    // `effect_unknown_call_keeps_arg_clique`.
+    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
     let edges = edges_at_site(&info, calls[0]);
     let mutual = edges
         .iter()
@@ -169,15 +170,15 @@ fn effect_sends_emits_same_edges_as_stores() {
 
 #[test]
 fn hard_edge_sites_marks_native_uncounted_store_sites() {
-    // `has?` is declared `Mixed` (a trait-dispatched native whose stores are uncounted at
-    // compile time), so its clique edges are HARD — the lowerer emits the incref
-    // value-based for a call-result source (docs/impl/region/effects.md "Hard edges: how a
-    // may-store edge is emitted"). Pins the inclusion side of the hard/soft split, the
-    // Mixed companion of `hard_edge_sites_marks_declared_stores_sites`, through the REAL
-    // classification.
-    let (hir, arena, symbols, info) = analyze_with_class("(has? \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "has?", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (has? ...) call");
+    // `fiber/resume` is declared `Mixed` (it installs its resume value into the target
+    // fiber's `signal` field, uncounted at compile time), so its clique edges are HARD —
+    // the lowerer emits the incref value-based for a call-result source
+    // (docs/impl/region/effects.md "Hard edges: how a may-store edge is emitted"). Pins
+    // the inclusion side of the hard/soft split, the Mixed companion of
+    // `hard_edge_sites_marks_declared_stores_sites`, through the REAL classification.
+    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
     assert!(
         info.hard_edge_sites.contains(&calls[0]),
         "a Mixed native call site must be a hard-edge site"
@@ -273,6 +274,35 @@ fn subprocess_exec_declares_opaque_no_arg_clique() {
         "subprocess/exec declares Opaque, so its call must record no arg-clique \
          edges; got {:?} (a regression to Mixed — the no-store clique leak)",
         edges
+    );
+}
+
+#[test]
+fn has_declares_opaque_no_arg_clique() {
+    // `has?` resolves its work through the value's trait table, so its RESULT is
+    // unbounded: `with-traits` may replace `:Collection` with a user closure returning
+    // anything, and neither `Immediate` nor `Fresh` holds on every path. Its STORE side
+    // is bounded regardless — the built-in `Collection:has?` reads and returns a bool,
+    // and a user closure is ordinary Elle code, which stores only through the
+    // runtime-counted mutable-store funnel. Unbounded result + no store is `Opaque`, so
+    // the call records NO arg-clique edges. Under `Mixed` the mutual clique increfed
+    // both heap args' regions and never balanced (nothing is stored) — two leaked
+    // regions per call (tests/elle/region-has-clique-leak.lisp). The sibling of
+    // `subprocess_exec_declares_opaque_no_arg_clique` on the trait-dispatch face; RED
+    // under a regression to Mixed.
+    let (hir, arena, symbols, info) = analyze_with_class("(has? \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "has?", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (has? ...) call");
+    let edges = edges_at_site(&info, calls[0]);
+    assert!(
+        edges.is_empty(),
+        "has? declares Opaque, so its call must record no arg-clique edges; \
+         got {:?} (a regression to Mixed — the trait-dispatch clique leak)",
+        edges
+    );
+    assert!(
+        !info.hard_edge_sites.contains(&calls[0]),
+        "an Opaque call site must NOT be a hard-edge site"
     );
 }
 

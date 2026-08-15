@@ -50,3 +50,39 @@ fn typeinfer_ret_types_resolve_through_registry() {
         "put became a primitive — move its typing to the registry"
     );
 }
+
+/// Every primitive in the canonical tables carries an EXAMINED region effect.
+///
+/// `RegionEffect::Unknown` is the default a table entry gets by omitting
+/// `effect:`, and it means "nobody has looked" — the solver then covers the
+/// callee with the full may-store arg clique, one never-balancing
+/// `IncrefRegion` per heap-argument pair per call
+/// (docs/impl/region/effects.md § "What the solver derives"). The census of
+/// `Unknown`s over these tables is the declaration work queue, and it is
+/// empty; this test keeps it that way, so a new primitive cannot inherit the
+/// clique by silence.
+///
+/// The plugin ABI cannot carry a claim, so plugin-supplied definitions stay
+/// `Unknown` by construction — they are not in these tables and are not
+/// constrained here.
+#[test]
+fn every_primitive_declares_an_examined_region_effect() {
+    use super::super::def::RegionEffect;
+    use super::{ffi_tables, ALL_TABLES};
+    let undeclared: Vec<&str> = ALL_TABLES
+        .iter()
+        .chain(ffi_tables().iter())
+        .flat_map(|table| table.iter())
+        .filter(|def| def.effect == RegionEffect::Unknown)
+        .map(|def| def.name)
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "primitive(s) left at the RegionEffect::Unknown default: {:?}\n\
+         Read the body and declare the strongest claim that holds on EVERY \
+         normally-completing path (docs/impl/region/effects.md \"Native region \
+         effects: declared, not guessed\") — `Mixed` if none does, `Opaque` if \
+         the result is unbounded but no argument is stored.",
+        undeclared,
+    );
+}

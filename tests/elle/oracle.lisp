@@ -781,7 +781,7 @@
    # region_native_trait_dispatch_fresh_result_reclaims). `(rest list)` shares its
    # tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
-   ["distinct" (fn [j] (distinct [1 2 1 3])) 2]
+   ["distinct" (fn [j] (distinct [1 2 1 3])) 1]
    # `take`/`drop` are CLOSED controls for the PER-PATH return frontier
    # (docs/impl/region/mechanism.md § "The return frontier is per-path";
    # tests/elle/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
@@ -792,8 +792,8 @@
    # regression to open must trip the completeness gate loudly.
    ["take" (fn [j] (take 2 (list 1 2 3))) 0]
    ["drop" (fn [j] (drop 1 (list 1 2 3))) 0]
-   ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 4]
-   ["frequencies" (fn [j] (frequencies [1 2 1 3])) 2]
+   ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 1]
+   ["frequencies" (fn [j] (frequencies [1 2 1 3])) 1]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
    ["to-list" (fn [j] (->list [1 2 3])) 0]
    ["freeze" (fn [j] (freeze @[1 2 3])) 0]

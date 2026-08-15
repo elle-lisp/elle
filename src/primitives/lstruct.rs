@@ -58,7 +58,14 @@ primitive! {
         category: "struct",
         example: "(has? {:a 1} :a) #=> true\n(has? |1 2 3| 2) #=> true\n(has? \"hello\" \"ell\") #=> true",
         aliases: &["has-key?", "contains?"],
-        effect: RegionEffect::Mixed,
+        // A read-only trait dispatcher: the result is unbounded (a `with-traits`
+        // override of `:Collection` may return anything, so neither `Immediate`
+        // nor `Fresh` holds on every path) while the store side is bounded (the
+        // built-in method reads and returns a bool; a user closure stores only
+        // through the runtime-counted funnel). Unbounded result + no store is
+        // exactly `Opaque` — no arg clique (docs/impl/region/effects.md § Opaque;
+        // tests/elle/region-has-clique-leak.lisp).
+        effect: RegionEffect::Opaque,
     }
 }
 

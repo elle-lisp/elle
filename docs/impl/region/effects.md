@@ -104,6 +104,18 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   uncounted *arg store* (which justifies the clique) from a merely *non-fresh
   result* (which does not). Declare `Opaque`, not `Mixed`, for a primitive
   that returns an opaque result but stores nothing.
+
+  **A read-only trait dispatcher is `Opaque`.** A primitive that resolves its
+  work through the trait table (`has?` → `Collection:has?`) has an unbounded
+  result: `with-traits` may replace the protocol with a user closure returning
+  anything, so neither `Immediate` nor `Fresh` holds on every path. The *store*
+  side is bounded regardless — the built-in method reads and returns a bool,
+  and a user closure is ordinary Elle code, which stores only through the
+  runtime-counted mutable-store funnel (the same argument the user-function
+  case below makes). Two properties, two answers: unbounded result, no store —
+  `Opaque`. Declaring `Mixed` there buys nothing and costs one never-balancing
+  `IncrefRegion` per heap-argument pair per call
+  (`tests/elle/region-has-clique-leak.lisp`).
 - **`Mixed`** — examined, and the native stores arguments *uncounted*
   (the property the arg clique exists to cover) — and/or returns a result
   that is neither always-fresh nor always-pass-through (a trait-dispatching
@@ -116,9 +128,12 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   carry a claim yet), and the standing classification of user-supplied
   functions and unknown callees in the solver. Treated exactly like
   `Mixed` operationally (full clique, no oracle check) — the distinction
-  is epistemic: `Unknown` is the declaration work queue (a census of
-  `Unknown`s is the remaining debt), while `Mixed` is settled and should
-  not be revisited expecting a free upgrade.
+  is epistemic: `Unknown` is the declaration work queue, while `Mixed` is
+  settled and should not be revisited expecting a free upgrade. Over the
+  canonical tables (`registration::ALL_TABLES`) that queue is empty, and a
+  test holds it empty — a new primitive that omits `effect:` inherits the
+  clique by silence, so the omission fails the build
+  (`every_primitive_declares_an_examined_region_effect`).
 
 **What the solver derives.** For an opaque (non-inlined) call the solver's
 baseline assumes every heap argument may be stored into every other —
@@ -216,10 +231,12 @@ obligation the root carries").
 `Funnel` is the one middle case: its result is arg0 in place or a fresh copy of
 arg0 — the container either way, never an element interior to it — so it needs
 no bound, only the reachability that a read out of that result is a read out of
-arg0 (`RegionInfo::funnel_result_containers`). The container READS
-(`get`/`first`/`rest`) declare `Funnel` as well but are excluded from both
-relations: their result *is* the interior element, and the borrow face's own
-edge records it against the tighter container.
+arg0 (`RegionInfo::funnel_result_containers`). The container READS are excluded
+from both relations: their result *is* the interior element, and the borrow
+face's own edge records it against the tighter container. That exclusion is
+keyed on the read set itself (`CallClassification::container_read_funnels` —
+`get`/`first`/`rest`/`pop` and their `%`-op peers), not on the declared effect,
+so it holds however each read is declared.
 
 **Hard edges: how a may-store edge is emitted.** An edge's compile-time
 incref is keyed by the *source* region. For a region minted by an alloc
