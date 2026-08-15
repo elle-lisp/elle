@@ -292,34 +292,45 @@ impl<'a> Lowerer<'a> {
                 self.pending_free_regions.push(rid);
             }
         }
+        // Every tail call the letrec BODY makes, by callee binding. A frame-replacing
+        // tail call leaves everything this node emits after the body — the scope-end
+        // releases — in dead code, so each marking below asks which release that
+        // stranding takes out and which channel supplies it.
+        let mut tail_callees: Vec<Binding> = Vec::new();
+        Self::collect_body_tail_callees(body, &mut tail_callees);
         // A self-recursive binding of THIS letrec is cell-free, but its closure region
         // lives through the recursion and its scope-end `DecrefRegion` lands at this
-        // letrec's scope end. When the body is a tail call that scope end is dead code
+        // letrec's scope end. When the body TAIL-CALLS it that scope end is dead code
         // past the `TailCall`, so the decref never runs and the region leaks. Mark such
         // bindings stranded BEFORE lowering the body, so a tail call to one (`(loop k)`
         // here, or its own `(loop …)` self-call) defers the region's release — the
         // runtime's
-        // `deferred_releases` supplies the stranded decref exactly once. Gating
-        // on `body_is_tail_call` (not `tail_scoped`, which also requires a scope region)
-        // is deliberate: the stranding is a property of the body. Without the tail-call
-        // gate a non-tail letrec body would defer a binding whose decref fires live — a
+        // `deferred_releases` supplies the stranded decref exactly once.
+        //
+        // The premise is a tail call to THIS binding, not a body that is wholly one:
+        // a body reaches its tail call through statements (`(begin (yield go) (go n))`)
+        // and through branches, and the scope end is dead on exactly the paths that
+        // take a tail call. A path that falls through instead — a sibling `if` arm, a
+        // native callee that keeps the frame — runs the live scope-end decref and
+        // records no deferral (`tail_call_inner` builds `DeferredReleases` only on the
+        // closure arm), so the two are mutually exclusive per path rather than
+        // alternatives to choose between. Without the tail-call premise a body that
+        // never replaces the frame would defer a decref that also fires live — a
         // double-free.
-        if Self::body_is_tail_call(body) {
-            for (b, _) in bindings.iter() {
-                // Cell-free self-recursion only. A self-recursive binding that is
-                // ALSO captured by a sibling (`needs_capture`) is held by a letrec
-                // cell whose lifetime outlives this tail-call activation; its
-                // closure region is released by the cell's cascade, so a tail-call
-                // deferred release would decref it a SECOND time and free it under the still-live
-                // cell (the scheduler's `handle-fiber-after-resume` — self-recursive
-                // AND sibling-captured — freed under its forward cell; a stale
-                // `tail_callee_release_region` deref of the next self-call).
-                // docs/impl/selfrec.md: the cell-free case is exactly the one the
-                // self-edge leaves uncaptured. Pinned by
-                // tests/elle/region-selfrec-captured-tail-release.lisp.
-                if self.self_recursive_bindings.contains(b) && !self.arena.get(*b).needs_capture() {
-                    self.stranded_self_bindings.insert(*b);
-                }
+        for b in tail_callees.iter().copied() {
+            // Cell-free self-recursion only. A self-recursive binding that is
+            // ALSO captured by a sibling (`needs_capture`) is held by a letrec
+            // cell whose lifetime outlives this tail-call activation; its
+            // closure region is released by the cell's cascade, so a tail-call
+            // deferred release would decref it a SECOND time and free it under the still-live
+            // cell (the scheduler's `handle-fiber-after-resume` — self-recursive
+            // AND sibling-captured — freed under its forward cell; a stale
+            // `tail_callee_release_region` deref of the next self-call).
+            // docs/impl/selfrec.md: the cell-free case is exactly the one the
+            // self-edge leaves uncaptured. Pinned by
+            // tests/elle/region-selfrec-captured-tail-release.lisp.
+            if self.self_recursive_bindings.contains(&b) && !self.arena.get(b).needs_capture() {
+                self.stranded_self_bindings.insert(b);
             }
         }
         // A letrec body that TAIL-CALLS a closure-cycle merge MEMBER strands the
@@ -353,8 +364,6 @@ impl<'a> Lowerer<'a> {
         // or capture-adopt path that claimed the region — deferring either
         // decrements a count this frame never raised.
         {
-            let mut tail_callees: Vec<Binding> = Vec::new();
-            Self::collect_body_tail_callees(body, &mut tail_callees);
             let scope_end_releases: Vec<crate::hir::region::Region> = self
                 .decrefs_by_decref_point
                 .get(&hir_id)

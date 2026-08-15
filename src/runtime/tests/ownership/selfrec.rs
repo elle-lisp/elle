@@ -351,8 +351,8 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
 }
 
 /// Per-call reclamation of a stranded recursive closure the recursion **RETURNS** —
-/// the return-funded admission (docs/impl/selfrec.md § "The deferral's escape gate is
-/// the fiber frontier alone"). Each subject's letrec/def body is a frame-replacing tail
+/// the return-funded admission (docs/impl/selfrec.md § "The deferral needs no escape
+/// gate"). Each subject's letrec/def body is a frame-replacing tail
 /// call, so the closure region's scope-end `DecrefRegion` is dead (or suppressed) and
 /// the tail-call deferred release is the region's only release channel. Returning the
 /// closure does not withdraw that channel: the callee's `Return` mints the caller's
@@ -419,6 +419,164 @@ fn recursive_returned_closure_reclaims_per_call() {
         "a returned cell-free self-recursive `def` closure must be reclaimed per call \
          (its release is dead past the tail call, so the deferral is the only channel): \
          region growth over 200 discarded calls must be ~0, got {define_self}",
+    );
+}
+
+/// Per-call reclamation of a stranded recursive closure that crosses the **fiber
+/// frontier** — the other half of the unconditional deferral (docs/impl/selfrec.md §
+/// "The deferral needs no escape gate"). Each subject's letrec body hands the closure
+/// across a fiber boundary and then tail-calls it, so its scope-end `DecrefRegion` is
+/// dead past the frame replacement and the deferral is the region's only channel.
+///
+/// Crossing the frontier is not a reason to withhold that channel, because the crossing
+/// counts a reference of its own: an emitted value takes the park retain into
+/// `fiber.signal` (which the resumer's result release consumes), and a `chan/send`
+/// message is increfed at the send site until a receive builds the result carrying it.
+/// The deferral drops the frame's own reference and no other, and it runs at the
+/// recursion's normal completion — after the crossing, which is a node of the same body.
+///
+/// Three shapes: the emit seed (`yield`, driven by an external resume per op) through
+/// both binder routes, and the `Sends` seed (`chan/send`, received in place). Each
+/// discards the delivered closure, so nothing legitimately retains it and the whole
+/// per-call region must come back.
+///
+/// Counterfactual: both read ~200 — one stranded region per call, closure and env
+/// together — while the deferral refuses a fiber-crossing binding; ~0 once the channel
+/// is unconditional. The live accumulator beside them proves the gauge sees per-call
+/// region growth at all.
+#[test]
+fn fiber_crossing_recursive_closure_reclaims_per_call() {
+    let live = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    // The emit seed: `go` is yielded to the resumer, then tail-called. The fiber body
+    // loops forever, so one `(fiber/resume f nil)` runs exactly one `step` — the yield
+    // parks it, and the next resume runs the recursion and reaches the next yield.
+    let emitted = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) 0 (go (- m 1))))] \
+              (yield go) \
+              (go k)))) \
+         (def f (fiber/new (fn [] (forever (step 3))) |:yield|))",
+        "(fiber/resume f nil)",
+        "arena/region-count",
+    );
+    assert!(
+        emitted < 50,
+        "a YIELDED cell-free self-recursive closure must still be reclaimed per call — \
+         the emit's park retain is the resumer's reference and the deferred release \
+         drops only the frame's: region growth over 200 resumes must be ~0, got {emitted}",
+    );
+
+    // The `def` binder face of the same crossing: a self-recursive `def` reaches the
+    // strand by the other route (its would-be-live release is suppressed rather than
+    // left as dead code), so the crossing must be sound through both binders.
+    let emitted_define = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (def go (fn [m] (if (< m 1) 0 (go (- m 1))))) \
+            (yield go) \
+            (go k))) \
+         (def f (fiber/new (fn [] (forever (step 3))) |:yield|))",
+        "(fiber/resume f nil)",
+        "arena/region-count",
+    );
+    assert!(
+        emitted_define < 50,
+        "a YIELDED cell-free self-recursive `def` closure must be reclaimed per call \
+         through the other binder route: region growth over 200 resumes must be ~0, \
+         got {emitted_define}",
+    );
+
+    // The `Sends` seed: `go` is sent over a channel, then tail-called. The receive
+    // pulls it back in the same op and discards it, so the send-site incref is
+    // released before the next op and only the frame's reference is in question.
+    let sent = mid_run_growth(
+        Runtime::new(),
+        "(def [snd rcv] (chan)) \
+         (def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) 0 (go (- m 1))))] \
+              (chan/send snd go) \
+              (go k)))) \
+         (def once (fn [] (step 3) (get (chan/recv rcv) 1)))",
+        "(once)",
+        "arena/region-count",
+    );
+    assert!(
+        sent < 50,
+        "a SENT cell-free self-recursive closure must be reclaimed per call — the send \
+         site counts the message until it is received, so the deferral drops only the \
+         frame's reference: region growth over 200 calls must be ~0, got {sent}",
+    );
+}
+
+/// The strand's premise is a tail call to the binding, not a body that IS one
+/// (docs/impl/selfrec.md § the placement table; `lower_letrec`). A letrec body reaches
+/// its tail call through statements — `(begin (stmt …) (go k))` — and ANF names that
+/// call's result, so the body is a `Begin` whose last element binds the call and
+/// returns the binding. Read as "the whole body is a tail call" that shape is not one,
+/// the binding is never stranded, and its scope-end `DecrefRegion` sits past the
+/// frame-replacing `TailCall` with no channel to supply it.
+///
+/// The ordinary demise reading covers the shape only while nothing else claims the
+/// closure: as soon as it escapes — here by the RETURN facet, the recursion handing
+/// itself back — the release no longer lands at the call node, and the strand is the
+/// only channel left. Both subjects below discard the returned closure, so the whole
+/// per-call region must come back.
+///
+/// Counterfactual: ~200 — one region per call, closure and env together — while the
+/// marking demands a wholly-tail-call body; ~0 once it asks for a tail call to the
+/// binding.
+#[test]
+fn statement_bodied_letrec_strands_its_self_recursive_member() {
+    let live = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    // A statement, then the tail call. `go` returns itself, so the return facet keeps
+    // the demise off the call node and the strand is the only channel.
+    let statement = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) go (go (- m 1))))] \
+              (+ k 1) \
+              (go k))))",
+        "(step 3)",
+        "arena/region-count",
+    );
+    assert!(
+        statement < 50,
+        "a letrec whose body reaches its tail call through a statement must strand its \
+         cell-free self-recursive member: region growth over 200 calls must be ~0, got \
+         {statement}",
+    );
+
+    // The same through a BRANCH, where only one arm leaves through the tail call. The
+    // other arm keeps the live scope-end release, so the two channels must stay
+    // mutually exclusive per path rather than both firing.
+    let branched = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) go (go (- m 1))))] \
+              (if (< k 0) go (go k)))))",
+        "(step 3)",
+        "arena/region-count",
+    );
+    assert!(
+        branched < 50,
+        "a letrec body only one arm of which tail-calls the member must reclaim per \
+         call — the arm that falls through runs the live scope-end release and records \
+         no deferral: region growth over 200 calls must be ~0, got {branched}",
     );
 }
 

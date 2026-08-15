@@ -274,7 +274,7 @@
 # recursion RETURNS has the tail-call deferred release as its region's only channel,
 # and keeps it — the callee's `Return` mints the caller's reference before the
 # trampoline runs the deferred decref, so the deferral drops only the frame's own
-# (docs/impl/selfrec.md § "The deferral's escape gate is the fiber frontier alone").
+# (docs/impl/selfrec.md § "The deferral needs no escape gate").
 # Its control `recur-local-foreign-mint` is not self-recursive, so nothing strands it
 # in the first place and the gap isolates the strand rather than the retain.
 (declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
@@ -1327,7 +1327,7 @@
 # that channel: the callee's `Return` mints the caller's reference before
 # `trampoline_loop` breaks and runs the deferred decref, so the caller's reference is
 # standing while the deferral drops the frame's own (docs/impl/selfrec.md § "The
-# deferral's escape gate is the fiber frontier alone"). The CONTROL
+# deferral needs no escape gate"). The CONTROL
 # `lcl-foreign-ret` is not self-recursive, so nothing strands its release in the
 # first place and the gap isolates the strand rather than the retain. Object growth,
 # not region growth, is the gauge (closure + env share one region). The
@@ -1368,6 +1368,49 @@
 (pin (measure-core "recur-local-foreign-mint"
                    (retain-block (fn [] (lcl-foreign-ret 3))) count-gauge 100 6
                    60 0.4 0.5) 0)
+
+# ── The same strand, handed across the FIBER frontier ──────────────────
+# `recur-local-self-yield` and `recur-local-self-send` are CLOSED controls
+# (undeclared, like `rest-array-copy`) for the fiber half of the stranded-self
+# deferred release. Each hands its cell-free self-recursive closure across a fiber
+# frontier — emitted to the resumer, or sent over a channel — and then tail-calls it,
+# so the scope-end `DecrefRegion` is dead past that `TailCall` and the deferral is the
+# region's only channel. The crossing is no reason to withhold it: the emit's park
+# retain into `fiber.signal` (which the resumer's result release consumes) and
+# `chan/send`'s send-site incref each count a reference of their own, so the deferral
+# drops the frame's alone (docs/impl/selfrec.md § "The deferral needs no escape
+# gate"). `recur-local-self` above is the control — the same strand with no crossing —
+# so the gap between them isolates the crossing rather than the strand. The soundness
+# half, that the delivered handle is still live after the deferred release, is pinned
+# under the UAF oracle by tests/elle/region-selfrec-fiber-release.lisp.
+(defn lcl-self-yield [n]
+  "Self-recursive local closure YIELDED to the resumer before the body tail-calls it."
+  # go crosses the frontier (a value use), which disables call-site param joins, so a
+  # local diverging guard proves the %lt/%sub operands (as in lcl-self-ret).
+  (letrec [go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) :done (go (%sub m 1))))]
+    (yield go)
+    (go n)))
+(def [lcl-snd lcl-rcv] (chan))
+(defn lcl-self-send [n]
+  "The same closure SENT over a channel — the other fiber-frontier seed."
+  (letrec [go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) :done (go (%sub m 1))))]
+    (chan/send lcl-snd go)
+    (go n)))
+(pin (measure "recur-local-self-yield"
+              (fn [j]
+                # Two resumes per op: the first runs to the yield, the second runs the
+                # recursion, whose normal completion is where the deferral fires.
+                (let [f (fiber/new (fn [] (lcl-self-yield 3)) |:yield|)]
+                  (fiber/resume f)
+                  (fiber/resume f))) 100 6 60 0.4 0.5) 0)
+(pin (measure "recur-local-self-send"
+              (fn [j]
+                (lcl-self-send 3)
+                (get (chan/recv lcl-rcv) 1)) 100 6 60 0.4 0.5) 0)
 
 # ── Stdlib / native-tail / discarded-tail leak classes ────────────────
 # Three more leak classes pinned in the one dashboard (leak state

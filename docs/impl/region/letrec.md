@@ -236,9 +236,9 @@ channels and lets exactly one fire.
   never free the arena out from under a later use), and the `TailCall` carries
   `DeferredReleases::callee = region_of(callee)` — the merged arena, because a member lives in it.
   That consumer refuses a callee crossing the **fiber** frontier, and admits the return
-  facet — the same reading, for the same reason, as the merge's own frontier gate above
-  and as the cell-free self-recursive deferral ([selfrec.md](../selfrec.md) § "The
-  deferral's escape gate is the fiber frontier alone"): this deferral runs at the
+  facet — the same reading, for the same reason, as the merge's own frontier gate above,
+  and the return half of the argument the cell-free self-recursive deferral makes
+  ([selfrec.md](../selfrec.md) § "The deferral needs no escape gate"): this deferral runs at the
   recursion's normal completion, after the `Return` mint that funds the caller's
   reference. The marking is keyed on `closure_cycle_members`, so only a member of an
   **admitted** merge reaches it and the gate never has to re-argue admission; it is kept

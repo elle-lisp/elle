@@ -248,6 +248,47 @@ fn a_letrec_member_the_body_tail_calls_defers_its_own_release() {
     );
 }
 
+/// A cell-free self-recursive callee keeps the deferral through every way its
+/// letrec body can reach the tail call, and through a crossing of any frontier
+/// (docs/impl/selfrec.md § "The deferral needs no escape gate" and § the placement
+/// table). The channel is the region's only one — the scope-end `DecrefRegion` is
+/// dead past the frame replacement — so a refusal here is one stranded closure and
+/// env per call, which no release-position pin can see.
+///
+/// Four bodies, each varying one thing the predicate must NOT read: the plain tail
+/// call, a statement before it (which ANF wraps so the body is no longer wholly a
+/// tail call), one branch arm taking it, and the closure handed across the fiber
+/// frontier before it. Each must defer exactly once — the body's tail call. `go`'s
+/// own self-call is lowered with the init, before the marking, so it never adds a
+/// second deferral that would drop the frame's single reference twice.
+#[test]
+fn a_stranded_self_recursive_callee_defers_through_every_body_shape() {
+    for (label, body) in [
+        ("a plain tail call", "(go n)"),
+        (
+            "a statement before the tail call",
+            "(begin (%not n) (go n))",
+        ),
+        ("one branch arm", "(if n go (go n))"),
+        (
+            "a fiber crossing before the tail call",
+            "(begin (emit 2 go) (go n))",
+        ),
+    ] {
+        let module = compile_to_lir(&format!(
+            "(begin (def f (fn (n) \
+               (letrec [go (fn (m) (if m 0 (go true)))] {body}))) (f false))"
+        ));
+        let deferrals = tail_call_deferrals(&module);
+        assert_eq!(
+            deferrals.iter().filter(|d| **d).count(),
+            1,
+            "a letrec body reaching its self-recursive member through {label} must \
+             defer that member's release exactly once (deferrals={deferrals:?})",
+        );
+    }
+}
+
 /// Position of the first `TailCall` in the function that contains one, with the
 /// indices of that block's `DecrefRegion`s naming the region `of` picks out of the
 /// same block's allocating instructions.

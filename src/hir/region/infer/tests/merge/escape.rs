@@ -44,7 +44,7 @@ fn merge_admits_returned_member_cycle_on_member_tail() {
     // NORMAL COMPLETION, after every `Return` mint on the taken path. The caller's
     // reference is standing when the frame's is dropped. This is the mutual twin of the
     // cell-free self-recursive deferral's return admission (docs/impl/selfrec.md § "The
-    // deferral's escape gate is the fiber frontier alone").
+    // deferral needs no escape gate").
     //
     // `ev` is used in value position (returned), which disables call-site param joins,
     // so the diverging guards prove the `%lt`/`%sub` operands — as in the oracle's

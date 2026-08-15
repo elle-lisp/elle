@@ -79,14 +79,14 @@ per-call region leaks. This is the same stranding the forward cell used to suffe
 removes the cell, not the stranding.
 
 Where the closure's single `DecrefRegion` lands, and who frees the region once, splits by
-whether the binding's body is a tail call — and, one level up, by which node the binder
+whether the binding's body **tail-calls** it — and, one level up, by which node the binder
 gives the analysis to hang the demise on:
 
 | binding shape | closure `DecrefRegion` placement | who frees the region once |
 |---|---|---|
-| `letrec`, tail-call body to the binding | letrec scope end — dead code past the `TailCall` | the tail-call **deferred release** |
-| `letrec`, tail-call body to another callee | letrec scope end — dead code past the `TailCall` | the **frame-exit relocation** |
-| `letrec`, non-tail body | fires live at the letrec scope end | the live `DecrefRegion` |
+| `letrec`, body tail-calls the binding | letrec scope end — dead code past the `TailCall` | the tail-call **deferred release** |
+| `letrec`, body tail-calls another callee | letrec scope end — dead code past the `TailCall` | the **frame-exit relocation** |
+| `letrec`, body tail-calls nothing | fires live at the letrec scope end | the live `DecrefRegion` |
 | `def`, body tail-calls the binding | the binding's last use IS that `TailCall` — dead code past it | the tail-call **deferred release** |
 | `def`, any other body | the binding's last use — the node that CONSUMES the closure | the live `DecrefRegion` |
 
@@ -94,6 +94,16 @@ The tail-call rows are the load-bearing case (the dominant self-recursive helper
 tail loop). There the closure's release must not run before the recursion completes,
 because the recursion re-enters the closure living in that region; freeing it there is a
 use-after-free of the closure's own env — the self-call re-dispatch reads a recycled page.
+
+The rows read **per path**, and the premise is a tail call to the binding rather than a
+body that is wholly one. A body reaches its tail call through statements and through
+branches — `(begin (stmt …) (go k))`, `(if c go (go k))` — and the frame is replaced just
+the same. On the paths that take the tail call the scope end is dead and the
+deferral supplies it; on a path that falls through instead — a sibling arm, or a callee
+that turns out to be a native and keeps the frame — the scope-end `DecrefRegion` runs live
+and no deferral is recorded at all (`tail_call_inner` builds `DeferredReleases` only on
+the closure arm). The two channels are exclusive per path by construction, so a body whose
+paths disagree needs no choice made for it.
 
 Which channel carries the release turns on **who the body tail-calls**, and the two are
 exclusive by construction. A body that tail-calls the binding itself makes the closure
@@ -111,8 +121,10 @@ argument and a sibling consumes it.
   channel supplies it: the deferral for a member callee, and otherwise the relocation,
   which carries the scope-end release back ahead of the `TailCall` under its own
   sole-holder admission ([region/mechanism.md](region/mechanism.md) § "A release past a
-  frame-replacing tail call is not a release"). `lower_letrec` marks a self-recursive
-  member `stranded_self_bindings` (`lir/lower/binding/let.rs`).
+  frame-replacing tail call is not a release"). `lower_letrec` marks a cell-free
+  self-recursive member `stranded_self_bindings` when the body tail-calls it, reading the
+  body's tail callees rather than asking whether the body IS a tail call
+  (`lir/lower/binding/let.rs`).
 - A `def` has no such node, so its closure region keeps the demise the ordinary binding
   chain computed: the binding's **last use**. That is the tighter of the two placements
   and it needs no relocation, because a use of the binding as a **callee** resolves
@@ -144,19 +156,28 @@ So the cell owns the release for a captured member; the deferral owns it only fo
 cell-free case.
 
 In both stranded cases the runtime **deferred release** supplies it.
-`tail_callee_defers_release` (`lir/lower/control/call.rs`) returns true for a tail call to a
-`stranded_self_bindings` callee that does not cross the fiber frontier; the `TailCall` then
+`tail_callee_defers_release` (`lir/lower/control/call.rs`) returns true for every tail call to a
+`stranded_self_bindings` callee (§ "The deferral needs no escape gate"); the `TailCall` then
 carries `DeferredReleases::callee = region_of(callee)`, and `trampoline_loop` (`vm/execute.rs`)
 decrefs each deferred region exactly once on the recursion's **normal completion** (deduped — a
 tail-recursive `loop` re-enters with the same closure each iteration but carries one
 stranded decref).
 
-### The deferral's escape gate is the fiber frontier alone
+That marking is consulted **before** the predicate's demise reading, which asks whether some
+region's `decref_point` is this call node. The stranded binding's release is at its binder's
+scope end by definition, so the demise reading answers about a different release entirely,
+and a call node that is nobody's `decref_point` would otherwise refuse the one callee whose
+release nothing else supplies.
 
-The deferred release for a stranded self-recursive binding is gated on **`escapes_fiber`** —
-neither the full activation escape nor the return facet.
+### The deferral needs no escape gate
 
-The full activation escape (`binding_escapes_activation`) additionally folds in the store
+The deferred release for a stranded self-recursive binding is **unconditional**: it consults
+no escape facet at all. The strand loses exactly one reference — the frame's own, taken where
+the closure was allocated — and the deferral supplies exactly that one, as a **decref** run at
+the recursion's normal completion. Each facet a gate could ask about answers for its own
+reason, and none of them is the frame's reference.
+
+The full activation escape (`binding_escapes_activation`) folds in the store
 and capture facets — **containment** relations that keep a closure inside the activation's
 owned subtree (it dies WITH the activation), not frontier crossings. A cell-free
 self-recursive closure held by a local container would then read as escaping and falsely
@@ -193,17 +214,26 @@ round and therefore nothing to bridge: that relocation moves a release *ahead* o
 and so needs a captured edge to hold the region off zero until the mint lands; the deferral
 runs *after* the mint and needs none.
 
-**The fiber frontier still refuses.** A closure emitted or sent crosses to a resumer or
-receiver whose hold the compiler did not place, and a parked frame may borrow it uncounted
-— the refusal every return-funded admission keeps. So the **residual** is a cell-free
-self-recursive closure that crosses the fiber frontier *and* whose defining body tail-calls
-it: that is the one pair of table rows where the deferral is the sole channel, so a binding
-this gate refuses has no release at all — its `DecrefRegion` still sits past the `TailCall`
-and no deferred channel supplies it, stranding closure and env once per call. The
-frame-exit relocation does not reach it either: the region is the tail call's own
-**callee**, and a release moved ahead of the call would free the closure the call is about
-to enter. That is a leak, never an over-free. Every other body shape keeps a release the
-gate never consults.
+**The fiber facet is funded by the crossing itself.** A value handed across the fiber
+frontier is *delivered*, not borrowed: every route that carries it counts its own reference
+at the crossing, so the receiver's hold is never the frame's.
+
+- an **emitted** value (`yield`/`emit`) takes the park retain as it escapes into
+  `fiber.signal` (`EscapeSite::EmitEscape`, `handle_emit`), and the resumer consumes that
+  retain through its own result release — the delivery hands the resumer one owning
+  reference ([region/owner.md](region/owner.md) § "Park/unpark symmetry");
+- a **sent** message — the other fiber-frontier seed, `chan/send`'s `Sends` declaration —
+  is increfed at the send site and held until the receive builds the result carrying it
+  (`release_received_message`, `primitives/chan/prims.rs`);
+- a **halted** payload takes the terminal park retain instead (`incref_signal_region`), the
+  one signal `handle_emit` deliberately leaves unretained.
+
+The order is structural rather than argued: the crossing is a node of the defining body and
+the deferral runs at the recursion's normal completion, so a crossing that executes at all
+executes first. A crossing *inside* the recursion suspends, and a suspending exit abandons
+the trampoline's whole deferred set (`trampoline_loop`) — a bounded over-keep, never a
+second release. So the fiber frontier is the return facet's case again with the receiver's
+reference in place of the caller's mint, and there is no body shape the deferral declines.
 
 ## Per-call cost, and the irreducible deferred release
 

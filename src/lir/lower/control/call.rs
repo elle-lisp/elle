@@ -35,7 +35,13 @@ impl<'a> Lowerer<'a> {
     /// supply the missing decref — a deferred decref on a still-`Counted` region,
     /// never an ownership-forest adoption.
     ///
-    /// Two facts decide it, from two sources:
+    /// Asked in two layers. The **binding-keyed channels** come first: a callee the
+    /// enclosing letrec or `def` marked stranded owns a release placed at that
+    /// binder's SCOPE END, which this call's frame replacement leaves in dead code,
+    /// so nothing about this node's own demises can answer for it (each channel's
+    /// arm below carries its own argument).
+    ///
+    /// Every other callee is decided by two facts, from two sources:
     /// - **region-locality** (a region fact): the callee's region demises at this
     ///   call's `decref_point` (this node) AND its decref is one the frame owns
     ///   (not in `suppressed_decref_regions`). A program-root callee (a top-level
@@ -59,9 +65,6 @@ impl<'a> Lowerer<'a> {
     /// Owned/Shared classification.
     fn tail_callee_defers_release(&self, func: &Hir) -> bool {
         let Some(call_id) = self.current_hir_id else {
-            return false;
-        };
-        let Some(dying) = self.decrefs_by_decref_point.get(&call_id) else {
             return false;
         };
         // Resolve the callee through the value-transparent wrappers to the
@@ -104,18 +107,12 @@ impl<'a> Lowerer<'a> {
                 .copied()
                 .collect(),
         };
-        // Region-locality (a region fact, not escape): the callee must have a
-        // per-call region that demises at THIS node AND whose decref the frame
-        // actually owns. A program-root callee (top-level `defn`) or a primitive
-        // has no per-call region here, and a SUPPRESSED region's decref is owned
-        // by the store path (the reassign-gate / container model) and was never
-        // stamped as an ordinary alloc — deferring either's release decrements an RC the
-        // frame never raised (a phantom `DecrefRegion` panic / use-after-free).
-        // `EscapeInfo` cannot express "has an owned per-call region here", so this
-        // stays a region fact.
-        let dies_here = func_regions
-            .iter()
-            .any(|r| dying.contains(r) && !self.region_info.suppressed_decref_regions.contains(r));
+        // The three binding-keyed channels below name a release the enclosing letrec
+        // (or `def`) places at its SCOPE END, not at this call node, so they are asked
+        // before the demise reading — whose `decrefs_by_decref_point` lookup answers a
+        // different question and would otherwise refuse a stranded callee wherever this
+        // node happens to be nobody's `decref_point`.
+        //
         // A self-recursive local closure (cell-free — its self-reference resolves to
         // the executing closure) is a per-call allocation whose region lives through
         // the whole recursion. Its scope-end `DecrefRegion` lands at the enclosing
@@ -126,24 +123,26 @@ impl<'a> Lowerer<'a> {
         // it. So a tail call to a stranded self-recursive binding defers its region's
         // release directly: the runtime frees it once at the recursion's normal completion
         // (deduped), reclaimed per call like a top-level recursive `defn`. Gating on
-        // `stranded_self_bindings` (a tail-call body) — not merely self-recursive — is
-        // load-bearing: a non-tail body's release fires LIVE, and deferring it too would
-        // free the region twice (the executing-closure re-dispatch then reads a
-        // recycled page).
+        // `stranded_self_bindings` (a body that TAIL-CALLS the binding) — not merely
+        // self-recursive — is load-bearing: a body that never replaces the frame runs
+        // its release LIVE, and deferring it too would free the region twice (the
+        // executing-closure re-dispatch then reads a recycled page).
         //
-        // The escape gate is the FIBER frontier alone (`escapes_fiber`), neither the
-        // full `binding_escapes_activation` nor the return facet. The full activation
-        // escape folds in store/capture CONTAINMENT — a closure held by a local
-        // container dies WITH the activation, so its release must still be deferred —
-        // and would re-strand that release into a leak. The RETURN facet is funded by
-        // the callee's own `Return` mint, which runs before `trampoline_loop` breaks
-        // and fires the deferred decref: the caller's reference is already standing
-        // when the deferral drops the frame's own, and on a path that returns something
-        // else no one else holds the region, so the frame's is correctly the last. Only
-        // a fiber crossing hands the closure to a holder the compiler did not place —
-        // a parked frame may borrow it uncounted — so only that facet refuses
-        // (docs/impl/selfrec.md § "The deferral's escape gate is the fiber frontier
-        // alone").
+        // The channel asks escape NOTHING. The strand loses exactly one reference —
+        // the frame's own, taken where the closure was allocated — and this deferral
+        // is a decref that supplies exactly that one, at the recursion's normal
+        // completion. Every facet a gate could read belongs to some OTHER reference:
+        // store/capture are CONTAINMENT (a closure held by a local container dies WITH
+        // the activation, so refusing there re-strands the release into a leak); the
+        // RETURN facet is funded by the callee's own `Return` mint, which runs before
+        // `trampoline_loop` breaks and fires the deferred decref; and a FIBER crossing
+        // counts its own reference as it crosses — the emit's park retain into
+        // `fiber.signal`, which the resumer's result release consumes, and
+        // `chan/send`'s send-site incref, held until a receive builds the result
+        // carrying the message. The crossing is a node of the same body, so it runs
+        // first; a crossing INSIDE the recursion suspends, and a suspending exit
+        // abandons the trampoline's whole deferred set — an over-keep, never a second
+        // release (docs/impl/selfrec.md § "The deferral needs no escape gate").
         if let HirKind::Var(b) = &func.kind {
             if self.stranded_self_bindings.contains(b) {
                 // Invariant: a stranded self-recursive binding is CELL-FREE
@@ -161,7 +160,7 @@ impl<'a> Lowerer<'a> {
                      cell already releases the closure region, so a tail-call deferred release would \
                      double-free it (see docs/impl/selfrec.md § the cell-free gate)"
                 );
-                return !self.escape_info.escapes_fiber(*b);
+                return true;
             }
             // A letrec closure-cycle merge member the enclosing letrec's BODY
             // tail-calls: the merged arena's binding-scope DecrefRegion is dead
@@ -223,6 +222,21 @@ impl<'a> Lowerer<'a> {
         {
             return false;
         }
+        // Region-locality (a region fact, not escape): the callee must have a
+        // per-call region that demises at THIS node AND whose decref the frame
+        // actually owns. A program-root callee (top-level `defn`) or a primitive
+        // has no per-call region here, and a SUPPRESSED region's decref is owned
+        // by the store path (the reassign-gate / container model) and was never
+        // stamped as an ordinary alloc — deferring either's release decrements an RC the
+        // frame never raised (a phantom `DecrefRegion` panic / use-after-free).
+        // `EscapeInfo` cannot express "has an owned per-call region here", so this
+        // stays a region fact.
+        let Some(dying) = self.decrefs_by_decref_point.get(&call_id) else {
+            return false;
+        };
+        let dies_here = func_regions
+            .iter()
+            .any(|r| dying.contains(r) && !self.region_info.suppressed_decref_regions.contains(r));
         // Escape is read from the authoritative analysis: among those owned
         // per-call callees, defer only one that does NOT escape its definition —
         // an escaping closure outlives the call and must not be freed by the new

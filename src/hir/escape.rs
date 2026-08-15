@@ -91,11 +91,13 @@
 //!   (`binding_escapes_via_return`, per binding).
 //! - **The lowerer** (`lir/lower`): `tail_callee_defers_release` reads
 //!   `lambda_escapes_definition` / `binding_escapes_activation` for the escape half
-//!   of the deferral decision — region-locality stays a region fact. For a
-//!   **stranded recursive** callee, whose region has no other release channel, it
-//!   narrows to `escapes_fiber` alone: the store/capture facets are containment, and
-//!   the return facet is funded by the callee's own return mint, which precedes the
-//!   deferred release (docs/impl/selfrec.md).
+//!   of the deferral decision — region-locality stays a region fact. A letrec
+//!   cycle/member callee narrows that to `escapes_fiber` alone: the store/capture
+//!   facets are containment, and the return facet is funded by the callee's own
+//!   return mint, which precedes the deferred release. A **stranded recursive**
+//!   callee reads no facet at all — the deferral supplies the frame's own reference
+//!   and every frontier crossing counts its own (docs/impl/selfrec.md § "The
+//!   deferral needs no escape gate").
 //!
 //! Two lowerer/HIR decisions deliberately do **not** read this analysis, because
 //! the question they answer is *ownership-location / mutation-sharing*, which is

@@ -6,7 +6,7 @@
 # tail call has its region's scope-end `DecrefRegion` emitted as dead code past
 # the `TailCall` — or suppressed outright for a `def` — so the runtime deferred
 # release is the region's ONLY release channel (docs/impl/selfrec.md). The
-# channel is gated on the FIBER frontier alone: a RETURNED closure keeps it,
+# channel is unconditional: a RETURNED closure keeps it,
 # because the callee's `Return` mints the caller's reference before
 # `trampoline_loop` breaks and runs the deferred decref, leaving the caller's
 # reference standing while the deferral drops the frame's own.
@@ -107,7 +107,39 @@
         "the first parked handle must outlive 60 rounds of churn")
 (assert (= (length parked) 60) "every round must have parked its handle")
 
-# ── (5) the closure returned through a second frame ──────────────────────
+# ── (5) bodies that REACH the tail call ──────────────────────────────────
+# The strand's premise is a tail call to the binding, not a body that is wholly
+# one: a body arrives at its tail call through statements and through branches,
+# and ANF names the call's result either way. Each shape below returns the
+# recursive closure — so the ordinary demise reading does not claim it and the
+# deferral is the only channel — and then re-enters the handle after churn. The
+# branch shape additionally drives the arm that does NOT tail-call, where the
+# live scope-end release runs and no deferral is recorded.
+(defn stmt-bodied [n]
+  (letrec [go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) go (go (%sub m 1))))]
+    (string "before-" n)
+    (go n)))
+
+(defn arm-bodied [n]
+  (letrec [go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) go (go (%sub m 1))))]
+    (if (< n 0) go (go n))))
+
+(var s 0)
+(while (< s 30)
+  (let [a (stmt-bodied 3)
+        b (arm-bodied 3)
+        c (arm-bodied -1)]
+    (push churn (string "reach-" s))
+    (assert (fn? (a 1)) "statement-bodied handle stale after churn")
+    (assert (fn? (b 1)) "branch-bodied handle stale after churn")
+    (assert (fn? (c 1)) "the falling-through arm's handle stale after churn"))
+  (assign s (+ s 1)))
+
+# ── (6) the closure returned through a second frame ──────────────────────
 # The handle crosses one more return boundary before it is called, so the
 # caller's reference is minted by a `Return` the recursion's own trampoline
 # never saw.

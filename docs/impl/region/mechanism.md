@@ -848,7 +848,7 @@ channel, run once at the callee's normal completion.
 The count argument is the ordering one, and it has nothing to bridge. The deferral is
 a decref, not a free, and it runs *after* the callee's `Return` mint — the same
 argument the cell-free self-recursive deferral makes for its own return admission
-(selfrec.md § "The deferral's escape gate is the fiber frontier alone"), where the
+(selfrec.md § "The deferral needs no escape gate"), where the
 frame-exit relocation has to move a release *ahead* of the call and fund the gap. The
 return facet is therefore funded, and only the **fiber** facet refuses, a parked frame
 being free to hold an uncounted borrow the compiler never placed.

@@ -416,6 +416,24 @@ fn region_selfrec_return_release() {
     );
 }
 
+// Guard — a stranded recursive closure handed across the FIBER frontier keeps its
+// tail-call deferred release too, and that release must drop only the FRAME's
+// reference. The crossing counts its own: the emit's park retain into `fiber.signal`,
+// which the resumer's result release consumes, and `chan/send`'s send-site incref,
+// held until a receive builds the result carrying the message (docs/impl/selfrec.md §
+// "The deferral needs no escape gate"). If the count is wrong, the delivered handle's
+// region is recycled and the self-call re-dispatch — which reads the executing closure
+// out of that very region — derefs a foreign page. Drives both fiber-frontier seeds —
+// the emit through both binder routes, the send through the `letrec` one — with
+// allocation churn between the release and the re-entry.
+#[test]
+fn region_selfrec_fiber_release() {
+    run_elle_script_with_args(
+        "region-selfrec-fiber-release",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a local mutual-recursion clique (`ev`/`od`) whose `letrec` body ends in a
 // tail call to a NON-member (a native `%add`, the redefined-closure operator `+`, a
 // foreign fn `g`, and a MIXED member+non-member `if`) must reclaim its merged arena
