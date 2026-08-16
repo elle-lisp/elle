@@ -253,6 +253,79 @@ fn a_native_tail_arm_does_not_decline_the_window() {
 }
 
 #[test]
+fn an_arm_whose_loop_reads_a_live_in_param_anchors_at_the_branch() {
+    // The window's iterative boundary is the loop's BODY, not the loop's own node.
+    // A read of a loop-external binding is anchored at the loop NODE
+    // (docs/impl/region/mechanism.md § "Every binder records its scope"), and the
+    // lowerer emits a node's releases after it, so that release already runs once
+    // per execution of the loop — the same count with which the merge is reached.
+    // Reading the boundary as the closed subtree interval would leave the branch's
+    // only release under the looping arm, stranding `xs` on every other arm.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (t xs) (if t (length xs) \
+           (begin (def @i 0) (while (%lt i 3) (length xs) (assign i (%add i 1))) 0)))",
+    );
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        find_first(&hir, |h| matches!(
+            &h.kind,
+            HirKind::While { .. } | HirKind::Loop { .. }
+        ))
+        .is_some(),
+        "the shape must contain an iterative scope for the boundary to be read"
+    );
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a live-in param a nested loop merely READS must be released where every \
+         arm reaches it"
+    );
+}
+
+#[test]
+fn a_value_born_in_an_arms_loop_keeps_its_release_inside_the_loop() {
+    // The boundary the reading above preserves. `s` is allocated in the loop BODY,
+    // so its release runs per iteration and its `decref_point` is a strict
+    // descendant of the `While` — where one anchored release would cover N
+    // allocations. Distinct from the pin above, whose region the loop only reads.
+    let (hir, _arena, _symbols, info) = analyze_with_class(
+        "(fn (t) (if t 0 \
+           (begin (def @i 0) \
+             (while (%lt i 3) (let [s (list 1 2)] (length s)) (assign i (%add i 1))) 0)))",
+    );
+    let loop_id = find_first(&hir, |h| {
+        matches!(&h.kind, HirKind::While { .. } | HirKind::Loop { .. })
+    })
+    .expect("an iterative scope");
+    let order = compute_order(&hir);
+    let low = compute_subtree_low(&hir, &order);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let lo = low.get(&loop_id).copied().unwrap_or(0);
+    let alloc = find_first(&hir, |h| matches!(&h.kind, HirKind::Call { .. }))
+        .and_then(|_| {
+            info.alloc_region
+                .iter()
+                .find(|(id, _)| {
+                    let o = ord(**id);
+                    o >= lo && o < ord(loop_id)
+                })
+                .map(|(_, &r)| r)
+        })
+        .expect("the loop body allocates a region");
+    let dord = ord(info
+        .region_data
+        .get(&alloc)
+        .expect("the loop-body region has RegionData")
+        .decref_point);
+    assert!(
+        dord >= lo && dord < ord(loop_id),
+        "a value born in the loop body must keep its release strictly inside the \
+         loop; r{} released at order {dord}, loop body is [{lo}, {})",
+        alloc.0,
+        ord(loop_id),
+    );
+}
+
+#[test]
 fn the_match_arm_that_uses_the_value_takes_no_head_compensation() {
     // The over-free counterfactual for the arm route: the arm holding the
     // `decref_point` already releases `v` at its own last use. A head release there

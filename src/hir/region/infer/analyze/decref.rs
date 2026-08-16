@@ -450,7 +450,9 @@ pub(super) fn populate_decref_points(
 /// both are about how many times a release runs: a `While`/`Loop` nested in the
 /// branch and holding the `decref_point` (its body re-allocates per iteration, so
 /// one release cannot cover N) and a `Lambda` holding it (its releases run in
-/// another activation, against another frame's slots).
+/// another activation, against another frame's slots). Each is the scope's BODY,
+/// never the scope's own node — a release anchored at the loop node already runs
+/// once per execution of the loop.
 ///
 /// An arm that leaves through a **frame-replacing** tail call does not arrive at
 /// the merge, so the anchor alone does not cover it — the frame-exit relocation
@@ -642,9 +644,19 @@ fn pin_branch_arm_releases(
             if dord >= anchor_ord || !br.arms.iter().any(|&(lo, hi)| lo <= dord && dord <= hi) {
                 continue;
             }
+            // A boundary is the scope's BODY, not the scope's own node: the
+            // lowerer emits a node's releases after it finishes lowering that
+            // node, so a `decref_point` AT the `While`/`Loop` lands after the loop
+            // and runs once per execution of it — the count the merge label is
+            // reached with. A `Lambda` node reads the same way; only its body runs
+            // in another activation. The interval is therefore half-open on the
+            // high end, which is what admits a live-in region a nested loop merely
+            // READS: the loop-node extension anchors every such read at the loop
+            // node (`hir/liveness/lastuse`), so the closed reading would leave the
+            // branch's only release under the looping arm.
             if inner_barriers
                 .iter()
-                .any(|&(lo, hi)| lo <= dord && dord <= hi)
+                .any(|&(lo, hi)| lo <= dord && dord < hi)
             {
                 continue;
             }

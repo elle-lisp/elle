@@ -467,6 +467,22 @@ reasons. Both are about *how many times* a release runs:
   different activation against a different frame's slots, which never reach this
   branch's merge label.
 
+Each boundary is the scope's **body**, not the scope's own node. The lowerer emits
+a node's releases after it finishes lowering that node, so a `decref_point` equal
+to the `While`/`Loop` node is emitted *after* the loop and runs once per execution
+of the loop — the same count with which the merge label is reached. A `Lambda`
+node reads the same way: the enclosing frame emits its releases, and only its body
+runs elsewhere. So the containment test is half-open on the high end — strictly
+inside the scope is a boundary, the scope's own node is not.
+
+That distinction is what admits an ordinary class rather than a corner: a live-in
+region a loop nested in one arm READS. The loop-node extension (§ "Every binder
+records its scope") anchors every such read at the loop node, so the closed
+interval would place the branch's only release under the arm holding that loop.
+The rows are `arm-loop-read` and `arm-loop-read-local` in
+`tests/elle/region-branch-arm-window.lisp`, beside the `bound-loop` boundary whose
+value is born in the loop body and whose release must stay there.
+
 The region must also be **live-in** to the branch (every allocation and
 holder-definition site outside the branch's subtree) — the same premise
 compensation states — so a value born inside an arm keeps its in-arm release,

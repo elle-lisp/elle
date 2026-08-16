@@ -44,12 +44,20 @@
 # funded one is `push-all`'s shape, and the unfunded one must stay bounded on the
 # baseline route it keeps.
 #
+# The two boundaries the window keeps are a nested loop and a nested lambda, and
+# each is the scope's BODY rather than the scope's own node: the lowerer emits a
+# node's releases after it, so a release anchored at the loop node already runs
+# once per execution of the loop. That is where the loop-node extension puts every
+# read of a live-in binding, so the distinction decides an ordinary class — the
+# `arm-loop-read*` rows — while `bound-loop`, whose value is born in the loop body,
+# must keep its release inside.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
 # region-branch-arm-window-uaf.lisp; the per-op rates are the `param-used-arm`,
-# `branch-arm-tailcall-sibling` and `branch-arm-return-captured` probes in
-# tests/elle/oracle.lisp.
+# `branch-arm-tailcall-sibling`, `branch-arm-return-captured` and `arm-loop-read`
+# probes in tests/elle/oracle.lisp.
 
 (def window 2000)
 
@@ -183,6 +191,40 @@
 # the release at its own last use, the base one takes compensation's route.
 (def acc-walk (fn (i acc) (if (%lt i 0) acc (acc-walk (%sub i 1) (pair i acc)))))
 
+# (k) an arm whose LOOP reads the live-in parameter. A read of a
+# loop-external binding is anchored at the loop NODE (docs/impl/region/mechanism.md
+# § "Every binder records its scope"), and the lowerer emits a node's releases
+# after it, so that release already runs once per execution of the loop — the same
+# count with which the merge label is reached. Driving the arm that does NOT loop
+# is what the anchor covers: without it the looping arm carries the branch's only
+# release and every other arm strands the argument's whole object graph. The
+# `bound-loop` boundary below is the contrast — its value is BORN in the loop body,
+# so its release stays inside.
+(defn arm-loop-read (v t)
+  (match t
+    :a (length v)
+    _
+      (begin
+        (var i 0)
+        (while (%lt i 3)
+          (get v i)
+          (assign i (%add i 1)))
+        (%add i 100))))
+
+# (l) the fn-LOCAL face of (k) — the same premise reached through the other route
+# into `binding_source_regions`.
+(defn arm-loop-read-local (t)
+  (let [v (list 1 2 3)]
+    (match t
+      :a (length v)
+      _
+        (begin
+          (var i 0)
+          (while (%lt i 3)
+            (get v i)
+            (assign i (%add i 1)))
+          (%add i 100)))))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
 # boundary would leave one release covering many allocations (the loop) or a
@@ -253,6 +295,11 @@
 (def returned-captured-exit-d
   (measure (fn () (returned-captured (@array) [1 2])) 200 window))
 (def acc-walk-d (measure (fn () (acc-walk 3 ())) 200 window))
+(def arm-loop-read-d
+  (measure (fn () (arm-loop-read (list 1 2 3) :a)) 200 window))
+(def arm-loop-read-exit-d
+  (measure (fn () (arm-loop-read (list 1 2 3) :z)) 200 window))
+(def arm-loop-read-local-d (measure (fn () (arm-loop-read-local :a)) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
@@ -270,6 +317,8 @@
 (println "  returned + captured sibling: fallthrough "
          returned-captured-fallthrough-d "  exit " returned-captured-exit-d)
 (println "  returned + unfunded sibling: acc-walk " acc-walk-d)
+(println "  arm loop reads live-in: param " arm-loop-read-d "  looping arm "
+         arm-loop-read-exit-d "  local " arm-loop-read-local-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
 (println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
 
@@ -304,6 +353,12 @@
 (bounded? acc-walk-d
           "returned accumulator whose sibling arm's callee funds no replica")
 
+(bounded? arm-loop-read-d
+          "arm whose loop reads the live-in parameter: non-looping arm")
+(bounded? arm-loop-read-exit-d
+          "arm whose loop reads the live-in parameter: the looping arm")
+(bounded? arm-loop-read-local-d "arm whose loop reads a live-in fn-local")
+
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
 
@@ -330,6 +385,9 @@
 (assert (= (length (returned-captured (@array) [1 2])) 2)
         "returned-captured walk arm result lost")
 (assert (= (length (acc-walk 3 ())) 4) "acc-walk result lost")
+(assert (= (arm-loop-read (list 1 2 3) :a) 3) "arm-loop-read short arm lost")
+(assert (= (arm-loop-read (list 1 2 3) :z) 103) "arm-loop-read looping arm lost")
+(assert (= (arm-loop-read-local :z) 103) "arm-loop-read-local looping arm lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
 

@@ -507,6 +507,21 @@
     _ (length v)))
 (defn t22-param-if [v c]
   (if c (length v) (%add 1 (length v))))
+# The window's iterative boundary is the loop's BODY, not the loop's own node. A
+# read of a loop-external binding is anchored at the loop NODE, and the lowerer
+# emits a node's releases after it, so that release already runs once per execution
+# of the loop — the count the merge label is reached with. Driven through the arm
+# that does NOT loop, the one whose release is new.
+(defn t22-arm-loop-read [v t]
+  (match t
+    :a (length v)
+    _
+      (begin
+        (var i 0)
+        (while (%lt i 3)
+          (get v i)
+          (assign i (%add i 1)))
+        (%add i 100))))
 # The same window over a branch one of whose arms leaves through a frame-replacing
 # CLOSURE tail call naming the same parameter — the `append`/`concat` dispatch
 # shape. Anchoring is what covers the arm driven here; the frame-exiting arm is
@@ -849,7 +864,7 @@
     (fn [j]
       (keys {:a 1 :b 2})
       (values {:a 1 :b 2})
-      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 3]
+      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 2]
    ["struct-lit" (fn [j] {:x j :y (+ j 1)}) 0]
    ["struct-get"
     (fn [j]
@@ -2067,6 +2082,11 @@
 # OTHER arm leaves through a frame-replacing closure tail call. Declining such a
 # branch whole strands the argument on the arm driven here, which is what the
 # `concat`/`append` family paid per call.
+# `arm-loop-read` is the fourth: the same window over a branch one of whose arms
+# LOOPS over the argument. Its release is anchored at the loop node, which the
+# lowerer emits after the loop, so the boundary that declines a loop is the loop's
+# BODY and this class is admitted; reading the boundary as the closed subtree
+# interval strands the argument on every arm but the looping one.
 (pin (measure-core "param-used-arm"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -2080,6 +2100,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t22-param-if (list 1 2 3) true)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "arm-loop-read"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-arm-loop-read (list 1 2 3) :a)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "branch-arm-tailcall-sibling"
                    (fn [b]

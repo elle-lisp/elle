@@ -114,6 +114,38 @@
     :b 1
     _ 2))
 
+# (e2) a nested loop that only READS a live-in subject. Its release is anchored at
+# the loop NODE, which the lowerer emits after the loop, so the window admits it —
+# the boundary is the loop's body, not the loop itself. The subject is read again
+# after the branch, so a release moved to the merge must still land behind that
+# read. Driven on both arms: the looping one, whose release moved, and the sibling
+# one, which now runs a release it never ran before.
+(defn w-loop-read (v t)
+  (%add (match t
+          :a (length (first v))
+          _
+            (begin
+              (var k 0)
+              (while (%lt k 4)
+                (first v)
+                (assign k (%add k 1)))
+              k)) (length (first v))))
+
+# (e3) the same loop-reading shape whose sibling arm STORES the subject into a
+# container outliving the frame. The store is an escape facet, so the admission
+# refuses the region and the in-arm release stands; the read back out must find it.
+(defn w-loop-read-store (v t)
+  (match t
+    :a (push sink v)
+    _
+      (begin
+        (var k 0)
+        (while (%lt k 4)
+          (first v)
+          (assign k (%add k 1)))
+        k))
+  (length (get sink (%sub (length sink) 1))))
+
 # (f) a nested LAMBDA inside the arm, called repeatedly: its body's releases
 # belong to the closure's activation. Hoisting one to the enclosing branch would
 # release a region resolved against the wrong frame's slot.
@@ -232,6 +264,9 @@
 (var s 0)
 (var t 0)
 (var u 0)
+(var v 0)
+(var w 0)
+(var x 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -239,6 +274,9 @@
   (assign d (w-capture (list (string "d" i) i) :a))
   (assign m (w-escaping-read (list (string "n" i) i) :a))
   (assign e (w-loop i :a))
+  (assign v (w-loop-read (list (string "v" i) i) :a))
+  (assign w (w-loop-read (list (string "w" i) i) :z))
+  (assign x (w-loop-read-store (list (string "x" i) i) :a))
   (assign f (w-lambda i :a))
   (assign g (w-park (list (string "g" i) i) :a))
   (assign h (w-tail (list (string "h" i) i) :b))
@@ -263,6 +301,11 @@
 (assert (> d 0) "arm value freed under the closure that captured it")
 (assert (> m 0) "arm value freed under a closure that escaped holding it")
 (assert (%gt e 0) "loop-body value freed under a later iteration's read")
+(assert (%gt v 0)
+        "live-in subject freed by the merge release its looping sibling admitted")
+(assert (%gt w 0) "live-in subject freed by the release moved off its loop node")
+(assert (%gt x 0)
+        "stored subject freed though a sibling arm's loop only reads it")
 (assert (%gt f 0) "lambda-body value released from the enclosing frame")
 (assert (> g 0) "parked fiber's borrow freed by the moved release")
 (assert (%gt h 0) "tail-call arm's own release lost to the merge")
