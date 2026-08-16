@@ -149,10 +149,11 @@ repoints. An alias of a value the **cell's own** binder allocated has no such
 slot to offer: the only recorded one is the cell's, which "a mutated slot is not
 a release route" (below) refuses. Such an alias instead takes a reference of its
 own wherever its read is a whole-value one (next section), which withdraws it
-from the sole-held question and hands the donation back. Where it is not — an
-init that on some path produces something other than a container's content,
-`(let [k (if c r (list))] …)` — the alias stays a holder, the counted-init route
-runs, and the init region over-keeps to scope exit.
+from the sole-held question and hands the donation back — including where only
+*some* path of the init reads the container, `(let [k (if c r (list))] …)`, whose
+allocating arm keeps its own regions while the container's are withdrawn. What
+still leaves the alias a holder, and the container on the counted-init route, is
+an init NO path of which is a whole-value read.
 
 Refusing instead costs the **store-site pin**, not merely the donation. On the
 unsuppressed baseline the cell holds no reference at all, so each stored value is
@@ -202,31 +203,45 @@ needs no counting: an element's region is independently counted by its parent's
 alloc-time scan, so the parent's demise cascades rather than freeing the element
 under the reader.
 
-**A branch whose every arm is such a read is one too.** What obliges the reader
-is the value it ends up holding, not the syntax that selected it: in
+**A branch is a read of whichever arms read.** What obliges the reader is the
+value it ends up holding, not the syntax that selected it: in
 `(let [k (if c r s)] …)` the name `k` is, on every path, a borrow out of a
 container that re-stores, and the retain the binder takes protects whichever
 container's content arrived — `IncrefValueRegion` names the runtime value, so one
 instruction covers every arm. The two containers each keep their donation, and
 correctly: on the path that did not run, the reader never became a holder of that
-container's init. The descent is over the branch forms and stops at the first arm
-that is not itself a whole-value read, so a mixed branch — one arm reading a
-container, another allocating — is declined **whole** and keeps the counted-init
-route.
+container's init.
 
-Declining the mixed branch is a requirement, not conservatism. What the counted
-read does is *replace* the reader's source regions with the placeholder, which is
-how the reader stops being a holder — and for an allocating arm those source
-regions are the only thing extending that value's last use out to the reader. Cut
-them and the arm's own release fires inside the arm, ahead of the binder's
-retain, so the retain names a freed value. A branch every arm of which reads a
-container has nothing to cut: a bare read allocates nothing, so no arm's release
-depends on the reader's holding.
+A **mixed** branch — one arm reading a container, another allocating — takes the
+same retain, and the replacement it pays with is per-arm. What the counted read
+does is *replace* the reader's source regions with the placeholder, which is how
+the reader stops being a holder; for an allocating arm those source regions are
+the only thing extending that value's last use out to the reader, so cutting them
+would put the arm's own release ahead of the binder's retain. So the descent cuts
+the regions of the arms that read a container and **keeps** every other arm's.
+Both halves stay balanced, because one `IncrefValueRegion` names whatever value
+arrived: on a reading path the retain and the placeholder's release are the
+reader's whole account, and the container's own drop-on-overwrite releases what
+it holds; on an allocating path the value carries two references — its birth and
+the retain — against two releases, that arm's ordinary decref at the reader's
+last use and the placeholder's. What the reader is left holding is exactly what
+each half needs: the allocating arm's regions, so its value stays extended, and
+none of the container's, so the container is its init's sole holder and the
+donation runs.
 
-A branch with no value on some path is declined by the same rule: a `Cond`
-without an else clause leaves a path whose result no arm produced. A `Match`
-needs no else — an unmatched value signals rather than falling through to one —
-so its arms *are* every value-producing path, and only an armless one has none.
+A statement wrapper is descended for the same reason, with one path rather than
+several: `(let [k (begin (log) r)] …)` leaves `k` holding exactly what the tail
+read, because the walk gives a `Begin` its last expression's regions and nothing
+else. What obliges the reader is the value it ends up holding, not the syntax
+that selected it, and a `begin` selects one exactly as an arm does.
+
+A branch NO arm of which reads a container is not a read of anything and declines
+as any other init does. A path with no value at all — a `Cond` without an else
+clause — is one of the arms that read nothing: it contributes no source region to
+keep, and carries no reference for the retain or the placeholder release to name,
+so both are no-ops on it. (A `Match` needs no else — an unmatched value signals
+rather than falling through to one — so its arms *are* every value-producing
+path.)
 
 **A version of the container is not an alias of it.** The reader's own source
 name is excluded from the arms, because functionalization's `fresh_version` keeps
@@ -236,13 +251,20 @@ same forwarding edge "A loop parameter's init source is not a second holder"
 (below) describes at a loop — the versions hold **one** reference between them
 because a `Var` read mints nothing — so counting the phi would claim a second
 reference for a single holding, and the container's returned-binding suppression
-would then run against a reader that had not paid for it. A user rebinding that
-shadows the container reads as a version too and declines with it, which costs
-promptness only: the decline is the conservative baseline, where the reader keeps
-holding the container's region and the container keeps the counted-init route.
+would then run against a reader that had not paid for it. So a version arm is one
+of the arms that read nothing, and its regions are among the ones the descent
+keeps — the phi hands its one reference along exactly as before, and the retain
+and the placeholder release that name the runtime value on that path balance each
+other. A user rebinding that shadows the container reads as a version too. A
+branch of nothing but versions is a read of nothing and declines whole: the
+reader keeps holding the container's region and the container keeps the
+counted-init route, which costs promptness only.
 
 The reference is the test: `reassign_gate_counts_a_branch_read_of_a_container`
-for the admission, `reassign_gate_declines_a_mixed_branch_init` for the decline,
+for the admission, `reassign_gate_counts_a_mixed_branch_init` for the mixed
+branch whose allocating arm keeps its regions,
+`reassign_gate_counts_a_begin_wrapped_read` for the statement wrapper,
+`reassign_gate_declines_a_branch_reading_no_container` for the decline,
 `reassign_gate_refuses_returned_value` for the phi that must stay uncounted, and
 `tests/elle/region-cell-alias-branch.lisp` for the measured shape.
 

@@ -538,8 +538,15 @@ impl RegionInference {
     /// region at the read node (it lands in `call_result_regions`, so the reader
     /// carries a value-based `DecrefValueRegion` at its last use) and record the
     /// read site so the lowerer emits the balancing `IncrefValueRegion`. Returns
-    /// `[read_r]` for the reader's `binding_regions`, or the unmodified
-    /// `init_regions` when the treatment does not apply.
+    /// the placeholder in place of the regions the containers contributed, or the
+    /// unmodified `init_regions` when no path is such a read.
+    ///
+    /// The replacement is per-path, which is what admits a MIXED branch: only the
+    /// regions the reading arms contributed are withdrawn, and an arm that
+    /// allocates keeps its own — those regions are the only thing extending that
+    /// value's last use out to the binder's retain. One `IncrefValueRegion` names
+    /// whichever value arrived, so both halves balance (docs/impl/region/bindings.md
+    /// § "A branch is a read of whichever arms read").
     ///
     /// The source test is `is_one_slot_container`, which reads the re-store fact
     /// without the realization: a captured cell whose update opcode decrefs the
@@ -560,29 +567,45 @@ impl RegionInference {
         init: &Hir,
         init_regions: Vec<Region>,
     ) -> Vec<Region> {
-        if init_regions.is_empty()
-            || self.arena().get(reader).needs_capture()
-            || !self.is_whole_container_read(init, self.arena().get(reader).name)
-        {
+        if init_regions.is_empty() || self.arena().get(reader).needs_capture() {
+            return init_regions;
+        }
+        let mut read_regions = Vec::new();
+        self.whole_container_read_regions(init, self.arena().get(reader).name, &mut read_regions);
+        if read_regions.is_empty() {
             return init_regions;
         }
         let read_r = self.alloc_here(init.id);
         self.call_result_regions.insert(read_r);
         self.counted_cell_read_sites.insert(init.id);
-        vec![read_r]
+        let mut out = vec![read_r];
+        out.extend(
+            init_regions
+                .into_iter()
+                .filter(|r| !read_regions.contains(r)),
+        );
+        out
     }
 
-    /// Does `h` produce, on **every** path, the whole current content of some
-    /// 1-slot container *other than* a container the binding named `reader_name`
-    /// is a version of? The leaves are a bare `Var(b)` over such a container and
-    /// the `DerefCell`-wrapped form `functionalize` puts around a needs-capture
-    /// read (the fn-local upvalue).
+    /// Collect into `out` the source regions of every 1-slot container `h`
+    /// produces the whole current content of, on any one of its paths. The leaves
+    /// are a bare `Var(b)` over such a container and the `DerefCell`-wrapped form
+    /// `functionalize` puts around a needs-capture read (the fn-local upvalue); a
+    /// leaf contributes exactly `binding_regions[b]`, which is what the walk
+    /// returns for it, so `out` is the part of the init's regions the caller
+    /// replaces with the placeholder.
     ///
-    /// A **branch** every arm of which is such a read is one too
-    /// (docs/impl/region/bindings.md § "A branch whose every arm is such a read is
-    /// one too"). The reader's obligation is about the value it ends up holding,
-    /// and one `IncrefValueRegion` at the binder names the runtime value — so it
-    /// covers whichever arm ran, over one container or several.
+    /// A **branch** is descended arm by arm, each arm being one path
+    /// (docs/impl/region/bindings.md § "A branch is a read of whichever arms
+    /// read"). The reader's obligation is about the value it ends up holding, and
+    /// one `IncrefValueRegion` at the binder names the runtime value — so it
+    /// covers whichever arm ran, over one container or several. An arm that is
+    /// *not* a read contributes nothing to `out` and so keeps its own regions in
+    /// the reader's set, which is what an allocating arm needs: those regions are
+    /// the only thing extending its value's last use out to the retain. A `Cond`
+    /// clause list with no else has a path that produces no value at all, which
+    /// is such an arm — it holds no reference for the retain or the placeholder
+    /// release to name.
     ///
     /// `reader_name` excludes the reader's OWN source name, because a binding that
     /// shares a container's name is a **version** of that container rather than a
@@ -592,56 +615,65 @@ impl RegionInference {
     /// resolves to it. A version hands the one reference along exactly as a loop
     /// parameter's init edge does (docs/impl/region/bindings.md § "A loop
     /// parameter's init source is not a second holder"); counting it would claim a
-    /// second reference for a single holding. A user rebinding that shadows the
-    /// container declines by the same test, which costs promptness only — the
-    /// decline is the conservative baseline, where the reader keeps holding the
-    /// container's region and the container keeps the counted-init route.
-    ///
-    /// Every other init declines, including a MIXED branch, and the decline is
-    /// load-bearing: the caller replaces the reader's source regions with the
-    /// placeholder, and for an arm that ALLOCATES those source regions are what
-    /// extend the allocated value's last use out to the reader. Cutting them would
-    /// put the arm's own release ahead of the binder's retain. A bare read
-    /// allocates nothing, so no arm's release depends on the reader holding it.
-    /// A path that produces no arm's value at all — a `Cond` with no else clause —
-    /// is likewise not a read of anything.
-    fn is_whole_container_read(&self, h: &Hir, reader_name: crate::value::SymbolId) -> bool {
+    /// second reference for a single holding. So a version arm reads nothing here
+    /// and keeps its regions, as any other non-reading arm does. A user rebinding
+    /// that shadows the container reads as a version too.
+    fn whole_container_read_regions(
+        &self,
+        h: &Hir,
+        reader_name: crate::value::SymbolId,
+        out: &mut Vec<Region>,
+    ) {
         match &h.kind {
             HirKind::Var(b) => {
                 let info = self.arena().get(*b);
-                info.is_one_slot_container() && info.name != reader_name
+                if info.is_one_slot_container() && info.name != reader_name {
+                    if let Some(regions) = self.binding_regions.get(b) {
+                        out.extend(regions.iter().copied());
+                    }
+                }
             }
-            HirKind::DerefCell { cell } => self.is_whole_container_read(cell, reader_name),
+            HirKind::DerefCell { cell } => {
+                self.whole_container_read_regions(cell, reader_name, out)
+            }
+            // A statement wrapper selects a value exactly as a branch arm does:
+            // the walk returns the LAST expression's regions and nothing else, so
+            // the reader ends up holding what the tail read, and the tail is the
+            // one path there is.
+            HirKind::Begin(exprs) => {
+                if let Some(tail) = exprs.last() {
+                    self.whole_container_read_regions(tail, reader_name, out);
+                }
+            }
             HirKind::If {
                 then_branch,
                 else_branch,
                 ..
             } => {
-                self.is_whole_container_read(then_branch, reader_name)
-                    && self.is_whole_container_read(else_branch, reader_name)
+                self.whole_container_read_regions(then_branch, reader_name, out);
+                self.whole_container_read_regions(else_branch, reader_name, out);
             }
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => {
-                else_branch
-                    .as_ref()
-                    .is_some_and(|e| self.is_whole_container_read(e, reader_name))
-                    && clauses
-                        .iter()
-                        .all(|(_, body)| self.is_whole_container_read(body, reader_name))
+                for (_, body) in clauses {
+                    self.whole_container_read_regions(body, reader_name, out);
+                }
+                if let Some(e) = else_branch {
+                    self.whole_container_read_regions(e, reader_name, out);
+                }
             }
-            // A `Match` needs no else: an unmatched value signals rather than
-            // falling through to a value, so the arms are every value-producing
-            // path. An arm's pattern names are irrelevant — what is asked of the
-            // arm is what its BODY produces.
+            // An unmatched value signals rather than falling through to a value,
+            // so a `Match`'s arms are every value-producing path it has. An arm's
+            // pattern names are irrelevant — what is asked of the arm is what its
+            // BODY produces.
             HirKind::Match { arms, .. } => {
-                !arms.is_empty()
-                    && arms
-                        .iter()
-                        .all(|(_, _, body)| self.is_whole_container_read(body, reader_name))
+                for (_, _, body) in arms {
+                    self.whole_container_read_regions(body, reader_name, out);
+                }
             }
-            _ => false,
+            _ => {}
         }
     }
 

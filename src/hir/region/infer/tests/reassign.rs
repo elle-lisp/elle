@@ -833,15 +833,15 @@ fn reassign_gate_counts_a_branch_read_of_a_container() {
     );
 }
 
-/// Counterfactual against over-admission of the branch: one arm that is NOT a
-/// whole-value read declines the whole init. What the counted read does is
-/// REPLACE the reader's source regions with the placeholder, and for an
-/// allocating arm those regions are the only thing extending that value's last
-/// use out to the reader — cutting them would put the arm's own release ahead of
-/// the binder's retain. So the container falls back to counting its init, and
-/// `keep` keeps the ordinary decref that releases the producer's reference.
+/// A MIXED branch — one arm reading the container, one allocating — takes the
+/// counted read too, and pays for the allocating arm by KEEPING that arm's source
+/// regions (docs/impl/region/bindings.md § "A branch is a read of whichever arms
+/// read"). The replacement is per-arm: the reader stops holding the container's
+/// regions, so the donation runs, while the allocating arm's region stays in the
+/// reader's set — it is the only thing extending that value's last use out to the
+/// binder's retain.
 #[test]
-fn reassign_gate_declines_a_mixed_branch_init() {
+fn reassign_gate_counts_a_mixed_branch_init() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
            (let [@last (array 0 0)]\n\
@@ -853,26 +853,136 @@ fn reassign_gate_declines_a_mixed_branch_init() {
                (%length keep)))))\n\
          (h 3)",
     );
+    let (last, last_sites) = heap_carrying_reassign(&hir, &info);
+    assert_eq!(
+        info.counted_cell_read_sites.len(),
+        1,
+        "the arm that reads the container makes the branch a counted read \
+         (got {:?})",
+        info.counted_cell_read_sites,
+    );
+    let site = *info.counted_cell_read_sites.iter().next().unwrap();
+    let placeholder = *info
+        .alloc_region
+        .get(&site)
+        .expect("counted read site mints a placeholder region");
+    assert!(
+        info.call_result_regions.contains(&placeholder),
+        "counted-read placeholder {placeholder:?} must be a call-result region",
+    );
+    // The reader: the one binding the placeholder was minted for.
+    let reader = *info
+        .binding_source_regions
+        .iter()
+        .find(|(_, rs)| rs.contains(&placeholder))
+        .expect("the placeholder is the reader's source region")
+        .0;
+    let reader_regs = &info.binding_source_regions[&reader];
+    let last_regs = &info.binding_source_regions[&last];
+    assert!(
+        reader_regs.iter().any(|r| *r != placeholder),
+        "the allocating arm's region stays in the reader's source set — cutting \
+         it would put that arm's own release ahead of the binder's retain \
+         (regs={reader_regs:?})",
+    );
+    assert!(
+        !reader_regs.iter().any(|r| last_regs.contains(r)),
+        "the container's regions are withdrawn from the reader, which is what \
+         hands the donation back (reader={reader_regs:?}, container={last_regs:?})",
+    );
+    assert!(
+        last_sites
+            .iter()
+            .any(|site| info.drop_on_overwrite_sites.contains(site)),
+        "the container keeps the model — drop-on-overwrite releases the \
+         reference it was donated"
+    );
+    assert!(
+        info.counted_cell_init_sites.is_empty(),
+        "with the reading arm counted the container is its init's sole holder, \
+         so the donation is available and no init retain is needed (got {:?})",
+        info.counted_cell_init_sites,
+    );
+    assert!(
+        last_regs
+            .iter()
+            .any(|r| info.suppressed_decref_regions.contains(r)),
+        "the donated init region's ordinary decref is suppressed \
+         (regs={last_regs:?})",
+    );
+}
+
+/// A statement wrapper around the read is descended too: a `Begin`'s value is
+/// its tail's, so the reader ends up holding what the tail read and takes the
+/// same counted reference (docs/impl/region/bindings.md § "A branch is a read of
+/// whichever arms read").
+#[test]
+fn reassign_gate_counts_a_begin_wrapped_read() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@last (array 0 0)]\n\
+             (let [keep (begin 1 last)]\n\
+               (var i 0)\n\
+               (while (%lt i n)\n\
+                 (begin (assign last (array i 7))\n\
+                        (assign i (%add i 1))))\n\
+               (%length keep)))))\n\
+         (h 3)",
+    );
+    let (last, _) = heap_carrying_reassign(&hir, &info);
+    assert_eq!(
+        info.counted_cell_read_sites.len(),
+        1,
+        "the begin's tail is the read the binder counts (got {:?})",
+        info.counted_cell_read_sites,
+    );
+    assert!(
+        info.counted_cell_init_sites.is_empty(),
+        "with the read counted the container is its init's sole holder, so the \
+         donation is available (got {:?})",
+        info.counted_cell_init_sites,
+    );
+    let last_regs = &info.binding_source_regions[&last];
+    assert!(
+        last_regs
+            .iter()
+            .any(|r| info.suppressed_decref_regions.contains(r)),
+        "the donated init region's ordinary decref is suppressed \
+         (regs={last_regs:?})",
+    );
+}
+
+/// Counterfactual against over-admission: a branch NO arm of which reads a
+/// container is a read of nothing, so the reader keeps every source region it
+/// had and the container falls back to counting its init. Nothing here obliges a
+/// retain — neither arm's value can be freed by the container's next overwrite.
+#[test]
+fn reassign_gate_declines_a_branch_reading_no_container() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@last (array 0 0)]\n\
+             (let [other (array 1 1)]\n\
+               (let [keep (if (%lt n 0) other (array 5 5))]\n\
+                 (var i 0)\n\
+                 (while (%lt i n)\n\
+                   (begin (assign last (array i 7))\n\
+                          (assign i (%add i 1))))\n\
+                 (%add (%length keep) (%length last)))))))\n\
+         (h 3)",
+    );
     let (_, last_sites) = heap_carrying_reassign(&hir, &info);
     assert!(
         info.counted_cell_read_sites.is_empty(),
-        "an arm that allocates is not a whole-value read, so the branch is \
-         declined whole (got {:?})",
+        "neither arm reads a 1-slot container, so there is nothing to count \
+         (got {:?})",
         info.counted_cell_read_sites,
     );
     assert!(
         last_sites
             .iter()
             .any(|site| info.drop_on_overwrite_sites.contains(site)),
-        "the container still takes the model — the decline changes who holds the \
-         init, not whether the container is a container"
-    );
-    assert_eq!(
-        info.counted_cell_init_sites.len(),
-        1,
-        "the alias stays a holder, so the container counts its init instead \
-         (got {:?})",
-        info.counted_cell_init_sites,
+        "the container still takes the model — what the branch decides is who \
+         holds the init, not whether the container is a container"
     );
 }
 
