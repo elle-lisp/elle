@@ -52,6 +52,34 @@ fn effect_mixed_call_keeps_arg_clique() {
     );
 }
 
+/// The clique is over pairs of ARGUMENTS: a `Mixed` native reached with ONE heap
+/// argument records no edge, however many source regions that argument's value
+/// carries. `k` here has one per arm of its `if`, and the two are alternatives
+/// for the single value `first` receives — never two values one could store into
+/// the other — so an edge between them would be an `IncrefRegion` no free cascade
+/// balances (docs/impl/region/effects.md § "What the solver derives"; the rate is
+/// pinned by tests/elle/region-native-effect-clique-leak.lisp).
+#[test]
+fn effect_mixed_call_pairs_arguments_not_one_arguments_regions() {
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(let [k (if (%lt 1 0) (list 1 2) (list 3 4))] (first k))");
+    let calls = find_calls_to_primitive(&hir, "first", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (first ...) call");
+    let reader = find_binding_by_name(&hir, "k", &arena, &symbols).expect("the reader binding k");
+    assert!(
+        info.binding_source_regions
+            .get(&reader)
+            .is_some_and(|rs| rs.len() >= 2),
+        "precondition: the branch gives k a region per arm (got {:?})",
+        info.binding_source_regions.get(&reader),
+    );
+    let edges = edges_at_site(&info, calls[0]);
+    assert!(
+        edges.is_empty(),
+        "a single-argument Mixed call must record no clique edge; got {edges:?}",
+    );
+}
+
 #[test]
 fn effect_delivers_call_emits_no_arg_clique() {
     // `fiber/resume` is declared `Delivers { args: [1] }`: it installs the resume

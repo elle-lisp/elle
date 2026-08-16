@@ -339,11 +339,22 @@ impl RegionInference {
                 // HARD (the lowerer increfs a call-result source by
                 // value; docs/impl/region/effects.md "Hard edges").
                 self.hard_edge_sites.insert(hir.id);
-                let heap_args: Vec<Region> = arg_regions.iter().flatten().copied().collect();
-                for i in 0..heap_args.len() {
-                    for j in (i + 1)..heap_args.len() {
-                        self.record_edge(hir.id, heap_args[i], heap_args[j]);
-                        self.record_edge(hir.id, heap_args[j], heap_args[i]);
+                // Pairs of ARGUMENTS, never one argument's own regions: those
+                // are alternatives for the single value the call receives — a
+                // branch's arms, a pattern alias into a scrutinee — so no store
+                // can carry one into the other, and an edge between them is an
+                // `IncrefRegion` no cascade balances (region/effects.md § "What
+                // the solver derives"). The declared-store path states the same
+                // rule as its `j == i` skip.
+                for (i, src_rs) in arg_regions.iter().enumerate() {
+                    for dst_rs in arg_regions.iter().skip(i + 1) {
+                        for (&src, &dst) in src_rs
+                            .iter()
+                            .flat_map(|s| dst_rs.iter().map(move |d| (s, d)))
+                        {
+                            self.record_edge(hir.id, src, dst);
+                            self.record_edge(hir.id, dst, src);
+                        }
                     }
                 }
             }

@@ -203,6 +203,20 @@ each heap argument's region at the call site, balanced by the target
 region's free-time cascade *only if the store actually happens*. A clique
 incref against a store that never happens never balances — an over-keep
 (never a mis-free) that leaks one region per uncounted edge per call.
+
+**The clique is over pairs of ARGUMENTS, never over one argument's own
+regions.** A single argument's value may have several source regions — the
+arms of a branch, a pattern alias into a scrutinee — and those are
+*alternatives* for the one value the call receives, never two values one
+could store into the other. So a native reached with one heap argument
+emits no edge however many regions that argument carries, and a store of
+that argument into another one is covered by the edges to the *other*
+argument's regions. Pairing a flattened region list instead strands one
+region per call on a shape with no second argument at all
+(`region-native-effect-clique-leak.lisp` § "One argument, two source
+regions"); the declared-store path states the same rule as its `j == i`
+skip (`record_store_edges`).
+
 Declarations shrink the clique to where it can be real:
 
 - `Immediate` / `Fresh` / `PassThrough` / `Opaque`: no argument is stored —
