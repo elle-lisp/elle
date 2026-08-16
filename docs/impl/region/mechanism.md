@@ -185,7 +185,9 @@ nothing).
 
 The **used** sibling arm is the residual, and its guard is not negotiable. A release
 there is admitted only where a retain on the same node funds it (the store, the
-`-mut` container, the return mint above). The tempting generalization — "the arm's
+`-mut` container, the return mint above), or where the release names an env cell box,
+whose holders are known without one (§ "A compensating release of an env cell names
+the box, not the holder's slot"). The tempting generalization — "the arm's
 last-use node is decref-safe by symmetry with the global `decref_point`, so release
 there unconditionally" — is a placement argument masquerading as a count argument.
 It says the release lands after this arm's last *named* use; it does not say the
@@ -213,10 +215,11 @@ placement needs a **self-cancelling** run — load, release by value, nil-stamp 
 `LoadCaptureRaw` + `DecrefCellRegion` is not: it leaves the holder as it was, so a
 second copy on a native fall-through would count twice.
 
-Compensation's **head** route needs no such run. The arm that falls through names the
-cell's binding nowhere, so it is a dead sibling arm, and its head release plus the
-sibling's relocated one are mutually exclusive by arm structure: exactly one runs per
-path, and no merge point is involved.
+Compensation's per-arm routes need no such run, because they rest on arm structure
+rather than on a stamp: the compensating release and the sibling's relocated one are
+mutually exclusive, so exactly one runs per path and no merge point is involved. The
+**head** route takes the arm that falls through naming the cell's binding nowhere —
+a dead sibling arm.
 
 Two of compensation's refusals would otherwise decline it, and both are claims about a
 release **route** rather than about the region:
@@ -238,24 +241,52 @@ env-slot reference and every other holder's is a counted edge — or, where the 
 forest claimed the cell instead, an owning one under which the decref is a structural
 no-op.
 
-The **`tail`** route stays refused whatever the arm's uses look like. Its count
-argument is a retain on the release's own node — a store's, a `-mut` container's, a
-return mint's — and no cell release has one. So an arm that *reads* the cell's binding
-is a used sibling arm with nothing to fund it, and the box still strands on that path.
-That residual is a leak, never an over-free.
+The **`tail`** route carries the box too, on the arm that *reads* the cell's binding
+while a sibling holds the `decref_point`. Two of that route's refusals stand in the
+way, and neither is about the box:
 
-Pinned by `tests/elle/region-tail-frame-exit.lisp` (the `arm-cell` / `arm-cell-ro`
-rows, both arms of each, with `arm-cell-read` as the residual), the analysis pins in
+- its **count argument** is a retain on the release's own node — a store's, a `-mut`
+  container's, a return mint's. That retain buys the knowledge that the arm's use of
+  the region left no reference the solver cannot name. A cell release has none and
+  needs none: the box's holders are known without one. They are the frame's env slot
+  and one counted `closure ⊇ cell` edge per capturer, because no use of the binding
+  ever yields the box. `DerefCell` reads the cell's *content*, `assign` writes that
+  content, and a capture takes the funnel's edge. So the release drops the frame's own
+  reference and nothing else, which is the head route's argument read at a later point
+  in the arm.
+- the **return frontier** withholds a region the caller now holds a reference to.
+  What a return hands over is again the content, which lives in a different region.
+  The caller never receives the box, and reaches it only through a closure that counts
+  it, so the frontier has nothing to withhold here.
+
+What the route still owes is placement, and the box's per-arm release is a max over
+the same pins the global `decref_point` is, restricted to this arm: each in-arm use's
+consuming node, and — because the box's cascade drops the cell's one reference to its
+*content* — the reader of each in-arm uncounted opcode read that borrows out of the
+cell (`uncounted_read_sites`; [rules.md](rules.md) Rule 4's borrowing node). A
+candidate that lands outside the arm is a point this arm cannot
+host, since ANF may float a consumer past its own arm; the arm is then declined by
+*both* routes rather than approximated, a head release there preceding the very use
+that candidate came from. Otherwise the arms stay mutually exclusive, so exactly one
+release runs per path; no merge point and no nil-stamp is involved, which is what a
+cell release cannot supply.
+
+Pinned by `tests/elle/region-tail-frame-exit.lisp` (the `arm-cell` / `arm-cell-ro` /
+`arm-cell-read` rows, both arms of each), the `env-cell-read-arm` probe in
+`tests/elle/oracle.lisp` (the per-op rate), the analysis pins in
 `regions::tests::compensate`
 (`a_falling_through_arm_compensates_the_env_cell_its_sibling_relocated`,
-`a_reassigned_holder_does_not_withdraw_its_env_cell_compensation`, and the
-`tail`-route counterfactual `an_env_cell_never_takes_the_per_arm_tail_route`), the
-placement pins in `lir::lower::tests::release`
-(`a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated` beside the
-decline `escaping_holder_env_cell_release_stays_after_the_tail_call`), and
+`a_reassigned_holder_does_not_withdraw_its_env_cell_compensation`,
+`an_env_cell_takes_the_tail_route_on_the_arm_that_reads_it`, and the counterfactual
+`an_unfunded_used_sibling_arm_takes_no_tail_route` that keeps the retain requirement
+on every other region), the placement pins in `lir::lower::tests::release`
+(`a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated` and
+`a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated`, beside the decline
+`escaping_holder_env_cell_release_stays_after_the_tail_call`), and
 `tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a closure
-handed out through the compensated arm must still rewrite and read its cell, and the
-cell's content must outlive the box).
+handed out through the compensated arm must still rewrite and read its cell, the
+content a reading arm returns must outlive the box, and the box must outlive the
+reading arm through a capturer that escaped with it).
 
 ## A release inside one arm is not a release on the other arms
 
@@ -403,7 +434,7 @@ Regions whose release belongs to another mechanism are excluded as in
 compensation: merge children, co-owned-group members, the mutated-slot 1-slot
 containers, and anything already suppressed. **Capture cells** are excluded here
 and only here — a cell release leaves no nil-stamp for a replica to no-op
-against, so it takes compensation's head route instead (§ "A compensating release
+against, so it takes compensation's per-arm routes instead (§ "A compensating release
 of an env cell names the box, not the holder's slot").
 
 ### An arm that leaves through a callee takes a replica, not the anchor

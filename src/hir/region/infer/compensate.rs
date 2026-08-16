@@ -21,8 +21,9 @@
 //!    every-arm-uses-it shape stdlib `put`/`set` take: `(match (type-of coll) …)`
 //!    passes the stored value to a different store intrinsic in each arm.
 //!
-//! A `tail` release is admitted only where a retain on the SAME node funds it, so
-//! the per-arm decref provably cannot drop a live value to zero. Three such retains:
+//! A `tail` release of a VALUE is admitted only where a retain on the SAME node
+//! funds it, so the per-arm decref provably cannot drop a live value to zero (an env
+//! cell's box needs no such retain — see below). Three such retains:
 //!  - the **stored value** — a `put`/`push`/`add` funnel raises the value's RC, so
 //!    releasing the wrapper's own reference to it leaves the container's reference
 //!    live (`funnel_store_sites`);
@@ -58,22 +59,26 @@
 //! them), co-owned-group members, mutated-slot 1-slot containers, and the
 //! already-`suppressed_decref_regions`.
 //!
-//! An **env cell** — a `cell_release_regions` member — is excluded from the `tail`
-//! route alone. Its release names the cell BOX (`LoadCaptureRaw` +
-//! `DecrefCellRegion`), so the two taints below — a MUTATED holder, whose slot is
-//! repointed, and a CAPTURED holder, reachable through a closure's env — are claims
-//! about a slot route that never touches it: the box is minted once per activation
-//! by `populate_env` and an `assign` writes its content, while a capturer reaches it
-//! through the counted `closure ⊇ cell` edge the funnel took. Both refusals are
-//! therefore read per region, exactly as the frame-exit admission reads them, and
-//! the `head` route covers the arm a frame-replacing sibling's relocation leaves
-//! empty (docs/impl/region/mechanism.md § "A compensating release of an env cell
-//! names the box, not the holder's slot"). The `tail` route keeps refusing it: that
-//! route's count argument is a retain on the release's own node, and no cell release
-//! has one. A compiled FORWARD cell is a different region and stays refused by both
-//! routes — its holder binding is captured by construction, so the capture taint
-//! reaches it, and its release is a `DecrefRegion` by static slot rather than a box
-//! load.
+//! An **env cell** — a `cell_release_regions` member — takes BOTH routes, and every
+//! refusal that would decline one is a claim about the *value* its holder binding
+//! names rather than about the box. Its release names the cell BOX, through
+//! `LoadCaptureRaw` + `DecrefCellRegion`: a box `populate_env` mints once per
+//! activation, which an `assign` never repoints (it writes the content), and which a
+//! capturer reaches through the counted `closure ⊇ cell` edge the funnel took. So
+//! the two slot-route taints — a MUTATED holder, a CAPTURED holder — miss it, and so
+//! do the `tail` route's own two gates: the RETURN frontier withholds a region the
+//! caller now holds a reference to, and what a return hands over is the content;
+//! the same-node RETAIN buys the knowledge that the arm's use named every
+//! reference, which the box's holders supply outright, no use of the binding ever
+//! yielding the box (docs/impl/region/mechanism.md § "A compensating release of an
+//! env cell names the box, not the holder's slot"). What the `tail` route still owes
+//! is placement, so the box's per-arm release is read off the same pins the global
+//! `decref_point` is: the arm's uses, AND the arm's uncounted opcode-read borrows
+//! out of the cell, whose reader the release must post-date.
+//!
+//! A compiled FORWARD cell is a different region and is refused by both routes — its
+//! holder binding is captured by construction, so the capture taint reaches it, and
+//! its release is a `DecrefRegion` by static slot rather than a box load.
 //!
 //! The **return frontier** is an exclusion of a different kind, and it is
 //! *per-path*: a returned region is the caller's to free only on the paths that
@@ -111,7 +116,8 @@
 //! resume, `docs/impl/region/generations.md` § "Uncounted-borrow check"). The retain
 //! on the node is what makes the per-arm decref provably non-zeroing, which is why
 //! a used sibling arm with no such retain keeps the baseline. The dead sibling arm
-//! needs no retain precisely because it creates no reference at all.
+//! needs no retain precisely because it creates no reference at all, and the env
+//! cell below needs none because its box's holders are known outright.
 //!
 //! This pass sees only the regions the **branch-arm release window** declined
 //! (`analyze/decref.rs`, docs/impl/region/mechanism.md § "A release inside one arm
@@ -239,6 +245,18 @@ pub(super) fn compute_branch_compensation(
     }
     for (&alloc_id, &r) in &info.alloc_region {
         region_anchors.entry(r).or_default().push(alloc_id);
+    }
+    // Region → the uncounted opcode reads (`%get`/`%first`/`%rest`) that borrow out
+    // of it. Such a read hands back a value living inside the container and raises
+    // no count on it, so the container's release must post-date the READER, not the
+    // read (`analyze/decref.rs`, `uncounted_read_sites`). The global `decref_point`
+    // already carries that extension; the env-cell `tail` route below carries it per
+    // arm, since that route has no same-node retain to prove the borrow counted.
+    let mut region_reads: HashMap<Region, Vec<HirId>> = HashMap::new();
+    for (&read_id, containers) in &info.uncounted_read_sites {
+        for &r in containers {
+            region_reads.entry(r).or_default().push(read_id);
+        }
     }
 
     // Regions whose compiler decref is suppressed or owned by another release
@@ -407,6 +425,49 @@ pub(super) fn compute_branch_compensation(
                 if ai == di {
                     continue; // the arm whose in-arm decref is the global decref_point
                 }
+                // An env cell routes by its own reading of the same question, since
+                // its `tail` release carries no same-node retain to stand in for the
+                // placement (module doc). The candidates are what the global
+                // `decref_point` is a max over, restricted to this arm: each in-arm
+                // use's consuming node, plus the reader of each in-arm uncounted
+                // opcode read that borrows out of the cell. A candidate landing
+                // OUTSIDE the arm is not a point this arm can host — ANF may float a
+                // consumer past its own arm — and the arm is then declined by both
+                // routes rather than approximated: the `head` release would precede
+                // the very use that candidate came from.
+                if info.cell_release_regions.contains(&r) {
+                    let in_arm = |id: HirId| {
+                        let o = ord(id);
+                        o >= arm_lo && o <= arm_hi
+                    };
+                    let candidates: Vec<HirId> = uses
+                        .iter()
+                        .copied()
+                        .filter(|&u| in_arm(u))
+                        .chain(
+                            region_reads
+                                .get(&r)
+                                .into_iter()
+                                .flatten()
+                                .copied()
+                                .filter(|&rd| in_arm(rd)),
+                        )
+                        .map(|n| last_use.get(&n).copied().unwrap_or(n))
+                        .collect();
+                    if candidates.is_empty() {
+                        // Dead sibling arm: the head release, as below.
+                        head.entry(arm_id).or_default().push(r);
+                    } else if holder_count.get(&r).copied().unwrap_or(0) == 1
+                        && candidates.iter().all(|&n| in_arm(n) && ord(n) != d)
+                    {
+                        let node = candidates
+                            .into_iter()
+                            .max_by_key(|&n| ord(n))
+                            .expect("a non-empty candidate set has a max");
+                        tail.entry(node).or_default().push(r);
+                    }
+                    continue;
+                }
                 // r's last-use nodes for uses within this sibling arm. Both the use
                 // AND its consuming (last-use) node must lie inside the arm: the
                 // decref is emitted at the node (through `emit_decrefs_for`), so a
@@ -442,14 +503,10 @@ pub(super) fn compute_branch_compensation(
                     // keeps the conservative single-`decref_point` baseline
                     // (leak-preserving, never a double-free).
                     //
-                    // An env cell is refused here however its uses fall: this
-                    // route's count argument is a retain on the release's own node,
-                    // and a `LoadCaptureRaw` + `DecrefCellRegion` run has none. The
-                    // `head` route needs no such retain and covers the cell (module
-                    // doc).
+                    // An env cell never reaches here — it routed above, off the box's
+                    // own holders rather than off a retain (module doc).
                     Some(node)
                         if info.call_result_regions.contains(&r)
-                            && !info.cell_release_regions.contains(&r)
                             && holder_count.get(&r).copied().unwrap_or(0) == 1
                             && tail_admitted(r, node) =>
                     {
@@ -476,10 +533,6 @@ pub(super) fn compute_branch_compensation(
                     // Dead sibling arm (no use at all): head release. Admitted on
                     // every arm of every branch kind — the arm creates no reference
                     // to `r`, so the callee's own is the only one in existence here.
-                    // For an env cell that reference is the frame's env slot, and
-                    // every other holder's is the funnel's counted `closure ⊇ cell`
-                    // edge (or, under a capture adopt, an owning one whose decref is
-                    // a structural no-op).
                     None => head.entry(arm_id).or_default().push(r),
                 }
             }

@@ -278,10 +278,11 @@ fn the_walk_base_case_releases_at_its_return() {
 // docs/impl/region/mechanism.md § "A compensating release of an env cell names the
 // box, not the holder's slot". An env cell's box is minted once per activation and
 // released through `LoadCaptureRaw` + `DecrefCellRegion`, which names the box
-// rather than the holder's slot — so neither the holder's reassignment nor a
-// capturer's alias reaches that release, and the head route's own premise (the arm
-// names the binding nowhere) carries it. The `tail` route stays refused: its count
-// argument is a retain on the release's own node, which no cell release has.
+// rather than the holder's slot. Every refusal that would decline a per-arm release
+// of it — a reassigned holder, a capturer's alias, the return frontier, the
+// same-node retain — is a claim about the VALUE that holder names, so both routes
+// carry the box: `head` where the arm names the binding nowhere, `tail` after that
+// arm's last use where it reads it.
 
 /// The env-cell region of the binding named `name` — the `cell_release_regions`
 /// member among its source regions.
@@ -352,21 +353,59 @@ fn a_reassigned_holder_does_not_withdraw_its_env_cell_compensation() {
 }
 
 #[test]
-fn an_env_cell_never_takes_the_per_arm_tail_route() {
-    // The over-free counterfactual. The `tail` route fires on an arm that USES the
-    // region, and is sound only where a retain on the release's own node funds it —
-    // a store's, a `-mut` container's, or a return mint's. A cell release has none
-    // of those, so no arm may carry one however its uses fall.
+fn an_env_cell_takes_the_tail_route_on_the_arm_that_reads_it() {
+    // `(if t c (g))` — the capture-use of `c` resolves through `g`'s last use, so
+    // the box's `decref_point` follows the CALL and lands in the else arm. The then
+    // arm READS `c`, making it a used sibling arm: the head route fires before the
+    // arm's body and would free the box under that read. The `tail` route releases
+    // after the read instead, and needs no same-node retain — the box's holders are
+    // the frame's env slot plus one counted `closure ⊇ cell` edge per capturer, and
+    // no use of the binding yields the box.
     let (hir, arena, symbols, info) =
-        analyze_with_class("(fn (n t) (def @c n) (let [g (fn () c)] (if t (g) c)))");
+        analyze_with_class("(fn (n t) (def @c n) (let [g (fn () c)] (if t c (g))))");
     let cell = env_cell_region(&hir, &arena, &symbols, &info, "c");
     assert!(
         info.branch_arm_decrefs
             .values()
-            .all(|rs| !rs.contains(&cell)),
-        "no per-arm `tail` release may name the env cell r{} — nothing on its node \
-         retains it; branch_arm_decrefs={:?}",
+            .any(|rs| rs.contains(&cell)),
+        "the arm that reads the cell's binding must release the box r{} after that \
+         read; branch_arm_decrefs={:?}",
         cell.0,
+        info.branch_arm_decrefs,
+    );
+    let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        !info
+            .branch_compensation
+            .get(&then_id)
+            .is_some_and(|comp| comp.contains(&cell)),
+        "the reading arm must take no head release of r{} — that frees the box \
+         under its own read",
+        cell.0,
+    );
+}
+
+#[test]
+fn an_unfunded_used_sibling_arm_takes_no_tail_route() {
+    // The counterfactual that keeps the retain requirement on every other region.
+    // Both arms name `xs` and neither node retains it — no store, no `-mut`
+    // container, no return mint — so the arm that loses the `decref_point` max keeps
+    // the conservative baseline. Only a cell release is admitted without one.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t xs) (let [n (if t (length xs) (length xs))] (%add n 1)))");
+    let b = find_binding_by_name(&hir, "xs", &arena, &symbols).expect("the param `xs`");
+    let regions: Vec<Region> = info
+        .binding_source_regions
+        .get(&b)
+        .cloned()
+        .unwrap_or_default();
+    assert!(!regions.is_empty(), "`xs` must hold a region to judge");
+    assert!(
+        info.branch_arm_decrefs
+            .values()
+            .all(|rs| regions.iter().all(|r| !rs.contains(r))),
+        "an unfunded used sibling arm must take no `tail` release; \
+         regions={regions:?} branch_arm_decrefs={:?}",
         info.branch_arm_decrefs,
     );
 }

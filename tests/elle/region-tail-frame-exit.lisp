@@ -38,10 +38,11 @@
 #
 # An ENV CELL's release leaves no such stamp, so it takes the other route to the
 # same place: the relocation keeps it in the arm whose tail call it was placed in,
-# and the sibling arm — which names the cell's binding nowhere — takes branch
-# compensation's HEAD release. Exactly one of the two runs per path, because the
-# arms are mutually exclusive (§ "A compensating release of an env cell names the
-# box, not the holder's slot").
+# and the sibling arm takes branch compensation's per-arm release — the HEAD one
+# where it names the cell's binding nowhere, the TAIL one, after its last use of
+# that binding, where it reads it. Exactly one of the two runs per path, because
+# the arms are mutually exclusive (§ "A compensating release of an env cell names
+# the box, not the holder's slot").
 #
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each subject, and for the exemptions and the boundary,
@@ -228,6 +229,29 @@
   (def @c n)
   (let [g (fn () c)]
     (if t (g) 0)))
+
+# (d11c) the sibling arm READS the cell's binding, so it is a USED sibling arm and
+# takes compensation's tail route — the same box release, after that arm's last use
+# instead of at its head. The route's same-node retain is a claim about the value
+# the holder names; this release names the box, whose holders are the frame's env
+# slot and one counted `closure ⊇ cell` edge per capturer, so no use of the binding
+# can add one (docs/impl/region/mechanism.md § "A compensating release of an env
+# cell names the box, not the holder's slot"). Both arms are driven: the reading arm
+# runs the tail release, the sibling runs the relocated one.
+(defn arm-cell-read (n t)
+  (def @c n)
+  (let [g (fn () c)]
+    (if t c (g))))
+
+# (d11d) the reassigned face of the reading arm: the box the reader's arm releases
+# is the one an `assign` writes through, which repoints its content and never the
+# box itself.
+(defn arm-cell-read-rw (n t)
+  (def @c n)
+  (let [g (fn ()
+            (assign c (%add c 1))
+            c)]
+    (if t c (g))))
 
 # (d12) a sibling's compiled FORWARD CELL. A one-way sibling capture is not a
 # cycle — `go` calls `helper` and `helper` does not call back — so no SCC forms and
@@ -471,20 +495,6 @@
 (defn handback-unfunded (v t)
   (if t v (tail-sink)))
 
-# residual: an env cell whose sibling arm READS its binding ────────────────────
-# `arm-cell` above is covered because the falling-through arm names `c` nowhere,
-# which is what makes it a dead sibling arm. An arm that READS `c` while the
-# sibling holds the `decref_point` is a USED sibling arm, and that route needs a
-# retain on the release's own node to fund it — a store's, a `-mut` container's, a
-# return mint's — which no `LoadCaptureRaw` + `DecrefCellRegion` run has. So the
-# box strands on the reading path. Driven for its VALUE, not its delta: it strands
-# by design, and what must hold is that both arms still compute correctly.
-
-(defn arm-cell-read (n t)
-  (def @c n)
-  (let [g (fn () c)]
-    (if t c (g))))
-
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def walk-moved-d
   (measure (fn () (length (drive-walk-moved [1 2 3]))) 200 window))
@@ -498,6 +508,11 @@
 (def arm-cell-f-d (measure (fn () (arm-cell 1 false)) 200 window))
 (def arm-cell-ro-t-d (measure (fn () (arm-cell-ro 1 true)) 200 window))
 (def arm-cell-ro-f-d (measure (fn () (arm-cell-ro 1 false)) 200 window))
+(def arm-cell-read-t-d (measure (fn () (arm-cell-read 1 true)) 200 window))
+(def arm-cell-read-f-d (measure (fn () (arm-cell-read 1 false)) 200 window))
+(def arm-cell-read-rw-t-d (measure (fn () (arm-cell-read-rw 1 true)) 200 window))
+(def arm-cell-read-rw-f-d
+  (measure (fn () (arm-cell-read-rw 1 false)) 200 window))
 (def fwd-cell-d (measure (fn () (fwd-cell 3)) 200 window))
 (def fwd-cell-plain-d (measure (fn () (fwd-cell-plain 3)) 200 window))
 (def fwd-cell-ret-d (measure (fn () (fwd-cell-ret 3)) 200 window))
@@ -561,6 +576,8 @@
 (println "  cells: immutable " cell-immutable-d "  reassigned "
          cell-reassigned-d "  heap-init " cell-heap-d "  arm " arm-cell-t-d "/"
          arm-cell-f-d "  arm-ro " arm-cell-ro-t-d "/" arm-cell-ro-f-d)
+(println "  cells read by a sibling arm: ro " arm-cell-read-t-d "/"
+         arm-cell-read-f-d "  rw " arm-cell-read-rw-t-d "/" arm-cell-read-rw-f-d)
 (println "  fwd cells: plain " fwd-cell-plain-d "  selfrec-control " fwd-cell-d
          "  returned " fwd-cell-ret-d "/" fwd-cell-ret-sib-d
          "  sibling-captures-member " fwd-cell-sib-d)
@@ -627,6 +644,10 @@
 (bounded? arm-cell-f-d "the falling-through sibling of that arm")
 (bounded? arm-cell-ro-t-d "the immutable cell relocated at the same arm")
 (bounded? arm-cell-ro-f-d "the falling-through sibling of the immutable arm")
+(bounded? arm-cell-read-t-d "the arm that READS the cell its sibling relocated")
+(bounded? arm-cell-read-f-d "the relocating sibling of the reading arm")
+(bounded? arm-cell-read-rw-t-d "the reading arm of a REASSIGNED cell")
+(bounded? arm-cell-read-rw-f-d "the relocating sibling of the reassigned reader")
 
 (bounded? fwd-cell-plain-d
           "a sibling's forward cell past a frame-replacing body")
@@ -676,8 +697,11 @@
 (assert (= (arm-cell 7 false) 0) "arm reassigned cell sibling arm lost")
 (assert (= (arm-cell-ro 7 true) 7) "arm immutable cell result lost")
 (assert (= (arm-cell-ro 7 false) 0) "arm immutable cell sibling arm lost")
-(assert (= (arm-cell-read 7 true) 7) "residual: arm cell read result lost")
-(assert (= (arm-cell-read 7 false) 7) "residual: arm cell read sibling arm lost")
+(assert (= (arm-cell-read 7 true) 7) "arm cell read result lost")
+(assert (= (arm-cell-read 7 false) 7) "arm cell read sibling arm lost")
+(assert (= (arm-cell-read-rw 7 true) 7) "reassigned arm cell read result lost")
+(assert (= (arm-cell-read-rw 7 false) 8)
+        "reassigned arm cell read sibling arm lost")
 (assert (= (fwd-cell 3) :done) "forward-cell walker result lost")
 (assert (= (fwd-cell-sib 3) :done) "sibling-captures-member result lost")
 (assert (= (def-arg-call 3) -1) "def-binder arg-call result lost")

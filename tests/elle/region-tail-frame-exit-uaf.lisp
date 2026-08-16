@@ -23,10 +23,14 @@
 # `assign` repoints. (e10) and (e11) drive that same box release where it is the
 # SIBLING arm's head compensation instead of the relocated copy — the arm names the
 # cell's binding nowhere, so the head route covers it, and what must survive is the
-# capturer's counted edge and the cell's own content. What the admission still
-# refuses is a holder escape marks by a facet no edge at the point replaces: a
-# closure that leaves carrying it (e4, and e9 for the cell), a store into a
-# longer-lived container (f), a fiber crossing (h).
+# capturer's counted edge and the cell's own content. (e12), (e13) and (e14) drive
+# the sibling arm that READS the cell's binding, where the box release is the tail
+# compensation instead: it must post-date the arm's read, leave the capturer's
+# counted edge standing, and post-date the READER of an uncounted opcode-read
+# borrow out of the cell. What the admission still refuses is a holder escape marks
+# by a facet no edge at the point replaces: a closure that leaves carrying it (e4,
+# and e9 for the cell), a store into a longer-lived container (f), a fiber crossing
+# (h).
 #
 # Every witness reads the subject's HEAP contents on the far side of the tail
 # call, through a chain long enough that an over-early free faults rather than
@@ -210,6 +214,44 @@
   (let [v (list (string "v" i) i)]
     (e11-arm-drop v false)
     (length (first v))))
+
+# (e12) the sibling arm READS the cell's binding, so its box release is the TAIL
+# compensation — after that read rather than at the arm's head — and the arm hands
+# the cell's CONTENT back. The release names the box, and the box's cascade drops
+# the one reference the cell holds on that content; the caller reads the returned
+# value afterwards, so a cascade that reached it would tear.
+(defn e12-arm-read (v t)
+  (def @c v)
+  (let [g (fn () (length c))]
+    (if t c (g))))
+(defn e12-read (i)
+  (length (first (e12-arm-read (list (string "w" i) i) true))))
+
+# (e13) the same reading arm where the capturer has already ESCAPED into a
+# module-level slot. The tail release drops the frame's own env-slot reference and
+# nothing else — what must stand is the counted `closure ⊇ cell` edge the funnel
+# took, since the caller drives the escaped closure after the frame is gone and
+# every drive derefs the box.
+(var e13-kept nil)
+(defn e13-arm-read-escape (v t)
+  (def @c v)
+  (let [g (fn () (length (first c)))]
+    (assign e13-kept g)
+    (if t (length c) (g))))
+(defn e13-read (i)
+  (let [n (e13-arm-read-escape (list (string "x" i) i) true)
+        m (e13-kept)]
+    (+ n m)))
+
+# (e14) the reading arm's use is an uncounted OPCODE read, whose result is a
+# borrow living inside the cell's content. The box's release must post-date the
+# READER, not the read, or the cascade frees the page the borrow points into.
+(defn e14-arm-borrow (v t)
+  (def @c v)
+  (let [g (fn () (length c))]
+    (if t (length (first c)) (g))))
+(defn e14-read (i)
+  (e14-arm-borrow (list (string "y" i) i) true))
 
 # (e4) the capturing closure ESCAPES — it is returned, so it outlives the frame
 # and carries `x` with it. Escape's capture facet refuses the holder, and the
@@ -453,6 +495,9 @@
 (var e9 0)
 (var e10 0)
 (var e11 0)
+(var e12 0)
+(var e13 0)
+(var e14 0)
 (var e4 0)
 (var f 0)
 (var g 0)
@@ -485,6 +530,9 @@
   (assign e9 (e9-read i))
   (assign e10 (e10-read i))
   (assign e11 (e11-read i))
+  (assign e12 (e12-read i))
+  (assign e13 (e13-read i))
+  (assign e14 (e14-read i))
   (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
@@ -525,6 +573,12 @@
         "env cell freed under the closure the compensated arm hands out")
 (assert (%gt e11 0)
         "cell content freed by the box release on the compensated arm")
+(assert (%gt e12 0)
+        "cell content freed by the reading arm's box release before its return")
+(assert (%gt e13 0)
+        "env cell freed under a closure that escaped before the reading arm ran")
+(assert (%gt e14 0)
+        "cell content freed under the reading arm's own opcode-read borrow")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")

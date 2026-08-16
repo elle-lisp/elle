@@ -362,6 +362,46 @@ fn tail_call_cell_release_layout(module: &crate::lir::LirModule) -> Option<(usiz
     None
 }
 
+/// For each block that makes no `TailCall` and does release a cell, the index of
+/// its last `LoadCapture` (the arm's read through the cell, `None` when it makes
+/// none) beside the indices of its `DecrefCellRegion`s.
+///
+/// A `tail`-route release must land AFTER the arm's read; a `head`-route one lands
+/// at the arm's head, before any read there is.
+fn fallthrough_cell_read_and_release(
+    module: &crate::lir::LirModule,
+) -> Vec<(Option<usize>, Vec<usize>)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    funcs
+        .flat_map(|f| f.blocks.iter())
+        .filter(|b| {
+            !b.instructions
+                .iter()
+                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+        })
+        .filter_map(|b| {
+            let releases: Vec<usize> = b
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
+                .map(|(idx, _)| idx)
+                .collect();
+            if releases.is_empty() {
+                return None;
+            }
+            let read = b
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| matches!(i.instr, LirInstr::LoadCapture { .. }))
+                .map(|(idx, _)| idx)
+                .next_back();
+            Some((read, releases))
+        })
+        .collect()
+}
+
 /// The `DecrefCellRegion` counts of the blocks that make no `TailCall` at all —
 /// where a branch arm's head compensation lands when its sibling leaves through a
 /// callee.
@@ -457,6 +497,41 @@ fn a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated() {
     assert!(
         fallthrough.iter().all(|&n| n <= 1),
         "no block may release the cell twice; per-block counts={fallthrough:?}",
+    );
+}
+
+#[test]
+fn a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated() {
+    // `(if t c (g))` — the same relocation, and the sibling arm READS `c`. The
+    // capture-use of `c` resolves through `g`'s last use, so the `decref_point`
+    // follows the call rather than the read and lands in the LATER arm. A head
+    // release on the reading arm would free the box under that read, so the arm
+    // takes the `tail` route instead: one `DecrefCellRegion` after its
+    // `LoadCapture`. The route's same-node retain is a claim about the value the
+    // holder names; the box's own holders are the frame's env slot and the
+    // capturer's counted edge (docs/impl/region/mechanism.md § "A compensating
+    // release of an env cell names the box, not the holder's slot").
+    let module = compile_to_lir(
+        "(begin (def f (fn (n t) (def @c n) \
+         (let [g (fn () c)] (if t c (g))))) (f 1 true))",
+    );
+    let (at, releases) =
+        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().all(|&r| r < at),
+        "the tail-calling arm must keep its relocated cell release ahead of the \
+         TailCall (at={at}, releases={releases:?})",
+    );
+    let arms = fallthrough_cell_read_and_release(&module);
+    assert!(
+        arms.iter()
+            .any(|(read, rel)| read.is_some_and(|r| rel.iter().all(|&d| d > r)) && rel.len() == 1),
+        "the reading arm must release the box exactly once, after its own read \
+         through the cell; per-block (last LoadCapture, DecrefCellRegion)={arms:?}",
+    );
+    assert!(
+        arms.iter().all(|(_, rel)| rel.len() <= 1),
+        "no block may release the cell twice; per-block reads/releases={arms:?}",
     );
 }
 

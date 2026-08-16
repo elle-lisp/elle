@@ -463,6 +463,17 @@
             (assign c (%add c 1))
             c)]
     (f)))
+# `env-cell-read-arm` drives the same box where a branch SIBLING arm reads the
+# cell's binding. The capture-use of `c` resolves through `f`'s last use, so the
+# box's `decref_point` follows the call into the arm that makes it, and the reading
+# arm takes compensation's TAIL release — after its own read, where the head release
+# would free the box under that read (docs/impl/region/mechanism.md § "A
+# compensating release of an env cell names the box, not the holder's slot"). Driven
+# through the reading arm, the only one whose release is new.
+(defn t20-read-arm [t]
+  (def @c 0)
+  (let [f (fn [] c)]
+    (if t c (f))))
 # The two faces of per-arm compensation over a `Match`, driven through the arm the
 # caller picks. `v` is allocated before the dispatch, so it is live-in on every arm
 # and its lone `decref_point` lands in the arm that uses it last.
@@ -1012,6 +1023,7 @@
                  (break))))) 0]
    ["store-wrapper" (fn [j] (t19-store t19s (string "v" j))) 0]
    ["fresh-env-cell" (fn [j] (t20-make-cell)) 0]
+   ["env-cell-read-arm" (fn [j] (t20-read-arm true)) 0]
    ["shared-env-cell"
     (fn [j]
       (let [f (fn []

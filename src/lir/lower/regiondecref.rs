@@ -328,11 +328,11 @@ impl<'a> Lowerer<'a> {
     ///
     /// The run leaves the env slot exactly as it was, which is why it is not
     /// self-cancelling and cannot be replicated across a branch merge
-    /// (`self_cancelling_run`). Its two emission sites are therefore mutually
+    /// (`self_cancelling_run`). Its three emission sites are therefore mutually
     /// exclusive by arm structure rather than by a nil-stamp: the region's own
-    /// `decref_point`, and a dead sibling arm's head compensation
-    /// (docs/impl/region/mechanism.md § "A compensating release of an env cell
-    /// names the box, not the holder's slot").
+    /// `decref_point`, a dead sibling arm's head compensation, and a reading
+    /// sibling arm's tail compensation (docs/impl/region/mechanism.md § "A
+    /// compensating release of an env cell names the box, not the holder's slot").
     fn emit_cell_region_release(&mut self, index: u16, site: HirId) {
         let val_reg = self.fresh_reg();
         self.emit(LirInstr::LoadCaptureRaw {
@@ -463,8 +463,9 @@ impl<'a> Lowerer<'a> {
     /// whose `decref_point` is in a DIFFERENT arm). Called AFTER the node's own
     /// `emit_decrefs_for`, so it fires after the arm's use of the value. Restricted
     /// by the analysis (`region::infer::compensate`) to single-holder `call_result`
-    /// regions, so only the value-route applies. Mutually exclusive arms ⇒ exactly
-    /// one of these (or the `decref_point`) fires per path.
+    /// regions and to env cells, so only the value route and the box route apply.
+    /// Mutually exclusive arms ⇒ exactly one of these (or the `decref_point`) fires
+    /// per path.
     pub(super) fn emit_arm_decrefs(&mut self, hir_id: HirId) {
         let regions = match self.region_info.branch_arm_decrefs.get(&hir_id) {
             Some(rs) => rs.clone(),
@@ -474,14 +475,27 @@ impl<'a> Lowerer<'a> {
             // Defensive: a release owned by another mechanism must never be doubled.
             if self.region_info.suppressed_decref_regions.contains(&r)
                 || self.region_info.owned_group_members.contains(&r)
-                || self.region_info.cell_release_regions.contains(&r)
-                || self.region_info.mutated_binding_value_regions.contains(&r)
                 || self.region_info.merged_root(r) != r
             {
                 continue;
             }
+            // An env cell: this arm READ the cell's binding, so its box release
+            // lands here — after that read — rather than at the arm head. Routed to
+            // the box rather than through the holder's slot, which is what keeps the
+            // holder's reassignment and its capturers out of the question
+            // (docs/impl/region/mechanism.md § "A compensating release of an env
+            // cell names the box, not the holder's slot").
+            if self.region_info.cell_release_regions.contains(&r) {
+                if let Some(&value_slot) = self.region_to_slot.get(&r) {
+                    self.emit_cell_region_release(value_slot.index(), hir_id);
+                }
+                continue;
+            }
+            if self.region_info.mutated_binding_value_regions.contains(&r) {
+                continue;
+            }
             // Stack-only: the analysis restricts this compensation to
-            // single-holder `call_result` regions, and an env-celled binding is
+            // single-holder `call_result` regions, and an env-indexed value slot is
             // not one — skipping leaves the region on its own `decref_point`.
             if let Some(slot) = self.region_to_slot.get(&r).and_then(|s| s.local()) {
                 let val_reg = self.fresh_reg();
