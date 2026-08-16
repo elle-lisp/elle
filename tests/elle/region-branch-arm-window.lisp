@@ -35,11 +35,21 @@
 # takes a replica, not the anchor"). Such a branch is driven on BOTH kinds of arm
 # below, since the two paths are covered by different halves of the composition.
 #
+# One escape facet is admitted rather than refused. A RETURNED region costs the
+# merge no funding edge — the arm that hands it over ran its mint before jumping
+# there — but a replica ahead of a `TailCall` runs before the callee's mint and
+# does owe one, so the branch is admitted only where every frame-exiting arm's
+# callee either names the region or captures it (mechanism.md § "The return facet
+# is a fact about the arms, not about the merge"). Both faces are rows below: the
+# funded one is `push-all`'s shape, and the unfunded one must stay bounded on the
+# baseline route it keeps.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
-# region-branch-arm-window-uaf.lisp; the per-op rates are the `param-used-arm`
-# and `branch-arm-tailcall-sibling` probes in tests/elle/oracle.lisp.
+# region-branch-arm-window-uaf.lisp; the per-op rates are the `param-used-arm`,
+# `branch-arm-tailcall-sibling` and `branch-arm-return-captured` probes in
+# tests/elle/oracle.lisp.
 
 (def window 2000)
 
@@ -143,6 +153,36 @@
     :c (tc-bare)
     _ 0))
 
+# (i) the parameter is RETURNED by the arm that runs, while the sibling arm — the
+# one that holds the `decref_point` — hands it to a local walker it tail-calls.
+# The return facet costs the merge nothing: this arm's own return mint has already
+# raised the count when the anchored release drops the frame's reference. The
+# sibling's replica is funded by the walker's captured-holder edge, so the branch
+# is admitted for the class (docs/impl/region/mechanism.md § "The return facet is a
+# fact about the arms, not about the merge"). This is `push-all` over a
+# byte-family source, and with it every `append`/`concat` that takes one.
+(defn returned-captured (dst src)
+  (if (%eq (type-of src) :string)
+    (begin
+      (push dst src)
+      dst)
+    (let [n (length src)]
+      (letrec [go (fn (i)
+                    (if (%lt i n)
+                      (begin
+                        (push dst (get src i))
+                        (go (%add i 1)))
+                      dst))]
+        (go 0)))))
+
+# (j) the DECLINE the same admission carries: the sibling arm tail-calls a callee
+# that neither names the accumulator nor captures it — a self-recursive walker
+# whose next `acc` is a fresh value built from this one. No edge funds a replica
+# there, so the branch keeps the whole return-facet class on the baseline and the
+# in-arm release stays where it is. Both arms are driven: the recursive one runs
+# the release at its own last use, the base one takes compensation's route.
+(def acc-walk (fn (i acc) (if (%lt i 0) acc (acc-walk (%sub i 1) (pair i acc)))))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
 # boundary would leave one release covering many allocations (the loop) or a
@@ -208,6 +248,11 @@
   (measure (fn () (tailcall-elsewhere (list 1 2 3) :a)) 200 window))
 (def tailcall-elsewhere-exit-d
   (measure (fn () (tailcall-elsewhere (list 1 2 3) :c)) 200 window))
+(def returned-captured-fallthrough-d
+  (measure (fn () (returned-captured (@string) "xy")) 200 window))
+(def returned-captured-exit-d
+  (measure (fn () (returned-captured (@array) [1 2])) 200 window))
+(def acc-walk-d (measure (fn () (acc-walk 3 ())) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
@@ -222,6 +267,9 @@
          tailcall-sibling-fallthrough-d "  exit " tailcall-sibling-exit-d)
 (println "  tail-calling sibling: names-none fallthrough "
          tailcall-elsewhere-fallthrough-d "  exit " tailcall-elsewhere-exit-d)
+(println "  returned + captured sibling: fallthrough "
+         returned-captured-fallthrough-d "  exit " returned-captured-exit-d)
+(println "  returned + unfunded sibling: acc-walk " acc-walk-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
 (println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
 
@@ -249,6 +297,12 @@
           "arm falling through while a sibling tail-calls naming nothing")
 (bounded? tailcall-elsewhere-exit-d
           "arm tail-calling naming nothing: the replicated release")
+(bounded? returned-captured-fallthrough-d
+          "arm returning the parameter while a capturing sibling tail-calls")
+(bounded? returned-captured-exit-d
+          "capturing sibling arm: the walker's own return of the parameter")
+(bounded? acc-walk-d
+          "returned accumulator whose sibling arm's callee funds no replica")
 
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
@@ -271,6 +325,11 @@
         "bare tail-calling sibling: fall-through arm result lost")
 (assert (= (tailcall-elsewhere (list 1 2 3) :c) 0)
         "bare tail-calling sibling: frame-exiting arm result lost")
+(assert (= (returned-captured (@string) "xy") "xy")
+        "returned-captured bulk arm result lost")
+(assert (= (length (returned-captured (@array) [1 2])) 2)
+        "returned-captured walk arm result lost")
+(assert (= (length (acc-walk 3 ())) 4) "acc-walk result lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
 

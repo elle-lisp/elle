@@ -215,10 +215,16 @@
 # dissolves, so they are CLOSED dissolution controls and a regression to open must
 # trip the gate loudly instead of being absorbed as F1a scratch that is no longer
 # there. The un-fused op's scratch keeps its F1a declaration through `wrap-map`.
+# The byte-family `concat`/`append` shapes — `concat-while`, `stdlib-concat`,
+# `yield-concat`, `string-outer`, `append-outer` — are CLOSED controls now, and
+# undeclared for the same reason `rest-array-copy` is: their strand was `push-all`'s
+# bulk arm returning the accumulator its sibling arm's walker captures, which the
+# branch-arm window now anchors (docs/impl/region/mechanism.md § "The return facet
+# is a fact about the arms, not about the merge"). A regression to open must trip
+# the completeness gate loudly rather than be absorbed back into F1a.
 (declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct"
                     "group-by" "frequencies" "merge" "concat" "pipeline"
-                    "each-list" "string-outer" "append-outer" "concat-while"
-                    "yield-concat" "stdlib-concat" "zip-tower"])
+                    "each-list" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -514,6 +520,28 @@
     :a (length v)
     :b (t22-tc-callee v)
     _ 0))
+# The same window over a RETURNED parameter — `push-all`'s shape, and with it every
+# `append`/`concat` over a byte-family source. The arm driven here hands `dst` back
+# to the caller; the sibling arm leaves through a local walker that reaches `dst`
+# only through its captured environment. The merge owes the return facet no funding
+# edge (this arm's own mint has already fired), and the sibling's replica is funded
+# by that captured edge, so the branch is admitted for the class
+# (docs/impl/region/mechanism.md § "The return facet is a fact about the arms, not
+# about the merge"). Refusing the facet outright strands one whole accumulator per
+# call on the arm driven here.
+(defn t22-returned-captured [dst src]
+  (if (%eq (type-of src) :string)
+    (begin
+      (push dst src)
+      dst)
+    (let [n (length src)]
+      (letrec [go (fn (i)
+                    (if (%lt i n)
+                      (begin
+                        (push dst (get src i))
+                        (go (%add i 1)))
+                      dst))]
+        (go 0)))))
 # The frame-exit release (docs/impl/region/mechanism.md § "A release past a
 # frame-replacing tail call is not a release"). `t23-unused`'s parameter is used
 # nowhere, so its release is the unused-parameter fallback the lowerer emits at the
@@ -1031,7 +1059,7 @@
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
         (fiber/resume f))) 0]
-   ["concat-while" (fn [j] (concat "x" (number->string j))) 1]
+   ["concat-while" (fn [j] (concat "x" (number->string j))) 0]
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
@@ -1457,12 +1485,17 @@
 # a latent double-free of that accumulator (the same over-free that SIGSEGVs
 # stdlib `compose`/`comp` — pinned by
 # tests/integration/fixtures/region-compose-closure-acc-uaf.lisp); it decremented
-# one extra region per fold, an unsound reclamation, not a real one. `concat` builds
-# a fresh accumulator + per-arg combiner closures. All non-escaping, acyclic
-# call-result regions no static slot can name. Pinned at the exact `(concat "a" "b")`
-# / 2-element `fold` shapes.
+# one extra region per fold, an unsound reclamation, not a real one. All
+# non-escaping, acyclic call-result regions no static slot can name. Pinned at the
+# exact `(concat "a" "b")` / 2-element `fold` shapes.
+#
+# `stdlib-concat` is a CLOSED control (undeclared, like `rest-array-copy`): the
+# accumulator `concat` fills is `push-all`'s returned parameter, whose release the
+# branch-arm window now anchors where every arm reaches it
+# (docs/impl/region/mechanism.md § "The return facet is a fact about the arms, not
+# about the merge"). A regression to open must trip the completeness gate loudly.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
-                   count-gauge 100 6 60 0.4 0.5) 1)
+                   count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
                    count-gauge 100 6 60 0.4 0.5) 1)
@@ -1739,7 +1772,7 @@
            (fn [i]
              (let [f (fn [] i)]
                (f))) 0)
-(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 1)
+(pin-yield "yield-concat" (fn [i] (concat "x" (number->string i))) 0)
 (pin (measure-core "yield-put"
                    (fn [b]
                      (drain-block (fn [n]
@@ -1839,9 +1872,11 @@
 # kernel has none, which is what the dissolution controls (`map-while`) measure.
 # `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
 # content is re-minted every iteration, bounded by the overwrite + demise pair (F5).
-# `string-outer`/`append-outer` are the `concat`/`append` per-call scratch leak
-# (§ F1a), NOT accumulator growth — flat per-iter (minus the 1 the self-reassign
-# reclaims), so they shrink when F1a closes, not when the loop ends.
+# `string-outer`/`append-outer` are CLOSED controls for the same close
+# `stdlib-concat` gauges: each iteration's `concat`/`append` returns `push-all`'s
+# accumulator parameter, and the branch-arm window anchors its release where every
+# arm reaches it. Their rate was always flat per-iter, never accumulator growth, so
+# a regression to open is a per-call strand and must trip the completeness gate.
 (println "── folded suite: persistent containers ──")
 (pin (measure-core "put-overwrite"
                    (fn [b]
@@ -1920,7 +1955,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign s (concat s "x"))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "append-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1928,7 +1963,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign acc (append acc [j]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── Discarded call-result + break-escape ──────────────────────────────
 # Direct while-statement run-blocks (no thunk wrapper): the discarded value is a
@@ -2052,6 +2087,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t22-tailcall-sibling (list 1 2 3) :a)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "branch-arm-return-captured"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-returned-captured (@string) "xy")
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The scope-map face of the same `Match`: the arm READS a name its pattern bound,
 # and that read is a borrowing read of the SCRUTINEE (rules.md Rule 4), so it is

@@ -145,6 +145,19 @@ pub fn analyze_regions_with(
     info.sole_frame_held_regions = frame_held.sole;
     info.return_frame_held_regions = frame_held.return_funded;
 
+    // What each frame-replacing tail call's own callee settles: the captured-holder
+    // edge that funds the return-facet admission, and how many arguments become
+    // owned parameters. Computed here because the branch-arm window below asks the
+    // same per-point funding question the lowerer does, one pass earlier; the merge
+    // forest is still empty at this point, so the regions are canonicalized again
+    // after the merge passes below (canonicalizing twice is canonicalizing once).
+    let mut tail_callee_facts = super::escape::tail_callee_facts(
+        hir,
+        &info,
+        &frame_replacing_tail_calls,
+        &inference_binding_regions,
+    );
+
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
     // break consuming-and-transferring-node pins, and the two re-anchoring
@@ -163,6 +176,7 @@ pub fn analyze_regions_with(
         &break_sites,
         &break_skip_blocks,
         &frame_replacing_tail_calls,
+        &tail_callee_facts,
     );
     let last_use = &last_use_info.per_node;
 
@@ -236,17 +250,17 @@ pub fn analyze_regions_with(
             .or_insert(RegionData::at(cm.drop_site));
     }
 
-    // What each frame-replacing tail call's own callee settles: the captured-holder
-    // edge that funds the return-facet admission, and how many arguments become
-    // owned parameters. Runs after the merge post-passes because the regions are
-    // canonicalized through the merge forest, which the lowerer's lookup resolves
-    // against.
-    info.tail_callee_facts = super::escape::tail_callee_facts(
-        hir,
-        &info,
-        &frame_replacing_tail_calls,
-        &inference_binding_regions,
-    );
+    // Canonicalize the callee facts through the merge forest, which the lowerer's
+    // lookup resolves against. The set was built above with an empty forest, so
+    // this is the one canonicalization, applied where the forest is final.
+    for f in tail_callee_facts.values_mut() {
+        f.capture_funded = f
+            .capture_funded
+            .iter()
+            .map(|&r| info.merged_root(r))
+            .collect();
+    }
+    info.tail_callee_facts = tail_callee_facts;
 
     // Ownership forest: adopt edges, the transferred-returned-subtree cut, the
     // co-owned-cycle cut, and the activation-owner cut. Runs LAST, after the

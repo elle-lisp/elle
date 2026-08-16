@@ -171,7 +171,9 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// Two consumers, deliberately sharing one predicate: the branch-arm release window
 /// (`region::infer::analyze::decref`) and the frame-exit release the lowerer performs at a
 /// tail call (`RegionInfo::sole_frame_held_regions`, region/mechanism.md § "A
-/// release past a frame-replacing tail call is not a release").
+/// release past a frame-replacing tail call is not a release"). Both read both
+/// halves — the return half needs the per-point funding edge either way, and the
+/// window asks it of the arms rather than of its own anchor.
 pub(super) fn sole_frame_held_regions(
     escape: &crate::hir::EscapeInfo,
     arena: &crate::hir::arena::BindingArena,
@@ -238,11 +240,15 @@ pub(super) struct FrameHeld {
     pub(super) sole: FxHashSet<Region>,
     /// The return facet and no other. Something DOES read the region after the
     /// frame — the caller, through a reference the callee's `Return` mints — so
-    /// this set is a precondition, never an admission on its own: its consumer
-    /// pairs it with the tail callee's captured-holder edge at each relocation
-    /// point, which is the count standing between the frame's release and that
-    /// mint (region/mechanism.md § "The callee's return mint, and the edge that
-    /// funds the gap"). A superset of `sole`.
+    /// this set is a precondition, never an admission on its own wherever the
+    /// release runs BEFORE that mint: its consumers pair it with the tail callee's
+    /// captured-holder edge at each relocation point, which is the count standing
+    /// between the frame's release and the mint (region/mechanism.md § "The
+    /// callee's return mint, and the edge that funds the gap"). A merge in this
+    /// frame is not such a point — every mint its arms ran has already fired there
+    /// — so the branch-arm window asks the pair only of the arms that leave through
+    /// a callee (§ "The return facet is a fact about the arms, not about the
+    /// merge"). A superset of `sole`.
     pub(super) return_funded: FxHashSet<Region>,
 }
 

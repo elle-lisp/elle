@@ -418,57 +418,15 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Every region one tail-call OPERAND — the callee, or an argument — may hand
-    /// the call: the regions the value it produces names, never the regions its
-    /// evaluation merely used along the way (docs/impl/region/mechanism.md § "What
-    /// an operand names is its VALUE, not its syntax").
-    ///
-    /// Each node in a value-producing position contributes its own `alloc_region`
-    /// and, for a `Var`, its binding's source regions, canonicalized through the
-    /// merge forest so a merged child and its root are one entry (the release side
-    /// only ever emits at the root). The descent then stops at the two nodes whose
-    /// value carries a **count of its own**:
-    ///
-    /// - a `Call`, whose result is handed over with exactly one minted reference no
-    ///   matter which region it turns out to live in (§ "The return mint is emitted
-    ///   exactly once"), so the callee's own closure region — read and finished with
-    ///   before this call was made — is not reachable from here;
-    /// - a `Lambda`, whose closure region IS the value, and whose captures the
-    ///   funnel counted when the env was built (§ "Lexical capture is not a second
-    ///   holder to fear").
-    ///
-    /// Everything else is descended, including an inline `%`-`Intrinsic`: it mints no
-    /// region, so a heap result of one (`%first`/`%rest`/`%get`) is an uncounted
-    /// borrow living in its operand's region, and the operand is the value-producing
-    /// leaf. Descending an unrecognised node over-approximates, which is the
-    /// leak-preserving direction.
-    ///
-    /// The closure-cycle merge's by-move boundary asks the same question of the same
-    /// expressions and answers it the same way (region/letrec.md § "What the
-    /// non-member tail still refuses"); the two differ only in what they return —
-    /// bindings there, regions here.
+    /// the call, read off [`crate::hir::region::RegionInfo::operand_value_regions`]
+    /// so this exemption and the branch-arm window's per-point funding question ask
+    /// one reading rather than two.
     fn collect_operand_regions(
         &self,
         h: &Hir,
         out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
     ) {
-        if let Some(&r) = self.region_info.alloc_region.get(&h.id) {
-            out.insert(self.region_info.merged_root(r));
-        }
-        if let HirKind::Var(b) = &h.kind {
-            for &r in self
-                .region_info
-                .binding_source_regions
-                .get(b)
-                .into_iter()
-                .flatten()
-            {
-                out.insert(self.region_info.merged_root(r));
-            }
-        }
-        if matches!(h.kind, HirKind::Call { .. } | HirKind::Lambda { .. }) {
-            return;
-        }
-        h.for_each_child(|c| self.collect_operand_regions(c, out));
+        self.region_info.operand_value_regions(h, out);
     }
 
     /// Emit `f`'s instructions for `region`, placed so that every path runs the

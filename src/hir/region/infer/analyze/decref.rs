@@ -31,6 +31,7 @@ pub(super) fn populate_decref_points(
     break_sites: &[(HirId, Vec<Region>)],
     break_skip_blocks: &[(HirId, Vec<HirId>)],
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
+    tail_callee_facts: &HashMap<HirId, crate::hir::region::TailCalleeFacts>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let porder = ProgramOrder::new(order);
@@ -404,6 +405,7 @@ pub(super) fn populate_decref_points(
         last_use,
         inference_binding_regions,
         frame_replacing_tail_calls,
+        tail_callee_facts,
     );
 
     // Runs LAST: it reads each region's FINAL `decref_point` to decide whether
@@ -432,6 +434,13 @@ pub(super) fn populate_decref_points(
 /// reach is an uncounted borrow in a parked frame. That is escape's question, and
 /// the admission below is its answer; everything escape cannot clear keeps the
 /// baseline and the counted per-arm routes.
+///
+/// The **return** facet is the one escape refusal the merge itself does not need:
+/// it is a point in this frame, so every mint the taken arm ran has already fired
+/// there. What it does need is that the arms which never arrive can still run the
+/// release, and a replica ahead of a `TailCall` DOES precede its callee's mint — so
+/// the return class is admitted per branch, only where every frame-exiting arm's
+/// point names or captures the region ([`FrameExit::admits`]).
 ///
 /// Once a region's `decref_point` leaves the arms, `region::infer::compensate` no
 /// longer finds it inside one, so neither of its per-arm routes fires for that
@@ -467,11 +476,20 @@ fn pin_branch_arm_releases(
     last_use: &HashMap<HirId, HirId>,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
+    tail_callee_facts: &HashMap<HirId, crate::hir::region::TailCalleeFacts>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let low = compute_subtree_low(hir, order);
     let mut scopes = BranchWindowScopes::default();
-    collect_branch_scopes(hir, order, &low, frame_replacing_tail_calls, &mut scopes);
+    collect_branch_scopes(
+        hir,
+        info,
+        order,
+        &low,
+        frame_replacing_tail_calls,
+        tail_callee_facts,
+        &mut scopes,
+    );
     if scopes.branches.is_empty() {
         return;
     }
@@ -521,15 +539,26 @@ fn pin_branch_arm_releases(
     // what it captures is the funnel's counted (or the forest's owning) edge, never
     // the uncounted borrow this admission guards against, and capture by a closure
     // that *escapes* is already one of escape's facets.
-    // Only the `sole` half: this window has no callee to supply the return facet's
-    // funding edge, so a region the caller will read keeps its in-arm release.
-    let sole_held = super::super::escape::sole_frame_held_regions(
+    //
+    // The **return** facet is asked per branch rather than refused outright. At the
+    // merge itself it needs no funding edge: the merge is in this frame, so an arm
+    // that hands the region over already ran its own return mint before jumping
+    // here and the release drops the frame's reference behind it, while an arm that
+    // hands nothing over leaves the frame's as the only reference in existence
+    // (§ "The return frontier is per-path"). What the facet does bound is the arms
+    // that never reach the merge: a frame-replacing tail call takes its release as a
+    // REPLICA, whose own count argument is the callee's captured-holder edge — a
+    // fact about the point, not about the region (`FrameExit::admits`). A branch
+    // with one such point unfunded keeps the whole return-facet class on the
+    // baseline, since anchoring there deletes the release on exactly that path.
+    let frame_held = super::super::escape::sole_frame_held_regions(
         escape,
         arena,
         info,
         inference_binding_regions,
-    )
-    .sole;
+    );
+    let sole_held = frame_held.sole;
+    let return_held = frame_held.return_funded;
 
     // Snapshotted for the frame-exit narrowing below, which reads it while
     // `region_data` is borrowed mutably. These are the regions
@@ -552,7 +581,7 @@ fn pin_branch_arm_releases(
                 || info.cell_release_regions.contains(&r)
                 || info.mutated_binding_value_regions.contains(&r)
                 || info.merged_root(r) != r
-                || !sole_held.contains(&r)
+                || !return_held.contains(&r)
         })
         .collect();
 
@@ -564,17 +593,24 @@ fn pin_branch_arm_releases(
             .copied()
             .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
             .collect();
-        // Does any arm leave through a callee instead of arriving at the merge?
+        // The arms that leave through a callee instead of arriving at the merge.
         // The anchor still covers the arms that fall through, and the frame-exit
         // relocation covers the rest — but only for a release it can REPLICATE,
-        // which is the value route alone. So the answer narrows the window to
+        // which is the value route alone. So their presence narrows the window to
         // `call_result_regions` here rather than declining the branch whole; every
         // other region keeps its in-arm release and compensation's counted routes.
-        let arm_exits_frame = scopes.frame_exits.iter().any(|&e| {
-            e >= br.node_lo
-                && e <= br.node_hi
-                && !inner_lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
-        });
+        let exits: Vec<&FrameExit> = scopes
+            .frame_exits
+            .iter()
+            .filter(|e| {
+                e.at >= br.node_lo
+                    && e.at <= br.node_hi
+                    && !inner_lambdas
+                        .iter()
+                        .any(|&(lo, hi)| lo <= e.at && e.at <= hi)
+            })
+            .collect();
+        let arm_exits_frame = !exits.is_empty();
         let anchor = last_use.get(&br.id).copied().unwrap_or(br.id);
         let anchor_ord = ord(anchor);
         // Only the barriers nested INSIDE this branch matter: one enclosing the
@@ -590,6 +626,16 @@ fn pin_branch_arm_releases(
                 continue;
             }
             if arm_exits_frame && !call_result_regions.contains(&r) {
+                continue;
+            }
+            // A region on the RETURN frontier is admitted only where every arm that
+            // leaves through a callee can still run its replica: the callee either
+            // already owns what it names (the ownership move the exemption keeps in
+            // the dead block) or holds the region through its captured environment,
+            // which is the count standing between this release and the mint the
+            // caller's reference comes from. Unfunded, the anchor would be the one
+            // release on a path that never reaches it.
+            if !sole_held.contains(&r) && !exits.iter().all(|e| e.admits(r)) {
                 continue;
             }
             let dord = ord(d.decref_point);
@@ -634,10 +680,9 @@ struct BranchWindowScopes {
     /// Subtree intervals of the `Lambda`s alone — the frame boundary, which says
     /// whose exits a `frame_exits` entry belongs to.
     lambdas: Vec<(u32, u32)>,
-    /// Post-order indices of the tail calls that may replace the frame. One
-    /// inside a branch means its merge label is not a point every arm reaches, so
-    /// the branch anchors only the releases the relocation can replicate into
-    /// that arm.
+    /// The tail calls that may replace the frame. One inside a branch means its
+    /// merge label is not a point every arm reaches, so the branch anchors only the
+    /// releases the relocation can replicate into that arm.
     ///
     /// Narrower than [`BreakWindowScopes::frame_exits`], which counts every
     /// `Return` and every tail `Call`: a functionalized `Return` inside an arm
@@ -645,7 +690,34 @@ struct BranchWindowScopes {
     /// a tail call to a *native* falls through to it. Only a callee that can
     /// replace the frame actually skips the merge, and reading the coarser set
     /// would narrow every native-tail dispatch arm for nothing.
-    frame_exits: Vec<u32>,
+    frame_exits: Vec<FrameExit>,
+}
+
+/// One frame-replacing tail call, with the two facts that decide whether a
+/// **return**-frontier region may take its release as a replica ahead of the call.
+///
+/// The same pair the lowerer reads at each relocation point
+/// (`lir::lower::emitops`, `TailExitHoist::exempt` / `capture_funded`): a region the
+/// call's own operands or result name is already the callee's by the ownership move,
+/// and a region the callee holds through its captured environment survives on that
+/// counted edge until its `Return` mints the caller's reference. A region in neither
+/// is one the callee cannot reach, and a replica there would be the only release on
+/// a path whose anchor the arm never arrives at.
+struct FrameExit {
+    /// Post-order index of the `Call`, for the branch/lambda containment tests.
+    at: u32,
+    /// The regions this call already owns — its own result, and every region an
+    /// operand's produced value names.
+    exempt: rustc_hash::FxHashSet<Region>,
+    /// The regions the callee holds through its captured environment.
+    capture_funded: rustc_hash::FxHashSet<Region>,
+}
+
+impl FrameExit {
+    /// Can a return-frontier region's release run at this point?
+    fn admits(&self, r: Region) -> bool {
+        self.exempt.contains(&r) || self.capture_funded.contains(&r)
+    }
 }
 
 /// One branch's post-order intervals: the whole node, and each arm's body.
@@ -659,9 +731,11 @@ struct ArmBranch {
 /// Collect [`BranchWindowScopes`] over the whole tree in one walk.
 fn collect_branch_scopes(
     hir: &Hir,
+    info: &RegionInfo,
     order: &HashMap<HirId, u32>,
     low: &HashMap<HirId, u32>,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
+    tail_callee_facts: &HashMap<HirId, crate::hir::region::TailCalleeFacts>,
     out: &mut BranchWindowScopes,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
@@ -696,12 +770,37 @@ fn collect_branch_scopes(
             out.barriers.push((lo(hir.id), ord(hir.id)));
             out.lambdas.push((lo(hir.id), ord(hir.id)));
         }
-        HirKind::Call { .. } if frame_replacing_tail_calls.contains(&hir.id) => {
-            out.frame_exits.push(ord(hir.id))
+        HirKind::Call { func, args, .. } if frame_replacing_tail_calls.contains(&hir.id) => {
+            let mut exempt = rustc_hash::FxHashSet::default();
+            if let Some(&r) = info.alloc_region.get(&hir.id) {
+                exempt.insert(info.merged_root(r));
+            }
+            info.operand_value_regions(func, &mut exempt);
+            for a in args {
+                info.operand_value_regions(&a.expr, &mut exempt);
+            }
+            out.frame_exits.push(FrameExit {
+                at: ord(hir.id),
+                exempt,
+                capture_funded: tail_callee_facts
+                    .get(&hir.id)
+                    .map(|f| f.capture_funded.clone())
+                    .unwrap_or_default(),
+            });
         }
         _ => {}
     }
-    hir.for_each_child(|c| collect_branch_scopes(c, order, low, frame_replacing_tail_calls, out));
+    hir.for_each_child(|c| {
+        collect_branch_scopes(
+            c,
+            info,
+            order,
+            low,
+            frame_replacing_tail_calls,
+            tail_callee_facts,
+            out,
+        )
+    });
 }
 
 /// Re-anchor every release a `break` jumps over onto the block it leaves.

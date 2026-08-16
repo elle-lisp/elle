@@ -24,6 +24,12 @@
 # replica, not the anchor"). So the escape refusals are driven over that branch
 # shape too, since it reaches the admission by a path the others do not.
 #
+# The RETURN facet is admitted rather than refused, and the two placements it
+# produces fault differently: the merge release must follow the returning arm's own
+# mint, and a replica ahead of a capturing tail callee must leave that callee's
+# counted edge standing. Both are driven, beside the shape whose sibling callee
+# funds nothing and therefore keeps the baseline route.
+#
 # Every witness reads the subject's HEAP contents after the branch, through a
 # chain long enough that an over-early free faults rather than reading stale but
 # still-mapped bytes. A fresh subject per iteration keeps region ids churning so
@@ -172,6 +178,32 @@
 (defn w-tail-return (v t)
   (length (first (w-tail-return-inner v t))))
 
+# (h4) the RETURN facet admitted through a capturing frame exit — `push-all`'s
+# shape. The running arm hands the subject back to the caller, and the sibling arm
+# leaves through a local walker that reaches the subject only through its captured
+# environment. The merge release must land after this arm's own return mint, or the
+# caller reads a freed value; the sibling's replica must land before its `TailCall`
+# without dropping the walker's counted edge, or the walker's own return of the
+# subject faults. Both arms are driven.
+(defn w-cap-return (v n)
+  (if (%eq n 0)
+    v
+    (letrec [go (fn (i) (if (%lt i n) (go (%add i 1)) v))]
+      (go 0))))
+(defn w-cap-return-read (v n)
+  (length (first (w-cap-return v n))))
+
+# (h5) the DECLINE the same admission carries: the sibling arm's callee neither
+# names the accumulator nor captures it, so the branch keeps the baseline route. The
+# accumulator is threaded through the recursion and read at the end, so a release
+# wrongly anchored at the merge — where this arm never arrives — would leave the
+# recursion's own hand-over unbalanced in the other direction.
+(def w-acc-walk
+  (fn (i acc)
+    (if (%lt i 0)
+      acc
+      (w-acc-walk (%sub i 1) (pair (string "w" i) acc)))))
+
 # (i) the `If` face, with the subject consumed after the branch.
 (defn w-if (v c)
   (let [r (if c (first v) (last v))]
@@ -197,6 +229,9 @@
 (var p 0)
 (var q 0)
 (var r 0)
+(var s 0)
+(var t 0)
+(var u 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -210,6 +245,9 @@
   (assign p (w-tail (list (string "p" i) i) :a))
   (assign q (w-tail-store (list (string "q" i) i) :a))
   (assign r (w-tail-return (list (string "r" i) i) :a))
+  (assign s (w-cap-return-read (list (string "s" i) i) 0))
+  (assign t (w-cap-return-read (list (string "t" i) i) 2))
+  (assign u (length (first (w-acc-walk 3 ()))))
   (assign j (w-if (list (string "j" i) (string "jj" i)) true))
   (assign k (c-plain (list (string "k" i) i)))
   # The sink is a module-level container by design (witness b stores into it);
@@ -234,6 +272,12 @@
         "stored arm value freed though a sibling arm leaves through a callee")
 (assert (%gt r 0)
         "returned arm value freed though a sibling arm leaves through a callee")
+(assert (%gt s 0)
+        "returned arm value freed by the merge release its capturing sibling admitted")
+(assert (%gt t 0)
+        "returned arm value freed by the replica ahead of a capturing tail callee")
+(assert (%gt u 0)
+        "threaded accumulator freed by a merge the recursive arm never reaches")
 (assert (%gt j 0) "`if` arm value freed under the post-branch read")
 
 (println "region-branch-arm-window-uaf: ok")

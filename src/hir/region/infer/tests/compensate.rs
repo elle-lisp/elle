@@ -93,30 +93,63 @@ fn release_clears_the_arms(
 // each route on the shape that selects it.
 
 #[test]
-fn returned_param_is_released_on_the_arm_that_does_not_return_it() {
+fn a_returned_param_anchors_where_no_arm_leaves_the_frame() {
     // `(if (%eq i 0) xs 7)` — `xs` leaves through the THEN arm, so its
-    // `decref_point` lands there. The ELSE arm hands the caller an immediate: no
-    // mint, no caller reference, and nothing else releases the param. `xs` crosses
-    // the return frontier, so the window declines it (its caller is a second
-    // holder the anchor argument says nothing about) and compensation is the route.
+    // `decref_point` lands there and the ELSE arm hands the caller an immediate.
+    // Both arms arrive at the merge, and the merge owes the return facet no
+    // funding edge: the returning arm ran its mint before jumping here, and the
+    // other handed nothing over (docs/impl/region/mechanism.md § "The return facet
+    // is a fact about the arms, not about the merge"). So the one release moves to
+    // the branch and neither compensation route fires.
     let (hir, arena, symbols, info) = analyze_with_class("(fn (i xs) (if (%eq i 0) xs 7))");
-    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
     assert!(
-        arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
-        "the non-returning arm must release the returned param's region"
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a returned param's release must sit where both arms reach it"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
+        "the anchored release must not be doubled by a per-arm compensation"
     );
 }
 
 #[test]
-fn returned_param_compensation_follows_the_arms() {
-    // The mirror: `xs` leaves through the ELSE arm, so the THEN arm owes the
-    // release. Pins that the admission keys on which arm carries the value out,
-    // not on arm position.
+fn a_returned_param_anchors_whichever_arm_carries_it_out() {
+    // The mirror: `xs` leaves through the ELSE arm. Pins that the admission reads
+    // arm structure and not arm position.
     let (hir, arena, symbols, info) = analyze_with_class("(fn (i xs) (if (%eq i 0) 7 xs))");
-    let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
     assert!(
-        arm_compensates(&hir, &arena, &symbols, &info, "xs", then_id),
-        "the non-returning arm must release the returned param's region"
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a returned param's release must sit where both arms reach it"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "xs", then_id),
+        "the anchored release must not be doubled by a per-arm compensation"
+    );
+}
+
+#[test]
+fn an_unfunded_frame_exit_keeps_a_returned_param_on_compensation() {
+    // The counterfactual for the admission above, and the one shape it declines:
+    // the ELSE arm leaves through a callee that neither names `xs` nor captures it,
+    // so no edge funds a replica ahead of that `TailCall`. Anchoring at the merge
+    // would put the region's only release on a path this arm never reaches, so the
+    // branch keeps the whole return-facet class on the baseline — the in-arm
+    // release in the returning arm, plus this arm's head compensation.
+    //
+    // The contrast with `a_frame_replacing_arm_anchors_a_value_routed_release` is
+    // one word of the then arm: there `xs` is merely READ, so it is sole-held and
+    // needs no funding at all.
+    let (hir, arena, symbols, info) = analyze_with_class("(fn (i xs) (if (%eq i 0) xs (g 7)))");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        !release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "an unfunded frame exit must leave the returned param's release in its arm"
+    );
+    assert!(
+        arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
+        "the declined arm must release the returned param's region"
     );
 }
 
@@ -177,6 +210,30 @@ fn a_frame_replacing_arm_anchors_a_value_routed_release() {
     );
     assert!(
         !arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
+        "the anchored release must not be doubled by a per-arm compensation"
+    );
+}
+
+#[test]
+fn a_capturing_frame_exit_funds_a_returned_param() {
+    // The `push-all` shape: the THEN arm returns `dst`, and the ELSE arm leaves
+    // through a local walker that reaches `dst` only through its captured
+    // environment. That capture is the funnel's counted edge, so it holds the
+    // region off zero until the walker's own `Return` mints the caller's reference
+    // — the funding the replica ahead of that `TailCall` needs. With every exit
+    // funded the branch anchors the return facet like any other class.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (dst n) (if (%eq n 0) dst \
+           (letrec [go (fn (i) (if (%lt i n) (go (%add i 1)) dst))] (go 0))))",
+    );
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "dst", &[then_id, else_id]),
+        "a capture-funded frame exit must not decline the returned param"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "dst", then_id)
+            && !arm_compensates(&hir, &arena, &symbols, &info, "dst", else_id),
         "the anchored release must not be doubled by a per-arm compensation"
     );
 }
@@ -244,12 +301,17 @@ fn returns_within(hir: &Hir, order: &HashMap<HirId, u32>, lo: u32, hi: u32) -> V
 
 #[test]
 fn the_walk_base_case_releases_at_its_return() {
-    // `(if (= i 0) xs (go (- i 1) xs))` — both arms use `xs`, so the recursive
+    // `(if (= i 0) xs (go (- i 1) (f xs)))` — both arms use `xs`, so the recursive
     // arm's later use takes the `decref_point` and the base case is left with a
     // return mint and no release. The release belongs at the base case's `Return`,
     // where the mint has already raised the count.
+    //
+    // The recursive arm hands the callee a value BUILT from `xs` rather than `xs`
+    // itself, and `go` captures nothing, so no edge funds a replica ahead of that
+    // `TailCall` and the branch-arm window declines the return facet here — which
+    // is what leaves this route the one that discharges the base case.
     let (hir, arena, symbols, info) = analyze_with_class(
-        "(letrec [go (fn (i xs) (if (%eq i 0) xs (go (%sub i 1) xs)))] (go 1 (list 1 2)))",
+        "(letrec [go (fn (i xs) (if (%eq i 0) xs (go (%sub i 1) (f xs))))] (go 1 (list 1 2)))",
     );
     let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");
     let order = compute_order(&hir);

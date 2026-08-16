@@ -177,6 +177,12 @@ a sibling of the arm holding the return: an inner branch whose own arms straddle
 hand-over keeps the conservative baseline. That residual is a leak, never an
 over-free.
 
+Both routes are what a branch falls back to. Where the **window** below admits the
+region instead — which for a returned one is where every frame-exiting arm funds its
+replica (§ "The return facet is a fact about the arms, not about the merge") — the
+single anchored release covers every path and neither route fires, since neither
+finds a `decref_point` inside an arm any more.
+
 Pinned by `tests/elle/region-return-arm-escape-leak.lisp` (both faces: the
 non-returning arm is bounded, and the returned value survives its caller's use), and
 for the `Match` arm by `tests/elle/region-match-dead-arm-leak.lisp` (both faces
@@ -354,6 +360,42 @@ on it.
 The **mutated** refusal is the one compensation makes about a release *route*: a
 slot repointed between the arm and the anchor frees whatever it holds then.
 
+#### The return facet is a fact about the arms, not about the merge
+
+One facet costs the merge nothing. A region on the **return** frontier is read
+after the frame is gone — by the caller, through the reference a `Return` mints —
+which is why the frame-exit relocation has to fund the gap between its moved
+release and that mint (§ "The callee's return mint, and the edge that funds the
+gap"). The merge has no such gap: it is a point *in this frame*, and every path
+that reaches it has already run whatever mint it was going to run. An arm that
+hands the region over minted the caller's reference before jumping here, so the
+anchored release drops the frame's own and leaves the caller's standing. An arm
+that hands nothing over leaves the frame's reference the only one in existence,
+which is the same per-path reading the head route makes (§ "The return frontier is
+per-path"). Either way the anchor needs no edge.
+
+Where the facet does bite is the arms that never arrive. A frame-replacing tail
+call takes its release as a **replica** (§ "An arm that leaves through a callee
+takes a replica, not the anchor"), and a replica ahead of a call *is* a release
+before the callee's mint — so it owes the funding argument the merge does not. The
+callee reaches a value this frame owns by two routes and no other: as an
+**operand**, where the release is the ownership move the exemption keeps in the
+dead block, or through its **captured environment**, where the funnel's counted
+edge spans the gap. A point offering neither is one where the callee cannot reach
+the region at all — and the window must not anchor there anyway, because the
+anchored release would then be the *only* release, on a path that never reaches
+it. So a branch is admitted for the return-facet class exactly when **every**
+frame-exiting arm's point is exempt or capture-funded, read off the same two facts
+the lowerer reads per point. One unfunded point holds the whole class to the
+baseline, where the in-arm release and the compensation routes still reach it.
+
+The `sole` class is unaffected by any of this: nothing reads it once the frame is
+gone, so its replicas need only the exemption the lowerer already applies.
+
+The leak this closes is the polymorphic helper that returns what it was handed —
+`push-all`'s bulk arm, and with it every `append`/`concat` over a byte-family
+argument, whose one release sits in the index-walk arm the call never takes.
+
 #### Lexical capture is not a second holder to fear
 
 Reachability through a closure's environment looks like the counter-example to
@@ -463,7 +505,9 @@ owned-parameter release consumes.
 Neither mechanism owes a new count argument for the composition. Both make a
 release fire on a path where none fired before, and both discharge exactly that
 with `sole_frame_held_regions` — the anchor at the analysis, each replica at its
-own point.
+own point. For the **return**-facet class the two questions come apart, and the
+window asks the replica's before it anchors at all (§ "The return facet is a fact
+about the arms, not about the merge").
 
 The composition does need a release the relocation can replicate, and only a
 **value-routed** one qualifies: it loads the holder slot, releases that value's
@@ -481,14 +525,19 @@ therefore still declines whole for every other region, which keeps compensation'
 head and tail routes reaching them exactly as before.
 
 Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with both
-boundaries, the `If` face, the captured-holder face and the frame-replacing-arm
-faces driven as rows), the `param-used-arm` / `param-used-arm-if` /
-`branch-arm-tailcall-sibling` probes in `tests/elle/oracle.lisp` (the per-op
+boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
+faces and the returned-parameter faces driven as rows), the `param-used-arm` /
+`param-used-arm-if` / `branch-arm-tailcall-sibling` / `branch-arm-return-captured`
+probes in `tests/elle/oracle.lisp` (the per-op
 rates), the placement pins in `lir::lower::tests::release`
 (`fallthrough_arm_releases_though_a_sibling_tail_call_exits`,
 `tail_call_argument_release_stays_the_ownership_move`,
 `moved_argument_takes_no_replica_in_the_arm_that_moves_it`), the value-route
 narrowing pin `regions::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
+the return-facet admission and its decline
+(`regions::tests::compensate::a_capturing_frame_exit_funds_a_returned_param`,
+`a_returned_param_anchors_where_no_arm_leaves_the_frame`,
+`an_unfunded_frame_exit_keeps_a_returned_param_on_compensation`),
 and `tests/elle/region-branch-arm-window-uaf.lisp` (the
 soundness complement — a value read, stored, returned, carried across a yield,
 reached through a closure's environment, or moved into a sibling arm's tail callee

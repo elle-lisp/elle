@@ -3,7 +3,7 @@
 //! cuts the lowerer consults, plus the queries over them.
 
 use crate::hir::binding::Binding;
-use crate::hir::expr::HirId;
+use crate::hir::expr::{Hir, HirId, HirKind};
 
 use super::{Region, RegionData, RegionStats};
 
@@ -569,13 +569,16 @@ pub struct RegionInfo {
     /// and with the same mutated-holder reading as `sole_frame_held_regions`. A
     /// superset of it.
     ///
-    /// Not an admission on its own: something *does* read such a region after the
-    /// frame, namely the caller, through a reference the tail callee's own
-    /// `Return` mints — and that mint fires after a relocated release would have
-    /// run. So the lowerer pairs this with `TailCalleeFacts::capture_funded` at each
-    /// relocation point, and the pair is the count argument
-    /// (docs/impl/region/mechanism.md § "The callee's return mint, and the edge
-    /// that funds the gap").
+    /// Not an admission on its own wherever the release runs BEFORE a mint:
+    /// something *does* read such a region after the frame, namely the caller,
+    /// through a reference the tail callee's own `Return` mints, and a release
+    /// relocated ahead of that call runs first. So the lowerer pairs this with
+    /// `TailCalleeFacts::capture_funded` at each relocation point, and the pair is
+    /// the count argument (docs/impl/region/mechanism.md § "The callee's return
+    /// mint, and the edge that funds the gap"). The branch-arm window asks the same
+    /// pair of every frame-exiting arm before it anchors, because a merge in this
+    /// frame follows whatever mint its arms already ran and needs no edge of its own
+    /// (§ "The return facet is a fact about the arms, not about the merge").
     pub return_frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Frame-replacing tail-call HirId → what that call's own callee tells the
     /// lowerer about the releases and mints around it ([`TailCalleeFacts`]).
@@ -779,6 +782,55 @@ impl RegionInfo {
             }
         }
         found
+    }
+
+    /// Every region one tail-call OPERAND — the callee, or an argument — may hand
+    /// the call: the regions the value it produces names, never the regions its
+    /// evaluation merely used along the way (docs/impl/region/mechanism.md § "What
+    /// an operand names is its VALUE, not its syntax").
+    ///
+    /// Each node in a value-producing position contributes its own `alloc_region`
+    /// and, for a `Var`, its binding's source regions, canonicalized through the
+    /// merge forest so a merged child and its root are one entry (the release side
+    /// only ever emits at the root). The descent then stops at the two nodes whose
+    /// value carries a **count of its own**:
+    ///
+    /// - a `Call`, whose result is handed over with exactly one minted reference no
+    ///   matter which region it turns out to live in (§ "The return mint is emitted
+    ///   exactly once"), so the callee's own closure region — read and finished with
+    ///   before this call was made — is not reachable from here;
+    /// - a `Lambda`, whose closure region IS the value, and whose captures the
+    ///   funnel counted when the env was built (§ "Lexical capture is not a second
+    ///   holder to fear").
+    ///
+    /// Everything else is descended, including an inline `%`-`Intrinsic`: it mints no
+    /// region, so a heap result of one (`%first`/`%rest`/`%get`) is an uncounted
+    /// borrow living in its operand's region, and the operand is the value-producing
+    /// leaf. Descending an unrecognised node over-approximates, which is the
+    /// leak-preserving direction.
+    ///
+    /// Two consumers read it, and both mean "this call already owns what it names":
+    /// the lowerer's frame-exit exemption (`TailExitHoist::exempt`), and the
+    /// branch-arm window's per-point funding question, which asks the same thing of
+    /// the same call one pass earlier.
+    ///
+    /// The closure-cycle merge's by-move boundary asks the same question of the same
+    /// expressions and answers it the same way (region/letrec.md § "What the
+    /// non-member tail still refuses"); the two differ only in what they return —
+    /// bindings there, regions here.
+    pub fn operand_value_regions(&self, h: &Hir, out: &mut FxHashSet<Region>) {
+        if let Some(&r) = self.alloc_region.get(&h.id) {
+            out.insert(self.merged_root(r));
+        }
+        if let HirKind::Var(b) = &h.kind {
+            for &r in self.binding_source_regions.get(b).into_iter().flatten() {
+                out.insert(self.merged_root(r));
+            }
+        }
+        if matches!(h.kind, HirKind::Call { .. } | HirKind::Lambda { .. }) {
+            return;
+        }
+        h.for_each_child(|c| self.operand_value_regions(c, out));
     }
 
     /// Does this scope have any allocations whose solved region matches it?
