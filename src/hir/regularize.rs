@@ -24,7 +24,7 @@ use crate::symbol::SymbolTable;
 /// hoisted cell and leaves a reference the lowerer cannot resolve. Pruning first
 /// means functionalize never sees the dead arm. Pruning also runs before escape
 /// analysis sees the tree, so the off-type arms no longer mark the scrutinee's
-/// region escaping (the io-yield / `each`-over-collection leak; `typeinfer/prune.rs`).
+/// region escaping (the `each`-over-collection over-keep; `typeinfer/prune.rs`).
 pub(crate) fn regularize(
     hir: &mut Hir,
     arena: &mut BindingArena,

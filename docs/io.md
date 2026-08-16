@@ -144,6 +144,21 @@ in that case, the same guarantee `write(2)`-loop helpers give elsewhere.
 The pinning tests are `tests/elle/port-shortwrite.lisp` and
 `tests/elle/port-shortread-framing.lisp` for the read direction.
 
+### A read that overshoots keeps the rest for the same port
+
+`port/read-line` stops at the newline and `port/read-exact` stops at the Nth
+grapheme, but the kernel read behind each of them takes a whole block. The
+backend holds the extra bytes and serves the next read on that port from them
+before it goes back to the kernel, so no byte is lost between two reads and
+`port/tell` reports the logical position rather than the kernel offset.
+
+The remainder belongs to the port that produced it, not to its descriptor
+*number*. A closed descriptor's number goes straight back to the OS — and a
+port dropped without `port/close` still closes its descriptor — so the next
+`port/open` can be handed that number. It starts with an empty remainder,
+whichever port held the number before it. The pinning test is
+`tests/elle/io.lisp` § "a recycled descriptor number carries no remainder".
+
 ### `:timeout` bounds each operation
 
 Every port call takes an optional `:timeout` in milliseconds, and it bounds

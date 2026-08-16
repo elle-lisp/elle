@@ -138,10 +138,9 @@ fn prim_io_reap(
         }
     };
     let completions = backend.0.poll();
-    // The completion-wrapper structs are born on this instance's own heap (the
-    // native call's), matching where the inner result/error values were built.
-    let heap: *mut crate::value::fiberheap::FiberHeap = ctx.heap_mut();
-    let values: Vec<Value> = completions.iter().map(|c| c.to_value(heap)).collect();
+    // The completion-wrapper structs share the array's region — this call's own
+    // — so the declared `Fresh` result is one region the caller releases whole.
+    let values: Vec<Value> = completions.iter().map(|c| c.to_value(ctx)).collect();
     (SIG_OK, ctx.array(values))
 }
 
@@ -165,8 +164,7 @@ fn prim_io_wait(
     let timeout_ms = prim_arg!(ctx, args, 1, as_int, "io/wait", "integer timeout");
     match backend.0.wait(timeout_ms) {
         Ok(completions) => {
-            let heap: *mut crate::value::fiberheap::FiberHeap = ctx.heap_mut();
-            let values: Vec<Value> = completions.iter().map(|c| c.to_value(heap)).collect();
+            let values: Vec<Value> = completions.iter().map(|c| c.to_value(ctx)).collect();
             (SIG_OK, ctx.array(values))
         }
         Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),

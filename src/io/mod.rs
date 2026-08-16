@@ -194,9 +194,18 @@ impl Completion {
     }
 
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}.
-    /// Built on `origin_heap` (the requesting instance's heap; see
-    /// [`completion_heap_ptr`]).
-    pub(crate) fn to_value(&self, origin_heap: *mut crate::value::fiberheap::FiberHeap) -> Value {
+    ///
+    /// Built through the REAPING CALL's own capability — `io/wait` / `io/reap`
+    /// collect these structs into the array they return, and both declare
+    /// `RegionEffect::Fresh`, so one region carries the whole result and the
+    /// caller's single `DecrefValueRegion` reclaims it (docs/impl/region/ctx.md
+    /// § "A helper reached from inside a call allocates through THAT call's
+    /// ctx"). The `:value`/`:error` payloads are the exception the edge
+    /// accounting exists for: the backend built them off this call, on the
+    /// requesting instance's heap (see [`completion_heap_ptr`]), so the struct
+    /// records a counted edge to each and the resumed fiber's own reference
+    /// carries it past this array's demise.
+    pub(crate) fn to_value(&self, ctx: &crate::primitives::ctx::Alloc<'_>) -> Value {
         let mut fields = BTreeMap::new();
         fields.insert(
             TableKey::Keyword("id".into()),
@@ -212,8 +221,6 @@ impl Completion {
                 fields.insert(TableKey::Keyword("error".into()), *e);
             }
         }
-        let heap = unsafe { &mut *completion_heap_ptr(origin_heap) };
-        let ctx = crate::primitives::ctx::Alloc::new(heap);
         ctx.struct_from(fields)
     }
 }

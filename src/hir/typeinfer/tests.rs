@@ -399,8 +399,8 @@ fn has_keyword_arm(hir: &Hir, kw: &str) -> bool {
 // The pruning *mechanism* is pinned here on hand-written, primitive-only
 // `(match (type-of x) …)` forms (the bare test harness carries no stdlib, so the
 // `each` macro — which uses stdlib `pair?` — cannot compile here). The `each`
-// end-to-end leak is the oracle's `each-array`/io-yield probes
-// (tests/elle/oracle.lisp), which run under the full stdlib.
+// end-to-end shape is the oracle's `each-array` probe (tests/elle/oracle.lisp),
+// which runs under the full stdlib.
 
 /// Type-directed dead-arm pruning. A `(match (type-of a) …)` whose scrutinee `a`
 /// is a literal array has every off-array arm provably unreachable, so `prune.rs`

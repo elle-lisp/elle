@@ -125,7 +125,7 @@ impl AsyncBackend {
                 inner.completions.push_back(Completion::ok(id, Value::NIL));
                 return Ok(id);
             }
-            if let PortKey::Fd(fd) = &port_key {
+            if let PortKey::Fd(fd, _) = &port_key {
                 let mut inner = self.inner.borrow_mut();
                 // Cancel all pending ops on this fd
                 let ids_to_cancel: Vec<SubmissionId> = inner
@@ -174,7 +174,7 @@ impl AsyncBackend {
                         false
                     };
                 if !retired {
-                    inner.fd_states.remove(&PortKey::Fd(*fd));
+                    crate::io::types::discard_fd_state(&mut inner.fd_states, *fd);
                 }
 
                 drop(inner);
@@ -224,12 +224,7 @@ impl AsyncBackend {
         }
 
         // Determine fd
-        let fd = match &port_key {
-            PortKey::Stdout => 1,
-            PortKey::Stderr => 2,
-            PortKey::Fd(raw) => *raw,
-            PortKey::Stdin => unreachable!(),
-        };
+        let fd = port_key.raw_fd();
 
         let buf_handle = match op {
             PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. } => None,

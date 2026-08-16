@@ -126,8 +126,17 @@ fn test_completion_to_value_success() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         let c = Completion::ok(SubmissionId::from_raw(42), h.ctx().string("hello"));
-        // The completion struct is built on the same heap its result string lives on.
-        let v = c.to_value(h.heap() as *mut crate::value::fiberheap::FiberHeap);
+        let ctx = h.ctx();
+        let v = c.to_value(&ctx);
+        // The struct is born in the REAPING call's own region, so the array
+        // `io/wait` collects it into and the struct share one region and one
+        // release (docs/impl/region/ctx.md § "A helper reached from inside a
+        // call allocates through THAT call's ctx").
+        assert_eq!(
+            crate::value::arena::region_of(h.heap(), v),
+            Some(ctx.test_region()),
+            "a completion struct is born in the reaping call's region"
+        );
         let fields = v.as_struct().unwrap();
         assert_eq!(
             sorted_struct_get(fields, &TableKey::Keyword("id".into()))
@@ -152,7 +161,9 @@ fn test_completion_to_value_error() {
             SubmissionId::from_raw(7),
             error_val_in(unsafe { &mut *heap_ptr }, "io-error", "test error", region),
         );
-        let v = c.to_value(heap_ptr);
+        let h = crate::primitives::ctx::TestHeap::new();
+        let ctx = h.ctx();
+        let v = c.to_value(&ctx);
         let fields = v.as_struct().unwrap();
         assert_eq!(
             sorted_struct_get(fields, &TableKey::Keyword("id".into()))

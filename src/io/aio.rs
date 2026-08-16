@@ -512,11 +512,11 @@ impl AsyncBackendInner {
             return;
         }
         retired.retain(|fd, _owned| {
-            let still_named = pending.values().any(|op| {
-                matches!(op, PendingOp::Port { port_key, .. } if *port_key == PortKey::Fd(*fd))
-            });
+            let still_named = pending
+                .values()
+                .any(|op| matches!(op, PendingOp::Port { port_key, .. } if port_key.names_fd(*fd)));
             if !still_named {
-                fd_states.remove(&PortKey::Fd(*fd));
+                crate::io::types::discard_fd_state(fd_states, *fd);
             }
             // Dropping the `OwnedFd` with the entry is what closes it.
             still_named

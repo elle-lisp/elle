@@ -7,6 +7,7 @@
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::os::unix::io::OwnedFd;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The kind of underlying OS resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +39,31 @@ pub enum Encoding {
     Binary, // raw bytes
 }
 
+/// A port's identity, minted once per `Port` and never reused.
+///
+/// A descriptor NUMBER is not an identity: the OS hands it out again as soon as
+/// the descriptor closes, so two ports that never coexisted can carry the same
+/// number. Per-descriptor state the I/O backend holds (`io::types::FdState`, the
+/// bytes a read left over) is keyed by number *and* identity, so the next port on
+/// a recycled number cannot reach what the previous one left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct PortId(u64);
+
+impl PortId {
+    /// The next unused identity. Process-wide and monotonic, so two instances on
+    /// two threads never mint the same one.
+    fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        PortId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// A standalone identity for a test that builds a `PortKey` without a port.
+    #[cfg(test)]
+    pub(crate) fn fresh() -> Self {
+        Self::next()
+    }
+}
+
 /// A port wrapping an OS file descriptor.
 ///
 /// Wrapped in `ExternalObject` via `Value::external("port", port)`.
@@ -53,6 +79,7 @@ pub enum Encoding {
 /// `port/close` on a stdio port just sets the `closed` flag. Drop is
 /// a no-op (nothing to drop when `fd` is `None`).
 pub(crate) struct Port {
+    id: PortId,
     fd: RefCell<Option<OwnedFd>>,
     kind: PortKind,
     direction: Direction,
@@ -64,18 +91,38 @@ pub(crate) struct Port {
 }
 
 impl Port {
-    /// Create a file port from an owned fd.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new_file(fd: OwnedFd, direction: Direction, encoding: Encoding, path: String) -> Self {
+    /// The one place a `Port` is built. Every named constructor below differs
+    /// only in its descriptor, kind, direction, encoding, and path, so each of
+    /// them is a call to this — which is what makes a port's identity
+    /// unforgeable: there is no other way to make one.
+    fn build(
+        fd: Option<OwnedFd>,
+        kind: PortKind,
+        direction: Direction,
+        encoding: Encoding,
+        path: Option<String>,
+    ) -> Self {
         Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::File,
+            id: PortId::next(),
+            fd: RefCell::new(fd),
+            kind,
             direction,
             encoding,
             closed: Cell::new(false),
-            path: Some(path),
+            path,
             timeout: Cell::new(None),
         }
+    }
+
+    /// This port's identity — see [`PortId`].
+    pub(crate) fn id(&self) -> PortId {
+        self.id
+    }
+
+    /// Create a file port from an owned fd.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn new_file(fd: OwnedFd, direction: Direction, encoding: Encoding, path: String) -> Self {
+        Self::build(Some(fd), PortKind::File, direction, encoding, Some(path))
     }
 
     /// Create an unopened port (fd filled in later by IO completion).
@@ -85,15 +132,7 @@ impl Port {
         encoding: Encoding,
         path: String,
     ) -> Self {
-        Port {
-            fd: RefCell::new(None),
-            kind,
-            direction,
-            encoding,
-            closed: Cell::new(false),
-            path: Some(path),
-            timeout: Cell::new(None),
-        }
+        Self::build(None, kind, direction, encoding, Some(path))
     }
 
     /// Set the fd on an unopened port (called by IO completion).
@@ -103,109 +142,87 @@ impl Port {
 
     /// Create a stdin port. Does not own the fd.
     pub fn stdin() -> Self {
-        Port {
-            fd: RefCell::new(None),
-            kind: PortKind::Stdin,
-            direction: Direction::Read,
-            encoding: Encoding::Text,
-            closed: Cell::new(false),
-            path: None,
-            timeout: Cell::new(None),
-        }
+        Self::build(None, PortKind::Stdin, Direction::Read, Encoding::Text, None)
     }
 
     /// Create a stdout port. Does not own the fd.
     pub fn stdout() -> Self {
-        Port {
-            fd: RefCell::new(None),
-            kind: PortKind::Stdout,
-            direction: Direction::Write,
-            encoding: Encoding::Text,
-            closed: Cell::new(false),
-            path: None,
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            None,
+            PortKind::Stdout,
+            Direction::Write,
+            Encoding::Text,
+            None,
+        )
     }
 
     /// Create a stderr port. Does not own the fd.
     pub fn stderr() -> Self {
-        Port {
-            fd: RefCell::new(None),
-            kind: PortKind::Stderr,
-            direction: Direction::Write,
-            encoding: Encoding::Text,
-            closed: Cell::new(false),
-            path: None,
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            None,
+            PortKind::Stderr,
+            Direction::Write,
+            Encoding::Text,
+            None,
+        )
     }
 
     pub fn new_tcp_listener(fd: OwnedFd, bound_addr: String) -> Self {
-        Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::TcpListener,
-            direction: Direction::Read,
-            encoding: Encoding::Text,
-            closed: Cell::new(false),
-            path: Some(bound_addr),
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            Some(fd),
+            PortKind::TcpListener,
+            Direction::Read,
+            Encoding::Text,
+            Some(bound_addr),
+        )
     }
 
+    /// Binary encoding: TCP is a byte stream. `port/read` returns bytes,
+    /// enabling binary protocols (TLS, msgpack, custom wire formats).
+    /// `port/write` accepts both bytes and strings, and `port/read-line`
+    /// always returns a string regardless of encoding.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_tcp_stream(fd: OwnedFd, peer_addr: String) -> Self {
-        Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::TcpStream,
-            direction: Direction::ReadWrite,
-            // Binary encoding: TCP is a byte stream. port/read returns bytes,
-            // enabling binary protocols (TLS, msgpack, custom wire formats).
-            // port/write accepts both bytes and strings.
-            // port/read-line always returns a string regardless of encoding.
-            encoding: Encoding::Binary,
-            closed: Cell::new(false),
-            path: Some(peer_addr),
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            Some(fd),
+            PortKind::TcpStream,
+            Direction::ReadWrite,
+            Encoding::Binary,
+            Some(peer_addr),
+        )
     }
 
     pub fn new_udp_socket(fd: OwnedFd, bound_addr: String) -> Self {
-        Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::UdpSocket,
-            direction: Direction::ReadWrite,
-            encoding: Encoding::Binary,
-            closed: Cell::new(false),
-            path: Some(bound_addr),
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            Some(fd),
+            PortKind::UdpSocket,
+            Direction::ReadWrite,
+            Encoding::Binary,
+            Some(bound_addr),
+        )
     }
 
     pub fn new_unix_listener(fd: OwnedFd, path: String) -> Self {
-        Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::UnixListener,
-            direction: Direction::Read,
-            encoding: Encoding::Text,
-            closed: Cell::new(false),
-            path: Some(path),
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            Some(fd),
+            PortKind::UnixListener,
+            Direction::Read,
+            Encoding::Text,
+            Some(path),
+        )
     }
 
+    /// Binary encoding: Unix streams are byte streams, same as TCP, so
+    /// `port/read` returns bytes for binary protocols (h2, gRPC, and the like).
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_unix_stream(fd: OwnedFd, peer_path: String) -> Self {
-        Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::UnixStream,
-            direction: Direction::ReadWrite,
-            // Binary encoding: Unix streams are byte streams, same as TCP.
-            // port/read returns bytes for binary protocols (h2, gRPC, etc.).
-            encoding: Encoding::Binary,
-            closed: Cell::new(false),
-            path: Some(peer_path),
-            timeout: Cell::new(None),
-        }
+        Self::build(
+            Some(fd),
+            PortKind::UnixStream,
+            Direction::ReadWrite,
+            Encoding::Binary,
+            Some(peer_path),
+        )
     }
 
     /// Create a pipe port from a subprocess stdio fd.
@@ -214,15 +231,7 @@ impl Port {
     /// Encoding is always Binary — subprocess output is an arbitrary byte
     /// stream. Text decoding is the caller's responsibility.
     pub fn new_pipe(fd: OwnedFd, direction: Direction, encoding: Encoding, label: String) -> Self {
-        Port {
-            fd: RefCell::new(Some(fd)),
-            kind: PortKind::Pipe,
-            direction,
-            encoding,
-            closed: Cell::new(false),
-            path: Some(label),
-            timeout: Cell::new(None),
-        }
+        Self::build(Some(fd), PortKind::Pipe, direction, encoding, Some(label))
     }
 
     /// Close the port. Idempotent.

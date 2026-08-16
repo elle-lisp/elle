@@ -226,7 +226,9 @@
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
                    "cancel-discard" "abort-discard"])
-(declare-root :f3 ["io-yield ev/sleep"])
+# `io-yield ev/sleep` is a CLOSED control (undeclared, like `rest-array-copy`): a
+# pumped io op strands nothing, so a regression to open must trip the completeness
+# gate loudly rather than be absorbed under a root.
 # F4 has NO declared probe: the returned closure cycle is closed for every body shape,
 # including the one bound OUT of its frame's tail position, where the merge follows the
 # handed-out member to the release point the last-use rule already computed for it. Its
@@ -339,16 +341,14 @@
 (defn probe-bounded [j]
   {:x j :y 2})
 
-# The io-yield target: ev/sleep, the clean probe (portless, nil result). Pins the
-# per-op net-object residual of a yielding io op — a residual the scheduler pump
-# pays each op, not an io-local mechanism. It is NOT escape imprecision: with the
-# real `fiber/resume` consuming `(get c :value)`, the completion struct measures
-# `escapes_activation = false`, and `io/wait` declares `RegionEffect::Fresh`
-# (oracle-checked), so nothing here is over-marked as escaping. The residual is
-# therefore a region/runtime-RC one, and the two mechanisms in reach of it are
-# already named: the may-store clique (`fiber/resume` is `Mixed`, so its dispatch
-# takes a per-arg retain that need not balance when no store happens) and prompt
-# reclamation of a `Fresh` call result. (The IN-LAMBDA self-recursive letrec closure `+`/`<` build over
+# A yielding io op, the whole round trip: ev/sleep is the clean shape (portless,
+# nil result), so what the gauge sees is the scheduler pump's own per-op cost. The
+# op suspends with an IoRequest, the pump reads a completion out of
+# `(io/wait backend …)` and resumes the fiber with it, and every region on that
+# path is released — the request's park retain at the resume, the completion array
+# and the structs it carries at the pump's own `DecrefValueRegion`, both being one
+# region (docs/impl/region/ctx.md § "A helper reached from inside a call allocates
+# through THAT call's ctx"). (The IN-LAMBDA self-recursive letrec closure `+`/`<` build over
 # their varargs is cell-free — its self-reference resolves to the executing closure, no
 # cell↔closure cycle — reclaimed per call by ordinary RC / the tail-call deferred release,
 # docs/impl/selfrec.md; that class is pinned directly by the `recur-local-self` probe
@@ -385,24 +385,17 @@
                (string "bounded shape leaked: " (get bnd :verdict) " rate="
                        (get bnd :rate))))
 
-# 3. The io-yield retain. Shrink-only: GREEN at the current rate, RED the moment
-#    it moves; a fix only LOWERS it (the residual's anatomy is at probe-io-yield).
-#    Dropped 2→1 when the scheduler pump's own completion-struct `put` began to
-#    monomorphize (the `& rest` wrapper collection fix, `monomorphize.rs`): one of
-#    the two retains was a `put`-wrapper strand, not escape imprecision. The
-#    residual 1/op is the genuine F3 Shared-completion retain, closing only as
-#    escape analysis is made branch/path-sensitive.
+# 3. The io round trip reclaims. Measured with the B-invariance self-test, so a
+#    reading of 0 is a per-op rate rather than a per-block artifact.
 (def io (measure-stable "io-yield ev/sleep" probe-io-yield 200 8 80 0.4 0.5))
 (show io)
 (check (assert (not= (get io :verdict) :contaminated)
                (string "io-yield rate is block-dependent (B vs 2B): "
                        (get io :rate) " vs " (get io :alt-rate)
                        " — a per-block artifact, not a per-op rate")))
-(check (assert (= (get io :verdict) :open)
-               (string "io-yield not measured as leaking: " (get io :verdict))))
-(check (assert (and (< 0.5 (get io :rate)) (< (get io :rate) 1.5))
-               (string "io-yield rate " (get io :rate)
-                       " ∉ [0.5,1.5] — shrink-only")))
+(check (assert (= (get io :verdict) :closed)
+               (string "io-yield leaked: " (get io :verdict) " rate="
+                       (get io :rate))))
 
 # 4. Sub-integer leak the integer slope cannot see. Tight tau/epsilon; reads
 #    :open at ≈0.33 where `slope` reported 0.

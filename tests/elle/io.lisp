@@ -51,6 +51,25 @@
                               (port/read-line p))]
                    (assert (= line "line1") "port/read-line reads first line"))))
 
+# === a recycled descriptor number carries no remainder ===
+# A read that overshoots leaves the rest of the block buffered for the next
+# read on the same descriptor: `port/read-line` stops at the newline and holds
+# what it read past it. The descriptor number goes back to the OS as soon as
+# the port's descriptor closes — which a port dropped rather than `port/close`d
+# still does — so the next `port/open` can be handed that very number, and it
+# must read its own file and nothing else.
+
+(with-temp-dir dir
+               (let [over (path/join dir "overshoot")
+                     fresh (path/join dir "fresh")]
+                 (spit over "line1\nline2\nline3")
+                 (spit fresh "fresh contents")
+                 (assert (= (port/read-line (port/open over :read)) "line1")
+                         "port/read-line stops at the first newline")
+                 (assert (= (string (port/read-all (port/open fresh :read)))
+                            "fresh contents")
+                         "a port on a recycled descriptor number reads only its own file")))
+
 # === io/backend errors ===
 
 (let [[ok? _] (protect ((fn () (io/backend :invalid))))]

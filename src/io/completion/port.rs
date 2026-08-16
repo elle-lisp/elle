@@ -50,9 +50,7 @@ pub(super) fn complete_port_op(
                 )
             {
                 // EOF for read operations
-                let state = fd_states
-                    .entry(port_key.clone())
-                    .or_insert_with(FdState::new);
+                let state = crate::io::types::fd_state_mut(fd_states, port_key);
 
                 // For ReadLine: check buffer for a partial last line
                 // (file content without trailing newline).
@@ -193,9 +191,7 @@ pub(super) fn complete_port_op(
 
                     // Also check if fd_state has leftover bytes from a previous
                     // over-read. If so, prepend them.
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
+                    let state = crate::io::types::fd_state_mut(fd_states, port_key);
 
                     if !state.buffer.is_empty() {
                         // Copy leftover bytes into the fiber buffer, shifting
@@ -267,9 +263,7 @@ pub(super) fn complete_port_op(
                     // boundary, or a previous short-read for this op).  The
                     // submit/resubmit path reduced the kernel read count by
                     // what was buffered.
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
+                    let state = crate::io::types::fd_state_mut(fd_states, port_key);
 
                     let total = if !state.buffer.is_empty() {
                         let buffered = state.buffer.len();
@@ -352,9 +346,7 @@ pub(super) fn complete_port_op(
                 PortOp::ReadAll => {
                     // ReadAll still uses the existing fd_states.buffer accumulation.
                     // Accumulated in fd_states.buffer by re-submission loop.
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
+                    let state = crate::io::types::fd_state_mut(fd_states, port_key);
                     state.buffer.extend_from_slice(&data);
                     let all: Vec<u8> = state.buffer.drain(..).collect();
                     let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };

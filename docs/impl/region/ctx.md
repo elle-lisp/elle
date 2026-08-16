@@ -48,8 +48,10 @@ The capability comes in two layers, because two different callers need it:
   else. A *pure allocation context*: it structurally cannot re-enter the
   interpreter. Built at the sites that allocate Elle values with **no VM in
   scope** — the reader (`read_str`, run by the formatter/LSP), the async-IO
-  completion builders, `send` reconstruction, the plugin `make_*` ctors, FFI
-  argument marshalling, and test scaffolding.
+  completion payload builders (`io::io_error` and the backends' result values,
+  born off the reaping call and handed to the resumed fiber), `send`
+  reconstruction, the plugin `make_*` ctors, FFI argument marshalling, and test
+  scaffolding.
 - **`NativeCtx<'h>`** = `Alloc` + a **non-null** `*mut VM`. `Deref<Target =
   Alloc>` so every `ctx.string(..)`/`ctx.error(..)`/`ctx.alloc(..)` keeps working
   unchanged. Adds `ctx.vm() -> &mut VM`, which is **total** — never `Option`. A
@@ -129,6 +131,27 @@ Invariants:
 - The JIT's `elle_jit_call` / `elle_jit_tail_call` route through
   `VM::dispatch_native_call`, so both tiers share its single bytecode-dispatch
   ctx construction and get identical region accounting for free.
+
+### A helper reached from inside a call allocates through THAT call's ctx
+
+`new`/`boundary` mint a region the *caller* has no name for, which is right at a
+call boundary — the result escapes across an ABI and the consumer releases it by
+value — and wrong anywhere inside a call that already owns a region. A helper
+that mints its own region while building part of a native's result strands that
+part: the result aggregate records a counted `aggregate ⊇ member` edge, so the
+caller's one `DecrefValueRegion` on the aggregate cascades the member region
+down to its **birth** reference and stops there. Nothing else names it.
+
+So a helper building a piece of a native's result takes the call's `&Alloc` and
+allocates through it. One region carries the whole result, one release reclaims
+it, and the `Fresh` declaration the primitive makes ([effects.md](effects.md))
+is true of the members as well as the aggregate. Two helpers sit on this seam:
+`traitregistry::call_method_fn` (below) and `io::Completion::to_value`, whose
+structs `io/wait` / `io/reap` collect into the array they return. The reference
+is the test: `tests/elle/region-io-completion-leak.lisp` measures a pumped io
+loop bounded, and
+`runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`
+pins the trait-dispatch face.
 
 ## VM access through the ctx — per-instance VM state
 

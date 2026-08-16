@@ -247,7 +247,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
         id,
         PendingOp::Port {
             op: PortOp::Write { data },
-            port_key: PortKey::Fd(write_fd),
+            port_key: PortKey::Fd(write_fd, crate::port::PortId::fresh()),
             port: Value::NIL,
             buffer_handle: Some(buf_handle),
             listener_kind: None,

@@ -128,8 +128,8 @@ pub(crate) fn release_displaced_terminal_signal(
 /// Release the `SuspendEscape` an io op left on its IoRequest's region when a
 /// parked fiber is resumed and that request — held in `fiber.signal` across the
 /// park — is replaced by `resume_value`. This reclaims the IoRequest region of a
-/// yielding io op — the gauge is `oracle.lisp`'s `io-yield ev/sleep` probe (the
-/// residual it reads is the general escape-imprecision gap, not this mechanism).
+/// yielding io op; the gauge is `oracle.lisp`'s `io-yield ev/sleep` probe, which
+/// measures the whole suspend/pump/resume round bounded.
 ///
 /// A yielding io op (`ev/sleep`, `port/read`, …) returns its `IoRequest` with
 /// `SIG_IO`, whereupon the suspend adds a

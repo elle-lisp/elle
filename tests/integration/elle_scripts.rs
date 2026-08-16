@@ -1383,6 +1383,19 @@ fn region_jit_io_suspend_uaf() {
     run_elle_script_with_args("region-jit-io-suspend-uaf", &["--mlir=off"]);
 }
 
+// Guard — an io completion struct shares the reaping call's region, so the
+// scheduler pump's release of the `io/wait` array cascades to the payload the
+// backend built and handed the resumed fiber. That fiber's own reference is
+// what must carry the payload past the cascade; under the UAF oracle a missing
+// one faults at the read instead of returning a recycled page.
+#[test]
+fn region_io_completion_leak_guardfree() {
+    run_elle_script_with_args(
+        "region-io-completion-leak",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // =============================================================================
 // I/O backend selection (`--no-uring`)
 // =============================================================================
