@@ -33,6 +33,63 @@ fn decref_region_emitted_for_emit_yield() {
     );
 }
 
+/// The `(retains, releases)` a module's park is wrapped in — retains in the block
+/// the `Emit` terminates, releases in the resume block it jumps to. Counted per
+/// block rather than per function so an unrelated mint elsewhere in the body (a
+/// `Return`'s, say) cannot stand in for the park's own pair.
+fn park_borrow_ops(module: &crate::lir::LirModule) -> (usize, usize) {
+    fn in_func(func: &LirFunction) -> Option<(usize, usize)> {
+        let (park, resume_label) =
+            func.blocks
+                .iter()
+                .find_map(|b| match b.terminator.terminator {
+                    crate::lir::Terminator::Emit { resume_label, .. } => Some((b, resume_label)),
+                    _ => None,
+                })?;
+        let resume = func.blocks.iter().find(|b| b.label == resume_label)?;
+        let count = |b: &crate::lir::BasicBlock, f: fn(&LirInstr) -> bool| {
+            b.instructions.iter().filter(|i| f(&i.instr)).count()
+        };
+        Some((
+            count(park, |i| matches!(i, LirInstr::IncrefValueRegion { .. })),
+            count(resume, |i| matches!(i, LirInstr::DecrefValueRegion { .. })),
+        ))
+    }
+    in_func(&module.entry)
+        .or_else(|| module.closures.iter().find_map(in_func))
+        .expect("a function terminating in Emit")
+}
+
+#[test]
+fn park_mints_a_body_reference_for_a_borrowed_payload() {
+    // The yielding lambda closes over a value the ENCLOSING lambda allocates and
+    // releases, so it owns no reference to strand in the continuation the discard
+    // discharge stands in for. `lower_emit` mints one: a retain before the
+    // suspend and a release first in the resume block
+    // (docs/impl/region/owner.md § "Park/unpark symmetry").
+    let module = compile_to_lir("(fn () (let [x (string \"a\")] (fn () (emit :yield x))))");
+    let (retains, releases) = park_borrow_ops(&module);
+    assert!(
+        retains >= 1 && releases >= 1,
+        "a borrowed yield payload must be retained across the park and released \
+         at the resume; got {retains} retain(s) and {releases} release(s)",
+    );
+}
+
+#[test]
+fn park_mints_nothing_for_a_body_allocated_payload() {
+    // The contrast: the body allocates what it yields, so its own release is
+    // already the one the discharge stands in for. A second reference here would
+    // be stranded at every abandoned park.
+    let module = compile_to_lir("(fn () (let [x (string \"a\")] (emit :yield x)))");
+    let (retains, _) = park_borrow_ops(&module);
+    assert_eq!(
+        retains, 0,
+        "a body-allocated yield payload already carries the body's reference; \
+         minting a second strands it per abandoned park",
+    );
+}
+
 #[test]
 fn release_emitted_for_unbound_call_result() {
     // An unbound Call result — `(f "a")` whose result flows

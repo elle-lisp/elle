@@ -320,6 +320,27 @@ fn region_fiber_child_effect_uaf() {
     );
 }
 
+// Guard — a fiber body owns one reference of every value it yields
+// (docs/impl/region/owner.md § "Park/unpark symmetry"). A park's `EmitEscape`
+// retain is the DELIVERY reference the resumer's result release consumes, so what
+// a discarded fiber's discharge stands in for is the body's separate reference,
+// released by the continuation past the yield. A body-allocated payload carries
+// that reference itself; a BORROWED one — a capture, a parameter, a module-level
+// binding — carries none unless the lowerer mints it, and the discharge then
+// releases the delivery reference twice over, freeing the value under every holder
+// that outlives the fiber. This drives each borrow shape past an abandoned
+// suspended fiber and reads it afterwards — through the resume result, through
+// `fiber/value`, through a container, and through the yielding frame's own binding
+// — so an over-free faults under guardfree, with the four controls that must stay
+// clean without a mint and a growth gauge that refuses a mint-everywhere fix.
+#[test]
+fn region_fiber_yield_borrow_uaf() {
+    run_elle_script_with_args(
+        "region-fiber-yield-borrow-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — an inlined callee's body regions name the CALLEE's activation, so the
 // caller names the call's own region for the result (docs/impl/region/mechanism.md
 // § "A call's result is named by the call's own region"). The result therefore

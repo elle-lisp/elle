@@ -163,6 +163,37 @@ pub struct RegionInfo {
     /// at these regions' `decref_point` instead of `DecrefRegion(rid)`,
     /// reading the runtime region from the value at last use.
     pub call_result_regions: FxHashSet<Region>,
+    /// `Emit` (`yield`/`emit`) site HirId → the regions its payload may live in,
+    /// as the walk resolved them. Read only by the borrowed-payload pass below;
+    /// an `Emit` evaluates to the resume value rather than to its payload, so
+    /// these regions are recorded rather than returned from the walk.
+    pub emit_payload_regions: HashMap<HirId, Vec<Region>>,
+    /// `Emit` (`yield`/`emit`) site HirIds whose payload the emitting body
+    /// releases nowhere — a capture, a parameter, a module-level binding, or any
+    /// value whose whole lifetime is another activation's.
+    ///
+    /// A park's `EmitEscape` retain is the **delivery** reference: the resumer's
+    /// release of the resume result consumes it, exactly as a completing child's
+    /// `Return` mint funds the release of a terminal result. What the discard
+    /// discharge stands in for is a *different* reference — the body's own,
+    /// released by the continuation past the yield, which a fiber abandoned while
+    /// suspended never runs. A body-allocated payload carries that reference
+    /// itself; a borrowed one carries none, and the discharge would then release
+    /// the delivery reference the resumer already consumed, freeing the value
+    /// under every holder that outlives the fiber.
+    ///
+    /// So the lowerer mints one at each **suspending** site here — an
+    /// `IncrefValueRegion` before the suspend and a `DecrefValueRegion` at the
+    /// resume — making "a fiber body owns one reference of every value it yields"
+    /// true by construction (docs/impl/region/owner.md § "Park/unpark symmetry").
+    /// An error or halt emit is excluded there: both are terminal, no instruction
+    /// past either ever runs, and a terminal result is pinned by the resume's own
+    /// park retain instead. A payload whose
+    /// regions this pass cannot resolve is treated as borrowed: minting where the
+    /// body already owns one strands a reference per abandoned park (a bounded
+    /// leak), while missing one frees a live value. Pinned by
+    /// tests/elle/region-fiber-yield-borrow-uaf.lisp.
+    pub borrowed_emit_payloads: FxHashSet<HirId>,
     /// HirIds of a binding init that is a WHOLE-VALUE read of a reassigned
     /// captured cell (`is_restorable_capture_cell`) — the reader of the 1-slot
     /// container. The cell's overwrite (`capture_store_with_rebind`) decrefs the
@@ -701,6 +732,8 @@ impl RegionInfo {
             region_data: HashMap::new(),
             binding_last_use: HashMap::new(),
             call_result_regions: FxHashSet::default(),
+            emit_payload_regions: HashMap::new(),
+            borrowed_emit_payloads: FxHashSet::default(),
             counted_cell_read_sites: FxHashSet::default(),
             counted_cell_init_sites: FxHashSet::default(),
             fresh_result_regions: FxHashSet::default(),

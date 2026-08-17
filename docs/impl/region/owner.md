@@ -202,6 +202,28 @@ parked fiber's accounting symmetric with its unpark:
   an io request); a fiber that can never run again consumes it at its terminal teardown or
   free-path discharge instead (`release_discarded_signal` via `Fiber::take_parked_state`) —
   the `yield-discard`/`denied-discard` probes pin both faces.
+- **A fiber body owns one reference of every value it yields.** Two references answer for a
+  parked payload, and they answer to different consumers. The escape retain above is the
+  **delivery** reference: the resumer's compiler-emitted release of the resume result consumes
+  it, exactly as a completing child's `Return` mint funds the release of a terminal result.
+  What the discard discharge stands in for is the *other* one — the body's own, released by
+  the continuation past the suspend, which a fiber abandoned while suspended never runs. A
+  payload the body allocated carries that reference itself. A payload it merely **borrows** —
+  a capture, a parameter, a module-level binding — carries none, so the discharge would
+  release the delivery reference the resumer already consumed and free the value under every
+  holder that outlives the fiber. Dropping the discharge instead is not the alternative: it is
+  the only release a discarded fiber's stranded continuation ever gets, and withdrawing it
+  strands the body-allocated payload of every abandoned park (the `yield-discard` /
+  `denied-discard` probes measure exactly that). Which case a park is in is compiler
+  knowledge, so the compiler supplies the missing reference rather than a flag: the analysis
+  names each `Emit` whose payload its own body releases nowhere
+  (`RegionInfo::borrowed_emit_payloads` — every region the payload may live in must have its
+  `decref_point` inside the emitting lambda), and `lower_emit` mints one there, an
+  `IncrefValueRegion` before the suspend and a `DecrefValueRegion` first in the continuation.
+  The copy the release loads is parked in a local slot of its own, the operand stack being
+  what survives a suspend. Unresolvable counts as borrowed: minting where the body already
+  owns a reference strands one per abandoned park, a bounded leak, while missing one frees a
+  live value. Pinned by `tests/elle/region-fiber-yield-borrow-uaf.lisp`.
 - **A delivery into a replayed frame carries one owning reference.** A parked
   `BytecodeFrame` re-enters at its suspending call's continuation, whose
   compiler-emitted result release consumes one owning reference of the value the

@@ -138,6 +138,9 @@ struct RegionInference {
     /// Byte-copy funnel call site → the stored value's regions. See
     /// `RegionInfo::funnel_bytecopy_value_sites`.
     funnel_bytecopy_value_sites: HashMap<HirId, Vec<Region>>,
+    /// `Emit` (`yield`/`emit`) site → the regions its payload may live in. See
+    /// `RegionInfo::emit_payload_regions`.
+    emit_payload_regions: HashMap<HirId, Vec<Region>>,
     /// Pass-through funnel-store call site → the CONTAINER argument (arg0) regions,
     /// recorded only for a `-mut` store whose declared return is a mutable container
     /// (the funnel returns arg0 in place). A dispatch wrapper's mutable arm returns
@@ -302,6 +305,7 @@ impl RegionInference {
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
             funnel_bytecopy_value_sites: HashMap::new(),
+            emit_payload_regions: HashMap::new(),
             funnel_container_sites: HashMap::new(),
             funnel_passthrough_sites: HashMap::new(),
             uncounted_read_sites: HashMap::new(),
@@ -801,6 +805,7 @@ mod ownership;
 mod postdom;
 mod tree;
 mod walk;
+mod yieldborrow;
 
 pub use analyze::{analyze_regions, analyze_regions_with};
 pub use format::format_regions;

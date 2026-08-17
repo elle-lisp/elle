@@ -324,6 +324,14 @@ suspends execution and resumes in a new block. The lowerer:
 2. Creates a new block at `resume_label`
 3. Emits `LoadResumeValue` as the first instruction of the resume block
 
+A suspending emit whose payload the body releases nowhere
+(`RegionInfo::borrowed_emit_payloads`) wraps that with the park's borrow mint: an
+`IncrefValueRegion` before the terminator and a `DecrefValueRegion` first in the
+resume block, with a copy parked in a local slot of its own since the value
+register is consumed by the `Emit`. That gives a fiber body one reference of every
+value it yields, which is what a discarded fiber's discharge releases
+(docs/impl/region/owner.md § "Park/unpark symmetry").
+
 The emitter preserves stack state across the emit boundary via
 `yield_stack_state`. This ensures intermediate values computed before emit
 (e.g., the `1` in `(+ 1 (emit :yield 2) 3)`) survive into the resume block.

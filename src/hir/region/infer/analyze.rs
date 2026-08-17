@@ -247,5 +247,13 @@ pub fn analyze_regions_with(
         &transfer_call_class,
     );
 
+    // Which `Emit` sites yield a payload their own body releases nowhere, so the
+    // lowerer can mint the body's missing reference there (docs/impl/region/owner.md
+    // § "Park/unpark symmetry" — "A fiber body owns one reference of every value it
+    // yields"). Runs after every decref_point post-pass and both merge seeds: the
+    // question is where a region's release lands, and a merged child's release is
+    // its root's.
+    info.borrowed_emit_payloads = super::yieldborrow::compute_borrowed_emit_payloads(hir, &info);
+
     info
 }

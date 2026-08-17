@@ -234,7 +234,13 @@ impl RegionInference {
                 // escape's judgment (`analyze_escape`'s fiber/emit facet, projected
                 // by `region::infer::escape`), not a solver-recorded region set — so the
                 // walk here just records the operand's edges / binding flow.
-                let _ = self.walk(value);
+                // The payload's regions are recorded (never returned — an `Emit`
+                // evaluates to the resume value, not to what it delivered) so the
+                // borrowed-payload pass can ask whether this body releases any of
+                // them (docs/impl/region/owner.md § "Park/unpark symmetry" — "A
+                // fiber body owns one reference of every value it yields").
+                let payload = self.walk(value);
+                self.emit_payload_regions.insert(hir.id, payload);
                 Vec::new()
             }
 

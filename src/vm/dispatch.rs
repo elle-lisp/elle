@@ -40,11 +40,13 @@ impl VM {
             .pop()
             .expect("VM bug: Stack underflow on emit");
 
-        // The compiler emits a `DecrefRegion` at the Emit's `decref_point`
-        // HirId, which fires right after this handler
-        // returns. Incref the value's region here so the matching
-        // decref doesn't take RC to zero while the scheduler still
-        // holds the value via `fiber.signal`.
+        // The DELIVERY reference: the resumer reads this value out of
+        // `fiber.signal` as its resume result and releases it there, so the park
+        // mints the reference that release consumes — the same service a
+        // completing child's `Return` mint performs for a terminal result. The
+        // body's own reference is a separate one, released by the continuation
+        // past this suspend (docs/impl/region/owner.md § "Park/unpark symmetry" —
+        // "A fiber body owns one reference of every value it yields").
         //
         // A HALT is the one signal whose decref never fires, so it is the one
         // signal that must not be retained. The dispatch loop leaves at this

@@ -63,6 +63,80 @@ fn yield_value_region_outlives_emit_scope() {
     );
 }
 
+// ── which yields need a minted body reference ───────────────────────────────
+//
+// A park's escape retain is the DELIVERY reference the resumer's result release
+// consumes; the reference a discarded fiber's discharge stands in for is the
+// body's own, released past the suspend. So the question each `Emit` answers is
+// whether its own body releases the payload anywhere
+// (docs/impl/region/owner.md § "Park/unpark symmetry").
+
+#[test]
+fn body_allocated_yield_payload_is_not_borrowed() {
+    // The body allocates what it yields, so its `decref_point` — the Emit node
+    // itself, per `yield_value_region_outlives_emit_scope` above — sits in the
+    // emitting lambda. That release is the one the discharge stands in for; a
+    // minted second reference would be stranded at every abandoned park.
+    let (hir, _arena, _symbols, info) =
+        analyze_with_hir("(fn () (let [x (string \"a\")] (emit :yield x)))");
+    let emit = find_first_emit(&hir).expect("emit present");
+    assert!(
+        !info.borrowed_emit_payloads.contains(&emit),
+        "a body-allocated yield payload owns its own reference; \
+         borrowed_emit_payloads = {:?}, emit @{}",
+        info.borrowed_emit_payloads,
+        emit.0,
+    );
+}
+
+#[test]
+fn captured_yield_payload_is_borrowed() {
+    // The value is allocated and released by the ENCLOSING lambda, so the
+    // yielding body holds no reference of its own and the discharge would
+    // release the resumer's.
+    let (hir, _arena, _symbols, info) =
+        analyze_with_hir("(fn () (let [x (string \"a\")] (fn () (emit :yield x))))");
+    let emit = find_first_emit(&hir).expect("emit present");
+    assert!(
+        info.borrowed_emit_payloads.contains(&emit),
+        "a yield of a captured value borrows it: the emitting body releases it \
+         nowhere, so the mint is owed; borrowed_emit_payloads = {:?}, emit @{}",
+        info.borrowed_emit_payloads,
+        emit.0,
+    );
+}
+
+#[test]
+fn captured_parameter_yield_payload_is_borrowed() {
+    // The everyday production shape: a fiber body closes over the enclosing
+    // function's parameter and yields it. The parameter's own release belongs to
+    // the frame the caller handed it to, and runs whatever the fiber does.
+    let (hir, _arena, _symbols, info) = analyze_with_hir("(fn (p) (fn () (emit :yield p)))");
+    let emit = find_first_emit(&hir).expect("emit present");
+    assert!(
+        info.borrowed_emit_payloads.contains(&emit),
+        "a yield of a captured parameter borrows it; borrowed_emit_payloads = {:?}, emit @{}",
+        info.borrowed_emit_payloads,
+        emit.0,
+    );
+}
+
+#[test]
+fn own_parameter_yield_payload_is_not_borrowed() {
+    // The contrast that keeps the question about the emitting BODY rather than
+    // about the syntax: a body yielding its own parameter holds the reference the
+    // caller moved in, and releases it at that parameter's last use — past the
+    // suspend, which is exactly the release the discharge stands in for.
+    let (hir, _arena, _symbols, info) = analyze_with_hir("(fn (p) (emit :yield p))");
+    let emit = find_first_emit(&hir).expect("emit present");
+    assert!(
+        !info.borrowed_emit_payloads.contains(&emit),
+        "a body owns the parameter it was handed; borrowed_emit_payloads = {:?}, emit @{}",
+        info.borrowed_emit_payloads,
+        emit.0,
+    );
+}
+
 #[test]
 fn funnel_containment_recorded_for_push() {
     // `%array-push` compiles as a native funnel Call: the store is runtime-counted,

@@ -371,6 +371,28 @@ impl<'a> Lowerer<'a> {
         // emitted here to mark the boundary.
         let value_reg = self.lower_expr(value)?;
 
+        // A fiber body owns one reference of every value it yields
+        // (docs/impl/region/owner.md § "Park/unpark symmetry"). The park's own
+        // `EmitEscape` retain is the DELIVERY reference — the resumer's release of
+        // the resume result consumes it — so what a discarded fiber's discharge
+        // stands in for is the body's separate reference, released by the
+        // continuation past this suspend. Where the payload is a borrow this body
+        // releases nowhere, that reference does not exist until it is minted here.
+        //
+        // Only a SUSPENDING signal parks a continuation to release it in, and only
+        // a non-terminal parked signal reaches the discharge: an error leaves
+        // through the unwind path and a halt promotes the fiber to `:dead`, so
+        // neither instruction below this one ever runs and a reference minted for
+        // it would be stranded, one per emit. Both are terminal, and a terminal
+        // result's payload is pinned by the resume's own park retain instead
+        // (`incref_signal_region`, `with_child_fiber` step 6a).
+        let suspends = !signal.intersects(crate::value::SIG_ERROR)
+            && !signal.intersects(crate::value::SIG_HALT);
+        let borrow_slot = self
+            .current_hir_id
+            .filter(|id| suspends && self.region_info.borrowed_emit_payloads.contains(id))
+            .map(|_| self.retain_emit_payload(value_reg));
+
         let resume_label = self.fresh_label();
 
         self.terminate(Terminator::Emit {
@@ -381,10 +403,45 @@ impl<'a> Lowerer<'a> {
 
         self.start_new_block(resume_label);
 
+        // The balancing release, first in the continuation the resume replays —
+        // and, for a fiber nobody resumes again, the one the discharge stands in
+        // for. The slot is written on every execution of this `Emit`, so a park
+        // inside a loop reads its own iteration's value and needs no nil-stamp.
+        if let Some(slot) = borrow_slot {
+            let val_reg = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+            self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+        }
+
         let dst = self.fresh_reg();
         self.emit(LirInstr::LoadResumeValue { dst });
 
         Ok(dst)
+    }
+
+    /// Retain the payload of an `Emit` whose body owns no reference of it, and
+    /// park a copy in a local slot the continuation can release it through.
+    ///
+    /// The operand stack is saved and restored across the suspend, and locals live
+    /// at its base (`Code::reserved_locals`), so a slot is the one route to the
+    /// value after the resume — the value register itself is consumed by the
+    /// `Emit`. The slot is private to this site, so nothing else can be reading it
+    /// when the release loads it. `IncrefValueRegion` peeks rather than consumes,
+    /// leaving `value_reg` live for the terminator; the round-trip through the slot
+    /// restores the emitter's stack entry for it.
+    fn retain_emit_payload(&mut self, value_reg: Reg) -> u16 {
+        self.emit(LirInstr::IncrefValueRegion { src: value_reg });
+        let slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
+        self.emit(LirInstr::StoreLocal {
+            slot,
+            src: value_reg,
+        });
+        self.emit(LirInstr::LoadLocal {
+            dst: value_reg,
+            slot,
+        });
+        slot
     }
 
     pub(super) fn lower_match(

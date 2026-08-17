@@ -65,14 +65,21 @@ pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
     bits.is_empty() || bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT)
 }
 
-/// Release the one park escape retain a DISCARDED fiber's non-terminal parked
-/// signal carries — `EmitEscape` for a `(yield v)`/`(emit …)` value,
-/// `SuspendEscape` for a yielding io request or capability-denial payload. The
-/// retain's symmetric release lives on the resume path (the resumed body's own
-/// pending release, or [`release_parked_signal`] for an io request); a fiber
-/// that can never run again reaches neither, so its terminal teardown
+/// Release the one reference a DISCARDED fiber's non-terminal parked signal
+/// leaves stranded in its continuation — the payload reference the emitting body
+/// holds across the suspend (`EmitEscape` for a `(yield v)`/`(emit …)` value,
+/// `SuspendEscape` for a yielding io request or capability-denial payload). A
+/// resumed body releases it itself, past the suspend; a fiber that can never run
+/// again reaches no such release, so its terminal teardown
 /// (`release_fiber_owned`) and the region free path's fiber discharge
-/// (`RegionStore::teardown_set`) release it here instead. Distinct from
+/// (`RegionStore::teardown_set`) run one here instead.
+///
+/// Exactly ONE reference is stranded per park, which is why one decref answers
+/// for it: a yielded payload's *delivery* reference is separately consumed by the
+/// resumer's release of the resume result, and a payload the body borrows rather
+/// than allocates is given a body reference of its own at the `Emit`
+/// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A fiber body owns one
+/// reference of every value it yields"). Distinct from
 /// [`release_parked_signal`], whose io gate and shared-region skip are
 /// resume-path concerns: at a discard there is no resume value and no body to
 /// double-release against (docs/impl/region/owner.md § "Park/unpark symmetry").
@@ -152,9 +159,10 @@ pub(crate) fn release_displaced_terminal_signal(
 /// caller (a use-after-free).
 ///
 /// Gated on `SIG_IO`. A user `(yield v)` / `(emit …)` value is **body-owned** —
-/// its region is released by the fiber body's own `DecrefRegion`, not by a
-/// caller's `DecrefValueRegion` — so releasing it here would double-free; only an
-/// io op's request is the orphaned, transient native-call result this balances.
+/// the resumed body itself releases the reference it held across the suspend, and
+/// the resumer's release of the resume result consumes the delivery reference —
+/// so releasing it here would double-free; only an io op's request is the
+/// orphaned, transient native-call result this balances.
 /// A no-op for a non-io signal, an immediate / `None` value, or a region-0 value.
 pub(crate) fn release_parked_signal(
     heap: &mut crate::value::fiberheap::FiberHeap,

@@ -100,6 +100,10 @@ impl RegionInference {
             // (the tight, binding-resolved last-use per region). Empty here.
             binding_last_use: HashMap::new(),
             call_result_regions: self.call_result_regions,
+            emit_payload_regions: self.emit_payload_regions,
+            // Populated by the borrowed-payload pass in `analyze_regions_with`,
+            // which reads the final `region_data` and merge forest. Empty here.
+            borrowed_emit_payloads: rustc_hash::FxHashSet::default(),
             counted_cell_read_sites: self.counted_cell_read_sites,
             // Recorded by the reassign gate, which runs after `build_info`.
             counted_cell_init_sites: rustc_hash::FxHashSet::default(),
