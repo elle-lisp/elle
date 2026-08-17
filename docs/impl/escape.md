@@ -41,10 +41,11 @@ reason for the verdict:
   complement, and the two together are what let a consumer say "this facet and no
   other": the full set alone cannot, because a binding on both the return and the
   fiber frontiers answers `true` to both of the queries above. Read by the
-  frame-exit release, whose whole question is whether the return facet is the sole
-  refusal and can therefore be replaced by the tail callee's own counted edge
-  ([region/mechanism.md](region/mechanism.md) § "The callee's return mint, and the
-  edge that funds the gap").
+  frame-held admission, whose whole question is whether the return facet is the sole
+  refusal — in which case it is no refusal, since a tail callee either counts the
+  region or cannot mint against it
+  ([region/mechanism.md](region/mechanism.md) § "The callee's return mint, and why
+  the point owes it nothing").
 
 ## The four facets
 
@@ -156,30 +157,28 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     [region/bindings.md](region/bindings.md); read per binding, never by projecting
     a returned region onto a cell, since `binding_source_regions` is "where the
     value points," not "where it lives");
-  - the **sole-holder admission** (`regions::escape::sole_frame_held_regions`) the
+  - the **frame-held admission** (`regions::escape::frame_held_regions`) the
     branch-arm release window and the lowerer's frame-exit release share: both make
     a release fire on a path where none fired before, so both must know this frame
-    holds the region's one reference. It reads `binding_escapes_activation` per
-    holder plus the frontiers' atomless site halves — and, unlike the merge gate
+    holds the region's one reference. It reads `binding_escapes_beyond_return` per
+    holder plus the fiber frontier's atomless site half — and, unlike the merge gate
     above, it does **not** consult the structural capture-graph, because a closure's
     hold on what it captures is a counted (or owning) edge rather than an uncounted
-    borrow; capture by a closure that *escapes* is already an escape facet
-    ([region/mechanism.md](region/mechanism.md) § "Lexical capture is not a second
-    holder to fear"). It also refuses a **mutated** route, which is not an escape
-    fact at all but the release-route one compensation makes — so it is asked of the
-    one binding whose slot the release loads (the binding whose init allocated the
-    region, or the parameter the prologue recorded), never of every holder, and an
-    env cell's `DecrefCellRegion`, which names the box no `assign` repoints, is
-    exempt ([region/mechanism.md](region/mechanism.md) § "A mutated holder poisons
-    its value route, not its cell box");
-  - the **return-funded admission** (`regions::escape::return_frame_held_regions`)
-    the frame-exit release adds on top of it, for a region whose *only* refusal is
-    the return facet (`binding_escapes_beyond_return` per holder, plus the fiber
-    frontier's atomless half). It is not sufficient on its own: the lowerer pairs
-    it with the tail callee's captured-holder edge at each relocation point, which
-    is the counted reference standing between the frame's release and the callee's
-    return mint ([region/mechanism.md](region/mechanism.md) § "The callee's return
-    mint, and the edge that funds the gap").
+    borrow; capture by a closure escaping *beyond the return facet* is already an
+    escape facet ([region/mechanism.md](region/mechanism.md) § "Lexical capture is
+    not a second holder to fear"). The **return** facet rides along rather than refusing: the
+    caller does read such a region afterwards, through the tail callee's return
+    mint, but that callee reaches a value this frame owns as an operand or through
+    its captured environment and by no other route, so it either counts the region
+    or cannot mint against it ([region/mechanism.md](region/mechanism.md) § "The
+    callee's return mint, and why the point owes it nothing"). It also refuses a
+    **mutated** route, which is not an escape fact at all but the release-route one
+    compensation makes — so it is asked of the one binding whose slot the release
+    loads (the binding whose init allocated the region, or the parameter the
+    prologue recorded), never of every holder, and an env cell's
+    `DecrefCellRegion`, which names the box no `assign` repoints, is exempt
+    ([region/mechanism.md](region/mechanism.md) § "A mutated holder poisons its
+    value route, not its cell box");
 - **The lowerer** (`lir/lower`) reads `lambda_escapes_definition` /
   `binding_escapes_activation` in `control/call.rs::tail_callee_defers_release`, the
   escape half of the per-call adopt decision (a per-call callee closure that dies
@@ -192,9 +191,9 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
   `escapes_fiber` alone. Its region has no other release channel at all, so the full
   activation escape would re-strand it — the store and capture facets are containment
   relations, and a closure a local container holds dies *with* the activation. The
-  return facet is admitted too, and unlike the frame-exit release's return-funded
-  admission it needs no funding edge: this release runs at the recursion's completion,
-  *after* the callee's return mint, so there is no gap to span
+  return facet is admitted too, and for a reason of its own rather than the frame-exit
+  release's: this release runs at the recursion's completion, *after* the callee's
+  return mint, so there is no gap to span
   ([selfrec.md](selfrec.md) § "The deferral's escape gate is the fiber frontier
   alone"). Only the fiber facet hands the closure to a holder the compiler did not
   place, so only it refuses.

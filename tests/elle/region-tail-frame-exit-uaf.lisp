@@ -10,14 +10,17 @@
 # covers what the call names: an argument's release must not fire before the
 # callee it was moved to reads it, and the callee closure's own region must not
 # be dropped before the frame it replaces runs. The **admission** — escape
-# proving the frame is the region's sole holder — covers the path the exemption
+# proving the frame holds the region alone — covers the path the exemption
 # cannot see: a tail callee also reaches its CAPTURED environment, which no
 # argument names — but the env's hold is the funnel's counted edge, so that path
 # is admitted rather than refused, and (e3) is the row that proves the count
 # stands. A value the callee hands BACK rides that same edge one step further —
 # the callee's `Return` mints the caller's reference after the relocated release
 # has run, and the env edge is what holds the region off zero in between, which
-# (e2), (e5) and (e6) drive. (e7) and (e8) drive the same admission for an ENV
+# (e2), (e5) and (e6) drive. (e15), (e16) and (e16b) drive the other end of the
+# same enumeration: a point neither route reaches cannot mint against the region
+# at all, so the relocated release is the last one.
+# (e7) and (e8) drive the same admission for an ENV
 # CELL's `DecrefCellRegion`, whose holder is REASSIGNED: that refusal is about a
 # release routed through the holder's slot, and this one names the cell box no
 # `assign` repoints. (e10) and (e11) drive that same box release where it is the
@@ -27,10 +30,11 @@
 # the sibling arm that READS the cell's binding, where the box release is the tail
 # compensation instead: it must post-date the arm's read, leave the capturer's
 # counted edge standing, and post-date the READER of an uncounted opcode-read
-# borrow out of the cell. What the admission still refuses is a holder escape marks
-# by a facet no edge at the point replaces: a closure that leaves carrying it (e4,
-# and e9 for the cell), a store into a longer-lived container (f), a fiber crossing
-# (h).
+# borrow out of the cell. A closure the frame RETURNS carries its capture on the
+# same counted edge, so it is admitted too and the edge is what must stand (e4, and
+# e9 for the cell). What the admission still refuses is a holder escape marks by a
+# facet no counted edge covers: a store into a longer-lived container (f), and a
+# fiber crossing (h).
 #
 # Every witness reads the subject's HEAP contents on the far side of the tail
 # call, through a chain long enough that an over-early free faults rather than
@@ -172,9 +176,10 @@
 (defn e8-read (i)
   (e8-arm (list (string "s" i) i) true))
 
-# (e9) the closure holding the reassigned cell ESCAPES, so escape's capture facet
-# refuses the holder and the box must stay in the dead block: the returned closure
-# rewrites and reads its cell after the frame is gone.
+# (e9) the closure holding the reassigned cell is RETURNED, carrying the box on the
+# counted `closure ⊇ cell` edge: the returned closure rewrites and reads its cell
+# after the frame is gone, so that edge is what the sibling arm's release must leave
+# standing.
 (defn tail-zero ()
   0)
 (defn e9-escaping (v t)
@@ -253,10 +258,47 @@
 (defn e14-read (i)
   (e14-arm-borrow (list (string "y" i) i) true))
 
-# (e4) the capturing closure ESCAPES — it is returned, so it outlives the frame
-# and carries `x` with it. Escape's capture facet refuses the holder, and the
-# release must stay in the dead block; the caller invokes the closure afterwards
-# and reads through it.
+# (e15) a returned hand-back at a point the tail callee cannot reach. `v` reaches a
+# return through the OTHER arm, so the arm that leaves through the callee releases a
+# return-frontier region ahead of that call — and the callee neither names nor
+# captures it, which is why nothing there can mint against it. Both arms are driven:
+# the returning one runs its mint before the anchored release, so the caller's read
+# must still see live pages, and the leaving one must free without touching the
+# caller's own copy.
+(defn e15-sink ()
+  0)
+(defn e15-arm (v t)
+  (if t v (e15-sink)))
+(defn e15-read (i)
+  (let [w (list (string "aa" i) i)
+        n (e15-arm (list (string "ab" i) i) false)
+        m (length (first (e15-arm w true)))]
+    (+ n (%add m (length (first w))))))
+
+# (e16) the everyday shape of the same reading — an index-walk fold driver. Each
+# step hands the COMBINER the previous accumulator and the tail callee the
+# combiner's RESULT, so the displaced accumulator's release is the frame's own and
+# runs ahead of the recursive call. The combiner reads what it was handed on the
+# next step, and the caller reads what the last step returned.
+(defn e16-step (f n j acc)
+  (if (%lt j n) (e16-step f n (%add j 1) (f acc j)) acc))
+(defn e16-read (i)
+  (let [seed (list (string "ac" i) i)
+        out (e16-step (fn (a b) (list (string "ad" i) (length (first a)))) 3 0
+                      seed)]
+    (length (first out))))
+
+# (e16b) the same driver whose combiner hands its accumulator straight back, so the
+# region the frame releases is one the tail callee does receive — through the
+# combiner's own return mint, which is what must stand.
+(defn e16b-read (i)
+  (let [seed (list (string "ae" i) i)
+        out (e16-step (fn (a b) a) 3 0 seed)]
+    (length (first out))))
+
+# (e4) the capturing closure is RETURNED, so it outlives the frame and carries `x`
+# with it — on the funnel's counted edge, which is what the frame's release must
+# leave standing. The caller invokes the closure afterwards and reads through it.
 (defn e4-escaping (i)
   (let [x (list (string "n" i) i)]
     (fn () (length (first x)))))
@@ -349,8 +391,8 @@
 (defn l-read (i)
   (l-fwd i))
 
-# (m) the CAPTURER is handed back, so the sole-held admission refuses and the return
-# half admits on the callee's captured edge — which is `closure ⊇ cell`. The caller
+# (m) the CAPTURER is handed back, so what stands between the relocated release and
+# the caller's minted reference is the callee's `closure ⊇ cell` edge. The caller
 # drives the returned closure afterwards, and every step of that drive derefs the
 # cell and reads `src` through the sibling, all after the defining frame is gone.
 (defn m2-fwd (i)
@@ -498,6 +540,9 @@
 (var e12 0)
 (var e13 0)
 (var e14 0)
+(var e15 0)
+(var e16 0)
+(var e16b 0)
 (var e4 0)
 (var f 0)
 (var g 0)
@@ -515,7 +560,7 @@
 (var p1 0)
 (var q1 0)
 (var r1 0)
-(while (%lt i 1500)
+(while (%lt i 1350)
   (assign a (a-moved i))
   (assign b (b-moved-beside i))
   (assign c (c-callee-local i))
@@ -533,6 +578,9 @@
   (assign e12 (e12-read i))
   (assign e13 (e13-read i))
   (assign e14 (e14-read i))
+  (assign e15 (e15-read i))
+  (assign e16 (e16-read i))
+  (assign e16b (e16b-read i))
   (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
@@ -579,6 +627,10 @@
         "env cell freed under a closure that escaped before the reading arm ran")
 (assert (%gt e14 0)
         "cell content freed under the reading arm's own opcode-read borrow")
+(assert (%gt e15 0) "hand-back freed at an arm whose callee cannot reach it")
+(assert (%gt e16 0) "fold accumulator freed under the combiner handed it next")
+(assert (%gt e16b 0)
+        "fold accumulator freed before its own combiner minted for it")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")

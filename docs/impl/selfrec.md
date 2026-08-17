@@ -120,7 +120,7 @@ argument and a sibling consumes it.
   body is a frame-replacing tail call that is dead code, and the two rows above say which
   channel supplies it: the deferral for a member callee, and otherwise the relocation,
   which carries the scope-end release back ahead of the `TailCall` under its own
-  sole-holder admission ([region/mechanism.md](region/mechanism.md) § "A release past a
+  frame-held admission ([region/mechanism.md](region/mechanism.md) § "A release past a
   frame-replacing tail call is not a release"). `lower_letrec` marks a cell-free
   self-recursive member `stranded_self_bindings` when the body tail-calls it, reading the
   body's tail callees rather than asking whether the body IS a tail call
@@ -209,7 +209,7 @@ right.
 
 This is the same "the retain on this node funds this release" argument the frame-exit
 relocation makes for a returned region ([region/mechanism.md](region/mechanism.md) § "The
-callee's return mint, and the edge that funds the gap"), with the ordering the other way
+callee's return mint, and why the point owes it nothing"), with the ordering the other way
 round and therefore nothing to bridge: that relocation moves a release *ahead* of the call
 and so needs a captured edge to hold the region off zero until the mint lands; the deferral
 runs *after* the mint and needs none.

@@ -120,16 +120,14 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
     out
 }
 
-/// The two frame-held sets ([`FrameHeld`]), split on whether the **return** facet
-/// counts as a refusal: `sole` is the regions whose every holder binding leaves
-/// this activation by **no** facet — non-escaping, with an unmutated release route,
-/// and absent from the return/fiber frontiers' atomless site halves — and
-/// `return_funded` is the same reading with the return facet alone allowed. A
-/// region with no holder binding at all offers nothing to judge and is refused by
-/// both — except a binding's compiled forward CELL, whose holders are that
-/// binding's one indirection out and which therefore carries its verdict, projected
-/// alongside the binding's own regions below (region/mechanism.md § "A compiled
-/// capture cell is frame-held exactly as its binding is").
+/// The regions this frame holds alone for as long as it lives: every holder binding
+/// leaves the activation by the **return** facet at most, the release route is
+/// unmutated, and the region is absent from the fiber frontier's atomless site half.
+/// A region with no holder binding at all offers nothing to judge and is refused —
+/// except a binding's compiled forward CELL, whose holders are that binding's one
+/// indirection out and which therefore carries its verdict, projected alongside the
+/// binding's own regions below (region/mechanism.md § "A compiled capture cell is
+/// frame-held exactly as its binding is").
 ///
 /// This is the **count** question a *placement* argument cannot answer, and the one
 /// admission every mechanism that makes a release fire where none fired before must
@@ -138,6 +136,15 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// uncounted borrow in a parked frame, and the release frees a region that frame
 /// still resolves through its slot (region/generations.md § "Uncounted-borrow
 /// check"). Escape is the sole authority for it (docs/impl/escape.md).
+///
+/// **The return facet rides along rather than refusing.** Something does read such a
+/// region after the frame — the caller, through a reference the tail callee's own
+/// `Return` mints, which fires after a release relocated ahead of that call. But the
+/// callee reaches a value this frame owns as an **operand** or through its
+/// **captured environment** and by no other route, so it either holds a counted (or
+/// owning) edge across that gap or cannot name the region at all, in which case its
+/// `Return` mints nothing against it (region/mechanism.md § "The callee's return
+/// mint, and why the point owes it nothing").
 ///
 /// **Lexical capture is deliberately not a refusal** (region/mechanism.md §
 /// "Lexical capture is not a second holder to fear"). A closure's environment does
@@ -149,9 +156,9 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// member's RC is frozen and every decref is a structural no-op. A counted or
 /// owning edge is not the uncounted borrow this predicate exists to protect, so
 /// the frame's own release still drops the only reference it owns. Capture by a
-/// closure that *escapes* is a different matter and is already covered:
-/// `binding_escapes_activation` folds in escape's capture facet, which propagates
-/// an escaping closure's verdict to every binding it captures. Contrast
+/// closure that escapes **beyond the return facet** is a different matter and is
+/// already covered: `binding_escapes_beyond_return` folds in escape's capture facet,
+/// which propagates such a closure's verdict to every binding it captures. Contrast
 /// [`captured_bindings`], the structural graph the *merge* gate reads — merging
 /// changes where a value lives, so it needs raw reachability rather than a count.
 ///
@@ -169,61 +176,43 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// backstops (`lir::lower::regiondecref::emit_decref_for_region`).
 ///
 /// Two consumers, deliberately sharing one predicate: the branch-arm release window
-/// (`region::infer::analyze::decref`) and the frame-exit release the lowerer performs at a
-/// tail call (`RegionInfo::sole_frame_held_regions`, region/mechanism.md § "A
-/// release past a frame-replacing tail call is not a release"). Both read both
-/// halves — the return half needs the per-point funding edge either way, and the
-/// window asks it of the arms rather than of its own anchor.
-pub(super) fn sole_frame_held_regions(
+/// (`region::infer::analyze::decref`) and the frame-exit release the lowerer performs
+/// at a tail call (`RegionInfo::frame_held_regions`, region/mechanism.md § "A
+/// release past a frame-replacing tail call is not a release").
+pub(super) fn frame_held_regions(
     escape: &crate::hir::EscapeInfo,
     arena: &crate::hir::arena::BindingArena,
     info: &RegionInfo,
     binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
     binder_init_sites: &HashMap<Binding, Option<HirId>>,
-) -> FrameHeld {
-    let all = shared_seed_regions(escape, info);
-    let fiber_only = fiber_frontier_regions(escape, info);
+) -> FxHashSet<Region> {
+    let fiber = fiber_frontier_regions(escape, info);
     let poisoned = mutated_route_regions(arena, info, binding_regions, binder_init_sites);
     let mut held: FxHashSet<Region> = FxHashSet::default();
     let mut refused: FxHashSet<Region> = FxHashSet::default();
-    let mut refused_beyond_return: FxHashSet<Region> = FxHashSet::default();
     for (b, regions) in binding_regions {
-        let escapes = escape.binding_escapes_activation(*b);
         let escapes_beyond_return = escape.binding_escapes_beyond_return(*b);
         // The binding's compiled forward CELL rides its binding's verdict. A binding
         // names the closure region its cell points AT, never the cell's own, so a
-        // cell region has no holder here and would be refused by both sets for want
-        // of anything to judge — while its holders are in fact this binding's
-        // holders one indirection out: the frame's own slot, plus one counted
-        // `closure ⊇ cell` edge per capturer. No route reaches the cell that does
-        // not reach the binding (a `DerefCell` read goes THROUGH the cell), so
-        // reading it under the same facets and the same mutated-route test asserts
-        // nothing new; it names a region the predicate could not see. An ambiguous
-        // multi-cell binding yields `None` and stays refused, keeping this in step
-        // with the `AdoptCellRegion` emit.
+        // cell region has no holder here and would be refused for want of anything
+        // to judge — while its holders are in fact this binding's holders one
+        // indirection out: the frame's own slot, plus one counted `closure ⊇ cell`
+        // edge per capturer. No route reaches the cell that does not reach the
+        // binding (a `DerefCell` read goes THROUGH the cell), so reading it under
+        // the same facets and the same mutated-route test asserts nothing new; it
+        // names a region the predicate could not see. An ambiguous multi-cell
+        // binding yields `None` and stays refused, keeping this in step with the
+        // `AdoptCellRegion` emit.
         let cell = info.single_cell_region_of(*b);
         for &r in regions.iter().chain(cell.iter()) {
             held.insert(r);
-            let route_poisoned = poisoned.contains(&r);
-            if route_poisoned || escapes {
+            if poisoned.contains(&r) || escapes_beyond_return {
                 refused.insert(r);
-            }
-            if route_poisoned || escapes_beyond_return {
-                refused_beyond_return.insert(r);
             }
         }
     }
-    FrameHeld {
-        sole: held
-            .iter()
-            .copied()
-            .filter(|r| !refused.contains(r) && !all.contains(r))
-            .collect(),
-        return_funded: held
-            .into_iter()
-            .filter(|r| !refused_beyond_return.contains(r) && !fiber_only.contains(r))
-            .collect(),
-    }
+    held.retain(|r| !refused.contains(r) && !fiber.contains(r));
+    held
 }
 
 /// Regions whose value-routed release would load a slot the program repoints
@@ -275,60 +264,28 @@ fn mutated_route_regions(
     out
 }
 
-/// The two frame-held sets, computed together because they differ only in whether
-/// the **return** facet counts as a refusal.
-pub(super) struct FrameHeld {
-    /// No facet at all: the frame holds the region's one reference and nothing
-    /// reads it once the frame is gone, so a release needs no funding.
-    pub(super) sole: FxHashSet<Region>,
-    /// The return facet and no other. Something DOES read the region after the
-    /// frame — the caller, through a reference the callee's `Return` mints — so
-    /// this set is a precondition, never an admission on its own wherever the
-    /// release runs BEFORE that mint: its consumers pair it with the tail callee's
-    /// captured-holder edge at each relocation point, which is the count standing
-    /// between the frame's release and the mint (region/mechanism.md § "The
-    /// callee's return mint, and the edge that funds the gap"). A merge in this
-    /// frame is not such a point — every mint its arms ran has already fired there
-    /// — so the branch-arm window asks the pair only of the arms that leave through
-    /// a callee (§ "The return facet is a fact about the arms, not about the
-    /// merge"). A superset of `sole`.
-    pub(super) return_funded: FxHashSet<Region>,
-}
-
 /// What a frame-replacing tail call's own callee tells the lowerer about the
 /// releases and mints around it ([`crate::hir::region::TailCalleeFacts`]).
 ///
-/// Both facts are per CALL rather than per region or per function, because both
-/// are claims about *this* callee: that it keeps a region alive across its own
-/// return mint (which a sibling arm's callee, capturing nothing, does not), and
-/// how many of the arguments it turns into owned parameters.
+/// Per CALL rather than per region or per function, because it is a claim about
+/// *this* callee: how many of the arguments it turns into owned parameters.
 ///
 /// Only a callee this compilation can see qualifies: a `Var` naming a
 /// `Let`/`Letrec`/`Define`-bound lambda in this unit. An unresolvable callee is
 /// simply absent, and every consumer takes its conservative branch there.
 pub(super) fn tail_callee_facts(
     hir: &Hir,
-    info: &RegionInfo,
     frame_replacing_tail_calls: &FxHashSet<HirId>,
-    binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
 ) -> HashMap<HirId, crate::hir::region::TailCalleeFacts> {
     let mut lambda_of: HashMap<Binding, LambdaFacts> = HashMap::new();
     collect_lambda_facts(hir, &mut lambda_of);
     let mut out = HashMap::new();
-    collect_call_facts(
-        hir,
-        info,
-        frame_replacing_tail_calls,
-        binding_regions,
-        &lambda_of,
-        &mut out,
-    );
+    collect_call_facts(hir, frame_replacing_tail_calls, &lambda_of, &mut out);
     out
 }
 
 /// What a lambda-bound binding's lambda contributes at a call to it.
 struct LambdaFacts {
-    captures: Vec<Binding>,
     /// Parameters that take one argument each — `params` less the rest parameter,
     /// which collects the overflow into a fresh list instead.
     fixed_params: usize,
@@ -340,14 +297,10 @@ struct LambdaFacts {
 fn collect_lambda_facts(h: &Hir, out: &mut HashMap<Binding, LambdaFacts>) {
     let mut record = |b: Binding, init: &Hir| {
         if let HirKind::Lambda {
-            captures,
-            params,
-            rest_param,
-            ..
+            params, rest_param, ..
         } = &init.kind
         {
             out.entry(b).or_insert_with(|| LambdaFacts {
-                captures: captures.iter().map(|c| c.binding).collect(),
                 fixed_params: params.len() - usize::from(rest_param.is_some()),
             });
         }
@@ -366,9 +319,7 @@ fn collect_lambda_facts(h: &Hir, out: &mut HashMap<Binding, LambdaFacts>) {
 
 fn collect_call_facts(
     h: &Hir,
-    info: &RegionInfo,
     frame_replacing_tail_calls: &FxHashSet<HirId>,
-    binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
     lambda_of: &HashMap<Binding, LambdaFacts>,
     out: &mut HashMap<HirId, crate::hir::region::TailCalleeFacts>,
 ) {
@@ -378,41 +329,13 @@ fn collect_call_facts(
                 out.insert(
                     h.id,
                     crate::hir::region::TailCalleeFacts {
-                        // A `needs_capture` binding is captured THROUGH its cell, so
-                        // the counted edge this callee holds is `closure ⊇ cell` and
-                        // names the cell region as well as the closure region the
-                        // cell points at. Without the cell the return half admits
-                        // the captured closure and strands the cell holding it — one
-                        // region short of the cascade.
-                        capture_funded: facts
-                            .captures
-                            .iter()
-                            .flat_map(|c| {
-                                binding_regions
-                                    .get(c)
-                                    .into_iter()
-                                    .flatten()
-                                    .copied()
-                                    .chain(info.single_cell_region_of(*c))
-                            })
-                            .map(|r| info.merged_root(r))
-                            .collect(),
                         fixed_params: facts.fixed_params,
                     },
                 );
             }
         }
     }
-    h.for_each_child(|c| {
-        collect_call_facts(
-            c,
-            info,
-            frame_replacing_tail_calls,
-            binding_regions,
-            lambda_of,
-            out,
-        )
-    });
+    h.for_each_child(|c| collect_call_facts(c, frame_replacing_tail_calls, lambda_of, out));
 }
 
 /// The binding a callee position names, looking through the `DerefCell` wrapper

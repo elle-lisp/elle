@@ -121,15 +121,6 @@ struct TailExitHoist {
     /// argument's is the ownership move the calling convention rests on, and the
     /// callee's belongs to the activation that takes it over.
     exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
-    /// Regions this call's callee closure holds through its captured environment,
-    /// canonicalized through the merge forest
-    /// (`TailCalleeFacts::capture_funded`). That counted edge spans the gap
-    /// between a release relocated ahead of the `TailCall` and the callee's own
-    /// return mint, so it is what admits a region whose only escape facet is the
-    /// return one (docs/impl/region/mechanism.md § "The callee's return mint, and
-    /// the edge that funds the gap"). Empty for a callee whose captures this
-    /// compilation cannot see, which then funds nothing.
-    capture_funded: rustc_hash::FxHashSet<crate::hir::region::Region>,
 }
 
 /// Where a relocation point lives, and with it which of the two placements

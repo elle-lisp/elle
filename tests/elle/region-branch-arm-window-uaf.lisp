@@ -5,13 +5,14 @@
 # The close moves a region's single release from inside one arm to the branch's
 # consuming node (docs/impl/region/mechanism.md § "A release inside one arm is
 # not a release on the other arms"). Moving a release LATER can only over-keep —
-# but only while the frame is the region's sole holder when it runs, and only
+# but only while the frame holds the region alone when it runs, and only
 # while the anchor is a point the arm actually reaches. The ways that fails all
 # fault here, and each is a shape the admission must DECLINE, a boundary must
 # stop, or a counted edge must survive: the arm handed the value to a container /
 # a closure / its caller, so a second holder exists the moved release must leave
-# standing — and where that holder ESCAPES, the admission refuses the window
-# outright; the arm re-allocates per iteration of a nested loop, so
+# standing — and where that holder crosses a frontier no counted edge covers, the
+# admission refuses the window outright; the arm re-allocates per iteration of a
+# nested loop, so
 # one release cannot cover N; the arm's releases belong to another frame; and the
 # arm parked a fiber that resolves the region through its own activation map after
 # the branch. A wrongly-admitted window frees a live region and the read below
@@ -90,10 +91,10 @@
             _ (fn () 0))]
     (f)))
 
-# (d2) the same capture, by a closure that ESCAPES — it is returned, so it
-# outlives this activation and carries `v` with it. Escape's capture facet refuses
-# the holder, the in-arm release stands, and the caller's later invocation reads
-# through it.
+# (d2) the same capture, by a closure the frame HANDS BACK — it outlives this
+# activation and carries `v` with it, on the funnel's counted edge. The release
+# moves to the branch like any other, and that edge is what the caller's later
+# invocation reads through.
 (defn w-escaping (v t)
   (match t
     :a

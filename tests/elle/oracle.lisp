@@ -215,19 +215,22 @@
 # dissolves, so they are CLOSED dissolution controls and a regression to open must
 # trip the gate loudly instead of being absorbed as F1a scratch that is no longer
 # there. The un-fused op's scratch keeps its F1a declaration through `wrap-map`.
-# The byte-family `concat`/`append` shapes — `concat-while`, `stdlib-concat`,
-# `yield-concat`, `string-outer`, `append-outer` — are CLOSED controls now, and
-# undeclared for the same reason `rest-array-copy` is: their strand was `push-all`'s
-# bulk arm returning the accumulator its sibling arm's walker captures, which the
-# branch-arm window now anchors (docs/impl/region/mechanism.md § "The return facet
-# is a fact about the arms, not about the merge"). A regression to open must trip
-# the completeness gate loudly rather than be absorbed back into F1a.
+# The `concat`/`append`/`fold` shapes — `concat`, `concat-while`, `stdlib-concat`,
+# `stdlib-fold`, `yield-concat`, `string-outer`, `append-outer` — are CLOSED controls
+# now, and undeclared for the same reason `rest-array-copy` is. Two readings of one
+# window close them: `push-all`'s bulk arm returns the accumulator its sibling arm's
+# walker captures, which the branch-arm window anchors (docs/impl/region/mechanism.md
+# § "The return facet costs the merge nothing"), and the index-walk fold driver
+# returns its accumulator from the base arm while the recursive arm hands the callee
+# the COMBINER's result — a point that cannot reach the accumulator and so owes it no
+# funding edge (§ "The callee's return mint, and why the point owes it nothing"). A
+# regression to open must trip the completeness gate loudly rather than be absorbed
+# back into F1a.
 # `group-by`, `frequencies`, `merge` and `each-list` are CLOSED controls too, under
 # a different rule of the same window: one binding owns a region's release ROUTE, so
 # a cursor an arm walks the input with refuses nothing (mechanism.md § "A mutated
 # holder poisons its value route, not its cell box").
-(declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct" "concat"
-                    "pipeline" "zip-tower"])
+(declare-root :f1a ["reduce" "fold" "wrap-map" "distinct" "pipeline" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -453,7 +456,7 @@
 # where the cell is minted. `c` is a captured, REASSIGNED local, so `populate_env`
 # mints its cell box once per activation — a fresh region per call — and the frame
 # ends in a closure tail call, which puts the box's `DecrefCellRegion` in the dead
-# post-`TailCall` block. Relocating it there is the sole-holder admission's
+# post-`TailCall` block. Relocating it there is the frame-held admission's
 # business, and the holder's mutation does not refuse it: the release names the
 # BOX, which no `assign` repoints (docs/impl/region/mechanism.md § "A mutated
 # holder poisons its value route, not its cell box"). `shared-env-cell`'s cell is
@@ -528,7 +531,7 @@
 # The sequence reads are read-only trait dispatchers and declare `Opaque`, so
 # they seed nothing on escape's store facet (docs/impl/region/effects.md
 # § `Opaque`). A `Mixed` declaration would, and every mechanism gated on
-# `sole_frame_held_regions` refuses a region escaping by a facet other than
+# `frame_held_regions` refuses a region escaping by a facet other than
 # return — the branch-arm window among them, which is what this drives.
 (defn t22-arm-seq-read [v t]
   (match t
@@ -561,12 +564,12 @@
 # The same window over a RETURNED parameter — `push-all`'s shape, and with it every
 # `append`/`concat` over a byte-family source. The arm driven here hands `dst` back
 # to the caller; the sibling arm leaves through a local walker that reaches `dst`
-# only through its captured environment. The merge owes the return facet no funding
-# edge (this arm's own mint has already fired), and the sibling's replica is funded
-# by that captured edge, so the branch is admitted for the class
-# (docs/impl/region/mechanism.md § "The return facet is a fact about the arms, not
-# about the merge"). Refusing the facet outright strands one whole accumulator per
-# call on the arm driven here.
+# only through its captured environment. The merge follows this arm's own mint, and
+# the sibling's replica runs ahead of a callee whose captured edge holds the region
+# off zero until its own mint, so the branch is admitted for the class
+# (docs/impl/region/mechanism.md § "The return facet costs the merge nothing").
+# Refusing the facet outright strands one whole accumulator per call on the arm
+# driven here.
 (defn t22-returned-captured [dst src]
   (if (%eq (type-of src) :string)
     (begin
@@ -584,7 +587,7 @@
 # frame-replacing tail call is not a release"). `t23-unused`'s parameter is used
 # nowhere, so its release is the unused-parameter fallback the lowerer emits at the
 # end of the body — the block a CLOSURE callee never reaches — and escape clears it
-# as sole-held. `t23-moved` is the exemption: its parameter IS the tail call's
+# as frame-held. `t23-moved` is the exemption: its parameter IS the tail call's
 # argument, so its release is the ownership move and must stay put.
 (defn t23-sink []
   0)
@@ -618,7 +621,7 @@
 # callee — after the relocated release has run. The env's counted edge is what
 # holds the region off zero in between, and it falls away only with the closure
 # region, at the callee's completion (docs/impl/region/mechanism.md § "The callee's
-# return mint, and the edge that funds the gap"). This is the stdlib `push-all`
+# return mint, and why the point owes it nothing"). This is the stdlib `push-all`
 # shape, and the strand it carried is what held the `concat`/`append` family.
 (defn t23-handback [dst src]
   (let [n (length src)]
@@ -642,9 +645,10 @@
 # holder bindings alone cannot see the cell at all. Stranding the cell strands the
 # sibling with it, the cell's reference being what holds that closure off zero
 # (docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
-# its binding is"). `t23-fwd-cell-ret` is the RETURN half of the same projection:
-# the capturer is handed back, so the funding edge — `closure ⊇ cell` — has to name
-# the cell as well as the closure it points at.
+# its binding is"). `t23-fwd-cell-ret` is the RETURN face of the same projection:
+# the capturer is handed back, so what keeps the cell alive across the relocated
+# release is the counted `closure ⊇ cell` edge, and the cell's own region has to
+# carry its binding's verdict for the projection to name it at all.
 (defn t23-fwd-cell [n]
   (letrec [helper (fn [x] (%sub x 1))
            go (fn [m] (helper m))]
@@ -697,6 +701,20 @@
   (letrec [helper (fn [x] (%sub x 1))
            go (fn [m] (helper m))]
     (helper (go n))))
+# `t23-fold-drive` is the index-walk fold driver every stdlib `fold`/`reduce`/
+# `concat` walks with. Its base arm returns the accumulator, so the region is on the
+# return frontier; its recursive arm hands the tail callee the COMBINER's result
+# rather than the accumulator itself, so no route reaches the accumulator at that
+# point. A callee reaches a value this frame owns as an operand or through its
+# captured environment and by no other route, so one it reaches by neither cannot
+# mint against the region and the relocated release is the last
+# (docs/impl/region/mechanism.md § "The callee's return mint, and why the point owes
+# it nothing"). RED if the admission narrows back to a per-point funding edge, which
+# strands one displaced accumulator per fold step.
+(defn t23-fold-step [f n i acc]
+  (if (%lt i n) (t23-fold-step f n (%add i 1) (f acc i)) acc))
+(defn t23-fold-drive [n]
+  (length (t23-fold-step (fn [a b] (@array)) n 0 (@array))))
 (defn helper-f [x]
   (string "v" x))
 (defn helper-g [x]
@@ -941,7 +959,14 @@
         (cyc-mk)
         nil)) 0]  # string ops + realistic patterns
     ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1))) 0]
-   ["concat" (fn [j] (concat "a" "b" "c")) 1]
+   # `concat` folds the extra arguments through `core-fold-step`, whose accumulator
+   # is a returned parameter the recursive arm hands its callee only through the
+   # combiner's RESULT. That point cannot reach the accumulator, so it owes no
+   # funding edge and each displaced one is freed per step
+   # (docs/impl/region/mechanism.md § "The callee's return mint, and why the point
+   # owes it nothing"). The 2-argument shape is `stdlib-concat` below; this is the
+   # 3-argument one, where the fold actually recurses.
+   ["concat" (fn [j] (concat "a" "b" "c")) 0]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
    ["join" (fn [j] (string/join ["a" "b" "c"] ",")) 0]
    ["trim" (fn [j] (string/trim "  x  ")) 0]
@@ -1521,30 +1546,26 @@
 
 # Stdlib per-call leak (F1a — the transform-scratch retain). The leaked
 # objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
-# `recur-local-*` probes read 0) and NOT, mostly, cons cells. Stage 1 dissolved the
-# first/rest copy-scratch AND the per-call `go` closure: `fold`/`reduce` now
+# `recur-local-*` probes read 0) and NOT, mostly, cons cells. `fold`/`reduce`
 # `(->array coll)` once and INDEX-walk through the shared self-recursive
-# `core-fold-step` driver (core.lisp) — `fold`/`reduce` read 0 with a fresh-lambda
-# combiner. `stdlib-fold`'s residual 1 is the heap accumulator element the reducer
-# threads forward. This rate is the SOUND one: the driver releases the
-# tail-transferred accumulator exactly once. A transiently-lower reading came from
-# a latent double-free of that accumulator (the same over-free that SIGSEGVs
-# stdlib `compose`/`comp` — pinned by
-# tests/integration/fixtures/region-compose-closure-acc-uaf.lisp); it decremented
-# one extra region per fold, an unsound reclamation, not a real one. All
-# non-escaping, acyclic call-result regions no static slot can name. Pinned at the
-# exact `(concat "a" "b")` / 2-element `fold` shapes.
+# `core-fold-step` driver (core.lisp), so neither the first/rest copy-scratch nor a
+# per-call `go` closure exists to leak.
 #
-# `stdlib-concat` is a CLOSED control (undeclared, like `rest-array-copy`): the
-# accumulator `concat` fills is `push-all`'s returned parameter, whose release the
-# branch-arm window now anchors where every arm reaches it
-# (docs/impl/region/mechanism.md § "The return facet is a fact about the arms, not
-# about the merge"). A regression to open must trip the completeness gate loudly.
+# `stdlib-concat` and `stdlib-fold` are CLOSED controls (undeclared, like
+# `rest-array-copy`). Two readings of one window close them. The accumulator
+# `concat` fills is `push-all`'s returned parameter, whose release the branch-arm
+# window anchors where every arm reaches it. And `core-fold-step`'s own accumulator
+# is a returned parameter the recursive arm hands its callee only through the
+# COMBINER's result — a point the callee cannot reach it at, which is exactly where
+# no funding edge is owed (docs/impl/region/mechanism.md § "The callee's return
+# mint, and why the point owes it nothing"), so each displaced accumulator is freed
+# per step instead of stranded. A regression to open must trip the completeness gate
+# loudly.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
                    count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
-                   count-gauge 100 6 60 0.4 0.5) 1)
+                   count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── HOF-composition dissolution debt — the zip-tower witness ───────────
 # `zip-tower` is a zip built as a TOWER of higher-order calls: it converts every
@@ -2195,11 +2216,11 @@
                          {:type :a :v v} v
                          _ 0)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The frame-exit release, ten CLOSED controls. A frame-replacing tail call means
+# The frame-exit release, eleven CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the close moves
 # that one release ahead of the `TailCall` — admitted where escape proves the frame
-# is the region's sole holder, since on the closure path it fires where none fired
+# holds the region alone, since on the closure path it fires where none fired
 # before (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
 # call is not a release"). `tail-frame-exit-unused` is the unused-parameter
 # fallback through that dead block; `tail-frame-exit-arms` is the same strand one
@@ -2213,7 +2234,7 @@
 # already 0, which reads GROWTH if the hoist ever releases an argument the callee
 # now owns. The two `tail-frame-exit-fwd-cell*` probes are the region no holder
 # binding NAMES — a prebound forward cell, which carries its binding's verdict one
-# indirection out, on the sole-held half and on the return-funded half in turn;
+# indirection out, for a frame-local capturer and for a returned one in turn;
 # `tail-frame-exit-fwd-cell-sib` is the inversion where the sibling captures the
 # member, so one tail call strands a merged arena AND its callee, on two channels
 # that neither substitute for one another nor name the same region.
@@ -2223,6 +2244,9 @@
 # of the exemption: what it keeps in the dead block, a channel must still run, so a
 # tail callee whose release the enclosing letrec places at its SCOPE END rides the
 # deferral exactly as one demising at the call node does.
+# `tail-frame-exit-fold-driver` is the other end of the hand-back's enumeration: a
+# returned accumulator the tail callee reaches through NEITHER route, so its
+# `Return` mints nothing against the region and the relocated release is the last.
 # Undeclared, like `param-used-arm`, so a regression trips the
 # completeness gate loudly rather than being absorbed as F1a scratch. The
 # counterfactual and the boundary rows live in
@@ -2297,6 +2321,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t23-callee-member 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "tail-frame-exit-fold-driver"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t23-fold-drive 3)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/mechanism.md § "`break` transfers its value"): the value a

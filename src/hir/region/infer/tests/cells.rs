@@ -297,32 +297,31 @@ fn frame_held_names_a_sibling_captured_forward_cell() {
         .unwrap_or_default();
     for r in &content {
         assert!(
-            info.sole_frame_held_regions.contains(r),
-            "anchor: the binding's own closure region r{} is sole-frame-held (nothing \
+            info.frame_held_regions.contains(r),
+            "anchor: the binding's own closure region r{} is frame-held (nothing \
              leaves the frame), so the cell's refusal cannot be blamed on the verdict; \
-             sole_frame_held={:?}",
+             frame_held={:?}",
             r.0,
-            info.sole_frame_held_regions,
+            info.frame_held_regions,
         );
     }
     assert!(
-        info.sole_frame_held_regions.contains(&cell),
+        info.frame_held_regions.contains(&cell),
         "the forward cell r{} must be frame-held exactly as its binding {helper:?} is — \
-         no route reaches the cell that does not reach the binding; sole_frame_held={:?}",
+         no route reaches the cell that does not reach the binding; frame_held={:?}",
         cell.0,
-        info.sole_frame_held_regions,
+        info.frame_held_regions,
     );
 }
 
 #[test]
-fn capture_funded_names_the_captured_binding_forward_cell() {
-    // The RETURN half. `go` is handed back, so escape's capture facet marks `helper`
-    // escaping and the sole-held admission rightly refuses the cell. What admits it is
-    // the tail callee's own counted edge — and that edge is `closure ⊇ CELL`, because a
-    // `needs_capture` binding is captured THROUGH its cell. So the cell must appear in
-    // `return_frame_held_regions` (the return facet and no other) and in the funding map
-    // of the letrec body's tail call, or the return half admits the closure and strands
-    // the cell that holds it — one region short of the cascade.
+fn frame_held_names_a_returned_capturers_forward_cell() {
+    // The RETURN face of the same projection. `go` is handed back, so escape's capture
+    // facet carries `helper` out with it — but by the return facet alone, which the
+    // admission allows: the callee reaches the cell through the counted `closure ⊇ cell`
+    // edge its env took, so the frame's release is not the last one standing. The cell
+    // must therefore carry its binding's verdict here too, or the relocation admits the
+    // closure and strands the cell that holds it — one region short of the cascade.
     let (_hir, _arena, info) = pipeline(
         "(defn h [n] \
            (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
@@ -336,37 +335,28 @@ fn capture_funded_names_the_captured_binding_forward_cell() {
         1,
         "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
     );
-    let (_helper, cell) = cells[0];
+    let (helper, cell) = cells[0];
+    let content = info
+        .binding_source_regions
+        .get(&helper)
+        .cloned()
+        .unwrap_or_default();
+    for r in &content {
+        assert!(
+            info.frame_held_regions.contains(r),
+            "anchor: the binding's own closure region r{} leaves by the return facet \
+             and no other, so it is frame-held and the cell's verdict must match it; \
+             frame_held={:?}",
+            r.0,
+            info.frame_held_regions,
+        );
+    }
     assert!(
-        !info.sole_frame_held_regions.contains(&cell),
-        "anchor: the returned `go` carries `helper` out by the capture facet, so the \
-         SOLE half must refuse the cell r{} — this pin is about the return half; \
-         sole_frame_held={:?}",
-        cell.0,
-        info.sole_frame_held_regions,
-    );
-    assert!(
-        info.return_frame_held_regions.contains(&cell),
+        info.frame_held_regions.contains(&cell),
         "the forward cell r{} leaves by the RETURN facet and no other, exactly as its \
-         binding does, so it must clear the return-funded precondition; \
-         return_frame_held={:?}",
+         binding does, so it must be frame-held; frame_held={:?}",
         cell.0,
-        info.return_frame_held_regions,
-    );
-    let funded: Vec<_> = info
-        .tail_callee_facts
-        .iter()
-        .filter(|(_, f)| f.capture_funded.contains(&cell))
-        .map(|(id, _)| id.0)
-        .collect();
-    assert!(
-        !funded.is_empty(),
-        "some frame-replacing tail call's callee must be recorded as funding the cell \
-         r{} — `go` captures `helper` THROUGH the cell, so that edge is the one holding \
-         the region off zero between the relocated release and the callee's mint; \
-         tail_callee_facts={:?}",
-        cell.0,
-        info.tail_callee_facts,
+        info.frame_held_regions,
     );
 }
 
@@ -375,8 +365,8 @@ fn frame_held_refuses_a_forward_cell_whose_binding_crosses_the_fiber_frontier() 
     // The counterfactual: the projection carries the binding's verdict, so it must
     // carry a REFUSAL too. `go` is YIELDED, so escape's capture facet marks `helper`
     // escaping beyond return — a resumer holds the closure through a hold the compiler
-    // did not place, and a parked frame may borrow the cell uncounted. No mint funds
-    // that, so the cell must be in NEITHER set and its release must keep the baseline.
+    // did not place, and a parked frame may borrow the cell uncounted. Nothing counts
+    // that hold, so the cell must be refused and its release must keep the baseline.
     let mut symbols = SymbolTable::new();
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
@@ -398,14 +388,12 @@ fn frame_held_refuses_a_forward_cell_whose_binding_crosses_the_fiber_frontier() 
     );
     let (_helper, cell) = cells[0];
     assert!(
-        !info.sole_frame_held_regions.contains(&cell)
-            && !info.return_frame_held_regions.contains(&cell),
-        "a forward cell r{} whose binding crosses the FIBER frontier must clear neither \
+        !info.frame_held_regions.contains(&cell),
+        "a forward cell r{} whose binding crosses the FIBER frontier must not clear the \
          admission — the projection carries the binding's refusal as it carries its \
-         verdict; sole_frame_held={:?} return_frame_held={:?}",
+         verdict; frame_held={:?}",
         cell.0,
-        info.sole_frame_held_regions,
-        info.return_frame_held_regions,
+        info.frame_held_regions,
     );
 }
 

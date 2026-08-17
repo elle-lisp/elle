@@ -14,20 +14,20 @@
 # The close moves that one release to just BEFORE the `TailCall`. Relocating an
 # instruction is not by itself free of obligation: on the closure path the
 # release now fires where none fired before, so it owes the same count argument
-# any such mechanism owes, and escape supplies it — the frame must be the
-# region's SOLE holder. A value the tail callee reaches through its CAPTURED
+# any such mechanism owes, and escape supplies it — the frame must hold the
+# region ALONE. A value the tail callee reaches through its CAPTURED
 # environment is named by no argument and by no callee region, yet the call reads
 # it — and it is admitted anyway, because the funnel counted the closure's hold
 # when the env was built, so the frame's release is still the only reference it
 # drops.
 #
-# A value the callee hands BACK is that same counted edge carrying one step
-# further. The caller's owning reference is minted by the CALLEE's `Return`, after
-# the relocated release has run, so the region must not reach zero in between —
-# and the env edge, dropped only with the closure region at the callee's
-# completion, is what stops it. So a region whose only escape facet is the return
-# one is admitted at a relocation point whose callee captures one of its holders,
-# and nowhere else.
+# A value the callee hands BACK reaches zero at no point either, and the reason is
+# that same enumeration read to its end. The caller's owning reference is minted by
+# the CALLEE's `Return`, after the relocated release has run — and the callee either
+# holds the region through its env, whose counted edge is dropped only with the
+# closure region at the callee's completion, or cannot name the region at all, in
+# which case its `Return` mints nothing against it. So a region whose only escape
+# facet is the return one is admitted at every relocation point.
 #
 # A release emitted once the block has CLOSED is placed the other way (§ "The
 # relocation point outlives the block"): a branch merge inherits the relocation
@@ -148,7 +148,7 @@
 # region off zero in between is the counted edge the funnel took when `go`'s
 # environment was built, and that edge falls away only with the closure region, at
 # the callee's completion (docs/impl/region/mechanism.md § "The callee's return
-# mint, and the edge that funds the gap").
+# mint, and why the point owes it nothing").
 (defn walk-all (dst src)
   (let [n (length src)]
     (letrec [go (fn [i]
@@ -172,8 +172,8 @@
   (walk-all (@array) src))
 
 # (d8) the hand-back reached through a branch ARM, so the release is the merge's
-# replica rather than an in-block move, and the funding edge is read at the arm's
-# own relocation point.
+# replica ahead of that arm's `TailCall` rather than an in-block move, and the
+# callee's counted edge is what stands between it and the mint.
 (defn arm-handback (v t)
   (let [g (fn () v)]
     (if t (g) 0)))
@@ -181,7 +181,7 @@
 # (d9) a captured local's ENV CELL. `populate_env` mints the cell box once per
 # activation, and its `DecrefCellRegion` lands in the same dead block — so a frame
 # that ends in a closure tail call strands one box per call unless the release
-# relocates too. The reassigned face is the one the sole-holder admission has to
+# relocates too. The reassigned face is the one the frame-held admission has to
 # read correctly: a mutated holder refuses a release routed through its SLOT, and
 # this release names the BOX, which no `assign` repoints
 # (docs/impl/region/mechanism.md § "A mutated holder poisons its value route, not
@@ -279,11 +279,11 @@
            go (fn (m) (if (%lt m 1) :done (go (helper m))))]
     (go n)))
 
-# (d14) the RETURN half: `go` is handed back, so escape's capture facet marks
-# `helper` escaping and the sole-held admission refuses. What admits the cell is the
-# tail callee's own counted edge — and a `needs_capture` binding is captured THROUGH
-# its cell, so the funding edge is `closure ⊇ cell` and must name the cell region as
-# well as the closure it points at.
+# (d14) the RETURN face: `go` is handed back, so `helper` leaves with it — by the
+# return facet alone, which the frame-held admission allows. What keeps the cell
+# alive across the relocated release is the counted `closure ⊇ cell` edge `go`'s env
+# took, a `needs_capture` binding being captured THROUGH its cell; the cell's own
+# region must carry its binding's verdict here or it strands the closure it holds.
 (defn fwd-cell-ret (n)
   (letrec [helper (fn (x)
                     (when (%not (%int? x)) (error :x))
@@ -463,21 +463,24 @@
 (defn branch-tail (x t)
   (if t (tail-sink) (length x)))
 
-# boundary: the capturing closure ESCAPES ──────────────────────────────────────
-# A closure that leaves the activation carries its captures with it, and escape's
-# capture facet says so — so the holder is refused and the release stays in the
-# dead block beside the sibling arm's tail call. Driven for its VALUE, not its
-# delta: it strands by design, and what must hold is that the escaped closure can
-# still read what it captured.
+# the capturing closure LEAVES BY RETURN ───────────────────────────────────────
+# A closure the frame hands back carries its captures with it, and it carries them
+# on the funnel's counted edge — which is why escape's capture facet propagates
+# nothing beyond the return one here and the holder is admitted like any other. The
+# release relocates ahead of the sibling arm's tail call, and the counted edge is
+# what keeps the capture alive for the caller that drives the returned closure.
+# Driven for its VALUE: the delta is the sibling arm's, and what must hold is that
+# the escaped closure can still read what it captured. The genuine refusal is a
+# closure that crosses the FIBER frontier, whose holder no edge at the point
+# replaces.
 
 (defn escaping-capture (x t)
   (let [g (fn () (length x))]
     (if t g (tail-sink))))
 
-# The same for a reassigned capture: the escaping closure carries the CELL, so the
-# holder is refused and the box stays in the dead block. Driven for its VALUE — it
-# strands by design, and what must hold is that the escaped closure can still read
-# and rewrite the cell it captured.
+# The same for a reassigned capture: the returned closure carries the CELL on the
+# same counted `closure ⊇ cell` edge. Driven for its VALUE — what must hold is that
+# the escaped closure can still read and rewrite the cell it captured.
 (defn escaping-cell (n t)
   (def @c n)
   (let [g (fn ()
@@ -485,21 +488,38 @@
             c)]
     (if t g (tail-sink))))
 
-# residual ─────────────────────────────────────────────────────────────────────
-# A returned holder the tail callee does NOT capture. `v` reaches a return through
-# the OTHER arm, so no environment edge stands at this arm's relocation point to
-# fund the release, and it keeps its place in the dead block. Driven for its
-# VALUE, not its delta: it strands by design, and what must hold is that both arms
-# still compute correctly.
-
-(defn handback-unfunded (v t)
+# (d20) a returned holder the tail callee neither names nor captures. `v` reaches a
+# return through the OTHER arm, so the arm that leaves through the callee releases a
+# return-frontier region ahead of that call — and it owes no funding edge, because a
+# callee reaches a value this frame owns as an operand or through its captured
+# environment and by no other route. This one is reached by neither, so it cannot
+# mint against `v`'s region at all and the replica is the last release
+# (docs/impl/region/mechanism.md § "The callee's return mint, and why the point owes
+# it nothing"). Both arms are driven, and the claim is that exactly one release
+# runs on each.
+(defn handback-unreached (v t)
   (if t v (tail-sink)))
+
+# (d21) the everyday shape of the same reading — an index-walk fold driver. The base
+# arm returns the accumulator; the recursive arm hands the tail callee the
+# COMBINER's result rather than `acc` itself, so nothing at that point reaches `acc`
+# and each displaced accumulator is the frame's alone to free. This is what `fold`,
+# `reduce` and `concat` walk with, so a strand here is one region per element.
+(defn fold-step (f n i acc)
+  (if (%lt i n) (fold-step f n (%add i 1) (f acc i)) acc))
+(defn drive-fold (n)
+  (length (fold-step (fn (a b) (@array)) n 0 (@array))))
 
 (def walk-d (measure (fn () (drive-walk [1 2 3])) 200 window))
 (def walk-moved-d
   (measure (fn () (length (drive-walk-moved [1 2 3]))) 200 window))
 (def arm-handback-d
   (measure (fn () (length (arm-handback [1 2 3] true))) 200 window))
+(def handback-unreached-t-d
+  (measure (fn () (length (handback-unreached (list 1 2 3) true))) 200 window))
+(def handback-unreached-f-d
+  (measure (fn () (handback-unreached (list 1 2 3) false)) 200 window))
+(def drive-fold-d (measure (fn () (drive-fold 3)) 200 window))
 (def cell-src [1 2 3])
 (def cell-immutable-d (measure (fn () (cell-immutable 1)) 200 window))
 (def cell-reassigned-d (measure (fn () (cell-reassigned 1)) 200 window))
@@ -565,6 +585,8 @@
          arm-captured-d)
 (println "  walk-fill " walk-fill-d "  walk-moved " walk-moved-d
          "  arm-handback " arm-handback-d)
+(println "  unreached hand-back " handback-unreached-t-d "/"
+         handback-unreached-f-d "  fold driver " drive-fold-d)
 (println "  arms: unused " arm-unused-t-d "/" arm-unused-f-d "  two " arm-two-d
          "  cond " arm-cond-0-d "/" arm-cond-2-d "  match " arm-match-a-d "/"
          arm-match-z-d)
@@ -635,6 +657,13 @@
 (bounded? walk-moved-d
           "the hand-back where the captured edge is the only other reference")
 (bounded? arm-handback-d "the hand-back reached through a branch arm's callee")
+(bounded? handback-unreached-t-d
+          "the arm that returns a hand-back the sibling's callee cannot reach")
+(bounded? handback-unreached-f-d
+          "the arm whose callee cannot reach the returned hand-back")
+# One accumulator per step, so the surviving-strand floor is a multiple of the
+# window; `bounded?`'s slack covers the one-time intercept either way.
+(bounded? drive-fold-d "an index-walk fold driver's displaced accumulators")
 
 (bounded? cell-immutable-d "the env cell of a captured local")
 (bounded? cell-reassigned-d "the env cell of a REASSIGNED captured local")
@@ -681,10 +710,11 @@
 (assert (= (length (drive-walk-moved [1 2 3])) 3) "moved-in walker result lost")
 (assert (= (length (arm-handback [1 2 3] true)) 3) "arm hand-back result lost")
 (assert (= (arm-handback [1 2 3] false) 0) "arm hand-back sibling arm lost")
-(assert (= (length (handback-unfunded [1 2 3] true)) 3)
-        "unfunded hand-back result lost")
-(assert (= (handback-unfunded [1 2 3] false) 0)
-        "unfunded hand-back sibling arm lost")
+(assert (= (length (handback-unreached [1 2 3] true)) 3)
+        "unreached hand-back result lost")
+(assert (= (handback-unreached [1 2 3] false) 0)
+        "unreached hand-back sibling arm lost")
+(assert (= (drive-fold 3) 0) "fold driver result lost")
 (assert (= (captured-param [1 2]) 2) "captured-param result lost")
 (assert (= (arm-captured [1 2] true) 2) "arm-captured result lost")
 (assert (= (drive-fill [1 2 3]) 3) "walk-fill result lost")

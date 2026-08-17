@@ -1006,9 +1006,9 @@ fn region_ownership_reclaims_returned_cycle_bound_out_of_tail_position() {
 /// (docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
 /// its binding is").
 ///
-/// Two shapes, one per admission half: nothing leaves the frame (the sole-held half),
-/// and the capturer is RETURNED (the return-funded half, where the funding edge is
-/// `closure ⊇ cell` and must name the cell as well as the closure it points at). Both
+/// Two shapes, one per face: nothing leaves the frame, and the capturer is RETURNED
+/// (where the counted `closure ⊇ cell` edge is what stands between the relocated
+/// release and the caller's minted reference). Both
 /// leak three objects in two regions per call — the cell, plus the sibling closure and
 /// its env — when the cell's release stays in the dead block.
 #[test]

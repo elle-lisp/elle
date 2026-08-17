@@ -132,8 +132,8 @@ frame-replacing tail call, exactly as any other of the frame's releases is. It i
 carried back ahead of the `TailCall` by the frame-exit release, whose count
 argument reads the cell under its binding's own escape verdict
 ([mechanism.md](mechanism.md) § "A compiled capture cell is frame-held exactly as
-its binding is"). Both halves apply: the sole-held one where nothing leaves the
-frame, and the return-funded one where the capturing member is handed to the caller.
+its binding is"). Both faces apply: the one where nothing leaves the frame, and the
+one where the capturing member is handed to the caller.
 
 The static-slot cell requirement is met in **every position**, top level and inside a
 lambda body alike: a `letrec` binding that is immutable, never mutated, and

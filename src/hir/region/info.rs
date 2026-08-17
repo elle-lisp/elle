@@ -66,20 +66,10 @@ impl CellContainer {
 }
 
 /// What a frame-replacing tail call's own callee settles about the RC traffic the
-/// lowerer emits around it. Both fields are claims about *this* callee, which is
-/// why they are recorded per call rather than per region or per function.
+/// lowerer emits around it. A claim about *this* callee, which is why it is
+/// recorded per call rather than per region or per function.
 #[derive(Debug)]
 pub struct TailCalleeFacts {
-    /// Regions the callee holds through its **captured environment** — the
-    /// allocation funnel's counted (or, under the forest, owning) edge, taken when
-    /// the closure was built and dropped only by the closure region's free-time
-    /// cascade at the callee's completion. It therefore spans the gap between a
-    /// release relocated ahead of the `TailCall` and the callee's return mint,
-    /// which is what admits a region escaping by the return facet alone
-    /// (docs/impl/region/mechanism.md § "The callee's return mint, and the edge
-    /// that funds the gap"). A sibling arm's callee, capturing nothing, funds
-    /// nothing — hence per call.
-    pub capture_funded: rustc_hash::FxHashSet<Region>,
     /// How many arguments this callee turns into **owned parameters**, each of
     /// which releases once. Arguments past this index are collected into the rest
     /// parameter's fresh list, whose own allocation scan and surplus release
@@ -542,9 +532,10 @@ pub struct RegionInfo {
     /// recorded here. Empty when no cycle merged (or every merged cycle's body
     /// tail-calls only members). Populated from `ClosureCycleMerge::tail_release_sites`.
     pub cycle_tail_release: HashMap<HirId, Region>,
-    /// Regions whose every holder binding leaves this activation by NO facet —
-    /// non-escaping, off the return/fiber frontiers, and with an unmutated release
-    /// route — so the frame holds the region's one reference.
+    /// Regions whose every holder binding leaves this activation by the **return**
+    /// facet at most — off the fiber frontier, and with an unmutated release route
+    /// — so the frame holds the region's one reference for as long as the frame
+    /// lives.
     ///
     /// This is escape's answer to the **count** question, projected onto regions,
     /// and it is the admission any mechanism owes when it makes a release fire
@@ -554,33 +545,25 @@ pub struct RegionInfo {
     /// closure path never ran into one it does; the branch-arm release window
     /// applies the same predicate inline for the same reason.
     ///
+    /// The **return** facet rides along rather than refusing. Something does read
+    /// such a region after the frame — the caller, through a reference the tail
+    /// callee's own `Return` mints — but that callee reaches a value this frame owns
+    /// as an operand or through its captured environment and by no other route, so
+    /// it either holds a counted edge across the gap or cannot mint against the
+    /// region at all (§ "The callee's return mint, and why the point owes it
+    /// nothing").
+    ///
     /// Lexical capture is deliberately not one of the refusals: a closure's hold on
     /// what it captures is counted (or owning), never an uncounted borrow, and
-    /// capture by an *escaping* closure is already an escape facet
-    /// (`region::infer::escape::sole_frame_held_regions`). The mutated refusal is not
+    /// capture by a closure escaping *beyond the return facet* is already an escape
+    /// facet (`region::infer::escape::frame_held_regions`). The mutated refusal is not
     /// an escape fact but compensation's release-route one, so it is asked of the ONE
     /// binding whose slot the release loads — the binding whose init allocated the
     /// region — rather than of every holder, and a `cell_release_regions` member,
     /// whose release names the cell BOX no `assign` repoints, is exempt outright
     /// (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
     /// not its cell box").
-    pub sole_frame_held_regions: rustc_hash::FxHashSet<Region>,
-    /// Regions whose every holder binding leaves this activation by the **return**
-    /// facet and no other — off the fiber frontier, escaping nowhere but a tail,
-    /// and with the same mutated-route reading as `sole_frame_held_regions`. A
-    /// superset of it.
-    ///
-    /// Not an admission on its own wherever the release runs BEFORE a mint:
-    /// something *does* read such a region after the frame, namely the caller,
-    /// through a reference the tail callee's own `Return` mints, and a release
-    /// relocated ahead of that call runs first. So the lowerer pairs this with
-    /// `TailCalleeFacts::capture_funded` at each relocation point, and the pair is
-    /// the count argument (docs/impl/region/mechanism.md § "The callee's return
-    /// mint, and the edge that funds the gap"). The branch-arm window asks the same
-    /// pair of every frame-exiting arm before it anchors, because a merge in this
-    /// frame follows whatever mint its arms already ran and needs no edge of its own
-    /// (§ "The return facet is a fact about the arms, not about the merge").
-    pub return_frame_held_regions: rustc_hash::FxHashSet<Region>,
+    pub frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Frame-replacing tail-call HirId → what that call's own callee tells the
     /// lowerer about the releases and mints around it ([`TailCalleeFacts`]).
     /// Populated only where the callee resolves to a lambda this compilation can
@@ -711,8 +694,7 @@ impl RegionInfo {
             binding_region: HashMap::new(),
             binding_source_regions: HashMap::new(),
             captured_reassigned_bindings: FxHashSet::default(),
-            sole_frame_held_regions: FxHashSet::default(),
-            return_frame_held_regions: FxHashSet::default(),
+            frame_held_regions: FxHashSet::default(),
             tail_callee_facts: HashMap::new(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),

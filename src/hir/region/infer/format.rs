@@ -119,15 +119,10 @@ pub fn format_regions(
         &info.suppressed_decref_regions,
     );
     // The count-question admission every mechanism that makes a release fire where
-    // none fired before must clear (`region::infer::escape::sole_frame_held_regions`).
+    // none fired before must clear (`region::infer::escape::frame_held_regions`).
     // Printed because a release staying put where the reading expected it to move is
     // otherwise indistinguishable from the mechanism not running at all.
-    set_line(&mut buf, "sole-frame-held", &info.sole_frame_held_regions);
-    set_line(
-        &mut buf,
-        "return-frame-held",
-        &info.return_frame_held_regions,
-    );
+    set_line(&mut buf, "frame-held", &info.frame_held_regions);
 
     writeln!(buf).unwrap();
     write!(buf, "{}", info.stats).unwrap();

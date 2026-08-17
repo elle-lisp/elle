@@ -37,12 +37,13 @@
 #
 # One escape facet is admitted rather than refused. A RETURNED region costs the
 # merge no funding edge — the arm that hands it over ran its mint before jumping
-# there — but a replica ahead of a `TailCall` runs before the callee's mint and
-# does owe one, so the branch is admitted only where every frame-exiting arm's
-# callee either names the region or captures it (mechanism.md § "The return facet
-# is a fact about the arms, not about the merge"). Both faces are rows below: the
-# funded one is `push-all`'s shape, and the unfunded one must stay bounded on the
-# baseline route it keeps.
+# there — and neither does a replica ahead of a `TailCall`, which runs before the
+# callee's mint: a callee reaches a value this frame owns as an operand or through
+# its captured environment and by no other route, so it either holds a counted edge
+# or cannot mint against the region at all (mechanism.md § "The callee's return
+# mint, and why the point owes it nothing"). Both ends are rows below: the captured
+# one is `push-all`'s shape, and the unreached one is a walker the arm hands a fresh
+# value instead.
 #
 # The two boundaries the window keeps are a nested loop and a nested lambda, and
 # each is the scope's BODY rather than the scope's own node: the lowerer emits a
@@ -196,12 +197,12 @@
                       dst))]
         (go 0)))))
 
-# (j) the DECLINE the same admission carries: the sibling arm tail-calls a callee
-# that neither names the accumulator nor captures it — a self-recursive walker
-# whose next `acc` is a fresh value built from this one. No edge funds a replica
-# there, so the branch keeps the whole return-facet class on the baseline and the
-# in-arm release stays where it is. Both arms are driven: the recursive one runs
-# the release at its own last use, the base one takes compensation's route.
+# (j) the other end of the same enumeration: the sibling arm tail-calls a callee
+# that neither names the accumulator nor captures it — a self-recursive walker whose
+# next `acc` is a fresh value built from this one. That callee cannot reach the
+# region, so its `Return` mints nothing against it and the replica ahead of the
+# `TailCall` is the region's last release. Both arms are driven: the recursive one
+# runs the replica, the base one the anchor.
 (def acc-walk (fn (i acc) (if (%lt i 0) acc (acc-walk (%sub i 1) (pair i acc)))))
 
 # (k) an arm whose LOOP reads the live-in parameter. A read of a
@@ -373,7 +374,7 @@
          tailcall-elsewhere-fallthrough-d "  exit " tailcall-elsewhere-exit-d)
 (println "  returned + captured sibling: fallthrough "
          returned-captured-fallthrough-d "  exit " returned-captured-exit-d)
-(println "  returned + unfunded sibling: acc-walk " acc-walk-d)
+(println "  returned + unreached sibling: acc-walk " acc-walk-d)
 (println "  arm loop reads live-in: param " arm-loop-read-d "  looping arm "
          arm-loop-read-exit-d "  local " arm-loop-read-local-d)
 (println "  arm introduces an alias: " arm-alias-inside-d)
@@ -411,7 +412,7 @@
 (bounded? returned-captured-exit-d
           "capturing sibling arm: the walker's own return of the parameter")
 (bounded? acc-walk-d
-          "returned accumulator whose sibling arm's callee funds no replica")
+          "returned accumulator the sibling arm's callee cannot reach")
 
 (bounded? arm-loop-read-d
           "arm whose loop reads the live-in parameter: non-looping arm")

@@ -178,10 +178,9 @@ hand-over keeps the conservative baseline. That residual is a leak, never an
 over-free.
 
 Both routes are what a branch falls back to. Where the **window** below admits the
-region instead — which for a returned one is where every frame-exiting arm funds its
-replica (§ "The return facet is a fact about the arms, not about the merge") — the
-single anchored release covers every path and neither route fires, since neither
-finds a `decref_point` inside an arm any more.
+region instead — a returned one included (§ "The return facet costs the merge
+nothing") — the single anchored release covers every path and neither route fires,
+since neither finds a `decref_point` inside an arm any more.
 
 Pinned by `tests/elle/region-return-arm-escape-leak.lisp` (both faces: the
 non-returning arm is bounded, and the returned value survives its caller's use), and
@@ -361,41 +360,33 @@ The **mutated** refusal is the one compensation makes about a release *route*: a
 slot repointed between the arm and the anchor frees whatever it holds then. It is
 therefore asked of the one binding that owns that route, below.
 
-#### The return facet is a fact about the arms, not about the merge
+#### The return facet costs the merge nothing
 
-One facet costs the merge nothing. A region on the **return** frontier is read
-after the frame is gone — by the caller, through the reference a `Return` mints —
-which is why the frame-exit relocation has to fund the gap between its moved
-release and that mint (§ "The callee's return mint, and the edge that funds the
-gap"). The merge has no such gap: it is a point *in this frame*, and every path
-that reaches it has already run whatever mint it was going to run. An arm that
-hands the region over minted the caller's reference before jumping here, so the
-anchored release drops the frame's own and leaves the caller's standing. An arm
-that hands nothing over leaves the frame's reference the only one in existence,
-which is the same per-path reading the head route makes (§ "The return frontier is
-per-path"). Either way the anchor needs no edge.
+A region on the **return** frontier is read after the frame is gone — by the
+caller, through the reference a `Return` mints. The merge is a point *in this
+frame*, so every path that reaches it has already run whatever mint it was going
+to run. An arm that hands the region over minted the caller's reference before
+jumping here, so the anchored release drops the frame's own and leaves the
+caller's standing. An arm that hands nothing over leaves the frame's reference the
+only one in existence, which is the same per-path reading the head route makes
+(§ "The return frontier is per-path").
 
-Where the facet does bite is the arms that never arrive. A frame-replacing tail
-call takes its release as a **replica** (§ "An arm that leaves through a callee
-takes a replica, not the anchor"), and a replica ahead of a call *is* a release
-before the callee's mint — so it owes the funding argument the merge does not. The
-callee reaches a value this frame owns by two routes and no other: as an
-**operand**, where the release is the ownership move the exemption keeps in the
-dead block, or through its **captured environment**, where the funnel's counted
-edge spans the gap. A point offering neither is one where the callee cannot reach
-the region at all — and the window must not anchor there anyway, because the
-anchored release would then be the *only* release, on a path that never reaches
-it. So a branch is admitted for the return-facet class exactly when **every**
-frame-exiting arm's point is exempt or capture-funded, read off the same two facts
-the lowerer reads per point. One unfunded point holds the whole class to the
-baseline, where the in-arm release and the compensation routes still reach it.
-
-The `sole` class is unaffected by any of this: nothing reads it once the frame is
-gone, so its replicas need only the exemption the lowerer already applies.
+The arms that never arrive take a **replica** ahead of their own `TailCall`
+(§ "An arm that leaves through a callee takes a replica, not the anchor"), which
+*is* a release before the callee's mint. That gap needs no edge at the point
+either, and the reason is the enumeration the exemption already rests on: a callee
+reaches a value this frame owns as an **operand** or through its **captured
+environment**, and both ends of that enumeration are safe (§ "The callee's return
+mint, and why the point owes it nothing"). So the return facet is admitted for the
+whole class, at the anchor and at every replica alike, and what the point still
+decides is only the exemption — a region an arm's own call names keeps its copy in
+the dead block as the ownership move.
 
 The leak this closes is the polymorphic helper that returns what it was handed —
 `push-all`'s bulk arm, and with it every `append`/`concat` over a byte-family
-argument, whose one release sits in the index-walk arm the call never takes.
+argument, whose one release sits in the index-walk arm the call never takes — and,
+through the replica, the index-walk fold driver behind `fold`/`reduce`/`concat`,
+whose base arm returns the accumulator its recursive arm's callee cannot reach.
 
 #### Lexical capture is not a second holder to fear
 
@@ -412,9 +403,12 @@ runtime: a reclamation typestate"). Either way the closure's hold is a counted o
 an owning edge, never the uncounted borrow this admission exists to protect, so a
 release of the frame's own reference cannot be the one that reaches zero.
 
-What *is* refused is capture by a closure that **escapes**: there the closure
-outlives this activation, and escape's capture facet already marks every binding
-such a closure captures. That is a flow fact. The structural capture-graph
+What *is* refused is capture by a closure that escapes **beyond the return facet**:
+there the closure reaches a holder the compiler did not place, and escape's capture
+facet already marks every binding such a closure captures. A closure the frame
+merely hands back carries its captures on the same counted edge, so it refuses
+nothing (§ "The callee's return mint, and why the point owes it nothing"). That is
+a flow fact. The structural capture-graph
 (`regions::escape::captured_bindings`) marks every captured binding whether or not
 its closure ever leaves — the right conservatism for the **merge** gate, which
 asks where a value may *live* and so needs raw reachability, and the wrong one
@@ -553,10 +547,9 @@ owned-parameter release consumes.
 
 Neither mechanism owes a new count argument for the composition. Both make a
 release fire on a path where none fired before, and both discharge exactly that
-with `sole_frame_held_regions` — the anchor at the analysis, each replica at its
-own point. For the **return**-facet class the two questions come apart, and the
-window asks the replica's before it anchors at all (§ "The return facet is a fact
-about the arms, not about the merge").
+with `frame_held_regions` — the anchor at the analysis, each replica at its own
+point. The **return**-facet class rides along on the same answer, at the anchor
+and at every replica alike (§ "The return facet costs the merge nothing").
 
 The composition does need a release the relocation can replicate, and only a
 **value-routed** one qualifies: it loads the holder slot, releases that value's
@@ -583,10 +576,10 @@ rates), the placement pins in `lir::lower::tests::release`
 `tail_call_argument_release_stays_the_ownership_move`,
 `moved_argument_takes_no_replica_in_the_arm_that_moves_it`), the value-route
 narrowing pin `regions::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
-the return-facet admission and its decline
-(`regions::tests::compensate::a_capturing_frame_exit_funds_a_returned_param`,
+the return-facet admission
+(`regions::tests::compensate::a_capturing_frame_exit_anchors_a_returned_param`,
 `a_returned_param_anchors_where_no_arm_leaves_the_frame`,
-`an_unfunded_frame_exit_keeps_a_returned_param_on_compensation`),
+`a_frame_exit_the_callee_cannot_reach_anchors_a_returned_param`),
 and `tests/elle/region-branch-arm-window-uaf.lisp` (the
 soundness complement — a value read, stored, returned, carried across a yield,
 reached through a closure's environment, or moved into a sibling arm's tail callee
@@ -896,59 +889,58 @@ only the frame's reference, and the moved value survives it. The one node with n
 such count is the inline `%`-opcode above, which is why the descent passes through
 it to the operand that owns the page.
 
-**Whether the frame is the sole holder** — the admission, and escape is its sole
-authority. The exemption above is a statement about *arguments*, and arguments are
-not the only path into a callee: a tail callee reaches its **captured environment**
-too, which no argument names and no callee region describes. `push-all`'s walker
-is exactly that shape — `(letrec [go (fn [i] … dst)] (go 0))` names `dst` only
-through `go`'s env. That path needs no enumeration and no refusal of its own,
-because the env's hold is a counted (or owning) edge the funnel took when the
-closure was built (§ "Lexical capture is not a second holder to fear"): a release
-of the frame's reference leaves the callee's standing. The predicate is one and
-the same for both mechanisms (`RegionInfo::sole_frame_held_regions`): every holder
-binding non-escaping, the region's own release route unmutated — or naming a cell
-box rather than a slot (§ "A mutated holder poisons its value route, not its cell
-box") — and the region absent from the return/fiber frontiers' atomless site
-halves.
+**Whether the frame holds the region alone** — the admission, and escape is its
+sole authority. The exemption above is a statement about *arguments*, and
+arguments are not the only path into a callee: a tail callee reaches its
+**captured environment** too, which no argument names and no callee region
+describes. `push-all`'s walker is exactly that shape —
+`(letrec [go (fn [i] … dst)] (go 0))` names `dst` only through `go`'s env. That
+path needs no enumeration and no refusal of its own, because the env's hold is a
+counted (or owning) edge the funnel took when the closure was built (§ "Lexical
+capture is not a second holder to fear"): a release of the frame's reference
+leaves the callee's standing. The predicate is one and the same for both
+mechanisms (`RegionInfo::frame_held_regions`): every holder binding escaping by
+the **return** facet at most, the region's own release route unmutated — or naming
+a cell box rather than a slot (§ "A mutated holder poisons its value route, not its
+cell box") — and the region absent from the fiber frontier's atomless site half.
 
 So this close covers a parameter or local the frame alone owns — captured by a
 locally-called closure or not — whose release lands at the body's scope exit, and
 with it the **env cell** of a captured local, whose `DecrefCellRegion` lands in
-the same dead block. The value the callee hands **back** is a separate question
-with a separate funding argument, below.
+the same dead block. Why the return facet rides along rather than refusing is the
+next section.
 
-### The callee's return mint, and the edge that funds the gap
+### The callee's return mint, and why the point owes it nothing
 
-A region on the **return** frontier fails the admission above, and the shape that
-fails it is the same walker one parameter over: `push-all` returns `dst` through
-`go`. Read as a count question the refusal is right in general and too strong
-here, and the difference is one edge.
+The shape that makes the return facet look like a refusal is the same walker one
+parameter over: `push-all` returns `dst` through `go`. A relocated release is safe
+when the reference it drops is not the region's last *live* one. For a value the
+callee merely **reads** — the walker's `src` — the frame's release is the last one
+and nothing reads the region after the frame is gone. For a value the callee
+**returns**, the caller does read it afterwards, through a reference the callee's
+own `Return` mints — and that mint fires *after* the relocated release. Between
+the two the count must not reach zero.
 
-A relocated release is safe when the reference it drops is not the region's last
-*live* one. For a value the callee merely **reads** — the walker's `src` — the
-frame's release is the last one and nothing reads the region after the frame is
-gone, so nothing needs funding. For a value the callee **returns**, the caller does
-read it afterwards, through a reference the callee's own `Return` mints — and that
-mint fires *after* the relocated release. Between the two the count must not reach
-zero.
-
-The tail callee's own hold is what keeps it off zero, and the system already
-counts it. A callee reaches a value this frame owns by exactly two routes: as an
-**argument**, where the release stays in the dead block and is the ownership move;
+Nothing can put it there, and the reason is the enumeration the exemption already
+rests on. A callee reaches a value this frame owns by exactly two routes: as an
+**operand**, where the release stays in the dead block and is the ownership move;
 or through its **captured environment**, where the funnel took a counted (or
-owning) edge when the closure was built. That edge is dropped by the closure
-region's free-time cascade, which the deferred callee release runs at the callee's
-*completion* — after its `Return`. So the order over one call is: env edge taken,
-frame release, callee mint, env edge falls away — and the reference left standing
-is the caller's.
+owning) edge when the closure was built. Both ends of that enumeration are safe:
 
-The admission is therefore asked **per relocation point**, not per region: a
-region whose only escape facet is the return one is relocated at a point whose
-callee is a closure capturing one of the region's holder bindings
-(`TailCalleeFacts::capture_funded`, keyed by the call node), and keeps the
-baseline at every other point. Nothing here weakens the sole-holder admission —
-the two are read together, and a region that clears the sole-holder predicate
-needs no funding because no one reads it after the frame.
+- a callee neither route reaches cannot name the region at all, so its `Return`
+  mints nothing against it and the frame's release is the region's last;
+- a callee the second route reaches holds a count that the closure region's
+  free-time cascade drops only at the callee's *completion*, after its `Return`. So
+  the order over one call is: env edge taken, frame release, callee mint, env edge
+  falls away — and the reference left standing is the caller's.
+
+The admission is therefore a fact about the **region**, not about the point: a
+region whose only escape facet is the return one is relocated wherever its release
+lands, and what the point still decides is the exemption alone. That the callee's
+captures are usually unknowable is what makes reading both routes the right
+reading rather than a weaker one — this compilation resolves a `Var` callee to a
+lambda in this unit and no further, so an imported or parameter callee's captures
+are invisible, and a capture is counted however little of it the compiler can see.
 
 Every other facet still refuses, and each for the reason it always did: a holder
 that crosses the **fiber** frontier may be borrowed uncounted by a parked frame; a
@@ -956,19 +948,26 @@ region whose own **route** binding is mutated has a release that frees whatever 
 slot holds then, except where the release names the cell box the mutation leaves
 alone (§ "A mutated holder poisons its value route, not its cell box"); a
 holder captured by a closure that **escapes** leaves with it. What is dropped is
-only the return facet's blanket refusal, and only where the callee's edge replaces
-it — which is why escape must be able to say "*this* facet and no other"
-(`EscapeInfo::binding_escapes_beyond_return`, the complement of
-`binding_escapes_via_return`).
+the return facet's refusal and nothing else — which is why escape must be able to
+say "*this* facet and no other" (`EscapeInfo::binding_escapes_beyond_return`, the
+complement of `binding_escapes_via_return`).
 
-The **residual** is a returned region the tail callee does not capture: some other
-path of this frame returns it, so no env edge funds the point and the release
-keeps its place in the dead block. That is a leak, never an over-free.
+The everyday shape this reaches is the index-walk fold driver — `fold`, `reduce`
+and `concat` all walk with it:
+
+```
+(fn [f n i acc] (if (%lt i n) (recur f n (%add i 1) (f acc i)) acc))
+```
+
+The base arm returns `acc`, so the region is on the return frontier. The recursive
+arm hands the callee the *combiner's* result rather than `acc` itself, so neither
+route reaches the accumulator at that point and the frame's release is its last —
+which is what frees each displaced accumulator per step rather than per call.
 
 ### A compiled capture cell is frame-held exactly as its binding is
 
-Both admissions read the frame's holders through `binding_source_regions`, so a
-region **no binding names** offers nothing to judge and both refuse. A compiled
+The admission reads the frame's holders through `binding_source_regions`, so a
+region **no binding names** offers nothing to judge and is refused. A compiled
 **capture cell** (`begin_cell_regions`) is exactly such a region: it is minted at
 the scope that prebinds it — the `Letrec` of a binding some *sibling* closure
 captures (letrec.md § the static-slot cell requirement) — and the binding names the
@@ -992,17 +991,12 @@ holder is a closure that captures the binding, and that hold is the counted (or
 owning) edge the funnel takes at the cell store (§ "Lexical capture is not a second
 holder to fear"). No route reaches the cell that does not reach the binding — a
 `DerefCell` read goes *through* the cell to get at the closure — so whatever escape
-says about the binding's regions it says about the cell's, by both facets and by
+says about the binding's regions it says about the cell's, by every facet and by
 the mutated-holder reading alike. Projecting each binding's single compiled cell
 region (`RegionInfo::single_cell_region_of`) alongside its `binding_source_regions`
 therefore asserts no admission the predicate was not already making; it names a
-region the predicate could not see.
-
-The funding side owes the same projection. A closure captures a `needs_capture`
-binding **through its cell**, so the counted edge the tail callee holds is
-`closure ⊇ cell`, and `TailCalleeFacts::capture_funded` names the cell region as
-well as the closure region the cell points at. Without it the return half admits
-the captured closure and strands the cell holding it — one region short of the
+region the predicate could not see. Without the projection the cell is refused for
+want of a holder and strands the closure it holds — one region short of the
 cascade, so the helper pair leaks whole.
 
 A binding with more than one compiled cell — a file-body/nested-`begin`
@@ -1119,12 +1113,12 @@ the non-self-cancelling boundary, the env-cell faces, and the
 handed-back-through-the-callee faces, and the forward-cell faces driven as rows),
 the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
-`tail-frame-exit-handback` / `tail-frame-exit-fwd-cell` /
-`tail-frame-exit-fwd-cell-ret` / `fresh-env-cell`
+`tail-frame-exit-handback` / `tail-frame-exit-fold-driver` /
+`tail-frame-exit-fwd-cell` / `tail-frame-exit-fwd-cell-ret` / `fresh-env-cell`
 probes in `tests/elle/oracle.lisp` (the per-op rates), the analysis-level
 projection pins in `regions::tests::cells`
 (`frame_held_names_a_sibling_captured_forward_cell`,
-`capture_funded_names_the_captured_binding_forward_cell`, and their
+`frame_held_names_a_returned_capturers_forward_cell`, and their
 escaping-holder counterfactual), the placement pins in
 `lir::lower::tests::release`, and
 `tests/elle/region-tail-frame-exit-uaf.lisp` (the soundness complement — a value

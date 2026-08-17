@@ -124,9 +124,10 @@
 //! is not a release on the other arms"). Where that window applies it moves the
 //! region's single `decref_point` out of the arms entirely, so `arm_of_d` below
 //! finds nothing and neither route fires — one anchored release replaces the
-//! per-arm ones. The two partition the obligation: the window answers "is this
-//! frame the sole holder" with escape and needs no count argument; everything
-//! escape cannot clear arrives here, where the count argument is the retain.
+//! per-arm ones. The two partition the obligation: the window answers "does this
+//! frame hold the region alone" with escape and needs no count argument;
+//! everything escape cannot clear arrives here, where the count argument is the
+//! retain.
 
 use super::*;
 use crate::hir::region::Region;

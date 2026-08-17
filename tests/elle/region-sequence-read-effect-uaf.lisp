@@ -7,7 +7,7 @@
 # its tighter `(alias, container)` record), and no argument is stored uncounted
 # (so escape seeds nothing on its store facet). What that withdraws is the false
 # store facet, and with it the refusal it forced on every mechanism gated on
-# `sole_frame_held_regions` — the branch-arm release window among them
+# `frame_held_regions` — the branch-arm release window among them
 # (docs/impl/region/effects.md § `Opaque`; docs/impl/escape.md).
 #
 # So the hazards are the ones the withdrawn refusal used to mask. A read hands

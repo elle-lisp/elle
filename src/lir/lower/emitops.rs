@@ -397,12 +397,6 @@ impl<'a> Lowerer<'a> {
         for a in args {
             self.collect_operand_regions(&a.expr, &mut exempt);
         }
-        let capture_funded = self
-            .region_info
-            .tail_callee_facts
-            .get(&call_id)
-            .map(|f| f.capture_funded.clone())
-            .unwrap_or_default();
         // This call dominates every position after it in the block, so it alone
         // covers them — any points a merge left here name arms that reach this
         // call, not the releases that follow it.
@@ -413,7 +407,6 @@ impl<'a> Lowerer<'a> {
             operand_locals,
             operand_captures,
             exempt,
-            capture_funded,
         });
     }
 
@@ -448,11 +441,11 @@ impl<'a> Lowerer<'a> {
     /// argument — on a closure path the release fires where none did before, and no
     /// premise about instruction placement can supply it: a value the tail callee
     /// reaches through its captured environment is named by no argument and by no
-    /// callee region, yet the call reads it. `sole_frame_held_regions` is that
-    /// argument for a region nobody reads once the frame is gone;
-    /// `return_frame_held_regions` plus the point's own `capture_funded` edge is
-    /// the argument for one the CALLEE hands back, where the caller's reference is
-    /// minted after this release runs. `TailExitHoist::exempt` and
+    /// callee region, yet the call reads it. `frame_held_regions` is that argument,
+    /// and it covers the region the CALLEE hands back too, because a callee reaches
+    /// a value this frame owns as an operand or through its captured environment and
+    /// by no other route (docs/impl/region/mechanism.md § "The callee's return mint,
+    /// and why the point owes it nothing"). `TailExitHoist::exempt` and
     /// [`Self::hoistable_run`] are the two readings of what each call itself names
     /// — both needed, because ANF is free to rewrite how an operand is spelled —
     /// and they are asked per point, so one arm's ownership move does not hold back
@@ -467,23 +460,18 @@ impl<'a> Lowerer<'a> {
         mut f: impl FnMut(&mut Self),
     ) {
         let root = self.region_info.merged_root(region);
-        // Two admissions, and which one applies decides whether the point's own
-        // funding is consulted. A SOLE-held region is read by nobody once the
-        // frame is gone, so any point may take it. A region held by the return
-        // facet alone IS read afterwards — by the caller, through the reference
-        // the tail callee's `Return` mints after this release would run — so it
-        // needs the callee's captured-holder edge to span the gap, which is a fact
-        // about the point rather than the region.
-        let sole = self.region_info.sole_frame_held_regions.contains(&root);
-        if self.tail_exit_hoist.is_empty()
-            || !(sole || self.region_info.return_frame_held_regions.contains(&root))
-        {
+        // One admission, asked of the region: the frame holds it alone for as long
+        // as the frame lives. A region the callee hands BACK is read afterwards —
+        // by the caller, through the reference the tail callee's `Return` mints
+        // after this release would run — and needs no edge of its own, because the
+        // callee reaches a value this frame owns as an operand (where the release
+        // stays behind as the ownership move) or through its captured environment
+        // (a counted edge) and by no other route.
+        if self.tail_exit_hoist.is_empty() || !self.region_info.frame_held_regions.contains(&root) {
             f(self);
             return;
         }
-        let admitted = |h: &super::TailExitHoist| {
-            !h.exempt.contains(&root) && (sole || h.capture_funded.contains(&root))
-        };
+        let admitted = |h: &super::TailExitHoist| !h.exempt.contains(&root);
         // The two placements never mix: a tail call emitted into this block
         // dominates every position after it, so `open_tail_exit_hoist` drops the
         // merge's points in favour of its own single one.

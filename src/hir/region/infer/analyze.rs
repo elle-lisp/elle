@@ -127,37 +127,24 @@ pub fn analyze_regions_with(
     let order = compute_order(hir);
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
-    // Escape's answer to the COUNT question, projected onto regions: which
-    // regions this frame is the sole holder of. Recorded once here because two
+    // Escape's answer to the COUNT question, projected onto regions: which regions
+    // this frame holds alone for as long as it lives. Recorded once here because two
     // mechanisms owe exactly this admission — the branch-arm release window below
     // and the lowerer's frame-exit release at a tail call — and both of them make
     // a release fire on a path where none fired before (region/mechanism.md).
     // Computed before the decref passes so it reads the escape facts, not any
-    // placement they go on to change. The second set relaxes exactly the RETURN
-    // facet's refusal; it is a precondition rather than an admission, and the
-    // lowerer completes it with the per-point funding map below.
-    let frame_held = super::escape::sole_frame_held_regions(
+    // placement they go on to change.
+    info.frame_held_regions = super::escape::frame_held_regions(
         &escape_info,
         arena,
         &info,
         &inference_binding_regions,
         &reassigns.binder_init_sites,
     );
-    info.sole_frame_held_regions = frame_held.sole;
-    info.return_frame_held_regions = frame_held.return_funded;
 
-    // What each frame-replacing tail call's own callee settles: the captured-holder
-    // edge that funds the return-facet admission, and how many arguments become
-    // owned parameters. Computed here because the branch-arm window below asks the
-    // same per-point funding question the lowerer does, one pass earlier; the merge
-    // forest is still empty at this point, so the regions are canonicalized again
-    // after the merge passes below (canonicalizing twice is canonicalizing once).
-    let mut tail_callee_facts = super::escape::tail_callee_facts(
-        hir,
-        &info,
-        &frame_replacing_tail_calls,
-        &inference_binding_regions,
-    );
+    // How many arguments each frame-replacing tail call's own callee turns into
+    // owned parameters, where this compilation can resolve the callee at all.
+    info.tail_callee_facts = super::escape::tail_callee_facts(hir, &frame_replacing_tail_calls);
 
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
@@ -175,7 +162,6 @@ pub fn analyze_regions_with(
         &break_sites,
         &break_skip_blocks,
         &frame_replacing_tail_calls,
-        &tail_callee_facts,
     );
     let last_use = &last_use_info.per_node;
 
@@ -248,18 +234,6 @@ pub fn analyze_regions_with(
             .and_modify(|d| d.extend_to(cm.drop_site))
             .or_insert(RegionData::at(cm.drop_site));
     }
-
-    // Canonicalize the callee facts through the merge forest, which the lowerer's
-    // lookup resolves against. The set was built above with an empty forest, so
-    // this is the one canonicalization, applied where the forest is final.
-    for f in tail_callee_facts.values_mut() {
-        f.capture_funded = f
-            .capture_funded
-            .iter()
-            .map(|&r| info.merged_root(r))
-            .collect();
-    }
-    info.tail_callee_facts = tail_callee_facts;
 
     // Ownership forest: adopt edges, the transferred-returned-subtree cut, the
     // co-owned-cycle cut, and the activation-owner cut. Runs LAST, after the

@@ -92,7 +92,7 @@ fn capture_handed_back_by_the_callee_precedes_the_tail_call() {
     // anyway, because the same capture that lets `g` read `x` is a counted edge
     // that outlives the mint — it falls away only with `g`'s region, at the
     // callee's completion (docs/impl/region/mechanism.md § "The callee's return
-    // mint, and the edge that funds the gap"; the `tail-frame-exit-handback`
+    // mint, and why the point owes it nothing"; the `tail-frame-exit-handback`
     // probe). This is the stdlib walker's accumulator.
     let module = compile_to_lir("(begin (def f (fn (x) (let [g (fn () x)] (g)))) (f (list 1 2)))");
     let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
@@ -104,20 +104,25 @@ fn capture_handed_back_by_the_callee_precedes_the_tail_call() {
 }
 
 #[test]
-fn handback_the_callee_does_not_capture_stays_after_the_tail_call() {
-    // The decline face, and the residual the admission leaves. `x` reaches a
-    // return through the OTHER arm, so it is on the return frontier — but the arm
-    // that leaves through a frame-replacing callee calls one that captures
-    // nothing, so no counted edge stands at that point to span the gap to a mint.
-    // The release keeps its place in the dead block: a leak, never an over-free.
+fn handback_the_callee_cannot_reach_precedes_the_tail_call() {
+    // The other end of the same enumeration. `x` reaches a return through the OTHER
+    // arm, so it is on the return frontier — and the arm that leaves through a
+    // frame-replacing callee calls one that neither names nor captures it. A callee
+    // reaches a value this frame owns by those two routes and no other, so this one
+    // cannot mint against `x`'s region at all and the hoisted release is the last
+    // (docs/impl/region/mechanism.md § "The callee's return mint, and why the point
+    // owes it nothing").
+    // `s` is int-valued so that the first `TailCall`-bearing function is `f` itself
+    // — a callee whose own body tail-calls a native would be read instead, and its
+    // layout says nothing about this placement.
     let module = compile_to_lir(
-        "(begin (def s (fn () (list 3))) (def f (fn (x c) (if c x (s)))) (f (list 1 2) false))",
+        "(begin (def s (fn () 0)) (def f (fn (x c) (if c x (s)))) (f (list 1 2) false))",
     );
     let (at, releases) = tail_call_release_layout(&module).expect("the body lowers to a TailCall");
     assert!(
-        releases.iter().all(|&r| r > at),
-        "a release was hoisted at a point whose callee captures nothing \
-         (at={at}, releases={releases:?}) — no edge funds the caller's mint",
+        releases.iter().any(|&r| r < at),
+        "the hand-back's release is still emitted after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path",
     );
 }
 

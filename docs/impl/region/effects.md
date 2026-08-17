@@ -127,7 +127,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   declaration: `Mixed`/`Unknown` seeds every argument on escape's **store**
   facet ([../escape.md](../escape.md)), and a region escaping by a facet other
   than return keeps the conservative baseline at every mechanism gated on
-  `sole_frame_held_regions` — the branch-arm release window among them. A
+  `frame_held_regions` — the branch-arm release window among them. A
   declaration is therefore a claim about escape as much as about edges, and the
   strongest true one is what a read-only dispatcher owes
   (`tests/elle/region-sequence-read-effect.lisp`).

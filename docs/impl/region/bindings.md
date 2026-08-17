@@ -596,7 +596,7 @@ loop-independent.
 The same "the box is not the slot" fact carries the cell's release past the other
 placement rule it meets. A frame that ends in a closure tail call runs nothing the
 lowerer emits after the `TailCall`, so a `DecrefCellRegion` landing there is
-carried back ahead of the call under the sole-holder admission
+carried back ahead of the call under the frame-held admission
 ([mechanism.md](mechanism.md) § "A release past a frame-replacing tail call is not
 a release"). That admission refuses a **mutated** holder — but only because a
 value-routed release reads the holder's slot, and this release reads the box,

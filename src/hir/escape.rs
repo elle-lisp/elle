@@ -236,11 +236,10 @@ pub struct EscapeInfo {
     /// funnel's counted edge, and whatever it carries out is the return facet's
     /// business.
     ///
-    /// Read by the frame-exit release's return-funded admission
-    /// (docs/impl/region/mechanism.md § "The callee's return mint, and the edge
-    /// that funds the gap"), which replaces the return facet's refusal with the
-    /// tail callee's own counted edge and must therefore know no other facet is
-    /// also refusing.
+    /// Read by the frame-held admission the branch-arm window and the frame-exit
+    /// release share (docs/impl/region/mechanism.md § "The callee's return mint,
+    /// and why the point owes it nothing"), which admits the return facet and must
+    /// therefore know no other facet is also refusing.
     binding_escapes_beyond: FxHashSet<Binding>,
     /// Allocation-site `HirId`s a value reaches a **tail/return** through — the
     /// region-level half of the return facet, naming the *atomless* escapes

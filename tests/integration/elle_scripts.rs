@@ -286,7 +286,7 @@ fn region_branch_arm_window_uaf() {
 // things: the result may live anywhere, and no argument is stored uncounted
 // (docs/impl/region/effects.md § `Opaque`). The second withdraws a store-facet
 // escape seed, and with it the refusal that seed forced on every mechanism gated
-// on `sole_frame_held_regions`. So this drives what the refusal used to mask: a
+// on `frame_held_regions`. So this drives what the refusal used to mask: a
 // read's result consumed after the branch that produced it, the subject read
 // again, the result returned to a caller or yielded to a resumer, and a genuine
 // store escape that must still refuse the window. Freeing the container under any

@@ -17,7 +17,7 @@
 # edge to emit either way. The cost is on the ESCAPE side, which reads the same
 # declaration: `Mixed`/`Unknown` seeds every argument on escape's store facet
 # (docs/impl/escape.md), and a region escaping by a facet other than return keeps
-# the conservative baseline at every mechanism gated on `sole_frame_held_regions`
+# the conservative baseline at every mechanism gated on `frame_held_regions`
 # — the branch-arm release window among them.
 #
 # So the gauge below is a BRANCH: the subject is live-in, one arm reads it

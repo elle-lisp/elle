@@ -168,14 +168,15 @@ other is structural ownership-location, NOT escape:
   the set under the three alias relations, so a region an inner call merely
   used is not exempt while one its result may live inside still is
   (docs/impl/region/mechanism.md § "What an operand names is its VALUE").
-  And the region must be sole-frame-held
-  (`RegionInfo::sole_frame_held_regions`), because a tail callee also reaches
+  And the region must be frame-held
+  (`RegionInfo::frame_held_regions`), because a tail callee also reaches
   its CAPTURED environment, which no argument names. A region escaping by the
-  RETURN facet alone (`RegionInfo::return_frame_held_regions`) is admitted at a
-  point whose callee captures one of its holders
-  (`TailCalleeFacts::capture_funded`): the caller's reference is minted
-  by the callee's own `Return`, after the relocated release, and that captured
-  edge is the count holding the region off zero in between.
+  RETURN facet alone is admitted at every point: the caller's reference is minted
+  by the callee's own `Return`, after the relocated release, and that callee
+  reaches a value this frame owns as an operand or through its captured
+  environment and by no other route — so it either counts the region across the
+  gap or cannot mint against it at all (docs/impl/region/mechanism.md § "The
+  callee's return mint, and why the point owes it nothing").
 - `emitops.rs::seal_arm_hoists` / `open_branch_merge` — an `if`/`cond`/`match`
   merge is reached only through arms the lowerer closes one at a time, so it
   INHERITS their relocation points and a release emitted past the merge is
