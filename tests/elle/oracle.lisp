@@ -507,6 +507,16 @@
     _ (length v)))
 (defn t22-param-if [v c]
   (if c (length v) (%add 1 (length v))))
+# The window's live-in premise is about the ALLOCATION: that is what "born in an
+# arm" means, and what the release's route follows, since `region_to_slot` is
+# keyed on a region's allocation site. A binding the arm introduces to ALIAS a
+# live-in value records no slot of its own and so decides nothing. Driven through
+# the arm that takes no alias, the one whose release is new.
+(defn t22-arm-alias-inside [v t]
+  (match t
+    :a (length v)
+    _ (let [w v]
+        (length w))))
 # The window's iterative boundary is the loop's BODY, not the loop's own node. A
 # read of a loop-external binding is anchored at the loop NODE, and the lowerer
 # emits a node's releases after it, so that release already runs once per execution
@@ -2092,11 +2102,15 @@
 # OTHER arm leaves through a frame-replacing closure tail call. Declining such a
 # branch whole strands the argument on the arm driven here, which is what the
 # `concat`/`append` family paid per call.
-# `arm-seq-read` is the fourth: the same window over a branch one of whose arms
+# `arm-alias-inside` is the fourth: the same window over a branch one of whose
+# arms binds an ALIAS of the argument. The live-in premise is about the
+# allocation, so a binding the arm introduces is not a birth in the arm; reading
+# the two kinds of anchor as one strands the argument on every other arm.
+# `arm-seq-read` is the fifth: the same window over a branch one of whose arms
 # READS the argument through a sequence read. Those reads declare `Opaque`, so
 # they seed nothing on escape's store facet and the window admits the argument;
 # a `Mixed` declaration seeds one and holds the whole branch to the baseline.
-# `arm-loop-read` is the fifth: the same window over a branch one of whose arms
+# `arm-loop-read` is the sixth: the same window over a branch one of whose arms
 # LOOPS over the argument. Its release is anchored at the loop node, which the
 # lowerer emits after the loop, so the boundary that declines a loop is the loop's
 # BODY and this class is admitted; reading the boundary as the closed subtree
@@ -2114,6 +2128,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t22-param-if (list 1 2 3) true)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "arm-alias-inside"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-arm-alias-inside (list 1 2 3) :a)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "arm-seq-read"
                    (fn [b]

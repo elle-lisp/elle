@@ -483,10 +483,23 @@ The rows are `arm-loop-read` and `arm-loop-read-local` in
 `tests/elle/region-branch-arm-window.lisp`, beside the `bound-loop` boundary whose
 value is born in the loop body and whose release must stay there.
 
-The region must also be **live-in** to the branch (every allocation and
-holder-definition site outside the branch's subtree) — the same premise
-compensation states — so a value born inside an arm keeps its in-arm release,
-and the window only moves releases of values the branch received.
+The region must also be **live-in** to the branch, so a value born inside an arm
+keeps its in-arm release and the window moves only what the branch received.
+"Born" is the **allocation**, and the release's route follows it:
+`record_region_slot` keys `region_to_slot` on a region's allocation site, so the
+slot a value-routed release loads belongs to the binding whose init allocated the
+region — never to an alias, whose init merely names another binding and records no
+slot. An allocation inside the branch is therefore the shape the premise exists to
+keep out: its slot holds garbage on every path that skips the arm. A holder the
+arm merely introduces is not a second birth and decides nothing.
+
+So a region with an allocation site is live-in exactly when every one of those
+sites is outside the branch. A region with none — an owned parameter's
+placeholder, whose slot the lambda prologue records — has only its holder
+definitions to offer, and every one of their sites must be outside. The rows that
+separate the two are `arm-alias-inside` and `bound-loop` in
+`tests/elle/region-branch-arm-window.lisp`; the born-in-an-arm soundness face is
+`w-born-in-arm` in `region-branch-arm-window-uaf.lisp`.
 
 Regions whose release belongs to another mechanism are excluded as in
 compensation: merge children, co-owned-group members, the mutated-slot 1-slot

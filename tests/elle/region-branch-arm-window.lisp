@@ -52,12 +52,18 @@
 # `arm-loop-read*` rows — while `bound-loop`, whose value is born in the loop body,
 # must keep its release inside.
 #
+# The live-in premise is about the ALLOCATION, since that is both what "born in
+# an arm" means and what the release's route follows: `region_to_slot` is keyed on
+# a region's allocation site, so a binding whose init merely names another one
+# records no slot and can never be the route. The `arm-alias-inside` row is the
+# alias an arm introduces; `bound-loop` is the birth the premise keeps out.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
 # region-branch-arm-window-uaf.lisp; the per-op rates are the `param-used-arm`,
-# `branch-arm-tailcall-sibling`, `branch-arm-return-captured` and `arm-loop-read`
-# probes in tests/elle/oracle.lisp.
+# `branch-arm-tailcall-sibling`, `branch-arm-return-captured`, `arm-alias-inside`
+# and `arm-loop-read` probes in tests/elle/oracle.lisp.
 
 (def window 2000)
 
@@ -225,6 +231,17 @@
             (assign i (%add i 1)))
           (%add i 100)))))
 
+# (m) the arm introduces an ALIAS of the live-in parameter — a binding whose init
+# merely names it. Nothing is born in the arm, and the release's route is still the
+# allocating binding's slot, since an init that names another binding records no
+# slot of its own (docs/impl/region/mechanism.md § "The boundaries"). Driven
+# through the arm that does NOT alias, the one whose release is new.
+(defn arm-alias-inside (v t)
+  (match t
+    :a (length v)
+    _ (let [w v]
+        (length w))))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
 # boundary would leave one release covering many allocations (the loop) or a
@@ -300,6 +317,8 @@
 (def arm-loop-read-exit-d
   (measure (fn () (arm-loop-read (list 1 2 3) :z)) 200 window))
 (def arm-loop-read-local-d (measure (fn () (arm-loop-read-local :a)) 200 window))
+(def arm-alias-inside-d
+  (measure (fn () (arm-alias-inside (list 1 2 3) :a)) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
@@ -319,6 +338,7 @@
 (println "  returned + unfunded sibling: acc-walk " acc-walk-d)
 (println "  arm loop reads live-in: param " arm-loop-read-d "  looping arm "
          arm-loop-read-exit-d "  local " arm-loop-read-local-d)
+(println "  arm introduces an alias: " arm-alias-inside-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
 (println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
 
@@ -359,6 +379,9 @@
           "arm whose loop reads the live-in parameter: the looping arm")
 (bounded? arm-loop-read-local-d "arm whose loop reads a live-in fn-local")
 
+(bounded? arm-alias-inside-d
+          "an arm that introduces an alias of the live-in param")
+
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
 
@@ -388,6 +411,7 @@
 (assert (= (arm-loop-read (list 1 2 3) :a) 3) "arm-loop-read short arm lost")
 (assert (= (arm-loop-read (list 1 2 3) :z) 103) "arm-loop-read looping arm lost")
 (assert (= (arm-loop-read-local :z) 103) "arm-loop-read-local looping arm lost")
+(assert (= (arm-alias-inside (list 1 2 3) :z) 3) "arm-alias-inside arm lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
 

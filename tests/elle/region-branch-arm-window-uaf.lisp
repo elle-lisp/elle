@@ -146,6 +146,19 @@
         k))
   (length (get sink (%sub (length sink) 1))))
 
+# (e4) a value BORN inside an arm, with the branch driven through a DIFFERENT arm.
+# The window must decline it: the allocation is what puts the value in a slot, so
+# on a path that skips the arm that slot was never stored and a release at the
+# merge would load whatever it holds and free that. The two rows either side —
+# `w-loop-read` above, whose arm only ALIASES a live-in value — are what the
+# distinction has to keep apart.
+(defn w-born-in-arm (i t)
+  (match t
+    :a
+      (let [x (list (string "y" i) i)]
+        (length (first x)))
+    _ 0))
+
 # (f) a nested LAMBDA inside the arm, called repeatedly: its body's releases
 # belong to the closure's activation. Hoisting one to the enclosing branch would
 # release a region resolved against the wrong frame's slot.
@@ -267,6 +280,8 @@
 (var v 0)
 (var w 0)
 (var x 0)
+(var y 0)
+(var z 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -277,6 +292,8 @@
   (assign v (w-loop-read (list (string "v" i) i) :a))
   (assign w (w-loop-read (list (string "w" i) i) :z))
   (assign x (w-loop-read-store (list (string "x" i) i) :a))
+  (assign y (w-born-in-arm i :a))
+  (assign z (w-born-in-arm i :z))
   (assign f (w-lambda i :a))
   (assign g (w-park (list (string "g" i) i) :a))
   (assign h (w-tail (list (string "h" i) i) :b))
@@ -306,6 +323,8 @@
 (assert (%gt w 0) "live-in subject freed by the release moved off its loop node")
 (assert (%gt x 0)
         "stored subject freed though a sibling arm's loop only reads it")
+(assert (%gt y 0) "value born in an arm freed under its own read")
+(assert (= z 0) "value born in an arm ran its allocating arm on the other path")
 (assert (%gt f 0) "lambda-body value released from the enclosing frame")
 (assert (> g 0) "parked fiber's borrow freed by the moved release")
 (assert (%gt h 0) "tail-call arm's own release lost to the merge")

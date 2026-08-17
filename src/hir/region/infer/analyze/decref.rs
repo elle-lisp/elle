@@ -501,10 +501,21 @@ fn pin_branch_arm_releases(
     // `node_hi` is exactly innermost-outward.
     scopes.branches.sort_by_key(|b| b.node_hi);
 
-    // Every allocation and holder-definition site of each region — the live-in
-    // premise's anchors, gathered as `region::infer::compensate` gathers them.
+    // The live-in premise's anchors: every allocation site of each region, and the
+    // definition site of every holder binding that could be the release's ROUTE.
+    // `record_region_slot` keys `region_to_slot` on a region's ALLOCATION site, so
+    // the slot a value-routed release loads belongs to the binding whose init
+    // allocated the region — or, for a region no site in this body allocates, to
+    // the parameter the lambda prologue recorded. An ALIAS binder, whose init
+    // merely names another binding, records no slot and can never be the route, so
+    // its definition site anchors nothing: an arm that introduces one has not given
+    // birth to the value and the branch still received it.
+    let aliases = alias_binders(hir);
     let mut region_anchors: HashMap<Region, Vec<u32>> = HashMap::new();
     for (b, regions) in inference_binding_regions {
+        if aliases.contains(b) {
+            continue;
+        }
         if let Some(&d) = du.def_site.get(b) {
             for &r in regions {
                 region_anchors.entry(r).or_default().push(ord(d));
@@ -674,6 +685,55 @@ fn pin_branch_arm_releases(
             d.decref_point = anchor;
         }
     }
+}
+
+/// Every binding whose initializer merely NAMES another binding — an alias.
+///
+/// Such a binder allocates nothing, so `record_region_slot` records no slot for
+/// it (`alloc_region` has no entry at a `Var` init) and no value-routed release
+/// can ever load its slot. It is therefore not an anchor for the branch-arm
+/// window's live-in premise: an arm that introduces one has not given birth to the
+/// value, and the region the branch received is still the branch's to release
+/// (region/mechanism.md § "The boundaries").
+///
+/// The descent looks through `DerefCell`, the wrapper functionalization puts
+/// around a read of a `needs_capture` binding, for the same reason the tail
+/// callee's resolution does: matching the bare `Var` alone would miss most real
+/// aliases.
+///
+/// One alias binder does own a slot, and the allocation half of the anchor set is
+/// what keeps it honest: a whole-value read of a 1-slot container mints a
+/// placeholder region AT the read (`counted_cell_read_sites`), which is an
+/// `alloc_region` entry at this very init — so the reader's own placeholder still
+/// anchors on the reader, while the container's region, which the reader only
+/// names, does not.
+fn alias_binders(hir: &Hir) -> rustc_hash::FxHashSet<Binding> {
+    fn names_a_binding(init: &Hir) -> bool {
+        match &init.kind {
+            HirKind::Var(_) => true,
+            HirKind::DerefCell { cell } => names_a_binding(cell),
+            _ => false,
+        }
+    }
+    fn walk(h: &Hir, out: &mut rustc_hash::FxHashSet<Binding>) {
+        match &h.kind {
+            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+                for (b, init) in bindings {
+                    if names_a_binding(init) {
+                        out.insert(*b);
+                    }
+                }
+            }
+            HirKind::Define { binding, value, .. } if names_a_binding(value) => {
+                out.insert(*binding);
+            }
+            _ => {}
+        }
+        h.for_each_child(|c| walk(c, out));
+    }
+    let mut out = rustc_hash::FxHashSet::default();
+    walk(hir, &mut out);
+    out
 }
 
 /// The structural facts [`pin_branch_arm_releases`] reads off one compilation

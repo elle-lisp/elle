@@ -282,6 +282,41 @@ fn an_arm_whose_loop_reads_a_live_in_param_anchors_at_the_branch() {
 }
 
 #[test]
+fn an_alias_the_arm_introduces_does_not_defeat_the_live_in_premise() {
+    // The live-in premise keeps out a value BORN inside an arm, and "born" is the
+    // allocation: `record_region_slot` keys `region_to_slot` on a region's
+    // allocation site, so a binding whose init merely names another one records no
+    // slot and can never be the release's route
+    // (docs/impl/region/mechanism.md § "The boundaries"). `w` here is such a
+    // binding, so `xs` is still live-in and its one release moves to the merge.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t xs) (if t (length xs) (let [w xs] (length w))))");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "an alias the arm introduces must not read as a birth in the arm"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "xs", then_id),
+        "the anchored release must not be doubled by a per-arm compensation"
+    );
+}
+
+#[test]
+fn a_value_allocated_in_an_arm_keeps_its_in_arm_release() {
+    // The boundary the reading above preserves, and the one the premise exists
+    // for: `x`'s allocation IS the arm, so its slot was never stored on the path
+    // that skips the arm and a release at the merge would free whatever it finds.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t) (if t (let [x (list 1 2 3)] (length x)) 0))");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        !release_clears_the_arms(&hir, &arena, &symbols, &info, "x", &[then_id, else_id]),
+        "a value allocated inside an arm must keep its release there"
+    );
+}
+
+#[test]
 fn a_value_born_in_an_arms_loop_keeps_its_release_inside_the_loop() {
     // The boundary the reading above preserves. `s` is allocated in the loop BODY,
     // so its release runs per iteration and its `decref_point` is a strict
