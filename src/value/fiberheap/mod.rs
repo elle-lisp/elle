@@ -34,6 +34,15 @@ pub fn dump_page_hist() {
     pagepool::dump_page_hist();
 }
 
+/// Bytes the process's region page pools hold from the OS right now — every
+/// thread's, not just this one's: raised by each `mmap`, lowered by each
+/// `munmap`, so a thread that ends without giving its heap back shows up here.
+/// Guarded pages (`--trace=guardfree`) keep their mapping on purpose and stay
+/// counted.
+pub fn mapped_bytes() -> u64 {
+    pagepool::mapped_bytes()
+}
+
 /// Tracks objects allocated by a single `with-allocator` invocation.
 pub(crate) struct CustomAllocState {
     allocator: Rc<AllocatorBox>,

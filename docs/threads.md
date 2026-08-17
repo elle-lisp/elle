@@ -88,6 +88,26 @@ clamped to a sane `[2 MB, 64 MB]` range. The earlier symptom — only a stack of
 corpus file needs only ~3–4 MB of worker stack in a debug build; matching the
 main thread gives ample headroom without reserving an absurd per-worker stack.
 
+#### A worker owns its heap and gives it back
+
+A worker builds a whole instance of its own: a VM, a symbol table, a compile
+context, and the region heap all its values live in. The result crosses back to
+the joiner as a serialized bundle — a deep copy — so nothing the worker
+allocated is reachable once the thread ends. The worker therefore **owns** its
+heap: the thread's exit tears every region down and returns the pages to the
+OS.
+
+This is what bounds a program that runs many workers in sequence. The test
+runner is the extreme case: it ships each corpus file to its own worker, twice
+(once per JIT policy), so a worker heap that outlived its thread would make the
+runner's memory the sum of every file it has run, and a batch of 25 files peaked
+at 13 GB before the fix. A worker's cost is now its own, and a run's peak is the
+largest single file rather than the whole batch.
+
+`tests/integration/thread_transfer/heap.rs` pins the bound with the mapped-page
+gauge (`elle::value::fiberheap::mapped_bytes`), which counts the bytes the
+region page pools hold from the OS across every thread.
+
 `sys/spawn` does **not** start a scheduler — wrap the body in `(ev/run …)`
 yourself if it does async I/O (`ev/run` resolves there, since stdlib is
 loaded). Neither does it import the test file's own top-level `def`s into the

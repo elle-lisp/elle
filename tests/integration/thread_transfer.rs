@@ -29,3 +29,6 @@ mod errors {
 mod closures {
     include!("thread_transfer/closures.rs");
 }
+mod heap {
+    include!("thread_transfer/heap.rs");
+}

@@ -124,6 +124,7 @@ impl MmapPage {
                 libc::munmap((aligned + len) as *mut libc::c_void, suffix);
             }
         }
+        MAPPED_BYTES.fetch_add(len as u64, Ordering::Relaxed);
         Some(MmapPage {
             ptr: aligned as *mut u8,
             len,
@@ -145,6 +146,7 @@ impl MmapPage {
         if ptr == libc::MAP_FAILED {
             None
         } else {
+            MAPPED_BYTES.fetch_add(len as u64, Ordering::Relaxed);
             Some(MmapPage {
                 ptr: ptr as *mut u8,
                 len,
@@ -202,8 +204,24 @@ impl Drop for MmapPage {
         unsafe {
             libc::munmap(self.ptr as *mut libc::c_void, self.len);
         }
+        MAPPED_BYTES.fetch_sub(self.len as u64, Ordering::Relaxed);
     }
 }
+
+/// Bytes every region page pool in the process holds from the OS right now:
+/// raised by each `mmap`, lowered by each `munmap`. Guarded pages
+/// (`--trace=guardfree`) keep their mapping on purpose and stay counted.
+///
+/// Process-wide by design. `arena/page-claims` reads one heap's claims, so it
+/// cannot see a heap another thread owns — and a worker thread's heap is
+/// exactly the memory a program that spawns workers has to get back
+/// (docs/threads.md § "A worker owns its heap and gives it back"). This is the
+/// gauge that says whether it did.
+pub fn mapped_bytes() -> u64 {
+    MAPPED_BYTES.load(Ordering::Relaxed)
+}
+
+static MAPPED_BYTES: AtomicU64 = AtomicU64::new(0);
 
 // SAFETY: MmapPage owns its virtual memory exclusively.
 unsafe impl Send for MmapPage {}

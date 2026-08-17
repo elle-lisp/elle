@@ -144,7 +144,21 @@ fn spawn_closure_impl(
             // channel below — otherwise a joiner parked in chan/select would
             // wait forever for a wake that never comes.
             let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut vm = VM::new();
+                // This worker's own region heap, owned here rather than leaked.
+                // `VM::new` leaks its heap on purpose — right for a VM whose
+                // values must outlive it (macro expansion, test scaffolding),
+                // wrong for a thread that ends: the result crosses back as a
+                // SendBundle (a deep copy), so nothing on this heap is
+                // reachable after the join, and a leaked one makes a program
+                // that runs workers in sequence pay for every worker it ever
+                // ran (docs/threads.md § "A worker owns its heap and gives it
+                // back"). Declared before `vm` so it drops LAST — the same
+                // order `RuntimeCore` holds its fields in, so the heap is live
+                // while the VM, symbols and compile context drop against it.
+                // The `Box` also gives the raw `heap_ptr` a stable address.
+                let mut heap = Box::new(crate::value::fiberheap::FiberHeap::new());
+                let heap_ptr: *mut crate::value::fiberheap::FiberHeap = &mut *heap;
+                let mut vm = VM::new_with_heap(heap_ptr);
                 vm.set_unicode_generation(unicode_generation);
                 let mut symbols = SymbolTable::new();
                 // Register primitives so docs are available in the spawned thread.
@@ -162,8 +176,13 @@ fn spawn_closure_impl(
                 // core.lisp env, primitive/stdlib metadata, projections), so a
                 // runtime `(eval …)` / `(import …)` inside the spawned closure
                 // resolves macros and exports. Boxed for a stable address; the VM
-                // points at it.
-                let mut compile = Box::new(crate::pipeline::CompileCtx::new());
+                // points at it. Its macro-expansion VM shares THIS worker's heap,
+                // as `RuntimeCore` wires the same pair: one worker is one region
+                // store, so a macro-expanded value and a runtime value coexist —
+                // and the store goes with the thread instead of leaking a second
+                // heap per worker (`CompileCtx::new` would build its VM through
+                // `VM::new`, which leaks one).
+                let mut compile = Box::new(crate::pipeline::CompileCtx::new_with_heap(heap_ptr));
                 compile.set_unicode_generation(unicode_generation);
                 vm.set_compile_ctx(&mut *compile as *mut crate::pipeline::CompileCtx);
 
