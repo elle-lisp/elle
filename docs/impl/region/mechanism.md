@@ -492,12 +492,35 @@ the type dispatch receives the cons chain as `seq`, the `:list` arm opens with
 `(def @cur seq)`, and reading the mutation off `cur` held `seq`'s whole chain
 for the life of the frame while `seq`'s own slot stayed untouched.
 
-A binding whose route this reading cannot name keeps the whole-holder one: a
-parameter (whose prologue records the slot for every call-result region its value
-may name), a pattern binder, and a binding two binders introduce are each a route
-for every region they hold. The emitter states the same refusal at its two
-mutated-slot backstops, and it is the emitter that decides what runs — so an
-admission the emitter then declines over-keeps rather than over-frees.
+**Four sites record a route, and no others.** `Define`, `Let` and `Letrec` are the
+three the mirror carries (`binder_init_sites`, recorded at the same three walk arms
+the lowerer records the slot at); the fourth is the **lambda prologue**, which
+records a parameter's slot for the call-result regions its value may name and for
+no others. So a mutated binding the mirror cannot name is read by *what introduced
+it* rather than by a blanket refusal:
+
+- a **parameter** poisons exactly the prologue's own set. That set is empty in
+  practice, and by construction: `needs_capture` at parameter scope IS `is_mutated`,
+  so a reassigned parameter is celled, the one region it names is that cell's, and a
+  cell region is exempt throughout (below). Stating the filter rather than relying on
+  that keeps the refusal tracking the route if the walk ever gives such a parameter a
+  second region.
+- a **`Loop` parameter** and a **pattern name** poison nothing at all. No site
+  records a slot for either, so no value-routed release can load the slot their
+  `assign` repoints. That is what a `def` with a mutable destructuring pattern —
+  `(def (@a @b) …)` — was refusing: reassigning one name held the whole scrutinee,
+  whose release routes through the temp that produced it.
+- a binding **two different binders** introduce keeps the whole-holder reading. Both
+  binders record a route, and nothing says which one the release loads; that is a
+  genuine ambiguity rather than a gap in the mirror.
+
+The emitter states the same refusal at its two mutated-slot backstops, and it is the
+emitter that decides what runs — so an admission the emitter then declines over-keeps
+rather than over-frees. The references are the tests:
+`a_reassigned_destructured_name_refuses_nothing` for the pattern name,
+`a_reassigned_parameter_has_no_route_but_its_box` for the parameter,
+`a_reassigned_allocating_binder_refuses_its_own_release` for the refusal the reading
+keeps, and `tests/elle/region-destructured-cursor.lisp` for the measured shape.
 
 An **env cell**'s release is a different instruction against a different object.
 `LoadCaptureRaw` + `DecrefCellRegion` names the cell **box**, and the box is

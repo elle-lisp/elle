@@ -440,7 +440,103 @@ fn an_alias_the_arm_introduces_does_not_defeat_the_live_in_premise() {
 // lambda prologue recorded. Every other holder names the same value through a slot
 // no release reads, so the mutated question is asked of the route's binding alone
 // (docs/impl/region/mechanism.md § "A mutated holder poisons its value route, not
-// its cell box"). The two pins below are the admission and the refusal it keeps.
+// its cell box"). The pins below are the admissions and the refusals they keep.
+
+#[test]
+fn a_reassigned_destructured_name_refuses_nothing() {
+    // The binder forms that record a route are `Define`, `Let`/`Letrec` and the
+    // lambda prologue, and no others. A DESTRUCTURING name is none of them: the
+    // pattern extracts it from the scrutinee, and the lowerer records no
+    // `region_to_slot` entry for it, so no value-routed release can load the slot
+    // its `assign` repoints. The destructured list lives in the ANF temp that
+    // produced it, whose own slot is bound once and never repointed — reassigning
+    // one of the names the pattern introduced must not refuse it.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(begin (def (@a @b) (list 1 2)) (assign a 10) (length b))");
+    let mutated: Vec<Binding> = info
+        .binding_source_regions
+        .keys()
+        .copied()
+        .filter(|&b| arena.get(b).is_mutated)
+        .collect();
+    assert_eq!(
+        mutated.len(),
+        1,
+        "one reassigned binding; got {:?}",
+        mutated
+            .iter()
+            .map(|&b| symbols.name(arena.get(b).name))
+            .collect::<Vec<_>>()
+    );
+    let a = mutated[0];
+    assert_eq!(
+        symbols.name(arena.get(a).name),
+        Some("a"),
+        "precondition: the reassigned binding is the destructured `a`"
+    );
+    let allocs = find_calls_to_primitive(&hir, "list", &arena, &symbols);
+    assert_eq!(allocs.len(), 1, "one `list` literal; got {allocs:?}");
+    let r = *info
+        .alloc_region
+        .get(&allocs[0])
+        .expect("the list literal allocates a region");
+    assert!(
+        info.binding_source_regions
+            .get(&a)
+            .is_some_and(|rs| rs.contains(&r)),
+        "precondition: the destructured name holds the scrutinee's region, which is \
+         what made the whole-holder reading refuse it"
+    );
+    assert!(
+        info.frame_held_regions.contains(&r),
+        "r{} routes through the temp that produced the list, and a destructuring \
+         name records no route at all, so it must not be refused; frame_held={:?}",
+        r.0,
+        info.frame_held_regions,
+    );
+}
+
+#[test]
+fn a_reassigned_parameter_has_no_route_but_its_box() {
+    // The parameter half of the same reading, and why the prologue's own set is
+    // empty in practice: `needs_capture` at parameter scope IS `is_mutated`, so a
+    // reassigned parameter is celled, and the one region it names is that cell's —
+    // released by naming the BOX, which `populate_env` mints once per activation
+    // and no `assign` repoints. So the prologue records no poisonable route, and
+    // the call result the body assigns into the parameter keeps its own.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t @p) (begin (assign p (rest p)) (if t (length p) 0)))");
+    let p = find_binding_by_name(&hir, "p", &arena, &symbols).expect("the param `p`");
+    assert!(
+        arena.get(p).is_mutated && arena.get(p).needs_capture(),
+        "precondition: a reassigned parameter is celled"
+    );
+    let p_regions = info
+        .binding_source_regions
+        .get(&p)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !p_regions.is_empty()
+            && p_regions
+                .iter()
+                .all(|r| info.cell_release_regions.contains(r)),
+        "the celled parameter names its env cell and nothing else; p={p_regions:?}"
+    );
+    let calls = find_calls_to_primitive(&hir, "rest", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "one `rest` call; got {calls:?}");
+    let r = *info
+        .alloc_region
+        .get(&calls[0])
+        .expect("the call result has a placeholder region");
+    assert!(
+        info.frame_held_regions.contains(&r),
+        "r{} is the assigned value's own region, not the cell's, so the parameter's \
+         reassignment must not refuse it; frame_held={:?}",
+        r.0,
+        info.frame_held_regions,
+    );
+}
 
 #[test]
 fn a_cursor_an_arm_walks_does_not_refuse_the_live_in_release() {

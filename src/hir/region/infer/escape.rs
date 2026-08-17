@@ -228,14 +228,20 @@ pub(super) fn frame_held_regions(
 /// Mirrored here off `binder_init_sites`, which the walk records at the same three
 /// binder forms the lowerer records the slot at.
 ///
-/// A mutated binding whose route this mirror cannot name keeps the conservative
-/// whole-holder reading — every region it holds is poisoned. That is a PARAMETER,
-/// whose slot the lambda prologue records for each call-result region its value may
-/// name, and a binding two different binders introduce, which `binder_init_sites`
-/// marks ambiguous rather than resolving. A mutated binding's compiled forward CELL
-/// keeps it too: the projection that names the cell asserts exactly what the
-/// binding asserts and nothing more (region/mechanism.md § "A compiled capture cell
-/// is frame-held exactly as its binding is").
+/// **Four binder sites record a route, and no others.** `Define`, `Let` and
+/// `Letrec` are the three the mirror carries; the fourth is the lambda prologue,
+/// which records a PARAMETER's slot for the call-result regions its value may name
+/// and for no others. So a mutated binding absent from the mirror is read by what
+/// introduced it rather than by a blanket refusal: a parameter poisons exactly the
+/// prologue's own set, while a name a pattern introduces and a `Loop` parameter —
+/// which no site records a slot for — poison nothing at all. The whole-holder
+/// reading is left to the one case that is a genuine ambiguity rather than a gap: a
+/// binding two different binders introduce, where `binder_init_sites` holds `None`
+/// because two routes exist and nothing here says which the release loads. A
+/// mutated binding's compiled forward CELL is refused too: the projection that
+/// names the cell asserts exactly what the binding asserts and nothing more
+/// (region/mechanism.md § "A compiled capture cell is frame-held exactly as its
+/// binding is").
 ///
 /// An env cell is exempt throughout: its release names the BOX at its env index,
 /// which `populate_env` mints once per activation and an `assign` never repoints.
@@ -257,7 +263,25 @@ fn mutated_route_regions(
             // merely names another binding allocates nothing and is absent from
             // `alloc_region`, exactly as it records no slot in the lowerer.
             Some(&Some(init)) => out.extend(info.alloc_region.get(&init).copied()),
-            _ => out.extend(regions.iter().copied()),
+            // Two different binders, each recording a route of its own, and nothing
+            // here says which one the release loads. A genuine ambiguity rather than
+            // a gap in the mirror, so every region the binding holds stays refused.
+            Some(None) => out.extend(regions.iter().copied()),
+            // The binding is introduced by none of the three binder forms. The lambda
+            // prologue is the only other site that records a route, and it records a
+            // PARAMETER's slot for the call-result regions its value may name and for
+            // no others (`lir::lower::lambda::body`).
+            None if arena.get(b).scope == crate::hir::arena::BindingScope::Parameter => out.extend(
+                regions
+                    .iter()
+                    .copied()
+                    .filter(|r| info.call_result_regions.contains(r)),
+            ),
+            // A name a PATTERN introduces — a destructuring binder, a `Match` arm's
+            // pattern — or a `Loop` parameter functionalization minted. No site
+            // records a slot for either, so no value-routed release can load the
+            // slot its `assign` repoints, and it poisons nothing.
+            None => {}
         }
     }
     out.retain(|r| !info.cell_release_regions.contains(r));
