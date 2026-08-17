@@ -103,7 +103,7 @@ pub(super) fn populate_decref_points(
                 .into_iter()
                 .flat_map(|v| v.iter())
                 .map(|use_id| last_use.get(use_id).copied().unwrap_or(*use_id))
-                .chain(c.stores.iter().copied())
+                .chain(c.stores.sites())
                 .chain(carried_loop.get(b).copied())
                 .max_by_key(|id| ord(*id));
             if let Some(lu) = latest {
@@ -130,7 +130,7 @@ pub(super) fn populate_decref_points(
     let cell_value_regions: rustc_hash::FxHashSet<Region> = info
         .cell_containers
         .values()
-        .flat_map(|c| c.value_regions.iter().copied())
+        .flat_map(|c| c.stores.value_regions())
         .collect();
     // Each stored value region beside the point its CELL stops holding it, which
     // the uncounted-read pass reads to tell a borrow the cell already covers from
@@ -140,7 +140,7 @@ pub(super) fn populate_decref_points(
     // to be wrong in. The max is defensive: one region, one storing cell.
     let mut cell_drop_point: HashMap<Region, HirId> = HashMap::new();
     for c in info.cell_containers.values() {
-        for &r in &c.value_regions {
+        for r in c.stores.value_regions() {
             cell_drop_point
                 .entry(r)
                 .and_modify(|cur| {
@@ -151,13 +151,18 @@ pub(super) fn populate_decref_points(
                 .or_insert(c.demise);
         }
     }
+    // One pin per STORE, carrying that store's own value regions. A cell reached
+    // from two mutually exclusive arms stores a different value at each site, so
+    // pinning every value at the cell's last store puts the first arm's release on
+    // a path that arm does not reach (docs/impl/region/bindings.md § "The store
+    // site is the store that took THAT value"). Where one region really is stored
+    // at several sites, every one of them pins it and the pin rule's maximum picks
+    // the latest — the point after every store that took a reference of it.
     let cell_store_pins: Vec<(HirId, Vec<Region>)> = info
         .cell_containers
         .values()
-        .filter_map(|c| {
-            let store = c.stores.iter().copied().max_by_key(|id| ord(*id))?;
-            Some((store, c.value_regions.clone()))
-        })
+        .flat_map(|c| c.stores.iter())
+        .map(|s| (s.site, s.value_regions.clone()))
         .collect();
     for (b, regions) in inference_binding_regions {
         if regions.is_empty() {

@@ -64,6 +64,20 @@ agree with which of the value's ordinary decrefs are suppressed:
   different runtime value every iteration, so every value but the last keeps a
   reference nobody drops.
 
+  **The store site is the store that took THAT value.** A cell records one entry
+  per store — the site, and the regions of the value stored there — so the pin
+  follows the value (`CellStore`). Reading the stores as one set instead pins
+  every value at the cell's *last* store, and that is a point the earlier value's
+  path need not reach. Two `assign`s in mutually exclusive arms of a branch inside
+  a loop are the ordinary shape: the first arm's value is pinned in the second
+  arm, so an iteration that takes the first arm again displaces the previous value
+  from its own ANF slot before the pin ever runs. That strands one region per
+  repeat and grows with the iteration count
+  (`tests/elle/region-cell-arm-store.lisp`). Where one region really is stored at
+  several sites, the pin is the latest of *those* sites: it must sit after every
+  store that takes a reference of it, which is what pinning each store in turn
+  computes, the pin rule being a maximum.
+
   Because no release does double duty, the accounting is per-value in every
   shape: born `+1`, store `+1`, then either the overwrite or the content drop
   `−1` and the store-site producer release `−1`.

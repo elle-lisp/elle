@@ -335,7 +335,7 @@ fn fn_local_cell_counts_its_store_for_either_content_producer() {
             .unwrap_or_else(|| panic!("fn-local cell ({content}) must record a container"));
         let c = &info.cell_containers[&x];
         assert!(
-            !c.value_regions.is_empty(),
+            c.stores.value_regions().next().is_some(),
             "the container ({content}) must name the regions it may hold"
         );
     }
@@ -1121,10 +1121,9 @@ fn reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell() {
     // Every link's own assign-value regions keep their decrefs — those are the
     // producer releases, pinned to the store sites.
     let kept: Vec<Region> = up_cell
-        .value_regions
-        .iter()
-        .chain(down_cell.value_regions.iter())
-        .copied()
+        .stores
+        .value_regions()
+        .chain(down_cell.stores.value_regions())
         .collect();
     assert!(
         kept.len() >= 2,
@@ -1299,8 +1298,12 @@ fn a_cell_stored_value_is_not_extended_by_a_read_of_the_cell() {
             .cell_containers
             .get(b)
             .unwrap_or_else(|| panic!("precondition: {b:?} takes the container model"));
-        let store = *cell.stores.last().expect("the link stores at least once");
-        for r in &cell.value_regions {
+        let store = cell
+            .stores
+            .sites()
+            .last()
+            .expect("the link stores at least once");
+        for r in &cell.stores.value_region_set() {
             assert!(
                 read_regions.contains(r),
                 "precondition: the read names the cell's stored value region {r:?}"
@@ -1313,4 +1316,92 @@ fn a_cell_stored_value_is_not_extended_by_a_read_of_the_cell() {
             );
         }
     }
+}
+
+/// A stored value's producer release is pinned to the store that took **that**
+/// value, not to the cell's latest store. Two `assign`s in mutually exclusive
+/// arms of a branch inside a loop are the ordinary shape: reading the cell's
+/// stores as one set pins the first arm's value inside the SECOND arm, so an
+/// iteration taking the first arm again displaces the previous value from its own
+/// ANF slot before that pin ever runs — one stranded region per repeat, growing
+/// with the iteration count (docs/impl/region/bindings.md § "The store site is
+/// the store that took THAT value"; `tests/elle/region-cell-arm-store.lisp`).
+///
+/// Stated over the program rather than over the container's fields: each stored
+/// value's release must land inside the subtree of the `assign` that stored it.
+#[test]
+fn a_stored_value_is_pinned_to_the_store_that_took_it() {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (begin (var last (array 0 0))\n\
+                  (var i 0)\n\
+                  (while (%lt i n)\n\
+                    (begin (if (%lt i 2)\n\
+                             (assign last (array i 7))\n\
+                             (assign last (array i 9)))\n\
+                           (assign i (%add i 1))))\n\
+                  0)))\n\
+         (h 8)",
+    );
+    // The heap-carrying cell of the loop, and the two arms that store into it.
+    let (cell_binding, stores) = info
+        .cell_containers
+        .iter()
+        .map(|(b, c)| (*b, c.stores.len()))
+        .find(|&(_, n)| n > 1)
+        .expect("precondition: one cell is stored into from both arms");
+    assert_eq!(
+        stores, 2,
+        "precondition: the branch gives the cell exactly two store sites"
+    );
+    let sites: Vec<HirId> = find_reassign_sites(&hir)
+        .into_iter()
+        .filter(|&(_, b)| b == cell_binding)
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(sites.len(), 2, "precondition: two assigns name the cell");
+
+    // Each arm allocates the value it stores, so the region born under one
+    // `assign` must be released under that same `assign`.
+    for site in sites {
+        let born: Vec<Region> = info
+            .alloc_region
+            .iter()
+            .filter(|(alloc_id, _)| subtree_contains(&hir, site, **alloc_id))
+            .map(|(_, &r)| r)
+            .collect();
+        assert!(
+            !born.is_empty(),
+            "precondition: the assign at @{} allocates the value it stores",
+            site.0
+        );
+        for r in born {
+            let Some(d) = info.region_data.get(&r) else {
+                continue;
+            };
+            assert!(
+                subtree_contains(&hir, site, d.decref_point),
+                "a value allocated under the assign at @{} is released at @{}, \
+                 outside that assign: the pin followed the cell's LAST store \
+                 instead of the store that took this value, so every path that \
+                 does not reach the last store strands it",
+                site.0,
+                d.decref_point.0,
+            );
+        }
+    }
+}
+
+/// True when `id` is `root` or lies in `root`'s subtree.
+fn subtree_contains(hir: &Hir, root: HirId, id: HirId) -> bool {
+    fn walk(hir: &Hir, root: HirId, id: HirId, inside: bool) -> bool {
+        let inside = inside || hir.id == root;
+        if inside && hir.id == id {
+            return true;
+        }
+        let mut found = false;
+        hir.for_each_child(|c| found |= walk(c, root, id, inside));
+        found
+    }
+    walk(hir, root, id, false)
 }

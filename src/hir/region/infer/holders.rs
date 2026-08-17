@@ -78,7 +78,7 @@ impl RegionHolders {
         };
         for (&b, regions) in source_regions {
             if is_user_binding(b, arena) && eligible(b) {
-                holders.insert(b, regions);
+                holders.insert(b, regions.iter().copied());
             }
         }
         holders
@@ -87,7 +87,12 @@ impl RegionHolders {
     /// Record that binding `b` holds each of `regions`. The caller has already
     /// applied its own eligibility filter; the universal synthetic exclusion is
     /// re-checked here so no fold-in path can smuggle a temp into the index.
-    pub(super) fn add(&mut self, b: Binding, arena: &BindingArena, regions: &[Region]) {
+    pub(super) fn add(
+        &mut self,
+        b: Binding,
+        arena: &BindingArena,
+        regions: impl IntoIterator<Item = Region>,
+    ) {
         if is_user_binding(b, arena) {
             self.insert(b, regions);
         }
@@ -121,9 +126,9 @@ impl RegionHolders {
         self.aliases.get(&b).copied().unwrap_or(b)
     }
 
-    fn insert(&mut self, b: Binding, regions: &[Region]) {
+    fn insert(&mut self, b: Binding, regions: impl IntoIterator<Item = Region>) {
         let b = self.resolve(b);
-        for &r in regions {
+        for r in regions {
             self.map.entry(r).or_default().insert(b);
         }
     }

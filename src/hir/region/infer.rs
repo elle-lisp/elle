@@ -9,7 +9,7 @@ use super::super::binding::Binding;
 use super::super::defuse::DefUseBuilder;
 use super::super::expr::{Hir, HirId, HirKind};
 use super::super::liveness::{compute_last_use, compute_order, compute_subtree_low};
-use super::{CallClassification, Region, RegionData, RegionInfo, RegionStats};
+use super::{CallClassification, CellStores, Region, RegionData, RegionInfo, RegionStats};
 
 use std::collections::HashMap;
 use tree::RegionTree;
@@ -31,11 +31,11 @@ struct RegionInference {
     /// Empty for opaque bindings (params, pattern bindings).
     /// Var(b) returns `binding_regions[b]` to propagate value flow.
     binding_regions: HashMap<Binding, Vec<Region>>,
-    /// Binding → (assign/set-cell sites, value regions stored) for a TOP-LEVEL
-    /// (file-letrec, `in_lambda_depth == 0`), non-capture binding that is
-    /// reassigned. Drives the mutable-reassign decref placement in
-    /// `analyze_regions_with`.
-    top_level_reassigns: HashMap<Binding, (Vec<HirId>, Vec<Region>)>,
+    /// Binding → its stores (each an assign/set-cell site with the regions of
+    /// the value stored there) for a TOP-LEVEL (file-letrec,
+    /// `in_lambda_depth == 0`), non-capture binding that is reassigned. Drives
+    /// the mutable-reassign decref placement in `analyze_regions_with`.
+    top_level_reassigns: HashMap<Binding, CellStores>,
     /// Top-level CAPTURED (`needs_capture`, outside a lambda) bindings that are
     /// reassigned — the `@x`-boxed-in-a-`MakeCaptureCell`-and-reassigned class.
     /// These are excluded from `top_level_reassigns` (the cell's RC is owned by
@@ -58,7 +58,7 @@ struct RegionInference {
     /// the cell slot holds an UNCOUNTED reference yet still receives a scope-exit
     /// `DecrefValueRegion`, one decref too many for the final value → the
     /// fn-local mutable-reassign double-free (`fn/cfg … :mermaid`).
-    local_reassigns: HashMap<Binding, (Vec<HirId>, Vec<Region>)>,
+    local_reassigns: HashMap<Binding, CellStores>,
     /// Loop parameter → the binding its init `Var` forwards from. Functionalization
     /// rewrites a `while` that assigns a binding into a `Loop` whose parameter is a
     /// fresh version of that binding, initialized from the pre-loop version and
@@ -477,13 +477,7 @@ impl RegionInference {
         } else {
             &mut self.local_reassigns
         };
-        let entry = map.entry(b).or_insert_with(|| (Vec::new(), Vec::new()));
-        entry.0.push(site);
-        for &r in val_regions {
-            if !entry.1.contains(&r) {
-                entry.1.push(r);
-            }
-        }
+        map.entry(b).or_default().record(site, val_regions);
     }
 
     fn arena(&self) -> &BindingArena {

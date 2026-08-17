@@ -14,10 +14,11 @@
 use super::super::holders::RegionHolders;
 use super::super::*;
 use crate::hir::defuse::DefUseBuilder;
-use crate::hir::region::CellContainer;
+use crate::hir::region::{CellContainer, CellStores};
 
-/// Binding → (assign sites, the regions of the values stored there).
-type ReassignSites = HashMap<Binding, (Vec<HirId>, Vec<Region>)>;
+/// Binding → its stores, each an assign site with the regions of the value
+/// stored there.
+type ReassignSites = HashMap<Binding, CellStores>;
 
 /// Everything the walk recorded about reassigned bindings. One value rather than
 /// three parameters because no consumer wants a subset: the scope split decides
@@ -223,9 +224,9 @@ pub(super) fn apply_reassign_containers(
         &is_read,
         Reassigns::forwarded_init_aliases(&next),
     );
-    for (b, (_sites, regions)) in top_level_reassigns.iter().chain(local_reassigns.iter()) {
+    for (b, stores) in top_level_reassigns.iter().chain(local_reassigns.iter()) {
         if is_read(*b) {
-            region_holders.add(*b, arena, regions);
+            region_holders.add(*b, arena, stores.value_regions());
         }
     }
     let sole_held = |b: Binding, r: Region| -> bool { region_holders.sole_held(b, r) };
@@ -254,7 +255,8 @@ pub(super) fn apply_reassign_containers(
     //   - value-succession into the binding's own next value
     //     (`(assign acc (pair i acc))` — alloc-scan counted).
     // Like sole_held, the check is per-binding, all-or-nothing.
-    for (b, (sites, regions)) in top_level_reassigns {
+    for (b, stores) in top_level_reassigns {
+        let regions = stores.value_region_set();
         let init_regions = inference_binding_regions
             .get(b)
             .map(|v| v.as_slice())
@@ -333,7 +335,7 @@ pub(super) fn apply_reassign_containers(
         // counted store instead balances: store incref + placeholder release = the
         // cell's one reference, dropped at the next overwrite.
         let donates = !regions.iter().any(|r| info.call_result_regions.contains(r));
-        for &s in sites {
+        for s in stores.sites() {
             info.drop_on_overwrite_sites.insert(s);
             if donates {
                 info.donated_overwrite_sites.insert(s);
@@ -397,7 +399,7 @@ pub(super) fn apply_reassign_containers(
         .flat_map(|links| {
             let kept: Vec<Region> = links
                 .iter()
-                .flat_map(|b| local_reassigns[b].1.iter().copied())
+                .flat_map(|b| local_reassigns[b].value_regions())
                 .collect();
             links.iter().map(move |&b| (b, kept.clone()))
         })
@@ -418,7 +420,8 @@ pub(super) fn apply_reassign_containers(
     // Pass 1: each binding's own answers. Recorded before any binding acts,
     // because a chain's links stand or fall together (pass 2).
     let mut verdicts: HashMap<Binding, LocalVerdict> = HashMap::new();
-    for (b, (_sites, regions)) in local_reassigns {
+    for (b, stores) in local_reassigns {
+        let regions = stores.value_region_set();
         // Record the binding so the lowerer can refuse a value-route decref +
         // nil-stamp that names this binding's stack slot. `allocate_slot` gives a
         // fn-local reassigned mutable its own never-reused slot that holds a live
@@ -438,7 +441,7 @@ pub(super) fn apply_reassign_containers(
         // SUPPRESS, which is only ever the donation's business: an aliased init
         // costs the donation, not the model (docs/impl/region/bindings.md § "What
         // the cell donates it must hold alone; what it counts it need not").
-        let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(regions);
+        let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(&regions);
         let last = Reassigns::last_of_chain(&next, *b);
         verdicts.insert(
             *b,
@@ -495,7 +498,8 @@ pub(super) fn apply_reassign_containers(
     }
 
     // Pass 3: apply.
-    for (b, (sites, regions)) in local_reassigns {
+    for (b, stores) in local_reassigns {
+        let regions = stores.value_region_set();
         let binding_regs = inference_binding_regions
             .get(b)
             .map(|v| v.as_slice())
@@ -511,7 +515,7 @@ pub(super) fn apply_reassign_containers(
         // at its own first overwrite (or at its own content drop). The chain rule
         // above makes that link a cell whenever this one is.
         let forwards_content = next.contains_key(b);
-        let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(regions);
+        let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(&regions);
 
         if takes_model {
             if !returned {
@@ -519,7 +523,7 @@ pub(super) fn apply_reassign_containers(
                 // overwrite (priors) and at the cell's scope demise (the final
                 // value). The first overwrite is the init value's owning demise,
                 // so drop-on-overwrite is its release channel too.
-                for &s in sites {
+                for s in stores.sites() {
                     info.drop_on_overwrite_sites.insert(s);
                 }
                 // The demise is seeded with the last store — the earliest point
@@ -530,11 +534,11 @@ pub(super) fn apply_reassign_containers(
                 // container all the same — the store-site pins and the
                 // hold-back from the binding chain are its business too — but
                 // without the content drop the next link takes over.
-                if let Some(&seed) = sites.last() {
+                if let Some(seed) = stores.sites().last() {
                     let cell = if forwards_content {
-                        CellContainer::forwarding(sites.clone(), regions.clone(), seed)
+                        CellContainer::forwarding(stores.clone(), seed)
                     } else {
-                        CellContainer::new(sites.clone(), regions.clone(), seed)
+                        CellContainer::new(stores.clone(), seed)
                     };
                     info.cell_containers.insert(*b, cell);
                 }

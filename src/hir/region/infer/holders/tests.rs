@@ -96,8 +96,8 @@ fn add_folds_in_extra_holders_and_excludes_synthetics() {
     src.insert(base, vec![Region(2)]);
 
     let mut holders = RegionHolders::from_source_regions(&src, &arena, |_| true);
-    holders.add(extra, &arena, &[Region(2)]);
-    holders.add(temp, &arena, &[Region(2)]); // excluded — synthetic
+    holders.add(extra, &arena, [Region(2)]);
+    holders.add(temp, &arena, [Region(2)]); // excluded — synthetic
 
     let hs = holders.holders_of(Region(2)).expect("holders recorded");
     assert_eq!(hs.len(), 2, "base + extra, temp excluded");
@@ -138,7 +138,7 @@ fn add_applies_the_alias_fold() {
     let aliases: HashMap<Binding, Binding> = [(from, carries)].into_iter().collect();
 
     let mut holders = RegionHolders::with_aliases(&HashMap::new(), &arena, |_| true, aliases);
-    holders.add(from, &arena, &[Region(2)]);
+    holders.add(from, &arena, [Region(2)]);
 
     let hs = holders.holders_of(Region(2)).expect("holders recorded");
     assert_eq!(hs.len(), 1);

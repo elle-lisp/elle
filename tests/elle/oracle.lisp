@@ -1052,7 +1052,25 @@
             (assign n (%add n 1))
             (assign r (rest r)))
           (list n (first keep))))) 0]
-   ["format" (fn [j] (string "iter " j " of " 100)) 0]
+   # A branch inside a loop stores into ONE cell from both arms, so the cell has
+   # two store sites and each arm allocates the value it stores. Each stored
+   # value's producer release is discharged at the store that took THAT value
+   # (docs/impl/region/bindings.md § "The store site is the store that took THAT
+   # value"). Pinning both values at the cell's LAST store puts the first arm's
+   # release inside the second arm, which that arm's path does not reach, so an
+   # iteration repeating the first arm displaces the previous value from its own
+   # ANF slot with nothing left to release it. `list-cursor` above is the
+   # single-store control — one arm, one site, nothing to mis-pair.
+   ["cell-arm-store"
+    (fn [j]
+      (let [@last (array 0 0)]
+        (def @i 0)
+        (while (%lt i 4)
+          (if (%lt (%mod i 4) 2)
+            (assign last (array i 7))
+            (assign last (array i 9)))
+          (assign i (%add i 1)))
+        (get last 1))) 0] ["format" (fn [j] (string "iter " j " of " 100)) 0]
    # The four-stage `split`/`map`/`filter`/`join` chain — a CLOSED control now
    # (undeclared, like `rest-array-copy`), so a regression to open trips the
    # completeness gate rather than being absorbed as F1a scratch. Every stage

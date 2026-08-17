@@ -10,20 +10,102 @@ use super::{Region, RegionData, RegionStats};
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
 
+/// One store into a reassigned binding: the `Assign`/`SetCell` site, and the
+/// regions of the value stored **there**.
+///
+/// The pairing is what makes a stored value's producer release land at the store
+/// that took it. A cell reached from two mutually exclusive arms stores a
+/// different value at each site, and a release pinned at the wrong one sits on a
+/// path the value's own arm need not reach (docs/impl/region/bindings.md § "The
+/// store site is the store that took THAT value").
+#[derive(Clone)]
+pub struct CellStore {
+    pub site: HirId,
+    pub value_regions: Vec<Region>,
+}
+
+/// Every store into one reassigned binding, in walk order.
+///
+/// A newtype rather than a bare `Vec`, so the two projections a consumer wants —
+/// the sites alone, and every stored region — are named once here instead of
+/// spelled out at each site, and so recording a store cannot forget to look for
+/// the site's existing entry.
+#[derive(Default, Clone)]
+pub struct CellStores(Vec<CellStore>);
+
+impl CellStores {
+    /// Record `value_regions` as stored at `site`, merging into that site's
+    /// existing entry. The solver re-walks an inlinable callee's body at the call
+    /// site to collect its edges, so one `assign` can be visited more than once;
+    /// merging keeps one entry per site whatever the visit count.
+    pub fn record(&mut self, site: HirId, value_regions: &[Region]) {
+        let at = match self.0.iter().position(|s| s.site == site) {
+            Some(at) => at,
+            None => {
+                self.0.push(CellStore {
+                    site,
+                    value_regions: Vec::new(),
+                });
+                self.0.len() - 1
+            }
+        };
+        let entry = &mut self.0[at];
+        for &r in value_regions {
+            if !entry.value_regions.contains(&r) {
+                entry.value_regions.push(r);
+            }
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &CellStore> + '_ {
+        self.0.iter()
+    }
+
+    /// The store sites alone — what drop-on-overwrite is marked at.
+    pub fn sites(&self) -> impl Iterator<Item = HirId> + '_ {
+        self.0.iter().map(|s| s.site)
+    }
+
+    /// Every region stored into the cell, whichever site took it. A region two
+    /// stores both take is yielded once per store, since the iterator's consumers
+    /// are pins and sets; [`Self::value_region_set`] is the deduplicated form.
+    pub fn value_regions(&self) -> impl Iterator<Item = Region> + '_ {
+        self.0.iter().flat_map(|s| s.value_regions.iter().copied())
+    }
+
+    /// Every region stored into the cell, each named once — the form the gate
+    /// reads, its questions being asked of a binding's whole set at once.
+    pub fn value_region_set(&self) -> Vec<Region> {
+        let mut out: Vec<Region> = Vec::new();
+        for r in self.value_regions() {
+            if !out.contains(&r) {
+                out.push(r);
+            }
+        }
+        out
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// A fn-local reassigned mutable that took the 1-slot-container gate
 /// (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
 /// containers"). The cell holds exactly ONE counted reference to its current
 /// content, and that reference needs both of its release channels named:
-/// drop-on-overwrite at each `store` for the displaced prior, and the content
+/// drop-on-overwrite at each store for the displaced prior, and the content
 /// drop at `demise` for the final, never-overwritten value. The producer's
-/// separate claim on each stored value dies at the store, which is why
-/// `value_regions` are pinned to the store sites instead of riding the cell
+/// separate claim on each stored value dies at the store that took it, which is
+/// why each store's regions are pinned to that store instead of riding the cell
 /// binding's uses (a cell binding names the slot, not any one value).
 pub struct CellContainer {
-    /// The `Assign`/`SetCell` sites that store into the cell.
-    pub stores: Vec<HirId>,
-    /// The regions of the values stored there.
-    pub value_regions: Vec<Region>,
+    /// The stores into the cell, each with the regions of the value it took.
+    pub stores: CellStores,
     /// The node whose exit is the cell's scope demise — the enclosing scope
     /// node, so a loop-carried cell drops once after the loop and a cell bound
     /// inside a loop body drops once per iteration. Read only when the cell
@@ -44,10 +126,9 @@ pub struct CellContainer {
 impl CellContainer {
     /// A cell that keeps both channels: drop-on-overwrite for each displaced
     /// prior, and the content drop at `demise` for the final one.
-    pub fn new(stores: Vec<HirId>, value_regions: Vec<Region>, demise: HirId) -> Self {
+    pub fn new(stores: CellStores, demise: HirId) -> Self {
         Self {
             stores,
-            value_regions,
             demise,
             forwards_content: false,
         }
@@ -57,10 +138,10 @@ impl CellContainer {
     /// chain, so the content drop belongs to that link and not to this one.
     /// `demise` still rides along because the placement passes compute it for
     /// every container; nothing reads it here.
-    pub fn forwarding(stores: Vec<HirId>, value_regions: Vec<Region>, demise: HirId) -> Self {
+    pub fn forwarding(stores: CellStores, demise: HirId) -> Self {
         Self {
             forwards_content: true,
-            ..Self::new(stores, value_regions, demise)
+            ..Self::new(stores, demise)
         }
     }
 }
