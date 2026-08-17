@@ -300,6 +300,26 @@ fn region_sequence_read_effect_uaf() {
     );
 }
 
+// Guard — `fiber/child` and `import` declare `Opaque`: each stores no argument, so
+// neither seeds escape's store facet (docs/impl/region/effects.md § `Opaque`).
+// Withdrawing that seed withdraws the refusal it forced on every mechanism gated
+// on `frame_held_regions`, the branch-arm release window among them, so the
+// argument's release moves from the arm that names it last to the merge every path
+// reaches. This drives what must still outlive that merge: a fiber read again
+// after the branch, resumed after it, stored into a container a sibling arm reads,
+// returned to a caller that resumes it, captured by a closure called later, and
+// held across the fiber frontier by an inner fiber — plus an import specifier read
+// and stored the same way. Freeing any of them at the merge faults on the read
+// below — SIGSEGV under guardfree. The leak face is
+// `region-fiber-child-effect.lisp`.
+#[test]
+fn region_fiber_child_effect_uaf() {
+    run_elle_script_with_args(
+        "region-fiber-child-effect-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — an inlined callee's body regions name the CALLEE's activation, so the
 // caller names the call's own region for the result (docs/impl/region/mechanism.md
 // § "A call's result is named by the call's own region"). The result therefore

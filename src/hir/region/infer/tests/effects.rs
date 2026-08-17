@@ -366,6 +366,69 @@ fn has_declares_opaque_no_arg_clique() {
 }
 
 #[test]
+fn fiber_child_declares_opaque_and_propagate_keeps_the_hard_edge() {
+    // The two fiber-graph natives split on the STORE side, and the split is what
+    // their declarations record. `fiber/child` reads the cached child-fiber `Value`
+    // out of its argument and returns it — no store, and a result living in whatever
+    // region the resume minted the cache in, so `Opaque`: no hard-edge site, and no
+    // store-facet escape seed on the argument (the escape half is
+    // `a_fiber_graph_read_does_not_seed_the_store_facet`). `fiber/propagate` returns
+    // SIG_PROPAGATE, which drives the VM to write its argument into the propagating
+    // fiber's own `child`/`child_value` fields with no counting seam — the uncounted
+    // store the clique covers — so it stays `Mixed` and stays a hard-edge site.
+    // Both are single-heap-arg, so the clique edge set is empty either way and
+    // `hard_edge_sites` is what distinguishes them (docs/impl/region/effects.md
+    // § `Opaque`, § `Mixed`).
+    let (hir, arena, symbols, info) = analyze_with_class("(fiber/child \"f\")");
+    let calls = find_calls_to_primitive(&hir, "fiber/child", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (fiber/child ...) call");
+    assert!(
+        !info.hard_edge_sites.contains(&calls[0]),
+        "fiber/child declares Opaque — it stores nothing — so its call site must \
+         NOT be a hard-edge site (a regression to Mixed re-seeds the store facet \
+         on every fiber it reads)"
+    );
+
+    let (hir, arena, symbols, info) = analyze_with_class("(fiber/propagate \"f\")");
+    let calls = find_calls_to_primitive(&hir, "fiber/propagate", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (fiber/propagate ...) call");
+    assert!(
+        info.hard_edge_sites.contains(&calls[0]),
+        "fiber/propagate's argument is stored uncounted into the propagating \
+         fiber's child field, so it must stay a Mixed hard-edge site"
+    );
+}
+
+#[test]
+fn import_declares_opaque_no_hard_edge() {
+    // `import` copies its specifier out to a Rust `String` to resolve it and stores
+    // no argument; the module value it hands back is produced by compiled code run
+    // on the driving VM, so the RESULT is unbounded and nothing else is — the VM
+    // re-entry rule's answer, `Opaque` (docs/impl/region/effects.md § `Opaque`).
+    // Single-heap-arg, so the clique is empty either way: `hard_edge_sites` and the
+    // store-facet seed (`import_does_not_seed_the_store_facet`) are what a
+    // regression to Mixed brings back. The result stays non-fresh — it lives in
+    // neither the call's own region nor the specifier's.
+    let (hir, arena, symbols, info) = analyze_with_class("(import \"std/nonexistent\")");
+    let calls = find_calls_to_primitive(&hir, "import", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (import ...) call");
+    assert!(
+        !info.hard_edge_sites.contains(&calls[0]),
+        "import declares Opaque, so its call site must NOT be a hard-edge site"
+    );
+    let call_r = *info
+        .alloc_region
+        .get(&calls[0])
+        .expect("import call must have a call-result region");
+    assert!(
+        !info.fresh_result_regions.contains(&call_r),
+        "import's result is minted by the module's own compiled top level, not in \
+         the call's region, so r{} must not be a fresh result",
+        call_r.0
+    );
+}
+
+#[test]
 fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
     // The io / fiber pass (docs/impl/region/effects.md "Native region effects").
     // Every primitive

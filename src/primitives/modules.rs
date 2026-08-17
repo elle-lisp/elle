@@ -371,7 +371,13 @@ primitive! {
         params: &["spec"],
         example: "(import \"std/http\")",
         aliases: &["import-file", "module/import"],
-        effect: RegionEffect::Mixed,
+        // Opaque, not Mixed: the specifier is copied out to a Rust String to
+        // resolve it and never retained, so no argument is stored, while the
+        // result — a value the module's own compiled top level returned, or a
+        // plugin value an earlier call minted and cached — lives in neither this
+        // call's region nor the specifier's. The VM re-entry rule: unbounded
+        // result, no store (docs/impl/region/effects.md § Opaque).
+        effect: RegionEffect::Opaque,
         result_minted: true,
     }
 }

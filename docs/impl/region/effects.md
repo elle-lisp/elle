@@ -134,15 +134,33 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 
   **A native that re-enters the VM is `Opaque` on the store side.** `vm/query`
   selects an operation by a runtime string; `compile/run-on` dispatches a
-  caller-supplied closure on a chosen tier; the `compile/*-module` loaders run a
-  compiled thunk. None of that reaches the store side: each copies its arguments
+  caller-supplied closure on a chosen tier; the `compile/*-module` loaders and
+  `import` compile a module and run its top level as a thunk. None of that reaches
+  the store side: each copies its arguments
   out (a Rust `String`, a cloned `Syntax`) and the Elle code it re-enters can
   store only through the runtime-counted funnel, exactly as an opaque user fn
   can. The *result* is what the re-entry makes unbounded, so the answer is again
   `Opaque` — and the obligation it carries is on the dispatch, not the primitive:
   an operation added behind one of these gateways that RETAINS an argument past
   the call invalidates the declaration and must move it back to `Mixed`
-  (`tests/elle/region-query-clique-leak.lisp`).
+  (`tests/elle/region-query-clique-leak.lisp`). `import` is the declarant whose
+  result side is furthest from its own region: the module value comes back through
+  the thunk's return convention already carrying the caller's reference
+  (`result_minted`, below), or — for a plugin already loaded — out of the plugin
+  cache, minted by an earlier call. The specifier is resolved through a Rust
+  `String` and never retained, so the store side is empty
+  (`import_declares_opaque_no_hard_edge`, `import_does_not_seed_the_store_facet`;
+  the soundness face is `tests/elle/region-fiber-child-effect-uaf.lisp`).
+
+  **A fiber-graph read is `Opaque`.** `fiber/child` hands back the cached
+  child-fiber `Value` its argument carries. The cache is written by the resume
+  machinery (`with_child_fiber`), not by this call, so the read itself stores
+  nothing; the value it returns lives in whatever region the child was minted in,
+  which is neither the call's own nor its argument's. Unbounded result, no store —
+  `Opaque`, and its argument is not a store-facet escape seed. What a `Mixed`
+  declaration costs a read like this is that seed: a fiber named in one arm of a
+  branch and read in another loses the branch-arm release window and strands per
+  call (`tests/elle/region-fiber-child-effect.lisp`).
 - **`Delivers { args }`** — the listed (0-based) arguments are handed to
   **another fiber** by installing them in its signal slot, and the result is
   unbounded. The fiber value installers are the declarants: `fiber/resume`'s
@@ -199,6 +217,20 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   worst case." A primitive that stores nothing but merely returns a
   non-fresh result is **`Opaque`** (above), not `Mixed` — the clique is
   keyed on the *store*, so a non-storing native must not carry it.
+
+  **A signal a handler stores for is a store.** A primitive whose work is done by
+  the VM's handler for its signal is judged on what that handler does with the
+  argument. `fiber/propagate` returns `SIG_PROPAGATE` carrying its fiber argument,
+  and `handle_fiber_propagate_signal` writes that value into the propagating
+  fiber's own `child`/`child_value` fields — a fiber field, not a fiber frontier,
+  and with no counting seam of its own. So the store is real and uncounted, which
+  is `Mixed`'s property, and the argument stays a store-facet escape seed. The
+  clique is empty either way (one heap argument), so that seed is the whole content
+  of the declaration here — and nothing else would catch its loss: a `PassThrough`
+  claim reads true on the result side (the result IS arg0) and the oracle exempts
+  a signal-carrying return anyway, so the store side is the only thing the
+  declaration is deciding. Pinned solver-side by
+  `fiber_child_declares_opaque_and_propagate_keeps_the_hard_edge`.
 - **`Unknown`** — nobody has looked. The default for unexamined
   primitives, every plugin-supplied definition (the plugin ABI cannot
   carry a claim yet), and the standing classification of user-supplied

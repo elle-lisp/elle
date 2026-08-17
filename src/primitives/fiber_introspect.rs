@@ -306,7 +306,14 @@ primitive! {
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/child f)",
-        effect: RegionEffect::Mixed,
+        // Opaque, not Mixed: the read hands back the cached child-fiber Value the
+        // resume machinery left on the argument (`with_child_fiber`), so this call
+        // stores nothing — while the value it returns lives in the region the child
+        // was minted in, neither the call's own nor its argument's. Unbounded
+        // result, no store. Mixed would seed the argument on escape's store facet,
+        // costing every branch that reads a live-in fiber here its release window
+        // (docs/impl/region/effects.md § "A fiber-graph read is `Opaque`").
+        effect: RegionEffect::Opaque,
     }
     "fiber/parent" => prim_fiber_parent {
         arity: Arity::Exact(1),
@@ -325,11 +332,14 @@ primitive! {
         doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
         category: "fiber",
-        // Kept Mixed (NOT PassThrough, an audit candidate): the SIG_PROPAGATE
-        // return drives the VM to store the fiber cross-fiber into `parent.child`,
-        // and as a single-heap-arg control-flow op its clique is empty either way
-        // — a PassThrough claim would be a silent yield-path over-tighten with no
-        // payoff.
+        // Mixed: the SIG_PROPAGATE return drives the VM to write the fiber
+        // argument into the propagating fiber's own `child`/`child_value` fields
+        // (`handle_fiber_propagate_signal`), with no counting seam — the uncounted
+        // store the clique exists to cover. The clique is empty either way (one
+        // heap argument), so what the declaration carries here is escape's store
+        // facet on the argument, which that write earns
+        // (docs/impl/region/effects.md § "A signal a handler stores for is a
+        // store").
         effect: RegionEffect::Mixed,
     }
     "fiber/caps" => prim_fiber_caps {

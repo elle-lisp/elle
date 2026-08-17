@@ -332,6 +332,39 @@ fn a_sequence_read_does_not_seed_the_store_facet() {
     );
 }
 
+/// The fiber-graph reads are the same claim on a different subject: `fiber/child`
+/// hands back the cached child-fiber `Value` its argument carries and stores
+/// nothing, so its argument is not a store-facet seed. `fiber/propagate` is the
+/// contrast that keeps the seed honest — it hands its argument to the
+/// `SIG_PROPAGATE` handler, which writes it into the propagating fiber's own
+/// `child`/`child_value` fields with no counting seam, the uncounted store `Mixed`
+/// exists to cover (docs/impl/region/effects.md § `Opaque`, § `Mixed`).
+#[test]
+fn a_fiber_graph_read_does_not_seed_the_store_facet() {
+    assert_binding_escape(
+        "(let [f (fiber/new (fn () 1) |:error|)] (fiber? (fiber/child f)))",
+        &[("f", false, false)],
+    );
+    assert_binding_escape(
+        "(let [f (fiber/new (fn () 1) |:error|)] (fiber? (fiber/propagate f)))",
+        &[("f", true, false)],
+    );
+}
+
+/// `import` copies its specifier out to a Rust `String` to resolve it and stores
+/// no argument; what it re-enters the VM to produce makes only the RESULT
+/// unbounded, which is `Opaque`'s half of the declaration and seeds nothing
+/// (docs/impl/region/effects.md § `Opaque`, the VM re-entry rule). The specifier
+/// is read through a binding so the call keeps its opaque projection — a literal
+/// spec is resolved and compiled at analysis time.
+#[test]
+fn import_does_not_seed_the_store_facet() {
+    assert_binding_escape(
+        "(let [s \"std/nonexistent\"] (length (import s)))",
+        &[("s", false, false)],
+    );
+}
+
 /// Container-read escape (the read-result → container-contents flow edge). A value
 /// stored into a container and then read back OUT (`first`/`rest`/`get`/`pop`) and
 /// ESCAPED must be marked escaping too: the ownership forest would otherwise adopt it

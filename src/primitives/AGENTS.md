@@ -56,9 +56,15 @@ Return values:
    Stores{args} = uncounted store into a structure (containment), fresh
    result; Sends{args} = like Stores but the args cross a fiber boundary
    (`chan/send`'s message) — same edges, plus a fiber-frontier Shared seed
-   for the ownership forest; Mixed = examined, no stronger claim holds
-   (identity tails, yield-suspending, runs user code, funnel-counted
-   container stores).
+   for the ownership forest; Funnel = every store rides the runtime-counted
+   mutable-store funnel; Delivers{args} = the args are installed in another
+   fiber's signal slot, counted by that seam; Opaque = stores nothing but the
+   result lives neither in this call's region nor in an argument's; Mixed =
+   examined, and the native (or the VM handler for the signal it returns)
+   stores an argument uncounted. The last two are the pair most often
+   confused: the arg clique and the store-facet escape seed are keyed on the
+   STORE, so a native that stores nothing declares Opaque however unbounded
+   its result.
 
 ```rust
 // In arithmetic.rs
