@@ -1741,6 +1741,7 @@
         select-sets @{}  # waiting-fiber → @{:candidates [...] :woken @[false]}
         completed @{}  # fiber → :ok | :error (already-completed fibers)
         joined @||  # set of fibers whose result was observed
+        entry-fibers @||  # set of the program's own fibers (see retire-fiber)
         scheduler-killed @||  # set of fibers we aborted at teardown (suppress their injected :shutdown)
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
         park-queues @{}
@@ -1748,6 +1749,28 @@
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
       (del select-sets waiter))
+
+    (defn retire-fiber [fiber]
+      "Drop the scheduler's records of a fiber whose result a caller took.
+       Both records are keyed by the fiber, so keeping them keeps the fiber
+       and its closure alive for the scheduler's whole life — one permanent
+       allocation per spawn. Nothing reads them after the delivery:
+       `get-completion` re-derives the status from the fiber whenever the
+       record is absent, and the unjoined-error tail reads only fibers
+       nobody joined.
+
+       Two fibers keep their records. The program's own — `:pump` reads
+       their record to know the program finished. And a FAILED one: its
+       mark is what stops the tail from re-raising an error its joiner
+       already took, and a later `get-completion` (a second join, a select
+       over it, a completion that arrives for it) re-records the failure
+       from the fiber's own status. Re-recording a success is harmless —
+       the tail reads `:error` alone — so a success needs no such memory.
+       See docs/scheduler.md § Completion records."
+      (when (and (= (get completed fiber) :ok)
+                 (not (contains? entry-fibers fiber)))
+        (del completed fiber)
+        (del joined fiber)))
 
     (defn wake-select-waiters [fiber]
       "Wake any select-set waiter that includes fiber as a candidate."
@@ -1792,7 +1815,9 @@
           (let [pair [(= status :ok) (fiber/value fiber)]]
             (each w in ws
               (fiber/resume w pair)
-              (handle-fiber-after-resume w))))  # Wake select waiters
+              (handle-fiber-after-resume w)))  # Every waiter was a joiner, and each now holds the result, so
+          # the record just written has no reader left.
+          (retire-fiber fiber))  # Wake select waiters
         (wake-select-waiters fiber)))
 
     (defn get-completion [fiber]
@@ -1822,7 +1847,8 @@
         (if (not (nil? comp))  # Already completed — resume immediately
           (begin
             (fiber/resume caller [(= comp :ok) (fiber/value target)])
-            (handle-fiber-after-resume caller))  # Still running — park caller on target's join waiter list
+            (handle-fiber-after-resume caller)  # The caller holds the result; the records have no reader left.
+            (retire-fiber target))  # Still running — park caller on target's join waiter list
           (let [ws (or (get waiters target)
                        (let [w @[]]
                          (put waiters target w)
@@ -1858,7 +1884,9 @@
             (del pending id)
             (del fiber-io target)))  # Graceful abort (runs defer/protect)
         (fiber/abort target {:error :aborted})  # Route the aborted fiber through completion
-        (handle-fiber-after-resume target))  # Resume caller with nil
+        (handle-fiber-after-resume target))  # The aborter observed the target on its own behalf, so the
+      # records retire on the same rule a delivered join uses.
+      (retire-fiber target)  # Resume caller with nil
       (fiber/resume caller nil)
       (handle-fiber-after-resume caller))
 
@@ -2089,9 +2117,12 @@
         :pending))
 
     (defn report []
-      "What the loop is waiting for right now. The loop blocks when
-       `runnable` is empty and the rest is not, so this names the waits
-       that outlived the work."
+      "What the loop is waiting for right now, and what it still
+       remembers. The loop blocks when `runnable` is empty and the rest
+       is not, so this names the waits that outlived the work; `:records`
+       and `:marks` name the completion bookkeeping that outlived the
+       fibers (docs/scheduler.md § Completion records), which is how a
+       program reads that a finished fiber was let go."
       (let [parks @[]]
         (each [key q] in (pairs park-queues)
           (push parks [key (length q)]))
@@ -2101,6 +2132,8 @@
          :joins (length waiters)
          :selects (length select-sets)
          :forwarded (length forwarded-pending)
+         :records (length completed)
+         :marks (length joined)
          :parks (freeze parks)}))
 
     {:spawn  # scheduler-fn: register fiber
@@ -2152,8 +2185,12 @@
            (error (fiber/value fiber)))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
-     :mark-joined  # mark a fiber as observed (suppress unjoined-error crash)
-      (fn (fiber) (add joined fiber))
+     :mark-joined  # mark one of the program's own fibers: observed (suppress the
+      # unjoined-error crash) and exempt from retirement, because `:pump`
+     # reads its completion record to know the program finished.
+     (fn (fiber)
+       (add joined fiber)
+       (add entry-fibers fiber))
      :backend backend}))
 
 (def *shutdown* (make-parameter nil))

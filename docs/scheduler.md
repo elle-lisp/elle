@@ -102,6 +102,39 @@ Two invariants govern delivery:
 
 `tests/elle/io-late-completion.lisp` pins both.
 
+## Completion records
+
+The scheduler remembers the fibers it has finished with: a status record
+(`:ok` or `:error`) per completed fiber, and a mark per fiber whose
+result someone took. Both are keyed by the fiber, so a record holds the
+fiber value — and the region the fiber and its closure live in — for as
+long as the record lasts.
+
+One invariant governs the records:
+
+- **A record lasts only as long as a reader needs it.** A delivered join
+  or abort drops both records for that fiber. Nothing reads them
+  afterwards: the status is re-derived from the fiber itself whenever the
+  record is absent, the value was always read from the fiber rather than
+  from the record, and the unjoined-error tail at the end of the loop
+  looks only at fibers nobody joined. A record that outlives its readers
+  makes every `ev/spawn` a permanent allocation, which a long-running
+  program pays for once per fiber it ever ran.
+
+The program's own fibers — the thunks `ev/run` hands the loop — are the
+exception. Their records are what tells the loop the program finished,
+so they last until the loop ends.
+
+`tests/elle/sched-completion-records.lisp` pins the bound through
+`ev/report`'s `:records` / `:marks`; `tests/elle/ev-unjoined-error.lisp` pins
+that retiring the records still leaves an unjoined failure to crash the
+program.
+
+The records are not the only per-fiber cost. A spawned fiber still strands a
+few regions of its own after everyone has let go of it — the residue
+`oracle.lisp`'s `spawn-join` probe measures and bounds. That is a region-model
+defect, tracked there; these records are the scheduler's own half of it.
+
 ---
 
 ## ev/report
@@ -117,7 +150,14 @@ struct:
 | `:joins` | fibers with at least one join waiter |
 | `:selects` | fibers parked on a select set |
 | `:forwarded` | I/O submitted for a child scheduler |
+| `:records` | completed fibers whose status the loop still holds |
+| `:marks` | fibers marked as observed (joined, aborted, or the program's own) |
 | `:parks` | one `[key count]` pair per non-empty park queue |
+
+`:records` and `:marks` are the completion bookkeeping above, not waits: a
+program that spawns in a loop reads them to see that finished fibers are let
+go. They stay flat under a join-and-discard loop and grow only with fibers
+nobody has observed yet.
 
 The loop blocks when `:runnable` is empty and everything else is not, so
 a report taken from a fiber the scheduler still runs names the waits that
