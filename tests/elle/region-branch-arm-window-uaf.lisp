@@ -17,6 +17,14 @@
 # the branch. A wrongly-admitted window frees a live region and the read below
 # faults.
 #
+# One binding owns a region's release ROUTE — the one whose init allocated it — so
+# an arm that walks the subject with a reassigned CURSOR leaves that route alone and
+# the window admits the subject (docs/impl/region/mechanism.md § "A mutated holder
+# poisons its value route, not its cell box"). The cursor hands back values living
+# inside the subject's own region, so the moved release must still follow every read
+# of them; that pair is driven below on both arms, and beside the store shape the
+# admission must refuse outright.
+#
 # A branch one of whose arms leaves through a frame-replacing callee is admitted
 # like any other — the relocation replicates the anchored release ahead of that
 # arm's call, or the exemption leaves it to the callee that took the argument over
@@ -159,6 +167,41 @@
         (length (first x)))
     _ 0))
 
+# (e5) the arm walks the live-in subject with a reassigned CURSOR, and the subject
+# is read again after the branch. The release's route is the subject's own slot,
+# which no `assign` repoints, so the window admits it — and the cursor's walk hands
+# back values living inside the subject's region, so a release moved to the merge
+# must still land behind the post-branch read. Driven on both arms: the walking one,
+# whose release moved, and the sibling one, which now runs a release it never ran.
+(defn w-cursor (v t)
+  (%add (match t
+          :a (length (first v))
+          _
+            (begin
+              (def @cur v)
+              (def @n 0)
+              (while (pair? cur)
+                (assign n (%add n (length (first cur))))
+                (assign cur (rest cur)))
+              n)) (length (first v))))
+
+# (e6) the same walk whose sibling arm STORES the subject into a container that
+# outlives the frame. The store is an escape facet, so the admission refuses the
+# region however the walking arm reassigns its cursor; the read back out must find
+# it.
+(defn w-cursor-store (v t)
+  (match t
+    :a (push sink v)
+    _
+      (begin
+        (def @cur v)
+        (def @n 0)
+        (while (pair? cur)
+          (assign n (%add n 1))
+          (assign cur (rest cur)))
+        n))
+  (length (get sink (%sub (length sink) 1))))
+
 # (f) a nested LAMBDA inside the arm, called repeatedly: its body's releases
 # belong to the closure's activation. Hoisting one to the enclosing branch would
 # release a region resolved against the wrong frame's slot.
@@ -282,6 +325,9 @@
 (var x 0)
 (var y 0)
 (var z 0)
+(var aa 0)
+(var ab 0)
+(var ac 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -294,6 +340,10 @@
   (assign x (w-loop-read-store (list (string "x" i) i) :a))
   (assign y (w-born-in-arm i :a))
   (assign z (w-born-in-arm i :z))
+  # Every element is a string: the walking arm measures each one it reaches.
+  (assign aa (w-cursor (list (string "aa" i) (string "aa2" i)) :a))
+  (assign ab (w-cursor (list (string "ab" i) (string "ab2" i)) :z))
+  (assign ac (w-cursor-store (list (string "ac" i) i) :a))
   (assign f (w-lambda i :a))
   (assign g (w-park (list (string "g" i) i) :a))
   (assign h (w-tail (list (string "h" i) i) :b))
@@ -323,6 +373,11 @@
 (assert (%gt w 0) "live-in subject freed by the release moved off its loop node")
 (assert (%gt x 0)
         "stored subject freed though a sibling arm's loop only reads it")
+(assert (%gt aa 0)
+        "live-in subject freed by the merge release its walking sibling admitted")
+(assert (%gt ab 0) "live-in subject freed under the cursor that walks it")
+(assert (%gt ac 0)
+        "stored subject freed though a sibling arm only walks it with a cursor")
 (assert (%gt y 0) "value born in an arm freed under its own read")
 (assert (= z 0) "value born in an arm ran its allocating arm on the other path")
 (assert (%gt f 0) "lambda-body value released from the enclosing frame")

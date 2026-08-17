@@ -58,6 +58,13 @@
 # records no slot and can never be the route. The `arm-alias-inside` row is the
 # alias an arm introduces; `bound-loop` is the birth the premise keeps out.
 #
+# The same keying decides whose MUTATION matters. One binding owns the route, so a
+# second name bound from the value — a cursor an arm walks with — repoints its own
+# slot and leaves the allocating binding's alone (docs/impl/region/mechanism.md
+# § "A mutated holder poisons its value route, not its cell box"). The
+# `arm-cursor` and `each-list` rows are that shape, `each`'s list arm being where
+# it is reached in production.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
@@ -242,6 +249,34 @@
     _ (let [w v]
         (length w))))
 
+# (n) the arm walks the live-in parameter with a reassigned CURSOR. The mutated
+# refusal is about the release's ROUTE, and one binding owns it: `region_to_slot`
+# is keyed on the allocation site, so the slot the release loads is `v`'s own,
+# which no `assign` repoints — the cursor's init merely names `v` and records no
+# slot at all (docs/impl/region/mechanism.md § "A mutated holder poisons its value
+# route, not its cell box"). This is the `each` macro's list arm, whose
+# `(def @cur seq)` reads the mutation off the cursor and stranded the whole cons
+# chain per call. Driven through the arm that does NOT walk, the one whose release
+# is new, and through the walking arm, whose release moved.
+(defn arm-cursor (v t)
+  (match t
+    :a (length v)
+    _
+      (begin
+        (def @cur v)
+        (def @n 0)
+        (while (pair? cur)
+          (assign n (%add n 1))
+          (assign cur (rest cur)))
+        n)))
+
+# (o) the `each` macro itself over a list — the production shape (n) isolates.
+(defn each-list (v)
+  (def @n 0)
+  (each x in v
+    (assign n (%add n 1)))
+  n)
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
 # boundary would leave one release covering many allocations (the loop) or a
@@ -319,6 +354,9 @@
 (def arm-loop-read-local-d (measure (fn () (arm-loop-read-local :a)) 200 window))
 (def arm-alias-inside-d
   (measure (fn () (arm-alias-inside (list 1 2 3) :a)) 200 window))
+(def arm-cursor-d (measure (fn () (arm-cursor (list 1 2 3) :a)) 200 window))
+(def arm-cursor-walk-d (measure (fn () (arm-cursor (list 1 2 3) :z)) 200 window))
+(def each-list-d (measure (fn () (each-list (list 1 2 3))) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
@@ -339,6 +377,8 @@
 (println "  arm loop reads live-in: param " arm-loop-read-d "  looping arm "
          arm-loop-read-exit-d "  local " arm-loop-read-local-d)
 (println "  arm introduces an alias: " arm-alias-inside-d)
+(println "  arm walks with a cursor: non-walking " arm-cursor-d "  walking "
+         arm-cursor-walk-d "  each-list " each-list-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
 (println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
 
@@ -382,6 +422,12 @@
 (bounded? arm-alias-inside-d
           "an arm that introduces an alias of the live-in param")
 
+(bounded? arm-cursor-d
+          "an arm that walks the live-in param with a cursor: non-walking arm")
+(bounded? arm-cursor-walk-d
+          "an arm that walks the live-in param with a cursor: the walking arm")
+(bounded? each-list-d "`each` over a list")
+
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
 
@@ -412,6 +458,9 @@
 (assert (= (arm-loop-read (list 1 2 3) :z) 103) "arm-loop-read looping arm lost")
 (assert (= (arm-loop-read-local :z) 103) "arm-loop-read-local looping arm lost")
 (assert (= (arm-alias-inside (list 1 2 3) :z) 3) "arm-alias-inside arm lost")
+(assert (= (arm-cursor (list 1 2 3) :a) 3) "arm-cursor short arm lost")
+(assert (= (arm-cursor (list 1 2 3) :z) 3) "arm-cursor walking arm lost")
+(assert (= (each-list (list 1 2 3)) 3) "each-list result lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
 

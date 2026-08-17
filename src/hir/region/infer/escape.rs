@@ -122,9 +122,8 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 
 /// The two frame-held sets ([`FrameHeld`]), split on whether the **return** facet
 /// counts as a refusal: `sole` is the regions whose every holder binding leaves
-/// this activation by **no** facet — non-escaping, with no mutated holder unless
-/// the region is released through a cell box rather than that holder's slot, and
-/// absent from the return/fiber frontiers' atomless site halves — and
+/// this activation by **no** facet — non-escaping, with an unmutated release route,
+/// and absent from the return/fiber frontiers' atomless site halves — and
 /// `return_funded` is the same reading with the return facet alone allowed. A
 /// region with no holder binding at all offers nothing to judge and is refused by
 /// both — except a binding's compiled forward CELL, whose holders are that
@@ -156,17 +155,18 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// [`captured_bindings`], the structural graph the *merge* gate reads — merging
 /// changes where a value lives, so it needs raw reachability rather than a count.
 ///
-/// **A mutated holder is refused for its value ROUTE, so the refusal reaches only
+/// **A mutated binding is refused for its value ROUTE, so the refusal reaches only
 /// as far as that route** (region/mechanism.md § "A mutated holder poisons its
-/// value route, not its cell box"). A value-routed release loads the holder's slot
-/// and frees the region of whatever it finds there, which a repointed slot makes
-/// unanswerable. An env cell's release names the cell BOX instead
-/// (`LoadCaptureRaw` + `DecrefCellRegion`), and the box is minted once per
-/// activation by `populate_env` and never repointed — an `assign` writes the
-/// cell's *content*. So a `cell_release_regions` member keeps the holder's
-/// mutation and owes only the count argument, which the facets above still ask.
-/// The emitter states the same exclusion at its two mutated-slot backstops
-/// (`lir::lower::regiondecref::emit_decref_for_region`).
+/// value route, not its cell box"). A value-routed release loads one slot and frees
+/// the region of whatever it finds there, which a repointed slot makes unanswerable
+/// — and that slot belongs to the region's own route binding, never to every
+/// binding that names the value ([`mutated_route_regions`]). An env cell's release
+/// names the cell BOX instead (`LoadCaptureRaw` + `DecrefCellRegion`), and the box
+/// is minted once per activation by `populate_env` and never repointed — an
+/// `assign` writes the cell's *content*. So a `cell_release_regions` member keeps
+/// its route's mutation and owes only the count argument, which the facets above
+/// still ask. The emitter states the same exclusion at its two mutated-slot
+/// backstops (`lir::lower::regiondecref::emit_decref_for_region`).
 ///
 /// Two consumers, deliberately sharing one predicate: the branch-arm release window
 /// (`region::infer::analyze::decref`) and the frame-exit release the lowerer performs at a
@@ -179,14 +179,15 @@ pub(super) fn sole_frame_held_regions(
     arena: &crate::hir::arena::BindingArena,
     info: &RegionInfo,
     binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
+    binder_init_sites: &HashMap<Binding, Option<HirId>>,
 ) -> FrameHeld {
     let all = shared_seed_regions(escape, info);
     let fiber_only = fiber_frontier_regions(escape, info);
+    let poisoned = mutated_route_regions(arena, info, binding_regions, binder_init_sites);
     let mut held: FxHashSet<Region> = FxHashSet::default();
     let mut refused: FxHashSet<Region> = FxHashSet::default();
     let mut refused_beyond_return: FxHashSet<Region> = FxHashSet::default();
     for (b, regions) in binding_regions {
-        let mutated = arena.get(*b).is_mutated;
         let escapes = escape.binding_escapes_activation(*b);
         let escapes_beyond_return = escape.binding_escapes_beyond_return(*b);
         // The binding's compiled forward CELL rides its binding's verdict. A binding
@@ -203,14 +204,7 @@ pub(super) fn sole_frame_held_regions(
         let cell = info.single_cell_region_of(*b);
         for &r in regions.iter().chain(cell.iter()) {
             held.insert(r);
-            // A MUTATED holder is refused for the reason compensation refuses it as
-            // a release route: a slot repointed before the release frees whatever it
-            // holds THEN, not what the solver named here. That is a claim about the
-            // release, not about the holder, so it is asked per region: an env
-            // cell's release names the cell BOX, which `populate_env` mints once per
-            // activation and no `assign` repoints, and is untouched by the
-            // mutation.
-            let route_poisoned = mutated && !info.cell_release_regions.contains(&r);
+            let route_poisoned = poisoned.contains(&r);
             if route_poisoned || escapes {
                 refused.insert(r);
             }
@@ -230,6 +224,55 @@ pub(super) fn sole_frame_held_regions(
             .filter(|r| !refused_beyond_return.contains(r) && !fiber_only.contains(r))
             .collect(),
     }
+}
+
+/// Regions whose value-routed release would load a slot the program repoints
+/// (region/mechanism.md § "A mutated holder poisons its value route, not its cell
+/// box").
+///
+/// **One binding owns a region's route.** The lowerer keys `region_to_slot` on the
+/// region's ALLOCATION site (`lir::lower::regionemit::record_region_slot`), so the
+/// slot a release loads is the slot of the binding whose *init* allocated the
+/// region. Every other binding that names the same value — a cursor an arm walks
+/// with, an alias — reaches it through a slot no release ever reads, so its
+/// reassignment cannot make the release name a value the solver did not mean.
+/// Mirrored here off `binder_init_sites`, which the walk records at the same three
+/// binder forms the lowerer records the slot at.
+///
+/// A mutated binding whose route this mirror cannot name keeps the conservative
+/// whole-holder reading — every region it holds is poisoned. That is a PARAMETER,
+/// whose slot the lambda prologue records for each call-result region its value may
+/// name, and a binding two different binders introduce, which `binder_init_sites`
+/// marks ambiguous rather than resolving. A mutated binding's compiled forward CELL
+/// keeps it too: the projection that names the cell asserts exactly what the
+/// binding asserts and nothing more (region/mechanism.md § "A compiled capture cell
+/// is frame-held exactly as its binding is").
+///
+/// An env cell is exempt throughout: its release names the BOX at its env index,
+/// which `populate_env` mints once per activation and an `assign` never repoints.
+fn mutated_route_regions(
+    arena: &crate::hir::arena::BindingArena,
+    info: &RegionInfo,
+    binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
+    binder_init_sites: &HashMap<Binding, Option<HirId>>,
+) -> FxHashSet<Region> {
+    let mut out: FxHashSet<Region> = FxHashSet::default();
+    for (&b, regions) in binding_regions {
+        if !arena.get(b).is_mutated {
+            continue;
+        }
+        out.extend(info.single_cell_region_of(b));
+        match binder_init_sites.get(&b) {
+            // One binder, so one route: only the region that binder's init
+            // allocated is released through this binding's slot. An init that
+            // merely names another binding allocates nothing and is absent from
+            // `alloc_region`, exactly as it records no slot in the lowerer.
+            Some(&Some(init)) => out.extend(info.alloc_region.get(&init).copied()),
+            _ => out.extend(regions.iter().copied()),
+        }
+    }
+    out.retain(|r| !info.cell_release_regions.contains(r));
+    out
 }
 
 /// The two frame-held sets, computed together because they differ only in whether

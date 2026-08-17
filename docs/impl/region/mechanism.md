@@ -349,16 +349,17 @@ same wall the per-arm route hits.
 Escape answers exactly it, and is the sole authority for it
 ([escape.md](../escape.md)): a value that leaves its activation by **no** facet —
 return, store, capture, fiber — is reachable only through this frame's slots. So
-the window is admitted for a region whose every holder binding is non-escaping and
-non-mutated, and which is absent from the return and fiber frontiers' atomless
-site halves (which no binding names). A region with no holder binding at all
-offers nothing to judge and is refused too. Everything else keeps its in-arm
-release and the per-arm compensation routes above, which carry a count argument
-instead — so the two mechanisms partition the obligation rather than overlapping
-on it.
+the window is admitted for a region whose every holder binding is non-escaping,
+whose own release route is unmutated, and which is absent from the return and
+fiber frontiers' atomless site halves (which no binding names). A region with no
+holder binding at all offers nothing to judge and is refused too. Everything else
+keeps its in-arm release and the per-arm compensation routes above, which carry a
+count argument instead — so the two mechanisms partition the obligation rather
+than overlapping on it.
 
 The **mutated** refusal is the one compensation makes about a release *route*: a
-slot repointed between the arm and the anchor frees whatever it holds then.
+slot repointed between the arm and the anchor frees whatever it holds then. It is
+therefore asked of the one binding that owns that route, below.
 
 #### The return facet is a fact about the arms, not about the merge
 
@@ -426,6 +427,25 @@ the route does. A value-routed release loads the holder's slot and frees whateve
 region the value it finds there lives in — which is why a slot the program
 repoints cannot carry one, and why the release is skipped for such a slot
 entirely ([bindings.md](bindings.md), "a mutated slot is not a release route").
+
+**One binding owns that route.** `region_to_slot` is keyed on a region's
+**allocation** site (`record_region_slot`), so the slot a value-routed release
+loads belongs to the binding whose init allocated the region — or, where no site
+in this body allocates it, to the parameter the lambda prologue recorded. Every
+other holder names the same value through a slot no release ever reads. So the
+mutated question is asked of the route's binding, and a second name bound *from*
+the value refuses nothing: a cursor an arm walks with repoints its own slot and
+leaves the allocating binding's alone. That is the everyday `each` over a list —
+the type dispatch receives the cons chain as `seq`, the `:list` arm opens with
+`(def @cur seq)`, and reading the mutation off `cur` held `seq`'s whole chain
+for the life of the frame while `seq`'s own slot stayed untouched.
+
+A binding whose route this reading cannot name keeps the whole-holder one: a
+parameter (whose prologue records the slot for every call-result region its value
+may name), a pattern binder, and a binding two binders introduce are each a route
+for every region they hold. The emitter states the same refusal at its two
+mutated-slot backstops, and it is the emitter that decides what runs — so an
+admission the emitter then declines over-keeps rather than over-frees.
 
 An **env cell**'s release is a different instruction against a different object.
 `LoadCaptureRaw` + `DecrefCellRegion` names the cell **box**, and the box is
@@ -886,9 +906,9 @@ because the env's hold is a counted (or owning) edge the funnel took when the
 closure was built (§ "Lexical capture is not a second holder to fear"): a release
 of the frame's reference leaves the callee's standing. The predicate is one and
 the same for both mechanisms (`RegionInfo::sole_frame_held_regions`): every holder
-binding non-escaping, no holder mutated except where the release names a cell box
-rather than the mutated slot (§ "A mutated holder poisons its value route, not its
-cell box"), and the region absent from the return/fiber frontiers' atomless site
+binding non-escaping, the region's own release route unmutated — or naming a cell
+box rather than a slot (§ "A mutated holder poisons its value route, not its cell
+box") — and the region absent from the return/fiber frontiers' atomless site
 halves.
 
 So this close covers a parameter or local the frame alone owns — captured by a
@@ -932,9 +952,9 @@ needs no funding because no one reads it after the frame.
 
 Every other facet still refuses, and each for the reason it always did: a holder
 that crosses the **fiber** frontier may be borrowed uncounted by a parked frame; a
-**mutated** holder is a release route that frees whatever the slot holds then,
-except where the release names the cell box the mutation leaves alone (§ "A
-mutated holder poisons its value route, not its cell box"); a
+region whose own **route** binding is mutated has a release that frees whatever the
+slot holds then, except where the release names the cell box the mutation leaves
+alone (§ "A mutated holder poisons its value route, not its cell box"); a
 holder captured by a closure that **escapes** leaves with it. What is dropped is
 only the return facet's blanket refusal, and only where the callee's edge replaces
 it — which is why escape must be able to say "*this* facet and no other"

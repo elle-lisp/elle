@@ -543,8 +543,8 @@ pub struct RegionInfo {
     /// tail-calls only members). Populated from `ClosureCycleMerge::tail_release_sites`.
     pub cycle_tail_release: HashMap<HirId, Region>,
     /// Regions whose every holder binding leaves this activation by NO facet —
-    /// non-mutated, non-escaping, off the return/fiber frontiers — so the frame
-    /// holds the region's one reference.
+    /// non-escaping, off the return/fiber frontiers, and with an unmutated release
+    /// route — so the frame holds the region's one reference.
     ///
     /// This is escape's answer to the **count** question, projected onto regions,
     /// and it is the admission any mechanism owes when it makes a release fire
@@ -557,16 +557,17 @@ pub struct RegionInfo {
     /// Lexical capture is deliberately not one of the refusals: a closure's hold on
     /// what it captures is counted (or owning), never an uncounted borrow, and
     /// capture by an *escaping* closure is already an escape facet
-    /// (`region::infer::escape::sole_frame_held_regions`). The mutated refusal is not an
-    /// escape fact but compensation's release-route one, so it is asked per region
-    /// rather than per holder: a `cell_release_regions` member names the cell BOX,
-    /// which no `assign` repoints, and keeps its mutated holder
+    /// (`region::infer::escape::sole_frame_held_regions`). The mutated refusal is not
+    /// an escape fact but compensation's release-route one, so it is asked of the ONE
+    /// binding whose slot the release loads — the binding whose init allocated the
+    /// region — rather than of every holder, and a `cell_release_regions` member,
+    /// whose release names the cell BOX no `assign` repoints, is exempt outright
     /// (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
     /// not its cell box").
     pub sole_frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Regions whose every holder binding leaves this activation by the **return**
     /// facet and no other — off the fiber frontier, escaping nowhere but a tail,
-    /// and with the same mutated-holder reading as `sole_frame_held_regions`. A
+    /// and with the same mutated-route reading as `sole_frame_held_regions`. A
     /// superset of it.
     ///
     /// Not an admission on its own wherever the release runs BEFORE a mint:

@@ -141,6 +141,7 @@ pub fn analyze_regions_with(
         arena,
         &info,
         &inference_binding_regions,
+        &reassigns.binder_init_sites,
     );
     info.sole_frame_held_regions = frame_held.sole;
     info.return_frame_held_regions = frame_held.return_funded;
@@ -166,8 +167,6 @@ pub fn analyze_regions_with(
         &mut info,
         hir,
         &du,
-        &escape_info,
-        arena,
         &order,
         &last_use_info,
         &inference_binding_regions,

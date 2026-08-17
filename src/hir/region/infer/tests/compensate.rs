@@ -302,6 +302,89 @@ fn an_alias_the_arm_introduces_does_not_defeat_the_live_in_premise() {
     );
 }
 
+// ── The mutated refusal is about the route, and one binding owns it ──
+//
+// `region_to_slot` is keyed on a region's allocation site, so the slot a
+// value-routed release loads belongs to the binding whose init allocated the
+// region — or, where nothing in this body allocates it, to the parameter the
+// lambda prologue recorded. Every other holder names the same value through a slot
+// no release reads, so the mutated question is asked of the route's binding alone
+// (docs/impl/region/mechanism.md § "A mutated holder poisons its value route, not
+// its cell box"). The two pins below are the admission and the refusal it keeps.
+
+#[test]
+fn a_cursor_an_arm_walks_does_not_refuse_the_live_in_release() {
+    // The everyday `each` over a list: the type dispatch receives the cons chain,
+    // and the arm that walks it opens by binding a reassigned cursor from it. The
+    // cursor's init merely NAMES `xs`, so it allocates nothing and records no slot
+    // — `xs`'s own untainted slot is still the release's one route, and the window
+    // must anchor the release where every arm reaches it.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (t xs) (if t (length xs) \
+           (begin (def @cur xs) (assign cur (rest cur)) (length cur))))",
+    );
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let cur = find_binding_by_name(&hir, "cur", &arena, &symbols).expect("the cursor `cur`");
+    assert!(
+        arena.get(cur).is_mutated,
+        "precondition: the cursor must be reassigned, or this pins nothing"
+    );
+    let xs = find_binding_by_name(&hir, "xs", &arena, &symbols).expect("the param `xs`");
+    let xs_regions = info
+        .binding_source_regions
+        .get(&xs)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !xs_regions.is_empty()
+            && info
+                .binding_source_regions
+                .get(&cur)
+                .is_some_and(|rs| xs_regions.iter().all(|r| rs.contains(r))),
+        "precondition: the cursor holds the param's regions, which is what made the \
+         whole-holder reading refuse them; xs={xs_regions:?}"
+    );
+    for r in &xs_regions {
+        assert!(
+            info.sole_frame_held_regions.contains(r),
+            "r{} routes through `xs`'s own slot, which no `assign` repoints, so the \
+             cursor's mutation must not refuse it; sole_frame_held={:?}",
+            r.0,
+            info.sole_frame_held_regions,
+        );
+    }
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a live-in value an arm walks with a cursor must be released where every arm \
+         reaches it"
+    );
+}
+
+#[test]
+fn a_reassigned_allocating_binder_refuses_its_own_release() {
+    // The refusal the reading keeps: here the mutated binding IS the route. `xs`'s
+    // init allocated the region, so `region_to_slot` names `xs`'s own slot, and by
+    // the release point that slot holds whatever the last `assign` stored.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (t) (begin (def @xs (list 1 2 3)) \
+           (if t (length xs) (begin (assign xs (rest xs)) (length xs)))))",
+    );
+    let allocs = find_calls_to_primitive(&hir, "list", &arena, &symbols);
+    assert_eq!(allocs.len(), 1, "one `list` literal; got {allocs:?}");
+    let r = *info
+        .alloc_region
+        .get(&allocs[0])
+        .expect("the list literal allocates a region");
+    assert!(
+        !info.sole_frame_held_regions.contains(&r),
+        "r{} is allocated by the init of the binding whose slot the release loads, \
+         and that binding is reassigned — the route is poisoned; \
+         sole_frame_held={:?}",
+        r.0,
+        info.sole_frame_held_regions,
+    );
+}
+
 #[test]
 fn a_value_allocated_in_an_arm_keeps_its_in_arm_release() {
     // The boundary the reading above preserves, and the one the premise exists

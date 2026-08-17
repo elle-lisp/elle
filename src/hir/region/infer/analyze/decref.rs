@@ -21,8 +21,6 @@ pub(super) fn populate_decref_points(
     info: &mut RegionInfo,
     hir: &Hir,
     du: &DefUseBuilder,
-    escape: &crate::hir::EscapeInfo,
-    arena: &BindingArena,
     order: &HashMap<HirId, u32>,
     last_use_info: &LastUseInfo,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
@@ -399,8 +397,6 @@ pub(super) fn populate_decref_points(
         info,
         hir,
         du,
-        escape,
-        arena,
         order,
         last_use,
         inference_binding_regions,
@@ -472,8 +468,6 @@ fn pin_branch_arm_releases(
     info: &mut RegionInfo,
     hir: &Hir,
     du: &DefUseBuilder,
-    escape: &crate::hir::EscapeInfo,
-    arena: &BindingArena,
     order: &HashMap<HirId, u32>,
     last_use: &HashMap<HirId, HirId>,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
@@ -543,15 +537,18 @@ fn pin_branch_arm_releases(
     // aliased region is only as local as its loosest holder), the region must have
     // one (an unheld region offers nothing to judge), and the atomless site halves
     // of the return/fiber frontiers are refused too, since no binding names them.
-    // One predicate, shared with the lowerer's frame-exit release
-    // (`RegionInfo::sole_frame_held_regions`): both mechanisms make a release fire
-    // where none fired before, so both owe escape the same count argument. A
-    // MUTATED holder is refused for the reason `region::infer::compensate` refuses it as
-    // a release route — a slot repointed between the arm and the anchor frees
-    // whatever it holds THEN. Lexical capture is NOT refused: a closure's hold on
-    // what it captures is the funnel's counted (or the forest's owning) edge, never
-    // the uncounted borrow this admission guards against, and capture by a closure
-    // that *escapes* is already one of escape's facets.
+    // One predicate, shared with the lowerer's frame-exit release, and computed once
+    // by `analyze_regions_with` before any of these passes run — both mechanisms make
+    // a release fire where none fired before, so both owe escape the same count
+    // argument, and reading it from `RegionInfo` is what keeps them one answer rather
+    // than two. A MUTATED route is refused for the reason
+    // `region::infer::compensate` refuses it as a release route — a slot repointed
+    // between the arm and the anchor frees whatever it holds THEN — and that is asked
+    // of the region's own route binding, not of every binding that names the value.
+    // Lexical capture is NOT refused: a closure's hold on what it captures is the
+    // funnel's counted (or the forest's owning) edge, never the uncounted borrow this
+    // admission guards against, and capture by a closure that *escapes* is already
+    // one of escape's facets.
     //
     // The **return** facet is asked per branch rather than refused outright. At the
     // merge itself it needs no funding edge: the merge is in this frame, so an arm
@@ -564,14 +561,8 @@ fn pin_branch_arm_releases(
     // fact about the point, not about the region (`FrameExit::admits`). A branch
     // with one such point unfunded keeps the whole return-facet class on the
     // baseline, since anchoring there deletes the release on exactly that path.
-    let frame_held = super::super::escape::sole_frame_held_regions(
-        escape,
-        arena,
-        info,
-        inference_binding_regions,
-    );
-    let sole_held = frame_held.sole;
-    let return_held = frame_held.return_funded;
+    let sole_held = info.sole_frame_held_regions.clone();
+    let return_held = info.return_frame_held_regions.clone();
 
     // Snapshotted for the frame-exit narrowing below, which reads it while
     // `region_data` is borrowed mutably. These are the regions

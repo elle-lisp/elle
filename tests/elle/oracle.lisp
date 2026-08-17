@@ -222,9 +222,12 @@
 # branch-arm window now anchors (docs/impl/region/mechanism.md § "The return facet
 # is a fact about the arms, not about the merge"). A regression to open must trip
 # the completeness gate loudly rather than be absorbed back into F1a.
-(declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct"
-                    "group-by" "frequencies" "merge" "concat" "pipeline"
-                    "each-list" "zip-tower"])
+# `group-by`, `frequencies`, `merge` and `each-list` are CLOSED controls too, under
+# a different rule of the same window: one binding owns a region's release ROUTE, so
+# a cursor an arm walks the input with refuses nothing (mechanism.md § "A mutated
+# holder poisons its value route, not its cell box").
+(declare-root :f1a ["reduce" "fold" "stdlib-fold" "wrap-map" "distinct" "concat"
+                    "pipeline" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -873,8 +876,16 @@
    # regression to open must trip the completeness gate loudly.
    ["take" (fn [j] (take 2 (list 1 2 3))) 0]
    ["drop" (fn [j] (drop 1 (list 1 2 3))) 0]
-   ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 1]
-   ["frequencies" (fn [j] (frequencies [1 2 1 3])) 1]
+   # `group-by`/`frequencies`/`merge`/`each-list` are CLOSED controls for the
+   # release ROUTE reading (undeclared, like `rest-array-copy`): one binding owns a
+   # region's route — the one whose init allocated it — so a second name bound from
+   # the value refuses nothing (docs/impl/region/mechanism.md § "A mutated holder
+   # poisons its value route, not its cell box"). Each of these walks its input with
+   # a reassigned cursor bound inside a type-dispatch arm, and reading the mutation
+   # off the cursor held the whole input per call. A regression to open must trip the
+   # completeness gate loudly rather than be absorbed back into F1a.
+   ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 0]
+   ["frequencies" (fn [j] (frequencies [1 2 1 3])) 0]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
    ["to-list" (fn [j] (->list [1 2 3])) 0]
    ["freeze" (fn [j] (freeze @[1 2 3])) 0]
@@ -884,7 +895,7 @@
     (fn [j]
       (keys {:a 1 :b 2})
       (values {:a 1 :b 2})
-      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 2]
+      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 0]
    ["struct-lit" (fn [j] {:x j :y (+ j 1)}) 0]
    ["struct-get"
     (fn [j]
@@ -1015,7 +1026,7 @@
    ["each-list"
     (fn [j]
       (each x in (list 1 2 3)
-        {:val x})) 3]
+        {:val x})) 0]
    # `map-while`/`filter-while` are DISSOLUTION controls: a non-capturing kernel
    # over a proven immutable array fuses to an inlined index-walk loop
    # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
@@ -1585,7 +1596,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) 18)
+                   count-gauge 100 6 60 0.4 0.5) 12)
 
 # Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
 # (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
