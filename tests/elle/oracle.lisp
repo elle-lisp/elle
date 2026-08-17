@@ -512,6 +512,16 @@
 # emits a node's releases after it, so that release already runs once per execution
 # of the loop — the count the merge label is reached with. Driven through the arm
 # that does NOT loop, the one whose release is new.
+# The sequence reads are read-only trait dispatchers and declare `Opaque`, so
+# they seed nothing on escape's store facet (docs/impl/region/effects.md
+# § `Opaque`). A `Mixed` declaration would, and every mechanism gated on
+# `sole_frame_held_regions` refuses a region escaping by a facet other than
+# return — the branch-arm window among them, which is what this drives.
+(defn t22-arm-seq-read [v t]
+  (match t
+    :a (first v)
+    :b (length v)
+    _ (length v)))
 (defn t22-arm-loop-read [v t]
   (match t
     :a (length v)
@@ -2082,7 +2092,11 @@
 # OTHER arm leaves through a frame-replacing closure tail call. Declining such a
 # branch whole strands the argument on the arm driven here, which is what the
 # `concat`/`append` family paid per call.
-# `arm-loop-read` is the fourth: the same window over a branch one of whose arms
+# `arm-seq-read` is the fourth: the same window over a branch one of whose arms
+# READS the argument through a sequence read. Those reads declare `Opaque`, so
+# they seed nothing on escape's store facet and the window admits the argument;
+# a `Mixed` declaration seeds one and holds the whole branch to the baseline.
+# `arm-loop-read` is the fifth: the same window over a branch one of whose arms
 # LOOPS over the argument. Its release is anchored at the loop node, which the
 # lowerer emits after the loop, so the boundary that declines a loop is the loop's
 # BODY and this class is admitted; reading the boundary as the closed subtree
@@ -2100,6 +2114,13 @@
                      (def @j 0)
                      (while (%lt j b)
                        (t22-param-if (list 1 2 3) true)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "arm-seq-read"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (t22-arm-seq-read (list 1 2 3) :a)
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "arm-loop-read"
                    (fn [b]

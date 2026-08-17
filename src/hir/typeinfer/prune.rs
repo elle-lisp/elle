@@ -10,8 +10,8 @@
 //!
 //! The `each` macro (`src/prelude.lisp`) is exactly this shape: it binds the
 //! collection to a local and dispatches `(match (type-of seq) …)`, handing `seq`
-//! to `Mixed`-declared ops (`->array`/`first`/`fiber/resume`) in the off-type
-//! arms. With the arms intact, `seq` is *referenced in every arm*, so the region
+//! to a per-type op (`->array`/`get`/`fiber/resume`) in each off-type arm. With
+//! the arms intact, `seq` is *referenced in every arm*, so the region
 //! solver computes `seq`'s last use — and thus its release point — at a use
 //! inside the textually-last arm, a block the live path never reaches. The
 //! collection's region is then never freed on the executed path: one leaked
@@ -19,8 +19,8 @@
 //! `each-manual` indexed loop; the branch-insensitive-escape imprecision class).
 //! Removing the dead arms leaves `seq` referenced only in the live arm, so its
 //! release lands on the executed path. The same pruning makes the escape analysis
-//! precise for the ownership path (escape no longer sees `seq` handed to an
-//! escaping op in a dead arm), so the one transform serves both consumers. The
+//! precise for the ownership path — whatever a dead arm hands `seq` to, escape no
+//! longer reads it — so the one transform serves both consumers. The
 //! async scheduler's `each c in completions` is the same shape — io/wait declares
 //! `RetType::Array`, so that dispatch prunes too — though that collection is not
 //! itself an io-yield contributor (the oracle's io-yield probe is unchanged

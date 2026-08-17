@@ -169,7 +169,14 @@ primitive! {
         params: &["sequence"],
         category: "list",
         example: "(first (list 1 2 3))",
-        effect: RegionEffect::Mixed,
+        // A read-only trait dispatcher: the result is unbounded (an element of
+        // arg0, or whatever a `with-traits` protocol returns), and no argument is
+        // stored — the built-in method reads, and a user closure stores only
+        // through the runtime-counted funnel. `Opaque` answers both, which
+        // matters here on the ESCAPE side rather than the clique's: `Mixed` would
+        // seed arg0 on escape's store facet (docs/impl/region/effects.md
+        // § `Opaque`; tests/elle/region-sequence-read-effect.lisp).
+        effect: RegionEffect::Opaque,
     }
     "second" => prim_second {
         signal: Signal::errors(),
@@ -178,7 +185,8 @@ primitive! {
         params: &["sequence"],
         category: "list",
         example: "(second (list 1 2 3))",
-        effect: RegionEffect::Mixed,
+        // A read-only trait dispatcher, exactly as `first` above.
+        effect: RegionEffect::Opaque,
     }
     "rest" => prim_rest {
         signal: Signal::errors(),
@@ -187,7 +195,9 @@ primitive! {
         params: &["sequence"],
         category: "list",
         example: "(rest (list 1 2 3))",
-        effect: RegionEffect::Mixed,
+        // A read-only trait dispatcher, exactly as `first` above: the shared tail
+        // of a list, a fresh slice of an array, or a protocol's own result.
+        effect: RegionEffect::Opaque,
     }
     "list" => prim_list {
         signal: Signal::silent(),
@@ -226,7 +236,10 @@ primitive! {
         params: &["coll"],
         category: "list",
         example: "(->array (list 1 2 3)) #=> [1 2 3]\n(->array @[1 2]) #=> [1 2]\n(->array |3 1 2|) #=> [1 2 3]",
-        effect: RegionEffect::Mixed,
+        // Reads arg0 and either hands it back (already an immutable array) or
+        // copies its elements into a fresh one — unbounded result, no store, so
+        // `Opaque` like the reads above.
+        effect: RegionEffect::Opaque,
         // Always yields an immutable array (returns arg0 only when it is already
         // one, else builds `ctx.array`), so a binding from it is statically
         // `:array` for typeof-dispatch pruning (typeinfer/prune.rs).
@@ -239,6 +252,7 @@ primitive! {
         params: &["coll"],
         category: "list",
         example: "(->list [1 2 3]) #=> (1 2 3)\n(->list @[1 2]) #=> (1 2)\n(->list |3 1 2|) #=> (1 2 3)",
-        effect: RegionEffect::Mixed,
+        // `->array`'s twin, and `Opaque` for the same two reasons.
+        effect: RegionEffect::Opaque,
     }
 }

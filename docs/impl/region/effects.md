@@ -117,6 +117,21 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   `IncrefRegion` per heap-argument pair per call
   (`tests/elle/region-has-clique-leak.lisp`).
 
+  The sequence reads and conversions are the same shape and take the same
+  declaration: `first`, `second`, `rest`, `->array` and `->list` each resolve
+  through `Sequence`/`Collection`, and each hands back an element of arg0, arg0
+  itself, or a fresh collection built from it — unbounded on the result side,
+  storing nothing. Their clique is empty either way (each takes one heap
+  argument, and the clique is over *pairs* of arguments), so what a `Mixed`
+  declaration would cost them is on the ESCAPE side, which reads the same
+  declaration: `Mixed`/`Unknown` seeds every argument on escape's **store**
+  facet ([../escape.md](../escape.md)), and a region escaping by a facet other
+  than return keeps the conservative baseline at every mechanism gated on
+  `sole_frame_held_regions` — the branch-arm release window among them. A
+  declaration is therefore a claim about escape as much as about edges, and the
+  strongest true one is what a read-only dispatcher owes
+  (`tests/elle/region-sequence-read-effect.lisp`).
+
   **A native that re-enters the VM is `Opaque` on the store side.** `vm/query`
   selects an operation by a runtime string; `compile/run-on` dispatches a
   caller-supplied closure on a chosen tier; the `compile/*-module` loaders run a

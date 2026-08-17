@@ -46,11 +46,20 @@
 # compile-time `IncrefRegion` no free cascade balances, stranding one region
 # per call with no second argument anywhere in the shape.
 #
-# `first` declares `RegionEffect::Mixed` — it can hand back a value living
-# inside its argument — so this is the clique face, not the no-clique one the
-# `identical?` churn above pins.
+# The rule is stated over the clique, so the declarant has to be one that
+# carries it: `fiber/child` declares `RegionEffect::Mixed` and takes a single
+# argument. `first` is the same shape over a declarant that carries no clique at
+# all (`Opaque`, the read-only trait dispatcher rule — docs/impl/region/
+# effects.md § `Opaque`), so the pair separates "one argument emits no edge"
+# from "this native emits none anywhere".
 
 (defn two-region-arg [n]
+  (let [k (if (%lt n 0)
+            (fiber/new (fn [] 1) |:yield|)
+            (fiber/new (fn [] 2) |:yield|))]
+    (fiber/child k)))
+
+(defn two-region-read [n]
   (let [k (if (%lt n 0) (list 1 2) (list 3 4))]
     (first k)))
 
@@ -62,15 +71,34 @@
     (assign i (%add i 1)))
   (%sub (arena/region-count) before))
 
-(assert (= (two-region-arg 1) 3)
-        "the branch-valued argument reads back through the Mixed native")
-(assert (= (two-region-arg -1) 1)
+(defn churn-two-region-read [n]
+  (def before (arena/region-count))
+  (def @i 0)
+  (while (%lt i n)
+    (two-region-read i)
+    (assign i (%add i 1)))
+  (%sub (arena/region-count) before))
+
+(assert (nil? (two-region-arg 1))
+        "the branch-valued argument reaches the Mixed native")
+(assert (nil? (two-region-arg -1)) "the other arm reaches the same call")
+(assert (= (two-region-read 1) 3)
+        "the branch-valued argument reads back through the sequence read")
+(assert (= (two-region-read -1) 1)
         "the other arm reads back through the same call")
 
 (let [t100 (churn-two-region 100)
-      t1000 (churn-two-region 1000)]
+      t1000 (churn-two-region 1000)
+      r100 (churn-two-region-read 100)
+      r1000 (churn-two-region-read 1000)]
   (assert (%lt t100 20)
           (string "one argument's own regions were paired at n=100: delta=" t100))
   (assert (%lt t1000 20)
           (string "one argument's own regions were paired at n=1000: delta="
-                  t1000)))
+                  t1000))
+  (assert (%lt r100 20)
+          (string "a sequence read over a two-region argument leaked at n=100: "
+                  "delta=" r100))
+  (assert (%lt r1000 20)
+          (string "a sequence read over a two-region argument leaked at n=1000: "
+                  "delta=" r1000)))

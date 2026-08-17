@@ -282,6 +282,24 @@ fn region_branch_arm_window_uaf() {
     );
 }
 
+// Guard — the sequence reads and conversions declare `Opaque`, which says two
+// things: the result may live anywhere, and no argument is stored uncounted
+// (docs/impl/region/effects.md § `Opaque`). The second withdraws a store-facet
+// escape seed, and with it the refusal that seed forced on every mechanism gated
+// on `sole_frame_held_regions`. So this drives what the refusal used to mask: a
+// read's result consumed after the branch that produced it, the subject read
+// again, the result returned to a caller or yielded to a resumer, and a genuine
+// store escape that must still refuse the window. Freeing the container under any
+// of those faults — SIGSEGV under guardfree. The leak face is
+// `region-sequence-read-effect.lisp`.
+#[test]
+fn region_sequence_read_effect_uaf() {
+    run_elle_script_with_args(
+        "region-sequence-read-effect-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — an inlined callee's body regions name the CALLEE's activation, so the
 // caller names the call's own region for the result (docs/impl/region/mechanism.md
 // § "A call's result is named by the call's own region"). The result therefore

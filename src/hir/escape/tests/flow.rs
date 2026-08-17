@@ -307,6 +307,31 @@ fn store_escape_spec() {
     assert_binding_escape("(let [s \"hi\"] (length s))", &[("s", false, false)]);
 }
 
+/// The store facet is keyed on the declared `RegionEffect`, so a native's
+/// declaration is a claim about escape and not only about the may-store clique.
+/// `Mixed`/`Unknown` seeds every argument here; the read-only trait dispatchers
+/// declare `Opaque` and seed nothing, which is their whole cost at one heap
+/// argument — the clique is over PAIRS of arguments and is empty either way
+/// (docs/impl/region/effects.md § `Opaque`; docs/impl/escape.md).
+#[test]
+fn a_sequence_read_does_not_seed_the_store_facet() {
+    for read in ["first", "second", "rest", "->array", "->list"] {
+        // The read's result is consumed locally, so nothing pulls the container's
+        // contents into a facet either — the subject is judged on the call alone.
+        assert_binding_escape(
+            &format!("(let [s (list 1 2)] (length ({read} s)))"),
+            &[("s", false, false)],
+        );
+    }
+    // The contrast: `git` is declared `Mixed` and genuinely so — it caches
+    // compiled SPIR-V on its argument's template, a retention no seam records —
+    // so its argument is seeded on the store facet.
+    assert_binding_escape(
+        "(let [s (fn (a b) a)] (length (git s)))",
+        &[("s", true, false)],
+    );
+}
+
 /// Container-read escape (the read-result → container-contents flow edge). A value
 /// stored into a container and then read back OUT (`first`/`rest`/`get`/`pop`) and
 /// ESCAPED must be marked escaping too: the ownership forest would otherwise adopt it

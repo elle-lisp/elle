@@ -283,7 +283,11 @@ unit test asserting escape's own spec.
 5. **Native `Mixed`/`Unknown` clique is conservative.** A native declared `Mixed`
    (uncounted store, examined) or `Unknown` (unexamined — the default) marks every
    heap argument escaping. As imprecise as the declarations are honest; examining a
-   primitive and declaring a tighter `RegionEffect` narrows it.
+   primitive and declaring a tighter `RegionEffect` narrows it. The seed is the
+   whole cost for a single-argument native, whose clique is empty in any case, so
+   a `Mixed` declaration is read here as a store claim and nowhere else — which is
+   why a native that stores nothing declares `Opaque`
+   ([region/effects.md](region/effects.md) § `Opaque`).
 
 ## Verification
 

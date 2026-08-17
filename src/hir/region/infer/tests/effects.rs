@@ -55,16 +55,20 @@ fn effect_mixed_call_keeps_arg_clique() {
 /// The clique is over pairs of ARGUMENTS: a `Mixed` native reached with ONE heap
 /// argument records no edge, however many source regions that argument's value
 /// carries. `k` here has one per arm of its `if`, and the two are alternatives
-/// for the single value `first` receives — never two values one could store into
+/// for the single value `git` receives — never two values one could store into
 /// the other — so an edge between them would be an `IncrefRegion` no free cascade
 /// balances (docs/impl/region/effects.md § "What the solver derives"; the rate is
 /// pinned by tests/elle/region-native-effect-clique-leak.lisp).
+///
+/// The declarant must be one that is genuinely `Mixed`, or the test would assert
+/// nothing about the clique loop: `git` caches compiled SPIR-V on its argument's
+/// template, a retention no compile-time seam records.
 #[test]
 fn effect_mixed_call_pairs_arguments_not_one_arguments_regions() {
     let (hir, arena, symbols, info) =
-        analyze_with_class("(let [k (if (%lt 1 0) (list 1 2) (list 3 4))] (first k))");
-    let calls = find_calls_to_primitive(&hir, "first", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (first ...) call");
+        analyze_with_class("(let [k (if (%lt 1 0) (fn () 1) (fn () 2))] (git k))");
+    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (git ...) call");
     let reader = find_binding_by_name(&hir, "k", &arena, &symbols).expect("the reader binding k");
     assert!(
         info.binding_source_regions
@@ -77,6 +81,11 @@ fn effect_mixed_call_pairs_arguments_not_one_arguments_regions() {
     assert!(
         edges.is_empty(),
         "a single-argument Mixed call must record no clique edge; got {edges:?}",
+    );
+    assert!(
+        info.hard_edge_sites.contains(&calls[0]),
+        "the declarant must still be Mixed, or this shape asserts nothing about \
+         the clique loop"
     );
 }
 
