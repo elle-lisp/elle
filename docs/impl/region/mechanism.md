@@ -334,6 +334,64 @@ single anchored release is exactly what those compensating releases were
 approximating, and the arm-structure premises they rest on are unchanged for
 every region the window declines.
 
+### An arm is a conditional position, not a syntactic arm body
+
+An arm is a program region at most one of which runs per execution. For an `If`
+and a `Match` that coincides with the syntactic arm body. For the
+short-circuiting forms — `cond`, `and`, `or` — it does not, and the syntactic
+reading is blind to exactly the position those forms put a release in.
+
+A `cond`'s clause **tests** are conditional positions as much as its bodies are:
+test *k* runs only where tests 0..*k*-1 all failed. So a region live-in to the
+form whose last use is a later clause's test has its `decref_point` where no
+earlier body's path passes, and no arm holds it. That is where the polymorphic
+entry point puts it. `distinct` dispatches with
+`(cond (or (pair? coll) (empty? coll)) … (array? coll) … (array? coll) …)`,
+naming `coll` in every test, so the argument's one release lands in the LAST test
+and every call that takes an earlier body strands the argument's whole object
+graph. `and`/`or` do the same with one position: `(or (array? v) (string? v))`
+never evaluates the second test when the first is true.
+
+The arms are read off the nested-`If` each form is equivalent to:
+
+```
+(cond t0 b0 t1 b1 … e)  ≡  (if t0 b0 (if t1 b1 … e))
+(and e0 e1 … en)        ≡  (if e0 (and e1 … en) false)
+(or  e0 e1 … en)        ≡  (if e0 true (or e1 … en))
+```
+
+So each clause boundary of a `cond` contributes a two-armed branch — the clause
+**body**, and **the rest of the chain** from the next test through the `else` —
+while `and`/`or` each contribute a single arm, their tail, the short-circuit path
+evaluating no node at all. Every one of those spans is contiguous in post-order,
+the walk visiting a form's parts in source order, so each is one interval and
+neither consumer learns a new shape. All levels of one form share its own node,
+hence one whole-node interval and one anchor: every level falls through to the
+same merge, the form's own consuming node.
+
+The last clause's sibling arm is the `else` branch, or **nothing** where the form
+has none. A `cond` that matches no clause evaluates to `nil` having run no body,
+so that path offers no node to host a compensating release and the pass does not
+fire on it — the leak-preserving direction a `Match` with no matching arm already
+takes.
+
+Overlapping levels cost nothing, because each `decref_point` lands in the arms of
+exactly the levels that need a release for it. One inside body *k* is in an arm
+of level *k* and in no arm of any other level. One inside test *k* is in the
+"rest" arm of every level below *k*, which is precisely the set of clause bodies
+whose paths skip that test.
+
+The rows are `cond-later-test`, `cond-else-path`, `cond-dispatch`, `or-short` and
+`and-short` in `tests/elle/region-branch-arm-window.lisp`, beside the
+`ctl-cond-last-test` / `ctl-or-full` controls that drive the path which does
+evaluate the position holding the release; the `w-cond`, `w-cond-store` and
+`w-or-short` soundness rows in `tests/elle/region-branch-arm-window-uaf.lisp`;
+the unit pins
+`regions::tests::compensate::a_cond_clause_test_is_a_conditional_position`,
+`a_cond_body_is_an_arm_like_any_other`, `a_short_circuit_tail_is_an_arm` and
+`an_and_tail_is_an_arm_too`; and the `distinct`, `pipeline`, `wrap-map` and
+`push-accum` probes in `tests/elle/oracle.lisp` as the production gauges.
+
 ### The admission: this frame must be the region's only holder
 
 The placement argument is enough *only* where this frame holds the region's one

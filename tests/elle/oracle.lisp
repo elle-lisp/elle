@@ -183,9 +183,8 @@
 
 # ── The defect / by-design split — the instrument owns the burndown headline ──
 # Every leak class has a ROOT (F1a/F1b/F2/F3/F4/F5), declared below. A small fixed set
-# of probes read open BY DESIGN — the module-level live-growth discriminator, the
-# sub-integer estimator self-test, and `push-accum` (whose residual is genuine per-op
-# `map` scratch it retains, § F1a) — and are NOT counted as defects. The open/closed
+# of probes read open BY DESIGN — the module-level live-growth discriminator and the
+# sub-integer estimator self-test — and are NOT counted as defects. The open/closed
 # split and the defect-vs-by-design breakdown used to be
 # recovered from this dashboard by `grep -c` minus a hand count of them; the
 # classifier below prints it directly AND refuses to be silently wrong: every
@@ -200,10 +199,13 @@
 # uses a MODULE-LEVEL sink and is unaffected. They are now CLOSED controls
 # (undeclared, like `rest-array-copy`), so a regression to open trips the
 # completeness gate as an F1b defect rather than being absorbed as growth.
+# `push-accum` is NOT here either, for the reason those two are not: its rate was
+# the per-op `map` scratch its accumulator retained, and the accumulator itself is
+# block-local, so it frees at the block's return. A CLOSED control now that the
+# scratch is reclaimed — undeclared, so a regression to open trips the completeness
+# gate as an F1a defect rather than being absorbed as growth.
 (def @by-design
-  @{"discriminator (live-growth)" true
-    "sub-integer (1-in-3 retain)" true
-    "push-accum" true})
+  @{"discriminator (live-growth)" true "sub-integer (1-in-3 retain)" true})
 (def @root-of @{})
 (defn declare-root [root labels]
   (each l in labels
@@ -230,7 +232,7 @@
 # a different rule of the same window: one binding owns a region's release ROUTE, so
 # a cursor an arm walks the input with refuses nothing (mechanism.md § "A mutated
 # holder poisons its value route, not its cell box").
-(declare-root :f1a ["reduce" "fold" "wrap-map" "distinct" "pipeline" "zip-tower"])
+(declare-root :f1a ["reduce" "fold" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -883,7 +885,15 @@
    # region_native_trait_dispatch_fresh_result_reclaims). `(rest list)` shares its
    # tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
-   ["distinct" (fn [j] (distinct [1 2 1 3])) 1]
+   # `distinct` is a CLOSED control for the arm reading (undeclared, like
+   # `rest-array-copy`), so a regression to open trips the completeness gate loudly
+   # rather than being absorbed as F1a scratch. Its dispatch is a `cond` naming
+   # `coll` in every clause TEST, and a clause test is a conditional position
+   # exactly as a clause body is (docs/impl/region/mechanism.md § "An arm is a
+   # conditional position, not a syntactic arm body"), so the argument's one
+   # release sat in the LAST test and every call taking an earlier body stranded
+   # the whole input.
+   ["distinct" (fn [j] (distinct [1 2 1 3])) 0]
    # `take`/`drop` are CLOSED controls for the PER-PATH return frontier
    # (docs/impl/region/mechanism.md § "The return frontier is per-path";
    # tests/elle/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
@@ -1043,11 +1053,16 @@
             (assign r (rest r)))
           (list n (first keep))))) 0]
    ["format" (fn [j] (string "iter " j " of " 100)) 0]
+   # The four-stage `split`/`map`/`filter`/`join` chain — a CLOSED control now
+   # (undeclared, like `rest-array-copy`), so a regression to open trips the
+   # completeness gate rather than being absorbed as F1a scratch. Every stage
+   # dispatches through a `cond` over its argument's type, so each call stranded
+   # its whole input on the clause-test reading above.
    ["pipeline"
     (fn [j]
       (string/join (filter (fn [x] (not= x ""))
                            (map string/trim (string/split "a , b , c" ","))) ","))
-    10]
+    0]
    ["each-list"
     (fn [j]
       (each x in (list 1 2 3)
@@ -1082,17 +1097,21 @@
       (let [f (fn [] (fn [] j))]
         ((f)))) 0] ["user-struct" (fn [j] (make-struct j)) 0]
    ["user-string" (fn [j] (make-label j)) 0] ["chain" (fn [j] (process j)) 0]
-   # The F1a gauge for the UN-fused stdlib `map`: the kernel CAPTURES `k`, a shape
-   # loop fusion declines (splicing a capture at the call site is out of scope), so
-   # the real `map` runs and its per-call strands are measured — the closure `map`
-   # mints for `f` (F5 arg/closure-retain), the `freeze` copy, and the map-body
-   # over-keep. Rate flat in element count: per-call strands, not per-element copy.
+   # The gauge for the UN-fused stdlib `map`: the kernel CAPTURES `k`, a shape loop
+   # fusion declines (splicing a capture at the call site is out of scope), so the
+   # real `map` runs and its per-call strands are measured. A CLOSED control now
+   # (undeclared, like `rest-array-copy`), so a regression to open trips the
+   # completeness gate rather than being absorbed as F1a scratch: `map` dispatches
+   # on its collection's type through a `cond`, whose later clause TESTS held the
+   # argument's one release (docs/impl/region/mechanism.md § "An arm is a
+   # conditional position, not a syntactic arm body"). Its `push-accum` face is the
+   # same op driven into a block-local accumulator.
    ["wrap-map"
     (fn [j]
       (let [k 1]
         (map (fn [x]
                (numeric!)
-               (%add x k)) [1 2 3]))) 3] ["factory" (fn [j] (t13proc j)) 0]
+               (%add x k)) [1 2 3]))) 0] ["factory" (fn [j] (t13proc j)) 0]
    ["cond-factory" (fn [j] (t13cond j)) 0] ["alias" (fn [j] (make-struct j)) 0]
    ["nested-factory" (fn [j] (t13nested j)) 0]
    ["struct-field"
@@ -1641,7 +1660,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) 12)
+                   count-gauge 100 6 60 0.4 0.5) 2)
 
 # Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
 # (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable
@@ -1956,11 +1975,16 @@
 # is freed at the block's return once the `push` wrapper stops stranding its
 # owned-param reference (F1b container compensation) — its earlier per-op growth was
 # that over-keep, not genuine retention (the gauge-live discriminator uses a
-# MODULE-level sink, `probe-disc`, and is unaffected). `push-accum` still leaks: its
-# residual is the per-op `map` scratch (§ F1a), which the accumulator's release does
-# not reach. Its kernel CAPTURES `k` deliberately — a capture declines loop fusion,
-# so the real stdlib `map` runs and there is a per-op scratch to retain; a fusable
-# kernel has none, which is what the dissolution controls (`map-while`) measure.
+# MODULE-level sink, `probe-disc`, and is unaffected). `push-accum` is the same
+# accumulator fed the per-op `map` scratch (§ F1a), and reclaims for the same
+# reason once that scratch does: `map` dispatches through a `cond` whose later
+# clause TESTS held the collection's one release, and a clause test is a
+# conditional position exactly as a clause body is
+# (docs/impl/region/mechanism.md § "An arm is a conditional position, not a
+# syntactic arm body"). Its kernel CAPTURES `k` deliberately — a capture declines
+# loop fusion, so the real stdlib `map` runs and there is a per-op scratch to
+# measure; a fusable kernel has none, which is what the dissolution controls
+# (`map-while`) measure. A CLOSED control now, undeclared like `rest-array-copy`.
 # `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
 # content is re-minted every iteration, bounded by the overwrite + demise pair (F5).
 # `string-outer`/`append-outer` are CLOSED controls for the same close
@@ -2030,7 +2054,7 @@
                              (map (fn [x]
                                     (numeric!)
                                     (%add x k)) [1 2 3]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 3)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "struct-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -2518,11 +2542,10 @@
                (string "unclassified open probe(s): " unclassified
                        " — every open probe must be a declared root or by-design "
                        "(the split ledger is stale)")))
-(check (assert (= n-by-design 3)
+(check (assert (= n-by-design 2)
                (string "by-design tally " n-by-design
-                       " ≠ 3 — the growth probes (live-growth discriminator, "
-                       "sub-integer estimator self-test, push-accum map-scratch "
-                       "accumulator) must each read open")))
+                       " ≠ 2 — the growth probes (live-growth discriminator, "
+                       "sub-integer estimator self-test) must each read open")))
 
 (report)
 (println "oracle: ok")

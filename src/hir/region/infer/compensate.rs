@@ -101,9 +101,13 @@
 //! one body runs per execution. Every premise above is stated over one arm and its
 //! siblings, so a `Match` arm is admitted by the identical argument (a `Match` with
 //! no matching arm runs no body at all — the compensation simply does not fire,
-//! which is the leak-preserving direction). `Cond`/`And`/`Or` are not collected as
-//! branches here, so they keep the conservative single-`decref_point` baseline until
-//! their structure is folded in.
+//! which is the leak-preserving direction). What counts as an arm is
+//! [`super::arms`]: the short-circuiting forms (`cond`, `and`, `or`) contribute
+//! the arms of their nested-`If` equivalent, one branch per conditional level, so
+//! a clause test is an arm exactly as a clause body is. The levels of one form
+//! partition the paths — the compensating side of level *k* is disjoint from every
+//! other level's — so a path takes one compensating release or the region's own
+//! `decref_point`, never both.
 //!
 //! The `tail` route's same-node retain requirement is **not** a redundant belt on
 //! the placement argument, and must not be relaxed into "any arm-last-use node".
@@ -129,6 +133,7 @@
 //! everything escape cannot clear arrives here, where the count argument is the
 //! retain.
 
+use super::arms::ArmSet;
 use super::*;
 use crate::hir::region::Region;
 
@@ -142,15 +147,6 @@ pub(super) struct BranchComp {
     /// compensation — the lowerer drops the redundant tail ReturnValue retain here.
     /// See `RegionInfo::container_release_sites`.
     pub container_release_sites: std::collections::HashSet<HirId>,
-}
-
-/// A branch (`If` or `Match`) with its whole-node post-order interval and each
-/// arm's interval. Both compensation routes are stated over arms alone, so the two
-/// kinds are indistinguishable here — an `If` is a two-armed branch.
-struct Branch {
-    node_lo: u32,
-    node_hi: u32,
-    arms: Vec<(HirId, u32, u32)>,
 }
 
 /// A `While`/`Loop`'s post-order subtree interval, for the loop-invariant guard.
@@ -182,7 +178,7 @@ pub(super) fn compute_branch_compensation(
     let low = compute_subtree_low(hir, order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
 
-    let mut branches: Vec<Branch> = Vec::new();
+    let mut branches: Vec<ArmSet> = Vec::new();
     let mut loops: Vec<IterScope> = Vec::new();
     collect(hir, order, &low, &mut branches, &mut loops);
     if branches.is_empty() {
@@ -405,7 +401,7 @@ pub(super) fn compute_branch_compensation(
             // Which arm holds the decref_point? (The leak is real only when the
             // release lands inside an arm — an extension that hoisted it out, or a
             // post-dominating point, leaves `d` outside every arm here.)
-            let arm_of_d = br.arms.iter().position(|&(_, lo, hi)| d >= lo && d <= hi);
+            let arm_of_d = br.arms.iter().position(|a| d >= a.lo && d <= a.hi);
             let Some(di) = arm_of_d else { continue };
             // live-in: every anchor is outside C's subtree.
             let live_in = anchors
@@ -422,7 +418,8 @@ pub(super) fn compute_branch_compensation(
             if crosses_loop {
                 continue;
             }
-            for (ai, &(arm_id, arm_lo, arm_hi)) in br.arms.iter().enumerate() {
+            for (ai, a) in br.arms.iter().enumerate() {
+                let (arm_id, arm_lo, arm_hi) = (a.id, a.lo, a.hi);
                 if ai == di {
                     continue; // the arm whose in-arm decref is the global decref_point
                 }
@@ -551,49 +548,23 @@ pub(super) fn compute_branch_compensation(
     }
 }
 
-/// Collect every `If`/`Match` (with its arms' intervals) and every `While`/`Loop`
-/// (with its subtree interval) in one walk.
+/// Collect every branch (with its arms' intervals — [`super::arms`]) and every
+/// `While`/`Loop` (with its subtree interval) in one walk.
 fn collect(
     hir: &Hir,
     order: &HashMap<HirId, u32>,
     low: &HashMap<HirId, u32>,
-    branches: &mut Vec<Branch>,
+    branches: &mut Vec<ArmSet>,
     loops: &mut Vec<IterScope>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
-    match &hir.kind {
-        HirKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            branches.push(Branch {
-                node_lo: lo(hir.id),
-                node_hi: ord(hir.id),
-                arms: vec![
-                    (then_branch.id, lo(then_branch.id), ord(then_branch.id)),
-                    (else_branch.id, lo(else_branch.id), ord(else_branch.id)),
-                ],
-            });
-        }
-        HirKind::Match { arms, .. } => {
-            branches.push(Branch {
-                node_lo: lo(hir.id),
-                node_hi: ord(hir.id),
-                arms: arms
-                    .iter()
-                    .map(|(_pat, _guard, body)| (body.id, lo(body.id), ord(body.id)))
-                    .collect(),
-            });
-        }
-        HirKind::While { .. } | HirKind::Loop { .. } => {
-            loops.push(IterScope {
-                lo: lo(hir.id),
-                hi: ord(hir.id),
-            });
-        }
-        _ => {}
+    if let HirKind::While { .. } | HirKind::Loop { .. } = &hir.kind {
+        loops.push(IterScope {
+            lo: lo(hir.id),
+            hi: ord(hir.id),
+        });
     }
+    branches.extend(super::arms::branch_arms(hir, order, low));
     hir.for_each_child(|c| collect(c, order, low, branches, loops));
 }

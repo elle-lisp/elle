@@ -9,6 +9,7 @@
 
 // `super` is `hir::region::infer::analyze`; `super::super` reaches the sibling
 // `hir::regions` items the original block saw through `use super::*`.
+use super::super::arms::{branch_arms, ArmSet};
 use super::super::*;
 use crate::hir::defuse::DefUseBuilder;
 use crate::hir::liveness::LastUseInfo;
@@ -611,7 +612,7 @@ fn pin_branch_arm_releases(
                 continue;
             }
             let dord = ord(d.decref_point);
-            if dord >= anchor_ord || !br.arms.iter().any(|&(lo, hi)| lo <= dord && dord <= hi) {
+            if dord >= anchor_ord || !br.arms.iter().any(|a| a.lo <= dord && dord <= a.hi) {
                 continue;
             }
             // A boundary is the scope's BODY, not the scope's own node: the
@@ -699,10 +700,15 @@ fn alias_binders(hir: &Hir) -> rustc_hash::FxHashSet<Binding> {
 /// unit, all as post-order indices so containment is an interval test.
 #[derive(Default)]
 struct BranchWindowScopes {
-    /// Every `If`/`Match`, with its own and its arms' subtree intervals. An `If`
-    /// is a two-armed branch — every premise here is stated over one arm and its
-    /// siblings, never over the branch's kind or arity.
-    branches: Vec<ArmBranch>,
+    /// Every branch, with its own and its arms' subtree intervals
+    /// ([`crate::hir::region::infer::arms`]). An `If` is a two-armed branch —
+    /// every premise here is stated over one arm and its siblings, never over the
+    /// branch's kind or arity — and a short-circuiting form contributes the arms
+    /// of its nested-`If` equivalent, one entry per conditional level. All the
+    /// entries of one form name that form's node, so they share the anchor and
+    /// the live-in premise; the first to fire moves the release to the anchor and
+    /// the rest then find it at or past that point.
+    branches: Vec<ArmSet>,
     /// Subtree intervals of the scopes a release may not be hoisted OUT of: an
     /// iterative scope (`While`/`Loop`, whose body re-allocates per iteration)
     /// and a `Lambda` (whose body runs in its own activation, against its own
@@ -724,14 +730,6 @@ struct BranchWindowScopes {
     frame_exits: Vec<u32>,
 }
 
-/// One branch's post-order intervals: the whole node, and each arm's body.
-struct ArmBranch {
-    id: HirId,
-    node_lo: u32,
-    node_hi: u32,
-    arms: Vec<(u32, u32)>,
-}
-
 /// Collect [`BranchWindowScopes`] over the whole tree in one walk.
 fn collect_branch_scopes(
     hir: &Hir,
@@ -743,28 +741,6 @@ fn collect_branch_scopes(
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
     match &hir.kind {
-        HirKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => out.branches.push(ArmBranch {
-            id: hir.id,
-            node_lo: lo(hir.id),
-            node_hi: ord(hir.id),
-            arms: vec![
-                (lo(then_branch.id), ord(then_branch.id)),
-                (lo(else_branch.id), ord(else_branch.id)),
-            ],
-        }),
-        HirKind::Match { arms, .. } => out.branches.push(ArmBranch {
-            id: hir.id,
-            node_lo: lo(hir.id),
-            node_hi: ord(hir.id),
-            arms: arms
-                .iter()
-                .map(|(_pat, _guard, body)| (lo(body.id), ord(body.id)))
-                .collect(),
-        }),
         HirKind::While { .. } | HirKind::Loop { .. } => {
             out.barriers.push((lo(hir.id), ord(hir.id)))
         }
@@ -777,6 +753,7 @@ fn collect_branch_scopes(
         }
         _ => {}
     }
+    out.branches.extend(branch_arms(hir, order, low));
     hir.for_each_child(|c| collect_branch_scopes(c, order, low, frame_replacing_tail_calls, out));
 }
 

@@ -66,12 +66,23 @@
 # `arm-cursor` and `each-list` rows are that shape, `each`'s list arm being where
 # it is reached in production.
 #
+# An arm is a conditional POSITION, not a syntactic arm body. A `cond`'s clause
+# tests are conditional positions exactly as its bodies are, and an `and`/`or` tail
+# is one with no sibling body at all, so all three read their arms off the
+# nested-`if` they are equivalent to (docs/impl/region/mechanism.md § "An arm is a
+# conditional position, not a syntactic arm body"). The `cond-*` and `*-short` rows
+# drive that reading on the path that skips the position holding the release, with
+# `ctl-cond-last-test` / `ctl-or-full` — the paths that do evaluate it — as the
+# already-bounded controls beside them.
+#
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
 # region-branch-arm-window-uaf.lisp; the per-op rates are the `param-used-arm`,
 # `branch-arm-tailcall-sibling`, `branch-arm-return-captured`, `arm-alias-inside`
-# and `arm-loop-read` probes in tests/elle/oracle.lisp.
+# and `arm-loop-read` probes in tests/elle/oracle.lisp, with `distinct`,
+# `pipeline`, `wrap-map` and `push-accum` as the stdlib gauges of the `cond`
+# reading.
 
 (def window 2000)
 
@@ -278,6 +289,50 @@
     (assign n (%add n 1)))
   n)
 
+# (p) a `cond` whose LATER CLAUSE TEST names the live-in parameter. A clause test
+# is a conditional position exactly as a clause body is — test k runs only where
+# tests 0..k-1 all failed — so the arms are the nested-`if` the form is equivalent
+# to: the clause body, and the rest of the chain from the next test on
+# (docs/impl/region/mechanism.md § "An arm is a conditional position, not a
+# syntactic arm body"). Driven through the FIRST body, the path that never
+# evaluates the test holding the release.
+(defn cond-later-test (v t)
+  (cond
+    (%eq t 0) 1
+    (%lt 0 (length v)) 2
+    true 0))
+
+# (q) the body half of the same decomposition, driven through the ELSE branch: the
+# release sits in the first clause's body and no clause matches.
+(defn cond-else-path (v t)
+  (cond
+    (%eq t 0) (length v)
+    (%eq t 1) 2
+    3))
+
+# (r) the production dispatch `distinct` takes: a type `cond` naming the argument
+# in every test, whose last test is the one no call reaches. Every call taking an
+# earlier body stranded the argument's whole object graph. Reached through a
+# binding holding the function as a VALUE, so the call site cannot prove the
+# argument's type and every clause survives the dispatch prune.
+(defn cond-dispatch (v)
+  (cond
+    (string? v) 0
+    (array? v) (length v)
+    (pair? v) 2
+    0))
+(def @cond-dispatch-ref cond-dispatch)
+
+# (s) `or` short-circuits: the second element runs only where the first is falsy,
+# so it is a conditional position with no sibling body — a one-armed branch.
+# Driven through the short-circuiting path.
+(defn or-short (v t)
+  (if (or t (%lt 0 (length v))) 1 2))
+
+# (t) the `and` face of the same rule: the tail runs only where the head is truthy.
+(defn and-short (v t)
+  (if (and t (%lt 0 (length v))) 1 2))
+
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
 # boundary would leave one release covering many allocations (the loop) or a
@@ -326,6 +381,17 @@
     :a (length v)
     _ 0))
 
+# The short-circuiting controls: the path that DOES evaluate the position holding
+# the release was already bounded, so a red row above is the window and not the
+# form.
+(defn ctl-cond-last-test (v t)
+  (cond
+    (%eq t 0) 1
+    (%lt 0 (length v)) 2
+    true 0))
+(defn ctl-or-full (v t)
+  (if (or t (%lt 0 (length v))) 1 2))
+
 (def used-param-d (measure (fn () (used-param (list 1 2 3) :a)) 200 window))
 (def used-param-if-d
   (measure (fn () (used-param-if (list 1 2 3) true)) 200 window))
@@ -362,6 +428,17 @@
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
 (def ctl-one-arm-d (measure (fn () (ctl-one-arm (list 1 2 3) :a)) 200 window))
+(def cond-later-test-d
+  (measure (fn () (cond-later-test (list 1 2 3) 0)) 200 window))
+(def cond-else-path-d
+  (measure (fn () (cond-else-path (list 1 2 3) 9)) 200 window))
+(def cond-dispatch-d
+  (measure (fn () (cond-dispatch-ref (@array 1 2 3))) 200 window))
+(def or-short-d (measure (fn () (or-short (list 1 2 3) true)) 200 window))
+(def and-short-d (measure (fn () (and-short (list 1 2 3) false)) 200 window))
+(def ctl-cond-last-test-d
+  (measure (fn () (ctl-cond-last-test (list 1 2 3) 1)) 200 window))
+(def ctl-or-full-d (measure (fn () (ctl-or-full (list 1 2 3) false)) 200 window))
 
 (println "region-branch-arm-window deltas over " window " iters:")
 (println "  param " used-param-d "  if " used-param-if-d "  type-dispatch "
@@ -381,7 +458,11 @@
 (println "  arm walks with a cursor: non-walking " arm-cursor-d "  walking "
          arm-cursor-walk-d "  each-list " each-list-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
-(println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d)
+(println "  cond: later test " cond-later-test-d "  else path " cond-else-path-d
+         "  type dispatch " cond-dispatch-d)
+(println "  short-circuit: or " or-short-d "  and " and-short-d)
+(println "  controls: last-arm " ctl-last-arm-d "  one-arm " ctl-one-arm-d
+         "  cond-last-test " ctl-cond-last-test-d "  or-full " ctl-or-full-d)
 
 # Every leak in this class is at least one whole region per call, so a surviving
 # strand reads ≥2000 over the window. 100 is slack for the one-time intercept.
@@ -390,6 +471,15 @@
 
 (bounded? ctl-last-arm-d "control: the arm holding the decref_point")
 (bounded? ctl-one-arm-d "control: single-arm dispatch")
+(bounded? ctl-cond-last-test-d "control: the cond path that runs the last test")
+(bounded? ctl-or-full-d "control: the `or` path that runs both elements")
+
+(bounded? cond-later-test-d "a cond clause body skipping a later clause's test")
+(bounded? cond-else-path-d
+          "a cond else branch skipping an earlier clause's body")
+(bounded? cond-dispatch-d "a type cond naming its argument in every test")
+(bounded? or-short-d "an `or` whose second element is short-circuited")
+(bounded? and-short-d "an `and` whose second element is short-circuited")
 
 (bounded? used-param-d "owned parameter used by an earlier arm")
 (bounded? used-param-if-d "owned parameter used by an earlier `if` arm")
@@ -462,6 +552,15 @@
 (assert (= (arm-cursor (list 1 2 3) :a) 3) "arm-cursor short arm lost")
 (assert (= (arm-cursor (list 1 2 3) :z) 3) "arm-cursor walking arm lost")
 (assert (= (each-list (list 1 2 3)) 3) "each-list result lost")
+(assert (= (cond-later-test (list 1 2 3) 0) 1) "cond first-body result lost")
+(assert (= (cond-later-test (list 1 2 3) 1) 2) "cond later-clause result lost")
+(assert (= (cond-else-path (list 1 2 3) 9) 3) "cond else result lost")
+(assert (= (cond-dispatch-ref (list 1 2 3)) 2) "cond dispatch pair arm lost")
+(assert (= (cond-dispatch-ref [1 2 3]) 3) "cond dispatch array arm lost")
+(assert (= (or-short (list 1 2 3) true) 1) "or short-circuit result lost")
+(assert (= (or-short (list 1 2 3) false) 1) "or full-evaluation result lost")
+(assert (= (and-short (list 1 2 3) false) 2) "and short-circuit result lost")
+(assert (= (and-short (list 1 2 3) true) 1) "and full-evaluation result lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
 

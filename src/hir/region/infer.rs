@@ -794,6 +794,7 @@ impl RegionInference {
 }
 
 mod analyze;
+mod arms;
 mod build;
 mod compensate;
 mod escape;

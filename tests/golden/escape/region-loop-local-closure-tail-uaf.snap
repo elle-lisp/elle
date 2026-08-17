@@ -67,8 +67,8 @@
     block7: DecrefValueRegion v125
   ; closure[0] <anon>
     block0: DecrefValueRegion v5
-    block2: DecrefValueRegion v11
-    block1: IncrefValueRegion v13
+    block1: IncrefValueRegion v11
+    block1: DecrefValueRegion v12
   ; closure[1] <anon>
     block4: IncrefRegion s10
     block4: DecrefValueRegion v18

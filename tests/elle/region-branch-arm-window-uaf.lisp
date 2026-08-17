@@ -39,6 +39,12 @@
 # counted edge standing. Both are driven, beside the shape whose sibling callee
 # funds nothing and therefore keeps the baseline route.
 #
+# An arm is a conditional POSITION, so a `cond`'s clause tests and an `and`/`or`
+# tail are arms too (docs/impl/region/mechanism.md § "An arm is a conditional
+# position, not a syntactic arm body"). The `w-cond` / `w-or-short` witnesses drive
+# both sides of that decomposition with the subject read after the form, and
+# `w-cond-store` drives the escape refusal the same reading must still make.
+#
 # Every witness reads the subject's HEAP contents after the branch, through a
 # chain long enough that an over-early free faults rather than reading stale but
 # still-mapped bytes. A fresh subject per iteration keeps region ids churning so
@@ -293,6 +299,35 @@
       acc
       (w-acc-walk (%sub i 1) (pair (string "w" i) acc)))))
 
+# (h6) the `cond` face: a clause TEST is a conditional position, so the subject's
+# release can sit in a test no path but the later clauses' reaches
+# (docs/impl/region/mechanism.md § "An arm is a conditional position, not a
+# syntactic arm body"). The window anchors it on the form's merge, which must land
+# behind the post-`cond` read. The second test is always false, so driving t=0 takes
+# the first body and skips that test while any other t evaluates it and falls to the
+# else — the two sides of the decomposition, each read after the form.
+(defn w-cond (v t)
+  (%add (cond
+          (%eq t 0) 1
+          (%lt (length (first v)) 0) 2
+          3) (length (first v))))
+
+# (h7) the escape refusal over the same form: the first clause's body stores the
+# subject into a container outliving the frame, so the admission refuses the region
+# and the in-arm release stands. The read back out must find it.
+(defn w-cond-store (v t)
+  (cond
+    (%eq t 0) (push sink v)
+    (%lt (length (first v)) 0) 2
+    3)
+  (length (get sink (%sub (length sink) 1))))
+
+# (h8) the short-circuit face: `(or a b)` evaluates `b` only where `a` is falsy, so
+# the subject's release can sit in a position the truthy path never runs. Driven on
+# both paths, with the subject read after the form.
+(defn w-or-short (v t)
+  (%add (if (or t (%lt 0 (length (first v)))) 1 2) (length (first v))))
+
 # (i) the `If` face, with the subject consumed after the branch.
 (defn w-if (v c)
   (let [r (if c (first v) (last v))]
@@ -329,6 +364,11 @@
 (var aa 0)
 (var ab 0)
 (var ac 0)
+(var ad 0)
+(var ae 0)
+(var ag 0)
+(var ah 0)
+(var ai 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -354,6 +394,11 @@
   (assign s (w-cap-return-read (list (string "s" i) i) 0))
   (assign t (w-cap-return-read (list (string "t" i) i) 2))
   (assign u (length (first (w-acc-walk 3 ()))))
+  (assign ad (w-cond (list (string "ad" i) i) 0))
+  (assign ae (w-cond (list (string "ae" i) i) 9))
+  (assign ag (w-cond-store (list (string "ag" i) i) 0))
+  (assign ah (w-or-short (list (string "ah" i) i) true))
+  (assign ai (w-or-short (list (string "ai" i) i) false))
   (assign j (w-if (list (string "j" i) (string "jj" i)) true))
   (assign k (c-plain (list (string "k" i) i)))
   # The sink is a module-level container by design (witness b stores into it);
@@ -396,6 +441,13 @@
         "returned arm value freed by the replica ahead of a capturing tail callee")
 (assert (%gt u 0)
         "threaded accumulator freed by a merge the recursive arm never reaches")
+(assert (%gt ad 0)
+        "live-in subject freed by the merge release a later cond TEST admitted")
+(assert (%gt ae 0) "live-in subject freed by the release moved off a cond test")
+(assert (%gt ag 0) "stored subject freed though only a later cond test names it")
+(assert (%gt ah 0)
+        "live-in subject freed by the merge release a short-circuited tail admitted")
+(assert (%gt ai 0) "live-in subject freed by the release moved off an `or` tail")
 (assert (%gt j 0) "`if` arm value freed under the post-branch read")
 
 (println "region-branch-arm-window-uaf: ok")

@@ -268,6 +268,120 @@ fn a_native_tail_arm_does_not_decline_the_window() {
     );
 }
 
+// ── An arm is a conditional position, not a syntactic arm body ───────
+//
+// A `cond`'s clause TESTS are conditional positions exactly as its bodies are,
+// and an `and`/`or` tail is one with no body at all. Reading those forms
+// syntactically leaves a release whose last use is a later test outside every
+// arm — which is where the polymorphic entry point puts it (see
+// docs/impl/region/mechanism.md § "An arm is a conditional position, not a
+// syntactic arm body" and the end-to-end rows in
+// tests/elle/region-branch-arm-window.lisp).
+
+/// Every child of the first `Cond` in the tree — each clause's test and body, and
+/// the `else` branch. The window's signature for a `cond` is that the release
+/// clears all of them: the anchor is the form's own consuming node, which no
+/// child's subtree contains.
+fn first_cond_parts(hir: &Hir) -> Option<Vec<HirId>> {
+    if let HirKind::Cond {
+        clauses,
+        else_branch,
+    } = &hir.kind
+    {
+        let mut out: Vec<HirId> = Vec::new();
+        for (test, body) in clauses {
+            out.push(test.id);
+            out.push(body.id);
+        }
+        out.extend(else_branch.iter().map(|e| e.id));
+        return Some(out);
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = first_cond_parts(c);
+        }
+    });
+    found
+}
+
+/// Every element of the first `And`/`Or` in the tree.
+fn first_short_circuit_parts(hir: &Hir) -> Option<Vec<HirId>> {
+    if let HirKind::And(exprs) | HirKind::Or(exprs) = &hir.kind {
+        return Some(exprs.iter().map(|e| e.id).collect());
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = first_short_circuit_parts(c);
+        }
+    });
+    found
+}
+
+#[test]
+fn a_cond_clause_test_is_a_conditional_position() {
+    // `xs`'s last use is the SECOND clause's test, which runs only where the first
+    // clause's test failed. Every call that takes the first body skips it, so a
+    // release left there fires on no such path at all. The arms of a `cond` are its
+    // nested-`If` equivalent — the clause body, and the rest of the chain from the
+    // next test on — so the one release anchors on the form's own merge.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t xs) (cond (%eq t 0) 1 (%lt 0 (length xs)) 2 true 0))");
+    let parts = first_cond_parts(&hir).expect("a Cond node");
+    assert_eq!(parts.len(), 6, "three clauses, each a test and a body");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &parts),
+        "a live-in param whose last use is a later clause's TEST must be released \
+         where every clause reaches it"
+    );
+}
+
+#[test]
+fn a_cond_body_is_an_arm_like_any_other() {
+    // The body half of the same decomposition: `xs`'s last use is the LAST clause's
+    // body, so every earlier clause strands it. `Cond` is a branch, so its bodies
+    // are arms exactly as an `If`'s and a `Match`'s are.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t xs) (cond (%eq t 0) 1 (%eq t 1) (length xs) true 0))");
+    let parts = first_cond_parts(&hir).expect("a Cond node");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &parts),
+        "a live-in param used by one clause body must be released where every \
+         clause reaches it"
+    );
+}
+
+#[test]
+fn a_short_circuit_tail_is_an_arm() {
+    // `(or a b)` evaluates `b` only where `a` is falsy, so `b` is a conditional
+    // position with no sibling body — a one-armed branch. `xs`'s last use sits
+    // there, and the path that short-circuits must still release it.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t xs) (if (or t (%lt 0 (length xs))) 1 2))");
+    let parts = first_short_circuit_parts(&hir).expect("an Or node");
+    assert_eq!(parts.len(), 2, "the `or` has two elements");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &parts[1..]),
+        "a live-in param whose last use is a short-circuited tail must be released \
+         where both paths reach it"
+    );
+}
+
+#[test]
+fn an_and_tail_is_an_arm_too() {
+    // The `and` face of the same rule: the tail runs only where the head is truthy.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (t xs) (if (and t (%lt 0 (length xs))) 1 2))");
+    let parts = first_short_circuit_parts(&hir).expect("an And node");
+    assert_eq!(parts.len(), 2, "the `and` has two elements");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &parts[1..]),
+        "a live-in param whose last use is a short-circuited `and` tail must be \
+         released where both paths reach it"
+    );
+}
+
 #[test]
 fn an_arm_whose_loop_reads_a_live_in_param_anchors_at_the_branch() {
     // The window's iterative boundary is the loop's BODY, not the loop's own node.
