@@ -26,7 +26,7 @@
 //! own node and interval, so they share one anchor and one live-in premise.
 //!
 //! Two consumers, deliberately sharing one reading: the branch-arm release window
-//! ([`super::analyze::decref`]) and per-arm branch compensation
+//! (`super::analyze::decref`) and per-arm branch compensation
 //! ([`super::compensate`]).
 
 use std::collections::HashMap;

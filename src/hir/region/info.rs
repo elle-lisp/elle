@@ -676,6 +676,26 @@ pub struct RegionInfo {
     /// (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
     /// not its cell box").
     pub frame_held_regions: rustc_hash::FxHashSet<Region>,
+    /// Regions a value-routed release can NAME — the analysis-side mirror of the
+    /// slot `lir::lower::regiondecref::value_release_slot` would load
+    /// (`region::infer::escape::value_routed_regions`).
+    ///
+    /// Releasing by region id is the lowerer's default, taken wherever a single
+    /// point covers every path, so this is not a class of region but a fact about
+    /// the ROUTE available to one: `call_result_regions`, whose release is
+    /// value-routed unconditionally, plus every region a `Define`/`Let`/`Letrec`
+    /// init allocated into a stack slot that names the value from the binder to the
+    /// release. It is what the branch-arm release window asks when an arm leaves
+    /// through a frame-replacing callee, because only a value route nil-stamps the
+    /// slot it read and so counts once where a merge's copy and an arm's replica
+    /// land on one path (docs/impl/region/mechanism.md § "A release the relocation
+    /// replicates names a VALUE, and a binder's slot supplies that name").
+    ///
+    /// Deliberately the conservative reading of the emitter's refusals: a region
+    /// claimed here that the emitter then releases by id takes no replica and has
+    /// lost the per-arm compensation the window displaced, so a celled or
+    /// reassigned binder's region stays out.
+    pub value_routed_regions: rustc_hash::FxHashSet<Region>,
     /// Frame-replacing tail-call HirId → what that call's own callee tells the
     /// lowerer about the releases and mints around it ([`TailCalleeFacts`]).
     /// Populated only where the callee resolves to a lambda this compilation can
@@ -807,6 +827,7 @@ impl RegionInfo {
             binding_source_regions: HashMap::new(),
             captured_reassigned_bindings: FxHashSet::default(),
             frame_held_regions: FxHashSet::default(),
+            value_routed_regions: FxHashSet::default(),
             tail_callee_facts: HashMap::new(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),

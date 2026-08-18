@@ -11,6 +11,13 @@
 //! the **only** place escape facts meet regions — escape holds no region plumbing,
 //! the solver holds no escape logic.
 //!
+//! One non-escape reading lives here beside them: the **release route** a binding's
+//! binder records ([`Route`]), the analysis-side mirror of the lowerer's
+//! `region_to_slot`. Both of its consumers are in this file — the mutated-route
+//! refusal `frame_held_regions` applies, and [`value_routed_regions`] — and a mirror
+//! that disagreed with itself between the two would poison one release while
+//! promising another, so the four binder sites are read exactly once.
+//!
 //! Projection rule: a frontier **binding** projects through `binding_source_regions`
 //! (the regions its value may point into); a frontier **allocation site** (a returned
 //! lambda, an atomless aggregate, a call result, an emitted/sent literal) projects
@@ -215,30 +222,128 @@ pub(super) fn frame_held_regions(
     held
 }
 
-/// Regions whose value-routed release would load a slot the program repoints
-/// (region/mechanism.md § "A mutated holder poisons its value route, not its cell
-/// box").
+/// What a binding's own binder records as the release route for its value — the
+/// slot a value-routed release loads (region/mechanism.md § "A release the
+/// relocation replicates names a VALUE, and a binder's slot supplies that name").
 ///
 /// **One binding owns a region's route.** The lowerer keys `region_to_slot` on the
 /// region's ALLOCATION site (`lir::lower::regionemit::record_region_slot`), so the
 /// slot a release loads is the slot of the binding whose *init* allocated the
 /// region. Every other binding that names the same value — a cursor an arm walks
-/// with, an alias — reaches it through a slot no release ever reads, so its
-/// reassignment cannot make the release name a value the solver did not mean.
-/// Mirrored here off `binder_init_sites`, which the walk records at the same three
-/// binder forms the lowerer records the slot at.
+/// with, an alias — reaches it through a slot no release ever reads.
 ///
 /// **Four binder sites record a route, and no others.** `Define`, `Let` and
-/// `Letrec` are the three the mirror carries; the fourth is the lambda prologue,
-/// which records a PARAMETER's slot for the call-result regions its value may name
-/// and for no others. So a mutated binding absent from the mirror is read by what
-/// introduced it rather than by a blanket refusal: a parameter poisons exactly the
-/// prologue's own set, while a name a pattern introduces and a `Loop` parameter —
-/// which no site records a slot for — poison nothing at all. The whole-holder
-/// reading is left to the one case that is a genuine ambiguity rather than a gap: a
-/// binding two different binders introduce, where `binder_init_sites` holds `None`
-/// because two routes exist and nothing here says which the release loads. A
-/// mutated binding's compiled forward CELL is refused too: the projection that
+/// `Letrec` are the three [`binder_route`] reads off `binder_init_sites`, which the
+/// walk records at exactly those forms; the fourth is the lambda prologue, which
+/// records a PARAMETER's slot for the call-result regions its value may name and
+/// for no others. So a binding absent from the mirror is read by what introduced it
+/// rather than by a blanket verdict either way.
+enum Route {
+    /// One binder, so one route: the region that binder's init allocated. `None`
+    /// where the init allocates nothing — an init that merely names another binding
+    /// is absent from `alloc_region`, exactly as it records no slot in the lowerer.
+    Binder(Option<Region>),
+    /// The lambda prologue's route: a PARAMETER's slot, standing for the
+    /// call-result regions the parameter's value may name
+    /// (`lir::lower::lambda::body`).
+    Prologue(Vec<Region>),
+    /// Two different binders, each recording a route of its own, and nothing here
+    /// says which one a release loads. A genuine ambiguity rather than a gap in the
+    /// mirror.
+    Ambiguous,
+    /// No site records a slot: a name a PATTERN introduces — a destructuring
+    /// binder, a `Match` arm's pattern — or a `Loop` parameter functionalization
+    /// minted.
+    Unrouted,
+}
+
+/// Read [`Route`] for one binding. `regions` is the binding's source-region set,
+/// which only the prologue's answer is stated over.
+fn binder_route(
+    b: Binding,
+    arena: &crate::hir::arena::BindingArena,
+    info: &RegionInfo,
+    regions: &[Region],
+    binder_init_sites: &HashMap<Binding, Option<HirId>>,
+) -> Route {
+    match binder_init_sites.get(&b) {
+        Some(&Some(init)) => Route::Binder(info.alloc_region.get(&init).copied()),
+        Some(None) => Route::Ambiguous,
+        None if arena.get(b).scope == crate::hir::arena::BindingScope::Parameter => {
+            Route::Prologue(
+                regions
+                    .iter()
+                    .copied()
+                    .filter(|r| info.call_result_regions.contains(r))
+                    .collect(),
+            )
+        }
+        None => Route::Unrouted,
+    }
+}
+
+/// Regions a value-routed release can NAME — the analysis-side reading of the slot
+/// `lir::lower::regiondecref::value_release_slot` would load.
+///
+/// Releasing by region id is the lowerer's default, so this is the set the
+/// frame-exit relocation can replicate into a branch arm: only a value route
+/// nil-stamps the slot it read, and only a stamped run counts once where a merge's
+/// copy and an arm's replica land on one path (region/mechanism.md § "An arm that
+/// leaves through a callee takes a replica, not the anchor"). Two halves:
+///
+/// - **`call_result_regions`** — the class whose release is value-routed
+///   unconditionally, whether the slot came from a binder or from the lambda
+///   prologue.
+/// - **the binder's own route** — a region a `Define`/`Let`/`Letrec` init
+///   allocated, whose slot names that value from the binder to the release.
+///
+/// The binder half is deliberately the conservative reading of the emitter's
+/// refusals, because a region claimed here that the emitter then releases by id
+/// takes no replica and has lost the per-arm compensation the window displaced. A
+/// **captured** binding is refused: its slot holds an env box or a compiled cell
+/// rather than the value. A **reassigned fn-local** is refused because its slot is
+/// repointed — the backstop for the emitter's own reading of that fact
+/// (`lir::lower::emitops::allocate_slot_routed`, which tracks it by slot);
+/// functionalization normally versions an in-function reassignment away, leaving
+/// the allocating binder a version no `assign` repoints. A region two binders claim
+/// keeps the strictest of their verdicts, since `region_to_slot` holds one entry
+/// and this cannot say whose.
+pub(super) fn value_routed_regions(
+    arena: &crate::hir::arena::BindingArena,
+    info: &RegionInfo,
+    binder_init_sites: &HashMap<Binding, Option<HirId>>,
+) -> FxHashSet<Region> {
+    let mut claimed: FxHashSet<Region> = info.call_result_regions.iter().copied().collect();
+    let mut refused: FxHashSet<Region> = FxHashSet::default();
+    for &b in binder_init_sites.keys() {
+        // The prologue's own regions are call results, so the first half already
+        // holds them and this reading needs no source-region set to state them over.
+        let Route::Binder(Some(r)) = binder_route(b, arena, info, &[], binder_init_sites) else {
+            continue;
+        };
+        if arena.get(b).needs_capture() || info.reassigned_local_bindings.contains(&b) {
+            refused.insert(r);
+        } else {
+            claimed.insert(r);
+        }
+    }
+    claimed.retain(|r| !refused.contains(r));
+    claimed
+}
+
+/// Regions whose value-routed release would load a slot the program repoints
+/// (region/mechanism.md § "A mutated holder poisons its value route, not its cell
+/// box").
+///
+/// The refusal reaches exactly the route [`binder_route`] names, never every
+/// binding that holds the value: a cursor an arm walks the value with reaches it
+/// through a slot no release reads, so its reassignment cannot make the release
+/// name a value the solver did not mean. So a parameter poisons exactly the
+/// prologue's own set, while a pattern name and a `Loop` parameter poison nothing
+/// at all. The whole-holder reading is left to [`Route::Ambiguous`], where two
+/// routes exist and nothing here says which the release loads.
+///
+/// A mutated binding's compiled forward CELL is refused too: the projection that
 /// names the cell asserts exactly what the binding asserts and nothing more
 /// (region/mechanism.md § "A compiled capture cell is frame-held exactly as its
 /// binding is").
@@ -257,31 +362,11 @@ fn mutated_route_regions(
             continue;
         }
         out.extend(info.single_cell_region_of(b));
-        match binder_init_sites.get(&b) {
-            // One binder, so one route: only the region that binder's init
-            // allocated is released through this binding's slot. An init that
-            // merely names another binding allocates nothing and is absent from
-            // `alloc_region`, exactly as it records no slot in the lowerer.
-            Some(&Some(init)) => out.extend(info.alloc_region.get(&init).copied()),
-            // Two different binders, each recording a route of its own, and nothing
-            // here says which one the release loads. A genuine ambiguity rather than
-            // a gap in the mirror, so every region the binding holds stays refused.
-            Some(None) => out.extend(regions.iter().copied()),
-            // The binding is introduced by none of the three binder forms. The lambda
-            // prologue is the only other site that records a route, and it records a
-            // PARAMETER's slot for the call-result regions its value may name and for
-            // no others (`lir::lower::lambda::body`).
-            None if arena.get(b).scope == crate::hir::arena::BindingScope::Parameter => out.extend(
-                regions
-                    .iter()
-                    .copied()
-                    .filter(|r| info.call_result_regions.contains(r)),
-            ),
-            // A name a PATTERN introduces — a destructuring binder, a `Match` arm's
-            // pattern — or a `Loop` parameter functionalization minted. No site
-            // records a slot for either, so no value-routed release can load the
-            // slot its `assign` repoints, and it poisons nothing.
-            None => {}
+        match binder_route(b, arena, info, regions, binder_init_sites) {
+            Route::Binder(r) => out.extend(r),
+            Route::Prologue(rs) => out.extend(rs),
+            Route::Ambiguous => out.extend(regions.iter().copied()),
+            Route::Unrouted => {}
         }
     }
     out.retain(|r| !info.cell_release_regions.contains(r));

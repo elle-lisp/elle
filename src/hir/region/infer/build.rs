@@ -89,6 +89,7 @@ impl RegionInference {
             binding_source_regions: HashMap::new(),
             captured_reassigned_bindings: rustc_hash::FxHashSet::default(),
             frame_held_regions: rustc_hash::FxHashSet::default(),
+            value_routed_regions: rustc_hash::FxHashSet::default(),
             // Populated after the merge post-pass in `analyze_regions_with`: its
             // regions are canonicalized through the merge forest, which is not
             // built yet here.

@@ -626,6 +626,19 @@ reads per point: an arm whose call **names** the region keeps its copy in the
 dead block, because that release is the ownership move the callee's
 owned-parameter release consumes.
 
+The exemption's two halves do not read alike here, and the window has to tell them
+apart. For an **argument**, the copy left in the dead block is exactly the
+ownership move — the callee's owned-parameter release runs in its place (rules.md
+Rule 5) — so nothing is owed on that path and the anchor is free to take the
+release away. For the **callee's own** region there is no such release: what stands
+in for it is the deferred callee channel, and that channel is keyed on where the
+release SITS (§ "What the exemption keeps, a channel must still run"). Anchoring it
+at the merge takes it out of the channel's reach and leaves the exiting arm with
+nothing at all. So the closure region an exiting arm's call reaches its callee
+through keeps its in-arm release. That boundary is the `bound-callee` row, and the
+leak it prevents is one closure region per call, compounding with the depth of a
+tower of stdlib HOF compositions.
+
 Neither mechanism owes a new count argument for the composition. Both make a
 release fire on a path where none fired before, and both discharge exactly that
 with `frame_held_regions` — the anchor at the analysis, each replica at its own
@@ -635,22 +648,32 @@ and at every replica alike (§ "The return facet costs the merge nothing").
 The composition does need a release the relocation can replicate, and only a
 **value-routed** one qualifies: it loads the holder slot, releases that value's
 region, and stamps the slot `nil`, so a second copy on one path no-ops. So the
-frame-exit relaxation is asked per region and admits only `call_result_regions`,
-the class the analysis can name as value-routed off `RegionInfo` alone. That is a
-proxy rather than the whole question — the emitter takes the value route for any
-region a binder recorded a slot for (§ "Self-cancelling is a property of the
-ROUTE, not of the region's class") — and the conservative side of the proxy is
-where the window needs to sit: a branch with a frame-replacing arm declines whole
-for every other region, which keeps compensation's head and tail routes reaching
-them exactly as before. Declining *inside* the arm instead would leave the
-anchored release covering only the falling-through arms while the tail-calling
-arm, which per-arm compensation used to reach at its head, got nothing. This is
-`self_cancelling_run`'s restriction read one step earlier, at the admission it
-builds on, and it is the same value-route line compensation's `tail` route
-already draws.
+frame-exit relaxation is asked per region, and the question it asks is the
+emitter's own: **can a value route NAME this region**
+(`RegionInfo::value_routed_regions`). That is not the region's class. Releasing by
+id is the lowerer's default, taken wherever a single point covers every path, and a
+region a `Define`/`Let`/`Letrec` binder allocated has a slot naming its value from
+the binder to the release — so it takes the value route as soon as some point
+admits it (§ "Self-cancelling is a property of the ROUTE, not of the region's
+class").
+Reading the class instead admits `call_result_regions` and declines every ordinary
+binder-owned allocation, which is the everyday live-in local a dispatch arm
+tail-calls past.
 
-Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with both
-boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
+The mirror is deliberately conservative, because a region admitted here that the
+emitter then releases by id gets no replica *and* has lost the per-arm
+compensation the window displaced — one leak traded for another. So it carries the
+emitter's refusals: a captured binder's slot holds an env box or a compiled cell
+rather than the value, and a reassigned binder's slot is repointed. Everything it
+declines keeps the whole-branch decline, and with it compensation's head and tail
+routes. Declining *inside* the arm instead would leave the anchored release
+covering only the falling-through arms while the tail-calling arm, which per-arm
+compensation used to reach at its head, got nothing. This is `self_cancelling_run`'s
+restriction read one step earlier, at the admission it builds on, and it is the
+same value-route line compensation's `tail` route already draws.
+
+Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with all
+three boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
 faces and the returned-parameter faces driven as rows), the `param-used-arm` /
 `param-used-arm-if` / `branch-arm-tailcall-sibling` / `branch-arm-return-captured`
 probes in `tests/elle/oracle.lisp` (the per-op
@@ -658,7 +681,12 @@ rates), the placement pins in `lir::lower::tests::release`
 (`fallthrough_arm_releases_though_a_sibling_tail_call_exits`,
 `tail_call_argument_release_stays_the_ownership_move`,
 `moved_argument_takes_no_replica_in_the_arm_that_moves_it`), the value-route
-narrowing pin `regions::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
+narrowing pins
+(`regions::tests::compensate::a_frame_replacing_arm_anchors_a_value_routed_release`,
+`a_frame_replacing_arm_anchors_a_binder_routed_release`,
+`a_callee_the_arm_tail_calls_keeps_its_in_arm_release`, and the mirror's own
+`a_binders_allocation_is_value_routed` /
+`a_celled_binders_allocation_is_not_value_routed`),
 the return-facet admission
 (`regions::tests::compensate::a_capturing_frame_exit_anchors_a_returned_param`,
 `a_returned_param_anchors_where_no_arm_leaves_the_frame`,
@@ -1192,6 +1220,11 @@ same runtime region the id resolves to. The two routes are therefore
 interchangeable at such a region, and only one of them replicates. So a release
 the relocation has to replicate takes the value route, and every release it does
 not keeps the id route.
+
+Which regions have that slot is `RegionInfo::value_routed_regions`, the analysis's
+mirror of `region_to_slot`, read by the branch-arm window so the two mechanisms ask
+one question rather than two (§ "An arm that leaves through a callee takes a
+replica, not the anchor").
 
 The reroute is asked only where some inherited point ADMITS the region, which
 keeps it disjoint from the channel that answers the same strand a different way: a

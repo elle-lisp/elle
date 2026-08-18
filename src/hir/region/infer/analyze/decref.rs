@@ -459,11 +459,21 @@ pub(super) fn populate_decref_points(
 /// the merge, so the anchor alone does not cover it — the frame-exit relocation
 /// does, replicating the anchored release ahead of that arm's `TailCall` or
 /// leaving it to the callee that took the argument over. That replica exists only
-/// for a value-routed release, so such a branch narrows the window to
-/// `call_result_regions` instead of declining whole; everything else keeps its
-/// in-arm release and `region::infer::compensate`'s counted routes. A tail call to a
-/// *native* pushes no frame and falls through, which is why the callee kind
-/// decides it (`frame_replacing_tail_calls`) and not `is_tail`.
+/// for a value-routed release, so such a branch narrows the window to the regions
+/// a value route can NAME (`value_routed`, `region::infer::escape`) instead of
+/// declining whole; everything else keeps its in-arm release and
+/// `region::infer::compensate`'s counted routes. A tail call to a *native* pushes
+/// no frame and falls through, which is why the callee kind decides it
+/// (`frame_replacing_tail_calls`) and not `is_tail`.
+///
+/// The exemption the relocation already reads (`TailExitHoist::exempt`) decides one
+/// more refusal, because its two halves owe different things. An **argument** the
+/// call names is the ownership move — the callee's owned-parameter release runs in
+/// place of the copy the arm left in its dead block — so the anchor may take that
+/// release away. The **callee's own** region has no such release standing in for
+/// it: the deferred callee channel does, and that channel is keyed on where the
+/// release sits, so anchoring it at the merge leaves the exiting arm with nothing
+/// (region/mechanism.md § "What the exemption keeps, a channel must still run").
 ///
 /// The region must also be **live-in** — every allocation and holder-definition
 /// site outside the branch's subtree — so a value born inside an arm keeps its
@@ -481,7 +491,14 @@ fn pin_branch_arm_releases(
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let low = compute_subtree_low(hir, order);
     let mut scopes = BranchWindowScopes::default();
-    collect_branch_scopes(hir, order, &low, frame_replacing_tail_calls, &mut scopes);
+    collect_branch_scopes(
+        hir,
+        info,
+        order,
+        &low,
+        frame_replacing_tail_calls,
+        &mut scopes,
+    );
     if scopes.branches.is_empty() {
         return;
     }
@@ -556,13 +573,8 @@ fn pin_branch_arm_releases(
     let frame_held = info.frame_held_regions.clone();
 
     // Snapshotted for the frame-exit narrowing below, which reads it while
-    // `region_data` is borrowed mutably. These are the regions
-    // `emit_decref_for_region` releases by VALUE through a holder slot — the only
-    // shape the frame-exit relocation can replicate into an arm, because only a
-    // value route nil-stamps the slot it read and so no-ops on a second copy
-    // (mechanism.md § "An arm that leaves through a callee takes a replica, not
-    // the anchor"; `self_cancelling_run`).
-    let call_result_regions = info.call_result_regions.clone();
+    // `region_data` is borrowed mutably (`RegionInfo::value_routed_regions`).
+    let value_routed = info.value_routed_regions.clone();
 
     // Regions whose release belongs to another mechanism: moving their
     // `decref_point` would move a release that mechanism, not this one, emits.
@@ -592,13 +604,27 @@ fn pin_branch_arm_releases(
         // The anchor still covers the arms that fall through, and the frame-exit
         // relocation covers the rest — but only for a release it can REPLICATE,
         // which is the value route alone. So their presence narrows the window to
-        // `call_result_regions` here rather than declining the branch whole; every
-        // other region keeps its in-arm release and compensation's counted routes.
-        let arm_exits_frame = scopes.frame_exits.iter().any(|&e| {
-            e >= br.node_lo
-                && e <= br.node_hi
-                && !inner_lambdas.iter().any(|&(lo, hi)| lo <= e && e <= hi)
-        });
+        // the regions a value route can name here rather than declining the branch
+        // whole; every other region keeps its in-arm release and compensation's
+        // counted routes. `value_routed` asks the question the emitter asks
+        // (`lir::lower::regiondecref::value_release_slot`) rather than reading the
+        // region's class: releasing by id is the lowerer's DEFAULT, taken wherever a
+        // single point covers every path, so a region a binder recorded a slot for
+        // takes the value route as soon as a point admits it (mechanism.md § "A
+        // release the relocation replicates names a VALUE, and a binder's slot
+        // supplies that name").
+        let arm_exits: Vec<&FrameExit> = scopes
+            .frame_exits
+            .iter()
+            .filter(|e| {
+                e.at >= br.node_lo
+                    && e.at <= br.node_hi
+                    && !inner_lambdas
+                        .iter()
+                        .any(|&(lo, hi)| lo <= e.at && e.at <= hi)
+            })
+            .collect();
+        let arm_exits_frame = !arm_exits.is_empty();
         let anchor = last_use.get(&br.id).copied().unwrap_or(br.id);
         let anchor_ord = ord(anchor);
         // Only the barriers nested INSIDE this branch matter: one enclosing the
@@ -613,7 +639,20 @@ fn pin_branch_arm_releases(
             if excluded.contains(&r) {
                 continue;
             }
-            if arm_exits_frame && !call_result_regions.contains(&r) {
+            if arm_exits_frame && !value_routed.contains(&r) {
+                continue;
+            }
+            // A region the exiting arm's call names as its CALLEE is exempt from the
+            // relocation, so no replica reaches that arm — and what stands in for the
+            // release there is the deferred callee channel, which is keyed on where
+            // the release SITS (`deferred_release_slot`; mechanism.md § "What the
+            // exemption keeps, a channel must still run"). Moving it to the merge
+            // takes it out of that channel's reach and leaves the arm with nothing,
+            // so such a region keeps its in-arm release. An ARGUMENT's exemption is
+            // the opposite story — the release the arm never runs IS the ownership
+            // move, and the callee's owned-parameter release consumes it — so an
+            // argument is no refusal here (rules.md Rule 5).
+            if arm_exits.iter().any(|e| e.callee.contains(&r)) {
                 continue;
             }
             let dord = ord(d.decref_point);
@@ -732,12 +771,27 @@ struct BranchWindowScopes {
     /// a tail call to a *native* falls through to it. Only a callee that can
     /// replace the frame actually skips the merge, and reading the coarser set
     /// would narrow every native-tail dispatch arm for nothing.
-    frame_exits: Vec<u32>,
+    frame_exits: Vec<FrameExit>,
+}
+
+/// One frame-replacing tail call, as the branch-arm window reads it.
+struct FrameExit {
+    /// Post-order index of the call, so containment in a branch or in a nested
+    /// lambda is an interval test.
+    at: u32,
+    /// The regions the call names as its **callee** — the closure region it reaches
+    /// the callee through. This is the half of `TailExitHoist::exempt` no
+    /// owned-parameter release stands in for: the relocation leaves such a release
+    /// where it sits, and the deferred callee channel runs it from there
+    /// (`deferred_release_slot`, `TailExitHoist::exempt`; mechanism.md § "What the
+    /// exemption keeps, a channel must still run").
+    callee: rustc_hash::FxHashSet<Region>,
 }
 
 /// Collect [`BranchWindowScopes`] over the whole tree in one walk.
 fn collect_branch_scopes(
     hir: &Hir,
+    info: &RegionInfo,
     order: &HashMap<HirId, u32>,
     low: &HashMap<HirId, u32>,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
@@ -753,13 +807,23 @@ fn collect_branch_scopes(
             out.barriers.push((lo(hir.id), ord(hir.id)));
             out.lambdas.push((lo(hir.id), ord(hir.id)));
         }
-        HirKind::Call { .. } if frame_replacing_tail_calls.contains(&hir.id) => {
-            out.frame_exits.push(ord(hir.id));
+        HirKind::Call { func, .. } if frame_replacing_tail_calls.contains(&hir.id) => {
+            // The callee half of `TailExitHoist::exempt`, read off the same
+            // `operand_value_regions` the lowerer reads so the two cannot disagree
+            // about which releases the relocation will decline to replicate.
+            let mut callee = rustc_hash::FxHashSet::default();
+            info.operand_value_regions(func, &mut callee);
+            out.frame_exits.push(FrameExit {
+                at: ord(hir.id),
+                callee,
+            });
         }
         _ => {}
     }
     out.branches.extend(branch_arms(hir, order, low));
-    hir.for_each_child(|c| collect_branch_scopes(c, order, low, frame_replacing_tail_calls, out));
+    hir.for_each_child(|c| {
+        collect_branch_scopes(c, info, order, low, frame_replacing_tail_calls, out)
+    });
 }
 
 /// Re-anchor every release a `break` jumps over onto the block it leaves.

@@ -31,7 +31,11 @@
 # arm's call, or the exemption leaves it to the callee that took the argument over
 # (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes a
 # replica, not the anchor"). So the escape refusals are driven over that branch
-# shape too, since it reaches the admission by a path the others do not.
+# shape too, since it reaches the admission by a path the others do not. That
+# narrowing asks which regions a value route can NAME, not which class they belong
+# to, so the same branch is driven over a subject the BINDER allocated — where the
+# merge release fires and the replica lands for the first time — beside the store
+# refusal the admission must still make there.
 #
 # The RETURN facet is admitted rather than refused, and the two placements it
 # produces fault differently: the merge release must follow the returning arm's own
@@ -273,6 +277,34 @@
 (defn w-tail-return (v t)
   (length (first (w-tail-return-inner v t))))
 
+# (h6) the same frame-exiting branch over a subject the BINDER allocated with an
+# inline `%`-opcode rather than a call result. The lowerer's default release names
+# such a region by id, and the window admits it on the route the binder recorded —
+# so the merge release now fires where a class reading emitted nothing, and what
+# must stand is the counted env edge the allocation funnel took when the closure was
+# built: that closure reads the subject AFTER the branch.
+(defn w-binder-capture (v t)
+  (let [w (%pair v nil)
+        f (fn () (length (first (first w))))]
+    (match t
+      :a
+        (length (first (first w)))
+      :b (w-tail-callee v)
+      _ 0)
+    (f)))
+
+# (h7) the refusal the same admission must still make: the falling-through arm
+# STORES the binder-allocated subject into a container that outlives the frame, so
+# escape refuses the window however the sibling arm ends and the read back out must
+# find it alive.
+(defn w-binder-store (v t)
+  (let [w (%pair v nil)]
+    (match t
+      :a (push sink w)
+      :b (w-tail-callee v)
+      _ 0))
+  (length (first (first (get sink (%sub (length sink) 1))))))
+
 # (h4) the RETURN facet admitted through a capturing frame exit — `push-all`'s
 # shape. The running arm hands the subject back to the caller, and the sibling arm
 # leaves through a local walker that reaches the subject only through its captured
@@ -369,6 +401,8 @@
 (var ag 0)
 (var ah 0)
 (var ai 0)
+(var aj 0)
+(var ak 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -391,6 +425,8 @@
   (assign p (w-tail (list (string "p" i) i) :a))
   (assign q (w-tail-store (list (string "q" i) i) :a))
   (assign r (w-tail-return (list (string "r" i) i) :a))
+  (assign aj (w-binder-capture (list (string "aj" i) i) :a))
+  (assign ak (w-binder-store (list (string "ak" i) i) :a))
   (assign s (w-cap-return-read (list (string "s" i) i) 0))
   (assign t (w-cap-return-read (list (string "t" i) i) 2))
   (assign u (length (first (w-acc-walk 3 ()))))
@@ -435,6 +471,10 @@
         "stored arm value freed though a sibling arm leaves through a callee")
 (assert (%gt r 0)
         "returned arm value freed though a sibling arm leaves through a callee")
+(assert (%gt aj 0)
+        "binder-allocated subject freed under the closure that captured it")
+(assert (%gt ak 0)
+        "stored binder-allocated subject freed though a sibling leaves the frame")
 (assert (%gt s 0)
         "returned arm value freed by the merge release its capturing sibling admitted")
 (assert (%gt t 0)

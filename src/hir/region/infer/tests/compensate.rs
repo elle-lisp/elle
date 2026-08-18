@@ -65,10 +65,63 @@ fn release_clears_the_arms(
         Some(rs) => rs,
         None => return false,
     };
+    regions
+        .iter()
+        .all(|&r| region_release_clears_the_arms(hir, info, r, arms))
+}
+
+/// Every binder of `name` that records a release route, as `(binding, region)` —
+/// the region its `Let`/`Letrec`/`Define` INIT allocated, which is what
+/// `region_to_slot` is keyed on (docs/impl/region/mechanism.md § "A release the
+/// relocation replicates names a VALUE, and a binder's slot supplies that name").
+/// More than one entry where functionalization split the name into versions, each
+/// with an allocating init of its own.
+fn binder_routes(
+    hir: &Hir,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+    info: &RegionInfo,
+    name: &str,
+) -> Vec<(Binding, Region)> {
+    fn walk(
+        h: &Hir,
+        name: &str,
+        arena: &BindingArena,
+        symbols: &SymbolTable,
+        info: &RegionInfo,
+        out: &mut Vec<(Binding, Region)>,
+    ) {
+        let mut record = |b: &Binding, init: &Hir| {
+            if symbols.name(arena.get(*b).name) == Some(name) {
+                out.extend(info.alloc_region.get(&init.id).map(|&r| (*b, r)));
+            }
+        };
+        match &h.kind {
+            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+                for (b, init) in bindings {
+                    record(b, init);
+                }
+            }
+            HirKind::Define { binding, value, .. } => record(binding, value),
+            _ => {}
+        }
+        h.for_each_child(|c| walk(c, name, arena, symbols, info, out));
+    }
+    let mut out = Vec::new();
+    walk(hir, name, arena, symbols, info, &mut out);
+    assert!(!out.is_empty(), "`{name}` has no allocating binder");
+    out
+}
+
+/// [`release_clears_the_arms`] for ONE region, so a pin can name the region it
+/// means rather than every region its holder may point into — an env-celled
+/// binding holds a box placeholder beside the value's own region, and the two
+/// answer to different release routes.
+fn region_release_clears_the_arms(hir: &Hir, info: &RegionInfo, r: Region, arms: &[HirId]) -> bool {
     let order = compute_order(hir);
     let low = compute_subtree_low(hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    regions.iter().all(|r| match info.region_data.get(r) {
+    match info.region_data.get(&r) {
         Some(d) => {
             let o = ord(d.decref_point);
             !arms
@@ -76,7 +129,7 @@ fn release_clears_the_arms(
                 .any(|&a| low.get(&a).copied().unwrap_or(0) <= o && o <= ord(a))
         }
         None => false,
-    })
+    }
 }
 
 // ── The obligation, and the two routes that discharge it ─────────────
@@ -207,10 +260,9 @@ fn a_frame_replacing_arm_anchors_a_value_routed_release() {
     // ahead of its `TailCall` — so the branch narrows to the releases that
     // relocation can replicate instead of declining whole
     // (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes
-    // a replica, not the anchor"). Only a VALUE route is replicable, and
-    // `call_result_regions` is the class this analysis can name as one off
-    // `RegionInfo` alone — which is what the first assertion states about this
-    // shape and the second relies on.
+    // a replica, not the anchor"). Only a VALUE route is replicable, and a call
+    // result is value-routed unconditionally — which is what the first assertion
+    // states about this shape and the second relies on.
     let (hir, arena, symbols, info) =
         analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) (g 7)))");
     let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
@@ -229,6 +281,133 @@ fn a_frame_replacing_arm_anchors_a_value_routed_release() {
     assert!(
         !arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
         "the anchored release must not be doubled by a per-arm compensation"
+    );
+}
+
+#[test]
+fn a_frame_replacing_arm_anchors_a_binder_routed_release() {
+    // The same branch shape, over a region the lowerer releases by ID unless some
+    // point admits it: `xs` is a `%pair` allocation the `let` binder owns, so it
+    // is no call result. `record_region_slot` still keyed a slot on that
+    // allocation, so the relocation can take the value route and replicate the
+    // release into the frame-replacing arm (docs/impl/region/mechanism.md § "A
+    // release the relocation replicates names a VALUE, and a binder's slot supplies
+    // that name"). The window asks that question rather than reading the region's
+    // class, so this branch narrows to `xs` instead of declining it.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (i) (let [xs (%pair 1 nil)] (if (%eq i 0) (length xs) (g 7))))");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let b = find_binding_by_name(&hir, "xs", &arena, &symbols).expect("the binding `xs`");
+    assert!(
+        info.binding_source_regions.get(&b).is_some_and(
+            |rs| !rs.is_empty() && rs.iter().all(|r| !info.call_result_regions.contains(r))
+        ),
+        "the discriminator: this pin is about a region OUTSIDE `call_result_regions`, \
+         which is what the class reading declined"
+    );
+    assert!(
+        release_clears_the_arms(&hir, &arena, &symbols, &info, "xs", &[then_id, else_id]),
+        "a frame-replacing sibling arm must not decline a binder-routed release"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &symbols, &info, "xs", then_id)
+            && !arm_compensates(&hir, &arena, &symbols, &info, "xs", else_id),
+        "the anchored release must not be doubled by a per-arm compensation"
+    );
+}
+
+#[test]
+fn a_binders_allocation_is_value_routed() {
+    // The positive half of the mirror, stated where the window reads it: an
+    // ordinary `let` binder's slot holds its init's value from the binder to the
+    // release, so the region that init allocated can be released by value and
+    // replicated into an arm.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (i) (let [xs (%pair 1 nil)] (if (%eq i 0) (length xs) (g 7))))");
+    let routes = binder_routes(&hir, &arena, &symbols, &info, "xs");
+    assert!(
+        routes
+            .iter()
+            .all(|(_, r)| info.value_routed_regions.contains(r)),
+        "{routes:?} is what an ordinary binder's slot names; value_routed={:?}",
+        info.value_routed_regions
+    );
+}
+
+#[test]
+fn a_celled_binders_allocation_is_not_value_routed() {
+    // The refusal the binder half keeps. `xs` is captured, so its binder stored the
+    // value into an env cell rather than into a stack slot naming the value — the
+    // slot a release would load holds the BOX. With no value route the frame-exit
+    // relocation can replicate nothing, so the branch-arm window must keep the
+    // whole-branch decline rather than anchor a release the exiting arm never runs.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (i) (let [@xs (%pair 1 nil) f (fn () (length xs))] \
+           (if (%eq i 0) (%add (length xs) (f)) (g 7))))",
+    );
+    let routes = binder_routes(&hir, &arena, &symbols, &info, "xs");
+    assert!(
+        routes
+            .iter()
+            .all(|(_, r)| !info.value_routed_regions.contains(r)),
+        "{routes:?} is stored into an env cell, so no slot names its value; \
+         value_routed={:?}",
+        info.value_routed_regions
+    );
+}
+
+#[test]
+fn a_callee_the_arm_tail_calls_keeps_its_in_arm_release() {
+    // The boundary the value-route reading must stop at. `go`'s own closure region
+    // is what the exiting arm's call names as its CALLEE, so the frame-exit
+    // relocation exempts it and replicates nothing into that arm — the deferred
+    // callee channel runs that release from where it sits instead
+    // (docs/impl/region/mechanism.md § "What the exemption keeps, a channel must
+    // still run"). Anchoring it at the merge would take it out of that channel's
+    // reach and leave the arm with no release at all, so the branch declines it.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn (xs) (letrec [go (fn (a b) a)] (if (%eq xs 0) 0 (go xs 1))))");
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let routes = binder_routes(&hir, &arena, &symbols, &info, "go");
+    assert!(
+        routes
+            .iter()
+            .all(|(_, r)| info.value_routed_regions.contains(r)),
+        "the discriminator: {routes:?} is binder-routed, so only the callee \
+         exemption can decline it"
+    );
+    assert!(
+        routes.iter().all(|(_, r)| !region_release_clears_the_arms(
+            &hir,
+            &info,
+            *r,
+            &[then_id, else_id]
+        )),
+        "a tail callee's own closure region must keep its in-arm release; got \
+         {routes:?}"
+    );
+}
+
+#[test]
+fn a_reassigned_binder_versions_away_before_it_can_route() {
+    // Why the mirror's reassign refusal is a backstop rather than a shape:
+    // functionalization gives an in-function reassignment one version per store, so
+    // the binder that ALLOCATES is not the binding an `assign` repoints — a loop
+    // carries the value through a `Loop` parameter, which allocates nothing and so
+    // records no route. The refusal keeps the emitter's own
+    // `reassigned_local_slots` reading honest where that does not hold; here it
+    // costs nothing, and the route stays available.
+    let (hir, arena, symbols, info) = analyze_with_class(
+        "(fn (@i n) (let [@xs (%pair 1 nil)] \
+           (begin (while (%lt i n) (begin (assign xs (%pair i xs)) (assign i (%add i 1)))) \
+             (if (%eq i 0) (length xs) (g 7)))))",
+    );
+    let routes = binder_routes(&hir, &arena, &symbols, &info, "xs");
+    assert!(
+        routes
+            .iter()
+            .all(|(b, _)| !info.reassigned_local_bindings.contains(b)),
+        "the allocating binder is a version no `assign` repoints; got {routes:?}"
     );
 }
 

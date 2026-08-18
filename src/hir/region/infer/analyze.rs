@@ -146,6 +146,16 @@ pub fn analyze_regions_with(
     // owned parameters, where this compilation can resolve the callee at all.
     info.tail_callee_facts = super::escape::tail_callee_facts(hir, &frame_replacing_tail_calls);
 
+    // Which regions a value-routed release can NAME — the releases the frame-exit
+    // relocation is able to replicate into a branch arm, and so the regions the
+    // branch-arm window may anchor when an arm leaves through a frame-replacing
+    // callee (region/mechanism.md § "An arm that leaves through a callee takes a
+    // replica, not the anchor"). Recorded here, beside the other admission the
+    // window owes, because the mirror of the lowerer's `region_to_slot` reads
+    // `binder_init_sites` — which the walk holds and the decref passes do not.
+    info.value_routed_regions =
+        super::escape::value_routed_regions(arena, &info, &reassigns.binder_init_sites);
+
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
     // break consuming-and-transferring-node pins, and the two re-anchoring

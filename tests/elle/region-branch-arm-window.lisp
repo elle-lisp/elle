@@ -35,6 +35,15 @@
 # takes a replica, not the anchor"). Such a branch is driven on BOTH kinds of arm
 # below, since the two paths are covered by different halves of the composition.
 #
+# A replica has to be a release that names a VALUE, so the branch is narrowed to
+# the regions a value route can name rather than to a class of region: releasing by
+# id is the lowerer's default, and a region a binder allocated has a slot naming its
+# value from the binder to the release (docs/impl/region/mechanism.md § "A release
+# the relocation replicates names a VALUE, and a binder's slot supplies that name").
+# The `binder-routed` rows are that reading, driven through an arm that USES the
+# subject — an arm that does not is already covered by the per-arm head
+# compensation.
+#
 # One escape facet is admitted rather than refused. A RETURNED region costs the
 # merge no funding edge — the arm that hands it over ran its mint before jumping
 # there — and neither does a replica ahead of a `TailCall`, which runs before the
@@ -186,6 +195,25 @@
     :c (tc-bare)
     _ 0))
 
+# (h2) the subject is a fn-local the BINDER allocated with an inline `%`-opcode,
+# so it is no call result and the lowerer's default release names it by region id.
+# A sibling arm still leaves through a frame-replacing callee, so the branch is
+# admitted only where the window asks the question the emitter asks rather than
+# reading the region's class: `region_to_slot` is keyed on the allocation site, so
+# the `let` binder's slot names this value from the binder to the release and the
+# relocation can replicate it (docs/impl/region/mechanism.md § "A release the
+# relocation replicates names a VALUE, and a binder's slot supplies that name").
+# Driven through an arm that USES the subject — an arm that does not is already
+# covered by the per-arm head compensation, so a used sibling is the path a class
+# reading strands.
+(defn binder-routed (t)
+  (let [v (%pair 1 nil)]
+    (match t
+      :a (length v)
+      :b (length v)
+      :c (tc-bare)
+      _ 0)))
+
 # (i) the parameter is RETURNED by the arm that runs, while the sibling arm — the
 # one that holds the `decref_point` — hands it to a local walker it tail-calls.
 # The return facet costs the merge nothing: this arm's own return mint has already
@@ -335,9 +363,9 @@
 
 # boundaries ───────────────────────────────────────────────────────────────────
 # Each drives the arm whose release must stay where it is. A hoist across a
-# boundary would leave one release covering many allocations (the loop) or a
-# release emitted against another frame's slots (the lambda) — both read as
-# growth.
+# boundary would leave one release covering many allocations (the loop), a release
+# emitted against another frame's slots (the lambda), or a release taken out of the
+# reach of the channel that runs it (the tail callee) — all three read as growth.
 
 # A nested loop holding the `decref_point`: the loop body re-allocates per
 # iteration, so `s`'s release must fire per iteration, not once after the branch.
@@ -353,6 +381,18 @@
         0)
     :b 1
     _ 2))
+
+# The CALLEE an exiting arm tail-calls. Its own closure region is what that call
+# names, so the frame-exit relocation exempts it and replicates nothing into the
+# arm — the deferred callee channel runs that release from where it sits instead
+# (docs/impl/region/mechanism.md § "What the exemption keeps, a channel must still
+# run"). Anchoring it at the merge would take it out of that channel's reach and
+# leave the tail-calling path with no release at all, so it stays in the arm. Driven
+# on both paths; the leak this boundary prevents is one closure region per call, and
+# it compounds with the depth of a tower of stdlib HOF compositions.
+(defn bound-callee (t)
+  (letrec [go (fn (a b) a)]
+    (if (%eq t 0) 0 (go t 1))))
 
 # A nested lambda holding it: its body's releases run in its own activation.
 (defn bound-lambda (t)
@@ -409,6 +449,9 @@
   (measure (fn () (tailcall-elsewhere (list 1 2 3) :a)) 200 window))
 (def tailcall-elsewhere-exit-d
   (measure (fn () (tailcall-elsewhere (list 1 2 3) :c)) 200 window))
+(def binder-routed-used-d (measure (fn () (binder-routed :a)) 200 window))
+(def binder-routed-last-d (measure (fn () (binder-routed :b)) 200 window))
+(def binder-routed-exit-d (measure (fn () (binder-routed :c)) 200 window))
 (def returned-captured-fallthrough-d
   (measure (fn () (returned-captured (@string) "xy")) 200 window))
 (def returned-captured-exit-d
@@ -426,6 +469,8 @@
 (def each-list-d (measure (fn () (each-list (list 1 2 3))) 200 window))
 (def bound-loop-d (measure (fn () (bound-loop :a)) 200 window))
 (def bound-lambda-d (measure (fn () (bound-lambda :a)) 200 window))
+(def bound-callee-d (measure (fn () (bound-callee 1)) 200 window))
+(def bound-callee-fallthrough-d (measure (fn () (bound-callee 0)) 200 window))
 (def ctl-last-arm-d (measure (fn () (ctl-last-arm (list 1 2 3) :z)) 200 window))
 (def ctl-one-arm-d (measure (fn () (ctl-one-arm (list 1 2 3) :a)) 200 window))
 (def cond-later-test-d
@@ -449,6 +494,9 @@
          tailcall-sibling-fallthrough-d "  exit " tailcall-sibling-exit-d)
 (println "  tail-calling sibling: names-none fallthrough "
          tailcall-elsewhere-fallthrough-d "  exit " tailcall-elsewhere-exit-d)
+(println "  binder-routed local, tail-calling sibling: used arm "
+         binder-routed-used-d "  last-use arm " binder-routed-last-d "  exit "
+         binder-routed-exit-d)
 (println "  returned + captured sibling: fallthrough "
          returned-captured-fallthrough-d "  exit " returned-captured-exit-d)
 (println "  returned + unreached sibling: acc-walk " acc-walk-d)
@@ -457,7 +505,9 @@
 (println "  arm introduces an alias: " arm-alias-inside-d)
 (println "  arm walks with a cursor: non-walking " arm-cursor-d "  walking "
          arm-cursor-walk-d "  each-list " each-list-d)
-(println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
+(println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d
+         "  tail callee " bound-callee-d "  callee fall-through "
+         bound-callee-fallthrough-d)
 (println "  cond: later test " cond-later-test-d "  else path " cond-else-path-d
          "  type dispatch " cond-dispatch-d)
 (println "  short-circuit: or " or-short-d "  and " and-short-d)
@@ -497,6 +547,12 @@
           "arm falling through while a sibling tail-calls naming nothing")
 (bounded? tailcall-elsewhere-exit-d
           "arm tail-calling naming nothing: the replicated release")
+(bounded? binder-routed-used-d
+          "binder-routed local used by an arm while a sibling tail-calls")
+(bounded? binder-routed-last-d
+          "binder-routed local: the arm holding the decref_point")
+(bounded? binder-routed-exit-d
+          "binder-routed local: the frame-exiting arm that names nothing")
 (bounded? returned-captured-fallthrough-d
           "arm returning the parameter while a capturing sibling tail-calls")
 (bounded? returned-captured-exit-d
@@ -521,6 +577,10 @@
 
 (bounded? bound-loop-d "loop nested in an arm: per-iteration release")
 (bounded? bound-lambda-d "lambda nested in an arm: per-activation release")
+(bounded? bound-callee-d
+          "the callee an exiting arm tail-calls: the deferred callee channel")
+(bounded? bound-callee-fallthrough-d
+          "the callee an exiting arm tail-calls: the fall-through path")
 
 # Value preservation: re-anchoring a release must not change what runs.
 (assert (= (used-param (list 1 2 3) :a) 3) "param arm result lost")
@@ -540,6 +600,8 @@
         "bare tail-calling sibling: fall-through arm result lost")
 (assert (= (tailcall-elsewhere (list 1 2 3) :c) 0)
         "bare tail-calling sibling: frame-exiting arm result lost")
+(assert (= (binder-routed :a) 1) "binder-routed used arm result lost")
+(assert (= (binder-routed :c) 0) "binder-routed frame-exiting arm result lost")
 (assert (= (returned-captured (@string) "xy") "xy")
         "returned-captured bulk arm result lost")
 (assert (= (length (returned-captured (@array) [1 2])) 2)
@@ -563,5 +625,7 @@
 (assert (= (and-short (list 1 2 3) true) 1) "and full-evaluation result lost")
 (assert (= (bound-loop :a) 0) "boundary loop body diverged")
 (assert (= (bound-lambda :a) 0) "boundary lambda body diverged")
+(assert (= (bound-callee 1) 1) "boundary tail-callee arm result lost")
+(assert (= (bound-callee 0) 0) "boundary tail-callee fall-through result lost")
 
 (println "region-branch-arm-window: ok")
