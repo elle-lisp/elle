@@ -298,7 +298,18 @@
 # (docs/impl/selfrec.md § "The deferral needs no escape gate").
 # Its control `recur-local-foreign-mint` is not self-recursive, so nothing strands it
 # in the first place and the gap isolates the strand rather than the retain.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
+# `loop-acc-return` is the POISONED VALUE ROUTE reaching the most ordinary
+# imperative idiom there is — accumulate into a local across a loop, return it.
+# Its release is routed through the reassigned binding's slot, and the slot's
+# occupant at the release point is whatever the LAST iteration stored, so every
+# earlier value the loop put there has no release at all: one region per
+# iteration, scaling with the trip count. Its twin `recur-acc-return` computes
+# the identical value by threading the accumulator as a parameter to a
+# self-recursive binding and reads 0, so the pair measures exactly what a
+# programmer would have to give up to be leak-free — which is the reason the pair
+# is here rather than one probe.
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"
+                   "loop-acc-return"])
 # F6 has NO declared probe: a cursor walk's rate was the ALIASED INIT, not the
 # cursor. `list-cursor` is now a CLOSED control (undeclared, like
 # `rest-array-copy`) for the counted-init half of the 1-slot container: a cell
@@ -862,10 +873,11 @@
         (assign k (%add k 1)))) 0]  # collection ops
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 0]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 0]
-   # zip's F1a copy-scratch is dissolved: the `tuple-at`/output closures that
-   # CAPTURED the mutable `arrs`/`out` (a stored closure over a mutable container
-   # strands its region) are now cell-free top-level drivers threading them as
-   # params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`). What remained was
+   # zip's F1a copy-scratch is dissolved: its column walks are cell-free top-level
+   # drivers threading `arrs`/`out` and their accumulators as params
+   # (`zip-tuple-at`/`zip-build-array`/`zip-build-list`), so no accumulator here is
+   # a slot rewritten across a loop — `loop-acc-return` gauges that construction
+   # directly, and this probe reads 0 because `zip` does not use it. What remained was
    # the per-path return frontier (docs/impl/region/mechanism.md § "The return
    # frontier is per-path"): every one of those drivers is a walk whose base case
    # returns a heap argument while the recursive arm holds the `decref_point`, so
@@ -2102,6 +2114,95 @@
                      (def @j 0)
                      (while (%lt j b)
                        (assign acc (append acc [j]))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+
+# ── The loop-carried accumulator a function RETURNS (F5) ──────────────
+# `loop-acc-return` builds a list by reassigning a local across a `while` and
+# hands it back; `recur-acc-return` computes the same list by threading the
+# accumulator as a parameter to a self-recursive binding. Same value, same
+# allocations, one difference: which construct carries the accumulator.
+#
+# Four discriminators place the defect, and all four are needed — the shape is
+# ordinary enough that resemblance would misattribute it. It needs the LOOP (the
+# same stores unrolled read 0), it needs the value to leave as the frame's own
+# returned value (handing it to a callee, or storing it into a container that is
+# returned instead, reads 0), it is indifferent to whether the accumulated values
+# are self-referential (a cons chain and a fresh string per iteration both leak),
+# and it survives an alias or a `let` binding on the way out. What it is NOT is
+# closure capture: a helper closing over the accumulator, or over a mutable input
+# container, reads 0 — those are the `capture-acc-*` controls below.
+(defn loop-acc-return-shape [n]
+  (def @acc ())
+  (def @i 0)
+  (while (%lt i n)
+    (assign acc (pair i acc))
+    (assign i (%add i 1)))
+  acc)
+(def recur-acc-return-step
+  (fn [i n acc]
+    (if (%lt i n) (recur-acc-return-step (%add i 1) n (pair i acc)) acc)))
+(defn recur-acc-return-shape [n]
+  (recur-acc-return-step 0 n ()))
+(pin (measure "loop-acc-return" (fn [j] (length (loop-acc-return-shape 4))) 100
+              6 60 0.4 0.5) 3.0)
+(pin (measure "recur-acc-return" (fn [j] (length (recur-acc-return-shape 4)))
+              100 6 60 0.4 0.5) 0)
+
+# ── The captured mutable accumulator — the shape a builder is WRITTEN in ──
+# Every container probe above drives its accumulator from a bare `while` in the
+# same scope. The everyday builder does not: it names the walk, and that helper
+# CAPTURES the mutable accumulator it fills. Both realizations are here, because
+# they take different region paths — `capture-acc-letrec` closes a local
+# `letrec` helper over `out` (a capture cell plus a closure per call),
+# `capture-acc-while` closes a plain `let`-bound `fn` over it — and both must be
+# bounded on the SAME terms as the uncaptured form, or a builder is only
+# leak-free when its author threads the accumulator through parameters instead.
+# `thread-acc-param` is that parameter-threaded alternative, kept beside them as
+# the discriminator: were the captured forms to regress, this one would stay at 0
+# and the difference would be exactly the cost of the rewrite. Closed controls,
+# undeclared like `rest-array-copy`, so a regression trips the completeness gate
+# rather than being absorbed under a root. The payload is a heap string per push,
+# so a stranded accumulator shows as element growth and not merely one region.
+(def thread-acc-driver
+  (fn [out i n]
+    (when (%lt i n)
+      (push out (string "e" i))
+      (thread-acc-driver out (%add i 1) n))))
+(pin (measure-core "capture-acc-letrec"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (let [out @[]]
+                         (letrec [go (fn [i]
+                                       (when (%lt i 4)
+                                         (push out (string "e" i))
+                                         (go (%add i 1))))]
+                           (go 0))
+                         (length out))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "capture-acc-while"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (let [out @[]
+                             fill (fn [n]
+                                    (def @i 0)
+                                    (while (%lt i n)
+                                      (push out (string "e" i))
+                                      (assign i (%add i 1))))]
+                         (fill 4)
+                         (length out))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "thread-acc-param"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (let [out @[]]
+                         (thread-acc-driver out 0 4)
+                         (length out))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── Discarded call-result + break-escape ──────────────────────────────
