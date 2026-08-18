@@ -6,13 +6,18 @@
 # element their predicate decides and stop there. Each wears a `filter`'s
 # two-argument shape and produces a scalar, so each is a terminal exactly as
 # `fold` and `count` are: the predicate becomes the pipeline's guard stage, the
-# accumulator is a scalar seeded with the answer for "no element decided it", and
-# the loop leaves through a `more` sentinel its condition reads. `all?` is the one
-# decided by a REJECTING element, so its guard carries the pipeline on the else
-# side. This file is the behavioral gauge: the fused form must compute EXACTLY
-# what the stdlib op computes, and must read no element past the decision. The
-# codegen gauge (the dispatch gone, the predicate inline, a scalar accumulator,
-# the sentinel condition) lives in `src/hir/typeinfer/fuse.rs`.
+# accumulator is a scalar seeded with the answer for "no element decided it", and —
+# where the search is lone — the loop leaves through a `more` sentinel its condition
+# reads. `all?` is the one decided by a REJECTING element, so its guard carries the
+# pipeline on the else side. Over a `map`/`filter` prefix the early exit stops the
+# search's own stage rather than the walk, because the staged form runs every
+# prefix stage on every element.
+#
+# This file is the behavioral gauge: the fused form must compute EXACTLY
+# what the stdlib op computes, must read no element past the decision when it is
+# lone, and must run its prefix on every element when it is not. The codegen gauge
+# (the dispatch gone, the predicate inline, a scalar accumulator, where the
+# sentinel is read) lives in `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies each op through a named function with a
 # `match` body — a binding-introducing form the inline-clone whitelist declines —
@@ -25,9 +30,9 @@
 (defn pos? [x]
   (match x
     _ (> x 0)))
-(defn gt1 [x]
+(defn nump [x]
   (match x
-    _ (> x 1)))
+    _ (number? x)))
 (defn evp [x]
   (match x
     _ (even? x)))
@@ -37,6 +42,9 @@
 (defn t3 [x]
   (match x
     _ (* x 3)))
+(defn inc1 [x]
+  (match x
+    _ (+ x 1)))
 
 # ── any? — decided by the first admitted element ───────────────────────
 (assert (= (any? (fn [x] (> x 2)) [1 2 3 4]) true)
@@ -115,21 +123,75 @@
 (assert (= (any? (fn [x] (> x 99)) [10 20 30 40]) false)
         "an undecided walk covers the whole input and answers the seed")
 
-# ── the prefix declines: a search fuses only as a lone op ──────────────
-# A staged `(any? p (map f xs))` runs `f` over the WHOLE input before `any?` sees
-# an element, where one fused loop would omit `f` on every element past the
-# decision. The chain declines; the pre-order recursion still fuses the inner
-# `map`, and the VALUE is the stdlib op's either way.
-(assert (= (any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4])) true)
+# ── the prefix fuses, and the early exit stops the SEARCH alone ────────
+# A staged `(any? p (map f xs))` runs `f` over the WHOLE input and `p` over the
+# elements up to the decision, so the fused loop makes exactly those calls: the
+# walk stays exhaustive and the `more` sentinel gates the search's own stage.
+(assert (= (any? (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4])) true)
         "any? over a map prefix computes the staged value")
+(assert (= (any? (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))
+           (any? evp (map t3 [1 2 3 4])))
+        "the fused composition agrees with the fully un-fused form")
+(assert (= (all? (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))
+           (all? evp (map t3 [1 2 3 4])))
+        "all? over a map prefix agrees with the un-fused form")
+# `find` over a map prefix answers the TRANSFORMED value, not the base element.
+(assert (= (find (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4])) 6)
+        "find over a map prefix answers the mapped value")
+(assert (= (find (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))
+           (find evp (map t3 [1 2 3 4])))
+        "the fused find composition agrees with the un-fused form")
+
+# A prefix stage runs on every element, decision or not. A transform that fails on
+# an element PAST the decision must still raise, exactly as the staged form does:
+# `(/ 6 0)` on the second element is reached only if the walk does not stop at the
+# first, which decides the answer.
+(assert (= :division-by-zero (try
+                               (any? (fn [y] (even? y))
+                                     (map (fn [x] (/ 6 x)) [3 0]))
+                               (catch e e:error)))
+        "a prefix runs past the decision — its error still surfaces")
+
+# The other half: the PREDICATE stops at the decision even though the walk does
+# not. `(/ 6 0)` in the predicate is reached only if the sentinel gate fails to
+# hold it off the second element, which the first element already decided.
+(assert (= (find (fn [y] (even? (/ 6 y))) (map (fn [x] (* x 1)) [3 0])) 3)
+        "the sentinel gate keeps the predicate off elements past the decision")
+
+# A filter prefix renumbers, so `find-index` answers a position in the FILTERED
+# input, which the loop carries as the surviving element's own count. The base
+# below puts the admitted element at base index 3 and filtered index 2, so the two
+# readings are distinguishable.
+(assert (= (find-index (fn [y] (even? y))
+                       (filter (fn [w] (number? w)) [1 "a" 3 4])) 2)
+        "find-index over a filter prefix answers a position in the FILTERED input")
+(assert (= (find-index (fn [y] (even? y))
+                       (filter (fn [w] (number? w)) [1 "a" 3 4]))
+           (find-index evp (filter nump [1 "a" 3 4])))
+        "the fused find-index composition agrees with the un-fused form")
+(assert (= (find-index (fn [y] (even? y))
+                       (filter (fn [w] (number? w)) [1 "a" 3])) nil)
+        "no survivor is admitted — the answer is the seed")
+(assert (= (find (fn [y] (even? y)) (filter (fn [w] (number? w)) [1 "a" 3 4])) 4)
+        "find over a filter prefix answers the surviving element")
+
+# A three-op prefix: the filter renumbers and the map does not, so the answer is
+# the survivor's position — 2 among the three survivors, where the base index is 3.
+(assert (= (find-index (fn [y] (odd? y))
+                       (map (fn [x] (+ x 1))
+                            (filter (fn [w] (number? w)) [1 "a" 3 4]))) 2)
+        "a mixed prefix renumbers by its filter alone")
+(assert (= (find-index (fn [y] (odd? y))
+                       (map (fn [x] (+ x 1))
+                            (filter (fn [w] (number? w)) [1 "a" 3 4])))
+           (find-index oddp (map inc1 (filter nump [1 "a" 3 4]))))
+        "the three-op composition agrees with the fully un-fused form")
+
+# A NON-reorder-safe body declines the whole composition (`>` routes through
+# `apply`), and the pre-order recursion still fuses the inner `map`. Same value.
 (assert (= (any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))
            (any? gt2 (map t3 [1 2 3 4])))
         "the declined composition agrees with the fully un-fused form")
-(assert (= (find-index (fn [y] (even? y)) (filter (fn [x] (> x 1)) [1 2 3 4])) 0)
-        "find-index over a filter prefix answers a position in the FILTERED input")
-(assert (= (find-index (fn [y] (even? y)) (filter (fn [x] (> x 1)) [1 2 3 4]))
-           (find-index evp (filter gt1 [1 2 3 4])))
-        "the declined find-index composition agrees with the un-fused form")
 
 # ── the mutable-array base declines ────────────────────────────────────
 # Each search's array arm re-reads `(length coll)` every iteration where the fused
@@ -205,7 +267,32 @@
         (string "a fused find-index must mint fewer: " idx-fused " vs "
                 idx-unfused))
 
+# Over a prefix the fused loop additionally removes the INTERMEDIATE array. The
+# reference isolates exactly that: `my-any` is the same stdlib function under a
+# user binding, which is not `is_primitive` and so is never recognized as a
+# terminal, while the inner `map` — the identical lambda over the identical base —
+# still fuses on the recursion. The two forms are otherwise the same program, so
+# the difference is exactly what fusing the search over a prefix buys: the
+# intermediate array between the two ops, the search's walker closure and its
+# forward cell, and the predicate closure the splice dissolves.
+(def my-any any?)
+(def pre-fused
+  (allocs (fn []
+            (any? (fn [y] (even? y))
+                  (map (fn [x] (* x 3)) [1 3 5 7 9 11 13 15 17 19])))))
+(def pre-staged
+  (allocs (fn []
+            (my-any (fn [y] (even? y))
+                    (map (fn [x] (* x 3)) [1 3 5 7 9 11 13 15 17 19])))))
+(assert (= (any? (fn [y] (even? y)) (map (fn [x] (* x 3)) odds))
+           (my-any (fn [y] (even? y)) (map t3 odds)))
+        "the fused prefixed any? computes the staged value")
+(assert (< pre-fused pre-staged)
+        (string "a prefixed any? must mint fewer (no intermediate array): "
+                pre-fused " vs " pre-staged))
+
 (println "dissolution-search-fuse: ok (any? saved " (- any-unfused any-fused)
          ", all? saved " (- all-unfused all-fused) ", find saved "
          (- find-unfused find-fused) ", find-index saved "
-         (- idx-unfused idx-fused) ")")
+         (- idx-unfused idx-fused) ", prefixed any? saved "
+         (- pre-staged pre-fused) ")")

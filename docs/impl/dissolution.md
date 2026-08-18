@@ -214,8 +214,9 @@ an element, or an index — so each is a terminal exactly as `fold` and `count` 
 
 The fused form is the count's shape plus an early exit. The predicate is the
 pipeline's guard stage, the accumulator is seeded with the answer for "no element
-decided it", and the loop leaves through a **sentinel the condition reads**: a
-`more` flag the deciding element clears.
+decided it", and — where the search is the chain's only op — the loop leaves
+through a **sentinel the condition reads**: a `more` flag the deciding element
+clears.
 
 ```
 (any? (fn [x] PRED) [ … ])
@@ -242,36 +243,65 @@ The four differ in three values, and in nothing else:
 | `any?` | `false` | `true` | the first element the predicate **admits** |
 | `all?` | `true` | `false` | the first element the predicate **rejects** |
 | `find` | `nil` | the element itself | the first element the predicate admits |
-| `find-index` | `nil` | the loop index `i` | the first element the predicate admits |
+| `find-index` | `nil` | its position in the walk | the first element the predicate admits |
 
 `all?` is the one whose guard runs the other way round: its answer is decided by a
 **failing** element, so the stage it appends continues the pipeline where the
-predicate does *not* pass. That is the pipeline's third stage kind — a `map`
-transforms the threaded value, a `filter` **keeps** what its predicate admits, and
-an `all?` **rejects** it — one `if` either way, differing only in which branch
-carries the rest of the pipeline.
+predicate does *not* pass. That is a guard's other side — a `map` transforms the
+threaded value, a `filter` **keeps** what its predicate admits, and an `all?`
+**rejects** it — one `if` either way, differing only in which branch carries the
+rest of the pipeline.
 
-A search fuses only as a **lone** op: no `map`/`filter` prefix, and (as for a fold
-or a count) not over a mutable `@array` base, whose length each array arm re-reads
-per iteration. The prefix refusal is what short-circuiting costs. A staged
-`(any? p (map f xs))` runs `f` over the **whole** input before `any?` examines an
-element, where one fused loop stops at the first deciding element and so omits `f`
-on every later one. That is not the interleaving the composition gate admits: the
-gate's argument is that reordering two lambdas' calls is unobservable without a
-sequencing effect, and it permits `SIG_ERROR` because each error still surfaces —
-neither claim covers work that no longer runs at all, where an error the staged
-form raises would simply not be raised. A prefix carries a second obligation for
-`find-index` alone: its answer is a position in the collection the op walks, so a
-`filter` prefix (whose survivors renumber) would need the surviving element's own
-count rather than the base index the loop carries.
+### The early exit stops the search's own work, not the pipeline's
 
-Because a search is always lone, its one op never reorders and it needs no purity
-gate, exactly as a lone `count` needs none. What it does save is what a lone count
-saves: each search's array arm walks with a `letrec`-bound self-recursive closure
-(`src/stdlib.lisp`), so the un-fused call mints that closure and its forward cell
-every time, plus the predicate closure wherever the argument is a lambda literal.
-The fused loop mints none of the three — and, unlike every other terminal, it also
-stops reading the collection once the answer is known.
+A search fuses over a `map`/`filter` prefix as the other terminals do. What the
+prefix changes is where the early exit applies. A staged `(any? p (map f xs))`
+runs `f` over the **whole** input and `p` over the elements up to the decision, so
+the fused loop must make exactly those calls: the walk stays exhaustive (the loop
+condition is the bare range test) and the sentinel gates the **search's own guard
+stage** instead.
+
+```
+(any? (fn [y] PRED) (map (fn [x] F-BODY) [ … ]))
+⇒
+  (while (< i len)
+    (let [v (let [x (get coll i)] F-BODY)]        ; runs on EVERY element
+      (if more
+        (if (let [y v] PRED)
+          (begin (assign ans true) (assign more false))
+          nil)
+        nil))
+    (assign i (+ i 1)))
+```
+
+Stopping the whole walk instead would leave the prefix's per-element work unrun,
+which the composition gate's argument does not cover: that argument is about
+*reordering* two lambdas' calls, and it permits `SIG_ERROR` because each error
+still surfaces — where an error the staged form raises on an element past the
+decision would not be raised at all. So a prefix costs the fused form the early
+exit's *walk*; what it keeps is the intermediate collection's dissolution, which
+is the whole of the saving over the staged form anyway. A **lone** search keeps
+the condition-read sentinel of the first shape above: nothing runs after its
+stage, so ending the walk there omits nothing.
+
+`find-index` carries one further obligation, and only where the prefix holds a
+`filter`: its answer is a position in the collection it walks, and a filter's
+survivors renumber. The loop then carries the surviving element's own count —
+bumped once per element that reaches the search's stage — and the deciding element
+records that in place of the base index. A `map` prefix preserves both the count
+and the order of the elements, so there the base index is already the answer.
+
+As for a fold or a count, a search does not fuse over a mutable `@array` base,
+whose length each array arm re-reads per iteration.
+
+A lone search never reorders and needs no purity gate, exactly as a lone `count`
+needs none; over a prefix it carries the composition gate like every other
+terminal. What it saves is what a lone count saves: each search's array arm walks
+with a `letrec`-bound self-recursive closure (`src/stdlib.lisp`), so the un-fused
+call mints that closure and its forward cell every time, plus the predicate
+closure wherever the argument is a lambda literal. The fused loop mints none of
+the three — plus, over a prefix, the intermediate collection — and, where it is
+lone, it also stops reading the collection once the answer is known.
 
 ## When it is legal — the gate
 
@@ -346,9 +376,8 @@ xs)`, length 1) threads its accumulator strictly in element order — exactly th
 stdlib fold — so it never reorders and needs no gate, even with a
 sequencing-effectful body; a lone `count` visits each element left to right and
 applies its predicate identically to the stdlib op, so it reads the same way. A
-search is lone by its own gate and reads the same way again, up to the element
-that decides it. A terminal *with* an inner `map`/`filter` prefix is length ≥ 2
-(the two collecting terminals only) and carries the
+lone search reads the same way again, up to the element that decides it. A
+terminal *with* an inner `map`/`filter` prefix is length ≥ 2 and carries the
 reorder requirement over every lambda (the terminal's and the prefix's): the
 terminal's per-element work interleaves with the prefix transforms
 (`g x0; f …; g x1; f …`) rather than running the whole prefix first, the same
@@ -569,7 +598,9 @@ codegen and execution levels, not on the leak oracle. Three pins:
   map/filter prefix into one loop with a second guard. Each **search** dissolves to a
   scalar accumulator under one guard, with the loop condition reading the `more`
   sentinel the deciding element clears (`all?` carrying the guard whose *else* branch
-  decides); the declines pin the prefix refusal for all four. A mutable-`@array`-base
+  decides); over a prefix the condition is the bare range test and the sentinel gates
+  the search's own stage instead, with a `filter` prefix under a `find-index` bumping
+  the survivor count the answer reads. A mutable-`@array`-base
   `map`/`filter` fuses
   with the accumulator returned **unfrozen** (no `freeze` call). A
   `(numeric!)`-declared raw-intrinsic kernel fuses — as a `map` transform, as a
@@ -609,11 +640,18 @@ codegen and execution levels, not on the leak oracle. Three pins:
   that decides early would measure the wrong thing: the fused loop runs one full
   iteration for the deciding element where the recursive walker answers without its
   final recursive step, and that odd step costs more than the two objects fusion
-  removes. So the **early exit** carries a gauge of its own, and not an allocation
+  removes. The **prefixed** case is weighed against a reference that fuses the
+  prefix and leaves the search un-fused (the same stdlib function under a user
+  binding, which is not `is_primitive`), so the difference is the intermediate array
+  plus what the search's own dissolution removes. So the **early exit** carries a
+  gauge of its own, and not an allocation
   one: a predicate that errors on every element past the decision completes only if
   the walk truly stops there. (A call tally would need a mutable global, whose
   reference makes the predicate a capture and declines fusion — so the error is what
-  can gauge the fused loop.) The
+  can gauge the fused loop.) Over a prefix the same instrument gauges both halves of
+  the split: a predicate that errors past the decision proves the sentinel gate
+  holds it off, and a prefix stage that errors past the decision proves the walk
+  did not stop. The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no

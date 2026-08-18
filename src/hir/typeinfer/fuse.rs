@@ -28,8 +28,10 @@
 //! same stages with a scalar terminal — the map-reduce shape, no array at all — and a
 //! count is that same shape with its predicate appended as the pipeline's last guard.
 //! A search is a count's shape again, appending the guard whichever way round its
-//! answer is decided; it fuses only as a LONE op, because stopping early omits
-//! per-element work a staged prefix would have performed (`validate_chain`).
+//! answer is decided. Its early exit stops the SEARCH, not the pipeline: lone, the
+//! loop condition reads the sentinel and the walk ends at the decision; over a
+//! prefix, the walk stays exhaustive (the staged form runs every prefix stage on
+//! every element) and a `Gate` stage reads the sentinel instead.
 //!
 //! ## Why this shape, here
 //!
@@ -59,9 +61,10 @@
 //! sequencing effects — so each lambda body in a chain of length ≥ 2 must be free
 //! of them (`reorder_safe`): no yield/I/O/emit/FFI/halt (a non-capturing lambda's
 //! only cross-element channel is such an effect). `SIG_ERROR` is permitted; see
-//! `reorder_safe`. A short-circuiting search would go further than reordering — it
-//! would leave a prefix stage's work unrun on every element past the decision — so
-//! it takes no prefix at all rather than a purity gate.
+//! `reorder_safe`. A short-circuiting search would go further than reordering if it
+//! cut the walk short under a prefix — leaving a prefix stage's work unrun on every
+//! element past the decision — so under a prefix it stops its own stage instead and
+//! the walk stays exhaustive.
 //!
 //! A body may hold a raw call-position `%`-intrinsic only under the function's own
 //! `(numeric!)` declaration. That declaration floors the parameters at Number —

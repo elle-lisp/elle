@@ -288,9 +288,8 @@ pub(super) fn clone_template(t: &FnTemplate, arena: &mut BindingArena) -> (Vec<B
 /// bodies or the base array's elements). A chain of any `map`/`filter` mix under
 /// an optional outermost scalar terminal, over the same proven base, fuses to one
 /// loop; the recursion still reaches HOFs nested inside a spliced lambda body or a
-/// declined chain's inner run (including a fold whose composition was declined, or
-/// a search — which takes no prefix at all — whose map/filter prefix then fuses on
-/// its own).
+/// declined chain's inner run (a chain declined by the reorder gate, say, whose
+/// inner map/filter run then fuses on its own).
 pub(super) fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,
@@ -303,8 +302,8 @@ pub(super) fn rewrite(
         let sig = hir.signal;
         let span = hir.span.clone();
         let owned = std::mem::replace(hir, Hir::error(span.clone()));
-        let (terminal, stages, base) = take_chain(owned, plan, arena, fns);
-        *hir = build_loop(terminal, stages, base, arena, ops, sig, span);
+        let chain = take_chain(owned, plan, arena, fns);
+        *hir = build_loop(chain, arena, ops, sig, span);
     }
     hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, fns));
 }

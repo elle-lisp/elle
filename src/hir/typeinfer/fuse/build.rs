@@ -72,12 +72,16 @@ impl Build<'_> {
     /// - a **`Transform`** stage (a `map`) transforms the value
     ///   (`(let [param cur] body)`) and threads the result on to the rest of the
     ///   pipeline;
-    /// - a **guard** stage binds the current value once (`item`, since a guard
+    /// - a **`Guard`** stage binds the current value once (`item`, since a guard
     ///   references it twice — the test and the pass-through) and continues the
     ///   pipeline on one side of its predicate, else `nil`: a `Keep` (a `filter`,
     ///   and the guard a `count`/`any?`/`find`/`find-index` appends) continues where
     ///   the predicate passes, a `Reject` (the guard an `all?` appends) where it
     ///   fails;
+    /// - a **`Gate`** stage binds the current value (so every stage BEFORE it has
+    ///   run for this element) and continues only while the sentinel holds — the
+    ///   form a search's early exit takes over a prefix, where the walk itself must
+    ///   stay exhaustive;
     /// - the base case (no stages left) hands the surviving value to the
     ///   **terminal** (`Build::terminal`): a `push` (Collect), a fold step (Fold),
     ///   a tally (Count), or the answer a search records (Decide).
@@ -91,34 +95,61 @@ impl Build<'_> {
     /// terminal) never exists.
     pub(super) fn element(
         &mut self,
-        stages: &mut std::vec::IntoIter<(StageKind, Binding, Hir)>,
+        stages: &mut std::vec::IntoIter<Stage>,
         base: &mut Option<Base>,
         acc: Binding,
         cur: Hir,
     ) -> Hir {
         match stages.next() {
             None => self.terminal(base, acc, cur),
-            Some((StageKind::Transform, param, body)) => {
+            Some(Stage::Transform { param, body }) => {
                 self.localize_param(param);
                 let next = self.let_(param, cur, body);
                 self.element(stages, base, acc, next)
             }
-            Some((kind, param, pred)) => {
+            Some(Stage::Guard { side, param, body }) => {
                 self.localize_param(param);
                 let item = self.local();
-                let cond = self.let_(param, self.var(item), pred);
+                let cond = self.let_(param, self.var(item), body);
                 let rest = self.element(stages, base, acc, self.var(item));
                 let skip = self.nil();
                 // The pipeline rides the branch the stage's predicate decides for:
                 // `Keep` continues where it passes, `Reject` where it fails.
-                let (then_branch, else_branch) = match kind {
-                    StageKind::Reject => (skip, rest),
-                    _ => (rest, skip),
+                let (then_branch, else_branch) = match side {
+                    GuardSide::Reject => (skip, rest),
+                    GuardSide::Keep => (rest, skip),
                 };
                 let guarded = self.node(HirKind::If {
                     cond: Box::new(cond),
                     then_branch: Box::new(then_branch),
                     else_branch: Box::new(else_branch),
+                });
+                self.let_(item, cur, guarded)
+            }
+            Some(Stage::Gate { sentinel, advance }) => {
+                // Binding `cur` first is what keeps the walk exhaustive: every
+                // earlier stage's per-element work is evaluated for this element
+                // whether or not the search still wants one.
+                let item = self.local();
+                let rest = self.element(stages, base, acc, self.var(item));
+                // The survivor count advances once per element that reaches the
+                // search's stage — after the guard, so the deciding element records
+                // its OWN position rather than the next one's.
+                let gated = match advance {
+                    None => rest,
+                    Some(pos) => {
+                        let next = self.call(self.ops.add, vec![self.var(pos), self.int(1)]);
+                        let bump = self.node(HirKind::Assign {
+                            target: pos,
+                            value: Box::new(next),
+                        });
+                        self.node(HirKind::Begin(vec![rest, bump]))
+                    }
+                };
+                let guarded = self.node(HirKind::If {
+                    cond: Box::new(self.var(sentinel)),
+                    then_branch: Box::new(gated),
+                    else_branch: Box::new(self.nil()),
                 });
                 self.let_(item, cur, guarded)
             }
@@ -165,7 +196,7 @@ impl Build<'_> {
             Base::Decide(d) => {
                 let DecideStep {
                     search,
-                    index,
+                    position,
                     more,
                 } = *d;
                 // Reached only by the element that decides the answer, which the
@@ -180,10 +211,13 @@ impl Build<'_> {
                     Search::Any => self.bool(true),
                     Search::All => self.bool(false),
                     Search::Find => cur,
-                    Search::FindIndex => self.var(index),
+                    Search::FindIndex => self.var(position),
                 };
-                // Clearing the sentinel is what stops the walk: the loop condition
-                // reads it, so no element past this one is ever fetched.
+                // Clearing the sentinel is what stops the search: the loop
+                // condition reads it where the search is lone (so no element past
+                // this one is fetched), and the `Gate` stage reads it under a
+                // prefix (so no element past this one reaches the predicate, while
+                // the prefix still runs on every one).
                 let record = self.node(HirKind::Assign {
                     target: acc,
                     value: Box::new(answer),
@@ -219,11 +253,12 @@ pub(super) enum Base {
 }
 
 /// What a [`Base::Decide`] needs to write the deciding element's answer: which
-/// search is being answered, the loop index (the answer a `find-index` records),
-/// and the sentinel binding whose clearing stops the walk.
+/// search is being answered, the position binding a `find-index` records (the loop
+/// index, or — under a prefix that renumbers — the survivor count), and the
+/// sentinel binding whose clearing stops the search.
 pub(super) struct DecideStep {
     pub(super) search: Search,
-    pub(super) index: Binding,
+    pub(super) position: Binding,
     pub(super) more: Binding,
 }
 
@@ -250,7 +285,7 @@ pub(super) struct FoldStep {
 ///       (define i 0)                     (define acc seed)
 ///       (while (< i len)                 (define i 0)
 ///         <pipeline; push acc>           (define more true)      ; search only
-///         (assign i (+ i 1)))            (while (and (< i len) more)
+///         (assign i (+ i 1)))            (while (and (< i len) more)  ; LONE search
 ///       (freeze acc))))                    <pipeline; assign acc …>
 ///                                          (assign i (+ i 1)))
 ///                                        acc)))
@@ -264,24 +299,35 @@ pub(super) struct FoldStep {
 /// both ride the same shape with nothing to order. The accumulator is a reassigned
 /// scalar (mirrors the induction variable), never an `@array`.
 ///
-/// A search adds one binding to that shape: the `more` sentinel its loop condition
-/// reads, cleared by the deciding element so no later element is fetched. Only a
-/// search mints it — every other terminal's walk is exhaustive, and its condition
-/// stays the bare range test.
+/// A search adds one binding to that shape: the `more` sentinel, cleared by the
+/// deciding element. Where the search is **lone**, the loop condition reads it and
+/// the walk ends at the decision. Where the search has a `map`/`filter` **prefix**,
+/// the staged form runs every prefix stage on every element, so the walk stays
+/// exhaustive (the bare range test) and a `Gate` stage reads the sentinel instead —
+/// gating the search's own guard alone. Only a search mints the sentinel; every
+/// other terminal's walk is exhaustive with nothing to stop.
+///
+/// A `find-index` whose prefix holds a `filter` mints one more: the survivor count
+/// its answer reads, since a filter's survivors renumber (a `map` prefix preserves
+/// both count and order, so the base index is already the answer).
 ///
 /// The Collect terminal's `unfrozen` flag selects its result arm: an immutable
 /// base freezes the accumulator; a mutable `@array` base returns it unfrozen (the
 /// mutable-array arm — `validate_chain` proves a mutable base is a lone
 /// `map`/`filter`, so a scalar terminal is never paired with it).
 pub(super) fn build_loop(
-    terminal: Terminal,
-    stages: Vec<(StageKind, Binding, Hir)>,
-    base: Hir,
+    chain: FusedChain,
     arena: &mut BindingArena,
     ops: &Ops,
     sig: Signal,
     span: crate::syntax::Span,
 ) -> Hir {
+    let FusedChain {
+        terminal,
+        mut stages,
+        terminal_guard,
+        base,
+    } = chain;
     let mut b = Build {
         arena,
         ops,
@@ -293,9 +339,20 @@ pub(super) fn build_loop(
     let i_b = b.arena.gensym();
     b.arena.get_mut(i_b).is_mutated = true; // the loop induction variable
 
-    // The early-exit sentinel, minted only for a search: the loop condition reads
-    // it and the deciding element clears it, so the walk stops there.
-    let mut more_b: Option<Binding> = None;
+    // The chain's shape decides where a search's sentinel is read and what a
+    // `find-index` answers with. Both questions are about the PREFIX, which is
+    // exactly `stages` — the terminal's own guard is held apart — so a guard here
+    // is a `filter`, whose survivors renumber.
+    let prefixed = !stages.is_empty();
+    let renumbers = stages.iter().any(|s| matches!(s, Stage::Guard { .. }));
+
+    // The early-exit sentinel, minted only for a search. The loop condition reads
+    // it where the search is lone; a `Gate` stage reads it under a prefix.
+    let mut sentinel_b: Option<Binding> = None;
+    // The survivor count a renumbering `find-index` answers with, and the gate that
+    // bumps it — the stage the search's guard rides under a prefix.
+    let mut position_b: Option<Binding> = None;
+    let mut gate: Option<Stage> = None;
 
     // Split the terminal into its seed (`init`, the scalar terminals only) and its
     // per-element base case. The accumulator differs by terminal: Collect fills a
@@ -335,7 +392,21 @@ pub(super) fn build_loop(
             b.arena.get_mut(acc).is_mutated = true;
             let more = b.arena.gensym();
             b.arena.get_mut(more).is_mutated = true;
-            more_b = Some(more);
+            sentinel_b = Some(more);
+            if prefixed {
+                let advance = if search == Search::FindIndex && renumbers {
+                    let pos = b.arena.gensym();
+                    b.arena.get_mut(pos).is_mutated = true;
+                    position_b = Some(pos);
+                    Some(pos)
+                } else {
+                    None
+                };
+                gate = Some(Stage::Gate {
+                    sentinel: more,
+                    advance,
+                });
+            }
             let seed = match search {
                 Search::Any => b.bool(false),
                 Search::All => b.bool(true),
@@ -343,12 +414,17 @@ pub(super) fn build_loop(
             };
             let step = DecideStep {
                 search,
-                index: i_b,
+                position: position_b.unwrap_or(i_b),
                 more,
             };
             (Some(seed), Some(Base::Decide(Box::new(step))), acc, false)
         }
     };
+
+    // The pipeline the element statement runs: the map/filter prefix, then a
+    // search's sentinel gate, then the terminal's own guard.
+    stages.extend(gate);
+    stages.extend(terminal_guard);
 
     // The per-element statement: thread (get coll i) through the pipeline.
     let elem0 = b.call(ops.get, vec![b.var(coll_b), b.var(i_b)]);
@@ -359,9 +435,11 @@ pub(super) fn build_loop(
         value: Box::new(b.call(ops.add, vec![b.var(i_b), b.int(1)])),
     });
     let in_range = b.call(ops.lt, vec![b.var(i_b), b.var(len_b)]);
-    let cond = match more_b {
-        Some(more) => b.node(HirKind::And(vec![in_range, b.var(more)])),
-        None => in_range,
+    // A prefix keeps the walk exhaustive — the sentinel gates the search's own
+    // stage there, never the range test.
+    let cond = match sentinel_b {
+        Some(more) if !prefixed => b.node(HirKind::And(vec![in_range, b.var(more)])),
+        _ => in_range,
     };
     let while_loop = b.node(HirKind::While {
         cond: Box::new(cond),
@@ -397,10 +475,16 @@ pub(super) fn build_loop(
             });
             let result = b.var(acc_b);
             let mut stmts = vec![define_acc, define_i];
-            if let Some(more) = more_b {
+            if let Some(more) = sentinel_b {
                 stmts.push(b.node(HirKind::Define {
                     binding: more,
                     value: Box::new(b.bool(true)),
+                }));
+            }
+            if let Some(pos) = position_b {
+                stmts.push(b.node(HirKind::Define {
+                    binding: pos,
+                    value: Box::new(b.int(0)),
                 }));
             }
             stmts.push(while_loop);

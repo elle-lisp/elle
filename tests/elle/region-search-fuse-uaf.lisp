@@ -4,19 +4,20 @@
 #
 # `any?`, `all?`, `find` and `find-index` each dissolve to an index-walk loop whose
 # last stage is the predicate's guard and whose base case writes a scalar answer and
-# clears the `more` sentinel the loop condition reads. Two roles put heap values on
+# clears the `more` sentinel that stops the search. Two roles put heap values on
 # that path. The base's heap elements must stay live for the guard that reads them,
 # on the deciding iteration and on every earlier one. And `find` is the only fused
-# terminal whose accumulator holds a value it did NOT allocate: it records a base
-# element and hands it out of the loop, past the base binding's own demise, so the
-# result must outlive the walk that found it. This fixture drives both with heap
-# values, so an over-free faults at the exact access under --trace=guardfree rather
-# than leaking silently. The plain-VM run also asserts the values, so a miscompile is
-# loud either way.
+# terminal whose accumulator holds a value out of the walk itself: it records a base
+# element — or, over a `map` prefix, the transform's result — and hands it out of the
+# loop, past the base binding's own demise, so the result must outlive the walk that
+# found it. This fixture drives both with heap values, so an over-free faults at
+# the exact access under --trace=guardfree rather than leaking silently. The plain-VM
+# run also asserts the values, so a miscompile is loud either way.
 #
-# A search fuses only as a lone op, so every case here is one; the predicates are
-# free to be variadic (`>` routes through `apply`) because a lone op carries no
-# reorder gate.
+# A lone search carries no reorder gate, so its predicate is free to be variadic
+# (`>` routes through `apply`). A search over a `map`/`filter` prefix is a
+# composition and does carry the gate, so the prefixed cases below use
+# reorder-safe bodies.
 
 # Heap elements read by the guard: a base string must not be freed under the
 # predicate that measures it, nor under a later iteration's read.
@@ -58,6 +59,27 @@
         "an undecided find answers nil")
 (assert (= (get base 2) "rrr") "the base outlives an undecided walk")
 
+# Over a `map` prefix a `find` records a value the LOOP minted — the transform's
+# result — and hands it out past the loop, where a lone `find` records one the base
+# owns. Every earlier iteration's transform result must die with its iteration,
+# and the recorded one must outlive the walk.
+(def made
+  (find (fn [s] (= s "bb!")) (map (fn [s] (string s "!")) ["a" "bb" "c"])))
+(assert (= made "bb!") "find over a map prefix records the transform's result")
+(assert (= (length made) 3) "the recorded loop-minted value survives the loop")
+
+# The prefix runs on every element, so the transforms past the decision mint and
+# free after the answer is settled — under the accumulator that already holds one.
+(assert (= (find (fn [s] (= (length s) 2))
+                 (map (fn [s] (string s "!")) ["a" "bb" "ccc"])) "a!")
+        "an early decision still walks the remaining transforms")
+
+# A filter prefix over heap elements: the survivor the guard passes on is the
+# base's own element, and `find-index` answers its position among the survivors.
+(assert (= (find-index (fn [s] (= (length s) 3))
+                       (filter (fn [s] (string? s)) [1 "a" "ccc"])) 1)
+        "find-index over a heap filter prefix counts survivors")
+
 # Heap values MINTED by the predicate on each element: a per-element temporary must
 # not be freed under its own read, and must not outlive the iteration that made it.
 (assert (= (any? (fn [s] (= (string "v" s) "vbb")) ["a" "bb" "ccc"]) true)
@@ -80,5 +102,17 @@
     (when (= (length r) 3) (assign acc (+ acc 1))))
   (assign i (+ i 1)))
 (assert (= acc 50) "repeated fused searches stay sound under region-id churn")
+
+# The same for a prefixed loop, which mints a transform result PER ELEMENT and
+# frees all but the recorded one — the churn a lone search never produces.
+(def @pacc 0)
+(def @j 0)
+(while (< j 50)
+  (let [r (find (fn [s] (= (length s) 3))
+                (map (fn [s] (string s "!")) ["a" "bb" "c"]))]
+    (when (= r "bb!") (assign pacc (+ pacc 1))))
+  (assign j (+ j 1)))
+(assert (= pacc 50)
+        "repeated prefixed searches stay sound under region-id churn")
 
 (println "region-search-fuse-uaf: ok")
