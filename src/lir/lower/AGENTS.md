@@ -183,12 +183,17 @@ other is structural ownership-location, NOT escape:
   emitted there AND replicated ahead of each arm's `TailCall`. What makes
   that count once per path is `self_cancelling_run`: a value-routed release
   nil-stamps the slot it read, so the copy a path reaches second loads `nil`
-  and no-ops. A run without that stamp (`DecrefRegion` by id,
-  `DecrefCellRegion`, the transfer adopt) keeps the baseline, and every other
-  block boundary clears the points — a replica in a point the emission
-  position is unreachable from is a release added where none was owed
-  (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
-  call is not a release").
+  and no-ops. Leaving no stamp is a fact about the ROUTE, and for a release by
+  region id the route is the lowerer's default rather than the region's only
+  option — so `emit_decref_for_region` takes the value route of the slot the
+  region's binder recorded whenever some point admits the region
+  (`replicating_release`; `value_release_slot` names the refusals). A
+  `DecrefCellRegion` and the transfer adopt have no such alternative and keep
+  the baseline, and every other block boundary clears the points — a replica
+  in a point the emission position is unreachable from is a release added
+  where none was owed (docs/impl/region/mechanism.md § "A release past a
+  frame-replacing tail call is not a release", § "Self-cancelling is a
+  property of the ROUTE, not of the region's class").
 
 ## Yield as terminator
 

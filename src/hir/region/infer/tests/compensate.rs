@@ -207,8 +207,10 @@ fn a_frame_replacing_arm_anchors_a_value_routed_release() {
     // ahead of its `TailCall` — so the branch narrows to the releases that
     // relocation can replicate instead of declining whole
     // (docs/impl/region/mechanism.md § "An arm that leaves through a callee takes
-    // a replica, not the anchor"). Only a VALUE route is replicable, which is what
-    // the first assertion states about this shape and the second relies on.
+    // a replica, not the anchor"). Only a VALUE route is replicable, and
+    // `call_result_regions` is the class this analysis can name as one off
+    // `RegionInfo` alone — which is what the first assertion states about this
+    // shape and the second relies on.
     let (hir, arena, symbols, info) =
         analyze_with_class("(fn (i xs) (if (%eq i 0) (length xs) (g 7)))");
     let (then_id, else_id) = first_if_arms(&hir).expect("an If node");

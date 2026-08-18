@@ -19,13 +19,15 @@ endif
 TIMEOUT ?= 30s
 LISP_FILES := $(shell find stdlib.lisp prelude.lisp lib/ tests/ demos/ -name '*.lisp' 2>/dev/null)
 
-# oracle.lisp is the leak-measurement instrument: dozens of adaptive
-# empirical-Bernstein probes, each looping blocks of heap ops until their
-# interval converges. That is ~17s of CPU regardless of tier (the JIT does not
+# oracle.lisp is the leak-measurement instrument: a couple of hundred adaptive
+# empirical-Bernstein probes, each looping blocks of heap ops until its interval
+# converges. That is tens of seconds of CPU regardless of tier (the JIT does not
 # accelerate it — the cost is region alloc/reclaim, not bytecode interpretation),
-# which fits the corpus TIMEOUT on a fast box but stretches past 30s on CI's slow
-# shared cores and gets SIGTERM'd. It (only) runs with a wider budget, pulled out
-# of the tight parallel batch so every other file still fails fast on a hang.
+# which outgrows both the corpus TIMEOUT and the `elle test` per-form budget and
+# gets killed there. It runs with a wider budget instead, pulled out of every
+# batch so each other file still fails fast on a hang. The cost tracks the probe
+# COUNT, so a pass that adds probes lengthens it — read the budget from a timed
+# run, never from a number written here.
 # $(1) is the tier flags for the pass (e.g. --jit=off --mlir=off).
 ORACLE_TIMEOUT ?= 120s
 ORACLE_FILE    := tests/elle/oracle.lisp
@@ -107,13 +109,22 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # (docs/test-runner.md § Concurrent runs wait).
 
 # Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
-# parked here with a tracked reason. Currently empty.
+# parked here with a tracked reason, plus the one file whose budget the runner
+# cannot express.
+#
+# oracle.lisp is that file: it is a measurement instrument whose cost is tens of
+# seconds of region alloc/reclaim on any tier, close enough to the runner's
+# per-form budget that a batch running it beside 24 other files loses the race
+# and records `timeout`. `RUN_CORPUS` runs it after the batch under
+# `ORACLE_TIMEOUT` instead, which is what smoke-vm/jit/noffi already do — so the
+# gate still covers it on both policies and every other file keeps failing fast
+# on a hang.
 #
 # (Resolved: subprocess.lisp used to hang in a worker thread — children inherited
 # the worker's all-blocked signal mask across fork/exec, so SIGTERM never landed
 # and subprocess/wait wedged. Fixed by resetting the child's mask in pre_exec;
 # see src/io/request.rs reset_child_signals + docs/posix-signals.md.)
-ELLE_TEST_SKIP :=
+ELLE_TEST_SKIP := $(ORACLE_FILE)
 
 # Per-pass skip lists for the DIRECT-RUN tier targets only (smoke-vm/jit/noffi).
 # jit-rejections    — requires JIT active (tests rejection tracking)
@@ -169,6 +180,8 @@ define RUN_CORPUS
 		| $(DEAL_CORPUS) \
 		| xargs -n $(CORPUS_BATCH) $(ELLE) test \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
+	$(call RUN_ORACLE,--jit=off)
+	$(call RUN_ORACLE,--jit=eager)
 endef
 
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)

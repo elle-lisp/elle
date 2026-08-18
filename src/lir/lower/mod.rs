@@ -412,6 +412,15 @@ pub struct Lowerer<'a> {
     /// each branch (and each lambda), so a nested branch's arms never leak into
     /// the enclosing one's collection.
     arm_exit_hoists: Vec<TailExitHoist>,
+    /// Set while `with_tail_exit_hoist` emits a release it is about to REPLICATE
+    /// ahead of a branch arm's `TailCall`. Such a release must name a VALUE, so
+    /// that the copy a path reaches second loads the `nil` the first stamped and
+    /// no-ops; `emit_decref_for_region` reads this to take the value route for a
+    /// region it would otherwise release by id (docs/impl/region/mechanism.md §
+    /// "Self-cancelling is a property of the ROUTE, not of the region's class").
+    /// False everywhere else, where one point covers every path and one
+    /// instruction does.
+    replicating_release: bool,
 }
 
 mod regiondecref;
@@ -462,6 +471,7 @@ impl<'a> Lowerer<'a> {
             return_minted_calls: rustc_hash::FxHashSet::default(),
             tail_exit_hoist: Vec::new(),
             arm_exit_hoists: Vec::new(),
+            replicating_release: false,
         }
     }
 

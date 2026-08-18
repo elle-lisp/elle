@@ -634,18 +634,20 @@ and at every replica alike (§ "The return facet costs the merge nothing").
 
 The composition does need a release the relocation can replicate, and only a
 **value-routed** one qualifies: it loads the holder slot, releases that value's
-region, and stamps the slot `nil`, so a second copy on one path
-no-ops. A release by region id (`DecrefRegion`) leaves no stamp and would count
-twice, which is why the relocation refuses it — and refusing it *there* would
-leave the anchored release covering only the falling-through arms while the
-tail-calling arm, which per-arm compensation used to reach at its head, got
-nothing. So the frame-exit relaxation is asked per region and admits only
-`call_result_regions`, the class `emit_decref_for_region` releases by value
-through a slot. This is `self_cancelling_run`'s restriction read one step
-earlier, at the admission it builds on, and it is the same value-route line
-compensation's `tail` route already draws. A branch with a frame-replacing arm
-therefore still declines whole for every other region, which keeps compensation's
-head and tail routes reaching them exactly as before.
+region, and stamps the slot `nil`, so a second copy on one path no-ops. So the
+frame-exit relaxation is asked per region and admits only `call_result_regions`,
+the class the analysis can name as value-routed off `RegionInfo` alone. That is a
+proxy rather than the whole question — the emitter takes the value route for any
+region a binder recorded a slot for (§ "Self-cancelling is a property of the
+ROUTE, not of the region's class") — and the conservative side of the proxy is
+where the window needs to sit: a branch with a frame-replacing arm declines whole
+for every other region, which keeps compensation's head and tail routes reaching
+them exactly as before. Declining *inside* the arm instead would leave the
+anchored release covering only the falling-through arms while the tail-calling
+arm, which per-arm compensation used to reach at its head, got nothing. This is
+`self_cancelling_run`'s restriction read one step earlier, at the admission it
+builds on, and it is the same value-route line compensation's `tail` route
+already draws.
 
 Pinned by `tests/elle/region-branch-arm-window.lisp` (the reclamation, with both
 boundaries, the `If` face, the captured-holder face, the frame-replacing-arm
@@ -1173,9 +1175,42 @@ mint") while a sibling arm's callee, capturing nothing, declines it.
 Self-cancelling is a real restriction, not a formality. A release by region id
 (`DecrefRegion`), a capture cell's `DecrefCellRegion`, and the transfer adopt
 leave no stamp behind and would count twice on a native fall-through, so a run
-that is not exactly load / release-by-value / nil-stamp keeps the baseline. Scope
-regions need nothing here anyway — `lower_call` already frees them before every
-`TailCall`.
+that is not exactly load / release-by-value / nil-stamp keeps the baseline — and
+for the id release that is a reason to change the ROUTE rather than to give up the
+replica (§ below). Scope regions need nothing here anyway — `lower_call` already
+frees them before every `TailCall`.
+
+#### Self-cancelling is a property of the ROUTE, not of the region's class
+
+Of those three the id release differs in kind: leaving no stamp is not a fact
+about the region. It is the lowerer's **default** route, taken because one
+instruction does the work of four wherever a single point covers every path.
+`region_to_slot` is keyed on a region's ALLOCATION site (`record_region_slot`), so
+a region a `Define`/`Let`/`Letrec` binder allocated has a slot that names its
+value from the binder to the release, and releasing what that slot holds frees the
+same runtime region the id resolves to. The two routes are therefore
+interchangeable at such a region, and only one of them replicates. So a release
+the relocation has to replicate takes the value route, and every release it does
+not keeps the id route.
+
+The reroute is asked only where some inherited point ADMITS the region, which
+keeps it disjoint from the channel that answers the same strand a different way: a
+release every point exempts — the merged arena riding the deferred slot
+(§ "What the exemption keeps, a channel must still run") — never changes route.
+The route's own refusals travel with it, each naming a reason this slot is not
+what the release reads: a **mutated** binder repoints its slot, an env cell's
+release names the BOX rather than the slot, and a transfer consumer's release is
+an adopt rather than a decref. Each of those keeps the id route, and with it the
+whole-branch decline.
+
+What the reading reaches is the `letrec` binding scope's own drop. A cell-free
+self-recursive helper's closure region is no call result, so the id route is its
+default, and its demise is the `Letrec` node — the binder is the scope
+([selfrec.md](../selfrec.md) § "The closure region is per-call and stranded"). A
+body whose tail is a branch every arm of which leaves through a frame-replacing
+callee arrives at that drop on no path at all, and the replica is what runs the
+release on each arm instead. That is the shape a polymorphic entry point takes
+when a `letrec` walker serves a dispatch whose arms tail-call out.
 
 **Which merges inherit the points.** `if`, `cond` and `match` merges are reached
 only through arms the lowerer closes one at a time, so each arm's points are
@@ -1190,8 +1225,9 @@ the point replaces.
 
 Pinned by `tests/elle/region-tail-frame-exit.lisp` (the reclamation, with the
 argument-move and callee exemptions, the per-arm faces, the captured-holder faces,
-the non-self-cancelling boundary, the env-cell faces, and the
-handed-back-through-the-callee faces, and the forward-cell faces driven as rows),
+the non-self-cancelling boundary, the env-cell faces, the
+handed-back-through-the-callee faces, the forward-cell faces, and the
+id-routed letrec closure whose body's tail is a branch, driven as rows),
 the `tail-frame-exit-unused` /
 `tail-frame-exit-moved` / `tail-frame-exit-arms` / `tail-frame-exit-captured` /
 `tail-frame-exit-handback` / `tail-frame-exit-fold-driver` /

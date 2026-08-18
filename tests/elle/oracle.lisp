@@ -232,7 +232,12 @@
 # a different rule of the same window: one binding owns a region's release ROUTE, so
 # a cursor an arm walks the input with refuses nothing (mechanism.md § "A mutated
 # holder poisons its value route, not its cell box").
-(declare-root :f1a ["reduce" "fold" "zip-tower"])
+# `zip-tower` is a CLOSED control too, for the same reason: the tower's `letrec`
+# helpers are released at a merge every dispatch arm leaves through, and the
+# frame-exit relocation replicates that release into each arm through the closure's
+# value route (mechanism.md § "Self-cancelling is a property of the ROUTE, not of the
+# region's class").
+(declare-root :f1a ["reduce" "fold"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
@@ -1628,26 +1633,27 @@
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
                    count-gauge 100 6 60 0.4 0.5) 0)
 
-# ── HOF-composition dissolution debt — the zip-tower witness ───────────
+# ── HOF composition — the zip-tower witness ───────────────────────────
 # `zip-tower` is a zip built as a TOWER of higher-order calls: it converts every
 # input to a list (`map to-list`), then recurses building the result with `(map
 # first lists)` AND `(map rest lists)` at every step, then rebuilds an array. It is
-# `map`/`pair`/`reverse`/`push` stacked several deep — and it leaks ~25 objects per
-# `(zip-tower [1 2] [3 4])` where a direct index walk over the same inputs leaks ~10
-# (the `zip` probe above, the production form). That ~15-object gap is not zip-specific:
-# it is the general fact that COMPOSING higher-order calls COMPOUNDS the collection-builder
-# over-keep — each layer's fresh accumulator/closures leak, so the total scales with
-# composition DEPTH, not per-call constant. This is the shape the north star says the
-# compiler should DISSOLVE: fuse the map-of-map into one loop, leaving no intermediate
-# collections to leak. Until dissolution loop-ifies HOF composition, this probe pins the
-# debt; it closes when a towered composition reclaims to the same floor as the hand-fused
-# form — NOT by hand-rewriting each composition, which is the programmer bridging a gap the
-# compiler should close. (The production `zip` WAS so rewritten, for the RSS win; this probe
-# is the standing record of what that rewrite worked around.) Shrink-only, and a SCALAR
-# again: the pin was a cross-tier [lo hi] range while the layers' arg-position closure-call
-# results rode a ReturnValue retain the VM held and the JIT did not. Both tiers now measure
-# the same rate, so the range collapses; re-open it as `[lo hi]` only if a tier span
-# reappears.
+# `map`/`pair`/`reverse`/`push` stacked several deep, so it measures whether COMPOSING
+# higher-order calls compounds the collection-builder over-keep — a rate that scales
+# with composition DEPTH rather than staying a per-call constant. It is a CLOSED
+# control now (undeclared, like `rest-array-copy`), so a regression to open trips the
+# completeness gate loudly rather than being absorbed under a root.
+#
+# The last mechanism it needed was a placement one. Each of the tower's helpers is a
+# cell-free self-recursive `letrec` closure whose demise the binder carries out to the
+# `Letrec` node, and every stdlib entry point the tower calls dispatches through a
+# branch whose arms tail-call out — so that release was emitted at a merge label no arm
+# arrives at. The frame-exit relocation replicates it ahead of each arm's `TailCall`,
+# which needs the closure's VALUE route, the slot its `letrec` binder recorded
+# (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE, not of
+# the region's class"). Shrink-only, and a SCALAR: the pin was a cross-tier [lo hi]
+# range while the layers' arg-position closure-call results rode a ReturnValue retain
+# the VM held and the JIT did not. Both tiers now measure the same rate, so the range
+# collapses; re-open it as `[lo hi]` only if a tier span reappears.
 (defn zip-tower [& colls]
   (letrec [to-list (fn (c)
                      (cond
@@ -1678,7 +1684,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) 2)
+                   count-gauge 100 6 60 0.4 0.5) 0)
 
 # Dispatch-wrapper IMMUTABLE-input residual — CLOSED by cross-unit monomorphization
 # (F1b; `hir/typeinfer/monomorphize.rs`). `put`/`del` on an immutable

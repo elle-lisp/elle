@@ -312,8 +312,74 @@ impl<'a> Lowerer<'a> {
                 }
                 return;
             }
+            // A release the relocation is about to REPLICATE into a branch's arms
+            // has to name a value: only a value route nil-stamps the slot it read,
+            // so only it counts once where two copies land on one path
+            // (docs/impl/region/mechanism.md § "Self-cancelling is a property of
+            // the ROUTE, not of the region's class"). The id route below is the
+            // default and keeps every release a single point already covers.
+            if self.replicating_release {
+                if let Some(slot) = self.value_release_slot(r) {
+                    self.emit_slot_value_release(slot);
+                    if crate::config::get().has_trace("rc") {
+                        eprintln!(
+                            "[trace:rc:emit] replicable_value_route region={:?} local_slot={} hir_id={:?} span={}",
+                            r, slot, hir_id, self.current_span
+                        );
+                    }
+                    return;
+                }
+            }
             let rid = self.static_slot(r);
             self.emit_decref_region(rid);
+        }
+    }
+
+    /// The stack slot a value-routed release of `r` may load, or `None` where the
+    /// region has no such route.
+    ///
+    /// `region_to_slot` is keyed on a region's ALLOCATION site, so the slot named
+    /// here belongs to the binder whose init allocated `r` and holds that value
+    /// from the binder to the release. Each refusal names a reason the slot is not
+    /// what the release reads: a **mutated** binder repoints it (read off the
+    /// region and, for a fn-local reassign, off the slot), an env cell's release
+    /// names the BOX rather than the slot's value, and a transfer consumer's
+    /// release is an `AdoptIntoActivation` rather than a decref. The final
+    /// condition is the id route's own premise, asked here so the two routes rest
+    /// on one fact: the lowerer must have stamped an allocation for this region,
+    /// or the slot holds a value some other region owns.
+    fn value_release_slot(&self, r: crate::hir::region::Region) -> Option<u16> {
+        if self.region_info.mutated_binding_value_regions.contains(&r)
+            || self.region_info.cell_release_regions.contains(&r)
+            || self.region_info.transfer_adopt_regions.contains(&r)
+        {
+            return None;
+        }
+        let slot = self.region_to_slot.get(&r)?.local()?;
+        if self.reassigned_local_slots.contains(&slot) {
+            return None;
+        }
+        let stamped = self
+            .region_to_table
+            .get(&r)
+            .is_some_and(|s| self.emitted_alloc_regions.contains(s));
+        stamped.then_some(slot)
+    }
+
+    /// Load what `slot` holds, release that value's RUNTIME region, and stamp the
+    /// slot `nil`.
+    ///
+    /// The one release shape that may be REPLICATED: whichever copy a path reaches
+    /// first does the work, and any later copy loads `nil`, whose release is a
+    /// no-op (`self_cancelling_run`). The stamp serves a second reader too — a
+    /// slot a later arm or a later iteration reuses must not be mistaken for the
+    /// value this release freed.
+    fn emit_slot_value_release(&mut self, slot: u16) {
+        let val_reg = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+        self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+        if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
+            self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
         }
     }
 
@@ -379,12 +445,7 @@ impl<'a> Lowerer<'a> {
             let Some(&slot) = self.binding_to_slot.get(&b) else {
                 continue;
             };
-            let val_reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-            self.emit(LirInstr::DecrefValueRegion { src: val_reg });
-            if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
-            }
+            self.emit_slot_value_release(slot);
             if crate::config::get().has_trace("rc") {
                 eprintln!(
                     "[trace:rc:emit] cell_content_drop binding={:?} local_slot={} demise={:?} span={}",
@@ -498,12 +559,7 @@ impl<'a> Lowerer<'a> {
             // single-holder `call_result` regions, and an env-indexed value slot is
             // not one — skipping leaves the region on its own `decref_point`.
             if let Some(slot) = self.region_to_slot.get(&r).and_then(|s| s.local()) {
-                let val_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-                self.emit(LirInstr::DecrefValueRegion { src: val_reg });
-                if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-                    self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
-                }
+                self.emit_slot_value_release(slot);
                 if crate::config::get().has_trace("rc") {
                     eprintln!(
                         "[trace:rc:emit] arm_decref region={:?} local_slot={} arm_node={:?} span={}",
@@ -564,12 +620,7 @@ impl<'a> Lowerer<'a> {
                 // of the slot is not mistaken for this freed value. Stack-only,
                 // as `emit_arm_decrefs` is.
                 if let Some(slot) = self.region_to_slot.get(&r).and_then(|s| s.local()) {
-                    let val_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-                    self.emit(LirInstr::DecrefValueRegion { src: val_reg });
-                    if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-                        self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
-                    }
+                    self.emit_slot_value_release(slot);
                     if crate::config::get().has_trace("rc") {
                         eprintln!(
                             "[trace:rc:emit] branch_compensation region={:?} local_slot={} arm={:?} span={}",

@@ -505,9 +505,21 @@ impl<'a> Lowerer<'a> {
         // Points inherited from the arms of a branch. The release stays here for
         // the paths that fall through to this merge, and a replica goes ahead of
         // each arm's tail call for the paths that leave through it.
+        //
+        // Whether any point actually takes a copy decides the ROUTE the release is
+        // emitted with: a region every point exempts — the merged arena riding the
+        // deferred slot — keeps the default release by id, so the two mechanisms
+        // stay disjoint (docs/impl/region/mechanism.md § "Self-cancelling is a
+        // property of the ROUTE, not of the region's class").
+        let replicates = self
+            .tail_exit_hoist
+            .iter()
+            .any(|h| matches!(h.block, super::HoistBlock::Finished(_)) && admitted(h));
+        let saved = std::mem::replace(&mut self.replicating_release, replicates);
         let start = self.current_block.instructions.len();
         f(self);
         if !self.self_cancelling_run(&self.current_block.instructions[start..]) {
+            self.replicating_release = saved;
             return;
         }
         for i in 0..self.tail_exit_hoist.len() {
@@ -531,6 +543,7 @@ impl<'a> Lowerer<'a> {
                 .instructions
                 .splice(at..at, copy);
         }
+        self.replicating_release = saved;
     }
 
     /// Does this run release by VALUE and nil-stamp the slot it read?

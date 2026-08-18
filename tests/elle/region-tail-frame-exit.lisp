@@ -339,6 +339,45 @@
   (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
     (top-sub (go n))))
 
+# (d16b) the same closure region where the letrec BODY's tail is a BRANCH. Every
+# arm leaves through its own frame-replacing callee, so the scope-end release is
+# emitted at a merge no path arrives at and the relocation replicates it ahead of
+# each arm's `TailCall`. A replica counts once only where the run nil-stamps the
+# slot it read, and this region's default route is by region id — so the release
+# takes the value route of the slot the `letrec` binder recorded for it
+# (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE,
+# not of the region's class"). Every arm is driven, and each must release once.
+(defn arm-selfrec (n t)
+  (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (go n)
+    (if t (tail-sink) (tail-sink2))))
+(defn arm-selfrec-cond (n t)
+  (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (go n)
+    (cond
+      (%eq t 0) (tail-sink)
+      (%eq t 1) (tail-sink2)
+      (tail-sink))))
+
+# (d16c) the recursion runs INSIDE the arm, so the arm both consumes the closure
+# and leaves through a callee. The replica still belongs ahead of that call: the
+# closure region is named by neither the callee nor an argument, the callee's
+# result being what the arm hands on.
+(defn arm-selfrec-inner (n t)
+  (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (if t
+      (let [r (go n)]
+        (top-sub r))
+      (tail-sink2))))
+
+# (d16d) the partial face: the else arm falls through to the merge and takes the
+# release emitted there, while the then arm runs its replica. The nil-stamp is
+# what makes the two copies act once, so both arms are driven.
+(defn arm-selfrec-partial (n t)
+  (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))]
+    (go n)
+    (if t (tail-sink) 5)))
+
 # (d18) the `def` face of the same three bodies. A `def` has no scope NODE, so the
 # analysis leaves its closure region's demise where the binding chain put it — the
 # binding's last use — and a use as a CALLEE resolves through `last_use` to the node
@@ -544,6 +583,18 @@
 (def def-tail-d (measure (fn () (def-tail 3)) 200 window))
 (def arg-call-selfrec-d (measure (fn () (arg-call-selfrec 3)) 200 window))
 (def arg-call-toplevel-d (measure (fn () (arg-call-toplevel 3)) 200 window))
+(def arm-selfrec-t-d (measure (fn () (arm-selfrec 3 true)) 200 window))
+(def arm-selfrec-f-d (measure (fn () (arm-selfrec 3 false)) 200 window))
+(def arm-selfrec-cond-0-d (measure (fn () (arm-selfrec-cond 3 0)) 200 window))
+(def arm-selfrec-cond-2-d (measure (fn () (arm-selfrec-cond 3 2)) 200 window))
+(def arm-selfrec-inner-t-d
+  (measure (fn () (arm-selfrec-inner 3 true)) 200 window))
+(def arm-selfrec-inner-f-d
+  (measure (fn () (arm-selfrec-inner 3 false)) 200 window))
+(def arm-selfrec-partial-t-d
+  (measure (fn () (arm-selfrec-partial 3 true)) 200 window))
+(def arm-selfrec-partial-f-d
+  (measure (fn () (arm-selfrec-partial 3 false)) 200 window))
 (def callee-letrec-member-d
   (measure (fn () (callee-letrec-member 3)) 200 window))
 (def callee-member-plain-d (measure (fn () (callee-member-plain 3)) 200 window))
@@ -606,6 +657,10 @@
 (println "  operand value: selfrec " arg-call-selfrec-d "  toplevel "
          arg-call-toplevel-d "  lambda " lambda-arg-d "  aggregate "
          aggregate-arg-d)
+(println "  letrec closure under a branch tail: if " arm-selfrec-t-d "/"
+         arm-selfrec-f-d "  cond " arm-selfrec-cond-0-d "/" arm-selfrec-cond-2-d
+         "  inner " arm-selfrec-inner-t-d "/" arm-selfrec-inner-f-d "  partial "
+         arm-selfrec-partial-t-d "/" arm-selfrec-partial-f-d)
 (println "  def binder: arg-call " def-arg-call-d "  nontail " def-nontail-d
          "  stmt " def-stmt-d "  tail " def-tail-d)
 (println "  letrec member callee: arg-call " callee-letrec-member-d "  plain "
@@ -690,6 +745,18 @@
 (bounded? arg-call-selfrec-d
           "a self-recursive member the tail call's ARGUMENT calls")
 (bounded? arg-call-toplevel-d "the same under a top-level tail callee")
+(bounded? arm-selfrec-t-d
+          "a letrec closure whose body's tail is a branch, then arm")
+(bounded? arm-selfrec-f-d "the same branch's else arm")
+(bounded? arm-selfrec-cond-0-d "the same under a cond clause body")
+(bounded? arm-selfrec-cond-2-d "the same under a cond else body")
+(bounded? arm-selfrec-inner-t-d
+          "the arm that both runs the recursion and leaves through a callee")
+(bounded? arm-selfrec-inner-f-d "the sibling of that arm")
+(bounded? arm-selfrec-partial-t-d
+          "the tail-calling arm of a partly falling-through branch tail")
+(bounded? arm-selfrec-partial-f-d
+          "the falling-through arm, which must not double-release")
 (bounded? lambda-arg-d "a fresh lambda handed to the tail call as its argument")
 (bounded? aggregate-arg-d "the aggregate an argument builds around a local")
 
@@ -740,6 +807,13 @@
 (assert (= (def-tail 3) 0) "def-binder tail result lost")
 (assert (= (arg-call-selfrec 3) -1) "operand-value selfrec result lost")
 (assert (= (arg-call-toplevel 3) -1) "operand-value toplevel result lost")
+(assert (= (arm-selfrec 3 true) 0) "branch-tail letrec then result lost")
+(assert (= (arm-selfrec 3 false) 1) "branch-tail letrec else result lost")
+(assert (= (arm-selfrec-cond 3 2) 0) "branch-tail letrec cond else result lost")
+(assert (= (arm-selfrec-inner 3 true) -1) "inner-recursion arm result lost")
+(assert (= (arm-selfrec-inner 3 false) 1) "inner-recursion sibling arm lost")
+(assert (= (arm-selfrec-partial 3 false) 5)
+        "partial branch-tail fall-through result lost")
 (assert (= (callee-letrec-member 3) 1) "callee-letrec-member result lost")
 (assert (= (callee-member-plain 3) 2) "callee-member-plain result lost")
 (assert (= (callee-member-capture member-src) 4)

@@ -125,6 +125,14 @@ argument and a sibling consumes it.
   self-recursive member `stranded_self_bindings` when the body tail-calls it, reading the
   body's tail callees rather than asking whether the body IS a tail call
   (`lir/lower/binding/let.rs`).
+
+  A body whose tail is a **branch** reaches the relocation the other way round: each arm
+  leaves through its own callee, so the scope-end release is emitted at the merge and
+  REPLICATED ahead of every arm's `TailCall`. A replica counts once only where the run
+  nil-stamps the slot it read, and the closure region's default route is by region id —
+  so the release takes the value route of the slot this binding's own `letrec` binder
+  recorded ([region/mechanism.md](region/mechanism.md) § "Self-cancelling is a property
+  of the ROUTE, not of the region's class").
 - A `def` has no such node, so its closure region keeps the demise the ordinary binding
   chain computed: the binding's **last use**. That is the tighter of the two placements
   and it needs no relocation, because a use of the binding as a **callee** resolves
@@ -282,6 +290,13 @@ live scope-exit drop is reachable and would fire ahead of the mint.
   gate for a regression that reintroduces a cell).
 - `…::self_recursive_loop_reclaims_per_call_no_stdlib` — the per-call closure region is
   reclaimed by the tail-call deferred release (`letrec` tail loop, region-count delta bounded).
+- `…::self_recursive_loop_under_a_branch_tail_reclaims_per_call` — the same region where the
+  letrec BODY's tail is a branch whose arms each leave through a callee, so the relocation's
+  replica is the channel rather than the deferral; both arms driven. The placement peer is
+  `lir::lower::tests::release::frameexit::a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm`
+  (with `…_no_arm_strands_keeps_its_release_by_id` as the decline), the leak rows are
+  `tests/elle/region-tail-frame-exit.lisp` § (d16b)–(d16d), and the soundness witness is that
+  file's `-uaf` peer § (e17).
 - `…::self_recursive_define_with_arith_reclaims_per_call` — a `def` tail-loop recursing with
   heap-allocating arithmetic runs clean and bounded (the heap churn recycles a
   prematurely-freed page, turning the latent use-after-free loud).

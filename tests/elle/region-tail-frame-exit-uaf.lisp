@@ -296,6 +296,28 @@
         out (e16-step (fn (a b) a) 3 0 seed)]
     (length (first out))))
 
+# (e17) a `letrec` closure whose body's tail is a BRANCH. Every arm leaves through
+# its own callee, so the scope-end release is replicated ahead of each arm's
+# `TailCall` — and replication needs the closure's VALUE route, which loads the
+# slot the `letrec` binder recorded and frees the region that value lives in
+# (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE, not
+# of the region's class"). The closure captures a caller-owned list, so the free
+# cascades along the funnel's counted edge and must drop that edge alone: the
+# caller hands ONE list to both arms and reads it afterwards, so an over-cascade
+# faults on the second call or on the final read. Exactly one release must run per
+# path, or the second call walks a recycled page.
+(defn e17-sink (n)
+  n)
+(defn e17-arm (v t)
+  (letrec [go (fn (m) (if (%lt m 1) (length (first v)) (go (%sub m 1))))]
+    (let [n (go 3)]
+      (if t (e17-sink n) (e15-sink)))))
+(defn e17-read (i)
+  (let [v (list (string "af" i) i)
+        n (e17-arm v true)
+        m (e17-arm v false)]
+    (%add n (%add m (length (first v))))))
+
 # (e4) the capturing closure is RETURNED, so it outlives the frame and carries `x`
 # with it — on the funnel's counted edge, which is what the frame's release must
 # leave standing. The caller invokes the closure afterwards and reads through it.
@@ -543,6 +565,7 @@
 (var e15 0)
 (var e16 0)
 (var e16b 0)
+(var e17 0)
 (var e4 0)
 (var f 0)
 (var g 0)
@@ -581,6 +604,7 @@
   (assign e15 (e15-read i))
   (assign e16 (e16-read i))
   (assign e16b (e16b-read i))
+  (assign e17 (e17-read i))
   (assign e4 (e4-read i))
   (assign f (f-read i))
   (assign g (g-return i))
@@ -631,6 +655,9 @@
 (assert (%gt e16 0) "fold accumulator freed under the combiner handed it next")
 (assert (%gt e16b 0)
         "fold accumulator freed before its own combiner minted for it")
+(assert (%gt e17 0)
+        "a letrec closure's replicated release freed more than the frame's own \
+         reference under a branch body tail")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")

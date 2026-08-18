@@ -350,6 +350,60 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
     );
 }
 
+/// Per-call reclamation of the same cell-free closure where the `letrec` BODY's
+/// tail is a **branch** whose arms each leave through a frame-replacing callee
+/// (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE,
+/// not of the region's class"). The recursion has completed by the branch, so the
+/// deferral channel does not apply here: the release the frame owes is the
+/// scope-end one, emitted at a merge label no arm arrives at, and the frame-exit
+/// relocation supplies it by replicating the release ahead of each arm's
+/// `TailCall`. A replica counts once only where the run nil-stamps the slot it
+/// read, so the closure region takes the value route of the slot its `letrec`
+/// binder recorded rather than its default release by region id.
+///
+/// Boolean-only for `Runtime::without_stdlib()`, and both arms are driven, since
+/// the claim is that exactly one release runs on each path. The closure and its
+/// env are two regions per call, so a surviving strand grows the sample by ~20
+/// over the ten discarded calls.
+#[test]
+fn self_recursive_loop_under_a_branch_tail_reclaims_per_call() {
+    use crate::pipeline::compile_file_repl;
+    // ONE compile, as `self_recursive_loop_reclaims_per_call_no_stdlib`: a fresh
+    // REPL compile renumbers global slots.
+    let src = "(def s (fn [] :a)) (def s2 (fn [] :b)) \
+        (def f (fn [k t] \
+          (letrec [loop (fn [m] (if m :done (loop true)))] \
+            (loop k) \
+            (if t (s) (s2))))) \
+        (f false true) \
+        (def a (arena/region-count)) \
+        (f false true) (f false false) (f false true) (f false false) \
+        (f false true) (f false false) (f false true) (f false false) \
+        (f false true) (f false false) \
+        (def b (arena/region-count)) \
+        (match (type-of b) :integer (match (type-of a) :integer (%sub b a) _ -1) _ -1)";
+    let mut rt = Runtime::without_stdlib();
+    let res = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    let delta = vm
+        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .expect("runs")
+        .as_int()
+        .expect("program returns the region-count delta as an int");
+    assert!(
+        delta <= 2,
+        "a cell-free self-recursive closure under a BRANCH body tail must be \
+         reclaimed per call: live region growth over 10 discarded closures must be \
+         ~0, got {delta} — its scope-end release lands at a merge label no arm \
+         arrives at unless the relocation replicates it into each of them",
+    );
+}
+
 /// Per-call reclamation of a stranded recursive closure the recursion **RETURNS** —
 /// the return-funded admission (docs/impl/selfrec.md § "The deferral needs no escape
 /// gate"). Each subject's letrec/def body is a frame-replacing tail
