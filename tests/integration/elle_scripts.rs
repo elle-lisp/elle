@@ -275,6 +275,25 @@ fn region_search_fuse_uaf() {
     );
 }
 
+// Take-while loop fusion (docs/impl/dissolution.md § "Take-while — the stage that
+// ends the walk") dissolves `(take-while pred xs)` over a proven immutable array
+// into an index-walk loop whose guard pushes what it admits and, on the side it
+// rejects, clears the sentinel that ends the run. Two roles put heap values on a
+// path no other terminal takes. The walk stops SHORT of the base, so it leaves with
+// the base's later elements never read while the accumulator holds heap values from
+// the ones it did read — the accumulator must own them past the loop and the base's
+// unread tail must survive. And the result is that accumulator itself, unfrozen, so
+// the caller holds the very object the loop filled rather than a frozen copy.
+// Either over-free SIGSEGVs under guardfree. Fires only on the fused shape; the
+// plain-VM run asserts the values.
+#[test]
+fn region_take_while_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-take-while-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

@@ -83,3 +83,5 @@ mod numeric;
 /// The four short-circuiting search terminals — a guard stage, a scalar answer,
 /// and the sentinel the loop condition reads.
 mod search;
+/// The `take-while` stage — a guard whose rejecting element ends the run.
+mod take;

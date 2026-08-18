@@ -31,6 +31,9 @@ impl Build<'_> {
     pub(super) fn bool(&self, b: bool) -> Hir {
         Hir::new(HirKind::Bool(b), self.span.clone(), Signal::silent())
     }
+    pub(super) fn empty_list(&self) -> Hir {
+        Hir::new(HirKind::EmptyList, self.span.clone(), Signal::silent())
+    }
     pub(super) fn call(&self, f: Binding, args: Vec<Hir>) -> Hir {
         self.node(HirKind::Call {
             func: Box::new(self.var(f)),
@@ -56,6 +59,14 @@ impl Build<'_> {
         self.arena.get_mut(b).is_immutable = true;
         b
     }
+    /// A fresh reassigned local — the induction variable, a scalar accumulator, an
+    /// early-exit sentinel, a survivor count. Each is `define`d before the loop and
+    /// `assign`ed inside it, so it must read as mutated.
+    pub(super) fn mutable_local(&mut self) -> Binding {
+        let b = self.arena.gensym();
+        self.arena.get_mut(b).is_mutated = true;
+        b
+    }
     /// Retype a consumed lambda parameter to a plain immutable local: the lambda is
     /// gone, so the lowerer must give the parameter a local slot, not an argument
     /// slot.
@@ -78,6 +89,10 @@ impl Build<'_> {
     ///   and the guard a `count`/`any?`/`find`/`find-index` appends) continues where
     ///   the predicate passes, a `Reject` (the guard an `all?` appends) where it
     ///   fails;
+    /// - a **`Take`** stage (a `take-while`) guards the same way and, on the side
+    ///   its predicate rejects, ends the run by clearing its sentinel — read by the
+    ///   loop condition where this is the chain's innermost op, and by the stage
+    ///   itself otherwise;
     /// - a **`Gate`** stage binds the current value (so every stage BEFORE it has
     ///   run for this element) and continues only while the sentinel holds — the
     ///   form a search's early exit takes over a prefix, where the walk itself must
@@ -124,6 +139,42 @@ impl Build<'_> {
                     then_branch: Box::new(then_branch),
                     else_branch: Box::new(else_branch),
                 });
+                self.let_(item, cur, guarded)
+            }
+            Some(Stage::Take {
+                sentinel,
+                ends_walk,
+                param,
+                body,
+            }) => {
+                self.localize_param(param);
+                let item = self.local();
+                let cond = self.let_(param, self.var(item), body);
+                let rest = self.element(stages, base, acc, self.var(item));
+                // The rejecting element ends the run: it enters nothing into the
+                // accumulator and clears the sentinel.
+                let stop = self.node(HirKind::Assign {
+                    target: sentinel,
+                    value: Box::new(self.bool(false)),
+                });
+                let run = self.node(HirKind::If {
+                    cond: Box::new(cond),
+                    then_branch: Box::new(rest),
+                    else_branch: Box::new(stop),
+                });
+                // Where this stage does not end the walk, the loop still visits
+                // every element — an inner stage's per-element work must run — so
+                // the stage reads its own sentinel to stay off the elements past
+                // the run's end.
+                let guarded = if ends_walk {
+                    run
+                } else {
+                    self.node(HirKind::If {
+                        cond: Box::new(self.var(sentinel)),
+                        then_branch: Box::new(run),
+                        else_branch: Box::new(self.nil()),
+                    })
+                };
                 self.let_(item, cur, guarded)
             }
             Some(Stage::Gate { sentinel, advance }) => {
@@ -262,6 +313,47 @@ pub(super) struct DecideStep {
     pub(super) more: Binding,
 }
 
+/// The accumulator half of a terminal: its seed expression (the scalar terminals
+/// only — a Collect's `@array` is minted by the loop scaffold), its per-element
+/// base case, the binding it accumulates into, and the two facts a Collect result
+/// arm answers with. `init` and `base` are `Option` because `build_loop` consumes
+/// each exactly once — `init` by the accumulator setup, `base` by the pipeline's
+/// innermost recursion.
+pub(super) struct Accum {
+    pub(super) init: Option<Hir>,
+    pub(super) base: Option<Base>,
+    pub(super) acc: Binding,
+    pub(super) unfrozen: bool,
+    pub(super) empty_is_list: bool,
+}
+
+impl Accum {
+    /// A scalar terminal — a fold, a count, or a search: a reassigned accumulator
+    /// seeded by `init`, with no result arm and so neither Collect fact to carry.
+    pub(super) fn scalar(init: Hir, base: Base, acc: Binding) -> Accum {
+        Accum {
+            init: Some(init),
+            base: Some(base),
+            acc,
+            unfrozen: false,
+            empty_is_list: false,
+        }
+    }
+
+    /// A Collect terminal: a fresh `@array` the loop scaffold mints and `push`
+    /// fills, plus what its result arm answers with (dissolution.md § "The two
+    /// facts the stdlib op's array arm decides").
+    pub(super) fn collect(acc: Binding, unfrozen: bool, empty_is_list: bool) -> Accum {
+        Accum {
+            init: None,
+            base: Some(Base::Push),
+            acc,
+            unfrozen,
+            empty_is_list,
+        }
+    }
+}
+
 /// The fold combinator a [`Base::Step`] splices: the two parameters that bind to
 /// the current accumulator and element, and the body they wrap.
 pub(super) struct FoldStep {
@@ -278,17 +370,17 @@ pub(super) struct FoldStep {
 /// accumulator's shape and result:
 ///
 /// ```text
-/// Collect (map/filter):            Fold (fold/reduce), Count and Search:
-/// (let [coll BASE]                 (let [seed INIT]
-///   (let [len (length coll)]         (let [coll BASE]
-///     (let [acc (@array)]              (let [len (length coll)]
-///       (define i 0)                     (define acc seed)
-///       (while (< i len)                 (define i 0)
-///         <pipeline; push acc>           (define more true)      ; search only
-///         (assign i (+ i 1)))            (while (and (< i len) more)  ; LONE search
-///       (freeze acc))))                    <pipeline; assign acc …>
-///                                          (assign i (+ i 1)))
-///                                        acc)))
+/// Collect (map/filter/take-while):  Fold (fold/reduce), Count and Search:
+/// (let [coll BASE]                  (let [seed INIT]
+///   (let [len (length coll)]          (let [coll BASE]
+///     (let [acc (@array)]               (let [len (length coll)]
+///       (define more true) ; take only    (define acc seed)
+///       (define i 0)                      (define i 0)
+///       (while (< i len)                  (define more true)      ; search only
+///         <pipeline; push acc>            (while (and (< i len) more)  ; INNERMOST
+///         (assign i (+ i 1)))               <pipeline; assign acc …>
+///       (freeze acc))))                     (assign i (+ i 1)))
+///                                         acc)))
 /// ```
 ///
 /// Every scalar terminal binds its seed to an immutable `seed` OUTERMOST. For a
@@ -299,22 +391,26 @@ pub(super) struct FoldStep {
 /// both ride the same shape with nothing to order. The accumulator is a reassigned
 /// scalar (mirrors the induction variable), never an `@array`.
 ///
-/// A search adds one binding to that shape: the `more` sentinel, cleared by the
-/// deciding element. Where the search is **lone**, the loop condition reads it and
-/// the walk ends at the decision. Where the search has a `map`/`filter` **prefix**,
-/// the staged form runs every prefix stage on every element, so the walk stays
-/// exhaustive (the bare range test) and a `Gate` stage reads the sentinel instead —
-/// gating the search's own guard alone. Only a search mints the sentinel; every
-/// other terminal's walk is exhaustive with nothing to stop.
+/// An early exit adds one binding to that shape: a `more` sentinel, cleared by the
+/// element that decides — a search's answer, or a `take-while`'s rejection. Where
+/// the op carrying it is the chain's **innermost**, the loop condition reads the
+/// sentinel and the walk ends at the decision. Where something is inner to that op,
+/// the staged form runs that stage on every element, so the walk stays exhaustive
+/// (the bare range test) and the sentinel gates the op's own stage instead — a
+/// `Gate` stage for a search, the `Take` stage's own `if` for a `take-while`. Only
+/// those two ops mint a sentinel; every other terminal's walk has nothing to stop.
 ///
 /// A `find-index` whose prefix holds a `filter` mints one more: the survivor count
-/// its answer reads, since a filter's survivors renumber (a `map` prefix preserves
-/// both count and order, so the base index is already the answer).
+/// its answer reads, since a filter's survivors renumber (a `map` prefix, and a
+/// `take-while`, preserve both count and order, so the base index is already the
+/// answer).
 ///
-/// The Collect terminal's `unfrozen` flag selects its result arm: an immutable
-/// base freezes the accumulator; a mutable `@array` base returns it unfrozen (the
-/// mutable-array arm — `validate_chain` proves a mutable base is a lone
-/// `map`/`filter`, so a scalar terminal is never paired with it).
+/// The Collect terminal's two flags select its result arm. `unfrozen`: an immutable
+/// base freezes the accumulator, while a mutable `@array` base — and a chain holding
+/// a `take-while`, whose array arm has no freeze — returns it unfrozen.
+/// `empty_is_list`: a chain holding a `take-while` answers an empty base with `()`,
+/// which is what that op's `(empty? coll)` clause returns
+/// (dissolution.md § "The two facts the stdlib op's array arm decides").
 pub(super) fn build_loop(
     chain: FusedChain,
     arena: &mut BindingArena,
@@ -336,8 +432,7 @@ pub(super) fn build_loop(
     };
     let coll_b = b.local();
     let len_b = b.local();
-    let i_b = b.arena.gensym();
-    b.arena.get_mut(i_b).is_mutated = true; // the loop induction variable
+    let i_b = b.mutable_local(); // the loop induction variable
 
     // The chain's shape decides where a search's sentinel is read and what a
     // `find-index` answers with. Both questions are about the PREFIX, which is
@@ -345,6 +440,26 @@ pub(super) fn build_loop(
     // is a `filter`, whose survivors renumber.
     let prefixed = !stages.is_empty();
     let renumbers = stages.iter().any(|s| matches!(s, Stage::Guard { .. }));
+
+    // Every `take-while` stage's sentinel needs a `(define more true)`, and at most
+    // one of them ends the walk — `take_chain` marks the chain's innermost op. A
+    // walk-ending `take-while` makes the chain `prefixed`, so a search sharing the
+    // chain takes its gate and the two never contend for the loop condition.
+    let take_sentinels: Vec<Binding> = stages
+        .iter()
+        .filter_map(|s| match s {
+            Stage::Take { sentinel, .. } => Some(*sentinel),
+            _ => None,
+        })
+        .collect();
+    let walk_end = stages.iter().find_map(|s| match s {
+        Stage::Take {
+            sentinel,
+            ends_walk: true,
+            ..
+        } => Some(*sentinel),
+        _ => None,
+    });
 
     // The early-exit sentinel, minted only for a search. The loop condition reads
     // it where the search is lone; a `Gate` stage reads it under a prefix.
@@ -358,8 +473,17 @@ pub(super) fn build_loop(
     // per-element base case. The accumulator differs by terminal: Collect fills a
     // fresh `@array` (immutable binding, mutated in place); Fold, Count and Search
     // each thread a reassigned scalar.
-    let (init, mut pipeline_base, acc_b, unfrozen) = match terminal {
-        Terminal::Collect { unfrozen } => (None, Some(Base::Push), b.local(), unfrozen),
+    let Accum {
+        init,
+        base: mut pipeline_base,
+        acc: acc_b,
+        unfrozen,
+        empty_is_list,
+    } = match terminal {
+        Terminal::Collect {
+            unfrozen,
+            empty_is_list,
+        } => Accum::collect(b.local(), unfrozen, empty_is_list),
         Terminal::Fold(f) => {
             let FoldTerminal {
                 init,
@@ -367,38 +491,27 @@ pub(super) fn build_loop(
                 elem_param,
                 body,
             } = *f;
-            let acc = b.arena.gensym();
-            b.arena.get_mut(acc).is_mutated = true;
-            (
-                Some(init),
-                Some(Base::Step(Box::new(FoldStep {
+            Accum::scalar(
+                init,
+                Base::Step(Box::new(FoldStep {
                     acc_param,
                     elem_param,
                     body,
-                }))),
-                acc,
-                false,
+                })),
+                b.mutable_local(),
             )
         }
-        Terminal::Count => {
-            let acc = b.arena.gensym();
-            b.arena.get_mut(acc).is_mutated = true;
-            (Some(b.int(0)), Some(Base::Tally), acc, false)
-        }
+        Terminal::Count => Accum::scalar(b.int(0), Base::Tally, b.mutable_local()),
         // A search seeds its accumulator with the answer for "no element decided
         // it" — the value each stdlib op returns from an exhausted walk.
         Terminal::Search(search) => {
-            let acc = b.arena.gensym();
-            b.arena.get_mut(acc).is_mutated = true;
-            let more = b.arena.gensym();
-            b.arena.get_mut(more).is_mutated = true;
+            let acc = b.mutable_local();
+            let more = b.mutable_local();
             sentinel_b = Some(more);
             if prefixed {
                 let advance = if search == Search::FindIndex && renumbers {
-                    let pos = b.arena.gensym();
-                    b.arena.get_mut(pos).is_mutated = true;
-                    position_b = Some(pos);
-                    Some(pos)
+                    position_b = Some(b.mutable_local());
+                    position_b
                 } else {
                     None
                 };
@@ -417,7 +530,7 @@ pub(super) fn build_loop(
                 position: position_b.unwrap_or(i_b),
                 more,
             };
-            (Some(seed), Some(Base::Decide(Box::new(step))), acc, false)
+            Accum::scalar(seed, Base::Decide(Box::new(step)), acc)
         }
     };
 
@@ -435,10 +548,13 @@ pub(super) fn build_loop(
         value: Box::new(b.call(ops.add, vec![b.var(i_b), b.int(1)])),
     });
     let in_range = b.call(ops.lt, vec![b.var(i_b), b.var(len_b)]);
-    // A prefix keeps the walk exhaustive — the sentinel gates the search's own
-    // stage there, never the range test.
-    let cond = match sentinel_b {
-        Some(more) if !prefixed => b.node(HirKind::And(vec![in_range, b.var(more)])),
+    // The condition reads the early exit of the chain's innermost op alone: a
+    // walk-ending `take-while`'s sentinel, or — where the chain is a lone search —
+    // the search's. Anything with something inner to it keeps the exhaustive walk
+    // and gates its own stage.
+    let cond = match (walk_end, sentinel_b) {
+        (Some(more), _) => b.node(HirKind::And(vec![in_range, b.var(more)])),
+        (None, Some(more)) if !prefixed => b.node(HirKind::And(vec![in_range, b.var(more)])),
         _ => in_range,
     };
     let while_loop = b.node(HirKind::While {
@@ -449,24 +565,56 @@ pub(super) fn build_loop(
         binding: i_b,
         value: Box::new(b.int(0)),
     });
+    // Each `take-while` stage starts its run open.
+    let define_takes: Vec<Hir> = take_sentinels
+        .iter()
+        .map(|&more| {
+            b.node(HirKind::Define {
+                binding: more,
+                value: Box::new(b.bool(true)),
+            })
+        })
+        .collect();
 
     match init {
         // Collect — a fresh `@array` accumulator. An immutable base freezes it to
-        // the result; a mutable `@array` base returns it unfrozen (type-preserving,
-        // mirroring the stdlib arm `(if (mutable? coll) acc (freeze acc))`).
+        // the result; a mutable `@array` base, and a chain holding a `take-while`,
+        // return it unfrozen (type-preserving, mirroring the stdlib arm
+        // `(if (mutable? coll) acc (freeze acc))` and `take-while`'s arm, which has
+        // no such test).
         None => {
             let result = if unfrozen {
                 b.var(acc_b)
             } else {
                 b.call(ops.freeze, vec![b.var(acc_b)])
             };
-            let acc_body = b.node(HirKind::Begin(vec![define_i, while_loop, result]));
+            let mut stmts = define_takes;
+            stmts.push(define_i);
+            stmts.push(while_loop);
+            stmts.push(result);
+            let acc_body = b.node(HirKind::Begin(stmts));
             let acc_let = b.let_(acc_b, b.call(ops.at_array, vec![]), acc_body);
-            let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), acc_let);
+            // A `take-while` answers an EMPTY input with `()`, its `(empty? coll)`
+            // clause preceding its array arm — and `validate_chain` proved the
+            // stages inner to it are all `map`s, so the base's emptiness is its
+            // input's and `len` decides it.
+            let collected = if empty_is_list {
+                b.node(HirKind::If {
+                    cond: Box::new(b.call(ops.lt, vec![b.int(0), b.var(len_b)])),
+                    then_branch: Box::new(acc_let),
+                    else_branch: Box::new(b.empty_list()),
+                })
+            } else {
+                acc_let
+            };
+            let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), collected);
             b.let_(coll_b, base, len_let)
         }
-        // Fold / Count — a scalar accumulator seeded by `init` (the fold's own seed
-        // expression, or the count's literal 0), its final value the result.
+        // Fold / Count / Search — a scalar accumulator seeded by `init` (the fold's
+        // own seed expression, the count's literal 0, or the answer for an exhausted
+        // walk), its final value the result. An exhausted walk answers with the seed
+        // however a `take-while` stage typed the collection it stood in for, so no
+        // empty-input arm is owed here.
         Some(init) => {
             let seed_b = b.local();
             let define_acc = b.node(HirKind::Define {
@@ -475,6 +623,7 @@ pub(super) fn build_loop(
             });
             let result = b.var(acc_b);
             let mut stmts = vec![define_acc, define_i];
+            stmts.extend(define_takes);
             if let Some(more) = sentinel_b {
                 stmts.push(b.node(HirKind::Define {
                     binding: more,

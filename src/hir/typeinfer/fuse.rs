@@ -7,7 +7,8 @@
 //! lambda body **spliced inline** rather than called through a closure value. The
 //! closure ceases to exist: no per-element closure allocation, no indirect call.
 //! `map` pushes each transform's result; `filter` pushes the element itself under
-//! an `if` guard. A chain's optional outermost **terminal** is a scalar op:
+//! an `if` guard; `take-while` pushes it under a guard whose rejecting side ends
+//! the run. A chain's optional outermost **terminal** is a scalar op:
 //! `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`) threads an
 //! accumulator seeded by `init` one left-fold step per element, `count`
 //! (`(count pred xs)`) tallies the elements its predicate admits, and each of the
@@ -28,10 +29,11 @@
 //! same stages with a scalar terminal — the map-reduce shape, no array at all — and a
 //! count is that same shape with its predicate appended as the pipeline's last guard.
 //! A search is a count's shape again, appending the guard whichever way round its
-//! answer is decided. Its early exit stops the SEARCH, not the pipeline: lone, the
-//! loop condition reads the sentinel and the walk ends at the decision; over a
-//! prefix, the walk stays exhaustive (the staged form runs every prefix stage on
-//! every element) and a `Gate` stage reads the sentinel instead.
+//! answer is decided, and a `take-while` is a guard whose rejecting side ends the
+//! run. Both carry an early exit, and the rule for where it is read is the same:
+//! the chain's INNERMOST op may end the walk — nothing runs before it, so no
+//! per-element work goes unrun — and its sentinel is the loop condition's. Every
+//! other early exit gates its own stage while the walk stays exhaustive.
 //!
 //! ## Why this shape, here
 //!
@@ -47,7 +49,7 @@
 //! It mirrors the container-dispatch monomorphization (`monomorphize.rs`):
 //! recognize a proven-type call across the compile-unit boundary (the callee is
 //! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`filter`/
-//! `fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
+//! `take-while`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
 //! shadows it with a non-primitive binding and is left alone) and collapse it to the
 //! direct form the proof selects.
 //!
@@ -61,10 +63,10 @@
 //! sequencing effects — so each lambda body in a chain of length ≥ 2 must be free
 //! of them (`reorder_safe`): no yield/I/O/emit/FFI/halt (a non-capturing lambda's
 //! only cross-element channel is such an effect). `SIG_ERROR` is permitted; see
-//! `reorder_safe`. A short-circuiting search would go further than reordering if it
-//! cut the walk short under a prefix — leaving a prefix stage's work unrun on every
-//! element past the decision — so under a prefix it stops its own stage instead and
-//! the walk stays exhaustive.
+//! `reorder_safe`. An early exit would go further than reordering if it
+//! cut the walk short with a stage inner to it — leaving that stage's work unrun on
+//! every element past the decision — so only the chain's innermost op ends the
+//! walk; the others stop their own stage while the walk stays exhaustive.
 //!
 //! A body may hold a raw call-position `%`-intrinsic only under the function's own
 //! `(numeric!)` declaration. That declaration floors the parameters at Number —

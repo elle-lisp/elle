@@ -1,15 +1,18 @@
 use super::*;
 
 /// The higher-order collection op a fused chain is built from, and the kind of
-/// each *stage* in the unified pipeline (`Build::element`). Both take
+/// each *stage* in the unified pipeline (`Build::element`). All three take
 /// `(lambda, coll)` and share the `(get`/`push`/`freeze)` index-walk over `coll`'s
 /// array arm; they differ only in how a stage handles the threaded element value:
 /// a `Map` stage transforms it and threads the result on, a `Filter` stage guards
-/// the rest of the pipeline behind its predicate (an `if`).
+/// the rest of the pipeline behind its predicate (an `if`), and a `TakeWhile`
+/// stage guards it the same way but ENDS the run at the first element its
+/// predicate rejects.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Hof {
     Map,
     Filter,
+    TakeWhile,
 }
 
 impl Hof {
@@ -18,20 +21,8 @@ impl Hof {
         match name {
             "map" => Some(Hof::Map),
             "filter" => Some(Hof::Filter),
+            "take-while" => Some(Hof::TakeWhile),
             _ => None,
-        }
-    }
-
-    /// What this op does as a pipeline stage, over the function it was written
-    /// with.
-    pub(super) fn stage(self, param: Binding, body: Hir) -> Stage {
-        match self {
-            Hof::Map => Stage::Transform { param, body },
-            Hof::Filter => Stage::Guard {
-                side: GuardSide::Keep,
-                param,
-                body,
-            },
         }
     }
 }
@@ -60,6 +51,19 @@ pub(super) enum Stage {
     /// current value and continue the pipeline on one side of the predicate.
     Guard {
         side: GuardSide,
+        param: Binding,
+        body: Hir,
+    },
+    /// A `take-while`: continue the pipeline while the predicate admits, and at
+    /// the first element it rejects clear `sentinel`, which ends the run. Where
+    /// this stage is the chain's innermost op — `ends_walk` — the loop condition
+    /// reads the sentinel and the walk stops there, nothing having run before it
+    /// for the elements past the decision. Otherwise the walk stays exhaustive and
+    /// the stage reads the sentinel itself (docs/impl/dissolution.md § "Which early
+    /// exit may end the walk").
+    Take {
+        sentinel: Binding,
+        ends_walk: bool,
         param: Binding,
         body: Hir,
     },
@@ -119,11 +123,16 @@ impl Search {
 /// `map`/`filter` pipeline stages are identical for every terminal; only the
 /// accumulator setup (`build_loop`) and the base case differ.
 ///
-/// - **Collect** — a `map`/`filter`-only chain: fill a fresh `@array` by `push`.
+/// - **Collect** — a `map`/`filter`/`take-while` chain: fill a fresh `@array` by
+///   `push`. Two flags carry what the stdlib ops' array arms decide.
 ///   `unfrozen` picks the result arm (the mutable-array arm): an immutable base
 ///   `freeze`s the accumulator to an immutable result; a mutable `@array` base
 ///   returns it unfrozen (type-preserving, mirroring the stdlib op's own
-///   `(if (mutable? coll) acc (freeze acc))`).
+///   `(if (mutable? coll) acc (freeze acc))`), and so does a chain holding a
+///   `take-while`, whose own array arm never freezes. `empty_is_list` answers an
+///   empty base with `()`, which is what a `take-while` returns there — its
+///   `(empty? coll)` clause precedes its array arm (docs/impl/dissolution.md
+///   § "The two facts the stdlib op's array arm decides").
 /// - **Fold** — a `fold`/`reduce` at the head: a **scalar** accumulator seeded by
 ///   `init`, updated `(assign acc (f acc elem))` per surviving element, whose final
 ///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
@@ -142,7 +151,7 @@ impl Search {
 ///   becomes the pipeline's last guard stage too, so the terminal carries only
 ///   which search it is.
 pub(super) enum Terminal {
-    Collect { unfrozen: bool },
+    Collect { unfrozen: bool, empty_is_list: bool },
     Fold(Box<FoldTerminal>),
     Count,
     Search(Search),
@@ -169,11 +178,11 @@ pub(super) struct FoldTerminal {
     pub(super) body: Hir,
 }
 
-/// A recognized `(map <lambda> …)` / `(filter <lambda> …)` call: the HOF kind,
-/// the lambda argument, and the collection argument (both borrowed). `None` when
-/// `hir` is not a call to the canonical stdlib `map`/`filter` with exactly two
-/// non-spliced arguments (a user redefinition shadows the name with a
-/// non-primitive binding and is excluded).
+/// A recognized `(map <lambda> …)` / `(filter <lambda> …)` /
+/// `(take-while <lambda> …)` call: the HOF kind, the lambda argument, and the
+/// collection argument (both borrowed). `None` when `hir` is not a call to one of
+/// those canonical stdlib ops with exactly two non-spliced arguments (a user
+/// redefinition shadows the name with a non-primitive binding and is excluded).
 pub(super) fn fusable_hof_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
@@ -345,10 +354,10 @@ pub(super) fn body_disqualifies(hir: &Hir, declared_numeric: bool) -> bool {
 }
 
 /// A validated fusable chain, ready for `take_chain`: which op heads it (a scalar
-/// terminal, or nothing but the `map`/`filter` pipeline), the inner `map`/`filter`
-/// pipeline kinds in the order the walk encounters them (OUTER→INNER), and whether
-/// the base is a mutable `@array` (so a Collect terminal emits the accumulator
-/// unfrozen — the mutable-array arm).
+/// terminal, or nothing but the pipeline), the inner pipeline kinds in the order
+/// the walk encounters them (OUTER→INNER), and whether the base is a mutable
+/// `@array` (so a Collect terminal emits the accumulator unfrozen — the
+/// mutable-array arm).
 pub(super) struct ChainPlan {
     pub(super) terminal: TerminalOp,
     pub(super) kinds: Vec<Hof>,
@@ -357,14 +366,15 @@ pub(super) struct ChainPlan {
 
 /// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
 /// optional outermost scalar terminal — a `fold`/`reduce`, a `count`, or a search —
-/// over a `map`/`filter` pipeline (in any mix) bottoming out at a proven immutable
-/// array. Every function qualifies (`qualifies_lambda`, arity 1 for
-/// `map`/`filter`/`count`/a search, 2 for `fold`); and for a **composition** — total
+/// over a `map`/`filter`/`take-while` pipeline (in any mix) bottoming out at a
+/// proven immutable array. Every function qualifies (`qualifies_lambda`, arity 1
+/// for every op but `fold`, which takes 2); and for a **composition** — total
 /// op count ≥ 2, where the terminal counts as an op — every body is `reorder_safe`
-/// (the reordering gate; see the module doc). A lone terminal (or a lone
-/// `map`/`filter`) is a single op and carries no reorder requirement: a fold threads
+/// (the reordering gate; see the module doc). A lone op carries no reorder
+/// requirement: a fold threads
 /// its accumulator strictly in element order and a count applies its predicate left
-/// to right, exactly as the stdlib ops do, and a lone search reads the same way up
+/// to right, exactly as the stdlib ops do, and a lone search or `take-while` reads
+/// the same way up
 /// to the element that decides it. A non-reorder-safe stage declines the whole
 /// composition, and the pre-order recursion (`rewrite`) still fuses its inner
 /// reorder-safe run.
@@ -407,7 +417,7 @@ pub(super) fn validate_chain(
         TerminalOp::Collect
     };
 
-    // The inner map/filter pipeline (1-param functions).
+    // The inner map/filter/take-while pipeline (1-param functions).
     let mut kinds = Vec::new();
     while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, 1)?);
@@ -419,17 +429,33 @@ pub(super) fn validate_chain(
     if ops == 0 {
         return None;
     }
+    // A `take-while` answers an EMPTY input with `()` rather than an array — its
+    // `(empty? coll)` clause precedes its array arm — and the fused loop reads that
+    // emptiness off `len`, which is the BASE's. A `map` preserves it; a `filter` or
+    // another `take-while` can hand an empty collection on from a non-empty base, so
+    // a chain that puts one of those inside a `take-while` declines whole and the
+    // pre-order recursion fuses its inner run instead. `kinds` is outer→inner, so
+    // the stages inner to the outermost `take-while` are the ones after it
+    // (dissolution.md § "The two facts the stdlib op's array arm decides").
+    if let Some(outermost) = kinds.iter().position(|k| *k == Hof::TakeWhile) {
+        if kinds[outermost + 1..].iter().any(|k| *k != Hof::Map) {
+            return None;
+        }
+    }
     let base = classify_base(cur, arena, symbol_names, bases)?;
     // A mutable `@array` base fuses only a single `map`/`filter`: the fused loop
     // walks the base LIVE against a `len` captured once, which matches the stdlib op
-    // exactly for one op. A `fold` (which snapshots via `->array`), a `count` (which
-    // re-reads `(length coll)` every iteration), and a composition (whose staged ops
-    // each run to completion over a fresh array) would each diverge from an
+    // exactly for one op. A `fold` (which snapshots via `->array`), a `count` and a
+    // `take-while` (which re-read `(length coll)` every iteration), and a
+    // composition (whose staged ops each run to completion over a fresh array) would
+    // each diverge from an
     // interleaved live walk under a mutating lambda (dissolution.md § "The
     // mutable-array arm"). The pre-order recursion still fuses the innermost single
     // op of a declined mutable chain.
     let mutable_base = base == BaseKind::Mutable;
-    if mutable_base && (terminal != TerminalOp::Collect || kinds.len() != 1) {
+    let lone_live_walk =
+        terminal == TerminalOp::Collect && matches!(kinds[..], [Hof::Map] | [Hof::Filter]);
+    if mutable_base && !lone_live_walk {
         return None;
     }
     if ops >= 2 && !all_silent {
@@ -517,7 +543,7 @@ pub(super) fn classify_base(
 }
 
 /// A consumed chain, ready for `build_loop`: the **terminal** (Collect, the fold
-/// combinator, the count tally, or which search is answered), the `map`/`filter`
+/// combinator, the count tally, or which search is answered), the pipeline's
 /// **prefix stages** in **application order** (innermost op first), the terminal's
 /// own guard stage (a `count`'s or a search's predicate, which runs last of all),
 /// and the base collection expression.
@@ -536,7 +562,7 @@ pub(super) struct FusedChain {
 /// Consume a validated chain into the parts the loop is built from.
 /// `plan.terminal` and `plan.kinds` are the chain's shape in outer→inner order
 /// (from `validate_chain`); the terminal is peeled first (it wraps the pipeline),
-/// then the map/filter ops. Each op's function is resolved by
+/// then the pipeline ops. Each op's function is resolved by
 /// `FnResolver::take_parts` — moved (a lambda literal) or cloned fresh (a named
 /// template). Validation guarantees the structure, so every destructuring is total.
 ///
@@ -602,12 +628,17 @@ pub(super) fn take_chain(
             });
             Terminal::Search(search)
         }
-        // The mutable-array arm: a mutable `@array` base returns the accumulator
-        // unfrozen (validate_chain proves a mutable base is a lone map/filter, so
-        // it is always a Collect, never paired with a scalar terminal).
-        TerminalOp::Collect => Terminal::Collect {
-            unfrozen: plan.mutable_base,
-        },
+        // The result arm, from the two ops whose array arms decide it: a mutable
+        // `@array` base returns the accumulator unfrozen, and so does a chain
+        // holding a `take-while` — whose empty-input `()` the Collect form must
+        // answer with too.
+        TerminalOp::Collect => {
+            let takes = plan.kinds.contains(&Hof::TakeWhile);
+            Terminal::Collect {
+                unfrozen: plan.mutable_base || takes,
+                empty_is_list: takes,
+            }
+        }
     };
 
     let mut stages = Vec::with_capacity(plan.kinds.len());
@@ -619,11 +650,37 @@ pub(super) fn take_chain(
         let lam = it.next().expect("HOF has 2 args").expr;
         let coll = it.next().expect("HOF has 2 args").expr;
         let (params, body) = fns.take_parts(lam, arena);
-        stages.push(hof.stage(params[0], body));
+        let param = params[0];
+        stages.push(match hof {
+            Hof::Map => Stage::Transform { param, body },
+            Hof::Filter => Stage::Guard {
+                side: GuardSide::Keep,
+                param,
+                body,
+            },
+            // The sentinel a rejecting element clears. Whether it ends the WALK is
+            // decided below, once the stages are in application order.
+            Hof::TakeWhile => {
+                let sentinel = arena.gensym();
+                arena.get_mut(sentinel).is_mutated = true;
+                Stage::Take {
+                    sentinel,
+                    ends_walk: false,
+                    param,
+                    body,
+                }
+            }
+        });
         expr = coll;
     }
     // Collected outer→inner; application order is inner→outer.
     stages.reverse();
+    // Nothing in the pipeline runs before the chain's innermost op, so that op — and
+    // only that op — may end the walk rather than gate its own stage
+    // (dissolution.md § "Which early exit may end the walk").
+    if let Some(Stage::Take { ends_walk, .. }) = stages.first_mut() {
+        *ends_walk = true;
+    }
     FusedChain {
         terminal,
         stages,
