@@ -123,6 +123,20 @@ the stored value dies at its producer release. Same retain-while-on-top
 discipline as `lower_call`'s borrowed-arg retain; pinned by
 `region-reassign-callresult-store.lisp`.
 
+**A value a 1-slot container holds is a runtime fact.** Which region the content
+lives in is decided per store, so every mint of that content that is not adjacent
+to the store — the `Return` handing the final value to the caller — reads the
+region off the VALUE. The reason is mechanical: each store discharges its value's
+producer claim with a release that *unmaps* the allocation's static slot
+(`take_runtime_region_for_drop_slot`), so past the last store the slot names
+nothing. `cell_stored_regions` carries the class to the one predicate that
+decides the encoding (`coalescible_solver_region`), beside the module-scope
+dynamic classes it already refuses. Left coalescible, the mint resolves an
+emptied slot and the equivalence oracle detonates, which is the loud face of a
+mis-coalesce and what that oracle is for
+(`coalescible_refuses_a_cell_stored_value`,
+`tests/elle/region-pair-heap-content-uaf.lisp`).
+
 **The gate.** The model trades static releases for suppression plus a
 value-based store/overwrite pair, so it is sound only when the cell's claim on a
 value region's single compiler-owned reference is exclusive — and the two
@@ -132,11 +146,13 @@ next section splits them):
 - **sole-held** — no other *read, user* binding may hold the region (a
   synthetic ANF producer temp or a write-only statement wrapper is not an
   alias); and
-- **not returned** — the region must not appear in any return site or lambda
-  tail set. A return transfers the value's initial reference to the caller,
-  whose value-based release consumes it; the cell claims the same reference
-  for drop-on-overwrite/teardown. Two static owners of one reference is a
-  double-free.
+- **not returned** — a *module-scope* cell's region must not appear in any
+  return site or lambda tail set. That cell ADOPTS the producer's reference,
+  and a return transfers the same reference to the caller, whose value-based
+  release consumes it — two static owners of one reference is a double-free.
+  A fn-local cell counts what it stores, so it claims nothing the return
+  needs and asks the question of nothing (see "Returned fn-local reassigned
+  mutables", below).
 
 **What the cell donates it must hold alone; what it counts it need not.**
 The sole-held question is asked on behalf of exactly one thing: the
@@ -425,38 +441,63 @@ the scope-based solver shares regions, so skipping there leaks an aliased value
 cells") keep a read from claiming the init region; the backstop is the
 correct-by-construction floor they build on.
 
-**Returned fn-local reassigned mutables.** A returned fn-local reassigned
-mutable stays balanced under one rule: exactly one callee decref per
-callee-held reference, plus the caller's mint. The mint-at-return convention
-supplies the caller's side — every `Return` mints one owning reference
-(`lower_return`'s `IncrefValueRegion`) which the caller balances with a
-`DecrefValueRegion` at the call result's decref_point — while the callee
-releases its own single reference with the reaching **assign-value** region's
-ordinary decref. So the callee KEEPS its assign-value decref (dropping it, or
-the mint, unbalances the pair into a leak or a double-free — the io/scheduler
-cross-fiber guard `tests/elle/region-reassign-return-park-uaf.lisp`, where a
-scheduler park that rebuilt the value at rc 1 makes a dropped-mint double-free
-fatal rather than latent).
+**Returned fn-local reassigned mutables — the return claims the MINT's
+reference, not the cell's.** Every `Return` mints one owning reference
+(`lower_return`'s `IncrefValueRegion`), which the caller balances with a
+`DecrefValueRegion` at the call result's `decref_point`. That mint is a
+reference the callee did not have a moment earlier, so it takes nothing from
+anyone — and a fn-local cell's own reference is likewise its own, taken by the
+counted store. Two references, two independent channels: the returned binding
+takes the **same container model** an unreturned one takes, and being returned
+decides nothing about it. Each channel is exactly one release, and a scheduler
+park is what makes a second one fatal rather than latent — a park rebuilds the
+value at rc 1, so the extra decref frees it before the caller reads
+(`tests/elle/region-reassign-return-park-uaf.lisp`).
 
-When the binding is assigned ONCE, its binding region and its assign-value
-region coalesce onto a single region (`binding_regs == regions`): one callee
-decref fires, the mint carries ownership to the caller, balanced — and there
-is nothing to suppress. A **loop** over the cell breaks that coalescing: the
-binding gets its own loop-carried region (the slot that carries the
-accumulator across the back-edge) DISTINCT from the per-iteration assign-value
-region, yet both name the same runtime value at the tail. The unsuppressed
-baseline then emits a value-route decref for EACH at the `Return` — two callee
-decrefs of the one callee-held reference, the second freeing the caller's
-minted reference before the caller reads it (the loop-reassigned-return
-double-free, `tests/integration/fixtures/region-capture-cell-string-accum-uaf.lisp`,
-guardfree pin `region_capture_cell_string_accum_uaf`). So a sole-held returned
-fn-local reassigned mutable suppresses the binding's OWN regions
-(`binding_regs \ regions` — the init region and the loop-carried region) while
-KEEPING the assign-value regions' decref: one callee release plus the mint,
-exactly as the single-assign case. The single-assign case has
-`binding_regs == regions`, so this suppresses nothing there and leaves the park
-guard's baseline untouched. (No drop-on-overwrite for a returned binding: the
-displaced intermediates leak as tolerated debt, never a UAF.)
+The order is what makes the pair exact, and the lowerer supplies it. The mint is
+emitted before the `Return` node's own releases (`lower_return`), and the cell's
+demise is that node — the tail read of the binding is the cell's last access. So
+the sequence at the tail is mint, then content drop: the caller leaves holding
+the reference the mint created and the cell's is gone. A loop-carried cell's
+displaced priors take drop-on-overwrite exactly as an unreturned cell's do, which
+is what keeps the accounting per-value rather than per-binding. Without it every
+value but the last is stranded, one region per trip
+(`tests/elle/region-loop-acc-return.lisp`).
+
+What the returned binding does still suppress is the binding's OWN regions
+(`binding_regs \ kept`). When the binding is assigned ONCE its binding region and
+its assign-value region coalesce (`binding_regs == regions`), so there is nothing
+to suppress. A **loop** over the cell breaks that coalescing: the binding gets its
+own loop-carried region (the slot that carries the accumulator across the
+back-edge) DISTINCT from the per-iteration assign-value region, yet both name the
+same runtime value at the tail. Leaving both unsuppressed emits a value-route
+decref for EACH at the `Return` — two releases of one reference, the second
+freeing the caller's minted reference before the caller reads it (the
+loop-reassigned-return double-free,
+`tests/integration/fixtures/region-capture-cell-string-accum-uaf.lisp`, guardfree
+pin `region_capture_cell_string_accum_uaf`).
+
+**A `Return` is a reader of the cell's content.** A stored value's producer
+release is pinned to its store site because the cell's counted reference takes
+over from there — so anything that borrows the value afterward is protected by
+the cell, up to the point the cell drops it. The return borrows exactly that way:
+it hands the content out and the mint pays for the caller's copy, so the
+producer's claim owes the `Return` nothing. Left unheld, the ordinary
+returned-region extension (`return_sites`, `decref::populate_decref_points`)
+drags the store-site pin back out to the `Return`, where one release names
+whatever the producer's ANF slot holds LAST — every earlier value of a loop
+stranded.
+
+The hold-back is the same predicate the uncounted-read extension already asks,
+against the same `cell_drop_point`, because it rests on the same fact: the cell's
+reference protects a borrow only up to the point the cell drops it. Where the
+cell drops the value at or after the `Return`, the extension buys nothing and is
+skipped; where it drops EARLIER the producer's reference is the return's only
+protection and the extension stands, which costs the store-site pin and leaves
+the over-keep — the safe direction to be wrong in. The reference is the test:
+`reassign_return_does_not_extend_a_cell_stored_value` for the hold-back, and
+`tests/elle/region-loop-acc-return.lisp` (guardfree pin
+`region_loop_acc_return_uaf`) for the measured shape.
 
 One obligation binds the fallback for a NON-sole returned binding (left at the
 unsuppressed baseline): **a mutated slot is not a release route.** A

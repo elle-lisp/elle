@@ -245,9 +245,18 @@ impl<'a> Lowerer<'a> {
     /// (`call_result_regions`, which subsumes a returned fixed param's phantom
     /// region and an opaque `(f x)`), an env-cell release (`cell_release_regions`,
     /// a captured upvalue), a reassign-suppressed region
-    /// (`suppressed_decref_regions`), or a reassigned 1-slot-container value
-    /// region (`mutated_binding_value_regions`, which also catches a returned
-    /// `Var` aliasing a store target — escape.md divergence 2).
+    /// (`suppressed_decref_regions`), a reassigned 1-slot-container value region
+    /// (`mutated_binding_value_regions`, which also catches a returned `Var`
+    /// aliasing a store target — escape.md divergence 2), or a value a fn-local
+    /// 1-slot container holds (`cell_stored_regions`).
+    ///
+    /// That last class is a runtime fact even though its allocation site names a
+    /// static slot: the container re-mints its content at every store and each
+    /// store's producer release *unmaps* that slot, so a mint emitted later — the
+    /// `Return` handing the final content out — would resolve the slot to nothing
+    /// and the equivalence oracle detonates
+    /// (docs/impl/region/bindings.md § "A value a 1-slot container holds is a
+    /// runtime fact"; `coalescible_refuses_a_cell_stored_value`).
     ///
     /// A returned `Var` whose `binding_source_regions` names *more than one*
     /// region is a branch-dependent mix — not statically nameable — so it is
@@ -269,6 +278,7 @@ impl<'a> Lowerer<'a> {
             || info.cell_release_regions.contains(&region)
             || info.suppressed_decref_regions.contains(&region)
             || info.mutated_binding_value_regions.contains(&region)
+            || info.cell_stored_regions.contains(&region)
         {
             return None;
         }

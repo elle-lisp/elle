@@ -18,12 +18,13 @@ use super::*;
 fn coalescible_predicate_class_logic() {
     // The predicate's class logic in isolation, over a hand-built `RegionInfo`.
     // This pins every dynamic-class exclusion — including the reassign classes
-    // (`suppressed_decref_regions`, `mutated_binding_value_regions`) that
-    // functionalize's assignment-conversion makes unreachable from straight-line
-    // Elle source in this unit harness — exactly per docs/impl/region/mechanism.md
-    // § "Compile-time region selection (coalescing)": Some iff the region is `live`
-    // and in NONE of the four dynamic classes, and (for a returned `Var`)
-    // `binding_source_regions` names exactly one region.
+    // (`suppressed_decref_regions`, `mutated_binding_value_regions`,
+    // `cell_stored_regions`) that functionalize's assignment-conversion makes
+    // unreachable from straight-line Elle source in this unit harness — exactly
+    // per docs/impl/region/mechanism.md § "Compile-time region selection
+    // (coalescing)": Some iff the region is `live` and in NONE of the dynamic
+    // classes, and (for a returned `Var`) `binding_source_regions` names exactly
+    // one region.
     use crate::hir::region::Region;
     let arena = crate::hir::BindingArena::new();
 
@@ -61,6 +62,9 @@ fn coalescible_predicate_class_logic() {
             Some("mutated") => {
                 info.mutated_binding_value_regions.insert(target);
             }
+            Some("cell_stored") => {
+                info.cell_stored_regions.insert(target);
+            }
             _ => {}
         }
         info
@@ -75,7 +79,13 @@ fn coalescible_predicate_class_logic() {
          allocation must coalesce",
     );
     // Each dynamic class refuses.
-    for class in ["call_result", "cell_release", "suppressed", "mutated"] {
+    for class in [
+        "call_result",
+        "cell_release",
+        "suppressed",
+        "mutated",
+        "cell_stored",
+    ] {
         assert_eq!(
             lw(build(Some(class), true, vec![target])).coalescible_solver_region(&var),
             None,
@@ -249,6 +259,57 @@ fn coalescible_accepts_returned_string_literal() {
         }
     }
     assert!(found, "expected a returned String node in (fn () \"hi\")");
+}
+
+#[test]
+fn coalescible_refuses_a_cell_stored_value() {
+    // A fn-local mutable accumulated across a `while` and handed back takes the
+    // 1-slot-container model, so its content is a RUNTIME fact: the container
+    // re-mints it at every store and each store's producer release unmaps the
+    // allocation's static slot, leaving nothing for a later mint to resolve. The
+    // returned `Var` must therefore take the value-resolved encoding
+    // (docs/impl/region/bindings.md § "A value a 1-slot container holds is a
+    // runtime fact"). Counterfactual: without the `cell_stored_regions` row the
+    // `%pair`'s region reads as a clean local allocation and the return mint is
+    // slot-resolved — `AssertRegionMatches` then detonates on the emptied slot
+    // (tests/elle/region-pair-heap-content-uaf.lisp).
+    let (lowerer, hir) = make_lowerer(
+        "(fn (n) (let [@acc (%pair 0 0)] \
+            (var i 0) \
+            (while (%lt i n) (begin (assign acc (%pair i 7)) (assign i (%add i 1)))) \
+            acc))",
+    );
+    assert!(
+        !lowerer.region_info.cell_stored_regions.is_empty(),
+        "precondition: the accumulator takes the container model, so its stored \
+         value region is recorded",
+    );
+    let mut found = false;
+    for p in return_value_ptrs(&hir) {
+        let v = unsafe { &*p };
+        let HirKind::Var(b) = &v.kind else { continue };
+        let names_a_cell_value = lowerer
+            .region_info
+            .binding_source_regions
+            .get(b)
+            .is_some_and(|rs| {
+                rs.iter()
+                    .any(|r| lowerer.region_info.cell_stored_regions.contains(r))
+            });
+        if !names_a_cell_value {
+            continue;
+        }
+        found = true;
+        assert!(
+            lowerer.coalescible_solver_region(v).is_none(),
+            "a returned Var naming a 1-slot container's content must NOT coalesce \
+             — the store that took it unmapped the slot the mint would resolve",
+        );
+    }
+    assert!(
+        found,
+        "expected the tail to return a Var naming the accumulator's stored value",
+    );
 }
 
 #[test]

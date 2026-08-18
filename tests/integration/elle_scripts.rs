@@ -92,6 +92,24 @@ fn region_array_element_uaf_guardfree() {
     );
 }
 
+// A fn-local mutable accumulated across a `while` and handed back takes the
+// 1-slot-container model, so each value the loop displaces is released at the
+// overwrite and the last one leaves with the caller — the `Return`'s mint pays
+// for the caller's reference and the cell's content drop, emitted after that
+// mint, releases the cell's (docs/impl/region/bindings.md § "Returned fn-local
+// reassigned mutables — the return claims the MINT's reference, not the
+// cell's"). Armed under the UAF oracle because the model runs a free path the
+// unsuppressed baseline never ran: were the content drop to consume the caller's
+// reference instead, the returned chain would fault at the caller's read. The
+// harness already covers the file's plain vm/jit runs and its bounded-rate face.
+#[test]
+fn region_loop_acc_return_uaf() {
+    run_elle_script_with_args(
+        "region-loop-acc-return",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a top-level mutable reassigned to a value referencing its old content
 // (`(assign x (pair v x))`) must survive when the file runs as the `%file-body`
 // whole-module thunk (the `elle test` shape). The solver must classify the

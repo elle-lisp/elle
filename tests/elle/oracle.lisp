@@ -298,18 +298,16 @@
 # (docs/impl/selfrec.md § "The deferral needs no escape gate").
 # Its control `recur-local-foreign-mint` is not self-recursive, so nothing strands it
 # in the first place and the gap isolates the strand rather than the retain.
-# `loop-acc-return` is the POISONED VALUE ROUTE reaching the most ordinary
-# imperative idiom there is — accumulate into a local across a loop, return it.
-# Its release is routed through the reassigned binding's slot, and the slot's
-# occupant at the release point is whatever the LAST iteration stored, so every
-# earlier value the loop put there has no release at all: one region per
-# iteration, scaling with the trip count. Its twin `recur-acc-return` computes
-# the identical value by threading the accumulator as a parameter to a
-# self-recursive binding and reads 0, so the pair measures exactly what a
-# programmer would have to give up to be leak-free — which is the reason the pair
-# is here rather than one probe.
-(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"
-                   "loop-acc-return"])
+# `loop-acc-return` and `recur-acc-return` are CLOSED controls (undeclared, like
+# `rest-array-copy`) for the RETURNED 1-slot container: a local accumulated across
+# a loop and handed back counts what it holds exactly as an unreturned cell does,
+# so each displaced prior dies at the overwrite and the final content leaves with
+# the caller (docs/impl/region/bindings.md § "Returned fn-local reassigned
+# mutables"). They must stay a PAIR: `recur-acc-return` computes the identical
+# value by threading the accumulator as a parameter to a self-recursive binding,
+# so the gap between them is exactly what a programmer would have to give up to be
+# leak-free, and a regression of either trips the completeness gate.
+(declare-root :f5 ["raw-del" "raw-del-immediate" "fresh-env-cell"])
 # F6 has NO declared probe: a cursor walk's rate was the ALIASED INIT, not the
 # cursor. `list-cursor` is now a CLOSED control (undeclared, like
 # `rest-array-copy`) for the counted-init half of the 1-slot container: a cell
@@ -875,11 +873,10 @@
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 0]
    # zip's F1a copy-scratch is dissolved: its column walks are cell-free top-level
    # drivers threading `arrs`/`out` and their accumulators as params
-   # (`zip-tuple-at`/`zip-build-array`/`zip-build-list`), so no accumulator here is
-   # a slot rewritten across a loop — `loop-acc-return` gauges that construction
-   # directly, and this probe reads 0 because `zip` does not use it. What remained was
-   # the per-path return frontier (docs/impl/region/mechanism.md § "The return
-   # frontier is per-path"): every one of those drivers is a walk whose base case
+   # (`zip-tuple-at`/`zip-build-array`/`zip-build-list`), so the walks allocate no
+   # closure and no capture cell. What remained was the per-path return frontier
+   # (docs/impl/region/mechanism.md § "The return frontier is per-path"): every one
+   # of those drivers is a walk whose base case
    # returns a heap argument while the recursive arm holds the `decref_point`, so
    # each call stranded the argument it handed back. A CLOSED control now,
    # undeclared like `rest-array-copy` so a regression trips the completeness gate.
@@ -2116,21 +2113,24 @@
                        (assign acc (append acc [j]))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 
-# ── The loop-carried accumulator a function RETURNS (F5) ──────────────
+# ── The loop-carried accumulator a function RETURNS ───────────────────
 # `loop-acc-return` builds a list by reassigning a local across a `while` and
 # hands it back; `recur-acc-return` computes the same list by threading the
 # accumulator as a parameter to a self-recursive binding. Same value, same
-# allocations, one difference: which construct carries the accumulator.
+# allocations, one difference: which construct carries the accumulator, so the
+# pair prices the rewrite a programmer would otherwise have to make.
 #
-# Four discriminators place the defect, and all four are needed — the shape is
-# ordinary enough that resemblance would misattribute it. It needs the LOOP (the
-# same stores unrolled read 0), it needs the value to leave as the frame's own
-# returned value (handing it to a callee, or storing it into a container that is
-# returned instead, reads 0), it is indifferent to whether the accumulated values
-# are self-referential (a cons chain and a fresh string per iteration both leak),
-# and it survives an alias or a `let` binding on the way out. What it is NOT is
-# closure capture: a helper closing over the accumulator, or over a mutable input
-# container, reads 0 — those are the `capture-acc-*` controls below.
+# The returned binding takes the 1-slot-container model, so each value the loop
+# displaces dies at the overwrite and the final content leaves with the caller —
+# the `Return`'s mint pays for the caller's reference and the cell's content drop,
+# emitted after that mint, releases the cell's. Withhold the container half and
+# each stored value is protected only by its producer's one release, which the
+# returned-region extension drags out to the `Return`: it names whatever the
+# producer's ANF slot holds LAST and every earlier value is stranded, one region
+# per trip. Neither probe cares whether the accumulated values are
+# self-referential (a cons chain and a fresh string per iteration read alike), and
+# neither is about closure capture — a helper closing over the accumulator, or
+# over a mutable input container, is the `capture-acc-*` pair below.
 (defn loop-acc-return-shape [n]
   (def @acc ())
   (def @i 0)
@@ -2144,7 +2144,7 @@
 (defn recur-acc-return-shape [n]
   (recur-acc-return-step 0 n ()))
 (pin (measure "loop-acc-return" (fn [j] (length (loop-acc-return-shape 4))) 100
-              6 60 0.4 0.5) 3.0)
+              6 60 0.4 0.5) 0)
 (pin (measure "recur-acc-return" (fn [j] (length (recur-acc-return-shape 4)))
               100 6 60 0.4 0.5) 0)
 

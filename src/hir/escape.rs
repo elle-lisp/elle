@@ -87,8 +87,9 @@
 //!   return frontier; its separate sole-held *reachability* refusal reads the
 //!   region capture-graph `region::infer::escape::captured_bindings`, never escape and
 //!   never the `is_captured` proxy), branch **compensation**'s escaping-exclusion
-//!   (the return frontier), and the reassign 1-slot-container gate
-//!   (`binding_escapes_via_return`, per binding).
+//!   (the return frontier), and the MODULE-SCOPE half of the reassign
+//!   1-slot-container gate (`binding_escapes_via_return`, per binding — the
+//!   fn-local half counts what it stores and so asks nothing about the return).
 //! - **The lowerer** (`lir/lower`): `tail_callee_defers_release` reads
 //!   `lambda_escapes_definition` / `binding_escapes_activation` for the escape half
 //!   of the deferral decision — region-locality stays a region fact. A letrec
@@ -284,8 +285,8 @@ impl EscapeInfo {
     /// Does this binding's value escape via the **return facet** — flow to a
     /// tail/return position? Strictly narrower than `binding_escapes_activation`
     /// (a value stored into a container or captured by a closure escapes its
-    /// activation but is *not* returned). The reassign gate's "not-returned"
-    /// check reads this directly, per binding (see the field doc).
+    /// activation but is *not* returned). The module-scope reassign gate's
+    /// "not-returned" check reads this directly, per binding (see the field doc).
     pub fn binding_escapes_via_return(&self, b: Binding) -> bool {
         self.binding_returns.contains(&b)
     }

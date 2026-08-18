@@ -593,6 +593,22 @@ pub struct RegionInfo {
     /// because there the producer's reference is donated to the cell and the
     /// final content is freed by the file-letrec frame teardown.
     pub cell_containers: HashMap<Binding, CellContainer>,
+    /// Every region a fn-local 1-slot container stores — the union of
+    /// `cell_containers`' store value regions, kept as a set because the lowerer
+    /// asks it per mint.
+    ///
+    /// Such a value's region is a RUNTIME fact even where its allocation site
+    /// names a static slot: the container re-mints its content at every store,
+    /// and each store discharges the producer's claim with a release that
+    /// *unmaps* that slot (`take_runtime_region_for_drop_slot`). So a mint
+    /// emitted later — the `Return` handing the final content to the caller — has
+    /// no slot to resolve and must read the region from the value. This is the
+    /// fn-local twin of `mutated_binding_value_regions`' dynamic boundary, kept
+    /// separate because that set also governs release ROUTES, which a cell's
+    /// value regions reach through their own producer temps
+    /// (docs/impl/region/bindings.md § "A value a 1-slot container holds is a
+    /// runtime fact").
+    pub cell_stored_regions: FxHashSet<Region>,
     /// Begin HirId → per-binding region for each pre-allocated capture cell
     /// (`lower_begin`'s MakeCaptureCell pre-pass), in `collect_preallocate_
     /// bindings` order. One region PER CELL — emitting every cell against the
@@ -859,6 +875,7 @@ impl RegionInfo {
             mutated_binding_value_regions: FxHashSet::default(),
             reassigned_local_bindings: FxHashSet::default(),
             cell_containers: HashMap::new(),
+            cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),

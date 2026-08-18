@@ -790,13 +790,11 @@
 ## ── Collection transforms ───────────────────────────────────────────
 
 ## Cell-free top-level drivers for `zip`. Each walk threads `arrs`/`k`/`out` and
-## its accumulator as PARAMETERS to a self-recursive top-level binding, so every
-## accumulator here is a parameter renewed per call rather than one local slot
-## rewritten across a loop — the closure-free property `fold` uses
-## (docs/impl/selfrec.md). The oracle's `loop-acc-return`/`recur-acc-return` pair
-## gauges what the two constructions cost, and is the reference for choosing this
-## one. `zip-tuple-at` conses column `i`'s tuple from the last input backward, so
-## it comes out in order with no reversal pass.
+## its accumulator as PARAMETERS to a self-recursive top-level binding, so the
+## walk allocates no closure and no capture cell — the closure-free property
+## `fold` uses (docs/impl/selfrec.md), and the reason for choosing this shape.
+## `zip-tuple-at` conses column `i`'s tuple from the last input backward, so it
+## comes out in order with no reversal pass.
 (def zip-tuple-at
   (fn [arrs k i j acc]
     (if (< j 0)

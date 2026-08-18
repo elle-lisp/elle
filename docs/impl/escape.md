@@ -34,8 +34,8 @@ reason for the verdict:
 - **per binding, return facet only** — does the value escape *specifically by
   flowing to a tail/return*? `binding_escapes_via_return(b)`. A strict
   sub-question of the full set (a value stored into a container or captured by a
-  closure escapes its activation but is **not** returned), read by the reassign
-  1-slot-container gate (below).
+  closure escapes its activation but is **not** returned), read by the
+  module-scope half of the reassign 1-slot-container gate (below).
 - **per binding, every facet but return** — does the value escape by a route
   *other* than flowing to a tail/return? `binding_escapes_beyond_return(b)`. The
   complement, and the two together are what let a consumer say "this facet and no
@@ -156,7 +156,10 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     (`binding_escapes_via_return`, per binding —
     [region/bindings.md](region/bindings.md); read per binding, never by projecting
     a returned region onto a cell, since `binding_source_regions` is "where the
-    value points," not "where it lives");
+    value points," not "where it lives"). Only the **module-scope** half asks it:
+    that cell adopts the producer's reference, which the return also transfers,
+    while a fn-local cell takes a counted reference of its own and so claims
+    nothing the return needs;
   - the **frame-held admission** (`regions::escape::frame_held_regions`) the
     branch-arm release window and the lowerer's frame-exit release share: both make
     a release fire on a path where none fired before, so both must know this frame

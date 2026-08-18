@@ -83,14 +83,14 @@ fn reassign_gate_keeps_container_stored_value_fn_local() {
     );
 }
 
-/// A reassigned binding whose value is RETURNED must not get the
-/// container model: the return transfers the value's single initial
-/// reference to the caller while the model claims it for the cell —
-/// two static owners of one reference. Today this shape is refused
-/// twice over (the read-after-assign is phi-wrapped, so the phi
-/// binding alias fails sole_held; and the tail regions land in
-/// `returned_regions`); the pin holds either derivation accountable so
-/// neither can be silently voided.
+/// A reassigned binding a conditional `assign` gives a PHI is refused: the phi
+/// is a second name for the value, so the store-site pin — which moves a
+/// producer release earlier — would leave that name reading a freed value. The
+/// refusal is `sole_held`'s alone; being read at the tail decides nothing, since
+/// the `Return`'s mint is a reference the callee did not hold a moment earlier
+/// (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables").
+/// Nothing may be suppressed on the fallback either: the unsuppressed baseline
+/// is what releases each value's producer reference there.
 #[test]
 fn reassign_gate_refuses_returned_value() {
     let (hir, _, info) = pipeline(
@@ -126,11 +126,9 @@ fn reassign_gate_refuses_returned_value() {
 /// caller's read (`region_capture_cell_string_accum_uaf`). Suppressing the
 /// binding's own region keeps the single assign-value decref (the callee's one
 /// release) and lets the `Return` mint carry ownership to the caller. Contrast
-/// `reassign_gate_refuses_returned_value` (an `if`-shaped returned reassign is
-/// phi-aliased ⇒ not sole ⇒ no split) and a single-assign returned cell, whose
-/// binding and assign-value regions coalesce so there is nothing to suppress —
-/// the mint-plus-lone-decref baseline the scheduler-park guard
-/// (`region-reassign-return-park-uaf.lisp`) depends on.
+/// `reassign_gate_refuses_returned_value` (an `if`-shaped reassign is
+/// phi-aliased ⇒ not sole ⇒ no model at all) and a single-assign cell, whose
+/// binding and assign-value regions coalesce so there is nothing to suppress.
 #[test]
 fn reassign_gate_splits_returned_loop_carried_region() {
     let (hir, _, info) = pipeline(
@@ -181,6 +179,149 @@ fn reassign_gate_splits_returned_loop_carried_region() {
         acc_regs.len(),
         acc_regs
     );
+}
+
+/// A RETURNED fn-local reassigned mutable takes the same container model an
+/// unreturned one takes. The return claims the reference the `Return`'s mint
+/// creates, which the callee did not hold a moment earlier; the cell's own
+/// reference is the counted store's and claims nothing from anyone. So being
+/// returned decides nothing about the container half — and withholding it
+/// strands every value the loop displaces, one region per trip
+/// (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables — the
+/// return claims the MINT's reference, not the cell's";
+/// `tests/elle/region-loop-acc-return.lisp` measures the strand).
+#[test]
+fn reassign_gate_counts_a_returned_loop_accumulator() {
+    let (hir, info) = returned_loop_accumulator();
+    let (acc, cell) = returned_accumulator_cell(&hir, &info);
+    assert!(
+        !cell.forwards_content,
+        "nothing forwards on from the returned link, so it keeps the content \
+         drop — the release of the cell's own reference, which the `Return` mint \
+         has already replaced for the caller"
+    );
+    assert!(
+        cell.stores.value_regions().next().is_some(),
+        "precondition: the loop's assign records the value it stores ({acc:?})"
+    );
+    for (site, b) in find_reassign_sites(&hir) {
+        if b != acc {
+            continue;
+        }
+        assert!(
+            info.drop_on_overwrite_sites.contains(&site),
+            "a returned cell keeps drop-on-overwrite at @{} — the channel that \
+             releases each value the loop displaces",
+            site.0
+        );
+        assert!(
+            !info.donated_overwrite_sites.contains(&site),
+            "a fn-local cell's store is COUNTED, whatever the tail does with the \
+             content: donating at @{} would leave the producer's reference with \
+             no release",
+            site.0
+        );
+    }
+}
+
+/// A `Return` is a reader of the cell's content, and the cell's reference
+/// protects it: the stored value's producer release stays pinned to its STORE
+/// site rather than riding the returned-region extension out to the `Return`.
+///
+/// The extension exists so a returned region's release orders after the mint.
+/// A cell-stored value needs nothing from it — the cell holds a counted
+/// reference of its own from the store onward, and drops it at the content drop
+/// the same `Return` node carries, after the mint. Left extended, the one
+/// release names whatever the producer's ANF slot holds LAST, so every earlier
+/// value of a loop is stranded (docs/impl/region/bindings.md § "A `Return` is a
+/// reader of the cell's content").
+#[test]
+fn reassign_return_does_not_extend_a_cell_stored_value() {
+    let (hir, info) = returned_loop_accumulator();
+    let (acc, cell) = returned_accumulator_cell(&hir, &info);
+    let stores: Vec<HirId> = cell.stores.sites().collect();
+    assert_eq!(
+        stores.len(),
+        1,
+        "precondition: the loop body assigns {acc:?} exactly once (got {stores:?})"
+    );
+    let returns = find_returns(&hir);
+    assert!(
+        !returns.is_empty(),
+        "precondition: the shape reads the accumulator at the tail"
+    );
+    for r in cell.stores.value_regions() {
+        let dp = info
+            .region_data
+            .get(&r)
+            .unwrap_or_else(|| panic!("stored region {r:?} has no decref point"))
+            .decref_point;
+        assert!(
+            !returns.contains(&dp),
+            "the stored value's release rode the returned-region extension out to \
+             the `Return` (@{}): one release there names only the last iteration's \
+             value, stranding every earlier one",
+            dp.0
+        );
+        assert_eq!(
+            dp, stores[0],
+            "a cell-stored value's producer release is pinned to the store that \
+             took it (region {r:?} landed at @{})",
+            dp.0
+        );
+    }
+}
+
+/// The returned loop accumulator: a fn-local mutable a `while` reassigns, whose
+/// final content the frame hands back. Shared by the two tests above so the
+/// container-model admission and the release placement are read off one shape.
+fn returned_loop_accumulator() -> (Hir, RegionInfo) {
+    let (hir, _, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (let [@acc (%pair 0 0)]\n\
+             (var i 0)\n\
+             (while (%lt i n)\n\
+               (begin (assign acc (%pair i 7))\n\
+                      (assign i (%add i 1))))\n\
+             acc)))\n\
+         (h 3)",
+    );
+    (hir, info)
+}
+
+/// The accumulator binding of [`returned_loop_accumulator`] and its recorded
+/// container. `acc` is the heap-carrying reassigned mutable — the immediate `i`
+/// counter carries no region.
+fn returned_accumulator_cell<'a>(
+    hir: &Hir,
+    info: &'a RegionInfo,
+) -> (Binding, &'a crate::hir::region::CellContainer) {
+    let acc = find_reassign_sites(hir)
+        .into_iter()
+        .map(|(_, b)| b)
+        .find(|b| {
+            info.binding_source_regions
+                .get(b)
+                .is_some_and(|rs| !rs.is_empty())
+        })
+        .expect("acc: the heap-carrying reassigned mutable");
+    let cell = info.cell_containers.get(&acc).unwrap_or_else(|| {
+        panic!("a returned fn-local reassigned mutable must record a container ({acc:?})")
+    });
+    (acc, cell)
+}
+
+/// Every `Return` node in the tree — the points `lower_return` mints at.
+fn find_returns(hir: &Hir) -> Vec<HirId> {
+    let mut out = Vec::new();
+    fn walk(hir: &Hir, out: &mut Vec<HirId>) {
+        if matches!(&hir.kind, HirKind::Return { .. }) {
+            out.push(hir.id);
+        }
+        hir.for_each_child(|c| walk(c, out));
+    }
+    walk(hir, &mut out);
+    out
 }
 
 /// Stay-GREEN control: the plain sole-held, not-returned top-level
@@ -1209,31 +1350,48 @@ fn reassign_gate_refuses_forwarding_chain_with_an_aliased_link() {
     }
 }
 
-/// The other half of the whole-chain rule: a link the RETURN facet refuses
-/// declines the chain too. Returning the binding transfers its reference to the
-/// caller, so the last link cannot also drop it — and with that link declined,
-/// nothing would release what the upstream link forwarded on.
+/// A chain whose LAST link is returned is admitted exactly as an unreturned one
+/// is, and keeps the same one-reference-one-channel shape: the upstream link
+/// forwards its content drop on, and the last link keeps it. The return claims
+/// the reference the `Return`'s mint creates, not the one the chain forwards, so
+/// the last link's content drop — emitted after that mint — is still the release
+/// of the chain's own reference (docs/impl/region/bindings.md § "Returned
+/// fn-local reassigned mutables — the return claims the MINT's reference, not
+/// the cell's").
 #[test]
-fn reassign_gate_refuses_forwarding_chain_whose_last_link_is_returned() {
+fn reassign_gate_counts_a_forwarding_chain_whose_last_link_is_returned() {
     let (hir, info) = two_loop_chain("", "last");
     let links = chain_links(&hir, &info);
-    assert!(
-        links.len() >= 2,
-        "precondition: the shape still chains two links (got {links:?})"
+    assert_eq!(
+        links.len(),
+        2,
+        "precondition: the shape chains two links (got {links:?})"
     );
-    for b in &links {
-        assert!(
-            !info.cell_containers.contains_key(b),
-            "no link of a returned chain may record a container ({b:?})"
-        );
-    }
+    let up = info
+        .cell_containers
+        .get(&links[0])
+        .expect("the upstream link takes the container model");
+    let down = info
+        .cell_containers
+        .get(&links[1])
+        .expect("the returned last link takes the container model");
+    assert!(
+        up.forwards_content,
+        "the upstream link hands its content drop to the link it forwards into"
+    );
+    assert!(
+        !down.forwards_content,
+        "the returned last link keeps the content drop — the release of the \
+         chain's one reference, which the `Return` mint has already replaced for \
+         the caller"
+    );
     for (site, b) in find_reassign_sites(&hir) {
         if !links.contains(&b) {
             continue;
         }
         assert!(
-            !info.drop_on_overwrite_sites.contains(&site),
-            "a returned last link declines the whole chain at @{}",
+            info.drop_on_overwrite_sites.contains(&site),
+            "every link of an admitted chain keeps drop-on-overwrite at @{}",
             site.0
         );
     }

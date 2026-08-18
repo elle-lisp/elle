@@ -171,24 +171,29 @@ struct LocalVerdict {
     /// Where the chain's binder stores the init value — the one position the
     /// counted-init retain can take. `None` leaves donate-or-refuse.
     init_site: Option<HirId>,
-    /// The binding's value reaches a tail, so the return transfers the reference
-    /// the cell would also claim.
-    returned: bool,
 }
 
 impl LocalVerdict {
     /// The binding takes the full container model: drop-on-overwrite for each
     /// displaced prior, and a content drop for the final one.
+    ///
+    /// Whether the binding's content is RETURNED is not part of the question. A
+    /// `Return` mints the caller's reference (`lower_return`), which the callee
+    /// did not hold a moment earlier, so it claims nothing the cell holds; and
+    /// the cell's own reference is the counted store's. The order that keeps the
+    /// pair exact is the lowerer's: the mint precedes the `Return` node's own
+    /// releases, and the content drop is one of them
+    /// (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables —
+    /// the return claims the MINT's reference, not the cell's").
     fn is_cell(&self) -> bool {
-        self.takes_model() && !self.returned
+        self.takes_model()
     }
 
-    /// The binding takes the model at all — as a container, or (when returned)
-    /// for its suppression alone. The init's claim must be discharged one way or
-    /// the other, and the counted route is a container-only channel: its retain
-    /// is balanced by drop-on-overwrite, which a returned binding does not get.
+    /// The binding takes the model at all. The init's claim must be discharged
+    /// one way or the other: donated (its ordinary decref suppressed, released
+    /// by drop-on-overwrite) or counted at the chain source's binder.
     fn takes_model(&self) -> bool {
-        self.stored_sole && (self.donates_init || (!self.returned && self.init_site.is_some()))
+        self.stored_sole && (self.donates_init || self.init_site.is_some())
     }
 }
 
@@ -457,14 +462,6 @@ pub(super) fn apply_reassign_containers(
                 init_site: chain_versions
                     .get(&last)
                     .and_then(|vs| Reassigns::init_store_site(vs, binder_init_sites)),
-                // Does the binding's value escape via the function's tail (read
-                // in return position)? `EscapeInfo`'s return facet
-                // (`binding_escapes_via_return`), read per-binding — see the
-                // top-level gate's note on why this is atom-level, not a region
-                // projection, and why the recorded class-3 divergences leave the
-                // gate outcome unchanged. Guarded by "carries a heap region"
-                // (immediate cells carry no reference).
-                returned: !binding_regs.is_empty() && escape_info.binding_escapes_via_return(*b),
             },
         );
     }
@@ -505,7 +502,6 @@ pub(super) fn apply_reassign_containers(
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
         let LocalVerdict {
-            returned,
             donates_init,
             init_site,
             ..
@@ -518,30 +514,33 @@ pub(super) fn apply_reassign_containers(
         let kept = chain_kept.get(b).map(|v| v.as_slice()).unwrap_or(&regions);
 
         if takes_model {
-            if !returned {
-                // Not returned (and admitted): the cell's content dies at the
-                // overwrite (priors) and at the cell's scope demise (the final
-                // value). The first overwrite is the init value's owning demise,
-                // so drop-on-overwrite is its release channel too.
-                for s in stores.sites() {
-                    info.drop_on_overwrite_sites.insert(s);
-                }
-                // The demise is seeded with the last store — the earliest point
-                // that is after every write — and `decref::populate_decref_points`
-                // moves it out to the cell's last read and past any loop the
-                // cell is carried across, both of which need the structural
-                // order this pass runs before. A FORWARDING link records the
-                // container all the same — the store-site pins and the
-                // hold-back from the binding chain are its business too — but
-                // without the content drop the next link takes over.
-                if let Some(seed) = stores.sites().last() {
-                    let cell = if forwards_content {
-                        CellContainer::forwarding(stores.clone(), seed)
-                    } else {
-                        CellContainer::new(stores.clone(), seed)
-                    };
-                    info.cell_containers.insert(*b, cell);
-                }
+            // The cell's content dies at the overwrite (priors) and at the
+            // cell's scope demise (the final value). The first overwrite is the
+            // init value's owning demise, so drop-on-overwrite is its release
+            // channel too. A binding whose content the frame RETURNS is no
+            // different: the `Return`'s mint is the caller's reference and the
+            // content drop, which the lowerer emits after that mint at the same
+            // node, is the cell's (docs/impl/region/bindings.md § "Returned
+            // fn-local reassigned mutables").
+            for s in stores.sites() {
+                info.drop_on_overwrite_sites.insert(s);
+            }
+            // The demise is seeded with the last store — the earliest point
+            // that is after every write — and `decref::populate_decref_points`
+            // moves it out to the cell's last read and past any loop the
+            // cell is carried across, both of which need the structural
+            // order this pass runs before. A FORWARDING link records the
+            // container all the same — the store-site pins and the
+            // hold-back from the binding chain are its business too — but
+            // without the content drop the next link takes over.
+            if let Some(seed) = stores.sites().last() {
+                let cell = if forwards_content {
+                    CellContainer::forwarding(stores.clone(), seed)
+                } else {
+                    CellContainer::new(stores.clone(), seed)
+                };
+                info.cell_stored_regions.extend(cell.stores.value_regions());
+                info.cell_containers.insert(*b, cell);
             }
             // KEEP the CHAIN's assign-value regions' (`kept`) decrefs and
             // suppress every OTHER region the binding may hold
@@ -549,32 +548,25 @@ pub(super) fn apply_reassign_containers(
             // accumulated in a LOOP, the loop-carried binding region that
             // aliases whatever value the slot currently holds).
             //
-            // Not returned: the kept assign-value decref is the PRODUCER's
-            // release of each stored value (pinned to the store site, where the
-            // cell's counted reference takes over); the cell's own reference is
-            // released by drop-on-overwrite and the content drop above. The
-            // init value is donated — it is stored uncounted at the define, so
-            // suppressing its ordinary decref leaves drop-on-overwrite (or the
-            // content drop, if it is never displaced) as its one release.
+            // The kept assign-value decref is the PRODUCER's release of each
+            // stored value (pinned to the store site, where the cell's counted
+            // reference takes over); the cell's own reference is released by
+            // drop-on-overwrite and the content drop above. The init value is
+            // donated — it is stored uncounted at the define, so suppressing its
+            // ordinary decref leaves drop-on-overwrite (or the content drop, if
+            // it is never displaced) as its one release.
             //
-            // Returned: the binding's value is minted for the caller at the
-            // `Return` (`lower_return`'s `IncrefValueRegion`). A loop over the
-            // cell gives the binding its OWN loop-carried region (the slot that
-            // carries the accumulator across the back-edge) that aliases the SAME
-            // runtime value as the reaching assign-value region — so leaving the
-            // unsuppressed baseline emits TWO value-route decrefs of that one
-            // value (binding-region slot AND assign-value temp) at the Return.
-            // The callee owns exactly one reference (the value's birth); the
-            // second decref frees the caller's minted reference before the
-            // caller's read (the loop-reassigned-return double-free —
-            // `region_capture_cell_string_accum_uaf`). Suppressing the
-            // binding's own region keeps the single assign-value decref (the
-            // callee's one release) and lets the mint carry ownership to the
-            // caller. A single-assign returned cell coalesces its binding and
-            // assign-value regions (`binding_regs == regions`), so this
-            // suppresses nothing there — the mint-plus-lone-decref baseline the
-            // scheduler-park guard depends on
-            // (`region-reassign-return-park-uaf.lisp`) is untouched.
+            // The loop-carried region is what makes the suppression load-bearing
+            // for a binding the frame returns: a loop gives the binding its OWN
+            // region (the slot that carries the accumulator across the back-edge)
+            // that aliases the SAME runtime value as the reaching assign-value
+            // region, so leaving both unsuppressed emits TWO value-route decrefs
+            // of one reference at the Return — the second frees the caller's
+            // minted reference before the caller's read (the
+            // loop-reassigned-return double-free,
+            // `region_capture_cell_string_accum_uaf`). A single-assign cell
+            // coalesces its binding and assign-value regions
+            // (`binding_regs == regions`), so this suppresses nothing there.
             //
             // All of that is the DONATION, and it is available only where the
             // cell is the init value's sole holder. Where a second name reads

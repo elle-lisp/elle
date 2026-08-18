@@ -349,9 +349,31 @@ pub(super) fn populate_decref_points(
     // handed back with one owning reference). For a pass-through arg the
     // region is the callee's phantom scope (guard-suppressed) and this
     // is inert.
+    //
+    // A value a fn-local 1-slot container holds is exempt on the same terms an
+    // uncounted read of one is, and against the same `cell_drop_point`: the
+    // producer's claim is discharged at the store, and from there the CELL's
+    // counted reference is what carries the value — across the `Return` too,
+    // where the mint pays for the caller's copy and the content drop (emitted
+    // after that mint, at the same node) releases the cell's. So where the cell
+    // drops the value at or after the return, the extension buys nothing and
+    // costs the store-site pin: one release at the `Return` names whatever the
+    // producer's ANF slot holds LAST, stranding every earlier value a loop
+    // stored. Where the cell drops it EARLIER — the value reaches the return
+    // through some other name, or through a tail branch the cell's own last
+    // access precedes — the producer's reference is the return's only
+    // protection and the extension stands (docs/impl/region/bindings.md § "A
+    // `Return` is a reader of the cell's content").
     for (return_id, regions) in return_sites {
-        info.region_data
-            .pin_all_to(regions.iter().copied(), *return_id, porder);
+        info.region_data.pin_all_to(
+            regions.iter().copied().filter(|r| {
+                cell_drop_point
+                    .get(r)
+                    .is_none_or(|&drop| porder.is_after(*return_id, drop))
+            }),
+            *return_id,
+            porder,
+        );
     }
 
     // Extend each destructured value's regions' `decref_point` to its

@@ -23,9 +23,9 @@ pub fn analyze_regions_with(
     let user_imm = classify_letrec_callees(hir, arena, &call_class);
     call_class.user_immediates = user_imm;
 
-    // Authoritative escape facts over the canonical HIR. The reassign
-    // 1-slot-container gate below reads this (its **return facet**,
-    // `binding_escapes_via_return`) for the gate's not-returned check, instead of
+    // Authoritative escape facts over the canonical HIR. The MODULE-SCOPE half of
+    // the reassign 1-slot-container gate below reads this (its **return facet**,
+    // `binding_escapes_via_return`) for its not-returned check, instead of
     // recomputing escape from region signals — the one escape analysis every
     // consumer reads. Computed here, before `call_class` is moved into the
     // inference; `analyze_escape` needs the declared native effects

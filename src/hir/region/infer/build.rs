@@ -131,6 +131,7 @@ impl RegionInference {
             mutated_binding_value_regions: rustc_hash::FxHashSet::default(),
             reassigned_local_bindings: rustc_hash::FxHashSet::default(),
             cell_containers: HashMap::new(),
+            cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: self.begin_cell_regions,
             // Populated by the `region::infer::merge` post-pass in `analyze_regions_with`,
             // after `region_data` decref_points are final (the seed's
