@@ -257,6 +257,24 @@ fn region_count_fuse_uaf() {
     );
 }
 
+// Search loop fusion (docs/impl/dissolution.md § "Search — the terminal that stops
+// early") dissolves `(any? p xs)` / `(all? …)` / `(find …)` / `(find-index …)` over a
+// proven immutable array into an index-walk loop whose last stage is the predicate's
+// guard and whose base case writes a scalar answer and clears the sentinel the loop
+// condition reads. Two roles put heap values on that path: the base's elements, which
+// must stay live for the guard that reads them on every iteration up to the decision;
+// and `find`'s answer, the only fused accumulator holding a value the loop did not
+// allocate — a base element handed out past the loop's own `coll` binding, which must
+// not be freed under the result. Either over-free SIGSEGVs under guardfree. Fires only
+// on the fused shape; the plain-VM run asserts the values.
+#[test]
+fn region_search_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-search-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

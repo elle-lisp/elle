@@ -9,8 +9,9 @@ intermediate collection, so the compiler is free to realize it as a plain loop
 with `f`'s body spliced in, a JIT'd group, CPU SIMD, or a device dispatch. This
 document specifies the first realization: **HOF-chain loop fusion** on the VM
 substrate (`src/hir/typeinfer/fuse.rs`), covering the two array-producing
-higher-order ops `map` and `filter` and the two scalar-producing terminals, the
-left-fold `fold`/`reduce` and the predicate tally `count`.
+higher-order ops `map` and `filter` and the scalar-producing terminals: the
+left-fold `fold`/`reduce`, the predicate tally `count`, and the four
+short-circuiting searches `any?`/`all?`/`find`/`find-index`.
 
 ## What the pass does
 
@@ -204,6 +205,74 @@ under a fold.
 accept one, but the base gate proves the `array` keyword specifically, so the
 fused form is reached only where the stdlib op would have taken its array arm.
 
+## Search — the terminal that stops early
+
+`any?`, `all?`, `find` and `find-index` each answer a question about the **first**
+element their predicate decides and stop walking there. Each takes the same
+`(function, collection)` shape a `filter` does and produces a scalar — a boolean,
+an element, or an index — so each is a terminal exactly as `fold` and `count` are.
+
+The fused form is the count's shape plus an early exit. The predicate is the
+pipeline's guard stage, the accumulator is seeded with the answer for "no element
+decided it", and the loop leaves through a **sentinel the condition reads**: a
+`more` flag the deciding element clears.
+
+```
+(any? (fn [x] PRED) [ … ])
+⇒
+(let [seed false]
+  (let [coll [ … ]]
+    (let [len (length coll)]
+      (define ans seed)
+      (define i 0)
+      (define more true)
+      (while (and (< i len) more)
+        (let [item (get coll i)]
+          (if (let [x item] PRED)
+            (begin (assign ans true) (assign more false))
+            nil))
+        (assign i (+ i 1)))
+      ans)))
+```
+
+The four differ in three values, and in nothing else:
+
+| op | seed — no element decided | the deciding element records | decided by |
+|----|---------------------------|------------------------------|------------|
+| `any?` | `false` | `true` | the first element the predicate **admits** |
+| `all?` | `true` | `false` | the first element the predicate **rejects** |
+| `find` | `nil` | the element itself | the first element the predicate admits |
+| `find-index` | `nil` | the loop index `i` | the first element the predicate admits |
+
+`all?` is the one whose guard runs the other way round: its answer is decided by a
+**failing** element, so the stage it appends continues the pipeline where the
+predicate does *not* pass. That is the pipeline's third stage kind — a `map`
+transforms the threaded value, a `filter` **keeps** what its predicate admits, and
+an `all?` **rejects** it — one `if` either way, differing only in which branch
+carries the rest of the pipeline.
+
+A search fuses only as a **lone** op: no `map`/`filter` prefix, and (as for a fold
+or a count) not over a mutable `@array` base, whose length each array arm re-reads
+per iteration. The prefix refusal is what short-circuiting costs. A staged
+`(any? p (map f xs))` runs `f` over the **whole** input before `any?` examines an
+element, where one fused loop stops at the first deciding element and so omits `f`
+on every later one. That is not the interleaving the composition gate admits: the
+gate's argument is that reordering two lambdas' calls is unobservable without a
+sequencing effect, and it permits `SIG_ERROR` because each error still surfaces —
+neither claim covers work that no longer runs at all, where an error the staged
+form raises would simply not be raised. A prefix carries a second obligation for
+`find-index` alone: its answer is a position in the collection the op walks, so a
+`filter` prefix (whose survivors renumber) would need the surviving element's own
+count rather than the base index the loop carries.
+
+Because a search is always lone, its one op never reorders and it needs no purity
+gate, exactly as a lone `count` needs none. What it does save is what a lone count
+saves: each search's array arm walks with a `letrec`-bound self-recursive closure
+(`src/stdlib.lisp`), so the un-fused call mints that closure and its forward cell
+every time, plus the predicate closure wherever the argument is a lambda literal.
+The fused loop mints none of the three — and, unlike every other terminal, it also
+stops reading the collection once the answer is known.
+
 ## When it is legal — the gate
 
 Fusion preserves the program's value and, for a single op (`map` or `filter`),
@@ -211,14 +280,15 @@ its exact per-element evaluation order (the loop visits each element left to
 right, applying `f`/`p` identically to the stdlib op). The gate:
 
 - **The callee is a canonical stdlib HOF.** A pipeline op is `map` or `filter`;
-  the optional outermost terminal op is `fold`, `reduce`, or `count`. Recognized by
+  the optional outermost terminal op is `fold`, `reduce`, `count`, or one of the
+  four short-circuiting searches `any?`/`all?`/`find`/`find-index`. Recognized by
   the callee binding being `is_primitive` (every stdlib/core export is bound so by
   `bind_primitives`, and the canonical core-env override is marked `is_primitive`
   too, so `fold`/`reduce` reach the gate exactly as `map`/`filter` do; a user
   redefinition shadows with a non-primitive binding) and named accordingly. A user
-  redefinition is never rewritten. A `count` call has a `filter`'s two-argument
-  shape, so the terminal is recognized before the pipeline walk starts and a
-  `count` is never read as a stage.
+  redefinition is never rewritten. A `count` or a search call has a `filter`'s
+  two-argument shape, so the terminal is recognized before the pipeline walk starts
+  and neither is ever read as a stage.
 - **`xs` is a proven immutable array.** One of: an array literal (`[ … ]`, which
   analyzes to a call to the `array` primitive, `RetType::Array`) or any
   `RetType::Array` primitive call at the call site; a `Var` alias whose
@@ -235,8 +305,8 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   call) selects the unfrozen-result arm under the tighter gate below (see
   "The mutable-array arm").
 - **The function is non-capturing with the op's fixed arity** — one parameter for
-  a `map`/`filter`/`count` (the element), two for a `fold` (the accumulator and the
-  element) — with no rest parameter, and a body free of nested lambdas and of
+  a `map`/`filter`/`count`/search (the element), two for a `fold` (the accumulator
+  and the element) — with no rest parameter, and a body free of nested lambdas and of
   call-position `%`-intrinsics unless the function declares `(numeric!)` (see
   "Raw `%`-intrinsic bodies" below). It is one of two forms:
   - a **lambda literal** written directly as the call's argument. It is consumed
@@ -276,7 +346,9 @@ xs)`, length 1) threads its accumulator strictly in element order — exactly th
 stdlib fold — so it never reorders and needs no gate, even with a
 sequencing-effectful body; a lone `count` visits each element left to right and
 applies its predicate identically to the stdlib op, so it reads the same way. A
-terminal *with* an inner `map`/`filter` prefix is length ≥ 2 and carries the
+search is lone by its own gate and reads the same way again, up to the element
+that decides it. A terminal *with* an inner `map`/`filter` prefix is length ≥ 2
+(the two collecting terminals only) and carries the
 reorder requirement over every lambda (the terminal's and the prefix's): the
 terminal's per-element work interleaves with the prefix transforms
 (`g x0; f …; g x1; f …`) rather than running the whole prefix first, the same
@@ -311,7 +383,8 @@ excluded shapes break that match:
   plain call.
 - **`count`** re-reads `(length coll)` on every iteration where the fused loop
   captures `len` once, so a predicate that pushes to or pops from the base would
-  observe a divergence. A `count` over a mutable base stays a plain call.
+  observe a divergence. A `count` over a mutable base stays a plain call. Each
+  **search** array arm re-reads it the same way and declines for the same reason.
 - **A composition** (`(map g (filter p @xs))`, …) runs each stdlib op to
   completion over a *fresh* array before the next begins, so a later op's lambda
   mutating the original base can no longer affect the result; the single fused
@@ -493,7 +566,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   accumulator (no `@array`/`freeze`, the fold step inline) that composes with a
   map/filter prefix into one loop. A `count` dissolves to a scalar tally — no
   `@array`/`freeze`, the predicate inline under one guard `if` — and composes with a
-  map/filter prefix into one loop with a second guard. A mutable-`@array`-base
+  map/filter prefix into one loop with a second guard. Each **search** dissolves to a
+  scalar accumulator under one guard, with the loop condition reading the `more`
+  sentinel the deciding element clears (`all?` carrying the guard whose *else* branch
+  decides); the declines pin the prefix refusal for all four. A mutable-`@array`-base
   `map`/`filter` fuses
   with the accumulator returned **unfrozen** (no `freeze` call). A
   `(numeric!)`-declared raw-intrinsic kernel fuses — as a `map` transform, as a
@@ -526,14 +602,26 @@ codegen and execution levels, not on the leak oracle. Three pins:
   produces a scalar, so it saves no *result* array — its win appears once it
   composes with a prefix (`dissolution-fold-fuse.lisp`). A lone `count` produces a
   scalar too, but its stdlib arm walks with a `letrec` closure, so
-  `dissolution-count-fuse.lisp` weighs the lone case as well as the prefix one. The
+  `dissolution-count-fuse.lisp` weighs the lone case as well as the prefix one. Each
+  search reads that way — `dissolution-search-fuse.lisp` weighs all four lone cases
+  against their un-fused twins over an **undecided** walk, where both forms visit
+  every element and the saving is the walker closure and its cell. Weighing a walk
+  that decides early would measure the wrong thing: the fused loop runs one full
+  iteration for the deciding element where the recursive walker answers without its
+  final recursive step, and that odd step costs more than the two objects fusion
+  removes. So the **early exit** carries a gauge of its own, and not an allocation
+  one: a predicate that errors on every element past the decision completes only if
+  the walk truly stops there. (A call tally would need a mutable global, whose
+  reference makes the predicate a capture and declines fusion — so the error is what
+  can gauge the fused loop.) The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
   GC-timing noise), so these are exact `<` relations.
 - **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
   `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`,
-  `dissolution-fold-fuse.lisp`, and `dissolution-count-fuse.lisp`
+  `dissolution-fold-fuse.lisp`, `dissolution-count-fuse.lisp`, and
+  `dissolution-search-fuse.lisp`
   (value-preserving, incl. the declined shapes, the reorder-gate fallback, the
   mutable-base arm — an unfrozen, in-place-mutable result — and named-function
   inlining, incl. a `let`-body function that now fuses by cloning its freshened
@@ -544,7 +632,8 @@ codegen and execution levels, not on the leak oracle. Three pins:
   shown to preserve both the value and the compile. Soundness:
   `tests/elle/region-map-fuse-uaf.lisp` /
   `region-filter-fuse-uaf.lisp` / `region-mixed-fuse-uaf.lisp` /
-  `region-fold-fuse-uaf.lisp` / `region-count-fuse-uaf.lisp`
+  `region-fold-fuse-uaf.lisp` / `region-count-fuse-uaf.lisp` /
+  `region-search-fuse-uaf.lisp` (whose `find` hands a base element out of the loop)
   (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place, a cloned same-unit
   named-function body, and a cross-unit stdlib `defn` (`identity`) inlined over heap

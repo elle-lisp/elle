@@ -46,7 +46,7 @@ pub(super) fn collect_inline_fns(
 }
 
 /// The inlineable template of a lambda initializer, or `None`. A qualifying lambda
-/// is non-capturing, has 1 or 2 fixed parameters (a `map`/`filter`/`count` element
+/// is non-capturing, has 1 or 2 fixed parameters (a `map`/`filter`/`count`/search element
 /// or a `fold` accumulator+element — the use site checks the exact arity), no rest
 /// parameter, unmutated parameters, and a `clone_fresh`-admissible body
 /// (`is_inlineable_body` — the pure-expression forms plus `let`, so the clone
@@ -286,10 +286,11 @@ pub(super) fn clone_template(t: &FnTemplate, arena: &mut BindingArena) -> (Vec<B
 /// chain, including its inner HOF calls); whether or not it fused, recurse into
 /// the resulting node's children (which fuses nested HOFs in the spliced lambda
 /// bodies or the base array's elements). A chain of any `map`/`filter` mix under
-/// an optional outermost `fold`/`reduce`, over the same proven base, fuses to one
+/// an optional outermost scalar terminal, over the same proven base, fuses to one
 /// loop; the recursion still reaches HOFs nested inside a spliced lambda body or a
-/// declined chain's inner run (including a fold whose composition was declined,
-/// whose map/filter prefix then fuses on its own).
+/// declined chain's inner run (including a fold whose composition was declined, or
+/// a search — which takes no prefix at all — whose map/filter prefix then fuses on
+/// its own).
 pub(super) fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,

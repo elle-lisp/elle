@@ -80,3 +80,6 @@ mod fold;
 mod named;
 /// Bodies holding a raw `%`-intrinsic under a `(numeric!)` declaration.
 mod numeric;
+/// The four short-circuiting search terminals — a guard stage, a scalar answer,
+/// and the sentinel the loop condition reads.
+mod search;

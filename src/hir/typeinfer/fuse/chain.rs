@@ -21,6 +21,71 @@ impl Hof {
             _ => None,
         }
     }
+
+    /// What this op does as a pipeline stage.
+    pub(super) fn stage(self) -> StageKind {
+        match self {
+            Hof::Map => StageKind::Transform,
+            Hof::Filter => StageKind::Keep,
+        }
+    }
+}
+
+/// What one stage of the unified pipeline does with the element value threaded
+/// into it (`Build::element`). `map` and `filter` supply the first two; the third
+/// is the guard an `all?` terminal appends, whose answer is decided by an element
+/// the predicate REJECTS (docs/impl/dissolution.md § "Search — the terminal that
+/// stops early"). A guard is one `if` either way — the two kinds differ only in
+/// which branch carries the rest of the pipeline.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StageKind {
+    /// A `map`: transform the threaded value and thread the result on.
+    Transform,
+    /// A `filter`, and the guard a `count`/`any?`/`find`/`find-index` terminal
+    /// appends: continue the pipeline for the elements the predicate ADMITS.
+    Keep,
+    /// The guard an `all?` terminal appends: continue for the elements the
+    /// predicate REJECTS.
+    Reject,
+}
+
+/// The four short-circuiting stdlib searches. Each takes a `(predicate,
+/// collection)` shape and answers a scalar about the FIRST element its predicate
+/// decides, reading no element past it — so each is a terminal, and the loop the
+/// four share leaves early through a sentinel its condition reads.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Search {
+    /// `any?` — `true` at the first admitted element, `false` if none is.
+    Any,
+    /// `all?` — `false` at the first rejected element, `true` if none is.
+    All,
+    /// `find` — the first admitted element itself, `nil` if none is.
+    Find,
+    /// `find-index` — the position of the first admitted element, `nil` if none is.
+    FindIndex,
+}
+
+impl Search {
+    /// The canonical stdlib name this search is recognized by.
+    pub(super) fn from_name(name: &str) -> Option<Search> {
+        match name {
+            "any?" => Some(Search::Any),
+            "all?" => Some(Search::All),
+            "find" => Some(Search::Find),
+            "find-index" => Some(Search::FindIndex),
+            _ => None,
+        }
+    }
+
+    /// Which side of the predicate decides this search's answer, as the stage its
+    /// predicate becomes: `all?` is decided by a rejected element, the other three
+    /// by an admitted one.
+    pub(super) fn guard(self) -> StageKind {
+        match self {
+            Search::All => StageKind::Reject,
+            _ => StageKind::Keep,
+        }
+    }
 }
 
 /// How a fused chain collects its per-element results — the pipeline's
@@ -40,17 +105,23 @@ impl Hof {
 ///   payload is boxed so the empty `Collect` does not inflate every `Terminal`.
 /// - **Count** — a `count` at the head: a **scalar** accumulator seeded at 0 and
 ///   incremented once per surviving element. The count's own predicate is not
-///   carried here — it becomes the pipeline's last `Filter` stage — so the terminal
+///   carried here — it becomes the pipeline's last guard stage — so the terminal
 ///   itself is a bare tally (docs/impl/dissolution.md § "Count — the terminal that
 ///   is a guard plus a tally").
+/// - **Search** — an `any?`/`all?`/`find`/`find-index` at the head: a **scalar**
+///   accumulator seeded with the answer for "no element decided it", written once
+///   by the deciding element, which also clears the sentinel the loop condition
+///   reads so the walk stops there. Its predicate becomes the pipeline's last
+///   guard stage too, so the terminal carries only which search it is.
 pub(super) enum Terminal {
     Collect { unfrozen: bool },
     Fold(Box<FoldTerminal>),
     Count,
+    Search(Search),
 }
 
 /// Which op sits at the head of a validated chain — the shape `take_chain` peels
-/// before the `map`/`filter` pipeline. `Fold` and `Count` are the two scalar
+/// before the `map`/`filter` pipeline. `Fold`, `Count` and `Search` are the scalar
 /// terminals; `Collect` means the chain is `map`/`filter` all the way up and its
 /// result is a fresh array.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -58,6 +129,7 @@ pub(super) enum TerminalOp {
     Collect,
     Fold,
     Count,
+    Search(Search),
 }
 
 /// The moved-out parts of a `fold`/`reduce` terminal (the boxed `Terminal::Fold`
@@ -153,9 +225,38 @@ pub(super) fn fusable_count_parts<'a>(
     Some((&args[0].expr, &args[1].expr))
 }
 
+/// A recognized `(any? <pred> <coll>)` / `(all? …)` / `(find …)` /
+/// `(find-index …)` call: which search it is, the 1-parameter predicate, and the
+/// collection. `None` when `hir` is not a call to one of the four canonical stdlib
+/// searches with exactly two non-spliced arguments; a user redefinition shadows the
+/// name with a non-primitive binding and is excluded, as for `map`/`filter`.
+///
+/// A search shares `filter`'s two-argument shape but produces a SCALAR, so it is a
+/// terminal rather than a stage: `Hof::from_name` never answers for one, and
+/// `validate_chain` asks this before the pipeline walk starts.
+pub(super) fn fusable_search_parts<'a>(
+    hir: &'a Hir,
+    arena: &BindingArena,
+    symbol_names: &HashMap<u32, String>,
+) -> Option<(Search, &'a Hir, &'a Hir)> {
+    let HirKind::Call { func, args, .. } = &hir.kind else {
+        return None;
+    };
+    if args.len() != 2 || args.iter().any(|a| a.spliced) {
+        return None;
+    }
+    let callee = unwrap_callee_binding(func)?;
+    let bi = arena.get(callee);
+    if !bi.is_primitive {
+        return None;
+    }
+    let search = Search::from_name(symbol_names.get(&bi.name.0)?)?;
+    Some((search, &args[0].expr, &args[1].expr))
+}
+
 /// The parameters and body of a lambda that qualifies for inlining, or `None`. A
 /// qualifying lambda is a literal with exactly `arity` fixed parameters (no rest)
-/// — one for a `map`/`filter`/`count` element function, two for a `fold`
+/// — one for a `map`/`filter`/`count`/search element function, two for a `fold`
 /// combinator — no captures
 /// (its body references only the parameters and globals, so splicing at the call
 /// site is always in scope), unmutated parameters, and **no nested lambda** in its
@@ -227,16 +328,18 @@ pub(super) struct ChainPlan {
 }
 
 /// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
-/// optional outermost scalar terminal — a `fold`/`reduce`, or a `count` — over a
-/// `map`/`filter` pipeline (in any mix) bottoming out at a proven immutable array.
-/// Every function qualifies (`qualifies_lambda`, arity 1 for `map`/`filter`/`count`,
-/// 2 for `fold`); and for a **composition** — total op count ≥ 2, where the terminal
-/// counts as an op — every body is `reorder_safe` (the reordering gate; see the
-/// module doc). A lone terminal (or a lone `map`/`filter`) is a single op and carries
-/// no reorder requirement: a fold threads its accumulator strictly in element order
-/// and a count applies its predicate left to right, exactly as the stdlib ops do. A
-/// non-reorder-safe stage declines the whole composition, and the pre-order recursion
-/// (`rewrite`) still fuses its inner reorder-safe run.
+/// optional outermost scalar terminal — a `fold`/`reduce`, a `count`, or a search —
+/// over a `map`/`filter` pipeline (in any mix) bottoming out at a proven immutable
+/// array. Every function qualifies (`qualifies_lambda`, arity 1 for
+/// `map`/`filter`/`count`/a search, 2 for `fold`); and for a **composition** — total
+/// op count ≥ 2, where the terminal counts as an op — every body is `reorder_safe`
+/// (the reordering gate; see the module doc). A lone terminal (or a lone
+/// `map`/`filter`) is a single op and carries no reorder requirement: a fold threads
+/// its accumulator strictly in element order and a count applies its predicate left
+/// to right, exactly as the stdlib ops do. A non-reorder-safe stage declines the
+/// whole composition, and the pre-order recursion (`rewrite`) still fuses its inner
+/// reorder-safe run. A search never reaches the gate at all: it takes no prefix, for
+/// the stronger reason below.
 ///
 /// The walk stops at the first node that is not a fusable HOF call; that node is
 /// the base candidate. If it is not a proven immutable array (e.g. the chain never
@@ -253,9 +356,10 @@ pub(super) fn validate_chain(
     let mut ops = 0usize;
     let mut cur = hir;
 
-    // The optional outermost scalar terminal: a fold/reduce (2-param combinator) or
-    // a count (1-param predicate). Asked before the pipeline walk, so a `count` —
-    // which wears a `filter`'s two-argument shape — is never read as a stage.
+    // The optional outermost scalar terminal: a fold/reduce (2-param combinator), a
+    // count, or one of the four searches (1-param predicate). Asked before the
+    // pipeline walk, so a `count` or a search — each of which wears a `filter`'s
+    // two-argument shape — is never read as a stage.
     let terminal = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, 2)?);
         ops += 1;
@@ -266,6 +370,11 @@ pub(super) fn validate_chain(
         ops += 1;
         cur = coll;
         TerminalOp::Count
+    } else if let Some((search, pred, coll)) = fusable_search_parts(cur, arena, symbol_names) {
+        all_silent &= reorder_safe(fns.body_signal(pred, arena, 1)?);
+        ops += 1;
+        cur = coll;
+        TerminalOp::Search(search)
     } else {
         TerminalOp::Collect
     };
@@ -280,6 +389,17 @@ pub(super) fn validate_chain(
     }
 
     if ops == 0 {
+        return None;
+    }
+    // A search fuses only as a LONE op. A staged `(any? p (map f xs))` runs `f`
+    // over the WHOLE input before `any?` examines an element, where one fused loop
+    // stops at the first deciding element and so omits `f` on every later one —
+    // work the staged form performs, not merely work it performs in another order.
+    // The composition gate's argument covers reordering (and, for `SIG_ERROR`,
+    // which error surfaces), never work that no longer runs (dissolution.md
+    // § "Search — the terminal that stops early"). The pre-order recursion still
+    // fuses the declined chain's inner run.
+    if matches!(terminal, TerminalOp::Search(_)) && !kinds.is_empty() {
         return None;
     }
     let base = classify_base(cur, arena, symbol_names, bases)?;
@@ -380,26 +500,30 @@ pub(super) fn classify_base(
 }
 
 /// Consume a validated chain, returning its **terminal** (Collect, the fold
-/// combinator, or the count tally), its per-element `map`/`filter` **stages**
-/// (`(hof, param, body)`) in **application order** (innermost op first), and the base
+/// combinator, the count tally, or which search is answered), its per-element
+/// `map`/`filter` **stages**
+/// (`(kind, param, body)`) in **application order** (innermost op first), and the base
 /// collection expression. `plan.terminal` and `plan.kinds` are the chain's shape in
 /// outer→inner order (from `validate_chain`); the terminal is peeled first (it wraps
 /// the pipeline), then the map/filter ops. Each op's function is resolved by
 /// `FnResolver::take_parts` — moved (a lambda literal) or cloned fresh (a named
 /// template). Validation guarantees the structure, so every destructuring is total.
 ///
-/// A `count`'s predicate is returned as an extra `Filter` **stage** appended after
-/// the reversal, so it runs last — the outermost op, applied to whatever the inner
-/// pipeline threaded through (docs/impl/dissolution.md § "Count — the terminal that
-/// is a guard plus a tally").
+/// A `count`'s or a search's predicate is returned as an extra **guard stage**
+/// appended after the reversal, so it runs last — the outermost op, applied to
+/// whatever the inner pipeline threaded through. The stage a `count` appends keeps
+/// what its predicate admits; an `all?` appends the one that keeps what its
+/// predicate rejects (docs/impl/dissolution.md § "Count — the terminal that is a
+/// guard plus a tally", § "Search — the terminal that stops early").
 pub(super) fn take_chain(
     mut expr: Hir,
     plan: ChainPlan,
     arena: &mut BindingArena,
     fns: &FnResolver,
-) -> (Terminal, Vec<(Hof, Binding, Hir)>, Hir) {
-    // The count's predicate, held aside until the stages are in application order.
-    let mut count_guard: Option<(Binding, Hir)> = None;
+) -> (Terminal, Vec<(StageKind, Binding, Hir)>, Hir) {
+    // The terminal's own predicate, held aside until the map/filter stages are in
+    // application order — it is the outermost op, so it goes last.
+    let mut terminal_guard: Option<(StageKind, Binding, Hir)> = None;
     let terminal = match plan.terminal {
         TerminalOp::Fold => {
             let HirKind::Call { args, .. } = expr.kind else {
@@ -427,8 +551,20 @@ pub(super) fn take_chain(
             let coll = it.next().expect("count has 2 args").expr;
             let (params, body) = fns.take_parts(lam, arena);
             expr = coll;
-            count_guard = Some((params[0], body));
+            terminal_guard = Some((StageKind::Keep, params[0], body));
             Terminal::Count
+        }
+        TerminalOp::Search(search) => {
+            let HirKind::Call { args, .. } = expr.kind else {
+                unreachable!("validate_chain proved a search call");
+            };
+            let mut it = args.into_iter();
+            let lam = it.next().expect("a search has 2 args").expr;
+            let coll = it.next().expect("a search has 2 args").expr;
+            let (params, body) = fns.take_parts(lam, arena);
+            expr = coll;
+            terminal_guard = Some((search.guard(), params[0], body));
+            Terminal::Search(search)
         }
         // The mutable-array arm: a mutable `@array` base returns the accumulator
         // unfrozen (validate_chain proves a mutable base is a lone map/filter, so
@@ -447,13 +583,13 @@ pub(super) fn take_chain(
         let lam = it.next().expect("HOF has 2 args").expr;
         let coll = it.next().expect("HOF has 2 args").expr;
         let (params, body) = fns.take_parts(lam, arena);
-        stages.push((hof, params[0], body));
+        stages.push((hof.stage(), params[0], body));
         expr = coll;
     }
     // Collected outer→inner; application order is inner→outer.
     stages.reverse();
-    if let Some((param, pred)) = count_guard {
-        stages.push((Hof::Filter, param, pred));
+    if let Some(guard) = terminal_guard {
+        stages.push(guard);
     }
     (terminal, stages, expr)
 }
