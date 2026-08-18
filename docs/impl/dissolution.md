@@ -9,8 +9,8 @@ intermediate collection, so the compiler is free to realize it as a plain loop
 with `f`'s body spliced in, a JIT'd group, CPU SIMD, or a device dispatch. This
 document specifies the first realization: **HOF-chain loop fusion** on the VM
 substrate (`src/hir/typeinfer/fuse.rs`), covering the two array-producing
-higher-order ops `map` and `filter` and the scalar-producing left-fold
-`fold`/`reduce`.
+higher-order ops `map` and `filter` and the two scalar-producing terminals, the
+left-fold `fold`/`reduce` and the predicate tally `count`.
 
 ## What the pass does
 
@@ -153,16 +153,56 @@ inline exactly as a `map` transform is. `init` is bound to an immutable `seed`
 of `(fold f init coll)` (init before coll) even though the loop needs `coll`
 and `len` first.
 
-Fold is always the **outermost/terminal** op — its scalar result is not a
+A fold is always **outermost** — its scalar result is not a
 collection, so no `map`/`filter` chains over it. So the pipeline is unchanged
-between the two terminals; only the accumulator setup and the per-element base
+between the terminals; only the accumulator setup and the per-element base
 case differ. `(fold f init (map g xs))` / `(fold f init (filter p xs))` — and any
 map/filter prefix — fuse to **one** loop whose base case is the fold step instead
 of the push, with **no intermediate array** between the inner ops and the fold.
 This is map-reduce: the canonical parallel-reduction shape and the reason to prove
 this leg. `Build::element` threads the value through the map/filter stages and its
-base case is the terminal — a `push` (Collect) or a fold `assign` (Fold); the
-recursion is otherwise identical.
+base case is the terminal — a `push` (Collect), a fold `assign` (Fold), or a tally
+`assign` (Count); the recursion is otherwise identical.
+
+## Count — the terminal that is a guard plus a tally
+
+`(count pred coll)` answers how many elements satisfy `pred`. It takes the same
+`(function, collection)` shape a `filter` does and produces a **number**, so it is
+a terminal exactly as `fold` is: nothing chains over it. Its fused form is the one
+already built — a `filter` **stage** whose base case counts instead of pushing:
+
+```
+(count (fn [x] PRED) [ … ])
+⇒
+(let [seed 0]
+  (let [coll [ … ]]
+    (let [len (length coll)]
+      (define n seed)
+      (define i 0)
+      (while (< i len)
+        (let [item (get coll i)]
+          (if (let [x item] PRED) (assign n (+ n 1)) nil))
+        (assign i (+ i 1)))
+      n)))
+```
+
+The predicate is appended as the **last** stage of the pipeline (it is the
+outermost op, so it runs after every inner transform/guard), and the terminal is a
+scalar accumulator seeded at 0 whose base case is `(assign n (+ n 1))`. Because
+the count's own stage is a guard, the value reaching that base case is always the
+local a `Filter` stage binds — the tally discards a name, never work.
+
+Even a lone `(count p xs)` saves allocations, which a lone fold does not:
+`count`'s array arm walks with a `letrec`-bound self-recursive closure
+(`src/stdlib.lisp`), so the un-fused call mints that closure and its forward cell
+every time — and the predicate closure on top of them wherever `p` is a lambda
+literal. The fused loop mints none of the three. Over a prefix —
+`(count p (map f xs))` — the intermediate array dissolves too, exactly as it does
+under a fold.
+
+`count`'s array arm errors on a string or bytes collection where `map`/`filter`
+accept one, but the base gate proves the `array` keyword specifically, so the
+fused form is reached only where the stdlib op would have taken its array arm.
 
 ## When it is legal — the gate
 
@@ -171,12 +211,14 @@ its exact per-element evaluation order (the loop visits each element left to
 right, applying `f`/`p` identically to the stdlib op). The gate:
 
 - **The callee is a canonical stdlib HOF.** A pipeline op is `map` or `filter`;
-  the optional outermost terminal op is `fold` or `reduce`. Recognized by the
-  callee binding being `is_primitive` (every stdlib/core export is bound so by
+  the optional outermost terminal op is `fold`, `reduce`, or `count`. Recognized by
+  the callee binding being `is_primitive` (every stdlib/core export is bound so by
   `bind_primitives`, and the canonical core-env override is marked `is_primitive`
   too, so `fold`/`reduce` reach the gate exactly as `map`/`filter` do; a user
   redefinition shadows with a non-primitive binding) and named accordingly. A user
-  redefinition is never rewritten.
+  redefinition is never rewritten. A `count` call has a `filter`'s two-argument
+  shape, so the terminal is recognized before the pipeline walk starts and a
+  `count` is never read as a stage.
 - **`xs` is a proven immutable array.** One of: an array literal (`[ … ]`, which
   analyzes to a call to the `array` primitive, `RetType::Array`) or any
   `RetType::Array` primitive call at the call site; a `Var` alias whose
@@ -193,7 +235,7 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   call) selects the unfrozen-result arm under the tighter gate below (see
   "The mutable-array arm").
 - **The function is non-capturing with the op's fixed arity** — one parameter for
-  a `map`/`filter` (the element), two for a `fold` (the accumulator and the
+  a `map`/`filter`/`count` (the element), two for a `fold` (the accumulator and the
   element) — with no rest parameter, and a body free of nested lambdas and of
   call-position `%`-intrinsics unless the function declares `(numeric!)` (see
   "Raw `%`-intrinsic bodies" below). It is one of two forms:
@@ -229,16 +271,18 @@ proven data does not error; refusing it would forbid every arithmetic tower, the
 shape this fusion exists to collapse. A single op never reorders and carries no
 such requirement.
 
-The **fold counts as an op** in the chain length. A lone `fold` (`(fold f init
+The **terminal counts as an op** in the chain length. A lone `fold` (`(fold f init
 xs)`, length 1) threads its accumulator strictly in element order — exactly the
 stdlib fold — so it never reorders and needs no gate, even with a
-sequencing-effectful body. A fold *with* an inner `map`/`filter` prefix is length
-≥ 2 and carries the reorder requirement over every lambda (the fold's and the
-prefix's): the fold step interleaves with the prefix transforms per element
+sequencing-effectful body; a lone `count` visits each element left to right and
+applies its predicate identically to the stdlib op, so it reads the same way. A
+terminal *with* an inner `map`/`filter` prefix is length ≥ 2 and carries the
+reorder requirement over every lambda (the terminal's and the prefix's): the
+terminal's per-element work interleaves with the prefix transforms
 (`g x0; f …; g x1; f …`) rather than running the whole prefix first, the same
 reorder a mixed chain makes. A non-reorder-safe stage declines the whole
 composition, and the pass falls back to fusing the inner reorder-safe run (the
-prefix), leaving the fold a plain call over the fused loop.
+prefix), leaving the terminal a plain call over the fused loop.
 
 ## The mutable-array arm
 
@@ -254,17 +298,20 @@ fused loop emits the accumulator **unfrozen** instead of `(freeze acc)`. The
 loop body is otherwise identical to the immutable arm.
 
 A mutable base fuses under a **strictly tighter gate: a single `map` or `filter`
-only** — no `fold`, no composition. The reason is that the fused loop walks the
+only** — no terminal, no composition. The reason is that the fused loop walks the
 base *live* (it reads `(get coll i)` each iteration against a `len` captured
 once), and this matches the stdlib op **exactly** for a single `map`/`filter`
 (whose own array arm captures `len` once and reads `coll` live) — so the value is
-preserved even if the lambda mutates the base through a global alias. The two
+preserved even if the lambda mutates the base through a global alias. The three
 excluded shapes break that match:
 
 - **`fold`** first snapshots its input (`(->array coll)` copies a mutable array)
   and walks the copy; a fused fold would walk the live base, so a mutating
   combinator would observe a divergence. A `fold` over a mutable base stays a
   plain call.
+- **`count`** re-reads `(length coll)` on every iteration where the fused loop
+  captures `len` once, so a predicate that pushes to or pops from the base would
+  observe a divergence. A `count` over a mutable base stays a plain call.
 - **A composition** (`(map g (filter p @xs))`, …) runs each stdlib op to
   completion over a *fresh* array before the next begins, so a later op's lambda
   mutating the original base can no longer affect the result; the single fused
@@ -273,8 +320,8 @@ excluded shapes break that match:
   pre-order recursion still fuses its innermost single `map`/`filter` (sound in
   isolation), leaving the outer ops as plain calls over that fused loop.
 
-For an **immutable** base neither hazard exists — the base cannot be mutated — so
-`fold` and compositions fuse over it exactly as before.
+For an **immutable** base none of the hazards exists — the base cannot be mutated
+— so the terminals and compositions fuse over it exactly as before.
 
 ## Named same-unit functions
 
@@ -444,7 +491,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   `filter` emits the guarded push (an `if`), a mixed chain fuses both ops into one
   loop (one accumulator, both body ops inline), and a fold dissolves to a scalar
   accumulator (no `@array`/`freeze`, the fold step inline) that composes with a
-  map/filter prefix into one loop. A mutable-`@array`-base `map`/`filter` fuses
+  map/filter prefix into one loop. A `count` dissolves to a scalar tally — no
+  `@array`/`freeze`, the predicate inline under one guard `if` — and composes with a
+  map/filter prefix into one loop with a second guard. A mutable-`@array`-base
+  `map`/`filter` fuses
   with the accumulator returned **unfrozen** (no `freeze` call). A
   `(numeric!)`-declared raw-intrinsic kernel fuses — as a `map` transform, as a
   `filter` guard, as a `fold` combinator, as a composition, as a named same-unit
@@ -452,8 +502,8 @@ codegen and execution levels, not on the leak oracle. Three pins:
   so it survives the splice) — with the spliced `%`-op inline in the loop. Decline pins guard the gate (user-shadowed
   callee, capturing lambda, unproven collection, an intrinsic body with **no**
   `(numeric!)` declaration, a non-reorder-safe composition — which declines and
-  fuses its inner run only — and a `fold` or composition over a mutable base,
-  which declines to the innermost single op). Named-function pins cover a `map`/`fold`
+  fuses its inner run only — and a `fold`, a `count`, or a composition over a
+  mutable base, which declines to the innermost single op). Named-function pins cover a `map`/`fold`
   whose argument is a `Var` naming a same-unit `defn` (the body inlines, the
   definition persists) and the declines (a `let`-body function, a capturing local
   function, a non-lambda `Var`). A **cross-unit** pin fuses `(map dec …)` where
@@ -474,14 +524,16 @@ codegen and execution levels, not on the leak oracle. Three pins:
   compile-unit boundary — against a capturing-lambda reference, proving the
   intermediate array vanishes across that boundary too. A lone `fold`
   produces a scalar, so it saves no *result* array — its win appears once it
-  composes with a prefix (`dissolution-fold-fuse.lisp`). The
+  composes with a prefix (`dissolution-fold-fuse.lisp`). A lone `count` produces a
+  scalar too, but its stdlib arm walks with a `letrec` closure, so
+  `dissolution-count-fuse.lisp` weighs the lone case as well as the prefix one. The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
   GC-timing noise), so these are exact `<` relations.
 - **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
-  `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`, and
-  `dissolution-fold-fuse.lisp`
+  `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`,
+  `dissolution-fold-fuse.lisp`, and `dissolution-count-fuse.lisp`
   (value-preserving, incl. the declined shapes, the reorder-gate fallback, the
   mutable-base arm — an unfrozen, in-place-mutable result — and named-function
   inlining, incl. a `let`-body function that now fuses by cloning its freshened
@@ -492,7 +544,8 @@ codegen and execution levels, not on the leak oracle. Three pins:
   shown to preserve both the value and the compile. Soundness:
   `tests/elle/region-map-fuse-uaf.lisp` /
   `region-filter-fuse-uaf.lisp` / `region-mixed-fuse-uaf.lisp` /
-  `region-fold-fuse-uaf.lisp` (guardfree over heap element/base/accumulator values,
+  `region-fold-fuse-uaf.lisp` / `region-count-fuse-uaf.lisp`
+  (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place, a cloned same-unit
   named-function body, and a cross-unit stdlib `defn` (`identity`) inlined over heap
   elements).

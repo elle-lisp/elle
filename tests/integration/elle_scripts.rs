@@ -222,6 +222,23 @@ fn region_fold_fuse_uaf() {
     );
 }
 
+// Count loop fusion (docs/impl/dissolution.md § "Count — the terminal that is a
+// guard plus a tally") dissolves `(count pred xs)` over a proven immutable array
+// into an index-walk loop whose last stage is the predicate's guard and whose base
+// case tallies a scalar. The tally discards the element value, so nothing downstream
+// keeps the base's heap elements alive for the guard that reads them — and over a
+// map prefix the freshly-minted heap value each element becomes is reachable only
+// through the loop's own local, with no intermediate array holding it. Either
+// over-free SIGSEGVs under guardfree. Fires only on the fused shape; the plain-VM
+// run asserts the values.
+#[test]
+fn region_count_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-count-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

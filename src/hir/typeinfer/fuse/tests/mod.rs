@@ -72,6 +72,8 @@ fn count_intrinsic(h: &Hir, want: &str) -> usize {
 
 /// `map`, `filter`, their compositions, and the mutable-array cases.
 mod collect;
+/// The `count` terminal — a guard stage plus a scalar tally.
+mod count;
 /// Fold and reduce terminals.
 mod fold;
 /// Chains whose lambda is a named function, same-unit or cross-unit.

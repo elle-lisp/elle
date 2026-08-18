@@ -72,33 +72,34 @@ impl Build<'_> {
     ///   references it twice — the test and the pass-through) and continues the
     ///   pipeline only when its predicate passes, else `nil`;
     /// - the base case (no stages left) hands the surviving value to the
-    ///   **terminal** (`Build::terminal`): a `push` (Collect) or a fold step (Fold).
+    ///   **terminal** (`Build::terminal`): a `push` (Collect), a fold step (Fold),
+    ///   or a tally (Count).
     ///
-    /// This one recursion realizes `map`, `filter`, `fold`, and any mix in a SINGLE
-    /// loop: a `map`-only chain is all `Map` stages (the transforms nest, no `if`),
-    /// a `filter`-only chain is all `Filter` stages (the element binds once, guards
-    /// nest), a mixed chain interleaves the two, and a fold reuses the same stages
-    /// with a scalar terminal — the intermediate array between any two adjacent
-    /// stages (or between the pipeline and the fold) never exists.
+    /// This one recursion realizes `map`, `filter`, `fold`, `count`, and any mix in
+    /// a SINGLE loop: a `map`-only chain is all `Map` stages (the transforms nest,
+    /// no `if`), a `filter`-only chain is all `Filter` stages (the element binds
+    /// once, guards nest), a mixed chain interleaves the two, and a scalar terminal
+    /// reuses the same stages — the intermediate array between any two adjacent
+    /// stages (or between the pipeline and the terminal) never exists.
     pub(super) fn element(
         &mut self,
         stages: &mut std::vec::IntoIter<(Hof, Binding, Hir)>,
-        fold: &mut Option<(Binding, Binding, Hir)>,
+        base: &mut Option<Base>,
         acc: Binding,
         cur: Hir,
     ) -> Hir {
         match stages.next() {
-            None => self.terminal(fold, acc, cur),
+            None => self.terminal(base, acc, cur),
             Some((Hof::Map, param, body)) => {
                 self.localize_param(param);
                 let next = self.let_(param, cur, body);
-                self.element(stages, fold, acc, next)
+                self.element(stages, base, acc, next)
             }
             Some((Hof::Filter, param, pred)) => {
                 self.localize_param(param);
                 let item = self.local();
                 let cond = self.let_(param, self.var(item), pred);
-                let then = self.element(stages, fold, acc, self.var(item));
+                let then = self.element(stages, base, acc, self.var(item));
                 let guarded = self.node(HirKind::If {
                     cond: Box::new(cond),
                     then_branch: Box::new(then),
@@ -111,22 +112,16 @@ impl Build<'_> {
 
     /// The pipeline's innermost base case — how a surviving element value `cur`
     /// enters the accumulator. Built exactly once (the base of the single element
-    /// statement), so the fold combinator (`Some`) is consumed here by `take`:
-    ///
-    /// - **Collect** (`None`): push `cur` into the `@array` accumulator.
-    /// - **Fold** (`Some((acc_param, elem_param, body))`): one left-fold step —
-    ///   rebind the combinator's two params (the current `acc`, and `cur`) and
-    ///   reassign the scalar accumulator to the body's result:
-    ///   `(assign acc (let [acc_param acc] (let [elem_param cur] body)))`.
-    pub(super) fn terminal(
-        &mut self,
-        fold: &mut Option<(Binding, Binding, Hir)>,
-        acc: Binding,
-        cur: Hir,
-    ) -> Hir {
-        match fold.take() {
-            None => self.call(self.ops.push, vec![self.var(acc), cur]),
-            Some((acc_param, elem_param, body)) => {
+    /// statement), so the [`Base`] is consumed here by `take`.
+    pub(super) fn terminal(&mut self, base: &mut Option<Base>, acc: Binding, cur: Hir) -> Hir {
+        match base.take().expect("one pipeline, one base case") {
+            Base::Push => self.call(self.ops.push, vec![self.var(acc), cur]),
+            Base::Step(f) => {
+                let FoldStep {
+                    acc_param,
+                    elem_param,
+                    body,
+                } = *f;
                 self.localize_param(acc_param);
                 self.localize_param(elem_param);
                 let inner = self.let_(elem_param, cur, body);
@@ -136,38 +131,81 @@ impl Build<'_> {
                     value: Box::new(step),
                 })
             }
+            Base::Tally => {
+                // A count's own predicate is the pipeline's LAST stage, and a
+                // `Filter` stage binds its value to a local before continuing — so
+                // `cur` here is that local's read and dropping it drops a name, not
+                // work. The assertion pins the ordering `take_chain` establishes.
+                debug_assert!(
+                    matches!(cur.kind, HirKind::Var(_)),
+                    "a tally discards its element value, so the count's guard stage \
+                     must have bound it first",
+                );
+                let next = self.call(self.ops.add, vec![self.var(acc), self.int(1)]);
+                self.node(HirKind::Assign {
+                    target: acc,
+                    value: Box::new(next),
+                })
+            }
         }
     }
+}
+
+/// The pipeline's innermost base case — what one surviving element does to the
+/// accumulator, once every `map`/`filter` stage has run.
+///
+/// - **Push** — Collect: `(push acc cur)` into the `@array` accumulator.
+/// - **Step** — Fold: one left-fold step. Rebind the combinator's two parameters
+///   (the current `acc`, and `cur`) and reassign the scalar accumulator to the
+///   body's result: `(assign acc (let [acc_param acc] (let [elem_param cur] body)))`.
+///   Boxed, as `Terminal::Fold` is, so the two empty variants stay cheap.
+/// - **Tally** — Count: `(assign acc (+ acc 1))`. The element value is not read;
+///   the count's predicate already ran as the pipeline's last guard stage.
+pub(super) enum Base {
+    Push,
+    Step(Box<FoldStep>),
+    Tally,
+}
+
+/// The fold combinator a [`Base::Step`] splices: the two parameters that bind to
+/// the current accumulator and element, and the body they wrap.
+pub(super) struct FoldStep {
+    pub(super) acc_param: Binding,
+    pub(super) elem_param: Binding,
+    pub(super) body: Hir,
 }
 
 /// Build the fused index-walk loop from the terminal, pipeline stages, and base
 /// collection. The `(get` + index-walk) scaffold is fixed; the per-element body is
 /// the unified transform/guard pipeline (`Build::element`) bottoming out at the
-/// terminal, so `map`, `filter`, `fold`, and any mix all collapse to one loop with
-/// one accumulator. The terminal picks the accumulator's shape and result:
+/// terminal, so `map`, `filter`, `fold`, `count`, and any mix all collapse to one
+/// loop with one accumulator. The terminal picks the accumulator's shape and result:
 ///
 /// ```text
-/// Collect (map/filter):            Fold (fold/reduce):
+/// Collect (map/filter):            Fold (fold/reduce) and Count:
 /// (let [coll BASE]                 (let [seed INIT]
 ///   (let [len (length coll)]         (let [coll BASE]
 ///     (let [acc (@array)]              (let [len (length coll)]
 ///       (define i 0)                     (define acc seed)
 ///       (while (< i len)                 (define i 0)
 ///         <pipeline; push acc>           (while (< i len)
-///         (assign i (+ i 1)))              <pipeline; assign acc (f acc _)>
+///         (assign i (+ i 1)))              <pipeline; assign acc …>
 ///       (freeze acc))))                    (assign i (+ i 1)))
 ///                                        acc)))
 /// ```
 ///
-/// For a fold, `init` is bound to an immutable `seed` OUTERMOST so it evaluates
-/// before the base collection — the source order of `(fold f init coll)` — even
-/// though the loop needs `coll`/`len` first. The accumulator is a reassigned
-/// scalar (mirrors the induction variable), never an `@array`.
+/// Both scalar terminals bind their seed to an immutable `seed` OUTERMOST. For a
+/// fold that is load-bearing: `init` is a source expression, and binding it first
+/// evaluates it before the base collection — the source order of
+/// `(fold f init coll)` — even though the loop needs `coll`/`len` first. A count's
+/// seed is the literal 0, so it rides the same shape with nothing to order. The
+/// accumulator is a reassigned scalar (mirrors the induction variable), never an
+/// `@array`.
 ///
 /// The Collect terminal's `unfrozen` flag selects its result arm: an immutable
 /// base freezes the accumulator; a mutable `@array` base returns it unfrozen (the
 /// mutable-array arm — `validate_chain` proves a mutable base is a lone
-/// `map`/`filter`, so a Fold terminal is never paired with it).
+/// `map`/`filter`, so a scalar terminal is never paired with it).
 pub(super) fn build_loop(
     terminal: Terminal,
     stages: Vec<(Hof, Binding, Hir)>,
@@ -188,12 +226,12 @@ pub(super) fn build_loop(
     let i_b = b.arena.gensym();
     b.arena.get_mut(i_b).is_mutated = true; // the loop induction variable
 
-    // Split the terminal into its seed (`init`, a fold only) and its per-element
-    // base case (`fold` — `None` for Collect). The accumulator differs by terminal:
-    // Collect fills a fresh `@array` (immutable binding, mutated in place); Fold
-    // threads a reassigned scalar.
-    let (init, mut fold, acc_b, unfrozen) = match terminal {
-        Terminal::Collect { unfrozen } => (None, None, b.local(), unfrozen),
+    // Split the terminal into its seed (`init`, the scalar terminals only) and its
+    // per-element base case. The accumulator differs by terminal: Collect fills a
+    // fresh `@array` (immutable binding, mutated in place); Fold and Count each
+    // thread a reassigned scalar.
+    let (init, mut pipeline_base, acc_b, unfrozen) = match terminal {
+        Terminal::Collect { unfrozen } => (None, Some(Base::Push), b.local(), unfrozen),
         Terminal::Fold(f) => {
             let FoldTerminal {
                 init,
@@ -203,13 +241,27 @@ pub(super) fn build_loop(
             } = *f;
             let acc = b.arena.gensym();
             b.arena.get_mut(acc).is_mutated = true;
-            (Some(init), Some((acc_param, elem_param, body)), acc, false)
+            (
+                Some(init),
+                Some(Base::Step(Box::new(FoldStep {
+                    acc_param,
+                    elem_param,
+                    body,
+                }))),
+                acc,
+                false,
+            )
+        }
+        Terminal::Count => {
+            let acc = b.arena.gensym();
+            b.arena.get_mut(acc).is_mutated = true;
+            (Some(b.int(0)), Some(Base::Tally), acc, false)
         }
     };
 
     // The per-element statement: thread (get coll i) through the pipeline.
     let elem0 = b.call(ops.get, vec![b.var(coll_b), b.var(i_b)]);
-    let body_stmt = b.element(&mut stages.into_iter(), &mut fold, acc_b, elem0);
+    let body_stmt = b.element(&mut stages.into_iter(), &mut pipeline_base, acc_b, elem0);
 
     let incr = b.node(HirKind::Assign {
         target: i_b,
@@ -239,7 +291,8 @@ pub(super) fn build_loop(
             let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), acc_let);
             b.let_(coll_b, base, len_let)
         }
-        // Fold — a scalar accumulator seeded by `init`, its final value the result.
+        // Fold / Count — a scalar accumulator seeded by `init` (the fold's own seed
+        // expression, or the count's literal 0), its final value the result.
         Some(init) => {
             let seed_b = b.local();
             let define_acc = b.node(HirKind::Define {

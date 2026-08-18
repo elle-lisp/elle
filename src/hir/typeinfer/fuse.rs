@@ -7,20 +7,23 @@
 //! lambda body **spliced inline** rather than called through a closure value. The
 //! closure ceases to exist: no per-element closure allocation, no indirect call.
 //! `map` pushes each transform's result; `filter` pushes the element itself under
-//! an `if` guard. `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`)
-//! is the chain's optional outermost **terminal**: a scalar accumulator seeded by
-//! `init` and updated one left-fold step per element, so there is no `@array` and
-//! no `freeze` — the result is the accumulator's final value. A composition —
+//! an `if` guard. A chain's optional outermost **terminal** is one of two scalar
+//! ops: `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`) threads an
+//! accumulator seeded by `init` one left-fold step per element, and `count`
+//! (`(count pred xs)`) tallies the elements its predicate admits — so there is no
+//! `@array` and no `freeze`, and the result is the accumulator's final value. A
+//! composition —
 //! `(map g (map f xs))`, `(filter q (filter p xs))`, any mix like `(map f (filter
-//! p xs))`, or a fold over a map/filter prefix like `(fold f init (map g xs))` —
+//! p xs))`, or a terminal over a map/filter prefix like `(fold f init (map g xs))` —
 //! fuses to a **single** loop through one unified transform/guard pipeline
 //! (`build_loop`/`Build::element`): each `map`/`filter` op is a *stage* (a `map`
 //! transforms the threaded value; a `filter` guards it), the stages nest in
 //! application order, and the base case is the terminal (a `push` for a collect, a
-//! fold step for a fold). The intermediate array any inner op would have allocated
-//! never exists. `map`-only and `filter`-only chains are just the all-transform and
-//! all-guard ends of the collect pipeline; a fold reuses the same stages with a
-//! scalar terminal — the map-reduce shape, no array at all.
+//! fold step for a fold, an increment for a count). The intermediate array any inner
+//! op would have allocated never exists. `map`-only and `filter`-only chains are just
+//! the all-transform and all-guard ends of the collect pipeline; a fold reuses the
+//! same stages with a scalar terminal — the map-reduce shape, no array at all — and a
+//! count is that same shape with its predicate appended as the pipeline's last guard.
 //!
 //! ## Why this shape, here
 //!
@@ -35,9 +38,9 @@
 //!
 //! It mirrors the container-dispatch monomorphization (`monomorphize.rs`):
 //! recognize a proven-type call across the compile-unit boundary (the callee is
-//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`filter`;
-//! a user redefinition shadows it with a non-primitive binding and is left alone)
-//! and collapse it to the direct form the proof selects.
+//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`filter`/
+//! `fold`/`reduce`/`count`; a user redefinition shadows it with a non-primitive
+//! binding and is left alone) and collapse it to the direct form the proof selects.
 //!
 //! ## Legality
 //!
@@ -91,7 +94,7 @@ use registry::*;
 
 pub(crate) use registry::FnInlineRegistry;
 
-/// Fuse every qualifying `map` chain into an inlined index-walk loop. Runs on
+/// Fuse every qualifying HOF chain into an inlined index-walk loop. Runs on
 /// surface HIR, before functionalize (see the module doc). `registry` is the
 /// per-instance cross-unit function-inline registry: this unit's inlineable
 /// functions are recorded into it (so later units can inline them) and its earlier

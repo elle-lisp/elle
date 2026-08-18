@@ -25,7 +25,7 @@ impl Hof {
 
 /// How a fused chain collects its per-element results — the pipeline's
 /// **terminal**, realized by the innermost base case of `Build::element`. The
-/// `map`/`filter` pipeline stages are identical for both terminals; only the
+/// `map`/`filter` pipeline stages are identical for every terminal; only the
 /// accumulator setup (`build_loop`) and the base case differ.
 ///
 /// - **Collect** — a `map`/`filter`-only chain: fill a fresh `@array` by `push`.
@@ -38,9 +38,26 @@ impl Hof {
 ///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
 ///   combinator lambda, moved in whole (`acc_param`, `elem_param`, `body`). The
 ///   payload is boxed so the empty `Collect` does not inflate every `Terminal`.
+/// - **Count** — a `count` at the head: a **scalar** accumulator seeded at 0 and
+///   incremented once per surviving element. The count's own predicate is not
+///   carried here — it becomes the pipeline's last `Filter` stage — so the terminal
+///   itself is a bare tally (docs/impl/dissolution.md § "Count — the terminal that
+///   is a guard plus a tally").
 pub(super) enum Terminal {
     Collect { unfrozen: bool },
     Fold(Box<FoldTerminal>),
+    Count,
+}
+
+/// Which op sits at the head of a validated chain — the shape `take_chain` peels
+/// before the `map`/`filter` pipeline. `Fold` and `Count` are the two scalar
+/// terminals; `Collect` means the chain is `map`/`filter` all the way up and its
+/// result is a fresh array.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalOp {
+    Collect,
+    Fold,
+    Count,
 }
 
 /// The moved-out parts of a `fold`/`reduce` terminal (the boxed `Terminal::Fold`
@@ -108,9 +125,38 @@ pub(super) fn fusable_fold_parts<'a>(
     Some((&args[0].expr, &args[1].expr, &args[2].expr))
 }
 
+/// A recognized `(count <pred> <coll>)` call: the 1-parameter predicate and the
+/// collection (both borrowed). `None` when `hir` is not a call to the canonical
+/// stdlib `count` with exactly two non-spliced arguments; a user redefinition
+/// shadows the name with a non-primitive binding and is excluded, as for
+/// `map`/`filter`.
+///
+/// `count` shares `filter`'s two-argument shape but produces a NUMBER, so it is a
+/// terminal rather than a stage: `Hof::from_name` never answers for it, and
+/// `validate_chain` asks this before the pipeline walk starts.
+pub(super) fn fusable_count_parts<'a>(
+    hir: &'a Hir,
+    arena: &BindingArena,
+    symbol_names: &HashMap<u32, String>,
+) -> Option<(&'a Hir, &'a Hir)> {
+    let HirKind::Call { func, args, .. } = &hir.kind else {
+        return None;
+    };
+    if args.len() != 2 || args.iter().any(|a| a.spliced) {
+        return None;
+    }
+    let callee = unwrap_callee_binding(func)?;
+    let bi = arena.get(callee);
+    if !bi.is_primitive || symbol_names.get(&bi.name.0)? != "count" {
+        return None;
+    }
+    Some((&args[0].expr, &args[1].expr))
+}
+
 /// The parameters and body of a lambda that qualifies for inlining, or `None`. A
 /// qualifying lambda is a literal with exactly `arity` fixed parameters (no rest)
-/// — one for a `map`/`filter` predicate, two for a `fold` combinator — no captures
+/// — one for a `map`/`filter`/`count` element function, two for a `fold`
+/// combinator — no captures
 /// (its body references only the parameters and globals, so splicing at the call
 /// site is always in scope), unmutated parameters, and **no nested lambda** in its
 /// body (so retyping a parameter to a plain local cannot disturb a capture of it).
@@ -169,27 +215,28 @@ pub(super) fn body_disqualifies(hir: &Hir, declared_numeric: bool) -> bool {
     found
 }
 
-/// A validated fusable chain, ready for `take_chain`: whether the outermost op is
-/// a `fold`/`reduce` terminal (a scalar accumulator), the inner `map`/`filter`
+/// A validated fusable chain, ready for `take_chain`: which op heads it (a scalar
+/// terminal, or nothing but the `map`/`filter` pipeline), the inner `map`/`filter`
 /// pipeline kinds in the order the walk encounters them (OUTER→INNER), and whether
 /// the base is a mutable `@array` (so a Collect terminal emits the accumulator
 /// unfrozen — the mutable-array arm).
 pub(super) struct ChainPlan {
-    pub(super) fold: bool,
+    pub(super) terminal: TerminalOp,
     pub(super) kinds: Vec<Hof>,
     pub(super) mutable_base: bool,
 }
 
 /// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
-/// optional outermost `fold`/`reduce` (the scalar terminal) over a `map`/`filter`
-/// pipeline (in any mix) bottoming out at a proven immutable array. Every lambda
-/// qualifies (`qualifies_lambda`, arity 1 for `map`/`filter`, 2 for `fold`); and
-/// for a **composition** — total op count ≥ 2, where the fold counts as an op —
-/// every lambda body is `reorder_safe` (the reordering gate; see the module doc).
-/// A lone `fold` (or a lone `map`/`filter`) is a single op and carries no reorder
-/// requirement: a fold threads its accumulator strictly in element order, exactly
-/// the stdlib fold. A non-reorder-safe stage declines the whole composition, and
-/// the pre-order recursion (`rewrite`) still fuses its inner reorder-safe run.
+/// optional outermost scalar terminal — a `fold`/`reduce`, or a `count` — over a
+/// `map`/`filter` pipeline (in any mix) bottoming out at a proven immutable array.
+/// Every function qualifies (`qualifies_lambda`, arity 1 for `map`/`filter`/`count`,
+/// 2 for `fold`); and for a **composition** — total op count ≥ 2, where the terminal
+/// counts as an op — every body is `reorder_safe` (the reordering gate; see the
+/// module doc). A lone terminal (or a lone `map`/`filter`) is a single op and carries
+/// no reorder requirement: a fold threads its accumulator strictly in element order
+/// and a count applies its predicate left to right, exactly as the stdlib ops do. A
+/// non-reorder-safe stage declines the whole composition, and the pre-order recursion
+/// (`rewrite`) still fuses its inner reorder-safe run.
 ///
 /// The walk stops at the first node that is not a fusable HOF call; that node is
 /// the base candidate. If it is not a proven immutable array (e.g. the chain never
@@ -206,14 +253,21 @@ pub(super) fn validate_chain(
     let mut ops = 0usize;
     let mut cur = hir;
 
-    // The optional outermost fold/reduce terminal (2-param combinator).
-    let fold = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
+    // The optional outermost scalar terminal: a fold/reduce (2-param combinator) or
+    // a count (1-param predicate). Asked before the pipeline walk, so a `count` —
+    // which wears a `filter`'s two-argument shape — is never read as a stage.
+    let terminal = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, 2)?);
         ops += 1;
         cur = coll;
-        true
+        TerminalOp::Fold
+    } else if let Some((pred, coll)) = fusable_count_parts(cur, arena, symbol_names) {
+        all_silent &= reorder_safe(fns.body_signal(pred, arena, 1)?);
+        ops += 1;
+        cur = coll;
+        TerminalOp::Count
     } else {
-        false
+        TerminalOp::Collect
     };
 
     // The inner map/filter pipeline (1-param functions).
@@ -230,21 +284,22 @@ pub(super) fn validate_chain(
     }
     let base = classify_base(cur, arena, symbol_names, bases)?;
     // A mutable `@array` base fuses only a single `map`/`filter`: the fused loop
-    // walks the base LIVE, which matches the stdlib op exactly for one op, but a
-    // `fold` (which snapshots via `->array`) or a composition (whose staged ops
-    // each run to completion over a fresh array) would diverge from an interleaved
-    // live walk under a mutating lambda (dissolution.md § "The mutable-array arm").
-    // The pre-order recursion still fuses the innermost single op of a declined
-    // mutable composition.
+    // walks the base LIVE against a `len` captured once, which matches the stdlib op
+    // exactly for one op. A `fold` (which snapshots via `->array`), a `count` (which
+    // re-reads `(length coll)` every iteration), and a composition (whose staged ops
+    // each run to completion over a fresh array) would each diverge from an
+    // interleaved live walk under a mutating lambda (dissolution.md § "The
+    // mutable-array arm"). The pre-order recursion still fuses the innermost single
+    // op of a declined mutable chain.
     let mutable_base = base == BaseKind::Mutable;
-    if mutable_base && (fold || kinds.len() != 1) {
+    if mutable_base && (terminal != TerminalOp::Collect || kinds.len() != 1) {
         return None;
     }
     if ops >= 2 && !all_silent {
         return None;
     }
     Some(ChainPlan {
-        fold,
+        terminal,
         kinds,
         mutable_base,
     })
@@ -324,46 +379,66 @@ pub(super) fn classify_base(
     }
 }
 
-/// Consume a validated chain, returning its **terminal** (Collect or the fold
-/// combinator), its per-element `map`/`filter` **stages** (`(hof, param, body)`) in
-/// **application order** (innermost op first), and the base collection expression.
-/// `plan.fold` and `plan.kinds` are the chain's shape in outer→inner order (from
-/// `validate_chain`); the fold is peeled first (it wraps the pipeline), then the
-/// map/filter ops. Each op's function is resolved by `take_fn_parts` — moved (a
-/// lambda literal) or cloned fresh (a named template). Validation guarantees the
-/// structure, so every destructuring is total.
+/// Consume a validated chain, returning its **terminal** (Collect, the fold
+/// combinator, or the count tally), its per-element `map`/`filter` **stages**
+/// (`(hof, param, body)`) in **application order** (innermost op first), and the base
+/// collection expression. `plan.terminal` and `plan.kinds` are the chain's shape in
+/// outer→inner order (from `validate_chain`); the terminal is peeled first (it wraps
+/// the pipeline), then the map/filter ops. Each op's function is resolved by
+/// `FnResolver::take_parts` — moved (a lambda literal) or cloned fresh (a named
+/// template). Validation guarantees the structure, so every destructuring is total.
+///
+/// A `count`'s predicate is returned as an extra `Filter` **stage** appended after
+/// the reversal, so it runs last — the outermost op, applied to whatever the inner
+/// pipeline threaded through (docs/impl/dissolution.md § "Count — the terminal that
+/// is a guard plus a tally").
 pub(super) fn take_chain(
     mut expr: Hir,
     plan: ChainPlan,
     arena: &mut BindingArena,
     fns: &FnResolver,
 ) -> (Terminal, Vec<(Hof, Binding, Hir)>, Hir) {
-    let terminal = if plan.fold {
-        let HirKind::Call { args, .. } = expr.kind else {
-            unreachable!("validate_chain proved a fold call");
-        };
-        let mut it = args.into_iter();
-        let lam = it.next().expect("fold has 3 args").expr;
-        let init = it.next().expect("fold has 3 args").expr;
-        let coll = it.next().expect("fold has 3 args").expr;
-        let (params, body) = fns.take_parts(lam, arena);
-        expr = coll;
-        Terminal::Fold(Box::new(FoldTerminal {
-            init,
-            acc_param: params[0],
-            elem_param: params[1],
-            body,
-        }))
-    } else {
+    // The count's predicate, held aside until the stages are in application order.
+    let mut count_guard: Option<(Binding, Hir)> = None;
+    let terminal = match plan.terminal {
+        TerminalOp::Fold => {
+            let HirKind::Call { args, .. } = expr.kind else {
+                unreachable!("validate_chain proved a fold call");
+            };
+            let mut it = args.into_iter();
+            let lam = it.next().expect("fold has 3 args").expr;
+            let init = it.next().expect("fold has 3 args").expr;
+            let coll = it.next().expect("fold has 3 args").expr;
+            let (params, body) = fns.take_parts(lam, arena);
+            expr = coll;
+            Terminal::Fold(Box::new(FoldTerminal {
+                init,
+                acc_param: params[0],
+                elem_param: params[1],
+                body,
+            }))
+        }
+        TerminalOp::Count => {
+            let HirKind::Call { args, .. } = expr.kind else {
+                unreachable!("validate_chain proved a count call");
+            };
+            let mut it = args.into_iter();
+            let lam = it.next().expect("count has 2 args").expr;
+            let coll = it.next().expect("count has 2 args").expr;
+            let (params, body) = fns.take_parts(lam, arena);
+            expr = coll;
+            count_guard = Some((params[0], body));
+            Terminal::Count
+        }
         // The mutable-array arm: a mutable `@array` base returns the accumulator
         // unfrozen (validate_chain proves a mutable base is a lone map/filter, so
-        // it is always a Collect, never paired with a Fold).
-        Terminal::Collect {
+        // it is always a Collect, never paired with a scalar terminal).
+        TerminalOp::Collect => Terminal::Collect {
             unfrozen: plan.mutable_base,
-        }
+        },
     };
 
-    let mut stages = Vec::with_capacity(plan.kinds.len());
+    let mut stages = Vec::with_capacity(plan.kinds.len() + 1);
     for hof in plan.kinds {
         let HirKind::Call { args, .. } = expr.kind else {
             unreachable!("validate_chain proved a HOF call");
@@ -377,5 +452,8 @@ pub(super) fn take_chain(
     }
     // Collected outer→inner; application order is inner→outer.
     stages.reverse();
+    if let Some((param, pred)) = count_guard {
+        stages.push((Hof::Filter, param, pred));
+    }
     (terminal, stages, expr)
 }
