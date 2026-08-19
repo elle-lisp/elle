@@ -348,15 +348,36 @@
                     (put (proc-get w) :resume pair)
                     (push ready w)))))))
 
-        # Wake select waiters
-        (each [pid entry] in (pairs select-sets)
+        # Wake select waiters. Process entries are keyed by pid; sub-fiber
+        # entries (:is-sub) by the waiting fiber, which is resumed directly.
+        (each [key entry] in (pairs select-sets)
           (when (not (get entry :woken))
             (when (not (nil? (find (fn [f] (= f fiber)) (get entry :candidates))))
               (put entry :woken true)
-              (del select-sets pid)
-              (when (alive? pid)
-                (put (proc-get pid) :resume fiber)
-                (push ready pid)))))))
+              (del select-sets key)
+              (if (get entry :is-sub)
+                (when (= (fiber/status entry:fiber) :paused)
+                  (fiber/resume entry:fiber fiber)
+                  (handle-sub-fiber-after-resume entry:fiber entry:pid))
+                (when (alive? key)
+                  (put (proc-get key) :resume fiber)
+                  (push ready key))))))))
+
+    # Queue a join/select target so it gets a first run. Only a :new fiber
+    # needs this — one built by hand and never spawned, which no queue holds.
+    # A :paused fiber is parked on I/O, a futex, or a wait the scheduler
+    # already tracks, and resuming it out of turn hands its park a nil
+    # result: a timer parked in ev/sleep would complete instantly, and every
+    # ev/timeout in a process would report its deadline at once
+    # (tests/elle/process-select.lisp). A fiber already queued would be
+    # resumed a second time the same way.
+    (def @pump-target
+      (fn [target pid]
+        (when (= (fiber/status target) :new)
+          (def @queued false)
+          (each e in (->list sub-runnable)
+            (when (= (get e :fiber) target) (assign queued true)))
+          (unless queued (push sub-runnable @{:fiber target :pid pid})))))
 
     (def @handle-sub-fiber-after-resume nil)
     (assign
@@ -460,8 +481,7 @@
                                         w))]
                                   # Store sub-fiber join entry — use negative PID to distinguish
                                   (push ws @{:fiber fiber :pid pid :is-sub true})
-                                  (when (nil? (get sub-completed target))
-                                    (push sub-runnable @{:fiber target :pid pid}))))))))
+                                  (pump-target target pid)))))))
                     :abort
                       (let [target (get request :fiber)]
                         (let [comp (get sub-completed target)]
@@ -482,8 +502,40 @@
                               (handle-sub-fiber-after-resume target pid)
                               (when (= (fiber/status fiber) :paused)
                                 (fiber/resume fiber nil)
-                                (handle-sub-fiber-after-resume fiber pid))))))  ## Unknown wait op — re-queue
-                    (push sub-runnable @{:fiber fiber :pid pid})))
+                                (handle-sub-fiber-after-resume fiber pid))))))
+                    :select
+                      (let [candidates (get request :fibers)
+                            done (find (fn [cf]
+                                         (or (not (nil? (get sub-completed cf)))
+                                         (= (fiber/status cf) :dead)
+                                         (= (fiber/status cf) :error)))
+                                       candidates)]
+                        (if (not (nil? done))
+                          (when (= (fiber/status fiber) :paused)
+                            (fiber/resume fiber done)
+                            (handle-sub-fiber-after-resume fiber pid))
+                          (begin
+                            ## Keyed by the waiting fiber; handle-wait's
+                            ## process entries are keyed by pid. The wake
+                            ## in complete-sub-fiber branches on :is-sub.
+                            (put select-sets fiber
+                                 @{:candidates candidates
+                                   :woken false
+                                   :is-sub true
+                                   :fiber fiber
+                                   :pid pid})
+                            (each cf in candidates
+                              (pump-target cf pid)))))
+                    ## Unknown wait op — abort loudly. A silent re-queue
+                    ## resumes the emitting fiber with nil, which it reads
+                    ## as its wait's result; the corruption then surfaces
+                    ## far from this dispatch, if it surfaces at all.
+                    (begin
+                      (protect (fiber/abort fiber
+                               {:error :protocol-error
+                                :message (concat "unknown :wait op from sub-fiber: "
+                                (string op))}))
+                      (handle-sub-fiber-after-resume fiber pid))))
                 (push sub-runnable @{:fiber fiber :pid pid}))))))
 
     # Drain sub-fiber runnable queue
@@ -530,9 +582,8 @@
                                    (let [w @[]]
                                      (put join-waiting target w)
                                      w))]
-                        (push ws pid)  # Ensure the target fiber gets pumped
-                        (when (nil? (get sub-completed target))
-                          (push sub-runnable @{:fiber target :pid pid}))))))))
+                        (push ws pid)  # Give a hand-built :new target its first run
+                        (pump-target target pid)))))))
           :select
             (let [candidates (get request :fibers)]
               (let [done (find (fn [f]
@@ -544,10 +595,9 @@
                     (put (proc-get pid) :resume done)
                     (push ready pid))
                   (begin
-                    (put select-sets pid @{:candidates candidates :woken false})  # Ensure all candidates get pumped
+                    (put select-sets pid @{:candidates candidates :woken false})  # Give hand-built :new candidates their first run
                     (each f in candidates
-                      (when (nil? (get sub-completed f))
-                        (push sub-runnable @{:fiber f :pid pid})))))))
+                      (pump-target f pid))))))
           :abort
             (let [target (get request :fiber)]
               (let [comp (get sub-completed target)]
@@ -960,7 +1010,9 @@
           (push vs @{:fiber target :pid 0})
           (each w in (->list waiters)
             (when (and (not (integer? w)) (get w :fiber)) (push vs w))))
-        (each [_pid e] in (pairs select-sets)
+        (each [_key e] in (pairs select-sets)
+          (when (get e :is-sub)
+            (push vs @{:fiber (get e :fiber) :pid (get e :pid)}))
           (each f in (get e :candidates)
             (push vs @{:fiber f :pid 0})))
         vs))

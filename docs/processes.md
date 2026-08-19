@@ -523,6 +523,22 @@ tracked by the scheduler and participate in I/O completion.
     (assert (= r2 70) "f2 = 70"))))
 ```
 
+`ev/select` — and everything built on it: `ev/timeout`, `ev/race`,
+`ev/scope`, `ev/as-completed` — works from the process fiber and from
+sub-fibers alike. The scheduler dispatches a process fiber's wait
+through one path and a sub-fiber's through another, and both implement
+the full wait vocabulary; a wait op neither knows is a protocol error,
+raised in the fiber that emitted it rather than swallowed.
+
+One rule keeps those waits honest: the scheduler never resumes a parked
+fiber except with the result it parked for. A join or select on a
+hand-built `:new` fiber gives that fiber a first run; a `:paused` fiber
+is already parked on I/O, a futex, or a wait the scheduler tracks, and
+is woken only by its own completion. Resuming it out of turn would hand
+its park a nil — a timer parked in `ev/sleep` would "complete"
+instantly, and every `ev/timeout` in a process would report its
+deadline at once. Pinned by `tests/elle/process-select.lisp`.
+
 ## Orphan sub-fibers and teardown
 
 A sub-fiber outlives the code that spawned it only as long as some
