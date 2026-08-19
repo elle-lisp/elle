@@ -93,6 +93,12 @@ impl Build<'_> {
     ///   its predicate rejects, ends the run by clearing its sentinel — read by the
     ///   loop condition where this is the chain's innermost op, and by the stage
     ///   itself otherwise;
+    /// - a **`Drop`** stage (a `drop-while`) is that stage's complement: its flag
+    ///   starts the pipeline rather than ending the run, so it passes nothing on
+    ///   until its predicate rejects an element and clears the flag, after which
+    ///   every element continues. It reads the flag twice — once to gate the
+    ///   predicate, once to gate the rest of the pipeline — so `rest` is spliced in
+    ///   one place;
     /// - a **`Gate`** stage binds the current value (so every stage BEFORE it has
     ///   run for this element) and continues only while the sentinel holds — the
     ///   form a search's early exit takes over a prefix, where the walk itself must
@@ -176,6 +182,44 @@ impl Build<'_> {
                     })
                 };
                 self.let_(item, cur, guarded)
+            }
+            Some(Stage::Drop {
+                sentinel,
+                param,
+                body,
+            }) => {
+                self.localize_param(param);
+                let item = self.local();
+                let cond = self.let_(param, self.var(item), body);
+                let rest = self.element(stages, base, acc, self.var(item));
+                // While the run lasts, the predicate decides whether it continues;
+                // the element that rejects clears the flag. Reading the flag BEFORE
+                // the test is what keeps the predicate off every element past the
+                // decision — exactly the set the stdlib op tests.
+                let start = self.node(HirKind::Assign {
+                    target: sentinel,
+                    value: Box::new(self.bool(false)),
+                });
+                let decide = self.node(HirKind::If {
+                    cond: Box::new(self.var(sentinel)),
+                    then_branch: Box::new(self.node(HirKind::If {
+                        cond: Box::new(cond),
+                        then_branch: Box::new(self.nil()),
+                        else_branch: Box::new(start),
+                    })),
+                    else_branch: Box::new(self.nil()),
+                });
+                // The same flag read a second time — one decision, two readings.
+                // Continuing the pipeline from inside the branch that cleared the
+                // flag would put `rest` in two places and duplicate every stage
+                // spliced after this one.
+                let pass = self.node(HirKind::If {
+                    cond: Box::new(self.var(sentinel)),
+                    then_branch: Box::new(self.nil()),
+                    else_branch: Box::new(rest),
+                });
+                let stmt = self.node(HirKind::Begin(vec![decide, pass]));
+                self.let_(item, cur, stmt)
             }
             Some(Stage::Gate { sentinel, advance }) => {
                 // Binding `cur` first is what keeps the walk exhaustive: every
@@ -398,19 +442,21 @@ pub(super) struct FoldStep {
 /// the staged form runs that stage on every element, so the walk stays exhaustive
 /// (the bare range test) and the sentinel gates the op's own stage instead — a
 /// `Gate` stage for a search, the `Take` stage's own `if` for a `take-while`. Only
-/// those two ops mint a sentinel; every other terminal's walk has nothing to stop.
+/// those two ops mint a sentinel; every other terminal's walk has nothing to stop. A
+/// `drop-while`'s flag is the same binding shape and the same `(define … true)`, but
+/// it never reaches the condition: it opens the pipeline rather than ending the walk.
 ///
-/// A `find-index` whose prefix holds a `filter` mints one more: the survivor count
-/// its answer reads, since a filter's survivors renumber (a `map` prefix, and a
-/// `take-while`, preserve both count and order, so the base index is already the
-/// answer).
+/// A `find-index` whose prefix **renumbers** mints one more: the survivor count its
+/// answer reads, since a `filter`'s survivors renumber and so does what a
+/// `drop-while` passes on (a `map` prefix, and a `take-while`, preserve both count
+/// and order, so the base index is already the answer).
 ///
 /// The Collect terminal's two flags select its result arm. `unfrozen`: an immutable
 /// base freezes the accumulator, while a mutable `@array` base — and a chain holding
-/// a `take-while`, whose array arm has no freeze — returns it unfrozen.
-/// `empty_is_list`: a chain holding a `take-while` answers an empty base with `()`,
+/// an op whose array arm has no freeze — returns it unfrozen.
+/// `empty_is_list`: such a chain answers an empty base with `()`,
 /// which is what that op's `(empty? coll)` clause returns
-/// (dissolution.md § "The two facts the stdlib op's array arm decides").
+/// (dissolution.md § "The two facts an untyped array arm decides").
 pub(super) fn build_loop(
     chain: FusedChain,
     arena: &mut BindingArena,
@@ -436,22 +482,19 @@ pub(super) fn build_loop(
 
     // The chain's shape decides where a search's sentinel is read and what a
     // `find-index` answers with. Both questions are about the PREFIX, which is
-    // exactly `stages` — the terminal's own guard is held apart — so a guard here
-    // is a `filter`, whose survivors renumber.
+    // exactly `stages` — the terminal's own guard is held apart — so the stages that
+    // renumber here are the `filter`s, whose survivors do, and the `drop-while`s,
+    // whose leading drop does.
     let prefixed = !stages.is_empty();
-    let renumbers = stages.iter().any(|s| matches!(s, Stage::Guard { .. }));
+    let renumbers = stages.iter().any(Stage::renumbers);
 
-    // Every `take-while` stage's sentinel needs a `(define more true)`, and at most
-    // one of them ends the walk — `take_chain` marks the chain's innermost op. A
-    // walk-ending `take-while` makes the chain `prefixed`, so a search sharing the
-    // chain takes its gate and the two never contend for the loop condition.
-    let take_sentinels: Vec<Binding> = stages
-        .iter()
-        .filter_map(|s| match s {
-            Stage::Take { sentinel, .. } => Some(*sentinel),
-            _ => None,
-        })
-        .collect();
+    // Every stage-owned flag needs a `(define … true)`: a `take-while`'s run
+    // sentinel, a `drop-while`'s dropping flag. At most one of them ends the walk —
+    // `take_chain` marks the chain's innermost op, and only a `take-while` can be
+    // marked. A walk-ending `take-while` makes the chain `prefixed`, so a search
+    // sharing the chain takes its gate and the two never contend for the loop
+    // condition.
+    let stage_sentinels: Vec<Binding> = stages.iter().filter_map(Stage::sentinel).collect();
     let walk_end = stages.iter().find_map(|s| match s {
         Stage::Take {
             sentinel,
@@ -565,8 +608,9 @@ pub(super) fn build_loop(
         binding: i_b,
         value: Box::new(b.int(0)),
     });
-    // Each `take-while` stage starts its run open.
-    let define_takes: Vec<Hir> = take_sentinels
+    // Each stage-owned flag starts `true`: a `take-while`'s run open, a
+    // `drop-while`'s dropping in force.
+    let define_flags: Vec<Hir> = stage_sentinels
         .iter()
         .map(|&more| {
             b.node(HirKind::Define {
@@ -588,7 +632,7 @@ pub(super) fn build_loop(
             } else {
                 b.call(ops.freeze, vec![b.var(acc_b)])
             };
-            let mut stmts = define_takes;
+            let mut stmts = define_flags;
             stmts.push(define_i);
             stmts.push(while_loop);
             stmts.push(result);
@@ -623,7 +667,7 @@ pub(super) fn build_loop(
             });
             let result = b.var(acc_b);
             let mut stmts = vec![define_acc, define_i];
-            stmts.extend(define_takes);
+            stmts.extend(define_flags);
             if let Some(more) = sentinel_b {
                 stmts.push(b.node(HirKind::Define {
                     binding: more,

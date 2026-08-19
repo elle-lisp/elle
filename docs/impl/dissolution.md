@@ -8,8 +8,9 @@ owned, non-escaping `xs` exposes no observable closure and no observable
 intermediate collection, so the compiler is free to realize it as a plain loop
 with `f`'s body spliced in, a JIT'd group, CPU SIMD, or a device dispatch. This
 document specifies the first realization: **HOF-chain loop fusion** on the VM
-substrate (`src/hir/typeinfer/fuse.rs`), covering the three array-producing
-higher-order ops `map`, `filter` and `take-while` and the scalar-producing
+substrate (`src/hir/typeinfer/fuse.rs`), covering the four array-producing
+higher-order ops `map`, `filter`, `take-while` and `drop-while` and the
+scalar-producing
 terminals: the left-fold `fold`/`reduce`, the predicate tally `count`, and the four
 short-circuiting searches `any?`/`all?`/`find`/`find-index`.
 
@@ -284,12 +285,13 @@ is the whole of the saving over the staged form anyway. A **lone** search keeps
 the condition-read sentinel of the first shape above: nothing runs after its
 stage, so ending the walk there omits nothing.
 
-`find-index` carries one further obligation, and only where the prefix holds a
-`filter`: its answer is a position in the collection it walks, and a filter's
-survivors renumber. The loop then carries the surviving element's own count —
-bumped once per element that reaches the search's stage — and the deciding element
-records that in place of the base index. A `map` prefix preserves both the count
-and the order of the elements, so there the base index is already the answer.
+`find-index` carries one further obligation, and only where the prefix **renumbers**:
+its answer is a position in the collection it walks, and a `filter`'s survivors
+renumber, as do a `drop-while`'s once its leading run is gone. The loop then carries
+the surviving element's own count — bumped once per element that reaches the search's
+stage — and the deciding element records that in place of the base index. A `map`
+prefix, and a `take-while`, preserve both the count and the order of the elements, so
+there the base index is already the answer.
 
 As for a fold or a count, a search does not fuse over a mutable `@array` base,
 whose length each array arm re-reads per iteration.
@@ -360,29 +362,6 @@ Where a lone search and a walk-ending `take-while` both want the loop condition,
 they cannot collide: a `take-while` is a stage, so a search sharing the chain with
 one has a prefix by construction and takes its gate.
 
-### The two facts the stdlib op's array arm decides
-
-`take-while`'s array arm is not type-preserving the way `map`'s and `filter`'s
-are, and fusion reproduces it exactly — a rewrite may not change a value.
-
-- **The result is unfrozen.** The array arm returns its `@array` accumulator with
-  no `(if (mutable? coll) acc (freeze acc))`, so a `take-while` over an immutable
-  array yields a **mutable** one. `map` and `filter` are type-preserving, so a
-  Collect chain holding a `take-while` anywhere is unfrozen throughout.
-- **An empty input answers `()`.** The `(or (pair? coll) (empty? coll))` clause
-  precedes the array arm, so an empty array takes the *list* arm and the op returns
-  the empty list. The fused Collect form answers `(< 0 len)`'s false side with
-  `()` for the same reason.
-
-The second fact is why a stage inner to a `take-while` must be a `map`. `len`
-decides the emptiness of the **base**, and a `map` preserves it; a `filter` or a
-second `take-while` can hand an empty collection on from a non-empty base, where
-the staged form would answer `()` and the fused loop its accumulator. Such a chain
-declines whole, and the pre-order recursion still fuses the inner run. A scalar
-terminal cannot observe the difference — an exhausted walk answers with its seed
-either way — but the rule is stated over the pipeline rather than over the
-terminal, so one reading covers every chain.
-
 As for a fold, a count or a search, a `take-while` does not fuse over a mutable
 `@array` base, whose length the array arm re-reads per iteration.
 
@@ -392,15 +371,97 @@ saves: its array arm walks with a `letrec`-bound self-recursive closure
 (`src/stdlib.lisp`), so the un-fused call mints that closure and its forward cell
 every time, plus the predicate closure wherever the argument is a lambda literal.
 
+## Drop-while — the stage that starts late
+
+`drop-while` is `take-while`'s complement: it skips the leading run its predicate
+admits and passes on every element from the first one the predicate rejects. It
+wears the same `(function, collection)` shape and produces a **collection**, so it
+is a pipeline **stage** too. Its fused form is a guard with the sides swapped and
+the sentinel latched the other way round — a `dropping` flag the rejecting element
+clears, after which every element passes:
+
+```
+(drop-while (fn [x] PRED) [ … ])
+⇒
+(let [coll [ … ]]
+  (let [len (length coll)]
+    (if (< 0 len)
+      (let [acc (@array)]
+        (define i 0)
+        (define dropping true)
+        (while (< i len)
+          (let [item (get coll i)]
+            (begin
+              (if dropping
+                (if (let [x item] PRED) nil (assign dropping false))
+                nil)
+              (if dropping nil (push acc item))))
+          (assign i (+ i 1)))
+        acc)
+      ())))
+```
+
+The predicate runs on exactly the elements the stdlib op gives it — the leading run,
+plus the element that ends it — because the first `if` reads the flag before testing.
+The walk itself stays exhaustive on every chain: a `drop-while` carries no early exit
+at all. Its decision *opens* the rest of the pipeline rather than closing the walk,
+so it never contends for the loop condition, and the innermost-op rule
+(§ "Which early exit may end the walk") has nothing to say about it.
+
+The two `if`s are one decision read twice, not two decisions. Writing it as a single
+`if` whose rejecting side both clears the flag and continues the pipeline would put
+the rest of the pipeline in two places — the deciding element's branch, and every
+later element's — duplicating every stage spliced after this one.
+
+A `drop-while` **renumbers**. It removes a leading run, so an element's position in
+its output is its base index less that run's length, and a `find-index` over one
+reads the survivor count the pipeline carries, exactly as it does over a `filter`
+(§ "The early exit stops the search's own work, not the pipeline's"). A `take-while`
+needs no such count: it keeps a leading run, so every survivor keeps its position.
+
+As for a fold, a count, a search or a `take-while`, a `drop-while` does not fuse over
+a mutable `@array` base, whose length its array arm re-reads per iteration.
+
+A lone `drop-while` never reorders and needs no purity gate; in a chain it carries
+the composition gate like every other op. It saves more than a lone `take-while`
+does: its array arm walks with **two** `letrec`-bound self-recursive closures
+(`src/stdlib.lisp`) — one to find the start, one to copy from it — so the un-fused
+call mints two closures and two forward cells every time, plus the predicate closure
+wherever the argument is a lambda literal.
+
+## The two facts an untyped array arm decides
+
+`take-while`'s and `drop-while`'s array arms are not type-preserving the way `map`'s
+and `filter`'s are, and fusion reproduces each exactly — a rewrite may not change a
+value.
+
+- **The result is unfrozen.** Each array arm returns its `@array` accumulator with
+  no `(if (mutable? coll) acc (freeze acc))`, so either op over an immutable array
+  yields a **mutable** one. `map` and `filter` are type-preserving, so a Collect
+  chain holding either op anywhere is unfrozen throughout.
+- **An empty input answers `()`.** The `(or (pair? coll) (empty? coll))` clause
+  precedes the array arm in both ops, so an empty array takes the *list* arm and the
+  op returns the empty list. The fused Collect form answers `(< 0 len)`'s false side
+  with `()` for the same reason.
+
+The second fact is why every stage inner to one of these two ops must be a `map`.
+`len` decides the emptiness of the **base**, and a `map` preserves it; a `filter`, a
+`take-while` or a `drop-while` can hand an empty collection on from a non-empty base,
+where the staged form would answer `()` and the fused loop its accumulator. Such a
+chain declines whole, and the pre-order recursion still fuses the inner run. A scalar
+terminal cannot observe the difference — an exhausted walk answers with its seed
+either way — but the rule is stated over the pipeline rather than over the terminal,
+so one reading covers every chain.
+
 ## When it is legal — the gate
 
 Fusion preserves the program's value and, for a single op (`map` or `filter`),
 its exact per-element evaluation order (the loop visits each element left to
 right, applying `f`/`p` identically to the stdlib op). The gate:
 
-- **The callee is a canonical stdlib HOF.** A pipeline op is `map`, `filter` or
-  `take-while`; the optional outermost terminal op is `fold`, `reduce`, `count`, or
-  one of the
+- **The callee is a canonical stdlib HOF.** A pipeline op is `map`, `filter`,
+  `take-while` or `drop-while`; the optional outermost terminal op is `fold`,
+  `reduce`, `count`, or one of the
   four short-circuiting searches `any?`/`all?`/`find`/`find-index`. Recognized by
   the callee binding being `is_primitive` (every stdlib/core export is bound so by
   `bind_primitives`, and the canonical core-env override is marked `is_primitive`
@@ -425,8 +486,8 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   call) selects the unfrozen-result arm under the tighter gate below (see
   "The mutable-array arm").
 - **The function is non-capturing with the op's fixed arity** — one parameter for
-  a `map`/`filter`/`take-while`/`count`/search (the element), two for a `fold` (the
-  accumulator
+  a `map`/`filter`/`take-while`/`drop-while`/`count`/search (the element), two for a
+  `fold` (the accumulator
   and the element) — with no rest parameter, and a body free of nested lambdas and of
   call-position `%`-intrinsics unless the function declares `(numeric!)` (see
   "Raw `%`-intrinsic bodies" below). It is one of two forms:
@@ -504,8 +565,8 @@ excluded shapes break that match:
 - **`count`** re-reads `(length coll)` on every iteration where the fused loop
   captures `len` once, so a predicate that pushes to or pops from the base would
   observe a divergence. A `count` over a mutable base stays a plain call. Each
-  **search** array arm re-reads it the same way, and so does **`take-while`**'s;
-  all decline for the same reason.
+  **search** array arm re-reads it the same way, and so do **`take-while`**'s and
+  **`drop-while`**'s; all decline for the same reason.
 - **A composition** (`(map g (filter p @xs))`, …) runs each stdlib op to
   completion over a *fresh* array before the next begins, so a later op's lambda
   mutating the original base can no longer affect the result; the single fused
@@ -696,7 +757,12 @@ codegen and execution levels, not on the leak oracle. Three pins:
   push under the same sentinel — the loop condition reading it where the
   `take-while` is the chain's innermost op, a gate stage where it has a prefix —
   with the accumulator returned unfrozen and an empty base answering `()`, and it
-  composes both ways (a `map` over it, and it over a `map`). A mutable-`@array`-base
+  composes both ways (a `map` over it, and it over a `map`). A **`drop-while`**
+  dissolves to the complementary shape — a `dropping` flag the rejecting element
+  clears, gating the pipeline rather than the walk, so the loop condition stays the
+  bare range test however the chain is arranged — with the same two array-arm facts,
+  and a `find-index` over one bumping the survivor count the leading drop renumbers.
+  A mutable-`@array`-base
   `map`/`filter` fuses
   with the accumulator returned **unfrozen** (no `freeze` call). A
   `(numeric!)`-declared raw-intrinsic kernel fuses — as a `map` transform, as a
@@ -705,9 +771,11 @@ codegen and execution levels, not on the leak oracle. Three pins:
   so it survives the splice) — with the spliced `%`-op inline in the loop. Decline pins guard the gate (user-shadowed
   callee, capturing lambda, unproven collection, an intrinsic body with **no**
   `(numeric!)` declaration, a non-reorder-safe composition — which declines and
-  fuses its inner run only — a `fold`, a `count`, a `take-while`, or a composition
+  fuses its inner run only — a `fold`, a `count`, a `take-while`, a `drop-while`, or
+  a composition
   over a
-  mutable base, which declines to the innermost single op, and a `take-while` whose
+  mutable base, which declines to the innermost single op, and a `take-while` or
+  `drop-while` whose
   inner stage is a `filter`, whose emptiness `len` cannot decide). Named-function pins cover a `map`/`fold`
   whose argument is a `Var` naming a same-unit `defn` (the body inlines, the
   definition persists) and the declines (a `let`-body function, a capturing local
@@ -753,7 +821,12 @@ codegen and execution levels, not on the leak oracle. Three pins:
   (`dissolution-take-while-fuse.lisp`): its lone case is weighed over an undecided
   walk, as a search's is, and its early exit carries the same error instrument —
   lone, a predicate that errors past the decision proves the walk stopped; over a
-  `map` prefix, a transform that errors past the decision proves it did not. The
+  `map` prefix, a transform that errors past the decision proves it did not. A
+  **`drop-while`** (`dissolution-drop-while-fuse.lisp`) weighs its lone case against
+  the un-fused twin, where the saving is two walker closures and their two cells;
+  its own instrument is the mirror image — a predicate that errors on an element
+  past the first rejection completes only if the flag really stops the predicate,
+  while the walk itself must still reach that element to push it. The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
@@ -761,7 +834,8 @@ codegen and execution levels, not on the leak oracle. Three pins:
 - **Value + soundness.** `tests/elle/dissolution-map-fuse.lisp`,
   `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`,
   `dissolution-fold-fuse.lisp`, `dissolution-count-fuse.lisp`,
-  `dissolution-search-fuse.lisp`, and `dissolution-take-while-fuse.lisp` (whose
+  `dissolution-search-fuse.lisp`, `dissolution-take-while-fuse.lisp` and
+  `dissolution-drop-while-fuse.lisp` (whose
   value pins carry the two array-arm facts: the mutable result, and the `()` an
   empty base answers with)
   (value-preserving, incl. the declined shapes, the reorder-gate fallback, the
@@ -777,7 +851,9 @@ codegen and execution levels, not on the leak oracle. Three pins:
   `region-fold-fuse-uaf.lisp` / `region-count-fuse-uaf.lisp` /
   `region-search-fuse-uaf.lisp` (whose `find` hands a base element out of the loop) /
   `region-take-while-fuse-uaf.lisp` (whose accumulator holds base elements the walk
-  stopped short of exhausting)
+  stopped short of exhausting) /
+  `region-drop-while-fuse-uaf.lisp` (whose accumulator holds base elements the
+  predicate never read, the leading run it did read entering nothing)
   (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place, a cloned same-unit
   named-function body, and a cross-unit stdlib `defn` (`identity`) inlined over heap

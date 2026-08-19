@@ -1,18 +1,20 @@
 use super::*;
 
 /// The higher-order collection op a fused chain is built from, and the kind of
-/// each *stage* in the unified pipeline (`Build::element`). All three take
+/// each *stage* in the unified pipeline (`Build::element`). All four take
 /// `(lambda, coll)` and share the `(get`/`push`/`freeze)` index-walk over `coll`'s
 /// array arm; they differ only in how a stage handles the threaded element value:
 /// a `Map` stage transforms it and threads the result on, a `Filter` stage guards
-/// the rest of the pipeline behind its predicate (an `if`), and a `TakeWhile`
+/// the rest of the pipeline behind its predicate (an `if`), a `TakeWhile`
 /// stage guards it the same way but ENDS the run at the first element its
-/// predicate rejects.
+/// predicate rejects, and a `DropWhile` is that stage's complement — it OPENS the
+/// rest of the pipeline there, having passed nothing on before.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Hof {
     Map,
     Filter,
     TakeWhile,
+    DropWhile,
 }
 
 impl Hof {
@@ -22,8 +24,20 @@ impl Hof {
             "map" => Some(Hof::Map),
             "filter" => Some(Hof::Filter),
             "take-while" => Some(Hof::TakeWhile),
+            "drop-while" => Some(Hof::DropWhile),
             _ => None,
         }
+    }
+
+    /// Is this op's stdlib array arm **type-preserving** — a frozen result over an
+    /// immutable array, and an empty array answered with an empty array? `map` and
+    /// `filter` are; `take-while` and `drop-while` are not, each returning its
+    /// `@array` accumulator raw and answering an empty input from the list arm its
+    /// `(empty? coll)` clause reaches first. The Collect terminal's two result flags
+    /// and the gate on what may sit inside such an op both read this one fact
+    /// (docs/impl/dissolution.md § "The two facts an untyped array arm decides").
+    pub(super) fn type_preserving(self) -> bool {
+        matches!(self, Hof::Map | Hof::Filter)
     }
 }
 
@@ -67,6 +81,18 @@ pub(super) enum Stage {
         param: Binding,
         body: Hir,
     },
+    /// A `drop-while`: pass nothing on while the predicate admits, and at the first
+    /// element it rejects clear `sentinel`, from which point every element continues
+    /// the pipeline. The flag is read before the predicate too, so no element past
+    /// the decision reaches it — which is exactly the set the stdlib op tests. The
+    /// walk itself is never cut short: this stage OPENS the rest of the pipeline
+    /// rather than closing the walk, so it owns no `ends_walk` question
+    /// (docs/impl/dissolution.md § "Drop-while — the stage that starts late").
+    Drop {
+        sentinel: Binding,
+        param: Binding,
+        body: Hir,
+    },
     /// The gate a search's own stage rides where a prefix keeps the walk
     /// exhaustive: continue only while `sentinel` holds, so the search's predicate
     /// runs on exactly the elements the staged form gives it. `advance` is the
@@ -77,6 +103,37 @@ pub(super) enum Stage {
         sentinel: Binding,
         advance: Option<Binding>,
     },
+}
+
+impl Stage {
+    /// The `true`-seeded flag this stage owns, if any: a `take-while`'s run
+    /// sentinel, or a `drop-while`'s dropping flag. The loop scaffold `define`s each
+    /// before the walk. A [`Stage::Gate`] reads the search terminal's own sentinel
+    /// rather than owning one, so it answers `None`.
+    pub(super) fn sentinel(&self) -> Option<Binding> {
+        match self {
+            Stage::Take { sentinel, .. } | Stage::Drop { sentinel, .. } => Some(*sentinel),
+            _ => None,
+        }
+    }
+
+    /// Does this stage **renumber** what reaches the rest of the pipeline, so a
+    /// `find-index` past it must answer with a survivor count rather than the base
+    /// index? A `filter` drops elements anywhere in the walk and a `drop-while`
+    /// removes a leading run; a `map` and a `take-while` preserve both the count and
+    /// the order of what they pass on.
+    pub(super) fn renumbers(&self) -> bool {
+        matches!(self, Stage::Guard { .. } | Stage::Drop { .. })
+    }
+}
+
+/// Mint a stage's `true`-seeded flag — a `take-while`'s run sentinel or a
+/// `drop-while`'s dropping flag. It is `assign`ed inside the loop, so it must read
+/// as mutated.
+pub(super) fn stage_sentinel(arena: &mut BindingArena) -> Binding {
+    let b = arena.gensym();
+    arena.get_mut(b).is_mutated = true;
+    b
 }
 
 /// The four short-circuiting stdlib searches. Each takes a `(predicate,
@@ -123,16 +180,17 @@ impl Search {
 /// `map`/`filter` pipeline stages are identical for every terminal; only the
 /// accumulator setup (`build_loop`) and the base case differ.
 ///
-/// - **Collect** — a `map`/`filter`/`take-while` chain: fill a fresh `@array` by
+/// - **Collect** — a `map`/`filter`/`take-while`/`drop-while` chain: fill a fresh
+///   `@array` by
 ///   `push`. Two flags carry what the stdlib ops' array arms decide.
 ///   `unfrozen` picks the result arm (the mutable-array arm): an immutable base
 ///   `freeze`s the accumulator to an immutable result; a mutable `@array` base
 ///   returns it unfrozen (type-preserving, mirroring the stdlib op's own
-///   `(if (mutable? coll) acc (freeze acc))`), and so does a chain holding a
-///   `take-while`, whose own array arm never freezes. `empty_is_list` answers an
-///   empty base with `()`, which is what a `take-while` returns there — its
+///   `(if (mutable? coll) acc (freeze acc))`), and so does a chain holding an op
+///   whose own array arm never freezes. `empty_is_list` answers an
+///   empty base with `()`, which is what such an op returns there — its
 ///   `(empty? coll)` clause precedes its array arm (docs/impl/dissolution.md
-///   § "The two facts the stdlib op's array arm decides").
+///   § "The two facts an untyped array arm decides").
 /// - **Fold** — a `fold`/`reduce` at the head: a **scalar** accumulator seeded by
 ///   `init`, updated `(assign acc (f acc elem))` per surviving element, whose final
 ///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
@@ -179,7 +237,8 @@ pub(super) struct FoldTerminal {
 }
 
 /// A recognized `(map <lambda> …)` / `(filter <lambda> …)` /
-/// `(take-while <lambda> …)` call: the HOF kind, the lambda argument, and the
+/// `(take-while <lambda> …)` / `(drop-while <lambda> …)` call: the HOF kind, the
+/// lambda argument, and the
 /// collection argument (both borrowed). `None` when `hir` is not a call to one of
 /// those canonical stdlib ops with exactly two non-spliced arguments (a user
 /// redefinition shadows the name with a non-primitive binding and is excluded).
@@ -429,15 +488,16 @@ pub(super) fn validate_chain(
     if ops == 0 {
         return None;
     }
-    // A `take-while` answers an EMPTY input with `()` rather than an array — its
-    // `(empty? coll)` clause precedes its array arm — and the fused loop reads that
-    // emptiness off `len`, which is the BASE's. A `map` preserves it; a `filter` or
-    // another `take-while` can hand an empty collection on from a non-empty base, so
-    // a chain that puts one of those inside a `take-while` declines whole and the
-    // pre-order recursion fuses its inner run instead. `kinds` is outer→inner, so
-    // the stages inner to the outermost `take-while` are the ones after it
-    // (dissolution.md § "The two facts the stdlib op's array arm decides").
-    if let Some(outermost) = kinds.iter().position(|k| *k == Hof::TakeWhile) {
+    // `take-while` and `drop-while` answer an EMPTY input with `()` rather than an
+    // array — the `(empty? coll)` clause precedes each one's array arm — and the
+    // fused loop reads that emptiness off `len`, which is the BASE's. A `map`
+    // preserves it; a `filter`, a `take-while` or a `drop-while` can hand an empty
+    // collection on from a non-empty base, so a chain that puts one of those inside
+    // an untyped-arm op declines whole and the pre-order recursion fuses its inner
+    // run instead. `kinds` is outer→inner, so the stages inner to the outermost such
+    // op are the ones after it (dissolution.md § "The two facts an untyped array arm
+    // decides").
+    if let Some(outermost) = kinds.iter().position(|k| !k.type_preserving()) {
         if kinds[outermost + 1..].iter().any(|k| *k != Hof::Map) {
             return None;
         }
@@ -445,8 +505,9 @@ pub(super) fn validate_chain(
     let base = classify_base(cur, arena, symbol_names, bases)?;
     // A mutable `@array` base fuses only a single `map`/`filter`: the fused loop
     // walks the base LIVE against a `len` captured once, which matches the stdlib op
-    // exactly for one op. A `fold` (which snapshots via `->array`), a `count` and a
-    // `take-while` (which re-read `(length coll)` every iteration), and a
+    // exactly for one op. A `fold` (which snapshots via `->array`), a `count`, a
+    // `take-while` and a `drop-while` (which re-read `(length coll)` every
+    // iteration), and a
     // composition (whose staged ops each run to completion over a fresh array) would
     // each diverge from an
     // interleaved live walk under a mutating lambda (dissolution.md § "The
@@ -628,15 +689,15 @@ pub(super) fn take_chain(
             });
             Terminal::Search(search)
         }
-        // The result arm, from the two ops whose array arms decide it: a mutable
-        // `@array` base returns the accumulator unfrozen, and so does a chain
-        // holding a `take-while` — whose empty-input `()` the Collect form must
-        // answer with too.
+        // The result arm, from the two facts that decide it: a mutable `@array` base
+        // returns the accumulator unfrozen, and so does a chain holding an op whose
+        // array arm is not type-preserving — whose empty-input `()` the Collect form
+        // must answer with too.
         TerminalOp::Collect => {
-            let takes = plan.kinds.contains(&Hof::TakeWhile);
+            let untyped = plan.kinds.iter().any(|k| !k.type_preserving());
             Terminal::Collect {
-                unfrozen: plan.mutable_base || takes,
-                empty_is_list: takes,
+                unfrozen: plan.mutable_base || untyped,
+                empty_is_list: untyped,
             }
         }
     };
@@ -660,16 +721,19 @@ pub(super) fn take_chain(
             },
             // The sentinel a rejecting element clears. Whether it ends the WALK is
             // decided below, once the stages are in application order.
-            Hof::TakeWhile => {
-                let sentinel = arena.gensym();
-                arena.get_mut(sentinel).is_mutated = true;
-                Stage::Take {
-                    sentinel,
-                    ends_walk: false,
-                    param,
-                    body,
-                }
-            }
+            Hof::TakeWhile => Stage::Take {
+                sentinel: stage_sentinel(arena),
+                ends_walk: false,
+                param,
+                body,
+            },
+            // The flag a rejecting element clears the other way round: it opens the
+            // rest of the pipeline, so there is no walk to end.
+            Hof::DropWhile => Stage::Drop {
+                sentinel: stage_sentinel(arena),
+                param,
+                body,
+            },
         });
         expr = coll;
     }
@@ -677,7 +741,9 @@ pub(super) fn take_chain(
     stages.reverse();
     // Nothing in the pipeline runs before the chain's innermost op, so that op — and
     // only that op — may end the walk rather than gate its own stage
-    // (dissolution.md § "Which early exit may end the walk").
+    // (dissolution.md § "Which early exit may end the walk"). A `drop-while`
+    // innermost therefore leaves an outer `take-while` gating its own stage: only
+    // the first stage is asked, and a `drop-while` has no walk to end.
     if let Some(Stage::Take { ends_walk, .. }) = stages.first_mut() {
         *ends_walk = true;
     }

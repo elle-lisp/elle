@@ -74,6 +74,9 @@ fn count_intrinsic(h: &Hir, want: &str) -> usize {
 mod collect;
 /// The `count` terminal — a guard stage plus a scalar tally.
 mod count;
+/// The `drop-while` stage — a flag the rejecting element clears, opening the rest
+/// of the pipeline.
+mod drop;
 /// Fold and reduce terminals.
 mod fold;
 /// Chains whose lambda is a named function, same-unit or cross-unit.

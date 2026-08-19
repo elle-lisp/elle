@@ -294,6 +294,26 @@ fn region_take_while_fuse_uaf() {
     );
 }
 
+// Drop-while loop fusion (docs/impl/dissolution.md § "Drop-while — the stage that
+// starts late") dissolves `(drop-while pred xs)` over a proven immutable array into
+// an index-walk loop whose guard clears a `dropping` flag at the first element its
+// predicate rejects, after which every element is pushed. Two roles put heap values
+// on a path no other stage takes. The accumulator fills from the base's TAIL, so the
+// leading run the predicate read and discarded must free while the base still owns
+// what the accumulator now holds. And the predicate stops at the decision while the
+// walk does not, so every later element is read and pushed by a path that never
+// binds it to the predicate's parameter. The result is that accumulator itself,
+// unfrozen, so the caller holds the very object the loop filled. Either over-free
+// SIGSEGVs under guardfree. Fires only on the fused shape; the plain-VM run asserts
+// the values.
+#[test]
+fn region_drop_while_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-drop-while-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

@@ -8,7 +8,9 @@
 //! closure ceases to exist: no per-element closure allocation, no indirect call.
 //! `map` pushes each transform's result; `filter` pushes the element itself under
 //! an `if` guard; `take-while` pushes it under a guard whose rejecting side ends
-//! the run. A chain's optional outermost **terminal** is a scalar op:
+//! the run, and `drop-while` under the complementary flag, which its rejecting side
+//! clears to open the rest of the pipeline. A chain's optional outermost
+//! **terminal** is a scalar op:
 //! `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`) threads an
 //! accumulator seeded by `init` one left-fold step per element, `count`
 //! (`(count pred xs)`) tallies the elements its predicate admits, and each of the
@@ -33,7 +35,10 @@
 //! run. Both carry an early exit, and the rule for where it is read is the same:
 //! the chain's INNERMOST op may end the walk — nothing runs before it, so no
 //! per-element work goes unrun — and its sentinel is the loop condition's. Every
-//! other early exit gates its own stage while the walk stays exhaustive.
+//! other early exit gates its own stage while the walk stays exhaustive. A
+//! `drop-while` carries no early exit at all: its flag opens the pipeline instead of
+//! closing the walk, so the loop condition stays the bare range test whatever the
+//! chain around it looks like.
 //!
 //! ## Why this shape, here
 //!
@@ -49,7 +54,7 @@
 //! It mirrors the container-dispatch monomorphization (`monomorphize.rs`):
 //! recognize a proven-type call across the compile-unit boundary (the callee is
 //! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`filter`/
-//! `take-while`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
+//! `take-while`/`drop-while`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
 //! shadows it with a non-primitive binding and is left alone) and collapse it to the
 //! direct form the proof selects.
 //!
