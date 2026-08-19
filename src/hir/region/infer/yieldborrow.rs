@@ -61,6 +61,47 @@ pub(super) fn compute_borrowed_emit_payloads(hir: &Hir, info: &RegionInfo) -> Fx
     out
 }
 
+/// The `Emit` sites of `hir` whose RESUME value nothing else counts
+/// (`RegionInfo::unfunded_resume_values`) — the other direction of the same
+/// crossing.
+///
+/// The resumer pushes the value onto the parked frame's stack and takes no
+/// reference for it, so the body reads it through the resumer's own reference
+/// unless one is minted here. What already funds a reference is the frame's own
+/// return transfer: an `Emit` the frame hands its value back from carries the
+/// `Return` marker's mint for the same region, and a second one would strand a
+/// reference per resume. So the answer is the emit sites whose result region is off
+/// the **return frontier**, read from escape's authoritative verdict rather than a
+/// syntactic tail test — a value bound and returned later is as funded as one
+/// returned in place.
+pub(super) fn compute_unfunded_resume_values(
+    hir: &Hir,
+    escape: &crate::hir::EscapeInfo,
+    info: &RegionInfo,
+) -> FxHashSet<HirId> {
+    let returned = super::escape::return_frontier_regions(
+        escape,
+        &info.alloc_region,
+        &info.binding_source_regions,
+    );
+    let mut out = FxHashSet::default();
+    collect_emit_sites(hir, &mut out);
+    out.retain(|site| {
+        info.alloc_region
+            .get(site)
+            .is_none_or(|&r| !returned.contains(&info.merged_root(r)) && !returned.contains(&r))
+    });
+    out
+}
+
+/// Every `Emit` node id in `hir`.
+fn collect_emit_sites(hir: &Hir, out: &mut FxHashSet<HirId>) {
+    if matches!(&hir.kind, HirKind::Emit { .. }) {
+        out.insert(hir.id);
+    }
+    hir.for_each_child(|c| collect_emit_sites(c, out));
+}
+
 /// Map every node to the innermost `Lambda` enclosing it (`None` at the
 /// compilation unit's top level), so "released in the emitting body" is one
 /// lookup per region.

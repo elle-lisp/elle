@@ -453,12 +453,36 @@ fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
 
 #[test]
 fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
-    // The decline face: the closure holding the cell crosses the FIBER frontier
-    // before the body tail-calls it, so escape's capture facet marks `c` escaping
-    // beyond return and both admissions refuse the box — a resumer holds the
-    // closure through a hold the compiler did not place. Only the mutated refusal
-    // is scoped to the value route; an escape facet no edge at the point replaces
+    // The decline face: the closure holding the cell is STORED into an aggregate
+    // before the body tail-calls it, so escape's capture facet marks `c` escaping by a
+    // CONTAINMENT facet and both admissions refuse the box — the aggregate holds the
+    // closure through a hold no seam at the point counts. Only the mutated refusal is
+    // scoped to the value route; a containment facet no edge at the point replaces
     // still refuses, and the release keeps its place in the dead block.
+    let module = compile_to_lir(
+        "(begin (def @sink nil) (def f (fn () (def @c 0) \
+         (let [g (fn () (assign c (%add c 1)) c)] \
+           (begin (assign sink (%pair g nil)) (g))))) \
+         (f))",
+    );
+    let (at, releases) =
+        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().all(|&r| r > at),
+        "an escaping holder's env cell was hoisted ahead of the TailCall \
+         (at={at}, releases={releases:?}) — the closure leaves carrying the cell",
+    );
+}
+
+#[test]
+fn yielded_holder_env_cell_release_precedes_the_frame_replacing_tail_call() {
+    // The admitted face beside it: the closure holding the cell crosses the FIBER
+    // frontier rather than a containment one. Every seam that hands a value to another
+    // fiber counts a reference of its own — the park's `EmitEscape` retain going out,
+    // the resume value's own mint coming back — so the crossing is not the uncounted
+    // second holder the admission guards against, and the box's release is hoisted
+    // ahead of the `TailCall` like any other
+    // (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
     let module = compile_to_lir(
         "(begin (def f (fn () (def @c 0) \
          (let [g (fn () (assign c (%add c 1)) c)] (begin (emit :yield g) (g))))) \
@@ -467,9 +491,10 @@ fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
     let (at, releases) =
         tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
     assert!(
-        releases.iter().all(|&r| r > at),
-        "an escaping holder's env cell was hoisted ahead of the TailCall \
-         (at={at}, releases={releases:?}) — the closure leaves carrying the cell",
+        releases.iter().any(|&r| r < at),
+        "a yielded holder's env cell release is still emitted after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path, one box \
+         stranded per activation",
     );
 }
 

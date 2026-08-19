@@ -244,7 +244,14 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard" "abort-discard" "spawn-join"])
+                   "cancel-discard" "abort-discard"])
+# `spawn-join` is a CLOSED control now (undeclared, like `rest-array-copy`), so a
+# regression to open trips the completeness gate loudly rather than being absorbed
+# under F2 — which is not where it belonged: what it measured was the frame-held
+# admission refusing the FIBER facet, not park residue. A crossing leaves a counted
+# holder — the park's `EmitEscape` retain going out, the resume value's own mint
+# coming back — so the admission rides it and only the containment facets refuse
+# (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
 # `io-yield ev/sleep` is a CLOSED control (undeclared, like `rest-array-copy`): a
 # pumped io op strands nothing, so a regression to open must trip the completeness
 # gate loudly rather than be absorbed under a root.
@@ -1567,29 +1574,30 @@
                 (lcl-self-send 3)
                 (get (chan/recv lcl-rcv) 1)) 100 6 60 0.4 0.5) 0)
 
-# ── The scheduler frontier — a spawned fiber's residue (F2) ───────────
+# ── The scheduler frontier — a spawned fiber's round trip ─────────────
 # `ev/spawn` + `ev/join` is the shape every structured-concurrency program
 # is built out of, and it is the one the h2 corpus multiplies: one session
-# answering 320 requests held ~1 GB of live heap on this residue alone.
+# answering 320 requests held ~1 GB of live heap on this round trip alone.
 #
-# What strands, read off `--trace=rc` for one op: the fiber's own region,
+# What stranded, read off `--trace=rc` for one op: the fiber's own region,
 # the closure it was made from, and the `[ok? value]` pair the join
-# delivered — each left at rc=1, its birth reference never released. Every
-# escape retain along the way IS balanced (four mutable-store retains
-# against four `unrecord_outgoing`, the return-value and call-argument
-# retains against their `DecrefValueRegion`s), so what is missing is the
-# release of the creating frame's own reference across `ev/spawn`'s tail
-# call — the per-path return frontier
-# (docs/impl/region/mechanism.md § "The return frontier is per-path"),
-# reached here through a callee resolved from a dynamic parameter.
+# delivered — each left at rc=1, its birth reference never released. The
+# frame that owned each one handed it to another fiber on ONE path and
+# reached its end on every other: `wake-select-waiters` takes the completed
+# fiber by tail-call move and resumes a select waiter with it, and a
+# program with no select outstanding never takes that arm. The release the
+# branch-arm window would anchor at the merge was refused because the
+# region crosses the fiber frontier — a refusal the crossing's own count
+# retires (docs/impl/region/mechanism.md § "A fiber crossing is a counted
+# holder too"). A CLOSED control now, and the shape is gauged directly by
+# tests/elle/region-fiber-frontier-window.lisp.
 #
 # The SCHEDULER's half of the per-fiber cost is closed and stays closed:
 # a delivered join retires the completion records that used to hold every
 # fiber a program ever spawned (docs/scheduler.md § Completion records,
-# pinned by tests/elle/sched-completion-records.lisp). This probe measures
-# what remains, which is the region model's. Shrink-only.
+# pinned by tests/elle/sched-completion-records.lisp).
 (pin (measure "spawn-join" (fn [j] (ev/join (ev/spawn (fn [] 7)))) 100 6 60 0.4
-              0.5) 4)
+              0.5) 0)
 
 # ── Stdlib / native-tail / discarded-tail leak classes ────────────────
 # Three more leak classes pinned in the one dashboard (leak state

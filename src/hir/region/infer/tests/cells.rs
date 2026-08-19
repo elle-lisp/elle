@@ -361,12 +361,15 @@ fn frame_held_names_a_returned_capturers_forward_cell() {
 }
 
 #[test]
-fn frame_held_refuses_a_forward_cell_whose_binding_crosses_the_fiber_frontier() {
-    // The counterfactual: the projection carries the binding's verdict, so it must
-    // carry a REFUSAL too. `go` is YIELDED, so escape's capture facet marks `helper`
-    // escaping beyond return — a resumer holds the closure through a hold the compiler
-    // did not place, and a parked frame may borrow the cell uncounted. Nothing counts
-    // that hold, so the cell must be refused and its release must keep the baseline.
+fn frame_held_names_a_yielded_capturers_forward_cell() {
+    // The FIBER face of the same projection. `go` is YIELDED, so escape's capture facet
+    // carries `helper` across the fiber frontier with it — a crossing the park counts a
+    // reference for (its `EmitEscape` retain going out, the resume value's own mint
+    // coming back), so it is not the uncounted borrow the admission guards against
+    // (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
+    // The cell must therefore carry its binding's verdict here as it does under the
+    // return facet; `frame_held_refuses_a_forward_cell_whose_binding_is_stored` below
+    // is the refusal that keeps the projection honest.
     let mut symbols = SymbolTable::new();
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
@@ -388,10 +391,45 @@ fn frame_held_refuses_a_forward_cell_whose_binding_crosses_the_fiber_frontier() 
     );
     let (_helper, cell) = cells[0];
     assert!(
+        info.frame_held_regions.contains(&cell),
+        "a forward cell r{} whose binding crosses the FIBER frontier must carry its \
+         binding's verdict — the crossing counts its own reference, so it is no \
+         uncounted second holder; frame_held={:?}",
+        cell.0,
+        info.frame_held_regions,
+    );
+}
+
+#[test]
+fn frame_held_refuses_a_forward_cell_whose_binding_is_stored() {
+    // The counterfactual: the projection carries the binding's verdict, so it must
+    // carry a REFUSAL too. `helper` is STORED into an aggregate, so escape marks it
+    // escaping by a CONTAINMENT facet — a holder no seam at the point counts. The cell
+    // must be refused there and its release must keep the baseline.
+    let mut symbols = SymbolTable::new();
+    let meta = crate::primitives::build_primitive_meta(&mut symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let (hir, arena, _) = compile_fhir(
+        "(defn h [n] \
+           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
+                    go (fn [m] (when (%not (%int? m)) (error :m)) \
+                         (if (%lt m 1) :done (go (helper m))))] \
+             (begin (%pair helper nil) (go n))))",
+        &mut symbols,
+    );
+    let info = analyze_regions_with(&hir, &arena, pc.call_classification);
+    let cells = compiled_cells(&info);
+    assert_eq!(
+        cells.len(),
+        1,
+        "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
+    );
+    let (_helper, cell) = cells[0];
+    assert!(
         !info.frame_held_regions.contains(&cell),
-        "a forward cell r{} whose binding crosses the FIBER frontier must not clear the \
-         admission — the projection carries the binding's refusal as it carries its \
-         verdict; frame_held={:?}",
+        "a forward cell r{} whose binding is STORED must not clear the admission — the \
+         projection carries the binding's refusal as it carries its verdict; \
+         frame_held={:?}",
         cell.0,
         info.frame_held_regions,
     );

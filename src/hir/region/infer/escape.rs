@@ -91,12 +91,15 @@ pub(crate) fn return_frontier_regions(
 /// Regions a value crosses the **fiber frontier** through — emitted, yielded, or
 /// sent, so another fiber can reach it. The region-level fiber facet.
 ///
-/// Two consumers: the ownership Shared seed (below), and the branch-arm release
-/// window, whose anchor argument is a placement one and therefore says nothing
-/// about *other* holders — a value another fiber can reach may be borrowed
-/// uncounted by a frame that is parked when the release runs
-/// (docs/impl/region/mechanism.md § "A release inside one arm is not a release on
-/// the other arms").
+/// One consumer: the ownership Shared seed (below). A value another fiber can
+/// reach cannot be Owned by a bounded activation, whatever counts the crossing
+/// takes.
+///
+/// The frame-held admission reads [`fiber_frontier_site_regions`] instead, not
+/// this: a crossing hands the value to a seam that counts a reference of its own,
+/// so the second holder it creates is not the uncounted borrow that admission
+/// guards against (docs/impl/region/mechanism.md § "A fiber crossing is a counted
+/// holder too").
 pub(crate) fn fiber_frontier_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxHashSet<Region> {
     let mut out: FxHashSet<Region> = FxHashSet::default();
     // Binding half: an emitted / sent binding.
@@ -105,8 +108,18 @@ pub(crate) fn fiber_frontier_regions(escape: &EscapeInfo, info: &RegionInfo) -> 
             out.extend(regions.iter().copied());
         }
     }
-    // Allocation-site half: an atomless emitted / sent value
-    // (`(yield (%pair …))`, `(chan/send s (%pair …))`).
+    out.extend(fiber_frontier_site_regions(escape, info));
+    out
+}
+
+/// The **atomless** half of [`fiber_frontier_regions`] alone: a value emitted or
+/// sent with no binding to name it (`(yield (%pair …))`, `(chan/send s (%pair …))`),
+/// projected through `alloc_region`.
+///
+/// Split out for the frame-held admission, which judges its bindings one by one and
+/// so needs the half no binding answers for.
+fn fiber_frontier_site_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxHashSet<Region> {
+    let mut out: FxHashSet<Region> = FxHashSet::default();
     for (&hid, &r) in &info.alloc_region {
         if escape.escapes_fiber_frontier(hid) {
             out.insert(r);
@@ -127,8 +140,8 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
     out
 }
 
-/// The regions this frame holds alone for as long as it lives: every holder binding
-/// leaves the activation by the **return** facet at most, the release route is
+/// The regions this frame holds alone for as long as it lives: no holder binding
+/// leaves the activation by a **containment** facet, the release route is
 /// unmutated, and the region is absent from the fiber frontier's atomless site half.
 /// A region with no holder binding at all offers nothing to judge and is refused —
 /// except a binding's compiled forward CELL, whose holders are that binding's one
@@ -163,11 +176,21 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// member's RC is frozen and every decref is a structural no-op. A counted or
 /// owning edge is not the uncounted borrow this predicate exists to protect, so
 /// the frame's own release still drops the only reference it owns. Capture by a
-/// closure that escapes **beyond the return facet** is a different matter and is
-/// already covered: `binding_escapes_beyond_return` folds in escape's capture facet,
+/// closure that escapes by a **containment** facet is a different matter and is
+/// already covered: `binding_escapes_by_containment` folds in escape's capture facet,
 /// which propagates such a closure's verdict to every binding it captures. Contrast
 /// [`captured_bindings`], the structural graph the *merge* gate reads — merging
 /// changes where a value lives, so it needs raw reachability rather than a count.
+///
+/// **A fiber crossing rides along for the same reason** (region/mechanism.md § "A
+/// fiber crossing is a counted holder too"). Each seam that hands a value to another
+/// fiber counts a reference of its own before this frame runs on: the park's
+/// `EmitEscape` retain going out, the resume value's own mint coming back
+/// (`RegionInfo::unfunded_resume_values`), and `chan/send`'s send-site incref. So the
+/// admission refuses the containment facets
+/// rather than everything beyond return. The fiber frontier's **atomless site half**
+/// still refuses: a value emitted or sent with no binding to name it is judged by no
+/// holder here at all.
 ///
 /// **A mutated binding is refused for its value ROUTE, so the refusal reaches only
 /// as far as that route** (region/mechanism.md § "A mutated holder poisons its
@@ -193,12 +216,12 @@ pub(super) fn frame_held_regions(
     binding_regions: &std::collections::HashMap<Binding, Vec<Region>>,
     binder_init_sites: &HashMap<Binding, Option<HirId>>,
 ) -> FxHashSet<Region> {
-    let fiber = fiber_frontier_regions(escape, info);
+    let fiber = fiber_frontier_site_regions(escape, info);
     let poisoned = mutated_route_regions(arena, info, binding_regions, binder_init_sites);
     let mut held: FxHashSet<Region> = FxHashSet::default();
     let mut refused: FxHashSet<Region> = FxHashSet::default();
     for (b, regions) in binding_regions {
-        let escapes_beyond_return = escape.binding_escapes_beyond_return(*b);
+        let escapes_by_containment = escape.binding_escapes_by_containment(*b);
         // The binding's compiled forward CELL rides its binding's verdict. A binding
         // names the closure region its cell points AT, never the cell's own, so a
         // cell region has no holder here and would be refused for want of anything
@@ -213,7 +236,7 @@ pub(super) fn frame_held_regions(
         let cell = info.single_cell_region_of(*b);
         for &r in regions.iter().chain(cell.iter()) {
             held.insert(r);
-            if poisoned.contains(&r) || escapes_beyond_return {
+            if poisoned.contains(&r) || escapes_by_containment {
                 refused.insert(r);
             }
         }

@@ -64,18 +64,20 @@
   #223 params=[] captures=[]
   #225 params=[b47(n)] captures=[b46(f)<Recursive>]
 [return_frontier]
-  [r13, r14, r31, r41, r44, r6]
+  [r15, r16, r35, r46, r49, r51, r7]
 [suppressed_decref_regions]
   []
 [region_instrs]
   ; entry <anon>
     block2: DecrefRegion s0
     block2: DecrefRegion s1
+    block4: IncrefValueRegion v42
     block4: DecrefValueRegion v43
     block3: DecrefValueRegion v45
     block3: DecrefRegion s2
     block6: DecrefRegion s3
     block6: DecrefRegion s4
+    block8: IncrefValueRegion v78
     block8: DecrefValueRegion v79
     block7: DecrefValueRegion v81
     block7: DecrefRegion s5
@@ -84,16 +86,19 @@
     block7: DecrefValueRegion v103
     block10: DecrefRegion s6
     block10: DecrefRegion s7
+    block12: IncrefValueRegion v131
     block12: DecrefValueRegion v132
     block11: DecrefValueRegion v134
     block11: DecrefRegion s8
     block14: DecrefRegion s9
     block14: DecrefRegion s10
+    block16: IncrefValueRegion v167
     block16: DecrefValueRegion v168
     block15: DecrefValueRegion v170
     block15: DecrefRegion s11
     block18: DecrefRegion s12
     block18: DecrefRegion s13
+    block20: IncrefValueRegion v203
     block20: DecrefValueRegion v204
     block19: DecrefValueRegion v206
     block19: DecrefRegion s14

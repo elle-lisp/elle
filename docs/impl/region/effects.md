@@ -173,13 +173,15 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
     takes the park-retain and records the `fiber → signal` outgoing edge
     (`record_terminal_signal_park`: the hard kill's, and the completing resume's
     step-6a park), so the fiber's free-time signal scan balances it. An install
-    the next step CONSUMES is a transient handover — `do_fiber_resume_single`
-    takes the value straight back out of the slot and hands it to the resumed
-    frame as a borrowed operand, while the caller's own frame stays parked
-    underneath the resume, holding the reference that keeps it alive. A
-    compile-time incref would double-count the first against its single cascade
-    decref and never balance the second, which is exactly the arg-clique leak
-    (`tests/elle/region-fiber-install-clique-leak.lisp`).
+    the next step CONSUMES is handed straight back out of the slot by
+    `do_fiber_resume_single` and pushed onto the resumed frame's stack, and it is
+    the RESUMED frame that counts it: the suspending call's continuation mints the
+    resume value it re-enters on — the parked native call's own result retain, or
+    the `Emit`'s (`RegionInfo::unfunded_resume_values`,
+    [owner.md](owner.md) § "A resume value crosses counted, or not at all"). A
+    compile-time incref at the install would double-count the first against its
+    single cascade decref and duplicate the second, which is exactly the arg-clique
+    leak (`tests/elle/region-fiber-install-clique-leak.lisp`).
   - **The argument side is also `Sends`'s answer — a frontier crossing.** The
     value goes to a fiber this activation does not bound, so escape seeds each
     listed argument on its **fiber** facet (`hir::escape`), never the store

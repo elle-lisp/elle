@@ -404,11 +404,15 @@ that: it is a count question wearing a placement question's clothes, and it is t
 same wall the per-arm route hits.
 
 Escape answers exactly it, and is the sole authority for it
-([escape.md](../escape.md)): a value that leaves its activation by **no** facet —
-return, store, capture, fiber — is reachable only through this frame's slots. So
-the window is admitted for a region whose every holder binding is non-escaping,
-whose own release route is unmutated, and which is absent from the return and
-fiber frontiers' atomless site halves (which no binding names). A region with no
+([escape.md](../escape.md)). What the admission needs from it is narrower than
+"escapes", though: an **uncounted** second holder. So the facets split. The
+**containment** facets — store, and capture by a closure that itself escapes —
+hand the value to a holder the frame cannot see and, for a declared native store,
+cannot count, and they refuse. The **return** and **fiber** facets each create a
+holder that is counted at the crossing, and each rides along instead (below). So
+the window is admitted for a region whose every holder binding is free of the
+containment facets, whose own release route is unmutated, and which is absent from
+the fiber frontier's atomless site half (which no binding names). A region with no
 holder binding at all offers nothing to judge and is refused too. Everything else
 keeps its in-arm release and the per-arm compensation routes above, which carry a
 count argument instead — so the two mechanisms partition the obligation rather
@@ -471,6 +475,45 @@ a flow fact. The structural capture-graph
 its closure ever leaves — the right conservatism for the **merge** gate, which
 asks where a value may *live* and so needs raw reachability, and the wrong one
 here, where the question is who holds a count.
+
+#### A fiber crossing is a counted holder too
+
+The fiber facet reads exactly as capture does, and for the same reason: every seam
+that hands a value to another fiber counts a reference of its own before this frame
+runs on. Each direction of each seam:
+
+- **out, at a park.** The emit's `EmitEscape` retain is the delivery reference,
+  consumed by the resumer's release of the resume result. Where the emitting body
+  holds no reference to give up — a capture, an enclosing frame's parameter, a
+  module-level binding — the compiler supplies one, so a park's payload carries
+  exactly one body reference beside the delivery's
+  ([owner.md](owner.md) § "Park/unpark symmetry").
+- **in, at a resume.** The resumer pushes the value onto the parked frame's stack
+  and takes nothing for it, so the `Emit` mints the reference the resumed body holds
+  it by — released at that node's own `decref_point`, as a call result is
+  ([owner.md](owner.md) § "A resume value crosses counted, or not at all").
+- **send.** `chan/send` declares `Sends`, whose recorded edge increfs the message at
+  the send site and holds it in the buffer until the receive lowers the count
+  ([effects.md](effects.md) § `Sends`).
+
+So a fiber crossing leaves a *counted* second holder, not the uncounted borrow this
+admission exists to protect, and the frame's own release still drops the only
+reference it owns. That is why the admission reads the containment facets
+(`EscapeInfo::binding_escapes_by_containment`) rather than everything beyond
+return. The two halves stand or fall together: withdraw the resume value's mint and
+a body that parks again holding it reads the resumer's freed reference, which is
+what `region-fiber-frontier-window-uaf.lisp` drives. The fiber frontier's **atomless
+site half** still refuses — a value emitted or sent with no binding to name it is
+judged by no holder here at all, so it keeps the conservative baseline the same way
+a region with no holder binding does.
+
+The leak this closes is the owned parameter a frame receives, hands to another
+fiber on one path, and reaches the end of on every other. `wake-select-waiters`
+takes the completed fiber by tail-call move from `complete-fiber` and resumes a
+select waiter with it, so its release sat inside the arm that finds a waiter — and
+a program with no select outstanding never runs that arm. Every `ev/spawn` /
+`ev/join` pair stranded the fiber, the closure it was made from, and the
+`[ok? value]` pair the join delivered.
 
 #### A mutated holder poisons its value route, not its cell box
 

@@ -107,6 +107,15 @@ being returned propagates nothing there, which is the precise reading its consum
 needs: that closure's hold on its captures is a counted edge, and the value it
 carries out is the return facet's business, not another facet's.
 
+One more cut of the same propagation: **containment alone**
+(`binding_escapes_by_containment`) is beyond-return less its fiber seeds — the
+store facet and capture by a closure that itself escapes. It exists because a
+consumer may care *who counts the second holder* rather than *whether one exists*:
+a containment escape hands the value to a holder the frame cannot see, while every
+fiber crossing counts a reference at its seam. The frame-held admission is that
+consumer ([region/mechanism.md](region/mechanism.md) § "A fiber crossing is a
+counted holder too").
+
 ## Interprocedural return transparency
 
 The return facet is **interprocedural** for an *arg-returning* callee. A tail call
@@ -163,13 +172,20 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
   - the **frame-held admission** (`regions::escape::frame_held_regions`) the
     branch-arm release window and the lowerer's frame-exit release share: both make
     a release fire on a path where none fired before, so both must know this frame
-    holds the region's one reference. It reads `binding_escapes_beyond_return` per
-    holder plus the fiber frontier's atomless site half — and, unlike the merge gate
+    holds the region's one reference. What it needs is narrower than "escapes" — an
+    **uncounted** second holder — so it reads `binding_escapes_by_containment` per
+    holder (the store facet, and capture by a closure that itself escapes) plus the
+    fiber frontier's atomless site half, and admits the two facets whose holder is
+    counted at the crossing. Unlike the merge gate
     above, it does **not** consult the structural capture-graph, because a closure's
     hold on what it captures is a counted (or owning) edge rather than an uncounted
     borrow; capture by a closure escaping *beyond the return facet* is already an
     escape facet ([region/mechanism.md](region/mechanism.md) § "Lexical capture is
-    not a second holder to fear"). The **return** facet rides along rather than refusing: the
+    not a second holder to fear"). The **fiber** facet rides along for the same
+    reason: the park's `EmitEscape` retain going out, the resume value's own mint
+    coming back, and `chan/send`'s send-site incref each count a reference before
+    this frame runs on ([region/mechanism.md](region/mechanism.md) § "A fiber
+    crossing is a counted holder too"). The **return** facet rides along rather than refusing: the
     caller does read such a region afterwards, through the tail callee's return
     mint, but that callee reaches a value this frame owns as an operand or through
     its captured environment and by no other route, so it either counts the region

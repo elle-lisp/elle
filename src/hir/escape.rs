@@ -242,6 +242,20 @@ pub struct EscapeInfo {
     /// and why the point owes it nothing"), which admits the return facet and must
     /// therefore know no other facet is also refusing.
     binding_escapes_beyond: FxHashSet<Binding>,
+    /// Bindings whose value escapes by a **containment** facet — stored into a
+    /// longer-lived region, or captured by a closure that itself escapes. The
+    /// beyond-return set less its fiber half, propagated through both edge kinds.
+    ///
+    /// The split exists because the two groups answer the *holder* question
+    /// differently. A containment escape hands the value to a holder the frame
+    /// cannot see and, for a declared native store, cannot count. A fiber crossing
+    /// hands it to a seam that counts its own reference — the park's `EmitEscape`
+    /// retain going out, the resume value's own mint coming back, `chan/send`'s
+    /// send-site incref — so the second holder it creates is counted, exactly as a
+    /// lexical capture's is.
+    /// Read by the frame-held admission (`region::infer::escape::frame_held_regions`),
+    /// which exists to exclude *uncounted* second holders.
+    binding_escapes_containment: FxHashSet<Binding>,
     /// Allocation-site `HirId`s a value reaches a **tail/return** through — the
     /// region-level half of the return facet, naming the *atomless* escapes
     /// `binding_returns` cannot (a bare `(%pair …)` / `(@array …)` / call result /
@@ -297,6 +311,14 @@ impl EscapeInfo {
     /// full set nor the return-only set can say alone (see the field doc).
     pub fn binding_escapes_beyond_return(&self, b: Binding) -> bool {
         self.binding_escapes_beyond.contains(&b)
+    }
+
+    /// Does this binding's value escape by a **containment** facet — a store into a
+    /// longer-lived region, or capture by a closure that itself escapes? The
+    /// beyond-return set less its fiber half (see the field doc): a fiber crossing
+    /// creates a counted holder, a containment escape need not.
+    pub fn binding_escapes_by_containment(&self, b: Binding) -> bool {
+        self.binding_escapes_containment.contains(&b)
     }
 
     /// Does an allocation at this `HirId` reach a **tail/return** (the region-level
@@ -427,6 +449,11 @@ pub fn analyze_escape(
     let mut beyond_seeds = fiber_seeds.clone();
     beyond_seeds.extend(other_seeds.iter().copied());
     let beyond = propagate(&beyond_seeds, &edges, Some(&lambda_captures));
+    // Containment alone: the store/capture half of beyond-return, without the fiber
+    // seeds. The frame-held admission reads this rather than `beyond`, because a
+    // fiber crossing counts its own reference at the seam and so is not the
+    // uncounted second holder that admission refuses (see `binding_escapes_containment`).
+    let containment = propagate(&other_seeds, &edges, Some(&lambda_captures));
     // Full escape: every facet's seeds, propagated through binding-definition AND
     // capture edges (a value captured by an escaping closure escapes too,
     // transitively).
@@ -456,6 +483,11 @@ pub fn analyze_escape(
     for a in beyond {
         if let Atom::Binding(b) = a {
             info.binding_escapes_beyond.insert(b);
+        }
+    }
+    for a in containment {
+        if let Atom::Binding(b) = a {
+            info.binding_escapes_containment.insert(b);
         }
     }
     // Fiber-frontier bindings: the directly emitted/sent binding seeds. No backward

@@ -68,9 +68,9 @@
   #130 params=[b40(xs)] captures=[]
   #133 params=[b42(a)] captures=[]
 [return_frontier]
-  [r1, r29, r32, r5, r60, r62, r63, r64, r65]
+  [r1, r30, r33, r5, r63, r65, r66, r67, r68]
 [suppressed_decref_regions]
-  [r34, r47]
+  [r35, r49]
 [region_instrs]
   ; entry <anon>
     block4: DecrefRegion s0
@@ -96,6 +96,7 @@
     block3: DecrefRegion s9
     block9: DecrefRegion s10
     block9: DecrefRegion s11
+    block11: IncrefValueRegion v139
     block11: DecrefValueRegion v140
     block10: DecrefValueRegion v142
     block15: DecrefRegion s12
@@ -112,6 +113,7 @@
     block20: DecrefValueRegion v218
     block20: DecrefRegion s17
     block20: DecrefRegion s18
+    block22: IncrefValueRegion v221
     block22: DecrefValueRegion v222
     block21: DecrefValueRegion v224
     block26: DecrefRegion s19
@@ -128,6 +130,7 @@
     block31: DecrefValueRegion v298
     block31: DecrefRegion s24
     block31: DecrefRegion s25
+    block33: IncrefValueRegion v301
     block33: DecrefValueRegion v302
     block32: DecrefValueRegion v304
     block32: DecrefRegion s26

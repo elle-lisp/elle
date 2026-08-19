@@ -393,6 +393,26 @@ fn region_branch_arm_window_uaf() {
     );
 }
 
+// Guard — a fiber crossing leaves a COUNTED holder, so the frame-held admission
+// rides it instead of refusing (docs/impl/region/mechanism.md § "A fiber crossing
+// is a counted holder too"). Going out that reference is the park's `EmitEscape`
+// retain; coming back it is the resume value's own mint, which nothing took before
+// (docs/impl/region/owner.md § "A resume value crosses counted, or not at all").
+// So this drives what must outlive the OTHER side's release: a body that keeps its
+// resume value past a further park, two bodies keeping the same delivered value, a
+// resumer reading what it was yielded after the emitting body ran on, and a value
+// delivered from inside a branch arm whose release the window now anchors at the
+// merge — plus the containment store the window must still refuse. Freeing any of
+// them faults on the read below — SIGSEGV under guardfree. The leak face is
+// `region-fiber-frontier-window.lisp`.
+#[test]
+fn region_fiber_frontier_window_uaf() {
+    run_elle_script_with_args(
+        "region-fiber-frontier-window-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — the sequence reads and conversions declare `Opaque`, which says two
 // things: the result may live anywhere, and no argument is stored uncounted
 // (docs/impl/region/effects.md § `Opaque`). The second withdraws a store-facet

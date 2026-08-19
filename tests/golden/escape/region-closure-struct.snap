@@ -25,7 +25,7 @@
   #9 params=[] captures=[b4(box)<Local>]
   #16 params=[b7(y)] captures=[b4(box)<Local>]
 [return_frontier]
-  [r19, r2, r4, r9]
+  [r2, r20, r4, r9]
 [suppressed_decref_regions]
   []
 [region_instrs]
@@ -37,6 +37,7 @@
     block0: DecrefValueRegion v33
     block2: DecrefRegion s1
     block2: DecrefRegion s2
+    block4: IncrefValueRegion v63
     block4: DecrefValueRegion v64
     block3: DecrefValueRegion v66
     block3: DecrefValueRegion v68

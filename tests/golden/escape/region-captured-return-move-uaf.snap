@@ -50,7 +50,7 @@
   b48(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
 [return_frontier]
-  [r52]
+  [r54]
 [suppressed_decref_regions]
   [r36, r40]
 [region_instrs]
@@ -96,18 +96,21 @@
     block65: IncrefValueRegion v362
     block65: DecrefValueRegion v363
     block69: DecrefRegion s2
+    block70: IncrefValueRegion v377
     block70: DecrefValueRegion v378
-    block1: DecrefValueRegion v380
-    block1: DecrefValueRegion v382
-    block1: DecrefValueRegion v392
-    block72: DecrefValueRegion v418
-    block72: DecrefValueRegion v423
+    block70: DecrefValueRegion v380
+    block1: DecrefValueRegion v381
+    block1: DecrefValueRegion v383
+    block1: DecrefValueRegion v393
+    block72: DecrefValueRegion v419
+    block72: DecrefValueRegion v424
     block72: DecrefRegion s3
-    block72: DecrefValueRegion v436
+    block72: DecrefValueRegion v437
     block72: DecrefRegion s4
-    block74: DecrefValueRegion v440
-    block73: DecrefValueRegion v442
-    block73: IncrefValueRegion v447
-    block73: DecrefValueRegion v448
-    block73: DecrefValueRegion v450
-    block73: DecrefValueRegion v452
+    block74: IncrefValueRegion v440
+    block74: DecrefValueRegion v441
+    block73: DecrefValueRegion v443
+    block73: IncrefValueRegion v448
+    block73: DecrefValueRegion v449
+    block73: DecrefValueRegion v451
+    block73: DecrefValueRegion v453

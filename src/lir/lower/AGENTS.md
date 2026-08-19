@@ -202,6 +202,11 @@ other is structural ownership-location, NOT escape:
 1. Emits `Terminator::Yield` to end the current block
 2. Creates a new block at `resume_label`
 3. Emits `LoadResumeValue` as the first instruction of the resume block
+4. Mints the resume value's own reference (`IncrefValueRegion`) unless the frame's
+   return transfer already funds one — the resumer hands the value over uncounted, so
+   without this the body reads the resumer's reference across its next park
+   (`RegionInfo::unfunded_resume_values`; docs/impl/region/owner.md § "A resume value
+   crosses counted, or not at all")
 
 The emitter preserves stack state across the yield boundary via `yield_stack_state`. This ensures intermediate values computed before yield (e.g., the `1` in `(+ 1 (yield 2) 3)`) survive into the resume block.
 

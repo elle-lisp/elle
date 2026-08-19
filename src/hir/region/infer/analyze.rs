@@ -265,5 +265,12 @@ pub fn analyze_regions_with(
     // its root's.
     info.borrowed_emit_payloads = super::yieldborrow::compute_borrowed_emit_payloads(hir, &info);
 
+    // The other half of the same symmetry: which `Emit` sites receive a resume value
+    // nothing else counts, so the lowerer can mint the reference this body holds it
+    // by. Reads the return frontier, so it runs beside the payload pass, after every
+    // decref_point post-pass.
+    info.unfunded_resume_values =
+        super::yieldborrow::compute_unfunded_resume_values(hir, &escape_info, &info);
+
     info
 }

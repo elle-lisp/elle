@@ -275,6 +275,25 @@ pub struct RegionInfo {
     /// leak), while missing one frees a live value. Pinned by
     /// tests/elle/region-fiber-yield-borrow-uaf.lisp.
     pub borrowed_emit_payloads: FxHashSet<HirId>,
+    /// `Emit` sites whose RESUME VALUE — what the `Emit` evaluates to — reaches this
+    /// body counted by nothing, so the lowerer mints the reference the body holds it
+    /// by (docs/impl/region/owner.md § "Park/unpark symmetry" — "A resume value
+    /// crosses counted, or not at all").
+    ///
+    /// The resumer pushes the value onto the parked frame's stack and takes no
+    /// reference for it (`VM::resume_suspended`), so without a mint the body reads it
+    /// through the resumer's own reference — an uncounted cross-fiber borrow that
+    /// outlives the resume as soon as the body parks again holding the value. The
+    /// mint's balancing release is the `Emit`'s own call-result `DecrefValueRegion`,
+    /// emitted at its `decref_point` like any other.
+    ///
+    /// A site is EXCLUDED where the frame's return transfer already funds a
+    /// reference for the same region: an `Emit` whose value the frame hands back
+    /// carries the `Return` marker's mint, and minting again would strand one
+    /// reference per resume. So the set is the emit sites whose result region is off
+    /// the return frontier — the same "exactly one mint per crossing" rule the
+    /// payload half states in the other direction.
+    pub unfunded_resume_values: FxHashSet<HirId>,
     /// HirIds of a binding init that is a WHOLE-VALUE read of a reassigned
     /// captured cell (`is_restorable_capture_cell`) — the reader of the 1-slot
     /// container. The cell's overwrite (`capture_store_with_rebind`) decrefs the
@@ -852,6 +871,7 @@ impl RegionInfo {
             call_result_regions: FxHashSet::default(),
             emit_payload_regions: HashMap::new(),
             borrowed_emit_payloads: FxHashSet::default(),
+            unfunded_resume_values: FxHashSet::default(),
             counted_cell_read_sites: FxHashSet::default(),
             counted_cell_init_sites: FxHashSet::default(),
             fresh_result_regions: FxHashSet::default(),

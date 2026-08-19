@@ -18,7 +18,7 @@
 [lambda_captures]
   #1 params=[b2(n)] captures=[]
 [return_frontier]
-  []
+  [r13]
 [suppressed_decref_regions]
   []
 [region_instrs]
@@ -28,13 +28,15 @@
     block2: DecrefRegion s1
     block2: DecrefValueRegion v38
     block2: DecrefRegion s2
+    block4: IncrefValueRegion v41
     block4: DecrefValueRegion v42
-    block6: DecrefValueRegion v60
+    block4: DecrefValueRegion v44
+    block6: DecrefValueRegion v61
     block6: DecrefRegion s3
-    block6: DecrefValueRegion v69
+    block6: DecrefValueRegion v70
     block6: DecrefRegion s4
-    block8: DecrefValueRegion v73
-    block7: IncrefValueRegion v75
+    block8: DecrefValueRegion v74
+    block7: IncrefValueRegion v76
   ; closure[0] <anon>
     block4: DecrefRegion s5
     block4: DecrefRegion s6

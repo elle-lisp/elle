@@ -99,9 +99,9 @@
   b97(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
 [return_frontier]
-  [r99]
+  [r108]
 [suppressed_decref_regions]
-  [r0, r1, r12, r13, r2, r20, r29, r3, r30, r31, r32, r33, r49, r50, r64, r79, r80, r83, r84]
+  [r0, r1, r13, r14, r2, r22, r3, r32, r33, r34, r35, r36, r54, r55, r71, r87, r88, r91, r92]
 [region_instrs]
   ; entry <anon>
     block0: IncrefValueRegion v89
@@ -113,6 +113,7 @@
     block0: IncrefValueRegion v109
     block2: DecrefRegion s0
     block2: DecrefRegion s1
+    block4: IncrefValueRegion v139
     block4: DecrefValueRegion v140
     block3: DecrefValueRegion v142
     block3: DecrefValueRegion v147
@@ -122,6 +123,7 @@
     block3: IncrefValueRegion v160
     block6: DecrefRegion s3
     block6: DecrefRegion s4
+    block8: IncrefValueRegion v190
     block8: DecrefValueRegion v191
     block7: DecrefValueRegion v193
     block7: IncrefValueRegion v200
@@ -129,6 +131,7 @@
     block7: IncrefValueRegion v204
     block10: DecrefRegion s5
     block10: DecrefRegion s6
+    block12: IncrefValueRegion v234
     block12: DecrefValueRegion v235
     block11: DecrefValueRegion v237
     block11: DecrefValueRegion v242
@@ -142,11 +145,13 @@
     block11: IncrefValueRegion v273
     block14: DecrefRegion s8
     block14: DecrefRegion s9
+    block16: IncrefValueRegion v303
     block16: DecrefValueRegion v304
     block15: DecrefValueRegion v306
     block15: IncrefValueRegion v309
     block18: DecrefRegion s10
     block18: DecrefRegion s11
+    block20: IncrefValueRegion v339
     block20: DecrefValueRegion v340
     block19: DecrefValueRegion v342
     block19: DecrefValueRegion v347
@@ -156,10 +161,12 @@
     block19: DecrefValueRegion v363
     block22: DecrefRegion s13
     block22: DecrefRegion s14
+    block24: IncrefValueRegion v395
     block24: DecrefValueRegion v396
     block23: DecrefValueRegion v398
     block26: DecrefRegion s15
     block26: DecrefRegion s16
+    block28: IncrefValueRegion v433
     block28: DecrefValueRegion v434
     block27: DecrefValueRegion v436
     block27: DecrefValueRegion v441
@@ -174,6 +181,7 @@
     block27: DecrefValueRegion v497
     block30: DecrefRegion s18
     block30: DecrefRegion s19
+    block32: IncrefValueRegion v528
     block32: DecrefValueRegion v529
     block31: DecrefValueRegion v531
     block31: DecrefValueRegion v536
@@ -194,6 +202,7 @@
     block31: DecrefValueRegion v609
     block34: DecrefRegion s23
     block34: DecrefRegion s24
+    block36: IncrefValueRegion v640
     block36: DecrefValueRegion v641
     block35: DecrefValueRegion v643
     block35: DecrefValueRegion v648

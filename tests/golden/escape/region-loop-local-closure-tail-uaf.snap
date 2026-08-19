@@ -36,7 +36,7 @@
   #53 params=[b15(n)] captures=[]
   #72 params=[] captures=[b17(i)<Local>]
 [return_frontier]
-  [r10, r31, r4]
+  [r10, r33, r4]
 [suppressed_decref_regions]
   []
 [region_instrs]
@@ -50,6 +50,7 @@
     block2: DecrefRegion s2
     block2: DecrefValueRegion v67
     block2: DecrefRegion s3
+    block4: IncrefValueRegion v70
     block4: DecrefValueRegion v71
     block3: DecrefRegion s4
     block3: DecrefRegion s5
@@ -59,6 +60,7 @@
     block6: DecrefRegion s7
     block6: DecrefValueRegion v111
     block6: DecrefRegion s8
+    block8: IncrefValueRegion v114
     block8: DecrefValueRegion v115
     block7: DecrefRegion s9
     block7: IncrefValueRegion v120

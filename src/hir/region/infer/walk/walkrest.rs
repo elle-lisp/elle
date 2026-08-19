@@ -241,7 +241,13 @@ impl RegionInference {
                 // fiber body owns one reference of every value it yields").
                 let payload = self.walk(value);
                 self.emit_payload_regions.insert(hir.id, payload);
-                Vec::new()
+                // An `Emit` evaluates to the RESUME value, which the resumer hands
+                // over uncounted. Mirror `Eval`: a placeholder call-result region, so
+                // the lowerer's `LoadResumeValue` mint has a `DecrefValueRegion` at
+                // this node's `decref_point` to balance it.
+                let result_r = self.alloc_here(hir.id);
+                self.call_result_regions.insert(result_r);
+                vec![result_r]
             }
 
             HirKind::Eval { expr, env } => {

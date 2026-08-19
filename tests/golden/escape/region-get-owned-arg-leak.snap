@@ -90,7 +90,7 @@
   #266 params=[] captures=[b1(two-get)<Local>]
   #288 params=[] captures=[b1(two-get)<Local>]
 [return_frontier]
-  [r10, r15, r20, r25, r30, r50, r55, r6, r76]
+  [r10, r15, r20, r25, r30, r53, r58, r6, r81]
 [suppressed_decref_regions]
   []
 [region_instrs]
@@ -109,18 +109,21 @@
     block2: DecrefRegion s7
     block2: DecrefValueRegion v106
     block2: DecrefRegion s8
+    block4: IncrefValueRegion v109
     block4: DecrefValueRegion v110
     block6: DecrefValueRegion v129
     block6: DecrefValueRegion v134
     block6: DecrefRegion s9
     block6: DecrefValueRegion v143
     block6: DecrefRegion s10
+    block8: IncrefValueRegion v146
     block8: DecrefValueRegion v147
     block10: DecrefValueRegion v166
     block10: DecrefValueRegion v171
     block10: DecrefRegion s11
     block10: DecrefValueRegion v180
     block10: DecrefRegion s12
+    block12: IncrefValueRegion v183
     block12: DecrefValueRegion v184
     block11: IncrefRegion s0
     block11: DecrefRegion s13
@@ -140,6 +143,7 @@
     block14: DecrefRegion s21
     block14: DecrefValueRegion v251
     block14: DecrefRegion s22
+    block16: IncrefValueRegion v254
     block16: DecrefValueRegion v255
     block18: DecrefValueRegion v275
     block18: DecrefValueRegion v280
@@ -147,6 +151,7 @@
     block18: DecrefRegion s24
     block18: DecrefValueRegion v289
     block18: DecrefRegion s25
+    block20: IncrefValueRegion v292
     block20: DecrefValueRegion v293
     block19: DecrefRegion s26
     block19: IncrefValueRegion v298

@@ -415,6 +415,19 @@ impl<'a> Lowerer<'a> {
 
         let dst = self.fresh_reg();
         self.emit(LirInstr::LoadResumeValue { dst });
+        // The resume value crosses from the resumer uncounted — `resume_suspended`
+        // pushes it onto this frame's stack and takes no reference for it. Mint the
+        // reference this body holds it by, so a later park cannot leave the resumer's
+        // release freeing a value this frame still reads; the `Emit`'s own
+        // call-result `DecrefValueRegion` gives it back. Skipped where the frame's
+        // return transfer already funds one for the same region
+        // (`unfunded_resume_values`).
+        if self
+            .current_hir_id
+            .is_some_and(|id| self.region_info.unfunded_resume_values.contains(&id))
+        {
+            self.emit(LirInstr::IncrefValueRegion { src: dst });
+        }
 
         Ok(dst)
     }

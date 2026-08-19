@@ -117,7 +117,14 @@ pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap
         });
         vm.heap().decref_region(region_id);
     } else if crate::config::get().has_trace("rc") {
-        eprintln!("[trace:rc] DecrefValueRegion: skip (no region)");
+        let loc = location_map
+            .get(&instr_ip)
+            .map(|l| format!("{l}"))
+            .unwrap_or_else(|| "?".to_string());
+        eprintln!(
+            "[trace:rc] DecrefValueRegion: skip (no region) of {} @ {loc} ip={instr_ip}",
+            value.type_name()
+        );
     }
 }
 

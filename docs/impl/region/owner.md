@@ -237,6 +237,23 @@ parked fiber's accounting symmetric with its unpark:
   theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
   (`tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp`);
   `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler witness.
+- **A resume value crosses counted, or not at all.** The delivery going *out* of a park
+  is counted (above); the value coming *back* in is not, and by the same accounting must
+  be. `VM::resume_suspended` pushes the resume value onto the parked frame's stack and
+  takes no reference for it, so the body reads the resumer's own — fine while the resume
+  call is still running, and a dangling read the moment the body parks again holding the
+  value and the resumer moves on. So the `Emit` itself supplies the reference: its result
+  is an ordinary call-result region (`walk`'s `Emit` arm), `lower_emit` mints one after
+  `LoadResumeValue`, and the node's own `decref_point` releases it. The mint is skipped
+  where the frame's **return transfer** already funds a reference for the same region —
+  an `Emit` whose value the frame hands back carries the `Return` marker's mint, and a
+  second would strand one per resume, so `RegionInfo::unfunded_resume_values` names the
+  sites whose result region is off the return frontier. What this buys beyond soundness is
+  the frame-held admission: with both directions counted, a fiber crossing is a counted
+  second holder rather than an uncounted borrow, so the branch-arm window and the
+  frame-exit release stop refusing it ([mechanism.md](mechanism.md) § "A fiber crossing is
+  a counted holder too"). Pinned by `tests/elle/region-fiber-frontier-window-uaf.lisp`,
+  with the leak face in `tests/elle/region-fiber-frontier-window.lisp`.
 - **A parked TERMINAL result displaced by a resume or abort install is released as it is
   displaced.** A terminal result parked in `fiber.signal` carries the park-retain and a
   recorded `fiber-region → result-region` content edge, both counting on the fiber's

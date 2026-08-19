@@ -306,12 +306,15 @@ pub(in crate::hir::escape) fn record_frontier_sites(
             }
             out.insert(hir.id);
         }
-        // Fresh allocations with no atom: a string/quoted-compound literal or an
-        // `Eval` result region.
-        HirKind::String(_) | HirKind::QuoteConst(_) | HirKind::Eval { .. } => {
+        // Fresh allocations with no atom: a string/quoted-compound literal, an
+        // `Eval` result region, or an `Emit`'s — what the resumer handed back.
+        HirKind::String(_)
+        | HirKind::QuoteConst(_)
+        | HirKind::Eval { .. }
+        | HirKind::Emit { .. } => {
             out.insert(hir.id);
         }
-        // Immediates and no-value forms (`While`/`Emit`/`Break`/`Recur`): no region.
+        // Immediates and no-value forms (`While`/`Break`/`Recur`): no region.
         _ => {}
     }
 }
