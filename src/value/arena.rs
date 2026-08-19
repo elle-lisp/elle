@@ -171,6 +171,12 @@ pub enum EscapeSite {
     /// prediction-free return convention; the caller's `DecrefValueRegion`
     /// consumes it).
     ReturnValue,
+    /// A message enqueued into a channel buffer (`chan/send`). The buffer is
+    /// external to the region system — no free-time cascade balances it — so
+    /// this retain IS the message's reference while it rides the buffer;
+    /// `release_received_message` lowers it as the receive takes the message
+    /// out (docs/impl/region/effects.md § `Sends`).
+    ChanSend,
     /// A yielded / suspended value escapes into `fiber.signal`.
     SuspendEscape,
     /// An emitted value the scheduler holds via `fiber.signal` past the
@@ -192,6 +198,7 @@ impl EscapeSite {
             EscapeSite::ParameterResolve => "parameter-resolve",
             EscapeSite::CallArgument => "call-argument",
             EscapeSite::ReturnValue => "return-value",
+            EscapeSite::ChanSend => "chan-send",
             EscapeSite::SuspendEscape => "suspend-escape",
             EscapeSite::EmitEscape => "emit-escape",
             EscapeSite::TerminalSignal => "terminal-signal",

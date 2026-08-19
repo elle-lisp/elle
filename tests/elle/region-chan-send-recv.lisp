@@ -5,8 +5,8 @@
 # fiber frontier (it rides the channel buffer, by pointer, to whatever fiber
 # receives it), so the message can never be Owned by a bounded activation and stays
 # on the incoming-count (per-region RC) path — the always-Shared class
-# (docs/impl/region/adopt.md § "Why this is hybrid"). The `Sends` edge increfs the
-# message's region at the send site to keep it alive in the channel buffer until
+# (docs/impl/region/adopt.md § "Why this is hybrid"). The send seam increfs the
+# message's region at the enqueue to keep it alive in the channel buffer until
 # received (docs/impl/region/effects.md § `Sends`) — "a store into a Shared region
 # bumps its count". Receiving the message removes it from the buffer, so its region's
 # incoming count must be lowered — "an overwrite/drop lowers it"

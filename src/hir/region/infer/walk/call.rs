@@ -321,14 +321,22 @@ impl RegionInference {
                 // structure), NOT a frontier crossing — no Shared seed.
                 self.record_store_edges(hir.id, stored, &arg_regions);
             }
-            Some(RegionEffect::Sends { args: stored }) => {
-                // A fiber-crossing send (`chan/send`): the same edge/lifetime
-                // accounting as `Stores` (keep the message alive in the channel
-                // buffer until the receiving fiber takes it). The fiber-frontier
-                // escape of the message is escape's judgment (`analyze_escape`'s
-                // fiber/send facet, projected by `region::infer::escape`), not a
-                // solver-recorded source set.
-                self.record_store_edges(hir.id, stored, &arg_regions);
+            Some(RegionEffect::Sends { .. }) => {
+                // A fiber-crossing send (`chan/send`): seam-counted, exactly as
+                // `Funnel` and `Delivers` — the send body retains the message's
+                // region at runtime after a successful enqueue
+                // (`EscapeSite::ChanSend` in `prim_chan_send`) and the receive
+                // lowers it (`release_received_message`), so NO may-store edge.
+                // An edge is doubly wrong here: its compile-time incref would
+                // double-count against the receive's single release where the
+                // solver can name a region pair, and silently fail to fire where
+                // it cannot — at a real call site the channel is typically an
+                // upvalue or module-level binding, so no pair exists and the
+                // message would ride the buffer on the sender's own references
+                // (tests/elle/region-chan-send-owned-param-uaf.lisp). The
+                // fiber-frontier escape of the message is escape's judgment
+                // (`analyze_escape`'s fiber/send facet, projected by
+                // `region::infer::escape`), not a solver-recorded source set.
             }
             Some(RegionEffect::Mixed | RegionEffect::Unknown) => {
                 // A registered NATIVE whose store behaviour is

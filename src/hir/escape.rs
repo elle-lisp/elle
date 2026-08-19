@@ -39,8 +39,9 @@
 //!   `PassThrough`/`Funnel` escape nothing. This is how `chan/send` (`Sends{[1]}`)
 //!   marks its message escaping — the *send* fiber boundary — while `fiber/new`/
 //!   `chan/recv` (`Fresh`) do not. (`Sends` and `Stores` escape a binding identically;
-//!   they differ only in that `Sends` ALSO crosses the fiber frontier, which the
-//!   fiber facet records — see below.)
+//!   they differ in the facet: a `Sends` message crosses the fiber frontier, which
+//!   the fiber facet records — see below — and its store is seam-counted, so the
+//!   solver records no edge for it.)
 //! - **capture** — a value *captured by a closure that itself escapes* escapes
 //!   too, transitively. The capture facet has **no seed of its own**: a closure
 //!   escapes its definition ONLY when its value returns/stores/crosses a fiber
@@ -360,9 +361,10 @@ impl EscapeInfo {
 ///      allocating intrinsics (`collect_flow`'s `Intrinsic` arm — `%pair` every
 ///      arg, `%array-push` arg 1, `%put` arg 2) and **native calls that declare a
 ///      store** (`collect_flow`'s `Call` arm, keyed on the callee's `RegionEffect`
-///      from `call_class`): `Stores{args}`/`Sends{args}` seed those args,
-///      `Mixed`/`Unknown` seeds every arg (the solver's mutual clique), and
-///      `Fresh`/`Immediate`/`PassThrough`/`Funnel` seed nothing. This is how
+///      from `call_class`): `Stores{args}` seeds those args, `Sends{args}` seeds
+///      them on the fiber facet (a seam-counted frontier crossing, not an edge
+///      source), `Mixed`/`Unknown` seeds every arg (the solver's mutual clique),
+///      and `Fresh`/`Immediate`/`PassThrough`/`Funnel` seed nothing. This is how
 ///      `chan/send` (`Sends{[1]}`) marks its message escaping while `fiber/new`
 ///      (`Fresh` — the closure rides the fresh fiber result) and `chan/recv`
 ///      (`Fresh`) do not.

@@ -48,18 +48,24 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   ownership subtree (`ffi/callback` stores a closure into a C function
   pointer), so it is **not** a fiber-frontier crossing and seeds nothing
   for the ownership forest.
-- **`Sends { args }`** — like `Stores`, but the listed arguments cross a
-  **fiber boundary**: they are handed to another fiber (`chan/send`'s
-  message rides the channel to the receiving fiber, by pointer under the
-  single-threaded scheduler). The solver does the *identical* edge and
-  lifetime accounting as `Stores` (the stored arg is increfed and kept
-  alive in the channel buffer until received) — but where a `Stores` target
-  is an in-heap container whose free-time cascade balances the incref, a
-  channel buffer is **external** to the region system, so nothing cascades
-  it. The message is a genuinely-Shared (no-bounded-dominator) region, and
-  its incoming count is maintained the way § class 7 of
-  [ownership.md](ownership.md) prescribes: the send bumps it (this
-  edge), and the **receive lowers it** — `chan/recv` / `chan/try-select` /
+- **`Sends { args }`** — the listed arguments cross a **fiber boundary**:
+  they are handed to another fiber (`chan/send`'s message rides the channel
+  to the receiving fiber, by pointer under the single-threaded scheduler).
+  The store is **seam-counted**: the send body increfs the message's region
+  at runtime after a successful enqueue (`EscapeSite::ChanSend` in
+  `prim_chan_send`), so the solver records **no edge** — exactly as for
+  `Funnel` and `Delivers`. A compile-time edge cannot carry this reference:
+  its incref is keyed on a region *pair* the solver must name, and at a real
+  call site the channel is typically a module-level binding read as an
+  upvalue, so no pair exists and no incref is emitted — the message then
+  rides the buffer on the sender's own references and is freed before the
+  receive (`tests/elle/region-chan-send-owned-param-uaf.lisp`). The buffer
+  is **external** to the region system — no free-time cascade balances
+  anything stored in it — so the seam retain IS the message's reference. The
+  message is a genuinely-Shared (no-bounded-dominator) region, and its
+  incoming count is maintained the way § class 7 of
+  [ownership.md](ownership.md) prescribes: the send bumps it (the seam
+  retain), and the **receive lowers it** — `chan/recv` / `chan/try-select` /
   `chan/wait-ready` each decref the message's region as it leaves the buffer
   (`release_received_message`, guarded by `value_in_region_store` so a
   cross-thread message on a foreign heap is left to that heap's accounting).
@@ -193,12 +199,14 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
     argument. So the result may live anywhere, the declaration oracle makes no
     result-side check, and the walk records `result ⊒ each argument`.
 
-  The distinction from `Sends` is *who counts the store*: `chan/send` leaves its
-  message in a channel buffer external to the region system, which nothing
-  cascades, so the send-site incref IS the message's reference and `chan/recv`
-  lowers it. A fiber's signal slot is not external — it is a scanned field of a
-  region-managed fiber object — so the seam counts it and a solver edge would
-  double-count.
+  The distinction from `Sends` is *who balances the seam's reference*: both
+  seams count their own store at runtime and record no solver edge. `chan/send`
+  leaves its message in a channel buffer external to the region system, which
+  nothing cascades, so the send-site retain IS the message's reference and
+  `chan/recv` lowers it. A fiber's signal slot is not external — it is a
+  scanned field of a region-managed fiber object — so an outliving install is
+  balanced by the fiber's free-time signal scan, and a consumed one by the
+  resumed frame's own accounting.
 
   **What a delivered value still owes is owed by its RESULT.** A caught
   `fiber/abort` hands the injected payload straight back to its caller, whose
@@ -278,16 +286,20 @@ Declarations shrink the clique to where it can be real:
   runtime-counted or transient, so — like `Funnel` — **no edges**. What the
   declaration still carries is the *frontier*: escape seeds the listed args on
   its fiber facet, so an installed value is never Owned.
-- `Stores { args }` (and `Sends { args }`, identically for edges): a directed
+- `Stores { args }`: a directed
   may-store edge from each listed argument's regions to each *other* heap
   argument's regions (the possible in-argument targets). A store into the
   result needs no compile-time edge — the result object's alloc-time scan
   counts it (Rule 5, immutable contents) or the mutable-store funnel does. A
   store into an external structure must be runtime-counted by the native
   itself (`incref_for_escape`); it is invisible to the solver by nature and
-  the declaration documents it. `Sends` records the same edges (shared
-  `record_store_edges`) and additionally seeds the listed args as
-  fiber-frontier crossings — the only behavioral difference.
+  the declaration documents it.
+- `Sends { args }`: **no edges** — the send seam retains the message's region
+  at runtime (`EscapeSite::ChanSend`), so a compile-time edge would
+  double-count where it fires and — the real defect it carried — silently
+  fail to fire where the channel's region is not nameable at the call site
+  (an upvalue or module-level channel). The declaration still seeds the
+  listed args as fiber-frontier crossings for escape.
 - `Mixed` / `Unknown` (a registered **native** whose store behaviour is
   uncounted-or-unexamined): the full mutual clique. A native can
   reach value/ internals and store an argument *uncounted* — invisible to
@@ -396,7 +408,7 @@ cascade steals a live reference: the call-result-arg clique UAF
 The fix is split by who recorded the edge:
 
 - Edges recorded at a **native call site with a declared uncounted-store
-  effect** (`Stores` / `Sends` / `Mixed` / `Unknown` — the callee is a known
+  effect** (`Stores` / `Mixed` / `Unknown` — the callee is a known
   primitive) are **hard edges**: the store is real or must be presumed
   real. For a call-result source the lowerer increfs by *value* — load
   the argument from its binding slot and retain the runtime region the
@@ -408,13 +420,15 @@ The fix is split by who recorded the edge:
   callee's own compilation, so no caller-side edge is needed; a slot-based
   edge would leak one region per alloc-region argument per call, and a
   value-based one would leak the call-result case too (the funnel already
-  counts the store). One residual remains: a user fn that dispatches a storing
-  native over a *call-result* argument (the higher-order `chan/send` shape) is
+  counts the store). One residual remains: a user fn that dispatches an
+  uncounted-store native over a *call-result* argument is
   a UAF candidate only when the dispatched native is not statically resolvable
   at the call site (`call_effect` returns `None`, so no hard edge is recorded).
   When the native *is* resolvable in the callee's own compilation it is a
-  hard-edge site like any other `Stores`/`Sends`/`Mixed`/`Unknown` native call, and
-  the value-based incref above covers the call-result source there.
+  hard-edge site like any other `Stores`/`Mixed`/`Unknown` native call, and
+  the value-based incref above covers the call-result source there. (A
+  seam-counted native — `Sends`, `Funnel`, `Delivers` — has no such residual:
+  its store is counted at the seam however the callee is reached.)
 
 **The declaration oracle.** A declaration is a soundness claim, so it is
 checked, forever: in debug builds `dispatch_native_call` compares the

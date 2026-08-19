@@ -140,8 +140,9 @@ fn fiber_emit_value_escapes() {
 }
 
 /// Native-declared store escape, the precise *send* treatment. `chan/send`
-/// declares `RegionEffect::Sends { args: [1] }` (a `Stores` that also crosses the
-/// fiber frontier): its message (arg 1) is stored uncounted into the channel and
+/// declares `RegionEffect::Sends { args: [1] }` (a store that also crosses the
+/// fiber frontier): its message (arg 1) is stored into the channel — seam-counted
+/// at the send (`EscapeSite::ChanSend`), so the solver records no edge — and
 /// crosses the fiber boundary, so it escapes. The binding-level escape set treats
 /// `Sends` exactly like `Stores`; the frontier distinction matters only for the
 /// fiber facet (the Shared seed `region::infer::escape` projects).

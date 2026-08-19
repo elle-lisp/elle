@@ -492,9 +492,9 @@ runs on. Each direction of each seam:
   and takes nothing for it, so the `Emit` mints the reference the resumed body holds
   it by — released at that node's own `decref_point`, as a call result is
   ([owner.md](owner.md) § "A resume value crosses counted, or not at all").
-- **send.** `chan/send` declares `Sends`, whose recorded edge increfs the message at
-  the send site and holds it in the buffer until the receive lowers the count
-  ([effects.md](effects.md) § `Sends`).
+- **send.** `chan/send`'s seam retains the message's region at the enqueue
+  (`EscapeSite::ChanSend`) and holds it in the buffer until the receive lowers
+  the count ([effects.md](effects.md) § `Sends`).
 
 So a fiber crossing leaves a *counted* second holder, not the uncounted borrow this
 admission exists to protect, and the frame's own release still drops the only

@@ -1,16 +1,45 @@
 use super::*;
 use crate::primitives::ctx::NativeCtx;
 
+/// Retain the message's region as it enters the channel buffer — the send half
+/// of the genuinely-Shared (class 7) message's incoming-count accounting
+/// (docs/impl/region/adopt.md § "Why this is hybrid").
+///
+/// `chan/send` is `RegionEffect::Sends` (docs/impl/region/effects.md § `Sends`):
+/// the message crosses the fiber frontier, so it can never be Owned and stays on
+/// the per-region RC path. The buffer is external to the region system — no
+/// free-time cascade balances a reference held by it — so the seam counts its
+/// own reference here, the way every other fiber-frontier seam does
+/// (`EscapeSite::ChanSend`; "a store into a Shared region bumps its count").
+/// This cannot be a compile-time edge: an edge's incref is keyed on a region
+/// pair the solver must name, and at a real call site the channel is typically
+/// an upvalue or module-level binding, so no pair exists and no incref would be
+/// emitted — the message would then ride the buffer on the sender's own
+/// references and be freed before the receive
+/// (tests/elle/region-chan-send-owned-param-uaf.lisp). Call this only after a
+/// successful enqueue; a `[:full]`/`[:disconnected]` send stores nothing.
+///
+/// Guarded by `value_in_region_store`: a message minted on a foreign heap (a
+/// value that arrived over a cross-thread channel and is re-sent) is a borrow
+/// this store neither counts nor may free. An immediate message has no region
+/// and no-ops.
+fn retain_sent_message(ctx: &mut NativeCtx, msg: Value) {
+    let heap = ctx.heap_mut();
+    if heap.value_in_region_store(msg) {
+        let region = crate::value::arena::region_of(heap, msg);
+        crate::value::arena::incref_for_escape(
+            heap,
+            region,
+            crate::value::arena::EscapeSite::ChanSend,
+        );
+    }
+}
+
 /// Lower the incoming count the send bumped, now that this message has left the
 /// channel buffer — the receive half of the genuinely-Shared (class 7) message's
-/// incoming-count accounting (docs/impl/region/adopt.md § "Why this is hybrid").
-///
-/// `chan/send` is `RegionEffect::Sends` (docs/impl/region/effects.md § `Sends`): the
-/// message crosses the fiber frontier, so it can never be Owned and stays on the
-/// per-region RC path, and the `Sends` edge increfs its region at the send site to
-/// keep it alive in the buffer *until received* — "a store into a Shared region bumps
-/// its count". A receive removes the message from the buffer, so its region's
-/// incoming count must drop by one — the matching "an overwrite/drop lowers it". Call
+/// incoming-count accounting, balancing `retain_sent_message`. A receive removes
+/// the message from the buffer, so its region's incoming count must drop by one
+/// — the matching "an overwrite/drop lowers it". Call
 /// this once per message pulled from the buffer, AFTER the `[:ok msg]`/`[i msg]`
 /// result carrying it is built, so that result's own reference holds the message
 /// across the release (releasing first could free it under the read).
@@ -187,6 +216,7 @@ pub(super) fn prim_chan_send(
     let result = tx.try_send(SendableValue(args[1]));
     match result {
         Ok(()) => {
+            retain_sent_message(ctx, args[1]);
             sender.1.wake_all();
             (SIG_OK, ctx.array(vec![Value::keyword("ok")]))
         }

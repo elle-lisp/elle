@@ -447,9 +447,10 @@ primitive! {
         example: "(chan/send sender 42)",
         // `Sends`, not `Stores`: the message (arg 1) crosses to the receiving
         // fiber (by pointer — `prim_chan_send` enqueues the raw `SendableValue`).
-        // Same edge/lifetime accounting as `Stores` (keep it alive in the buffer
-        // until received); the fiber-frontier escape of the message is the escape
-        // analysis's fiber/send facet (`hir::escape`), the Shared seed the
+        // The store is seam-counted (`retain_sent_message` on a successful
+        // enqueue, lowered by `release_received_message` at the receive), so the
+        // solver records no edge; the fiber-frontier escape of the message is the
+        // escape analysis's fiber/send facet (`hir::escape`), the Shared seed the
         // ownership forest reads.
         effect: RegionEffect::Sends { args: &[1] },
     }

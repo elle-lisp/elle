@@ -71,8 +71,9 @@ A value escapes its activation through any of four facets:
   `Mixed`/`Unknown` escapes every arg (the solver's full mutual clique), and
   `Fresh`/`Immediate`/`PassThrough`/`Funnel`/`Opaque` escape nothing. (`Sends` and
   `Delivers` are stores that also cross a fiber boundary; all three escape
-  identically here, and differ only in what the SOLVER records — `Delivers` no
-  edge, because its install seam counts its own reference.)
+  identically here, and differ in what the SOLVER records — `Stores` an edge,
+  `Sends` and `Delivers` none, because the send seam and the install seam each
+  count their own reference at runtime.)
 - **capture** — a value *captured by a closure that itself escapes* escapes too,
   transitively. The capture facet has **no seed of its own**: a closure escapes
   its definition ONLY when its value returns/stores/crosses a fiber boundary (the

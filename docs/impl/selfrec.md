@@ -231,7 +231,8 @@ at the crossing, so the receiver's hold is never the frame's.
   retain through its own result release — the delivery hands the resumer one owning
   reference ([region/owner.md](region/owner.md) § "Park/unpark symmetry");
 - a **sent** message — the other fiber-frontier seed, `chan/send`'s `Sends` declaration —
-  is increfed at the send site and held until the receive builds the result carrying it
+  takes the seam's runtime retain at the enqueue (`EscapeSite::ChanSend`) and is held
+  until the receive builds the result carrying it
   (`release_received_message`, `primitives/chan/prims.rs`);
 - a **halted** payload takes the terminal park retain instead (`incref_signal_region`), the
   one signal `handle_emit` deliberately leaves unretained.

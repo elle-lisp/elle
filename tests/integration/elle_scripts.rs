@@ -624,6 +624,25 @@ fn region_selfrec_fiber_release() {
     );
 }
 
+// Guard — `chan/send`'s message reference is counted at the send seam itself
+// (`EscapeSite::ChanSend` in `prim_chan_send`): the channel buffer is external to
+// the region system, so the seam's runtime retain is what holds the message until
+// `release_received_message` lowers it at the receive. A compile-time `Sends` edge
+// cannot carry that reference — it is keyed on a region pair, and at a real call
+// site the channel is a module-level binding read as an upvalue, so no pair exists
+// and no incref is emitted; the sending function's owned-parameter release then
+// drains the message's region to zero while it still sits in the buffer, and the
+// receive reads a freed region (SIGSEGV under guardfree). Drives the owned-param
+// message through a top-level caller loop, an `ev/spawn`'d sender, and a
+// tail-position `chan/recv`, plus the bounded-growth leak face of the same seam.
+#[test]
+fn region_chan_send_owned_param_uaf() {
+    run_elle_script_with_args(
+        "region-chan-send-owned-param-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a local mutual-recursion clique (`ev`/`od`) whose `letrec` body ends in a
 // tail call to a NON-member (a native `%add`, the redefined-closure operator `+`, a
 // foreign fn `g`, and a MIXED member+non-member `if`) must reclaim its merged arena

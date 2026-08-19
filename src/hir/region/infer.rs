@@ -761,10 +761,9 @@ impl RegionInference {
     /// each listed (stored) argument's regions to every OTHER heap argument's
     /// regions (the possible in-argument store targets), and mark the site HARD (the
     /// lowerer increfs a call-result source by value; docs/impl/region/effects.md
-    /// "Hard edges"). Shared by the `Stores` and `Sends` effects: both perform this
-    /// same edge/lifetime accounting (the message stays alive in the channel buffer
-    /// for `Sends`). The fiber-frontier escape of a `Sends` message is escape's
-    /// (`analyze_escape`'s fiber/send facet), not a fact this records.
+    /// "Hard edges"). The `Stores` effect alone reaches this: a `Sends` store is
+    /// seam-counted at runtime and records no edge (the `Sends` arm in
+    /// `walk_call`).
     fn record_store_edges(&mut self, site: HirId, stored: &[usize], arg_regions: &[Vec<Region>]) {
         self.hard_edge_sites.insert(site);
         for &i in stored {

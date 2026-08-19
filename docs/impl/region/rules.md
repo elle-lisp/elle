@@ -228,6 +228,12 @@ is a correctness defect, not a tuning knob.
      (captured env, saved operand stack) and owns its `activation_region_map`; these are RC
      roots, increfed at suspend and released at resume-consume **and** at
      squelch/abort discard (an unbalanced discard underflows);
+   - *sent channel message* — `chan/send` increfs the message's region after a
+     successful enqueue (`EscapeSite::ChanSend`); the channel buffer is external
+     to the region system, so this retain is the message's only reference while
+     it rides the buffer, and each receive (`chan/recv`/`chan/try-select`/
+     `chan/wait-ready`) decrefs it as the message leaves
+     (`release_received_message`);
    - *terminal fiber signal* — a child's set-once return/error/halt result, read
      later via `fiber/value`, is park-retained when the fiber goes terminal and
      released by the signal scan when the fiber is freed.

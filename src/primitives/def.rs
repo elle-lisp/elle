@@ -60,13 +60,13 @@ pub enum RetType {
 ///
 /// The region solver keys the opaque-call arg clique on this:
 /// `Immediate`/`Fresh`/`PassThrough` calls record no may-store edges
-/// between their heap arguments; `Stores` (and `Sends`, identically) record
+/// between their heap arguments; `Stores` records
 /// directed edges from the listed arguments only; `Mixed` and `Unknown`
 /// (the default) keep the full mutual clique — the conservative worst case
-/// (over-keep, never mis-free). `Sends` additionally marks the listed args
+/// (over-keep, never mis-free). `Sends` and `Delivers` mark the listed args
 /// as fiber-frontier crossings for the ownership forest (the **send** Shared
-/// seed) — see the variant doc. `Delivers` marks the same crossing but records
-/// no edges, because a fiber signal-slot install counts its own reference.
+/// seed) and record no edges, because each seam counts its own reference at
+/// runtime — see the variant docs.
 ///
 /// A declaration is a soundness claim, so it is checked forever: in debug
 /// builds `dispatch_native_call` compares the declared effect against
@@ -96,14 +96,19 @@ pub enum RegionEffect {
     /// result are `Fresh` (alloc-scan counted); a funnel-storing native
     /// declares `Funnel`.
     Stores { args: &'static [usize] },
-    /// Like `Stores`, but the listed arguments cross a **fiber boundary**:
-    /// they are handed to another fiber (`chan/send`'s message rides the
-    /// channel to the receiving fiber, by pointer under the single-threaded
-    /// scheduler). The solver treats the edge/lifetime accounting exactly as
-    /// `Stores` — the stored arg is increfed and kept alive in the channel
-    /// buffer. The *escape* of the message is the escape analysis's fiber/send
-    /// facet (`hir::escape`), the **send** half of the ownership forest's
-    /// fiber-facet Shared seed. The
+    /// The listed arguments cross a **fiber boundary**: they are handed to
+    /// another fiber (`chan/send`'s message rides the channel to the receiving
+    /// fiber, by pointer under the single-threaded scheduler). The store is
+    /// seam-counted, so the solver records NO edges: the send body retains the
+    /// message's region at runtime after a successful enqueue
+    /// (`EscapeSite::ChanSend` in `prim_chan_send`), and the receive lowers it
+    /// (`release_received_message`). A compile-time edge cannot carry this
+    /// reference — it is keyed on a region pair, and at a real call site the
+    /// channel is typically an upvalue or module-level binding, so no pair
+    /// exists and no incref would be emitted
+    /// (tests/elle/region-chan-send-owned-param-uaf.lisp). The *escape* of the
+    /// message is the escape analysis's fiber/send facet (`hir::escape`), the
+    /// **send** half of the ownership forest's fiber-facet Shared seed. The
     /// distinction from `Stores` is the *frontier*: a `Stores` into a local
     /// aggregate or a callback (`ffi/callback`) is containment and stays an
     /// Owned-candidate; a `Sends` leaves the fiber and cannot be Owned. A heap
@@ -154,11 +159,12 @@ pub enum RegionEffect {
     ///   back a value read out of the fiber argument. No result-side oracle
     ///   check, and the walk records `result ⊒ each argument`.
     ///
-    /// The distinction from `Sends` is who counts the store: a channel buffer is
-    /// external to the region system and nothing cascades it, so `chan/send`'s
-    /// edge IS the message's reference. A fiber's signal slot is a scanned field
-    /// of a region-managed fiber object, so the seam counts it and a solver edge
-    /// would double-count (docs/impl/region/effects.md § `Delivers`).
+    /// The distinction from `Sends` is who balances the seam's reference: a
+    /// channel buffer is external to the region system and nothing cascades it,
+    /// so `chan/send`'s seam retain IS the message's reference and the receive
+    /// lowers it. A fiber's signal slot is a scanned field of a region-managed
+    /// fiber object, so an outliving install is balanced by the fiber's
+    /// free-time signal scan (docs/impl/region/effects.md § `Delivers`).
     Delivers { args: &'static [usize] },
     /// Examined, and the native stores arguments *uncounted* (the property
     /// the arg clique exists to cover) — and/or returns a result that is

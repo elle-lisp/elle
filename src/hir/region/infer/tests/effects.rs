@@ -196,14 +196,21 @@ fn effect_stores_call_emits_directed_edges_only() {
     );
 }
 #[test]
-fn effect_sends_emits_same_edges_as_stores() {
-    // `Sends{args}` performs the SAME edge/lifetime accounting as `Stores{args}` —
-    // it must record the IDENTICAL directed may-store edges (a regression here is a
-    // channel-message UAF: the message freed while still in the buffer). The
-    // fiber-frontier *escape* of a `Sends` message is escape's judgment, not a
-    // solver-recorded seed — pinned in the escape tests (`native_store_spec`, the
-    // real `chan/send`). Same shape and harness as
-    // `effect_stores_call_emits_directed_edges_only`, with `string` declared `Sends`.
+fn effect_sends_call_emits_no_arg_clique() {
+    // `Sends{args}` is seam-counted, exactly like `Delivers`: the send body
+    // retains the message's region at runtime after a successful enqueue
+    // (`EscapeSite::ChanSend` in `prim_chan_send`), and the receive lowers it
+    // (`release_received_message`). So the call records NO may-store edge. A
+    // compile-time edge is doubly wrong here: it double-counts against the
+    // receive's single release where its region pair is nameable, and it silently
+    // fails to fire where the channel is an upvalue or module-level binding (no
+    // pair to key the incref on) — the owned-parameter message UAF
+    // (tests/elle/region-chan-send-owned-param-uaf.lisp). The fiber-frontier
+    // *escape* of a `Sends` message is escape's judgment, not a solver-recorded
+    // seed — pinned in the escape tests (`native_store_spec`, the real
+    // `chan/send`). Same shape and harness as
+    // `effect_stores_call_emits_directed_edges_only`, with `string` declared
+    // `Sends`.
     use crate::primitives::def::RegionEffect;
     let (hir, arena, symbols, info) = analyze_with_effect(
         "(string \"a\" \"b\" \"c\")",
@@ -212,18 +219,16 @@ fn effect_sends_emits_same_edges_as_stores() {
     );
     let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
     assert_eq!(calls.len(), 1);
-    let r_a = string_literal_region(&hir, &info, "a");
-    let r_b = string_literal_region(&hir, &info, "b");
-    let r_c = string_literal_region(&hir, &info, "c");
-    let mut edges = edges_at_site(&info, calls[0]);
-    edges.sort_by_key(|&(s, d)| (s.0, d.0));
-    let mut expected = vec![(r_a, r_b), (r_a, r_c)];
-    expected.sort_by_key(|&(s, d)| (s.0, d.0));
-    assert_eq!(
-        edges, expected,
-        "Sends{{args: [0]}} must record the SAME directed edges as Stores — from \
-         the stored arg r{} to the other heap args (r{}, r{})",
-        r_a.0, r_b.0, r_c.0
+    let edges = edges_at_site(&info, calls[0]);
+    assert!(
+        edges.is_empty(),
+        "a Sends native call must not record arg-clique edges (the send seam \
+         counts its own reference); got {:?}",
+        edges
+    );
+    assert!(
+        !info.hard_edge_sites.contains(&calls[0]),
+        "a Sends call site records no edges, so it must not be marked hard"
     );
 }
 

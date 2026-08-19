@@ -1991,8 +1991,8 @@
 # `chan/send` is the sole `RegionEffect::Sends` declarant: its message crosses the
 # fiber frontier (it rides the channel buffer, by pointer, to the receiving fiber),
 # so it can never be Owned by a bounded activation and stays on the incoming-count
-# (per-region RC) path — the always-Shared class. The `Sends` edge increfs the
-# message region at the send site to hold it in the buffer until received ("a store
+# (per-region RC) path — the always-Shared class. The send seam increfs the
+# message region at the enqueue to hold it in the buffer until received ("a store
 # into a Shared region bumps its count"); the receive removes it from the buffer, so
 # its region's incoming count is lowered there ("an overwrite/drop lowers it" —
 # region/ownership.md § class 7, the Shared incoming-count). Reclaimed: rate 0. The

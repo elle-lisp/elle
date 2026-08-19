@@ -54,8 +54,9 @@ Return values:
    debug builds): Immediate = non-heap result; Fresh = heap result in
    this call's own region; PassThrough = never fresh, no stores;
    Stores{args} = uncounted store into a structure (containment), fresh
-   result; Sends{args} = like Stores but the args cross a fiber boundary
-   (`chan/send`'s message) — same edges, plus a fiber-frontier Shared seed
+   result; Sends{args} = the args cross a fiber boundary (`chan/send`'s
+   message), seam-counted at the send (`EscapeSite::ChanSend`) so no edges,
+   plus a fiber-frontier Shared seed
    for the ownership forest; Funnel = every store rides the runtime-counted
    mutable-store funnel; Delivers{args} = the args are installed in another
    fiber's signal slot, counted by that seam; Opaque = stores nothing but the

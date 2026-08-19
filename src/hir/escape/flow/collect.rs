@@ -324,10 +324,10 @@ pub(in crate::hir::escape) fn collect_flow(
         // (uncounted) into another argument or an external structure escapes,
         // exactly the solver's opaque-call `cross_region_refs` edge sources
         // (`regions/walk/walkrest.rs`'s `Call` arm). Keyed on the callee's declared
-        // `RegionEffect`: `Stores{args}`/`Sends{args}` seed those args (the edge
-        // sources), and `Delivers{args}` seeds them on the fiber facet even though it
-        // records no edge (its install seam counts its own reference, but the value
-        // still crosses to another fiber); `Mixed`/`Unknown` seeds every arg (the
+        // `RegionEffect`: `Stores{args}` seeds those args (the edge sources), and
+        // `Sends{args}`/`Delivers{args}` seed them on the fiber facet even though
+        // neither records an edge (each seam counts its own reference at runtime,
+        // but the value still crosses to another fiber); `Mixed`/`Unknown` seeds every arg (the
         // solver's full mutual clique — any arg may be stored);
         // `Fresh`/`Immediate`/`PassThrough`/`Funnel`/
         // `Opaque` and an opaque user fn (`None`) seed nothing (no uncounted store the
@@ -357,10 +357,10 @@ pub(in crate::hir::escape) fn collect_flow(
                     // receiving fiber, and a `Delivers` install (`fiber/resume`'s
                     // resume value) goes into another fiber's signal slot, so both are
                     // frontier crossings (fiber seeds + region-level fiber sites),
-                    // distinct from a `Stores` containment. The two differ only in what
-                    // the SOLVER records — `Sends` an edge, `Delivers` none, because
-                    // the install seam counts its own reference — which is not this
-                    // analysis's question.
+                    // distinct from a `Stores` containment. Both are seam-counted
+                    // (the send retain / the install's park-retain or transient
+                    // handover), so the solver records no edge for either — which
+                    // is not this analysis's question.
                     for &i in stored {
                         if let Some(a) = args.get(i) {
                             tail_sources(ctx, &a.expr, fiber_seeds);
