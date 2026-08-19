@@ -714,6 +714,12 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
   -N                            # stop after N failures (-1 = fail-fast); default: run to completion
 ```
 
+Three global `elle` flags pass through to the runner's own VM rather than
+being read as corpus paths: `--trace=...`, `--stats`, and `--no-uring`.
+`--no-uring` runs the whole corpus on the thread-pool I/O backend — the
+only backend a Mac has — so a pool-only wedge can be chased on a Linux
+box (`elle test --no-uring tests/elle/process-io.lisp`).
+
 ### Execution and completion
 
 By default `elle test` **runs to completion** and collects every result — it does
