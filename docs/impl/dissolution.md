@@ -610,22 +610,24 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   mutable `@array` base (keyword `@array`, or a `RetType::MutableArray` producer
   call) selects the unfrozen-result arm under the tighter gate below (see
   "The mutable-array arm").
-- **The function is non-capturing with the op's fixed arity** — one parameter for
+- **The function has the op's fixed arity** — one parameter for
   a `map`/`filter`/`take-while`/`drop-while`/`mapcat`/`count`/search (the element), two for a
   `fold` (the accumulator
   and the element) and two for a `map-indexed` (the position and the element) — with
   no rest parameter, and a body free of nested lambdas and of
   call-position `%`-intrinsics unless the function declares `(numeric!)` (see
-  "Raw `%`-intrinsic bodies" below). It is one of two forms:
+  "Raw `%`-intrinsic bodies" below). The fixed parameter count is what makes the
+  loop's element (and, for a fold, the accumulator) bind 1:1. It is one of two forms:
   - a **lambda literal** written directly as the call's argument. It is consumed
     by the rewrite (moved out of the call), so no other use can observe the
-    change, and its parameter is retyped to a loop-local in place.
+    change, and its parameter is retyped to a loop-local in place. It may
+    **capture**, its free variables being in scope at the splice — see "Captures"
+    below for what that costs the composition gate.
   - a **`Var` referencing a same-compile-unit function** whose initializer is such
     a lambda (a top-level `(defn f …)` or a `let`/`def`-bound `(fn …)`) — inlined
-    by cloning, see "Named same-unit functions" below.
-  No captures means the body references only its parameters and globals, so
-  splicing it at the call site is always in scope; the fixed parameter count
-  means the loop's element (and, for a fold, the accumulator) bind 1:1.
+    by cloning, see "Named same-unit functions" below. A template must be
+    **non-capturing**: its body names the scope it was defined in, not the one it
+    splices into.
 - **A `mapcat`'s function body proves an array result.** Only that op reads what its
   function returns as a *collection*, and only the indexed walk is linear
   (§ "Mapcat — the stage that fans out"). The body is read by the same
@@ -646,9 +648,11 @@ unobservable. This is why a mixed chain is gated identically to a homogeneous on
 a mixed chain is always length ≥ 2, so it always carries the reorder requirement,
 and a non-reorder-safe stage (a variadic comparison like `>`, which routes through
 `apply`) declines the whole composition — the chain then falls back to fusing only
-its inner reorder-safe run. Reordering is observable only through a sequencing
-effect, and a non-capturing lambda's only cross-element channel is one; a body
-with none reorders unobservably. `SIG_ERROR` is
+its inner reorder-safe run. A **capture** is a second cross-element channel and
+carries no signal at all, so a composition additionally requires every lambda to be
+non-capturing (§ "Captures"). Reordering is otherwise observable only through a
+sequencing effect, and a non-capturing lambda's only cross-element channel is one; a
+body with none reorders unobservably. `SIG_ERROR` is
 deliberately permitted — error reordering changes only *which* of several errors
 surfaces (each still surfaces as an error), and a dissolvable numeric kernel over
 proven data does not error; refusing it would forbid every arithmetic tower, the
@@ -689,7 +693,8 @@ base *live* (it reads `(get coll i)` each iteration against a `len` captured
 once), and this matches the stdlib op **exactly** for those three (each array arm
 captures `len` once — `mapcat`'s through the `each` macro's own indexed arm — and
 reads `coll` live) — so the value is
-preserved even if the lambda mutates the base through a global alias. A `mapcat`'s
+preserved even if the lambda mutates the base through an alias, whether a global or
+a capture of the base's own binding (§ "Captures"). A `mapcat`'s
 inner walk reads its function's result the same way, so it matches there too. The
 three excluded shapes break the match:
 
@@ -713,6 +718,51 @@ three excluded shapes break the match:
 
 For an **immutable** base none of the hazards exists — the base cannot be mutated
 — so the terminals and compositions fuse over it exactly as before.
+
+## Captures — a literal's free variables are in scope at the splice
+
+A call-site lambda literal is **moved** out of the call, and its body is spliced
+where the call was. Every free variable that body reads is therefore bound by an
+enclosing scope of the splice — which is what writing the lambda there means.
+
+The spliced `Var` names the same binding the closure would have captured:
+`CaptureInfo::binding` is the enclosing binding itself, never a per-closure slot. So
+the enclosing function resolves that name exactly as it resolves any other name it
+holds. A `Local` capture is one of that function's own slots. A transitive `Capture`
+is one the enclosing lambda already carries in its capture list, because a nested
+lambda's captures propagate outward when it is analyzed. A capturing literal
+therefore splices with no rename and no machinery, and `(map (fn [x] (* x k)) xs)`
+dissolves as `(map (fn [x] (* x 2)) xs)` does.
+
+A capture marks its binding celled. The spliced read unwraps that cell exactly as
+every other read of the binding does, so a mutable capture is read live per element,
+as the closure read it.
+
+The one capture kind that declines is the **self-reference**
+(`CaptureKind::Recursive`). It names the executing closure rather than a binding the
+enclosing frame holds, and fusion removes the closure it would name.
+
+The two **template** paths cannot have this fact, which is why the refusal belongs to
+the clone rather than to the splice. A named function's body names the scope it was
+*defined* in, and the call site need not sit inside that scope. So `fn_template`
+refuses a capture outright, and the cross-unit collector admits only free variables
+that are genuine globals (§ "Cross-unit named functions").
+
+### A capture is a second cross-element channel
+
+What a capture costs is the **composition** gate. The reorder argument (§ "When it is
+legal — the gate") rests on one premise: a non-capturing lambda's only cross-element
+channel is a sequencing effect. Interleaving `f x0; g …; f x1; g …` is unobservable
+when each body reads only its parameters and globals. A captured binding is a second
+such channel, and it raises no signal to gate it with — a mutable local two bodies
+share, or a mutable value an immutable local names. A chain that interleaves two
+lambdas cannot admit one.
+
+A capturing lambda therefore fuses **only in a chain of one op**. That chain carries
+no reorder requirement at all: a lone op applies its function to each element left to
+right, exactly as the stdlib op does, so whatever state the body reaches behaves
+identically. A capture anywhere in a longer chain declines that chain whole, and the
+pre-order recursion still fuses its inner run.
 
 ## Named same-unit functions
 
@@ -929,6 +979,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   renumbers; its decline pins are a function whose result is not a proven array, a
   `mapcat` inner to any untyped array arm (including another `mapcat`), and a
   cross-unit named function, whose body the array proof cannot read.
+  A **capturing** lambda literal fuses at every op, with its own module of
+  cross-cutting pins: a capture reaching two function levels out, a mutable capture,
+  and the three declines — a self-reference, a composition, and a terminal over a
+  prefix (each leaving the inner run to fuse on the recursion's retry).
   A mutable-`@array`-base
   `map`/`filter`/`mapcat` fuses
   with the accumulator returned **unfrozen** (no `freeze` call). A
@@ -1004,6 +1058,13 @@ codegen and execution levels, not on the leak oracle. Three pins:
   nothing measurable. What fusion removes is the **flat collection** between the
   `mapcat` and whatever consumes it, which is the whole of its saving and the
   strictly larger one. The
+  A **capturing** lambda (`dissolution-capture-fuse.lisp`) is weighed against the
+  same declining oracle and pinned equal to the global-only form's count — the
+  capture buys nothing back, which is the claim. That file also carries the
+  composition gate's own instrument, and it is not an allocation one: two lambdas
+  sharing a captured log record the ORDER of their calls, so the staged
+  `:f :f :g :g` proves the chain declined where a fused loop would have interleaved
+  `:f :g :f :g`. The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
@@ -1040,7 +1101,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   position) /
   `region-mapcat-fuse-uaf.lisp` (whose accumulator holds heap elements read out of a
   per-element array that dies before the next base element, and whose function hands
-  the BASE's own element through that array)
+  the BASE's own element through that array) /
+  `region-capture-fuse-uaf.lisp` (whose loop reads a heap value the ENCLOSING frame
+  owns once per element, hands that value into an accumulator outliving the loop, and
+  writes a captured cell per element)
   (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place, a cloned same-unit
   named-function body, and a cross-unit stdlib `defn` (`identity`) inlined over heap

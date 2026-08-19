@@ -295,17 +295,18 @@ fn user_shadowed_search_is_not_fused() {
     );
 }
 
-/// Safety: a capturing search predicate is left alone (its body references a free
-/// variable, so splicing it at the call site is out of scope).
+/// A capturing predicate fuses: the splice is the call site, so `k` is in scope
+/// where the search's guard lands (docs/impl/dissolution.md § "Captures"). Fails
+/// while the gate refuses a capture: the `any?` call and the closure both survive.
 #[test]
-fn capturing_search_predicate_is_not_fused() {
+fn capturing_search_predicate_fuses() {
     let (hir, arena, names) = compile("(let [k 2] (any? (fn [x] (> x k)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &names);
     assert!(
-        cs.iter().any(|n| n == "any?"),
-        "a capturing search predicate must not fuse; callees were {cs:?}",
+        !cs.iter().any(|n| n == "any?"),
+        "the `any?` dispatch must be gone; callees were {cs:?}",
     );
-    assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
 }
 
 /// A search whose predicate is a `Var` naming a same-unit `defn` inlines its body,

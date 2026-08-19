@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # Guardfree soundness of filter loop fusion (docs/impl/dissolution.md).
 #
-# `(filter p xs)` over a proven immutable array with an inline non-capturing
+# `(filter p xs)` over a proven immutable array with an inline
 # predicate dissolves to an index-walk loop with a GUARDED push: it binds the
 # element once, tests the predicate, and pushes the element into a fresh @array
 # only when the predicate passes, then freezes it. This fixture drives that path

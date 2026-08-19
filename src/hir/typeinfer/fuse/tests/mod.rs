@@ -70,6 +70,9 @@ fn count_intrinsic(h: &Hir, want: &str) -> usize {
     n
 }
 
+/// Chains whose lambda literal captures an enclosing local — where the capture
+/// reaches from, and the composition it declines.
+mod capture;
 /// `map`, `filter`, their compositions, and the mutable-array cases.
 mod collect;
 /// The `count` terminal — a guard stage plus a scalar tally.

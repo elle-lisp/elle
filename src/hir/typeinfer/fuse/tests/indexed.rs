@@ -218,17 +218,19 @@ fn user_shadowed_map_indexed_is_not_fused() {
     );
 }
 
-/// Safety: a capturing function is left alone — its body references a free variable,
-/// so splicing it at the call site is out of scope.
+/// A capturing function fuses: the splice is the call site, so `k` is in scope
+/// beside the position and the element (docs/impl/dissolution.md § "Captures").
+/// Fails while the gate refuses a capture: the `map-indexed` call and the closure
+/// both survive.
 #[test]
-fn capturing_map_indexed_fn_is_not_fused() {
+fn capturing_map_indexed_fn_fuses() {
     let (hir, arena, names) = compile("(let [k 2] (map-indexed (fn [i x] (* k x)) [1 2 3]))");
     let cs = callees(&hir, &arena, &names);
     assert!(
-        cs.iter().any(|n| n == "map-indexed"),
-        "a capturing map-indexed function must not fuse; callees were {cs:?}",
+        !cs.iter().any(|n| n == "map-indexed"),
+        "the `map-indexed` dispatch must be gone; callees were {cs:?}",
     );
-    assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
 }
 
 /// Safety: the arity is the op's, not the resolver's. A one-parameter function is a

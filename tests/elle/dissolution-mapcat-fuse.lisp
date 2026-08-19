@@ -130,10 +130,11 @@
            (list 1 1 3 3))
         "a filter inner to a mapcat declines and takes the stdlib value")
 
-# A capturing function is left alone; the value is unchanged.
-(def bump 5)
-(assert (= (->list (mapcat (fn [x] [x bump]) [1 2])) (list 1 5 2 5))
-        "a capturing function declines and still computes the stdlib value")
+# A function reading an enclosing local fuses — the splice is the call site, so the
+# name is in scope (docs/impl/dissolution.md § "Captures").
+(assert (= (->list (let [bump 5]
+                     (mapcat (fn [x] [x bump]) [1 2]))) (list 1 5 2 5))
+        "a capturing function fuses to the stdlib value")
 
 # ── the mutable-array arm ──────────────────────────────────────────────
 # `mapcat`'s array arm walks the base through `each`, which captures `(length seq)`

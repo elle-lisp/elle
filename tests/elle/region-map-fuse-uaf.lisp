@@ -2,7 +2,7 @@
 # Guardfree soundness of map-chain loop fusion (docs/impl/dissolution.md).
 #
 # `(map f xs)` / `(map g (map f xs))` over a proven immutable array with inline
-# non-capturing lambdas dissolves to one inlined index-walk loop. The loop mints
+# lambdas dissolves to one inlined index-walk loop. The loop mints
 # a fresh @array accumulator, fills it with the per-element results, and freezes
 # it; the base array (a fresh literal here) is owned by the loop's `coll` binding
 # and freed at scope exit. This fixture drives that path with HEAP element values

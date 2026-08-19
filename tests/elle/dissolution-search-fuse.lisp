@@ -102,10 +102,9 @@
 # ── the early exit: no element past the decision is read ───────────────
 # The fused loop leaves through the `more` sentinel it clears at the deciding
 # element. A predicate that ERRORS on every later element is the sharp gauge: the
-# division by zero is unreachable if — and only if — the walk truly stops. A
-# counter would need a mutable global, whose reference makes the predicate a
-# capture and declines fusion, so this measures the fused loop where a tally
-# could not.
+# division by zero is unreachable if — and only if — the walk truly stops. It gauges
+# the element being READ, which is stronger than any tally of the predicate's own
+# calls: the error fires from inside the body the loop would have run.
 (assert (= (any? (fn [x] (> (/ 6 x) 1)) [3 0]) true)
         "any? stops at the deciding element — the later one is never read")
 (assert (= (all? (fn [x] (> (/ 6 x) 3)) [3 0]) false)

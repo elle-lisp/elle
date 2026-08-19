@@ -4,7 +4,8 @@
 #
 # A chain need not be homogeneous. `(map f (filter p xs))` and `(filter q (map g
 # xs))` — any mix of `map` and `filter` over the same proven immutable array with
-# inline non-capturing lambdas — fuse to a SINGLE index-walk loop through one
+# inline non-capturing lambdas (a composition declines a capture) — fuse to a
+# SINGLE index-walk loop through one
 # unified transform/guard pipeline: a `map` stage transforms the threaded element,
 # a `filter` stage guards it, and the intermediate array between the two ops never
 # exists. This file is the behavioral gauge: the fused form must compute EXACTLY

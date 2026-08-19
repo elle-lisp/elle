@@ -3,7 +3,8 @@
 # § "Mixed chains — one loop").
 #
 # A mixed `(map f (filter p xs))` / `(filter q (map g xs))` over a proven immutable
-# array with inline non-capturing lambdas fuses to ONE index-walk loop: a `map`
+# array with inline non-capturing lambdas (a composition declines a capture) fuses
+# to ONE index-walk loop: a `map`
 # stage transforms the threaded element, a `filter` stage binds it once and pushes
 # under a guard, and the intermediate array between the two ops never exists. This
 # fixture drives that path with HEAP element values — strings and structs — so that

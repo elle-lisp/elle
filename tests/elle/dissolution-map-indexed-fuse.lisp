@@ -133,10 +133,11 @@
         "a mutable @array base runs through the un-fused stdlib op")
 (assert (= (length mut) 3) "the walk does not disturb the mutable base")
 
-# A capturing function is left alone; the value is unchanged.
-(def bump 5)
-(assert (= (->list (map-indexed (fn [i x] (+ i x bump)) [10 20])) (list 15 26))
-        "a capturing function declines and still computes the stdlib value")
+# A function reading an enclosing local fuses — the splice is the call site, so the
+# name is in scope (docs/impl/dissolution.md § "Captures").
+(assert (= (->list (let [bump 5]
+                     (map-indexed (fn [i x] (+ i x bump)) [10 20])))
+           (list 15 26)) "a capturing function fuses to the stdlib value")
 
 # ── the base survives the walk ─────────────────────────────────────────
 (def base [7 8 9])

@@ -128,18 +128,22 @@ fn core_lisp_hof_exports_are_primitive_like_stdlib() {
     );
 }
 
-/// Safety: a capturing lambda is left alone (its body references a free
-/// variable, so it is not the non-capturing kernel the gate admits). The
-/// `map` call survives.
+/// A capturing lambda literal fuses: the splice IS the call site, so `k` is in
+/// scope where the body lands (docs/impl/dissolution.md § "Captures"). Fails while
+/// the gate refuses a capture: the `map` call and the closure both survive.
 #[test]
-fn capturing_lambda_is_not_fused() {
+fn capturing_lambda_fuses() {
     let (hir, arena, names) = compile("(let [k 10] (map (fn [x] (+ x k)) [1 2 3]))");
     let cs = callees(&hir, &arena, &names);
     assert!(
-        cs.iter().any(|n| n == "map"),
-        "a capturing lambda must not fuse; callees were {cs:?}",
+        !cs.iter().any(|n| n == "map"),
+        "the `map` dispatch must be gone; callees were {cs:?}",
     );
-    assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
+    assert!(
+        cs.iter().any(|n| n == "+"),
+        "the capturing body must run inline in the loop; callees were {cs:?}",
+    );
 }
 
 /// Safety: a `map` over a value that is not a proven immutable array (here a
@@ -358,18 +362,18 @@ fn mixed_three_stage_tower_fuses_to_one_loop() {
     assert_eq!(count_ifs(&hir), 2, "the loop `if` plus one filter guard");
 }
 
-/// Safety: a capturing predicate is left alone (it references a free variable,
-/// so it is not the non-capturing kernel the gate admits). The `filter` call
-/// survives.
+/// A capturing predicate fuses, as a capturing transform does — the guard stage is
+/// spliced where the `filter` call stood, so `k` is in scope. Fails while the gate
+/// refuses a capture: the `filter` call and the closure both survive.
 #[test]
-fn capturing_predicate_is_not_fused() {
+fn capturing_predicate_fuses() {
     let (hir, arena, names) = compile("(let [k 2] (filter (fn [x] (> x k)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &names);
     assert!(
-        cs.iter().any(|n| n == "filter"),
-        "a capturing predicate must not fuse; callees were {cs:?}",
+        !cs.iter().any(|n| n == "filter"),
+        "the `filter` dispatch must be gone; callees were {cs:?}",
     );
-    assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
 }
 
 /// A `map` over a `Var` whose initializer is a proven immutable array fuses:

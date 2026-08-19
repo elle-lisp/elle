@@ -418,14 +418,21 @@ pub(super) fn fusable_search_parts<'a>(
 /// The parameters and body of a lambda that qualifies for inlining, or `None`. A
 /// qualifying lambda is a literal with exactly `arity` fixed parameters (no rest)
 /// — one for a `map`/`filter`/`count`/search element function, two for a `fold`
-/// combinator or a `map-indexed`'s position-and-element function — no captures
-/// (its body references only the parameters and globals, so splicing at the call
-/// site is always in scope), unmutated parameters, and **no nested lambda** in its
-/// body (so retyping a parameter to a plain local cannot disturb a capture of it).
-/// A raw `%`-intrinsic in the body is admitted only under the lambda's own
-/// `(numeric!)` declaration (`body_disqualifies`). These bounds keep the splice a
-/// straight `(let [param elem] body)` per parameter with no substitution or cell
-/// reasoning.
+/// combinator or a `map-indexed`'s position-and-element function — unmutated
+/// parameters, and **no nested lambda** in its body (so retyping a parameter to a
+/// plain local cannot disturb a capture of it). A raw `%`-intrinsic in the body is
+/// admitted only under the lambda's own `(numeric!)` declaration
+/// (`body_disqualifies`). These bounds keep the splice a straight
+/// `(let [param elem] body)` per parameter with no substitution or cell reasoning.
+///
+/// A **capture** is admitted: the rewrite moves the literal out of the call and
+/// splices its body where that call stood, so every free variable it reads is bound
+/// by an enclosing scope of the splice and resolves from the enclosing function with
+/// no rename (docs/impl/dissolution.md § "Captures"). The exception is a
+/// **self-reference** (`CaptureKind::Recursive`), which names the executing closure
+/// rather than a binding the frame holds — and fusion removes the closure it would
+/// name. What a capture does cost is the composition gate, which `validate_chain`
+/// asks separately (`captures_locals`).
 pub(super) fn qualifies_lambda<'a>(
     lam: &'a Hir,
     arena: &BindingArena,
@@ -442,13 +449,33 @@ pub(super) fn qualifies_lambda<'a>(
     else {
         return None;
     };
-    if rest_param.is_some() || params.len() != arity || !captures.is_empty() {
+    if rest_param.is_some() || params.len() != arity {
+        return None;
+    }
+    if captures
+        .iter()
+        .any(|c| matches!(c.kind, CaptureKind::Recursive { .. }))
+    {
         return None;
     }
     if params.iter().any(|p| arena.get(*p).is_mutated) || body_disqualifies(body, *assert_numeric) {
         return None;
     }
     Some((params, body))
+}
+
+/// Does this function argument read a binding through a **capture** — a name the
+/// closure would have carried in its environment, rather than one of its own
+/// parameters or a constant the lowerer folds in? Only a call-site lambda literal
+/// can answer yes: the two template paths refuse a capture outright, a cloned body
+/// naming the scope its function was DEFINED in.
+///
+/// A capture is a cross-element channel the reorder gate cannot see — a mutable
+/// local two bodies share, or a mutable value an immutable local names, neither of
+/// which raises a signal — so a chain that interleaves two lambdas' calls declines
+/// on it (docs/impl/dissolution.md § "A capture is a second cross-element channel").
+pub(super) fn captures_locals(lam: &Hir) -> bool {
+    matches!(&lam.kind, HirKind::Lambda { captures, .. } if !captures.is_empty())
 }
 
 /// Does a lambda body disqualify it from inlining? Two structural hazards, both
@@ -518,6 +545,10 @@ pub(super) fn validate_chain(
     fns: &FnResolver,
 ) -> Option<ChainPlan> {
     let mut all_silent = true;
+    // Set by any function argument that reads an enclosing local. It refuses a
+    // composition for the reason `all_silent` does — an interleaving the staged form
+    // would not make becomes observable — so the two are read together below.
+    let mut any_capturing = false;
     let mut ops = 0usize;
     let mut cur = hir;
 
@@ -527,16 +558,19 @@ pub(super) fn validate_chain(
     // two-argument shape — is never read as a stage.
     let terminal = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, 2)?);
+        any_capturing |= captures_locals(lam);
         ops += 1;
         cur = coll;
         TerminalOp::Fold
     } else if let Some((pred, coll)) = fusable_count_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(pred, arena, 1)?);
+        any_capturing |= captures_locals(pred);
         ops += 1;
         cur = coll;
         TerminalOp::Count
     } else if let Some((search, pred, coll)) = fusable_search_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(pred, arena, 1)?);
+        any_capturing |= captures_locals(pred);
         ops += 1;
         cur = coll;
         TerminalOp::Search(search)
@@ -549,6 +583,7 @@ pub(super) fn validate_chain(
     let mut kinds = Vec::new();
     while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, hof.arity())?);
+        any_capturing |= captures_locals(lam);
         // A `mapcat` reads what its function returns as a COLLECTION and walks it,
         // and the fused inner walk is an indexed one — linear only over an array,
         // where a list would make it quadratic. Every other op is indifferent to
@@ -604,7 +639,12 @@ pub(super) fn validate_chain(
     if mutable_base && !lone_live_walk {
         return None;
     }
-    if ops >= 2 && !all_silent {
+    // A composition interleaves the ops' per-element work, which the staged form runs
+    // one op at a time. Two channels make that observable: a sequencing effect, and a
+    // capture — an enclosing local one body writes and another reads, with no signal
+    // to gate it. A lone op reorders nothing, so it is asked neither question
+    // (dissolution.md § "A capture is a second cross-element channel").
+    if ops >= 2 && (!all_silent || any_capturing) {
         return None;
     }
     Some(ChainPlan {

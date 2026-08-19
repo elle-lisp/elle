@@ -155,8 +155,11 @@ fn named_let_body_fn_composition_fuses_to_one_loop() {
 }
 
 /// Safety: a `let`-bound local function that CAPTURES a free variable is not
-/// inlined (captures are non-empty, so the body would reference an out-of-scope
-/// local once spliced). The `map` call survives.
+/// inlined. A template is CLONED, and its body names the scope the function was
+/// defined in — which the call site need not sit inside, so the clone could splice
+/// an out-of-scope reference. That is the one place the capture refusal still
+/// belongs; a call-site literal is spliced AT its own scope and keeps its captures
+/// (docs/impl/dissolution.md § "Captures"). The `map` call survives.
 #[test]
 fn named_capturing_local_fn_declines() {
     let (hir, arena, names) = compile("(let [k 10] (let [g (fn [x] (+ x k))] (map g [1 2 3])))");

@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # Map-chain loop fusion — value preservation (docs/impl/dissolution.md).
 #
-# `(map f xs)` over a proven immutable array with an inline non-capturing lambda
+# `(map f xs)` over a proven immutable array with an inline lambda
 # `f` dissolves to an inlined index-walk loop, and `(map g (map f xs))` fuses to
 # one loop with no intermediate array. This file is the behavioral gauge: the
 # fused form must compute EXACTLY what the un-fused `map` computes. The codegen
@@ -157,10 +157,11 @@
     (assert (= (mutable? m) true) "Var-bound mutable-base map is unfrozen")
     (assert (= (get m 1) 7) "Var-bound mutable-base map value")))
 
-# A capturing lambda is NOT fused, but must still compute correctly.
+# A capturing lambda fuses — the splice is the call site, so `k` is in scope
+# (docs/impl/dissolution.md § "Captures").
 (assert (= (let [k 100]
              (map (fn [x] (+ x k)) [1 2 3])) [101 102 103])
-        "capturing lambda (declined) is still correct")
+        "a capturing lambda fuses to the stdlib value")
 
 # A raw call-position `%`-intrinsic body FUSES under a `(numeric!)` declaration
 # (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"). The declaration floors

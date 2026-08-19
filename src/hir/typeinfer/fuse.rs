@@ -80,11 +80,15 @@
 //! per-element evaluation order (the loop applies the lambda left to right,
 //! identically to the stdlib op), so it needs no purity gate. A **composition**
 //! interleaves the per-element work (`f x0; g …; f x1; g …`) rather than running
-//! all of the first op then all of the second — a reorder observable only through
-//! sequencing effects — so each lambda body in a chain of length ≥ 2 must be free
-//! of them (`reorder_safe`): no yield/I/O/emit/FFI/halt (a non-capturing lambda's
-//! only cross-element channel is such an effect). `SIG_ERROR` is permitted; see
-//! `reorder_safe`. An early exit would go further than reordering if it
+//! all of the first op then all of the second — a reorder observable through two
+//! channels, so each lambda in a chain of length ≥ 2 must have neither. It must be
+//! free of **sequencing effects** (`reorder_safe`): no yield/I/O/emit/FFI/halt.
+//! `SIG_ERROR` is permitted; see `reorder_safe`. And it must be **non-capturing**
+//! (`captures_locals`): a captured binding is state two bodies can share with no
+//! signal to gate it. A lone op interleaves nothing and is asked neither question,
+//! which is why a capturing literal fuses there — its body is spliced AT the call
+//! site, so its free variables are in scope with no rename. An early exit would go
+//! further than reordering if it
 //! cut the walk short with a stage inner to it — leaving that stage's work unrun on
 //! every element past the decision — so only the chain's innermost op ends the
 //! walk; the others stop their own stage while the walk stays exhaustive.
@@ -100,7 +104,7 @@
 use super::prune::concrete_init_keywords;
 use super::unwrap_callee_binding;
 use crate::hir::arena::{BindingArena, BindingScope};
-use crate::hir::binding::Binding;
+use crate::hir::binding::{Binding, CaptureKind};
 use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::primitives::def::RetType;
 use crate::signals::{Signal, SIG_ERROR};

@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # Filter loop fusion — value preservation + realization (docs/impl/dissolution.md).
 #
-# `(filter p xs)` over a proven immutable array with an inline non-capturing
+# `(filter p xs)` over a proven immutable array with an inline
 # predicate dissolves to an inlined index-walk loop with a GUARDED push: the
 # element is bound once and pushed only when `(p item)` is truthy — no per-element
 # closure, no `filter` dispatch. A `(filter q (filter p xs))` fuses to one loop
@@ -83,10 +83,11 @@
 (assert (= (mutable? (filter (fn [x] (> x 2)) [1 2 3])) false)
         "fused result is frozen")
 
-# A capturing predicate is NOT fused, but must still compute correctly.
+# A capturing predicate fuses too — the splice is the call site, so `k` is in scope
+# (docs/impl/dissolution.md § "Captures").
 (assert (= (let [k 2]
              (filter (fn [x] (> x k)) [1 2 3 4])) [3 4])
-        "capturing predicate (declined) is still correct")
+        "a capturing predicate fuses to the stdlib value")
 
 # A MIXED map/filter chain fuses to ONE loop when every stage is reorder-safe
 # (docs/impl/dissolution.md § "Mixed chains — one loop"; the full value/realization
@@ -102,28 +103,35 @@
 (assert (= (filter (fn [x] (> x 20)) (map (fn [x] (* x 10)) [1 2 3])) [30])
         "mixed filter-of-map (inner-only fallback) computes the same value")
 
-# ── Realization: the closure is gone ──────────────────────────────────
-# A single `filter` over an inline non-capturing predicate mints no closure; the
-# un-fused reference is a CAPTURING predicate (declined), which mints the closure.
-# Both compute the same survivors. `arena/total-allocs` is a cumulative, monotonic
-# count of objects ever minted (docs/impl/dissolution.md § "The gauge").
+# ── Realization: the per-element call is gone ─────────────────────────
+# A single `filter` over an inline predicate splices the guard into the loop, so no
+# closure is called per element; the un-fused reference calls its `match`-body
+# oracle once per element. Both compute the same survivors. `arena/total-allocs` is
+# a cumulative, monotonic count of objects ever minted (docs/impl/dissolution.md
+# § "The gauge").
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
     (thunk)
     (- (arena/total-allocs) before)))
 
 (def f-fused (allocs (fn [] (filter (fn [x] (> x 2)) [1 2 3 4 5 6 7 8 9 10]))))
-(def f-unfused
+(def f-unfused (allocs (fn [] (filter big? [1 2 3 4 5 6 7 8 9 10]))))
+(assert (= (filter (fn [x] (> x 2)) [1 2 3 4 5 6 7 8 9 10])
+           (filter big? [1 2 3 4 5 6 7 8 9 10]))
+        "fused and un-fused filters compute the same value")
+(assert (< f-fused f-unfused)
+        (string "fused filter must mint fewer: " f-fused " vs " f-unfused))
+
+# The capture widening realizes the same win: a predicate reading an enclosing local
+# fuses exactly as one reading only globals does (docs/impl/dissolution.md
+# § "Captures"). Before that widening this was the un-fused reference above.
+(def f-capture
   (allocs (fn []
             (let [m 2]
               (filter (fn [x] (> x m)) [1 2 3 4 5 6 7 8 9 10])))))
-(assert (= (filter (fn [x] (> x 2)) [1 2 3 4 5 6 7 8 9 10])
-           (let [m 2]
-             (filter (fn [x] (> x m)) [1 2 3 4 5 6 7 8 9 10])))
-        "fused and capturing-reference filters compute the same value")
-(assert (< f-fused f-unfused)
-        (string "fused filter must mint fewer (no closure): " f-fused " vs "
-                f-unfused))
+(assert (= f-capture f-fused)
+        (string "a capturing predicate fuses identically: " f-capture " vs "
+                f-fused))
 
 # A `(numeric!)`-declared raw-`%`-intrinsic predicate fuses too
 # (docs/impl/dissolution.md § "Raw `%`-intrinsic bodies"): the declaration floors

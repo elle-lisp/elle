@@ -155,18 +155,20 @@ fn user_shadowed_fold_is_not_fused() {
     );
 }
 
-/// Safety: a capturing fold lambda is left alone (its body references a free
-/// variable, so splicing it at the call site is out of scope). The `fold` call
-/// survives.
+/// A capturing combinator fuses: the splice is the call site, so `k` is in scope
+/// where the fold step lands (docs/impl/dissolution.md § "Captures"). A lone fold
+/// threads its accumulator in element order exactly as the stdlib one does, so the
+/// capture reaches the same state at each step. Fails while the gate refuses a
+/// capture: the `fold` call and the closure both survive.
 #[test]
-fn capturing_fold_lambda_is_not_fused() {
+fn capturing_fold_lambda_fuses() {
     let (hir, arena, names) = compile("(let [k 10] (fold (fn [a x] (+ a (+ x k))) 0 [1 2 3]))");
     let cs = callees(&hir, &arena, &names);
     assert!(
-        cs.iter().any(|n| n == "fold"),
-        "a capturing fold lambda must not fuse; callees were {cs:?}",
+        !cs.iter().any(|n| n == "fold"),
+        "the `fold` dispatch must be gone; callees were {cs:?}",
     );
-    assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
 }
 
 /// A fold over a `Var`-bound immutable array fuses — the base-alias proof and

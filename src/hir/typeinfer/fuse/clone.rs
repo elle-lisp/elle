@@ -46,7 +46,11 @@ pub(super) fn collect_inline_fns(
 }
 
 /// The inlineable template of a lambda initializer, or `None`. A qualifying lambda
-/// is non-capturing, has 1 or 2 fixed parameters (a `map`/`filter`/`count`/search element
+/// is non-capturing — a template is CLONED, and its body names the scope the function
+/// was defined in, which the call site need not sit inside, where a call-site literal
+/// is spliced at its own scope and keeps its captures (docs/impl/dissolution.md
+/// § "Captures"). It also
+/// has 1 or 2 fixed parameters (a `map`/`filter`/`count`/search element
 /// or a `fold` accumulator+element — the use site checks the exact arity), no rest
 /// parameter, unmutated parameters, and a `clone_fresh`-admissible body
 /// (`is_inlineable_body` — the pure-expression forms plus `let`, so the clone

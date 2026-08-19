@@ -353,6 +353,24 @@ fn region_mapcat_fuse_uaf() {
     );
 }
 
+// Fusing a CAPTURING lambda (docs/impl/dissolution.md § "Captures") splices a body
+// that reads an enclosing binding directly, so the loop holds a heap value the
+// ENCLOSING frame owns rather than one reached through a closure environment. Three
+// roles follow from that. The capture is read once per element across the whole
+// walk, so the frame must still own it at the last one; the body may hand it INTO
+// the accumulator, so a frame-owned value ends up in a structure that outlives the
+// loop; and a captured mutable binding is written per element through its cell,
+// whose displaced prior must free without taking the live one. Any of those
+// over-frees SIGSEGVs under guardfree. Fires only on the fused shape; the plain-VM
+// run asserts the values.
+#[test]
+fn region_capture_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-capture-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

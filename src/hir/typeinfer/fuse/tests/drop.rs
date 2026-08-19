@@ -285,17 +285,19 @@ fn user_shadowed_drop_while_is_not_fused() {
     );
 }
 
-/// Safety: a capturing predicate is left alone — its body references a free variable,
-/// so splicing it at the call site is out of scope.
+/// A capturing predicate fuses: the splice is the call site, so `k` is in scope
+/// where the dropping flag's guard lands (docs/impl/dissolution.md § "Captures").
+/// Fails while the gate refuses a capture: the `drop-while` call and the closure
+/// both survive.
 #[test]
-fn capturing_drop_while_predicate_is_not_fused() {
+fn capturing_drop_while_predicate_fuses() {
     let (hir, arena, names) = compile("(let [k 2] (drop-while (fn [x] (> x k)) [3 4 1]))");
     let cs = callees(&hir, &arena, &names);
     assert!(
-        cs.iter().any(|n| n == "drop-while"),
-        "a capturing drop-while predicate must not fuse; callees were {cs:?}",
+        !cs.iter().any(|n| n == "drop-while"),
+        "the `drop-while` dispatch must be gone; callees were {cs:?}",
     );
-    assert!(count_lambdas(&hir) >= 1, "the closure must survive");
+    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
 }
 
 /// A `drop-while` whose predicate is a `Var` naming a same-unit `defn` inlines its

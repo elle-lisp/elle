@@ -163,10 +163,11 @@
         "a mutable @array base runs through the un-fused stdlib op")
 (assert (= (length mut) 4) "the walk does not disturb the mutable base")
 
-# A capturing predicate is left alone; the value is unchanged.
-(def limit 5)
-(assert (= (->list (take-while (fn [x] (even? (+ x limit))) [1 3 4])) (list 1 3))
-        "a capturing predicate declines and still computes the stdlib value")
+# A predicate reading an enclosing local fuses — the splice is the call site, so the
+# name is in scope (docs/impl/dissolution.md § "Captures").
+(assert (= (->list (let [limit 5]
+                     (take-while (fn [x] (even? (+ x limit))) [1 3 4])))
+           (list 1 3)) "a capturing predicate fuses to the stdlib value")
 
 # ── the base survives the walk ─────────────────────────────────────────
 (def base [2 4 6 8 9 10])
