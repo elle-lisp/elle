@@ -314,6 +314,25 @@ fn region_drop_while_fuse_uaf() {
     );
 }
 
+// Map-indexed loop fusion (docs/impl/dissolution.md § "Map-indexed — the stage that
+// carries the position") dissolves `(map-indexed f xs)` over a proven immutable array
+// into an index-walk loop whose element statement binds the walk's induction variable
+// to the function's first parameter and the element to its second. Two roles put heap
+// values on a path no other stage takes. The stage binds TWO locals per element where
+// every other stage binds one, so the element's region must survive the position
+// binding that wraps it. And the result is the accumulator itself, unfrozen, so the
+// caller holds the very object the loop filled — including where the function hands
+// the BASE's own element straight through, which puts a base-owned heap value into an
+// accumulator that outlives the loop. Either over-free SIGSEGVs under guardfree.
+// Fires only on the fused shape; the plain-VM run asserts the values.
+#[test]
+fn region_map_indexed_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-map-indexed-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

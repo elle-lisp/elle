@@ -1,5 +1,17 @@
 use super::*;
 
+/// Mint a fresh reassigned local: the walk's induction variable, a scalar
+/// accumulator, a survivor count, or a stage's `true`-seeded flag (a `take-while`'s
+/// run sentinel, a `drop-while`'s dropping flag). Each is `define`d before the loop
+/// and `assign`ed inside it, so it must read as mutated. A free function because
+/// `take_chain` mints a stage's flag before any [`Build`] exists, and `build_loop`
+/// mints the induction variable before it constructs one.
+pub(super) fn fresh_mutable(arena: &mut BindingArena) -> Binding {
+    let b = arena.gensym();
+    arena.get_mut(b).is_mutated = true;
+    b
+}
+
 /// Node factory for the synthesized loop. Bundles the span and signal every
 /// synthesized node carries and the arena for minting locals, so the fixed
 /// `(get`/`push`/`freeze)` scaffold and the per-element transform/guard pipeline
@@ -13,6 +25,10 @@ pub(super) struct Build<'a> {
     pub(super) ops: &'a Ops,
     pub(super) span: crate::syntax::Span,
     pub(super) sig: Signal,
+    /// The walk's induction variable — the current element's index into the BASE,
+    /// which is also its position in a [`Stage::Enumerate`]'s input (every stage
+    /// inner to one preserves the walk's length).
+    pub(super) index: Binding,
 }
 
 impl Build<'_> {
@@ -59,13 +75,10 @@ impl Build<'_> {
         self.arena.get_mut(b).is_immutable = true;
         b
     }
-    /// A fresh reassigned local — the induction variable, a scalar accumulator, an
-    /// early-exit sentinel, a survivor count. Each is `define`d before the loop and
-    /// `assign`ed inside it, so it must read as mutated.
+    /// A fresh reassigned local — a scalar accumulator, an early-exit sentinel, a
+    /// survivor count (`fresh_mutable`).
     pub(super) fn mutable_local(&mut self) -> Binding {
-        let b = self.arena.gensym();
-        self.arena.get_mut(b).is_mutated = true;
-        b
+        fresh_mutable(self.arena)
     }
     /// Retype a consumed lambda parameter to a plain immutable local: the lambda is
     /// gone, so the lowerer must give the parameter a local slot, not an argument
@@ -83,6 +96,9 @@ impl Build<'_> {
     /// - a **`Transform`** stage (a `map`) transforms the value
     ///   (`(let [param cur] body)`) and threads the result on to the rest of the
     ///   pipeline;
+    /// - an **`Enumerate`** stage (a `map-indexed`) does the same with the walk's
+    ///   induction variable bound beside the element, the position parameter
+    ///   outermost as the stdlib arm's `(f i (get coll i))` call has it;
     /// - a **`Guard`** stage binds the current value once (`item`, since a guard
     ///   references it twice — the test and the pass-through) and continues the
     ///   pipeline on one side of its predicate, else `nil`: a `Keep` (a `filter`,
@@ -126,6 +142,17 @@ impl Build<'_> {
             Some(Stage::Transform { param, body }) => {
                 self.localize_param(param);
                 let next = self.let_(param, cur, body);
+                self.element(stages, base, acc, next)
+            }
+            Some(Stage::Enumerate { index, param, body }) => {
+                self.localize_param(index);
+                self.localize_param(param);
+                // The position binds OUTSIDE the element, mirroring the stdlib arm's
+                // `(f i (get coll i))` argument order. It reads the loop's induction
+                // variable, which is this element's position in the stage's own
+                // input: no stage inner to this one may shorten the walk.
+                let transformed = self.let_(param, cur, body);
+                let next = self.let_(index, self.var(self.index), transformed);
                 self.element(stages, base, acc, next)
             }
             Some(Stage::Guard { side, param, body }) => {
@@ -470,15 +497,19 @@ pub(super) fn build_loop(
         terminal_guard,
         base,
     } = chain;
+    // Minted before the builder: an `Enumerate` stage reads it as the element's
+    // position, so the builder carries it rather than threading it through the
+    // pipeline recursion.
+    let i_b = fresh_mutable(arena);
     let mut b = Build {
         arena,
         ops,
         span,
         sig,
+        index: i_b,
     };
     let coll_b = b.local();
     let len_b = b.local();
-    let i_b = b.mutable_local(); // the loop induction variable
 
     // The chain's shape decides where a search's sentinel is read and what a
     // `find-index` answers with. Both questions are about the PREFIX, which is

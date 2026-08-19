@@ -79,6 +79,9 @@ mod count;
 mod drop;
 /// Fold and reduce terminals.
 mod fold;
+/// The `map-indexed` stage — a transform that reads the walk's induction variable
+/// beside the element.
+mod indexed;
 /// Chains whose lambda is a named function, same-unit or cross-unit.
 mod named;
 /// Bodies holding a raw `%`-intrinsic under a `(numeric!)` declaration.

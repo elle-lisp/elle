@@ -6,7 +6,9 @@
 //! index-walk loop that op's own array arm runs (`src/stdlib.lisp`) — but with the
 //! lambda body **spliced inline** rather than called through a closure value. The
 //! closure ceases to exist: no per-element closure allocation, no indirect call.
-//! `map` pushes each transform's result; `filter` pushes the element itself under
+//! `map` pushes each transform's result; `map-indexed` does the same with the walk's
+//! induction variable bound beside the element (`(f i elem)`); `filter` pushes the
+//! element itself under
 //! an `if` guard; `take-while` pushes it under a guard whose rejecting side ends
 //! the run, and `drop-while` under the complementary flag, which its rejecting side
 //! clears to open the rest of the pipeline. A chain's optional outermost
@@ -38,7 +40,10 @@
 //! other early exit gates its own stage while the walk stays exhaustive. A
 //! `drop-while` carries no early exit at all: its flag opens the pipeline instead of
 //! closing the walk, so the loop condition stays the bare range test whatever the
-//! chain around it looks like.
+//! chain around it looks like. A `map-indexed` carries none either, and needs no
+//! survivor count for its position: every stage that renumbers is one that shortens
+//! the walk, and the emptiness rule (`Hof::preserves_length`) already refuses each
+//! one inner to an untyped array arm, of which `map-indexed` is one.
 //!
 //! ## Why this shape, here
 //!
@@ -53,7 +58,8 @@
 //!
 //! It mirrors the container-dispatch monomorphization (`monomorphize.rs`):
 //! recognize a proven-type call across the compile-unit boundary (the callee is
-//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`filter`/
+//! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`map-indexed`/
+//! `filter`/
 //! `take-while`/`drop-while`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
 //! shadows it with a non-primitive binding and is left alone) and collapse it to the
 //! direct form the proof selects.
