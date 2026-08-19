@@ -82,6 +82,8 @@ mod fold;
 /// The `map-indexed` stage — a transform that reads the walk's induction variable
 /// beside the element.
 mod indexed;
+/// The `mapcat` stage — a fan-out whose element statement carries a walk of its own.
+mod mapcat;
 /// Chains whose lambda is a named function, same-unit or cross-unit.
 mod named;
 /// Bodies holding a raw `%`-intrinsic under a `(numeric!)` declaration.

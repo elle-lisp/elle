@@ -165,7 +165,7 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
 
 /// A `filter` prefix drops elements, so the position a `find-index` answers is
 /// the surviving element's own count, not the base index: the loop carries a
-/// second `+` bump beside the index walk's. Every other search answers a value
+/// second `%add` bump beside the index walk's. Every other search answers a value
 /// rather than a position and carries none.
 #[test]
 fn find_index_over_a_filter_prefix_counts_survivors() {
@@ -178,7 +178,7 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         2,
         "the survivor count is bumped beside the index walk; callees were {cs:?}",
     );
@@ -192,7 +192,7 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
     let (hir, arena, names) = compile(&format!("(any? (fn [y] (even? y)) {filtered})"));
     let cs = callees(&hir, &arena, &names);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         1,
         "only the index walk bumps for a boolean answer; callees were {cs:?}",
     );
@@ -203,7 +203,7 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
         compile("(find-index (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &names);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         1,
         "a map prefix does not renumber; callees were {cs:?}",
     );

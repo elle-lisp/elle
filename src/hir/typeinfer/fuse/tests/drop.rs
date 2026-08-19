@@ -140,7 +140,7 @@ fn count_over_drop_while_fuses_to_one_scalar_loop() {
 
 /// A `drop-while` prefix **renumbers** — it removes a leading run, so an element's
 /// position in its output is not its base index. A `find-index` over one therefore
-/// carries the survivor count, exactly as it does over a `filter`: a second `+`
+/// carries the survivor count, exactly as it does over a `filter`: a second `%add`
 /// beside the index walk's. A `take-while` keeps a leading run and carries none.
 #[test]
 fn find_index_over_drop_while_counts_survivors() {
@@ -153,7 +153,7 @@ fn find_index_over_drop_while_counts_survivors() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         2,
         "the survivor count is bumped beside the index walk; callees were {cs:?}",
     );
@@ -163,7 +163,7 @@ fn find_index_over_drop_while_counts_survivors() {
     let (hir, arena, names) = compile(&format!("(any? (fn [y] (odd? y)) {dropped})"));
     let cs = callees(&hir, &arena, &names);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         1,
         "only the index walk bumps for a boolean answer; callees were {cs:?}",
     );
@@ -174,7 +174,7 @@ fn find_index_over_drop_while_counts_survivors() {
         compile("(find-index (fn [y] (odd? y)) (take-while (fn [x] (number? x)) [2 4 5 7]))");
     let cs = callees(&hir, &arena, &names);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         1,
         "a take-while does not renumber; callees were {cs:?}",
     );

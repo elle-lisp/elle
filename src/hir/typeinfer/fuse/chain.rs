@@ -1,15 +1,17 @@
 use super::*;
 
 /// The higher-order collection op a fused chain is built from, and the kind of
-/// each *stage* in the unified pipeline (`Build::element`). All five take
+/// each *stage* in the unified pipeline (`Build::element`). All six take
 /// `(lambda, coll)` and share the `(get`/`push`/`freeze)` index-walk over `coll`'s
 /// array arm; they differ only in how a stage handles the threaded element value:
 /// a `Map` stage transforms it and threads the result on, a `MapIndexed` stage does
 /// the same with the walk's position bound beside it, a `Filter` stage guards
 /// the rest of the pipeline behind its predicate (an `if`), a `TakeWhile`
 /// stage guards it the same way but ENDS the run at the first element its
-/// predicate rejects, and a `DropWhile` is that stage's complement — it OPENS the
-/// rest of the pipeline there, having passed nothing on before.
+/// predicate rejects, a `DropWhile` is that stage's complement — it OPENS the
+/// rest of the pipeline there, having passed nothing on before — and a `Mapcat`
+/// threads a whole RUN of values on where every other stage threads one, walking
+/// the collection its function returns with a second loop.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Hof {
     Map,
@@ -17,6 +19,7 @@ pub(super) enum Hof {
     Filter,
     TakeWhile,
     DropWhile,
+    Mapcat,
 }
 
 impl Hof {
@@ -28,6 +31,7 @@ impl Hof {
             "filter" => Some(Hof::Filter),
             "take-while" => Some(Hof::TakeWhile),
             "drop-while" => Some(Hof::DropWhile),
+            "mapcat" => Some(Hof::Mapcat),
             _ => None,
         }
     }
@@ -44,8 +48,8 @@ impl Hof {
 
     /// Is this op's stdlib array arm **type-preserving** — a frozen result over an
     /// immutable array, and an empty array answered with an empty array? `map` and
-    /// `filter` are; `map-indexed`, `take-while` and `drop-while` are not, each
-    /// returning its
+    /// `filter` are; `map-indexed`, `take-while`, `drop-while` and `mapcat` are not,
+    /// each returning its
     /// `@array` accumulator raw and answering an empty input from the list arm its
     /// `(empty? coll)` clause reaches first. The Collect terminal's two result flags
     /// and the gate on what may sit inside such an op both read this one fact
@@ -56,13 +60,15 @@ impl Hof {
 
     /// Does this op hand on exactly as many elements as it was given, in the same
     /// order? A `map` and a `map-indexed` do; the three ops that can shorten a walk
-    /// — `filter`, `take-while`, `drop-while` — do not. Two consumers read the one
+    /// — `filter`, `take-while`, `drop-while` — do not, and neither does the one that
+    /// can lengthen it, a `mapcat`, which turns one element into a run of any length.
+    /// Two consumers read the one
     /// fact. It is what a stage inner to an untyped array arm must satisfy, since
     /// `len` decides that arm's emptiness off the BASE. And it is why a
-    /// `map-indexed`'s position is the walk's induction variable: only a shortening
-    /// stage renumbers, and the emptiness rule already refuses every one of those
-    /// inner to a `map-indexed` (docs/impl/dissolution.md § "Map-indexed — the stage
-    /// that carries the position").
+    /// `map-indexed`'s position is the walk's induction variable: only a
+    /// non-length-preserving stage renumbers, and the emptiness rule already refuses
+    /// every one of those inner to a `map-indexed` (docs/impl/dissolution.md
+    /// § "Map-indexed — the stage that carries the position").
     pub(super) fn preserves_length(self) -> bool {
         matches!(self, Hof::Map | Hof::MapIndexed)
     }
@@ -132,6 +138,18 @@ pub(super) enum Stage {
         param: Binding,
         body: Hir,
     },
+    /// A `mapcat`: apply the function to the current value and splice the collection
+    /// it returns, running the rest of the pipeline once per element of that
+    /// collection. This is the one stage whose element statement carries a walk of
+    /// its own — `index` is the inner walk's induction variable, a loop-scaffold
+    /// local reset per base element — and the one whose function's RESULT is gated,
+    /// since only an indexed walk over a proven array is linear
+    /// (docs/impl/dissolution.md § "Mapcat — the stage that fans out").
+    Fan {
+        index: Binding,
+        param: Binding,
+        body: Hir,
+    },
     /// The gate a search's own stage rides where a prefix keeps the walk
     /// exhaustive: continue only while `sentinel` holds, so the search's predicate
     /// runs on exactly the elements the staged form gives it. `advance` is the
@@ -156,13 +174,27 @@ impl Stage {
         }
     }
 
+    /// The inner walk's induction variable a [`Stage::Fan`] owns, if any. The loop
+    /// scaffold `define`s it at 0 beside the walk's own, so no `define` sits inside a
+    /// loop body; the stage resets it per base element.
+    pub(super) fn inner_index(&self) -> Option<Binding> {
+        match self {
+            Stage::Fan { index, .. } => Some(*index),
+            _ => None,
+        }
+    }
+
     /// Does this stage **renumber** what reaches the rest of the pipeline, so a
     /// `find-index` past it must answer with a survivor count rather than the base
-    /// index? A `filter` drops elements anywhere in the walk and a `drop-while`
-    /// removes a leading run; a `map`, a `map-indexed` and a `take-while` preserve
+    /// index? A `filter` drops elements anywhere in the walk, a `drop-while` removes
+    /// a leading run, and a `mapcat` turns one element into a run of any length; a
+    /// `map`, a `map-indexed` and a `take-while` preserve
     /// both the count and the order of what they pass on.
     pub(super) fn renumbers(&self) -> bool {
-        matches!(self, Stage::Guard { .. } | Stage::Drop { .. })
+        matches!(
+            self,
+            Stage::Guard { .. } | Stage::Drop { .. } | Stage::Fan { .. }
+        )
     }
 }
 
@@ -210,7 +242,8 @@ impl Search {
 /// `map`/`filter` pipeline stages are identical for every terminal; only the
 /// accumulator setup (`build_loop`) and the base case differ.
 ///
-/// - **Collect** — a `map`/`map-indexed`/`filter`/`take-while`/`drop-while` chain:
+/// - **Collect** — a `map`/`map-indexed`/`filter`/`take-while`/`drop-while`/`mapcat`
+///   chain:
 ///   fill a fresh
 ///   `@array` by
 ///   `push`. Two flags carry what the stdlib ops' array arms decide.
@@ -457,7 +490,8 @@ pub(super) struct ChainPlan {
 
 /// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
 /// optional outermost scalar terminal — a `fold`/`reduce`, a `count`, or a search —
-/// over a `map`/`map-indexed`/`filter`/`take-while`/`drop-while` pipeline (in any
+/// over a `map`/`map-indexed`/`filter`/`take-while`/`drop-while`/`mapcat` pipeline
+/// (in any
 /// mix) bottoming out at a
 /// proven immutable array. Every function qualifies (`qualifies_lambda`, at the op's
 /// own arity — 1 for every op but `fold` and `map-indexed`, which take 2); and for a
@@ -515,6 +549,14 @@ pub(super) fn validate_chain(
     let mut kinds = Vec::new();
     while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, hof.arity())?);
+        // A `mapcat` reads what its function returns as a COLLECTION and walks it,
+        // and the fused inner walk is an indexed one — linear only over an array,
+        // where a list would make it quadratic. Every other op is indifferent to
+        // what its function returns (dissolution.md § "Mapcat — the stage that fans
+        // out").
+        if hof == Hof::Mapcat && !fns.result_is_array(lam, arena, symbol_names, bases) {
+            return None;
+        }
         ops += 1;
         kinds.push(hof);
         cur = coll;
@@ -523,11 +565,13 @@ pub(super) fn validate_chain(
     if ops == 0 {
         return None;
     }
-    // `map-indexed`, `take-while` and `drop-while` answer an EMPTY input with `()`
+    // `map-indexed`, `take-while`, `drop-while` and `mapcat` answer an EMPTY input
+    // with `()`
     // rather than an array — the `(empty? coll)` clause precedes each one's array arm
     // — and the fused loop reads that emptiness off `len`, which is the BASE's. A
-    // length-preserving stage carries it through; a `filter`, a `take-while` or a
-    // `drop-while` can hand an empty collection on from a non-empty base, so a chain
+    // length-preserving stage carries it through; a `filter`, a `take-while`, a
+    // `drop-while` or a `mapcat` can hand an empty collection on from a non-empty
+    // base, so a chain
     // that puts one of those inside an untyped-arm op declines whole and the
     // pre-order recursion fuses its inner run instead. `kinds` is outer→inner, so the
     // stages inner to the outermost such op are the ones after it (dissolution.md
@@ -540,9 +584,12 @@ pub(super) fn validate_chain(
         }
     }
     let base = classify_base(cur, arena, symbol_names, bases)?;
-    // A mutable `@array` base fuses only a single `map`/`filter`: the fused loop
-    // walks the base LIVE against a `len` captured once, which matches the stdlib op
-    // exactly for one op. A `fold` (which snapshots via `->array`), a `count`, a
+    // A mutable `@array` base fuses only a single `map`/`filter`/`mapcat`: the fused
+    // loop
+    // walks the base LIVE against a `len` captured once, which matches those stdlib
+    // arms exactly for one op — a `mapcat`'s through the `each` macro's own indexed
+    // arm, which captures the length once as well. A `fold` (which snapshots via
+    // `->array`), a `count`, a
     // `map-indexed`, a `take-while` and a `drop-while` (which re-read
     // `(length coll)` every
     // iteration), and a
@@ -552,8 +599,8 @@ pub(super) fn validate_chain(
     // mutable-array arm"). The pre-order recursion still fuses the innermost single
     // op of a declined mutable chain.
     let mutable_base = base == BaseKind::Mutable;
-    let lone_live_walk =
-        terminal == TerminalOp::Collect && matches!(kinds[..], [Hof::Map] | [Hof::Filter]);
+    let lone_live_walk = terminal == TerminalOp::Collect
+        && matches!(kinds[..], [Hof::Map] | [Hof::Filter] | [Hof::Mapcat]);
     if mutable_base && !lone_live_walk {
         return None;
     }
@@ -778,6 +825,13 @@ pub(super) fn take_chain(
             // rest of the pipeline, so there is no walk to end.
             Hof::DropWhile => Stage::Drop {
                 sentinel: fresh_mutable(arena),
+                param: params[0],
+                body,
+            },
+            // The induction variable of the walk this stage runs over its function's
+            // result. `build_loop` `define`s it beside the base walk's own.
+            Hof::Mapcat => Stage::Fan {
+                index: fresh_mutable(arena),
                 param: params[0],
                 body,
             },

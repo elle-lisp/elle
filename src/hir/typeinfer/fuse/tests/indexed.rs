@@ -52,7 +52,7 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
         "the loop `if` and the empty-base `()` arm — the stage adds no guard",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "+"),
+        count_intrinsic(&hir, "%add"),
         1,
         "only the index walk bumps: the position IS that index; callees were {cs:?}",
     );

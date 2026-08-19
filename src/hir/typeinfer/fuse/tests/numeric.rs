@@ -22,8 +22,8 @@ fn numeric_declared_intrinsic_body_map_fuses() {
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
         count_intrinsic(&hir, "%add"),
-        1,
-        "the `%add` opcode must run inline in the fused loop",
+        2,
+        "the kernel's `%add` runs inline in the fused loop, beside the index walk's own",
     );
     assert_eq!(
         count_callee(&hir, &arena, &names, "@array"),
@@ -81,7 +81,11 @@ fn numeric_declared_intrinsic_fold_fuses() {
         "a `(numeric!)`-declared intrinsic combinator must fuse; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert_eq!(count_intrinsic(&hir, "%add"), 1, "the fold step inlines");
+    assert_eq!(
+        count_intrinsic(&hir, "%add"),
+        2,
+        "the fold step inlines, beside the index walk's own bump",
+    );
     assert_eq!(
         count_callee(&hir, &arena, &names, "@array"),
         0,
@@ -144,7 +148,11 @@ fn numeric_declared_intrinsic_composition_fuses_to_one_loop() {
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert_eq!(count_intrinsic(&hir, "%add"), 1, "the outer kernel inlines");
+    assert_eq!(
+        count_intrinsic(&hir, "%add"),
+        2,
+        "the outer kernel inlines, beside the index walk's own bump",
+    );
     assert_eq!(count_intrinsic(&hir, "%mul"), 1, "the inner kernel inlines");
     assert_eq!(
         count_callee(&hir, &arena, &names, "@array"),

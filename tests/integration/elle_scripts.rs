@@ -333,6 +333,26 @@ fn region_map_indexed_fuse_uaf() {
     );
 }
 
+// Mapcat loop fusion (docs/impl/dissolution.md § "Mapcat — the stage that fans out")
+// dissolves `(mapcat f xs)` over a proven immutable array into an index-walk loop
+// whose element statement binds the collection `f` returns and walks it with a SECOND
+// `while`, splicing the rest of the pipeline inside that inner walk. Three roles put
+// heap values on a path no other stage takes. The per-element collection is a fresh
+// region born and abandoned once per base element while the accumulator keeps values
+// read out of it, so those must outlive the collection that carried them. The
+// function may hand the BASE's own element through that collection, routing a
+// base-owned heap value into an accumulator that outlives the loop. And the result is
+// that accumulator itself, unfrozen, so the caller holds the very object the loop
+// filled. Any of those over-frees SIGSEGVs under guardfree. Fires only on the fused
+// shape; the plain-VM run asserts the values.
+#[test]
+fn region_mapcat_fuse_uaf() {
+    run_elle_script_with_args(
+        "region-mapcat-fuse-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `break` TRANSFERS its value to the enclosing block
 // (docs/impl/region/mechanism.md § "`break` transfers its value; it does not
 // consume it"). The transfer moves the broken value's release out of the block

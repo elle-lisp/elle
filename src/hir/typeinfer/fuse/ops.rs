@@ -15,10 +15,10 @@ pub(super) struct Ops {
     pub(super) push: Binding,
     /// `(freeze acc)` — the immutable result.
     pub(super) freeze: Binding,
-    /// `(< i len)`.
+    /// `(< i len)`. Every counter the scaffold advances takes the raw `%add`
+    /// intrinsic instead (`Build::advance`), so no arithmetic wrapper is resolved
+    /// here.
     pub(super) lt: Binding,
-    /// `(+ i 1)`.
-    pub(super) add: Binding,
 }
 
 impl Ops {
@@ -46,7 +46,6 @@ impl Ops {
             push: find("push")?,
             freeze: find("freeze")?,
             lt: find("<")?,
-            add: find("+")?,
         })
     }
 }

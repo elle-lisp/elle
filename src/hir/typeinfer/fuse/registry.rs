@@ -257,6 +257,35 @@ impl FnResolver<'_> {
         }
     }
 
+    /// Does this function argument's body prove it returns an **array**? Asked only
+    /// of a `mapcat`, the one op that reads its function's result as a collection and
+    /// walks it: the fused inner walk is an indexed one, linear over an array and
+    /// quadratic over a list (docs/impl/dissolution.md § "Mapcat — the stage that
+    /// fans out").
+    ///
+    /// The body is read by `classify_base`, the same proof the chain's own base
+    /// collection is read by, so it answers for a call-site array producer and for a
+    /// `Var` alias of one. A **cross-unit** template declines: its body names the
+    /// defining unit's bindings, which neither this arena nor this unit's init-keyword
+    /// map can resolve, so no reading of it here would be sound.
+    pub(super) fn result_is_array(
+        &self,
+        lam: &Hir,
+        arena: &BindingArena,
+        symbol_names: &HashMap<u32, String>,
+        bases: &FxHashMap<Binding, &'static str>,
+    ) -> bool {
+        let body = match &lam.kind {
+            HirKind::Lambda { body, .. } => &**body,
+            HirKind::Var(b) => match self.templates.get(b) {
+                Some(t) => &t.body,
+                None => return false,
+            },
+            _ => return false,
+        };
+        classify_base(body, arena, symbol_names, bases).is_some()
+    }
+
     /// Resolve a HOF's function argument to owned `(params, body)`, ready to splice:
     /// a **lambda literal** is *moved* out; a same-unit `Var` *clones* its template;
     /// a cross-unit stdlib `Var` clones the registry template with its globals

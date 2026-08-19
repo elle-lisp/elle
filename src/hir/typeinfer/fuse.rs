@@ -10,8 +10,9 @@
 //! induction variable bound beside the element (`(f i elem)`); `filter` pushes the
 //! element itself under
 //! an `if` guard; `take-while` pushes it under a guard whose rejecting side ends
-//! the run, and `drop-while` under the complementary flag, which its rejecting side
-//! clears to open the rest of the pipeline. A chain's optional outermost
+//! the run, `drop-while` under the complementary flag, which its rejecting side
+//! clears to open the rest of the pipeline, and `mapcat` pushes every element of the
+//! array its function returns, walked by a second loop. A chain's optional outermost
 //! **terminal** is a scalar op:
 //! `fold`/`reduce` (`(fold f init xs)`, `f` called `(f acc elem)`) threads an
 //! accumulator seeded by `init` one left-fold step per element, `count`
@@ -43,7 +44,16 @@
 //! chain around it looks like. A `map-indexed` carries none either, and needs no
 //! survivor count for its position: every stage that renumbers is one that shortens
 //! the walk, and the emptiness rule (`Hof::preserves_length`) already refuses each
-//! one inner to an untyped array arm, of which `map-indexed` is one.
+//! one inner to an untyped array arm, of which `map-indexed` is one. A `mapcat`
+//! threads a whole RUN of values on where every other stage threads exactly one: its
+//! element statement carries a SECOND walk over the collection its function returns,
+//! with the rest of the pipeline spliced inside it, so each stage outer to it runs
+//! once per spliced element — which is what the flat collection the stdlib op builds
+//! gives them.
+//!
+//! Every counter the emitted loop owns advances by the raw `%add` opcode
+//! (`Build::advance`), never the stdlib `+`, whose rest-list and `letrec` walker
+//! would re-mint per element the very closure this pass dissolves.
 //!
 //! ## Why this shape, here
 //!
@@ -60,7 +70,7 @@
 //! recognize a proven-type call across the compile-unit boundary (the callee is
 //! `is_primitive` — a `bind_primitives` stdlib export — and named `map`/`map-indexed`/
 //! `filter`/
-//! `take-while`/`drop-while`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
+//! `take-while`/`drop-while`/`mapcat`/`fold`/`reduce`/`count`/`any?`/`all?`/`find`/`find-index`; a user redefinition
 //! shadows it with a non-primitive binding and is left alone) and collapse it to the
 //! direct form the proof selects.
 //!

@@ -63,6 +63,29 @@ impl Build<'_> {
             is_tail: false,
         })
     }
+    /// `(assign counter (%add counter 1))` — the one-step advance every counter the
+    /// scaffold owns takes: the base walk's induction variable, a `mapcat`'s inner
+    /// one, a `find-index`'s survivor count, a `count`'s tally.
+    ///
+    /// The raw `%add` is the opcode the stdlib walks this loop stands in for advance
+    /// by (`src/prelude.lisp`'s `each` macro). Reaching the stdlib `+` instead would put
+    /// a variadic call in the loop: `+` collects a rest-list and folds it with a
+    /// `letrec` walker, so every element would mint that list, the walker's closure
+    /// and its cell — re-creating per element exactly the closure this pass exists to
+    /// dissolve. The contract (`docs/intrinsics.md` § "The contract: prove or
+    /// reject") discharges from the counter's own type: the scaffold seeds each at
+    /// the literal `0` and advances it by this site alone, so nothing but a number
+    /// ever reaches it.
+    pub(super) fn advance(&self, counter: Binding) -> Hir {
+        let step = self.node(HirKind::Intrinsic {
+            op: crate::hir::expr::IntrinsicOp::Add,
+            args: vec![self.var(counter), self.int(1)],
+        });
+        self.node(HirKind::Assign {
+            target: counter,
+            value: Box::new(step),
+        })
+    }
     pub(super) fn let_(&self, binding: Binding, value: Hir, body: Hir) -> Hir {
         self.node(HirKind::Let {
             bindings: vec![(binding, value)],
@@ -115,6 +138,10 @@ impl Build<'_> {
     ///   every element continues. It reads the flag twice — once to gate the
     ///   predicate, once to gate the rest of the pipeline — so `rest` is spliced in
     ///   one place;
+    /// - a **`Fan`** stage (a `mapcat`) applies its function to the current value and
+    ///   walks the collection it returns with a SECOND loop, running the rest of the
+    ///   pipeline once per element of it — the one stage that threads a whole run of
+    ///   values on where every other threads exactly one;
     /// - a **`Gate`** stage binds the current value (so every stage BEFORE it has
     ///   run for this element) and continues only while the sentinel holds — the
     ///   form a search's early exit takes over a prefix, where the walk itself must
@@ -248,6 +275,40 @@ impl Build<'_> {
                 let stmt = self.node(HirKind::Begin(vec![decide, pass]));
                 self.let_(item, cur, stmt)
             }
+            Some(Stage::Fan { index, param, body }) => {
+                self.localize_param(param);
+                let inner = self.local();
+                let ilen = self.local();
+                // The rest of the pipeline runs once per element of the collection
+                // the function returned, which is what a stage outer to the stdlib
+                // op sees — the flat collection being all it is given.
+                let elem = self.call(self.ops.get, vec![self.var(inner), self.var(index)]);
+                let rest = self.element(stages, base, acc, elem);
+                let bump = self.advance(index);
+                let inner_loop = self.node(HirKind::While {
+                    cond: Box::new(self.call(self.ops.lt, vec![self.var(index), self.var(ilen)])),
+                    body: Box::new(self.node(HirKind::Begin(vec![rest, bump]))),
+                });
+                // The index is one binding for the whole fused loop, so each base
+                // element restarts it; `build_loop` `define`s it before the walk
+                // rather than here, no `define` belonging inside a loop body.
+                let reset = self.node(HirKind::Assign {
+                    target: index,
+                    value: Box::new(self.int(0)),
+                });
+                let walk = self.node(HirKind::Begin(vec![reset, inner_loop]));
+                // `ilen` is read once per base element, exactly as the `each` macro's
+                // indexed arm captures `(length seq)` once — so a function returning
+                // a collection something else mutates diverges from the stdlib op
+                // nowhere.
+                let len_let = self.let_(
+                    ilen,
+                    self.call(self.ops.length, vec![self.var(inner)]),
+                    walk,
+                );
+                let produced = self.let_(param, cur, body);
+                self.let_(inner, produced, len_let)
+            }
             Some(Stage::Gate { sentinel, advance }) => {
                 // Binding `cur` first is what keeps the walk exhaustive: every
                 // earlier stage's per-element work is evaluated for this element
@@ -260,11 +321,7 @@ impl Build<'_> {
                 let gated = match advance {
                     None => rest,
                     Some(pos) => {
-                        let next = self.call(self.ops.add, vec![self.var(pos), self.int(1)]);
-                        let bump = self.node(HirKind::Assign {
-                            target: pos,
-                            value: Box::new(next),
-                        });
+                        let bump = self.advance(pos);
                         self.node(HirKind::Begin(vec![rest, bump]))
                     }
                 };
@@ -309,11 +366,7 @@ impl Build<'_> {
                     "a tally discards its element value, so the count's guard stage \
                      must have bound it first",
                 );
-                let next = self.call(self.ops.add, vec![self.var(acc), self.int(1)]);
-                self.node(HirKind::Assign {
-                    target: acc,
-                    value: Box::new(next),
-                })
+                self.advance(acc)
             }
             Base::Decide(d) => {
                 let DecideStep {
@@ -441,7 +494,7 @@ pub(super) struct FoldStep {
 /// accumulator's shape and result:
 ///
 /// ```text
-/// Collect (map/filter/take-while):  Fold (fold/reduce), Count and Search:
+/// Collect (a pipeline chain):       Fold (fold/reduce), Count and Search:
 /// (let [coll BASE]                  (let [seed INIT]
 ///   (let [len (length coll)]          (let [coll BASE]
 ///     (let [acc (@array)]               (let [len (length coll)]
@@ -449,8 +502,8 @@ pub(super) struct FoldStep {
 ///       (define i 0)                      (define i 0)
 ///       (while (< i len)                  (define more true)      ; search only
 ///         <pipeline; push acc>            (while (and (< i len) more)  ; INNERMOST
-///         (assign i (+ i 1)))               <pipeline; assign acc …>
-///       (freeze acc))))                     (assign i (+ i 1)))
+///         (assign i (%add i 1)))            <pipeline; assign acc …>
+///       (freeze acc))))                     (assign i (%add i 1)))
 ///                                         acc)))
 /// ```
 ///
@@ -474,9 +527,11 @@ pub(super) struct FoldStep {
 /// it never reaches the condition: it opens the pipeline rather than ending the walk.
 ///
 /// A `find-index` whose prefix **renumbers** mints one more: the survivor count its
-/// answer reads, since a `filter`'s survivors renumber and so does what a
-/// `drop-while` passes on (a `map` prefix, and a `take-while`, preserve both count
-/// and order, so the base index is already the answer).
+/// answer reads, since a `filter`'s survivors renumber, so does what a
+/// `drop-while` passes on, and so does a `mapcat`'s fan-out (a `map` prefix, and a
+/// `take-while`, preserve both count and order, so the base index is already the
+/// answer). A `mapcat` mints a counter of its own besides — the induction variable of
+/// the walk its element statement runs over its function's result.
 ///
 /// The Collect terminal's two flags select its result arm. `unfrozen`: an immutable
 /// base freezes the accumulator, while a mutable `@array` base — and a chain holding
@@ -514,8 +569,8 @@ pub(super) fn build_loop(
     // The chain's shape decides where a search's sentinel is read and what a
     // `find-index` answers with. Both questions are about the PREFIX, which is
     // exactly `stages` — the terminal's own guard is held apart — so the stages that
-    // renumber here are the `filter`s, whose survivors do, and the `drop-while`s,
-    // whose leading drop does.
+    // renumber here are the `filter`s, whose survivors do, the `drop-while`s, whose
+    // leading drop does, and the `mapcat`s, whose fan-out does.
     let prefixed = !stages.is_empty();
     let renumbers = stages.iter().any(Stage::renumbers);
 
@@ -526,6 +581,10 @@ pub(super) fn build_loop(
     // sharing the chain takes its gate and the two never contend for the loop
     // condition.
     let stage_sentinels: Vec<Binding> = stages.iter().filter_map(Stage::sentinel).collect();
+    // A `mapcat`'s inner walk owns an induction variable, `define`d at 0 here and
+    // reset by the stage per base element — a `define` belongs before a loop, never
+    // inside one.
+    let stage_indices: Vec<Binding> = stages.iter().filter_map(Stage::inner_index).collect();
     let walk_end = stages.iter().find_map(|s| match s {
         Stage::Take {
             sentinel,
@@ -617,10 +676,7 @@ pub(super) fn build_loop(
     let elem0 = b.call(ops.get, vec![b.var(coll_b), b.var(i_b)]);
     let body_stmt = b.element(&mut stages.into_iter(), &mut pipeline_base, acc_b, elem0);
 
-    let incr = b.node(HirKind::Assign {
-        target: i_b,
-        value: Box::new(b.call(ops.add, vec![b.var(i_b), b.int(1)])),
-    });
+    let incr = b.advance(i_b);
     let in_range = b.call(ops.lt, vec![b.var(i_b), b.var(len_b)]);
     // The condition reads the early exit of the chain's innermost op alone: a
     // walk-ending `take-while`'s sentinel, or — where the chain is a lone search —
@@ -640,8 +696,9 @@ pub(super) fn build_loop(
         value: Box::new(b.int(0)),
     });
     // Each stage-owned flag starts `true`: a `take-while`'s run open, a
-    // `drop-while`'s dropping in force.
-    let define_flags: Vec<Hir> = stage_sentinels
+    // `drop-while`'s dropping in force. Each stage-owned inner index starts at 0,
+    // as the base walk's own does.
+    let mut define_stage_locals: Vec<Hir> = stage_sentinels
         .iter()
         .map(|&more| {
             b.node(HirKind::Define {
@@ -650,12 +707,18 @@ pub(super) fn build_loop(
             })
         })
         .collect();
+    define_stage_locals.extend(stage_indices.iter().map(|&j| {
+        b.node(HirKind::Define {
+            binding: j,
+            value: Box::new(b.int(0)),
+        })
+    }));
 
     match init {
         // Collect — a fresh `@array` accumulator. An immutable base freezes it to
-        // the result; a mutable `@array` base, and a chain holding a `take-while`,
-        // return it unfrozen (type-preserving, mirroring the stdlib arm
-        // `(if (mutable? coll) acc (freeze acc))` and `take-while`'s arm, which has
+        // the result; a mutable `@array` base, and a chain holding an op whose array
+        // arm is not type-preserving, return it unfrozen (mirroring the stdlib arm
+        // `(if (mutable? coll) acc (freeze acc))`, and the untyped arms, which have
         // no such test).
         None => {
             let result = if unfrozen {
@@ -663,16 +726,16 @@ pub(super) fn build_loop(
             } else {
                 b.call(ops.freeze, vec![b.var(acc_b)])
             };
-            let mut stmts = define_flags;
+            let mut stmts = define_stage_locals;
             stmts.push(define_i);
             stmts.push(while_loop);
             stmts.push(result);
             let acc_body = b.node(HirKind::Begin(stmts));
             let acc_let = b.let_(acc_b, b.call(ops.at_array, vec![]), acc_body);
-            // A `take-while` answers an EMPTY input with `()`, its `(empty? coll)`
-            // clause preceding its array arm — and `validate_chain` proved the
-            // stages inner to it are all `map`s, so the base's emptiness is its
-            // input's and `len` decides it.
+            // An untyped array arm answers an EMPTY input with `()`, its
+            // `(empty? coll)` clause preceding that arm — and `validate_chain` proved
+            // every stage inner to it length-preserving, so the base's emptiness is
+            // its input's and `len` decides it.
             let collected = if empty_is_list {
                 b.node(HirKind::If {
                     cond: Box::new(b.call(ops.lt, vec![b.int(0), b.var(len_b)])),
@@ -698,7 +761,7 @@ pub(super) fn build_loop(
             });
             let result = b.var(acc_b);
             let mut stmts = vec![define_acc, define_i];
-            stmts.extend(define_flags);
+            stmts.extend(define_stage_locals);
             if let Some(more) = sentinel_b {
                 stmts.push(b.node(HirKind::Define {
                     binding: more,

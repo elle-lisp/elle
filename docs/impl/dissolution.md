@@ -8,8 +8,9 @@ owned, non-escaping `xs` exposes no observable closure and no observable
 intermediate collection, so the compiler is free to realize it as a plain loop
 with `f`'s body spliced in, a JIT'd group, CPU SIMD, or a device dispatch. This
 document specifies the first realization: **HOF-chain loop fusion** on the VM
-substrate (`src/hir/typeinfer/fuse.rs`), covering the five array-producing
-higher-order ops `map`, `map-indexed`, `filter`, `take-while` and `drop-while` and
+substrate (`src/hir/typeinfer/fuse.rs`), covering the six array-producing
+higher-order ops `map`, `map-indexed`, `filter`, `take-while`, `drop-while` and
+`mapcat` and
 the scalar-producing
 terminals: the left-fold `fold`/`reduce`, the predicate tally `count`, and the four
 short-circuiting searches `any?`/`all?`/`find`/`find-index`.
@@ -31,7 +32,7 @@ directly into the loop body** instead of called through a closure value:
       (define i 0)
       (while (< i len)
         (push acc (let [x (get coll i)] BODY))
-        (assign i (+ i 1)))
+        (assign i (%add i 1)))
       (freeze acc))))
 ```
 
@@ -142,7 +143,7 @@ dissolves to:
       (define i 0)
       (while (< i len)
         (assign acc (let [acc-p acc] (let [x (get coll i)] STEP)))
-        (assign i (+ i 1)))
+        (assign i (%add i 1)))
       acc)))
 ```
 
@@ -183,14 +184,14 @@ already built — a `filter` **stage** whose base case counts instead of pushing
       (define i 0)
       (while (< i len)
         (let [item (get coll i)]
-          (if (let [x item] PRED) (assign n (+ n 1)) nil))
-        (assign i (+ i 1)))
+          (if (let [x item] PRED) (assign n (%add n 1)) nil))
+        (assign i (%add i 1)))
       n)))
 ```
 
 The predicate is appended as the **last** stage of the pipeline (it is the
 outermost op, so it runs after every inner transform/guard), and the terminal is a
-scalar accumulator seeded at 0 whose base case is `(assign n (+ n 1))`. Because
+scalar accumulator seeded at 0 whose base case is `(assign n (%add n 1))`. Because
 the count's own stage is a guard, the value reaching that base case is always the
 local a `Filter` stage binds — the tally discards a name, never work.
 
@@ -233,7 +234,7 @@ clears.
           (if (let [x item] PRED)
             (begin (assign ans true) (assign more false))
             nil))
-        (assign i (+ i 1)))
+        (assign i (%add i 1)))
       ans)))
 ```
 
@@ -272,7 +273,7 @@ stage** instead.
           (begin (assign ans true) (assign more false))
           nil)
         nil))
-    (assign i (+ i 1)))
+    (assign i (%add i 1)))
 ```
 
 Stopping the whole walk instead would leave the prefix's per-element work unrun,
@@ -328,7 +329,7 @@ merely being skipped:
             (if (let [x item] PRED)
               (push acc item)
               (assign more false)))
-          (assign i (+ i 1)))
+          (assign i (%add i 1)))
         acc)
       ())))
 ```
@@ -355,7 +356,7 @@ sentinel instead, as a prefixed search's guard does:
       (if more
         (if (let [y v] PRED) (push acc v) (assign more false))
         nil))
-    (assign i (+ i 1)))
+    (assign i (%add i 1)))
 ```
 
 Where a lone search and a walk-ending `take-while` both want the loop condition,
@@ -396,7 +397,7 @@ clears, after which every element passes:
                 (if (let [x item] PRED) nil (assign dropping false))
                 nil)
               (if dropping nil (push acc item))))
-          (assign i (+ i 1)))
+          (assign i (%add i 1)))
         acc)
       ())))
 ```
@@ -442,7 +443,7 @@ own induction variable, bound to the function's first parameter.
 ⇒
   (while (< i len)
     (push acc (let [ip i] (let [xp (get coll i)] BODY)))
-    (assign i (+ i 1)))
+    (assign i (%add i 1)))
 ```
 
 The position the function reads is an index into `map-indexed`'s **own** input, and
@@ -466,25 +467,107 @@ saves: its array arm walks with a `letrec`-bound self-recursive closure
 (`src/stdlib.lisp`), so the un-fused call mints that closure and its forward cell
 every time, plus the function closure wherever the argument is a lambda literal.
 
+## Mapcat — the stage that fans out
+
+`mapcat` applies its function to each element and **splices** the collection that
+function returns into one flat result — `(each x in coll (each y in (f x) (push
+result y)))`, its array arm's whole body (`src/stdlib.lisp`). It produces a
+collection, so it is a pipeline **stage**. Every other stage threads exactly one
+value on per element; this one threads a whole run of them, so its fused form is
+the first to put a **second walk** inside the element statement:
+
+```
+(mapcat (fn [x] BODY) [ … ])
+⇒
+(let [coll [ … ]]
+  (let [len (length coll)]
+    (if (< 0 len)
+      (let [acc (@array)]
+        (define j 0)
+        (define i 0)
+        (while (< i len)
+          (let [inner (let [x (get coll i)] BODY)]
+            (let [ilen (length inner)]
+              (begin
+                (assign j 0)
+                (while (< j ilen)
+                  (push acc (get inner j))
+                  (assign j (%add j 1))))))
+          (assign i (%add i 1)))
+        acc)
+      ())))
+```
+
+The rest of the pipeline is spliced **inside** the inner `while`, so every stage
+outer to a `mapcat` runs once per spliced element rather than once per base element
+— which is what a stage outer to the stdlib op sees, the flat collection being all
+it is given. The inner index is one binding the loop scaffold owns, `define`d beside
+the walk's own and reset per base element, so no `define` sits inside a loop body.
+
+### The function's result must be a proven array
+
+`each y in (f x)` walks whatever `f` returns — a list with `first`/`rest`, an
+indexed collection with `get`. The fused inner walk is the indexed one, so
+`mapcat` fuses **only where `f`'s body proves it returns an array**, read by the
+same `classify_base` proof the base collection is read by. The reason is cost, not
+value: over a list, `(get inner j)` is O(j) and the fused walk would be quadratic
+where the stdlib op's is linear — a bounded scratch saving traded for an unbounded
+time cost, which no rewrite may do. A function whose result is unproven declines and
+the `mapcat` stays a plain call.
+
+The proof reads **this** compile unit's bindings, so it is asked of a call-site
+lambda literal and of a same-unit named function, and a cross-unit template
+declines: that template's body names the defining unit's bindings, which the array
+proof cannot resolve here (§ "Cross-unit named functions").
+
+Like `each`, the fused inner walk captures `(length inner)` **once** per base
+element and reads `inner` live, so a function returning a collection something else
+mutates diverges from the stdlib op nowhere.
+
+### What a mapcat decides for the chain around it
+
+- **Its array arm is untyped** — the accumulator is returned unfrozen and an empty
+  base answers `()` (§ "The two facts an untyped array arm decides") — so every
+  stage inner to a `mapcat` must be length-preserving.
+- **It is not length-preserving itself**, so a `mapcat` inner to any untyped array
+  arm — another `mapcat`, a `map-indexed`, a `take-while`, a `drop-while` — declines
+  the chain whole. Each of those reads its own emptiness off the base's `len`, and a
+  `mapcat` can hand an empty collection on from a non-empty base.
+- **It renumbers**, one base element becoming a run of any length, so a `find-index`
+  outer to a `mapcat` answers with the survivor count the pipeline carries, exactly
+  as it does past a `filter` (§ "The early exit stops the search's own work, not the
+  pipeline's").
+- **It carries no early exit**, so it never contends for the loop condition, and the
+  innermost-op rule (§ "Which early exit may end the walk") has nothing to say about
+  it. Nothing that owns a sentinel can land inside the inner walk either: a
+  `take-while` or a `drop-while` outer to a `mapcat` is exactly what the emptiness
+  rule refuses.
+
+A lone `mapcat` never reorders and needs no purity gate; in a chain it carries the
+composition gate like every other op. What it saves is the per-element intermediate
+its array arm has no way to avoid — plus, over a prefix or under a terminal, the
+whole flat collection between the ops.
+
 ## The two facts an untyped array arm decides
 
-The array arms of `map-indexed`, `take-while` and `drop-while` are not
+The array arms of `map-indexed`, `take-while`, `drop-while` and `mapcat` are not
 type-preserving the way `map`'s and `filter`'s are, and fusion reproduces each
 exactly — a rewrite may not change a value.
 
 - **The result is unfrozen.** Each array arm returns its `@array` accumulator with
-  no `(if (mutable? coll) acc (freeze acc))`, so any of the three over an immutable
+  no `(if (mutable? coll) acc (freeze acc))`, so any of the four over an immutable
   array yields a **mutable** one. `map` and `filter` are type-preserving, so a
-  Collect chain holding any of the three anywhere is unfrozen throughout.
+  Collect chain holding any of the four anywhere is unfrozen throughout.
 - **An empty input answers `()`.** The `(or (pair? coll) (empty? coll))` clause
-  precedes the array arm in all three ops, so an empty array takes the *list* arm and
+  precedes the array arm in all four ops, so an empty array takes the *list* arm and
   the op returns the empty list. The fused Collect form answers `(< 0 len)`'s false
   side with `()` for the same reason.
 
-The second fact is why every stage inner to one of these three ops must be
+The second fact is why every stage inner to one of these four ops must be
 **length-preserving** — a `map` or a `map-indexed`. `len` decides the emptiness of
 the **base**, and a length-preserving stage carries it through; a `filter`, a
-`take-while` or a `drop-while` can hand an empty collection on from a non-empty base,
+`take-while`, a `drop-while` or a `mapcat` can hand an empty collection on from a
+non-empty base,
 where the staged form would answer `()` and the fused loop its accumulator. Such a
 chain declines whole, and the pre-order recursion still fuses the inner run. A scalar
 terminal cannot observe the difference — an exhausted walk answers with its seed
@@ -502,7 +585,7 @@ its exact per-element evaluation order (the loop visits each element left to
 right, applying `f`/`p` identically to the stdlib op). The gate:
 
 - **The callee is a canonical stdlib HOF.** A pipeline op is `map`, `map-indexed`,
-  `filter`, `take-while` or `drop-while`; the optional outermost terminal op is `fold`,
+  `filter`, `take-while`, `drop-while` or `mapcat`; the optional outermost terminal op is `fold`,
   `reduce`, `count`, or one of the
   four short-circuiting searches `any?`/`all?`/`find`/`find-index`. Recognized by
   the callee binding being `is_primitive` (every stdlib/core export is bound so by
@@ -528,7 +611,7 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   call) selects the unfrozen-result arm under the tighter gate below (see
   "The mutable-array arm").
 - **The function is non-capturing with the op's fixed arity** — one parameter for
-  a `map`/`filter`/`take-while`/`drop-while`/`count`/search (the element), two for a
+  a `map`/`filter`/`take-while`/`drop-while`/`mapcat`/`count`/search (the element), two for a
   `fold` (the accumulator
   and the element) and two for a `map-indexed` (the position and the element) — with
   no rest parameter, and a body free of nested lambdas and of
@@ -543,6 +626,12 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   No captures means the body references only its parameters and globals, so
   splicing it at the call site is always in scope; the fixed parameter count
   means the loop's element (and, for a fold, the accumulator) bind 1:1.
+- **A `mapcat`'s function body proves an array result.** Only that op reads what its
+  function returns as a *collection*, and only the indexed walk is linear
+  (§ "Mapcat — the stage that fans out"). The body is read by the same
+  `classify_base` proof the base is, so it qualifies as a call-site array producer or
+  a `Var` alias of one; a cross-unit template declines, its body naming the defining
+  unit's bindings. Every other op is indifferent to what its function returns.
 
 For a **composition** (a chain of length ≥ 2 — homogeneous *or* mixed), the pass
 additionally requires each lambda body to be free of **sequencing effects** — no
@@ -593,13 +682,16 @@ its input mutable, so a proven-`@array` binding is mutable at every use), so the
 fused loop emits the accumulator **unfrozen** instead of `(freeze acc)`. The
 loop body is otherwise identical to the immutable arm.
 
-A mutable base fuses under a **strictly tighter gate: a single `map` or `filter`
+A mutable base fuses under a **strictly tighter gate: a single `map`, `filter` or
+`mapcat`
 only** — no terminal, no composition. The reason is that the fused loop walks the
 base *live* (it reads `(get coll i)` each iteration against a `len` captured
-once), and this matches the stdlib op **exactly** for a single `map`/`filter`
-(whose own array arm captures `len` once and reads `coll` live) — so the value is
-preserved even if the lambda mutates the base through a global alias. The three
-excluded shapes break that match:
+once), and this matches the stdlib op **exactly** for those three (each array arm
+captures `len` once — `mapcat`'s through the `each` macro's own indexed arm — and
+reads `coll` live) — so the value is
+preserved even if the lambda mutates the base through a global alias. A `mapcat`'s
+inner walk reads its function's result the same way, so it matches there too. The
+three excluded shapes break the match:
 
 - **`fold`** first snapshots its input (`(->array coll)` copies a mutable array)
   and walks the copy; a fused fold would walk the live base, so a mutating
@@ -615,7 +707,8 @@ excluded shapes break that match:
   mutating the original base can no longer affect the result; the single fused
   loop interleaves the ops against the live base, where such a mutation *would*
   affect later reads. A composition over a mutable base declines, and the
-  pre-order recursion still fuses its innermost single `map`/`filter` (sound in
+  pre-order recursion still fuses its innermost single `map`/`filter`/`mapcat`
+  (sound in
   isolation), leaving the outer ops as plain calls over that fused loop.
 
 For an **immutable** base none of the hazards exists — the base cannot be mutated
@@ -702,12 +795,31 @@ Everything else in the gate is identical — non-capturing, fixed arity, no rest
 parameter, unmutated parameters, and the composition reorder requirement (read
 from the template body's signal).
 
-Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/`+`/
+Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/
 `length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
 original call's signal — a sound upper bound (that call's signal already subsumes
 every op in the stdlib op's body) — so the bottom-up signal re-propagation
 (`hir/narrow.rs`) never under-reports the fused form's effects. The spliced lambda
 bodies keep their own signals.
+
+## The scaffold's own counters advance by opcode
+
+Every counter the scaffold owns — the walk's induction variable, a `mapcat`'s inner
+one, a `find-index`'s survivor count, a `count`'s tally — advances through the raw
+`%add` intrinsic (`Build::advance`), never through the stdlib `+`. That is what the
+walks this loop stands in for do (`src/prelude.lisp`'s `each` macro), and the reason
+is the pass's own thesis: `+` is a variadic function that collects a rest-list and
+folds it with a `letrec` walker, so reaching it once per element would mint that
+list, the walker's closure and its cell — re-creating per element exactly the closure
+fusion exists to dissolve, and swamping the intermediate collection the fusion
+removed. The comparison `(< i len)` stays a call: it lowers to an opcode already, so
+it mints nothing.
+
+The intrinsic carries a prove-or-reject operand contract (`docs/intrinsics.md`),
+discharged here by the counter's own type rather than by any declaration: the
+scaffold seeds each counter at the literal `0` and advances it by this one site, so
+nothing but a number ever reaches it. This is the same proof `each`'s
+`(def @idx 0)` / `(%add idx 1)` pair rests on.
 
 ## Raw `%`-intrinsic bodies — the declaration travels with the binding
 
@@ -810,8 +922,15 @@ codegen and execution levels, not on the leak oracle. Three pins:
   sentinel at all; its decline pins are the shapes the emptiness rule refuses inner
   to it — a `filter`, a `take-while`, a `drop-while` — which is what leaves its
   position read off the base index.
+  A **`mapcat`** dissolves to a SECOND `while` inside the element statement, over the
+  array its function returns — one accumulator, no per-element intermediate — with
+  the same two array-arm facts, the rest of the pipeline spliced inside that inner
+  walk, and a `find-index` over one bumping the survivor count its fan-out
+  renumbers; its decline pins are a function whose result is not a proven array, a
+  `mapcat` inner to any untyped array arm (including another `mapcat`), and a
+  cross-unit named function, whose body the array proof cannot read.
   A mutable-`@array`-base
-  `map`/`filter` fuses
+  `map`/`filter`/`mapcat` fuses
   with the accumulator returned **unfrozen** (no `freeze` call). A
   `(numeric!)`-declared raw-intrinsic kernel fuses — as a `map` transform, as a
   `filter` guard, as a `fold` combinator, as a composition, as a named same-unit
@@ -822,8 +941,8 @@ codegen and execution levels, not on the leak oracle. Three pins:
   fuses its inner run only — a `fold`, a `count`, a `take-while`, a `drop-while`, or
   a composition
   over a
-  mutable base, which declines to the innermost single op, and a `take-while` or
-  `drop-while` whose
+  mutable base, which declines to the innermost single op, and a `take-while`,
+  `drop-while` or `mapcat` whose
   inner stage is a `filter`, whose emptiness `len` cannot decide). Named-function pins cover a `map`/`fold`
   whose argument is a `Var` naming a same-unit `defn` (the body inlines, the
   definition persists) and the declines (a `let`-body function, a capturing local
@@ -877,7 +996,14 @@ codegen and execution levels, not on the leak oracle. Three pins:
   while the walk itself must still reach that element to push it. A
   **`map-indexed`** (`dissolution-map-indexed-fuse.lisp`) weighs its lone case
   against the un-fused twin — one walker closure and its cell — and its composition
-  with a `map` on either side, where the intermediate array goes too. The
+  with a `map` on either side, where the intermediate array goes too. A **`mapcat`**
+  (`dissolution-mapcat-fuse.lisp`) is weighed over a composition and under a scalar
+  terminal, never lone: its array arm walks with two `each` macro expansions rather
+  than a `letrec` closure, and the per-element collection its function returns is
+  minted by both forms, so a lone `mapcat` has no closure to dissolve and saves
+  nothing measurable. What fusion removes is the **flat collection** between the
+  `mapcat` and whatever consumes it, which is the whole of its saving and the
+  strictly larger one. The
   intermediate is non-escaping and freed before the call returns, so it is
   invisible to every live/peak/steady-state axis — the leak oracle included; only
   a cumulative allocation-event count sees it, and it is deterministic (no
@@ -886,10 +1012,13 @@ codegen and execution levels, not on the leak oracle. Three pins:
   `dissolution-filter-fuse.lisp`, `dissolution-mixed-fuse.lisp`,
   `dissolution-fold-fuse.lisp`, `dissolution-count-fuse.lisp`,
   `dissolution-search-fuse.lisp`, `dissolution-take-while-fuse.lisp`,
-  `dissolution-drop-while-fuse.lisp` and `dissolution-map-indexed-fuse.lisp` (whose
+  `dissolution-drop-while-fuse.lisp`, `dissolution-map-indexed-fuse.lisp` (whose
   value pins carry the two array-arm facts: the mutable result, and the `()` an
   empty base answers with — plus, for the `map-indexed`, the position every admitted
-  chain hands its function)
+  chain hands its function) and `dissolution-mapcat-fuse.lisp` (whose value pins
+  carry the fan-out: an empty per-element result contributing nothing, a base
+  element contributing many, and the array-result gate that declines a
+  list-returning function to the stdlib op)
   (value-preserving, incl. the declined shapes, the reorder-gate fallback, the
   mutable-base arm — an unfrozen, in-place-mutable result — and named-function
   inlining, incl. a `let`-body function that now fuses by cloning its freshened
@@ -908,7 +1037,10 @@ codegen and execution levels, not on the leak oracle. Three pins:
   predicate never read, the leading run it did read entering nothing) /
   `region-map-indexed-fuse-uaf.lisp` (whose transform reads the induction variable
   and a heap element in one body, and hands the base's own element out under a
-  position)
+  position) /
+  `region-mapcat-fuse-uaf.lisp` (whose accumulator holds heap elements read out of a
+  per-element array that dies before the next base element, and whose function hands
+  the BASE's own element through that array)
   (guardfree over heap element/base/accumulator values,
   including a mutable-base heap result mutated in place, a cloned same-unit
   named-function body, and a cross-unit stdlib `defn` (`identity`) inlined over heap
