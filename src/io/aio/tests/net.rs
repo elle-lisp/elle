@@ -559,6 +559,137 @@ fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
     });
 }
 
+/// Closing a listener must END its parked pool accept, on every platform.
+///
+/// `port/close` is the only unblocking mechanism a program has for an accept
+/// nobody cancels — an accept loop parked in a live process, closed by another
+/// process at teardown (tests/elle/process-accept-close.lisp is the scheduler
+/// shape). The close path may not lean on `shutdown(2)` for this: shutdown of
+/// a LISTENING socket is a Linux extension — macOS and the BSDs return
+/// ENOTCONN and wake nothing, and the accept's worker then polls the retired
+/// descriptor forever while the scheduler waits on a completion that never
+/// comes. The wake must come from the operation's stop pipe instead.
+///
+/// Built on `new_thread_pool` for the reason the cancellation tests give: on a
+/// Linux dev box the default backend is the ring, and this property would go
+/// unchecked everywhere it can regress.
+#[test]
+fn closing_a_listener_ends_its_parked_pool_accept() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+        use std::os::unix::io::FromRawFd;
+
+        // A BLOCKING listener, deliberately — see the cancellation test above.
+        let listener_fd = unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+            assert!(fd >= 0, "socket() failed");
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = 0;
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            assert_eq!(
+                libc::bind(
+                    fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+                ),
+                0
+            );
+            assert_eq!(libc::listen(fd, 128), 0);
+            fd
+        };
+        let listener_port = h.ctx().external(
+            "port",
+            Port::new_tcp_listener(
+                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                "127.0.0.1:0".to_string(),
+            ),
+        );
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let accept_port_val = h.ctx().external(
+            "port",
+            Port::new_unopened(
+                PortKind::TcpStream,
+                Direction::ReadWrite,
+                Encoding::Binary,
+                String::new(),
+            ),
+        );
+        let accept_id = backend
+            .submit(
+                &IoRequest {
+                    op: PortOp::Accept {
+                        options: Default::default(),
+                        encoding: crate::port::Encoding::Binary,
+                        accept_port: accept_port_val,
+                    }
+                    .into(),
+                    port: listener_port,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        // Let the worker reach its wait before the close arrives.
+        let mut submitted = false;
+        for _ in 0..200 {
+            if backend.workers() > 0 {
+                submitted = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(submitted, "the pool never took the accept out to a worker");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Close the listener. The close itself completes immediately; the
+        // parked accept must then complete too — as an error, within a bound.
+        let close_id = backend
+            .submit(
+                &IoRequest {
+                    op: IoOp::Close,
+                    port: listener_port,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        let mut accept_completion = None;
+        for _ in 0..40 {
+            for c in backend.wait(50).unwrap() {
+                if c.id == accept_id {
+                    accept_completion = Some(c);
+                } else {
+                    assert_eq!(c.id, close_id, "unexpected completion");
+                }
+            }
+            if accept_completion.is_some() {
+                break;
+            }
+        }
+        let accept_completion = accept_completion.expect(
+            "the parked accept never completed after its listener closed — \
+             the fiber waiting on it would wait forever",
+        );
+        assert!(
+            accept_completion.result.is_err(),
+            "an accept on a closed listener must not report success",
+        );
+        assert_eq!(
+            backend.workers(),
+            0,
+            "the accept's worker never came back after the close",
+        );
+        assert!(
+            !backend.has_pending(),
+            "the accept is still pending after the close",
+        );
+    });
+}
+
 /// A cancelled datagram receive must END on the thread-pool backend.
 ///
 /// The accept test's twin on the other open-ended socket operation: a socket

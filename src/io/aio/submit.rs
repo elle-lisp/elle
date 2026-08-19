@@ -138,18 +138,33 @@ impl AsyncBackend {
                     .collect();
 
                 let still_running = !ids_to_cancel.is_empty();
-                for _op_id in ids_to_cancel {
+                // A CONNECTED stream socket is woken by shutdown(2): the worker's
+                // poll reports the fd readable, its read returns 0, and the fiber
+                // sees a clean EOF. Every other descriptor needs the operation's
+                // stop pipe instead: shutdown of a LISTENING socket wakes a
+                // parked accept only on Linux — macOS and the BSDs return
+                // ENOTCONN and wake nothing — and an unconnected UDP socket, a
+                // pipe, or a file is not a connected socket anywhere. A worker
+                // left unwoken polls the retired descriptor forever, and the
+                // fiber waiting on it is never resumed (pinned by
+                // `closing_a_listener_ends_its_parked_pool_accept`).
+                let stream_socket =
+                    matches!(port.kind(), PortKind::TcpStream | PortKind::UnixStream);
+                for op_id in ids_to_cancel {
                     match inner.platform {
                         #[cfg(target_os = "linux")]
                         PlatformBackend::Uring(ref mut ring) => {
-                            let _ = crate::io::uring::submit_uring_cancel(ring, _op_id);
+                            let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
                         }
                         PlatformBackend::ThreadPool => {
-                            // Thread pool: shutdown the fd to unblock any worker
-                            // stuck in accept/read/recv. Do NOT remove the pending
-                            // entry — let the worker's error completion flow back
-                            // so the fiber resumes and can exit cleanly.
-                            unsafe { libc::shutdown(*fd, libc::SHUT_RDWR) };
+                            // Do NOT remove the pending entry — let the worker's
+                            // error completion flow back so the fiber resumes and
+                            // can exit cleanly.
+                            if stream_socket {
+                                unsafe { libc::shutdown(*fd, libc::SHUT_RDWR) };
+                            } else {
+                                inner.hub.stop(op_id);
+                            }
                         }
                     }
                 }

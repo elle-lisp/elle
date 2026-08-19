@@ -279,6 +279,30 @@ the same moment, so per-fd buffering never spans two ports either.
 
 Pinned by `tests/elle/io-cancel-releases.lisp`.
 
+### How a close wakes the operations it retires
+
+A retired descriptor is only given back once its operations complete, so
+the close must also make sure they DO complete — a worker parked on a
+descriptor nobody will ever act on again holds its wait forever, and the
+fiber behind it is never resumed. The close wakes each pending operation
+on the port, by descriptor kind:
+
+- **A connected stream socket** (`TcpStream`, `UnixStream`) is woken by
+  `shutdown(2)`: the worker's poll reports the fd readable, its read
+  returns zero bytes, and the fiber sees a clean EOF.
+- **Everything else** — a listener, a datagram socket, a pipe — is woken
+  through the operation's stop pipe, the same wake `io/cancel` uses.
+  `shutdown(2)` cannot reach these: shutting down a LISTENING socket
+  wakes a parked accept only on Linux (macOS and the BSDs return
+  `ENOTCONN` and wake nothing), and an unconnected UDP socket or a pipe
+  is not a connected socket on any platform.
+
+Unlike `io/cancel`, the close does not mark the operation cancelled: the
+worker's error completion flows back to the fiber, which resumes and can
+exit cleanly. Pinned by `closing_a_listener_ends_its_parked_pool_accept`
+(`src/io/aio/tests/net.rs`) and, end to end through two processes, by
+`tests/elle/process-accept-close.lisp`.
+
 ### How many operations run at once
 
 The OS decides. A pool operation is one `std::thread::Builder::spawn`, so
