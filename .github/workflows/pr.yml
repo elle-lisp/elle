@@ -251,6 +251,12 @@ jobs:
     env:
       PROPTEST_CASES: 8
       RUST_TEST_THREADS: 2
+      # The release profile strips the symbol table (Cargo.toml: strip =
+      # "symbols"), which turns the timeout photograph (src/test.lisp
+      # photograph-threads → /usr/bin/sample) into unreadable `???` frames.
+      # Keep the symbol table on this runner: it is the box where the corpus
+      # wedges, and the photograph is the only evidence a timeout leaves.
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
