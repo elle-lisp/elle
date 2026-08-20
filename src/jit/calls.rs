@@ -184,6 +184,28 @@ pub(crate) fn args_ptr_to_value_slice(args_ptr: *const Value, nargs: u32) -> &'s
     }
 }
 
+/// Debug-build guard at the compiled-call boundary: classify the callee's env
+/// backing through the region-of funnel, whose generation check panics with
+/// free-log attribution when the backing page's region was freed
+/// (docs/impl/region/generations.md § "Region generations"). Compiled code
+/// reads the env by raw pointer — no funnel, no check — so a stale env
+/// crosses this boundary silently and detonates later at an unattributed
+/// load in native code. Classifying here names the call boundary instead.
+/// Release builds skip it: the funnel walk costs a page-header probe per
+/// compiled call. Called by both compiled-call entries: `VM::call_jit`
+/// (interpreter→JIT, src/vm/jit_entry.rs) and the JIT-to-JIT dispatch in
+/// `calls/callops.rs`.
+#[inline]
+pub(crate) fn debug_check_env_backing(
+    heap: &crate::value::fiberheap::FiberHeap,
+    closure: &crate::value::Closure,
+) {
+    if cfg!(debug_assertions) && !closure.env.is_empty() {
+        // The stale case panics inside `region_of_ptr`; the id is unused.
+        let _ = heap.region_of_ptr(closure.env.as_ptr() as *const ());
+    }
+}
+
 /// Hand a JIT-to-JIT (or SCC direct) callee one `CallArgument` owning reference
 /// per non-captured FIXED param, mirroring `VM::populate_env`/`push_param`
 /// (own_params=true) for the path where no interpreter env is built (the callee

@@ -119,6 +119,11 @@ pub extern "C" fn elle_jit_call(
                 closure.env.as_ptr()
             };
 
+            // Debug builds: detonate here, with attribution, if the env
+            // backing's region was freed — compiled code would read it
+            // unchecked.
+            super::debug_check_env_backing(unsafe { &*vm.heap_ptr }, closure);
+
             // Non-tail call: the JIT callee owns each non-captured fixed param
             // and releases it value-based (`DecrefValueRegion`) at its
             // decref_point. The fast path hands args by pointer with no env

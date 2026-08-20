@@ -141,3 +141,76 @@ fn sig_error_terminal_stored_as_error_not_panic() {
         assert!(sig.intersects(SIG_TERMINAL));
     });
 }
+
+// ── The env-backing guard at the compiled-call boundary ─────────────
+//
+// Compiled code reads a closure's env by raw pointer — no region-of
+// funnel, no generation check — so a stale env crosses the call boundary
+// silently and detonates later at an unattributed load (or, on macOS,
+// wedges the thread on the faulting instruction). The guard classifies
+// the env backing at the boundary, where the generation check names the
+// call site instead.
+
+#[test]
+#[should_panic(expected = "stale region")]
+fn env_backing_guard_panics_on_a_freed_env_region() {
+    crate::value::arena::with_test_region(|| {
+        let vm = make_vm();
+        let heap = unsafe { &mut *vm.heap_ptr };
+        let region = heap.new_runtime_region();
+        let env = crate::value::arena::alloc_region_slice_in_region(
+            heap,
+            &[crate::value::Value::int(42)],
+            region,
+        );
+        let template = std::rc::Rc::new(crate::value::ClosureTemplate::new(
+            std::rc::Rc::new(vec![]),
+            crate::value::Arity::Exact(0),
+            std::rc::Rc::new(vec![]),
+        ));
+        let closure = crate::value::Closure::new(template, env, crate::value::SignalBits::EMPTY);
+        heap.decref_region(region); // the env's backing region is freed
+        debug_check_env_backing(heap, &closure);
+    });
+}
+
+#[test]
+fn env_backing_guard_accepts_a_live_env_region() {
+    crate::value::arena::with_test_region(|| {
+        let vm = make_vm();
+        let heap = unsafe { &mut *vm.heap_ptr };
+        let region = heap.new_runtime_region();
+        let env = crate::value::arena::alloc_region_slice_in_region(
+            heap,
+            &[crate::value::Value::int(42)],
+            region,
+        );
+        let template = std::rc::Rc::new(crate::value::ClosureTemplate::new(
+            std::rc::Rc::new(vec![]),
+            crate::value::Arity::Exact(0),
+            std::rc::Rc::new(vec![]),
+        ));
+        let closure = crate::value::Closure::new(template, env, crate::value::SignalBits::EMPTY);
+        debug_check_env_backing(heap, &closure);
+        heap.decref_region(region);
+    });
+}
+
+#[test]
+fn env_backing_guard_ignores_an_empty_env() {
+    crate::value::arena::with_test_region(|| {
+        let vm = make_vm();
+        let heap = unsafe { &mut *vm.heap_ptr };
+        let template = std::rc::Rc::new(crate::value::ClosureTemplate::new(
+            std::rc::Rc::new(vec![]),
+            crate::value::Arity::Exact(0),
+            std::rc::Rc::new(vec![]),
+        ));
+        let closure = crate::value::Closure::new(
+            template,
+            crate::value::region_slice::RegionSlice::empty(),
+            crate::value::SignalBits::EMPTY,
+        );
+        debug_check_env_backing(heap, &closure);
+    });
+}

@@ -299,6 +299,10 @@ impl VM {
             closure.env.as_ptr()
         };
 
+        // Debug builds: detonate here, with attribution, if the env backing's
+        // region was freed — compiled code would read it unchecked.
+        crate::jit::dispatch::debug_check_env_backing(unsafe { &*self.heap_ptr }, closure);
+
         // Interpreter→JIT non-tail entry: hand the compiled callee one
         // `CallArgument` owning reference per non-captured fixed param, exactly
         // as the interpreter's `build_closure_env` (own_params=true) does for an
