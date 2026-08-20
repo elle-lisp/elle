@@ -101,7 +101,8 @@ fn saved_dispositions() -> &'static Mutex<HashMap<libc::c_int, libc::sigaction>>
 /// Process-wide signal trap installation, called exactly once from
 /// `main()` before any worker thread spawns. Workers call
 /// `mask_all_signals_on_this_thread` on entry and thereby inherit a
-/// no-signal-delivery posture; the *main* thread is what this function
+/// no-async-signal-delivery posture (the fault set stays deliverable);
+/// the *main* thread is what this function
 /// configures, and the policy below decides which signals get a
 /// sigaction handler (delivered to the main thread by the kernel
 /// because everyone else has them masked) and which are
@@ -125,7 +126,8 @@ fn saved_dispositions() -> &'static Mutex<HashMap<libc::c_int, libc::sigaction>>
 /// A user `os/sig-watch :sigterm` (etc.) lazily `pthread_sigmask`-blocks
 /// the watched signal on the main thread before opening its
 /// per-receiver `signalfd`. With the main thread blocking the signal
-/// and every worker thread already masking everything, the kernel has
+/// and every worker thread already masking every asynchronous signal,
+/// the kernel has
 /// no delivery target — the sigaction handler installed here cannot
 /// fire while a watcher is alive. The signalfd reads it instead.
 /// When the last watcher closes, the lazy-block unblocks the signal,
@@ -256,15 +258,37 @@ fn block_absorb_set_on_main_thread() {
     }
 }
 
-/// Mask all maskable signals on the calling thread. Workers call this
-/// as their first action after spawn so the kernel never selects them
-/// as a signal delivery target. Must not be called on the main VM
-/// thread (the lazy-block policy depends on the main thread starting
-/// with an empty mask).
+/// The fault set: signals the CPU raises synchronously at a specific
+/// instruction. They are bound to the faulting thread, so a mask cannot
+/// reroute them — it can only jam delivery. Jammed, Linux force-kills
+/// the process anyway, but macOS leaves the signal pending and
+/// re-executes the faulting instruction, pinning the thread at one PC
+/// forever (`fault_on_a_masked_thread_kills_the_process` is the pin).
+/// Worker masks therefore always exclude this set — the disposition
+/// stays "Untouched" per docs/posix-signals.md § "Disposition table".
+const FAULT_SET: &[libc::c_int] = &[
+    libc::SIGSEGV,
+    libc::SIGBUS,
+    libc::SIGILL,
+    libc::SIGFPE,
+    libc::SIGTRAP,
+    libc::SIGSYS,
+    libc::SIGABRT,
+];
+
+/// Mask every asynchronous signal on the calling thread; the fault set
+/// stays deliverable (see `FAULT_SET`). Workers call this as their
+/// first action after spawn so the kernel never selects them as the
+/// delivery target for an asynchronous signal. Must not be called on
+/// the main VM thread (the lazy-block policy depends on the main
+/// thread starting with an empty mask).
 pub fn mask_all_signals_on_this_thread() {
     unsafe {
         let mut full: libc::sigset_t = std::mem::zeroed();
         libc::sigfillset(&mut full);
+        for &s in FAULT_SET {
+            libc::sigdelset(&mut full, s);
+        }
         // SIG_BLOCK is additive; SIG_SETMASK replaces. We want SIG_SETMASK
         // so a worker thread that gets recycled doesn't accumulate state
         // from a previous owner.

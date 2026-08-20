@@ -29,8 +29,9 @@ impl CompletionHub {
         let eventfd = self.eventfd();
         let started = std::thread::Builder::new().spawn(move || {
             let id = raw_id;
-            // Block all signals on this worker so the kernel never selects
-            // it as the delivery target for a watched POSIX signal.
+            // Block every asynchronous signal on this worker so the kernel
+            // never selects it as the delivery target for a watched POSIX
+            // signal. The fault set stays deliverable.
             // See src/io/sigfd.rs and docs/posix-signals.md.
             crate::io::sigfd::mask_all_signals_on_this_thread();
             let (result_code, data) = run(op, bounds);

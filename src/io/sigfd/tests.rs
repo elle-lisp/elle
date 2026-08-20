@@ -18,19 +18,74 @@ fn current_thread_blocked_starts_empty_or_known() {
 }
 
 #[test]
-fn mask_all_signals_blocks_everything_on_this_thread() {
+fn mask_all_signals_blocks_async_but_not_fault_signals() {
     let h = std::thread::spawn(|| {
         mask_all_signals_on_this_thread();
         current_thread_blocked()
     });
     let blocked = h.join().unwrap();
     // sigkill and sigstop can't be blocked even via SIG_SETMASK with a
-    // full set — the kernel silently strips them. Everything else
-    // should be present.
+    // full set — the kernel silently strips them. Every asynchronous
+    // signal should be present.
     assert!(blocked.contains(&libc::SIGTERM), "SIGTERM blocked");
     assert!(blocked.contains(&libc::SIGUSR1), "SIGUSR1 blocked");
     assert!(blocked.contains(&libc::SIGUSR2), "SIGUSR2 blocked");
     assert!(blocked.contains(&libc::SIGINT), "SIGINT blocked");
+    // The fault set must stay deliverable: a synchronous fault is bound
+    // to the faulting thread, so a mask cannot reroute it. Blocked, a
+    // fault force-kills on Linux but wedges the thread on macOS — the
+    // kernel re-executes the faulting instruction forever. See
+    // docs/posix-signals.md § "Mask policy".
+    for (sig, name) in [
+        (libc::SIGSEGV, "SIGSEGV"),
+        (libc::SIGBUS, "SIGBUS"),
+        (libc::SIGILL, "SIGILL"),
+        (libc::SIGFPE, "SIGFPE"),
+        (libc::SIGTRAP, "SIGTRAP"),
+        (libc::SIGSYS, "SIGSYS"),
+        (libc::SIGABRT, "SIGABRT"),
+    ] {
+        assert!(!blocked.contains(&sig), "{name} must stay deliverable");
+    }
+}
+
+/// A synchronous fault on a thread carrying the worker mask must kill
+/// the process promptly. With the fault set wrongly inside the mask,
+/// Linux still force-delivers the default (kill), but macOS leaves the
+/// signal pending and re-executes the faulting load forever — the
+/// child then hangs and `fork_run`'s deadline fails the test.
+#[test]
+fn fault_on_a_masked_thread_kills_the_process() {
+    let status = fork_run(5, || {
+        mask_all_signals_on_this_thread();
+        let page = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                4096,
+                libc::PROT_NONE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if page == libc::MAP_FAILED {
+            return 73;
+        }
+        let v = unsafe { std::ptr::read_volatile(page as *const u8) };
+        // Unreachable: the read faults. A distinguishable code in case
+        // the kernel somehow satisfied a PROT_NONE read.
+        74 + v as i32
+    });
+    assert!(
+        libc::WIFSIGNALED(status),
+        "child exited {} instead of dying from the fault",
+        libc::WEXITSTATUS(status),
+    );
+    let sig = libc::WTERMSIG(status);
+    assert!(
+        sig == libc::SIGSEGV || sig == libc::SIGBUS,
+        "child died from signal {sig}, expected SIGSEGV/SIGBUS"
+    );
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]

@@ -101,14 +101,14 @@ process-wide POSIX traps before any worker thread spawns:
 | Resume | `CONT` | `sigaction` to an empty handler so the kernel has a delivery target. Nothing to clean up. |
 | Pipe | `PIPE` | `sigaction(SIG_IGN)`. Writes to broken pipes surface as `EPIPE`; nothing entered the kernel queue. |
 | Absorb | `USR1`, `USR2`, `CHLD`, `URG`, `WINCH`, `ALRM` | `pthread_sigmask(SIG_BLOCK)` on the main thread. With every worker also masking on spawn, no thread has these unblocked; the kernel queues them and nobody reads. Silently absorbed unless `os/sig-watch` opens a `signalfd` to drain. Accidental `kill -USR1 $pid` becomes a no-op. |
-| Fault | `SEGV`, `BUS`, `FPE`, `ILL`, `ABRT`, `TRAP`, `SYS` | Untouched. Synchronous fault signals; intercepting them only obscures real bugs. |
+| Fault | `SEGV`, `BUS`, `FPE`, `ILL`, `ABRT`, `TRAP`, `SYS` | Untouched. Synchronous fault signals; intercepting them only obscures real bugs. Worker masks exclude them too (see "Mask policy"). |
 | Uncatchable | `KILL`, `STOP` | Kernel forbids touching these. Pass through. |
 
 ## Watcher override
 
 The terminate-set handlers are installed *process-wide* — but only
 fire when the kernel can deliver the signal. With every worker thread
-masking everything and `os/sig-watch :sigterm` adding SIGTERM to the
+masking every asynchronous signal and `os/sig-watch :sigterm` adding SIGTERM to the
 main thread's mask, **no thread has SIGTERM unblocked**. The kernel
 parks the signal on the process pending queue, the sigaction handler
 cannot fire, and the watcher's `signalfd` reads the event instead.
@@ -125,11 +125,18 @@ process killer.
 
 ## Mask policy
 
-1. **Worker threads block everything.** Every thread Elle spawns
-   internally (the I/O thread pool, the stdin reader, the JIT worker,
-   the user `(spawn closure)` worker) masks all maskable signals as
-   its first action. Workers are never the kernel's chosen signal
-   delivery target.
+1. **Worker threads block every asynchronous signal.** Every thread
+   Elle spawns internally (the I/O thread pool, the stdin reader, the
+   JIT worker, the user `(spawn closure)` worker) masks the full set,
+   minus the fault set, as its first action. Workers are never the
+   kernel's chosen delivery target for an asynchronous signal. The
+   fault set stays deliverable because a synchronous fault is bound to
+   the faulting thread — a mask cannot reroute it, only jam it. A
+   blocked fault kills the process on Linux (the kernel forces the
+   default disposition). On macOS the kernel leaves the signal pending
+   and re-executes the faulting instruction, so the thread spins at
+   one PC forever — a silent wedge in place of a crash. An unblocked
+   fault set turns that wedge into an ordinary attributed crash.
 2. **The main thread blocks the absorb set at startup.** `USR1`,
    `USR2`, `CHLD`, `URG`, `WINCH`, `ALRM` are masked before `VM::new`
    runs. The terminate, job-control, resume, and pipe sets are
@@ -237,8 +244,9 @@ recover it. Linux signalfd populates both fields.
 
 ### Library-spawned threads inherit the startup mask, not later watches
 
-Elle masks all signals on every thread it spawns directly (threadpool,
-stdin reader, JIT worker, user `(spawn closure)` worker). Threads
+Elle masks every asynchronous signal on every thread it spawns
+directly (threadpool, stdin reader, JIT worker, user `(spawn closure)`
+worker); the fault set stays deliverable. Threads
 spawned by C dependencies (Cranelift codegen auxiliary threads,
 libffi callbacks, future plugin cdylibs, anything called via FFI)
 inherit whatever the *main thread's* mask was at *their* spawn time.
