@@ -1,11 +1,43 @@
-//! Dynamic parameter baseline a child fiber inherits from its parent on first
-//! resume, plus the debug-only uncounted-borrow check that guards it. Seeding
-//! the baseline takes no reference count, so `record_param_borrows` snapshots
-//! each borrowed region's generation and `first_stale_borrow` later confirms
-//! none was freed under the borrow (docs/impl/region/generations.md
+//! Dynamic parameter baseline a child fiber inherits from its parent — the
+//! counted seeding (`retain_param_baseline`) and the debug-only borrow check
+//! that proves the count holds. A child routinely outlives its creator's
+//! `parameterize` scope, so each heap entry of the installed baseline takes
+//! one retain and a recorded `fiber → value` content edge, released by the
+//! fiber object's own free (docs/impl/region/owner.md § "A child's inherited
+//! parameter baseline is a counted holder"). `record_param_borrows` snapshots
+//! each entry region's generation and `first_stale_borrow` later confirms
+//! none was freed under the fiber (docs/impl/region/generations.md
 //! § "Uncounted-borrow check").
 
 use crate::value::Value;
+
+/// Retain a seeded parameter baseline: one `ParamBaseline` retain and one
+/// recorded `fiber → value` content edge per heap entry. Called once per
+/// fiber, right after the baseline frame is installed, with the fiber's own
+/// heap VALUE (the edges' source). The symmetric release is the Fiber
+/// content-scan arm's baseline walk at the fiber object's free — gated on
+/// `Fiber::param_baseline_seeded`, which every install site must set.
+pub(crate) fn retain_param_baseline(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    fiber_value: Value,
+    flat: &[(u32, Value)],
+) {
+    let fiber_r = crate::value::arena::region_of(heap, fiber_value);
+    for &(_, v) in flat {
+        let r = crate::value::arena::region_of(heap, v);
+        // A value co-region with the fiber object needs no edge and MUST take
+        // no retain: the free-cascade scan skips self-region refs, so a
+        // self-retain here would keep the fiber's own region alive forever.
+        if r.is_some() && r != fiber_r {
+            crate::value::arena::incref_for_escape(
+                heap,
+                r,
+                crate::value::arena::EscapeSite::ParamBaseline,
+            );
+            heap.record_outgoing_edge(fiber_r, r);
+        }
+    }
+}
 
 /// Flatten dynamic parameter frames into a single baseline frame, later
 /// frames overriding earlier ones. Used when a child fiber inherits its

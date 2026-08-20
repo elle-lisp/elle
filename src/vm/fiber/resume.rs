@@ -52,8 +52,14 @@ impl VM {
             let flat = super::flatten_param_frames(&self.fiber.param_frames);
             #[cfg(debug_assertions)]
             let borrows = super::record_param_borrows(&flat, self.heap());
+            // The seeded baseline is a counted holder (docs/impl/region/owner.md
+            // § "A child's inherited parameter baseline is a counted holder"):
+            // retain each heap entry and record the fiber → value edge; the
+            // fiber object's free releases them through the baseline walk.
+            super::retain_param_baseline(unsafe { &mut *self.heap_ptr }, child_value, &flat);
             child_handle.with_mut(|c| {
                 c.param_frames = vec![flat];
+                c.param_baseline_seeded = true;
                 #[cfg(debug_assertions)]
                 {
                     c.param_borrows = borrows;

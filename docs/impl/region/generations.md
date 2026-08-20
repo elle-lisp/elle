@@ -93,13 +93,15 @@ the foreign page's region id to the local store.
 ## Uncounted-borrow check
 
 Some references convey no reference count. A child fiber inherits its parent's
-dynamic-parameter bindings as a baseline frame (`seed_child_inheritance`,
-`src/vm/fiber.rs`); the heap values in that frame — a scheduler reached through a
-parameter, say — are *borrowed*, snapshotted without an incref. The borrow is
-sound only while the borrowed region outlives the borrowing fiber, an invariant
-the runtime upholds structurally (the activation that owns the value drives the
-fiber to completion before it returns). Generations make that invariant checked
-rather than assumed.
+dynamic-parameter bindings as a baseline frame (`prim_fiber_new`,
+`seed_child_inheritance`); each heap value in that frame — a scheduler reached
+through a parameter, say — takes one seeding retain and a recorded
+`fiber → value` content edge, released by the fiber object's own free
+([owner.md](owner.md) § "A child's inherited parameter baseline is a counted
+holder"). The check below is the oracle that the count holds: the borrowed
+region must outlive the borrowing fiber, and generations make that checked
+rather than assumed — a missing or displaced retain panics at the resume
+boundary instead of surfacing as a stale read far from the seam.
 
 When the baseline is seeded, each heap binding's `(parameter, region,
 generation)` is recorded on the fiber (`param_borrows`, debug builds only). At

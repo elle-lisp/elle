@@ -270,8 +270,24 @@ impl RegionPool {
                 // free's cross-ref scan reads the freed page
                 // (tests/elle/region-squelch-fiber-uaf.lisp).
                 let mut closure_value = Value::NIL;
+                // The seeded parameter BASELINE (frames[0], exactly when
+                // `param_baseline_seeded`) was retained at the seed with a
+                // recorded fiber → value edge per heap entry
+                // (`retain_param_baseline`); walking it here is the symmetric
+                // release at the fiber object's free. The fiber's own later
+                // `parameterize` frames are NOT walked — their values belong
+                // to the parked activation (docs/impl/region/owner.md § "A
+                // child's inherited parameter baseline is a counted holder").
+                let mut param_vals: Vec<Value> = Vec::new();
                 let _ = handle.try_with(|fib| {
                     closure_value = fib.closure_value;
+                    if fib.param_baseline_seeded {
+                        if let Some(baseline) = fib.param_frames.first() {
+                            for &(_, v) in baseline {
+                                param_vals.push(v);
+                            }
+                        }
+                    }
                     // An empty env uses a dangling sentinel pointer (not in any
                     // region page) — skip it. For a non-empty env, synthesize a
                     // heap Value at the backing so the shared `check` routes the
@@ -308,6 +324,9 @@ impl RegionPool {
                 }
                 check(&signal_val);
                 check(&closure_value);
+                for v in &param_vals {
+                    check(v);
+                }
             }
             HeapObject::ClosureTemplate(t) => {
                 // The template's constant pool. These are immediates

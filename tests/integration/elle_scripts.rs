@@ -1823,3 +1823,16 @@ fn fiber_deep_nesting_jit() {
 fn signals_no_stale_suspended_frame_region_borrow() {
     run_elle_script_with_args("signals", &["--jit=off"]);
 }
+
+// A spawned fiber outlives the parameterize scope it inherited from, so its
+// baseline snapshot must COUNT what it holds (docs/impl/region/owner.md § "A
+// child's inherited parameter baseline is a counted holder"). This binary runs
+// with debug assertions, where a missing seeding retain panics deterministically
+// at the resume boundary (the generation-stamped borrow check,
+// docs/impl/region/generations.md § "Uncounted-borrow check") — the reason the
+// pin lives here rather than only in the release-built corpus, where the same
+// defect surfaces as timing-dependent stale reads.
+#[test]
+fn region_param_fiber_inherit_uaf() {
+    run_elle_script_with_args("param-fiber-inherit", &[]);
+}

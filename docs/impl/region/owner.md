@@ -254,6 +254,28 @@ parked fiber's accounting symmetric with its unpark:
   frame-exit release stop refusing it ([mechanism.md](mechanism.md) § "A fiber crossing is
   a counted holder too"). Pinned by `tests/elle/region-fiber-frontier-window-uaf.lisp`,
   with the leak face in `tests/elle/region-fiber-frontier-window.lisp`.
+- **A child's inherited parameter baseline is a counted holder.** A new fiber snapshots
+  its creator's dynamic-parameter bindings into one baseline frame — at creation
+  (`prim_fiber_new`), or at the first-resume fallback for a fiber seeded by its resumer
+  (`seed_child_inheritance`, `do_fiber_resume_single`) — precisely BECAUSE the creator's
+  `parameterize` blocks unwind long before the scheduler resumes the child. So the child
+  routinely outlives every structural holder of the bound values: the frame is Rust-side
+  state no store funnel records, and with nothing counting the crossing, the spawner's
+  completed activation frees the value's region while the child is parked — every later
+  read of the parameter in the child is then a use-after-free (the h2 corpus's
+  wrong-typed channel messages, and the wedges behind them, on the thread-pool backend
+  whose completion timing lets spawners finish first). The seeding therefore counts,
+  like every other seam that hands a value to another fiber: each heap entry of the
+  installed baseline takes one retain (`EscapeSite::ParamBaseline`) and records a
+  `fiber-region → value-region` content edge, released when the fiber's own heap object
+  frees (the Fiber content-scan arm visits the seeded baseline, so the free cascade is
+  the one symmetric release — the same shape as the terminal-signal park). The fiber's
+  own later `parameterize` frames stay uncounted: their values are the parked
+  activation's, released by its owed-release table. The generation-stamped borrow check
+  ([generations.md](generations.md) § "Uncounted-borrow check") stays as the oracle that
+  the count holds. Pinned by `tests/elle/param-fiber-inherit.lisp` and the
+  `region_param_fiber_inherit_uaf` integration pin (debug builds panic at the resume
+  boundary when the count is missing).
 - **A parked TERMINAL result displaced by a resume or abort install is released as it is
   displaced.** A terminal result parked in `fiber.signal` carries the park-retain and a
   recorded `fiber-region → result-region` content edge, both counting on the fiber's

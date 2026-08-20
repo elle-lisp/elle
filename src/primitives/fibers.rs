@@ -106,6 +106,16 @@ pub(crate) fn prim_fiber_new(
             fiber.param_borrows = crate::vm::fiber::record_param_borrows(&flat, ctx.heap_mut());
         }
         fiber.param_frames = vec![flat];
+        // The seeded baseline is a counted holder (docs/impl/region/owner.md
+        // § "A child's inherited parameter baseline is a counted holder").
+        // Setting the flag BEFORE `ctx.fiber` is the whole retain here: the
+        // allocation funnel scans the new object's content, and the Fiber
+        // scan arm walks the baseline exactly when the flag is set — so the
+        // creation increfs and records each entry's edge, and the fiber
+        // object's free releases them. A fiber seeded AFTER its allocation
+        // (`seed_child_inheritance`, the first-resume fallback) takes the
+        // explicit `retain_param_baseline` instead.
+        fiber.param_baseline_seeded = true;
     }
 
     (SIG_OK, ctx.fiber(fiber))

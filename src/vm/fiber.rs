@@ -60,6 +60,6 @@ pub(crate) use refcount::{
 #[cfg_attr(not(feature = "wasm"), allow(unused_imports))]
 pub(crate) use refcount::record_terminal_signal_park;
 
-pub(crate) use param::flatten_param_frames;
 #[cfg(debug_assertions)]
 pub(crate) use param::{first_stale_borrow, record_param_borrows};
+pub(crate) use param::{flatten_param_frames, retain_param_baseline};

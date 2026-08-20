@@ -185,6 +185,12 @@ pub enum EscapeSite {
     /// A child fiber's set-once terminal result, park-retained until the fiber
     /// is freed (released by the signal scan — asymmetric by Rule 7).
     TerminalSignal,
+    /// A heap value in a child fiber's inherited dynamic-parameter baseline,
+    /// retained at the seed until the fiber is freed (released by the Fiber
+    /// content scan's baseline walk — the terminal-signal shape;
+    /// docs/impl/region/owner.md § "A child's inherited parameter baseline is
+    /// a counted holder").
+    ParamBaseline,
 }
 
 impl EscapeSite {
@@ -202,6 +208,7 @@ impl EscapeSite {
             EscapeSite::SuspendEscape => "suspend-escape",
             EscapeSite::EmitEscape => "emit-escape",
             EscapeSite::TerminalSignal => "terminal-signal",
+            EscapeSite::ParamBaseline => "param-baseline",
         }
     }
 }

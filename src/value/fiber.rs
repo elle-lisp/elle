@@ -94,14 +94,23 @@ pub struct Fiber {
     /// Parameter binding frames. Each `parameterize` pushes a frame;
     /// exiting pops it. Lookup walks frames from top to bottom.
     pub param_frames: Vec<Vec<(u32, Value)>>,
+    /// True once an inherited parameter BASELINE was installed as
+    /// `param_frames[0]` (creation-time snapshot in `prim_fiber_new`, or the
+    /// first-resume fallback). The seed retains each heap entry's region and
+    /// records a `fiber → value` content edge; the Fiber content-scan arm
+    /// visits the baseline exactly when this is set, so the fiber's free
+    /// cascade is the symmetric release (docs/impl/region/owner.md § "A
+    /// child's inherited parameter baseline is a counted holder"). The
+    /// fiber's own later `parameterize` frames are not covered — their values
+    /// belong to the parked activation.
+    pub param_baseline_seeded: bool,
     /// Recorded `(param_id, region, generation)` for the heap values in this
-    /// fiber's *inherited baseline* parameter frame — the uncounted cross-fiber
-    /// borrows a child fiber snapshots from its parent (e.g. the scheduler a
-    /// fiber reaches via a dynamic parameter). Seeding the baseline takes no
-    /// reference count, so the borrow is sound only while the region stays live;
-    /// the recorded generation lets the resume and `resolve_parameter` checks
-    /// confirm that (debug builds), turning a violated invariant into a panic at
-    /// the borrow instead of a stale read. Populated only under
+    /// fiber's *inherited baseline* parameter frame. The seed retains each
+    /// entry's region (`EscapeSite::ParamBaseline`), so the region outliving
+    /// the fiber is an invariant the count upholds; the recorded generation
+    /// lets the resume and `resolve_parameter` checks PROVE it (debug
+    /// builds), turning a missing or displaced retain into a panic at the
+    /// borrow instead of a stale read. Populated only under
     /// `debug_assertions`; empty otherwise (docs/impl/region/generations.md
     /// § "Uncounted-borrow check").
     pub param_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
@@ -368,6 +377,7 @@ impl Fiber {
             closure,
             closure_value: Value::NIL,
             param_frames: Vec::new(),
+            param_baseline_seeded: false,
             param_borrows: Vec::new(),
             signal: None,
             suspended: None,
@@ -401,6 +411,7 @@ impl Fiber {
             closure,
             closure_value: Value::NIL,
             param_frames: Vec::new(),
+            param_baseline_seeded: false,
             param_borrows: Vec::new(),
             signal: None,
             suspended: None,
