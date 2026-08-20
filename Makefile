@@ -1,6 +1,6 @@
 .PHONY: all elle docs docgen smoke test crosscheck clean space help \
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir \
-       doctest elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
+       doctest elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
 
 .DEFAULT_GOAL := all
@@ -241,9 +241,23 @@ smoke-mlir: elle-mlir  ## Corpus via elle test (+ mlir-cpu tier) + whole-file --
 		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
 	$(call RUN_ORACLE,--mlir=eager)
 
-elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
+elle-wasm:   ## Build elle with WASM support (for check-wasm/smoke-wasm)
 	@echo "=== build elle with WASM ==="
 	cargo build $(CARGO_PROFILE) -p elle --features wasm -q
+
+# The CI gate for the wasm backend while the tier carries no production
+# workloads: the feature still compiles, and the full-module tier still boots —
+# compiles a module to wasm, executes it, returns. The `[wasm]` marker is the
+# proof the tier engaged: a binary built WITHOUT the feature accepts
+# `--wasm=full` and silently runs the VM, which would green a build gate that
+# gated nothing. Full corpus coverage on this tier is smoke-wasm.
+check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
+	@echo "=== wasm boot check ==="
+	@out=$$(timeout 300s $(ELLE) --wasm=full tests/elle/arithmetic.lisp 2>&1); code=$$?; \
+	printf '%s\n' "$$out"; \
+	[ $$code -eq 0 ] || { echo "FAILED: wasm boot (exit $$code)"; exit 1; }; \
+	printf '%s\n' "$$out" | grep -q '\[wasm\]' \
+		|| { echo "FAILED: wasm boot ran without engaging the wasm tier"; exit 1; }
 
 smoke-wasm: elle-wasm  ## Corpus via elle test (+ wasm tier) + whole-file --wasm=full pass
 	@echo "=== elle test (wasm build: + wasm tier, cross-tier divergence) ==="

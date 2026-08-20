@@ -334,7 +334,15 @@ and each is pinned by a specific corpus file run under `--wasm=full`.
 
 ## Testing
 
+CI gates on `make check-wasm` only: the feature compiles, and the full-module
+tier boots one module (the `[wasm]` marker proves the tier engaged — a
+non-wasm binary accepts `--wasm=full` and silently runs the VM). The corpus
+passes below do not gate CI while the tier carries no production workloads.
+
 ```bash
+# Build gate: feature compiles, tier boots (the CI gate)
+make check-wasm
+
 # WASM smoke tests (all elle scripts except eval)
 make smoke-wasm
 
