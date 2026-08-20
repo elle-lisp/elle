@@ -117,6 +117,15 @@ pub extern "C" fn elle_jit_load_capture_cell(cell_tag: u64, cell_payload: u64) -
     if let Some(cell_ref) = cell.as_capture_cell() {
         JitValue::from_value(*cell_ref.borrow())
     } else {
+        // The LIR promised a capture cell here; anything else is corruption
+        // (a scrubbed or recycled slot reads as an unrelated tag). Detonate
+        // in debug builds; release degrades to nil so a long corpus run
+        // still reports the downstream failure rather than aborting.
+        debug_assert!(
+            false,
+            "JIT capture-cell load: expected capture cell, got tag {} payload {:#x}",
+            cell.tag, cell.payload
+        );
         eprintln!("JIT type error: expected capture cell");
         JitValue::nil()
     }
@@ -165,6 +174,14 @@ pub extern "C" fn elle_jit_store_capture_cell(
         let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
         crate::value::arena::capture_store_with_rebind(heap, cell, val);
     } else {
+        // Same contract as the load above: the LIR promised a cell, so a
+        // non-cell here is corruption. Detonate in debug builds; release
+        // drops the store and reports downstream.
+        debug_assert!(
+            false,
+            "JIT capture-cell store: expected capture cell, got tag {} payload {:#x}",
+            cell.tag, cell.payload
+        );
         eprintln!("JIT type error: expected capture cell");
     }
     JitValue::nil()
