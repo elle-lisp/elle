@@ -1780,14 +1780,12 @@ fn fiber_deep_nesting_vm() {
     );
 }
 
-// Known limitation — the JIT resume path (`handle_fiber_resume_signal_jit`,
-// src/vm/fiber/jit.rs) calls `do_fiber_resume` synchronously from JIT'd frames,
-// which cannot be unwound by SIG_SWITCH, so JIT'd deep fiber nesting overflows
-// the host stack and aborts the process (hence the quarantined fixture +
-// #[ignore]). Lifting this requires the JIT resume to convert to the trampoline
-// via its side-exit (YIELD_SENTINEL) machinery.
+// The same file under `--jit=eager`. The fixture's `-jit` driver shapes are
+// JIT-admissible (their `fiber/new` lives in a helper, so the recursive
+// resume caller itself compiles), so this pin drives a compiled
+// `fiber/resume` caller 20000 deep — the depth a per-level Rust frame
+// residue would turn into a stack-overflow abort. See the fixture header.
 #[test]
-#[ignore = "RED: JIT'd nested fiber/resume still recurses on the Rust stack and overflows at depth"]
 fn fiber_deep_nesting_jit() {
     run_elle_file_with_args(
         "tests/integration/fixtures/fiber-depth.lisp",
