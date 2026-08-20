@@ -20,7 +20,7 @@ impl VM {
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
     /// - (:"jit/map" . _) — the JIT code-address registry as text
-    /// - (:"jit/peek" . `"0x<addr>"`) — four instruction words at a JIT address, or nil
+    /// - (:"jit/peek" . `"0x<addr>"`) — instruction words around a JIT address, or nil
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
@@ -330,10 +330,12 @@ impl VM {
             "jit/map" => (SIG_OK, ctx.string(crate::jit::registry::render())),
             #[cfg(not(feature = "jit"))]
             "jit/map" => (SIG_OK, ctx.string(String::new())),
-            // The four instruction words at a JIT address, for the reader
-            // of a thread photograph: the map names the function a sampled
-            // `???` frame belongs to, and this shows the bytes its PC is
-            // parked on. Nil for a malformed address, one outside every
+            // A window of instruction words around a JIT address, for the
+            // reader of a thread photograph: the map names the function a
+            // sampled `???` frame belongs to, and this shows the bytes its
+            // PC is parked on plus their neighborhood — enough to carry a
+            // LoadExtName call-target literal.
+            // Nil for a malformed address, one outside every
             // registered block, or one whose pages are no longer resident
             // (docs/impl/jit.md § "The code-address registry").
             #[cfg(feature = "jit")]

@@ -71,10 +71,16 @@ preceding entry — the registry records entry addresses, not sizes, and
 Cranelift lays functions out contiguously enough for nearest-preceding to
 name the frame.
 
-`(vm/query "jit/peek" "0x<addr>")` renders the four 32-bit words at a JIT
-address (`0x<w0> 0x<w1> 0x<w2> 0x<w3>`, in address order), or `nil` when the
-address is malformed, lies past every registered block, or its pages are no
-longer resident — a photograph can carry an address whose module has since
+`(vm/query "jit/peek" "0x<addr>")` renders a window of 32-bit words around a
+JIT address: from 16 bytes before it (clamped to the nearest registered
+entry) to 48 bytes after, four words per `0x<addr>: <w0> <w1> <w2> <w3>`
+line. The window is sized for the AArch64 `LoadExtName` sequence
+(`ldr rd, pc+8; b pc+16; .8byte target`): a PC parked just before that
+sequence carries the call target inside the window, where four words at the
+PC alone cut the literal off. The query answers `nil` when the address is
+malformed, lies past every registered block, or its own 16 bytes are not
+resident; another line of the window whose page is gone renders
+`(unmapped)` — a photograph can carry an address whose module has since
 been dropped, and the query must not fault on it. The runner prints the peek
 for each sampled `???` frame beside the map: the map names the function the
 frame belongs to, and the peek shows the instructions the sampled PC is

@@ -36,16 +36,23 @@
             "jit/map: a compiled function's source label appears in the registry")))
 
 # The peek beside the map (docs/impl/jit.md): the map names the function a
-# sampled frame belongs to, and the peek shows the instruction words at the
-# frame's address. An address outside every registered block — including one
-# from a photograph whose module is gone — answers nil rather than faulting.
+# sampled frame belongs to, and the peek shows a window of instruction words
+# around the frame's address — each line prefixed with its own address, wide
+# enough to carry a LoadExtName call-target literal past a parked PC. An
+# address outside every registered block — including one from a photograph
+# whose module is gone — answers nil rather than faulting.
 (let [m (vm/query "jit/map" nil)]
   (when (and (vm/query "jit?" registry-probe) (> (length m) 0))
     (let* [line (get (string/split m "\n") 0)
            addr (get (string/split line " ") 0)
            words (vm/query "jit/peek" addr)]
       (assert (string? words) "jit/peek: a registered entry answers words")
-      (assert (string/contains? words "0x") "jit/peek: words render as hex")))
+      (assert (string/contains? words "0x") "jit/peek: words render as hex")
+      (assert (> (length (string/split words "\n")) 1)
+              "jit/peek: the window spans several address-prefixed lines")
+      (each l in (string/split words "\n")
+        (assert (string/contains? l ":")
+                "jit/peek: each window line names its address"))))
   (assert (nil? (vm/query "jit/peek" "0x10"))
           "jit/peek: an address below every entry answers nil")
   (assert (nil? (vm/query "jit/peek" "junk"))

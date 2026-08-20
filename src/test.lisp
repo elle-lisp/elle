@@ -276,11 +276,12 @@
         # registry" — on AArch64, `0x14000000` is a branch to itself).
         (let [[a-ok? addrs] (protect (jit-frame-addrs shot))]
           (when (and a-ok? (> (length addrs) 0))
-            (eprintln "── code at sampled jit frames (4 words each) ──")
+            (eprintln "── code around sampled jit frames (each line names its address) ──")
             (each a in (take 4 addrs)
               (let [[p-ok? words] (protect (vm/query "jit/peek" a))]
                 (when (and p-ok? (string? words))
-                  (eprintln (concat a "  " words)))))))
+                  (eprintln (concat "pc " a ":"))
+                  (eprintln words))))))
         (eprintln "── end threads ──────────────────────────────────────────"))))
   c)
 

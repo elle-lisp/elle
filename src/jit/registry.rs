@@ -60,44 +60,108 @@ fn resident(addr: usize, len: usize) -> bool {
     unsafe { libc::mincore(start as *mut libc::c_void, span, vec.as_mut_ptr() as *mut _) == 0 }
 }
 
-/// The four 32-bit words at `addr`, rendered `0x<w0> 0x<w1> 0x<w2> 0x<w3>`
-/// in address order — the instructions a sampled PC is parked on, read
-/// beside the photograph the address came from (docs/impl/jit.md § "The
-/// code-address registry"). `None` when the address precedes every entry,
-/// sits more than `PEEK_SPAN` past its nearest one, or its pages are gone.
+/// A window of 32-bit words around `addr` — the instructions a sampled PC
+/// is parked on plus their neighborhood, read beside the photograph the
+/// address came from (docs/impl/jit.md § "The code-address registry"). The
+/// window runs from 16 bytes before `addr` (clamped to the nearest
+/// registered entry) to 48 bytes after, sized so a PC parked just before an
+/// AArch64 `LoadExtName` sequence still shows the 8-byte call-target
+/// literal that follows its branch. Rendered four words per
+/// `0x<addr>: 0x<w0> 0x<w1> 0x<w2> 0x<w3>` line; a line whose page is gone
+/// renders `(unmapped)`. `None` when the address precedes every entry, sits
+/// more than `PEEK_SPAN` past its nearest one, or its own 16 bytes are gone.
 pub(crate) fn peek(addr: usize) -> Option<String> {
     let entries = snapshot();
     let base = entries.iter().rev().map(|(a, _)| *a).find(|a| *a <= addr)?;
     if addr - base >= PEEK_SPAN || !resident(addr, 16) {
         return None;
     }
-    let words: Vec<String> = (0..4)
-        .map(|i| {
-            let w = unsafe { ((addr + i * 4) as *const u32).read_volatile() };
-            format!("{:#010x}", w)
-        })
-        .collect();
-    Some(words.join(" "))
+    let addr = addr & !3; // word-align a mid-instruction sample
+    let start = addr.saturating_sub(16).max(base);
+    let end = addr + 48;
+    use std::fmt::Write;
+    let mut out = String::new();
+    let mut line = start;
+    while line < end {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let _ = write!(out, "{:#x}:", line);
+        if resident(line, 16) {
+            for i in 0..4 {
+                let w = unsafe { ((line + i * 4) as *const u32).read_volatile() };
+                let _ = write!(out, " {:#010x}", w);
+            }
+        } else {
+            out.push_str(" (unmapped)");
+        }
+        line += 16;
+    }
+    Some(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Distinct, recognizable word values: `0xa5a50000 + index`.
+    static WORDS: [u32; 32] = {
+        let mut w = [0u32; 32];
+        let mut i = 0;
+        while i < 32 {
+            w[i] = 0xa5a5_0000 + i as u32;
+            i += 1;
+        }
+        w
+    };
+
     #[test]
-    fn peek_reads_a_registered_span_and_refuses_the_rest() {
-        static WORDS: [u32; 4] = [0x1400_0000, 1, 2, 3];
-        let addr = WORDS.as_ptr() as usize;
-        record(addr, "peek-span-probe");
+    fn peek_renders_a_window_around_the_address() {
+        let base = WORDS.as_ptr() as usize;
+        record(base, "peek-window-probe");
+        // Word index 6: the window spans [addr-16, addr+48) = indices 2..18.
+        let addr = base + 24;
         let s = peek(addr).expect("registered resident address answers");
+        // Context before the address: index 2 (addr-16).
         assert!(
-            s.starts_with("0x14000000"),
-            "words render in address order: {s}"
+            s.contains("0xa5a50002"),
+            "window reaches back 16 bytes: {s}"
         );
-        assert_eq!(s.split(' ').count(), 4);
+        // The queried word itself.
+        assert!(s.contains("0xa5a50006"), "window covers the address: {s}");
+        // A LoadExtName literal parked 16 bytes past a sampled PC: index 10.
+        assert!(
+            s.contains("0xa5a5000a"),
+            "window reaches 16 bytes past: {s}"
+        );
+        // The window's last word: index 17 (addr+44).
+        assert!(
+            s.contains("0xa5a50011"),
+            "window reaches 48 bytes past: {s}"
+        );
+        // Each line names its own address.
+        for line in s.lines() {
+            assert!(line.starts_with("0x"), "line carries its address: {line}");
+        }
+        assert_eq!(s.lines().count(), 4, "four lines of four words: {s}");
         // Below every entry: nothing precedes a null-page address.
         assert!(peek(0x10).is_none());
         // Past the span of its nearest entry.
-        assert!(peek(addr + PEEK_SPAN).is_none());
+        assert!(peek(base + PEEK_SPAN).is_none());
+    }
+
+    #[test]
+    fn peek_clamps_the_window_at_the_registered_entry() {
+        let base = WORDS.as_ptr() as usize;
+        record(base, "peek-clamp-probe");
+        // At the entry itself there is nothing before it to show: the
+        // first rendered line is the entry's own address.
+        let s = peek(base).expect("entry address answers");
+        let first = s.lines().next().expect("at least one line");
+        assert!(
+            first.starts_with(&format!("{base:#x}:")),
+            "window must start at the entry, not below it: {s}"
+        );
+        assert!(s.contains("0xa5a50000"), "entry word present: {s}");
     }
 }
