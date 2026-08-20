@@ -44,6 +44,50 @@ pub(crate) fn empty_merged_slots() -> Rc<FxHashSet<u32>> {
     EMPTY_MERGED_SLOTS.with(Rc::clone)
 }
 
+thread_local! {
+    /// Shared empty frame-release tables — the default for `Code` objects built
+    /// without a lowered function (the bootstrap/eval thunks). One `Rc` bump,
+    /// no allocation.
+    static EMPTY_FRAME_RELEASE_SLOTS: Rc<Vec<u16>> = Rc::new(Vec::new());
+    static EMPTY_FRAME_RELEASE_REGIONS: Rc<Vec<u32>> = Rc::new(Vec::new());
+}
+
+/// The shared empty value-route release table (an `Rc` bump). Used by `Code::new`'s
+/// default and by any site with no lowered function to carry them from.
+pub(crate) fn empty_frame_release_slots() -> Rc<Vec<u16>> {
+    EMPTY_FRAME_RELEASE_SLOTS.with(Rc::clone)
+}
+
+/// The shared empty slot-route release table (an `Rc` bump).
+pub(crate) fn empty_frame_release_regions() -> Rc<Vec<u32>> {
+    EMPTY_FRAME_RELEASE_REGIONS.with(Rc::clone)
+}
+
+/// The per-function region tables a `Code` carries beside its bytecode: the
+/// builder-idiom merge set the alloc dispatch mint-or-reuses, and the two
+/// abandoned-frame release tables an error exit walks. They travel together
+/// because they come from one place — the function's `LirFunction`, through its
+/// `ClosureTemplate` or its `Bytecode` — so an entry that builds a `Code` from raw
+/// parts hands them over as one value rather than as three parameters.
+#[derive(Debug, Clone)]
+pub struct CodeTables {
+    pub merged_slots: Rc<FxHashSet<u32>>,
+    pub frame_release_slots: Rc<Vec<u16>>,
+    pub frame_release_regions: Rc<Vec<u32>>,
+}
+
+impl Default for CodeTables {
+    /// The shared empty tables — three `Rc` bumps, no allocation. What a body
+    /// with no lowered function carries (a bootstrap or synthetic thunk).
+    fn default() -> Self {
+        CodeTables {
+            merged_slots: empty_merged_slots(),
+            frame_release_slots: empty_frame_release_slots(),
+            frame_release_regions: empty_frame_release_regions(),
+        }
+    }
+}
+
 /// A code object's executable context: bytecode, constant pool, location map,
 /// and nested-lambda blueprints, shared across all instances of one lambda.
 /// See the module docs.
@@ -68,6 +112,22 @@ pub struct Code {
     /// minting. Empty unless a merge fired (a nested `%pair` literal seeding the
     /// builder idiom), so byte-identical to the plain mint when no merge exists.
     pub merged_slots: Rc<FxHashSet<u32>>,
+    /// The local slots this function's **value-routed** releases read, ascending
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). A value route is `LoadLocal s; DecrefValueRegion;
+    /// StoreLocal s nil`, so the slot is the release's whole identity and the nil
+    /// stamp records that it ran. An error exit walks these slots and releases
+    /// what each still holds — the releases the abandoned frame owed and can no
+    /// longer reach. Empty for a body with no value route, so the walk is then a
+    /// single length check.
+    pub frame_release_slots: Rc<Vec<u16>>,
+    /// The static region slots this function's **slot-routed** releases name,
+    /// ascending — the `DecrefRegion` half of [`Self::frame_release_slots`]
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). That route's receipt is the activation region map: the alloc
+    /// mints the mapping and the release takes it, so a slot still mapped when the
+    /// frame is abandoned is a release that did not run.
+    pub frame_release_regions: Rc<Vec<u32>>,
     /// How many stack positions this code object's entry prologue reserves for
     /// the frame's locals.
     ///
@@ -86,10 +146,11 @@ pub struct Code {
 }
 
 impl Code {
-    /// Bundle the code-object Rcs into a `Code`. `merged_slots` defaults to the
-    /// shared empty set and `reserved_locals` to `0`; a caller that carries
-    /// merge metadata or a local-reserving prologue (the per-call
-    /// `ClosureTemplate::code`) sets them after construction.
+    /// Bundle the code-object Rcs into a `Code`. The three region tables default
+    /// to the shared empty ones ([`CodeTables`]) and `reserved_locals` to `0`; a
+    /// caller that carries a lowered function's tables or a local-reserving
+    /// prologue (the per-call `ClosureTemplate::code`) sets them after
+    /// construction.
     pub fn new(
         bytecode: Rc<Vec<u8>>,
         constants: Rc<Vec<Value>>,
@@ -102,7 +163,19 @@ impl Code {
             location_map,
             child_protos,
             merged_slots: empty_merged_slots(),
+            frame_release_slots: empty_frame_release_slots(),
+            frame_release_regions: empty_frame_release_regions(),
             reserved_locals: 0,
         }
+    }
+
+    /// Install the function's region tables. The entry path
+    /// (`VM::execute_bytecode`) builds a `Code` from raw parts and calls this with
+    /// what its `Bytecode`/`ClosureTemplate` carries.
+    pub fn with_tables(mut self, tables: CodeTables) -> Self {
+        self.merged_slots = tables.merged_slots;
+        self.frame_release_slots = tables.frame_release_slots;
+        self.frame_release_regions = tables.frame_release_regions;
+        self
     }
 }

@@ -591,6 +591,24 @@ fn region_tail_signal_exit_uaf() {
     );
 }
 
+// Guard — a frame abandoned by an ERROR runs the releases it still owed, off
+// the value-route slots the emitter recorded (docs/impl/region/mechanism.md
+// § "An abandoned frame runs the releases it still owes"). Each is a release
+// the frame genuinely had, run earlier than it would have been, so what must
+// survive is everything that outlives the frame: the signal PAYLOAD the catcher
+// receives, a value the frame STORED into a longer-lived container, a parked
+// frame the RESTARTS system can replay, and the CATCHING frame's own values.
+// Every read below happens after the unwind ran, so an over-release faults
+// there — SIGSEGV under guardfree. The leak face is
+// `region-error-unwind.lisp`.
+#[test]
+fn region_error_unwind_uaf() {
+    run_elle_script_with_args(
+        "region-error-unwind-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `def` evaluates to what it bound, so its initializer's demise must
 // not be narrowed onto the initializer when nothing reads the binding
 // (docs/impl/region/mechanism.md § "A binder's init release lands after the slot

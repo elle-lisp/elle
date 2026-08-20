@@ -19,5 +19,5 @@ fn invalid_opcode_byte_panics_with_defined_message() {
     // 0xFF is not a valid Instruction discriminant. The merged-slots set is
     // empty (no builder-idiom merge metadata for a hand-fed byte buffer); its
     // element type is inferred from the parameter (`Rc<FxHashSet<u32>>`).
-    let _ = vm.execute_bytecode(&[0xFF], &[], &[], std::rc::Rc::new(Default::default()), None);
+    let _ = vm.execute_bytecode(&[0xFF], &[], &[], Default::default(), None);
 }

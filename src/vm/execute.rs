@@ -178,11 +178,17 @@ impl VM {
     /// the input if a tail call occurred before the signal.
     /// Core tail-call trampoline loop shared by `execute_bytecode_from_ip`
     /// and `execute_bytecode_saving_stack`.
+    /// `walk_abandoned` — run the releases this activation still owes when it
+    /// leaves by an **error** (docs/impl/region/mechanism.md § "An abandoned frame
+    /// runs the releases it still owes"). False where the frame is not abandoned:
+    /// a fiber body whose entrant parks it for the restarts system, and the resume
+    /// entry, whose frame the caller manages and may re-park.
     fn trampoline_loop(
         &mut self,
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
+        walk_abandoned: bool,
     ) -> ExecResult {
         let mut current_code = code.clone();
         let mut current_env = closure_env.clone();
@@ -219,6 +225,15 @@ impl VM {
                         activation_owner_node: None,
                         current_closure: self.fiber.current_closure,
                     };
+                }
+                // The frame's locals are still on the stack, and an error leaves
+                // through the signal machinery without running the rest of its
+                // instructions — so the releases among them run here, before the
+                // locals travel out in `stack` below.
+                if walk_abandoned && bits.intersects(SIG_ERROR) {
+                    let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
+                    let exit_code = current_code.clone();
+                    self.release_abandoned_frame(&exit_code, payload);
                 }
                 let inner_stack = std::mem::take(&mut self.fiber.stack).into_vec();
                 break ExecResult {
@@ -295,7 +310,9 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
     ) -> ExecResult {
-        self.trampoline_loop(code, closure_env, start_ip)
+        // The caller (`resume_suspended`) owns this frame and may re-park it, so
+        // its error exit is not an abandonment the walk may act on.
+        self.trampoline_loop(code, closure_env, start_ip, false)
     }
 
     /// Execute bytecode returning SignalBits (for fiber/closure execution).
@@ -333,8 +350,14 @@ impl VM {
         // builds from this activation's returned context (cross-yield remap
         // preservation — docs/impl/region/model.md). TCO loops inside `trampoline_loop`
         // without re-entering here, so a tail call correctly reuses the frame.
+        // Whether THIS activation's frame is parked on an error exit is the
+        // entrant's to say, and only `do_fiber_first_resume` says yes; taking the
+        // one-shot here leaves every body this one calls answering no
+        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+        // it still owes").
+        let parks_error_frame = std::mem::take(&mut self.pending_error_park);
         self.push_activation_region_map();
-        let mut result = self.trampoline_loop(code, closure_env, 0);
+        let mut result = self.trampoline_loop(code, closure_env, 0, !parks_error_frame);
         if !result.bits.is_empty() {
             result.activation_region_map = self
                 .fiber

@@ -255,6 +255,16 @@
 # fall-through owes, a signal exit owes too"). Its first stranded reference was the
 # aborted fiber's own value, which pinned the body closure and everything the parked
 # frame held behind it.
+# `denied-discard`'s rate is what is LEFT of the dead continuation once the frames'
+# own owed releases run. A frame abandoned by an error — and a parked one the fiber
+# can never re-enter — reaches none of its remaining instructions, so each release
+# among them runs off the value-route slots the emitter recorded
+# (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it still
+# owes"), gauged directly by `tests/elle/region-error-unwind.lisp`. What that walk
+# cannot NAME is a value with no binding of its own, so no route and no receipt:
+# the literal the denied call materialized straight into an argument, the rest list
+# the calling convention built for it, and a parameter released through an env slot,
+# which carries no nil stamp — so a release that ran reads like one that did not.
 # `spawn-join` is a CLOSED control now (undeclared, like `rest-array-copy`), so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # under F2 — which is not where it belonged: what it measured was the frame-held
@@ -1244,7 +1254,7 @@
     (fn [j]
       (let [f (fiber/new (fn [] (println "blocked")) |:error :io| :deny |:io|)]
         (fiber/resume f)
-        (get (fiber/value f) :error))) 3]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
+        (get (fiber/value f) :error))) 2]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
    # frees everything the fiber owns (owner nodes, the parked signal's park
    # escape retain), and no carrier retain pins the fiber region
    # (docs/impl/region/owner.md § "Park/unpark symmetry").

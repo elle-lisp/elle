@@ -406,7 +406,11 @@ fn compile_core(
             &closure.template.bytecode,
             &closure.template.constants,
             &closure.template.child_protos,
-            closure.template.merged_slots.clone(),
+            crate::value::code::CodeTables {
+                merged_slots: closure.template.merged_slots.clone(),
+                frame_release_slots: closure.template.frame_release_slots.clone(),
+                frame_release_regions: closure.template.frame_release_regions.clone(),
+            },
             Some(&env),
         )
         .expect("core.lisp export closure must succeed");

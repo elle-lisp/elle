@@ -46,6 +46,17 @@ pub struct Bytecode {
     /// fired (a builder idiom seeded by a nested `%pair` literal), so inert when
     /// no merge exists.
     pub merged_slots: std::rc::Rc<rustc_hash::FxHashSet<u32>>,
+    /// The local slots this (top-level / entry) function's value-routed releases
+    /// read, carried from the entry `LirFunction.frame_release_slots` so the
+    /// executing `Code` can walk them at an error exit
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). The per-lambda equivalent rides
+    /// `ClosureTemplate.frame_release_slots`; this is the entry-function path
+    /// (`Bytecode → Code`), which would otherwise read empty.
+    pub frame_release_slots: std::rc::Rc<Vec<u16>>,
+    /// The `DecrefRegion` half of the same table, carried the same way — the
+    /// static region slots this entry function's slot-routed releases name.
+    pub frame_release_regions: std::rc::Rc<Vec<u32>>,
 }
 
 impl Bytecode {
@@ -59,6 +70,8 @@ impl Bytecode {
             signal_projection: None,
             child_protos: Vec::new(),
             merged_slots: crate::value::code::empty_merged_slots(),
+            frame_release_slots: crate::value::code::empty_frame_release_slots(),
+            frame_release_regions: crate::value::code::empty_frame_release_regions(),
         }
     }
 

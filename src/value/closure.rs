@@ -78,6 +78,16 @@ pub struct ClosureTemplate {
     /// alloc dispatch consults it for mint-or-reuse. Empty unless a merge fired,
     /// so byte-identical to the plain mint on the default path.
     pub merged_slots: Rc<rustc_hash::FxHashSet<u32>>,
+    /// The local slots this function's value-routed releases read, cloned from
+    /// its `LirFunction` and threaded into the executing `Code` (`code()`),
+    /// where an error exit walks them to run the releases the abandoned frame
+    /// still owed (docs/impl/region/mechanism.md § "An abandoned frame runs the
+    /// releases it still owes"). Empty for a body with no value route.
+    pub frame_release_slots: Rc<Vec<u16>>,
+    /// The `DecrefRegion` half of the same table — the static region slots this
+    /// function's slot-routed releases name, threaded into the executing `Code`
+    /// beside the value-route slots.
+    pub frame_release_regions: Rc<Vec<u32>>,
     /// Blueprints for the nested lambdas this code object's `MakeClosure`
     /// instructions materialize. Plain compile-time data (one `Rc` per nested
     /// lambda), **not** heap `Value`s in any region — a `MakeClosure` indexes
@@ -113,6 +123,8 @@ impl ClosureTemplate {
             spirv: std::cell::OnceCell::new(),
             region_table: Vec::new(),
             merged_slots: Rc::new(rustc_hash::FxHashSet::default()),
+            frame_release_slots: crate::value::code::empty_frame_release_slots(),
+            frame_release_regions: crate::value::code::empty_frame_release_regions(),
             child_protos: Rc::new(Vec::new()),
         }
     }
@@ -132,6 +144,10 @@ impl ClosureTemplate {
         // alloc dispatch can mint-or-reuse merged slots (an `Rc` bump, not an
         // allocation). Empty unless a merge fired, so inert on the default path.
         code.merged_slots = self.merged_slots.clone();
+        // Carry the value-route release table so an error exit can run the
+        // releases this body's abandoned frame still owed (an `Rc` bump).
+        code.frame_release_slots = self.frame_release_slots.clone();
+        code.frame_release_regions = self.frame_release_regions.clone();
         // The body's prologue reserves one stack position per local, so operands
         // sit above them; carry the count so the dispatch loop can check that
         // nothing pops into the reserved region (`Code::reserved_locals`).

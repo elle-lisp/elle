@@ -1388,6 +1388,82 @@ payload carries, a restarted `:error` fiber that replays the block, a suspending
 a caught error whose handler reads the released value's holder must all survive the exit's
 release).
 
+## An abandoned frame runs the releases it still owes
+
+The section above places one release in the block a signal exit skips. That block is
+not the only thing skipped. An **error** leaves through the signal machinery, so
+*none* of the frame's remaining instructions run — and every release the frame still
+owed is among them. The frame that called the raising native holds the arguments it
+materialized for that call, and every binding whose last use lies past it; each of
+those is one region nobody releases. The rate is per unwound frame and per pending
+value, so a `try`/`protect` in a loop grows without bound — the shape a retry loop
+and a server request loop both are.
+
+The frame is gone, so the release cannot be reached by resuming it — the runtime runs
+it at the exit instead. What that needs is the set the frame still owes, and the
+emitter already names it. A **value-routed** release is three instructions,
+`LoadLocal s; DecrefValueRegion; StoreLocal s nil` (§ "Two resolutions"), and the
+slot `s` is its whole identity: the instruction releases whatever `s` holds at the
+moment it runs, and the nil stamp is what records that it ran.
+`Code::frame_release_slots` carries those slots per function; an error exit walks
+them, and a slot still holding a heap value is a release that did not run.
+
+**The slot is the release, not the value.** Three facts make the walk *that* release
+rather than a new one:
+
+- **A slot belongs to one binding for the whole body.** `allocate_slot` counts
+  `num_locals` up and never reuses, and stamps each new slot nil where the binding is
+  introduced, so nothing but that binding's own value is ever what the walk finds.
+- **The nil stamp is the receipt.** Every value route clears its slot as it releases,
+  so a non-nil slot is an unrun release and a run one is invisible to the walk. An arm
+  whose release the taken path would not have reached reads nil for the same reason a
+  replicated release does (§ "The relocation point outlives the block").
+- **A release the emitter declined is not in the table.** A slot is recorded where the
+  plain value route is *emitted*, so a mutated route, a reassigned binding's slot, a
+  cell release naming the box, and a transfer adopt each record nothing. The walk can
+  only run a release the frame genuinely had.
+
+**Two routes, two receipts.** The slot-resolved release (`DecrefRegion`) is named the
+same way, by the static region slot it carries, and its receipt is the activation map
+itself: the alloc mints the mapping and the release TAKES it
+(`take_runtime_region_for_drop_slot`), so a slot still mapped is a release that did not
+run. `Code::frame_release_regions` carries those. Naming only the slots the *executing*
+function releases for is what keeps a caller's leftovers out: the map survives a
+frame-replacing tail call, and the references still in it are the callee's own machinery
+to answer for.
+
+**What the signal carries is not abandoned.** The error's payload leaves with the
+signal and the raising frame may be the one that owns its region — a native hands back
+a value it read out of an argument, and `protect` delivers that payload to the catcher
+as data. So the walk skips a slot whose value lives in the payload's region. Nothing
+else survives the frame: a value the frame stored elsewhere is held by a counted edge
+the store funnel recorded, which this release cannot take below that holder's count.
+
+**A frame the restarts system can replay is not abandoned.** A fiber body's first run
+parks its own frame on an error exit (`do_fiber_first_resume`), so a restart replays
+those instructions and the releases among them; running them here as well would release
+twice. The parking caller says so with a one-shot (`VM::pending_error_park`), taken at
+the activation's entry so the frames that body *calls* — which nothing parks — still
+walk. What the parked frame owes runs where no resume can reach it either: the fiber's
+own discharge reads the same two tables off each parked `BytecodeFrame`, its saved
+locals and its saved activation map standing in for the live ones
+([owner.md](owner.md) § "The bounded residual").
+
+The **JIT** tier keeps today's behaviour: a compiled frame's error exit walks nothing,
+a bounded over-keep, never an over-free.
+
+Pinned by `tests/elle/region-error-unwind.lisp` (the leak gauge — the pending release
+of a raising call's argument, of two of them, of a binding live across the raising
+call, and of an enclosing frame, each bounded beside a control that raises holding
+nothing), the `denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate),
+`lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
+a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so a route
+the emitter declined has no entry), and `tests/elle/region-error-unwind-uaf.lisp` (the
+soundness complement — the payload the raising native builds while the frame holds its
+argument, a value the frame stored into a container that outlives it, a parked frame the
+restarts system replays, and a catching frame's own values, all under
+`--trace=guardfree`).
+
 ## Compile-time region selection (coalescing)
 
 Where the compiler can prove a value is a **fresh local allocation whose region

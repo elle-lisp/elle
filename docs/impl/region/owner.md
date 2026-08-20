@@ -376,7 +376,8 @@ or capability-denied fiber nobody restarts — reaches no teardown call, so the 
 where its demise is actually observed: the region free. When a dying region's pages hold a
 `Fiber` object, `RegionStore::teardown_set` takes that fiber's parked state (the same
 `Fiber::take_parked_state` set the terminal teardown consumes: parked activation owner
-nodes, the fiber owner node, and the parked non-terminal signal's escape retain) and feeds
+nodes, the fiber owner node, the parked non-terminal signal's escape retain, and each
+parked frame's own owed releases — read off its two release tables) and feeds
 the regions into the free's iterative cascade — after the debug equivalence oracle, since
 these are not recorded content edges. The take empties the fiber's slots, so a fiber that
 already tore down discharges nothing, and an executing (borrowed) fiber is skipped — its
@@ -386,12 +387,17 @@ region cannot be dying while it runs. Pinned by
 
 **The bounded residual: a dead continuation's pending value releases.** A discarded fiber's
 parked frames still hold values whose releases live only in the continuation that will
-never run — parked operand-stack temporaries, and call-slot scratch (a string literal
-materialized for a denied call). The restart replay would consume them; a discard cannot,
-because the per-value ownership is compiler knowledge and a blanket release of the parked
-stack or the parked activation map double-frees — a mapped slot can be stale where its
-value's release was emitted value-based or died past a tail call. This class is bounded per
-discarded fiber, measured by the `denied-discard` oracle rate.
+never run. Most of them run at the discharge instead, off the compiler's own release
+tables — the frame's value-route slots and its slot-route static regions, each carrying a
+receipt that says whether the release already ran ([mechanism.md](mechanism.md) § "An
+abandoned frame runs the releases it still owes"). That is what a blanket release of the
+parked stack or the parked activation map could not be: a mapped slot can be stale where
+its value's release was emitted value-based or died past a tail call, so it double-frees.
+What is left is what neither table can NAME — a value with no binding of its own, and so
+no route and no receipt: a literal materialized straight into a denied call's argument,
+the rest list the calling convention built for a variadic callee, and a parameter released
+through an env slot, which carries no nil stamp. This class is bounded per discarded
+fiber, measured by the `denied-discard` oracle rate.
 
 One member of it is closed and is no longer part of the residual: a **borrowed tail
 argument's** retain, which the frame mints so a callee has a reference to release. That

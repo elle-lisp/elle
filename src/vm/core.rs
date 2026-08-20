@@ -172,6 +172,15 @@ pub struct VM {
     /// instance — a top-level program, module body, or eval'd form. `NIL`
     /// between calls; never read except by the immediately following entry.
     pub(crate) pending_entry_closure: Value,
+    /// One-shot "the caller parks this activation's frame on an error exit", set
+    /// immediately before entering a body via `execute_bytecode_saving_stack`,
+    /// which takes it (resetting to `false`) at entry. A parked frame is
+    /// replayable — the restarts system resumes an `:error` fiber into it — so the
+    /// releases it still owes stay owed and the abandoned-frame walk must not run
+    /// them (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+    /// it still owes"). `do_fiber_first_resume` is the one entrant that parks an
+    /// error frame; taken at entry, so the frames that body CALLS still walk.
+    pub(crate) pending_error_park: bool,
     /// One-shot parent-wiring override for the next `with_child_fiber`.
     /// Set by the trampoline descent in `do_fiber_resume` from
     /// `PendingFiberResume::parent`; consumed (taken) by `with_child_fiber`

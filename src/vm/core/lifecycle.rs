@@ -101,6 +101,7 @@ impl VM {
             pending_tail_call: None,
             pending_fiber_resume: None,
             pending_entry_closure: crate::value::Value::NIL,
+            pending_error_park: false,
             trampoline_parent_override: None,
             error_loc: None,
             gated_exit_reason: None,
@@ -150,6 +151,7 @@ impl VM {
         self.current_fiber_value = None;
         self.pending_tail_call = None;
         self.pending_entry_closure = crate::value::Value::NIL;
+        self.pending_error_park = false;
         self.pending_fiber_resume = None;
         self.error_loc = None;
         self.active_tier = "bytecode";

@@ -71,6 +71,21 @@ pub struct LirFunction {
     /// `ClosureTemplate`/`Bytecode` so the alloc dispatch mint-or-reuses them. Empty
     /// unless a merge fired, so byte-identical to the plain mint on the default path.
     pub merged_slots: Vec<StaticRegion>,
+    /// The local slots this function's **value-routed** releases read, ascending
+    /// and deduplicated (docs/impl/region/mechanism.md § "An abandoned frame runs
+    /// the releases it still owes"). Recorded by `emit_decref_for_region` where it
+    /// emits the plain `LoadLocal s; DecrefValueRegion; StoreLocal s nil` route —
+    /// so a route the emitter declined records nothing — and propagated to
+    /// `ClosureTemplate`/`Bytecode` so an error exit can run the releases the
+    /// abandoned frame still owed.
+    pub frame_release_slots: Vec<u16>,
+    /// The static region slots this function's **slot-routed** releases name — the
+    /// `DecrefRegion` half of the same table (docs/impl/region/mechanism.md § "An
+    /// abandoned frame runs the releases it still owes"). Recorded by
+    /// `emit_decref_region`, so a suppressed or phantom release records nothing;
+    /// the activation map is that route's receipt, the release taking the mapping
+    /// as it runs.
+    pub frame_release_regions: Vec<StaticRegion>,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.
@@ -141,6 +156,8 @@ impl LirFunction {
             call_sites: Vec::new(),
             region_table: Vec::new(),
             merged_slots: Vec::new(),
+            frame_release_slots: Vec::new(),
+            frame_release_regions: Vec::new(),
         }
     }
 

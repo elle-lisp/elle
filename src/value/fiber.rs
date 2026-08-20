@@ -253,6 +253,33 @@ pub struct ParkedState {
     /// instead is settled where the imbalance starts, by not retaining
     /// (`VM::handle_emit`).
     pub signal: Option<(SignalBits, Value)>,
+    /// The values each still-parked `BytecodeFrame` owes a release for — read out
+    /// of its saved locals at the slots its own `Code::frame_release_slots` names
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). A frame this fiber can never re-enter never reaches the
+    /// `LoadLocal s; DecrefValueRegion; StoreLocal s nil` route that would have
+    /// released them, so the one release each is owed runs at the discharge.
+    ///
+    /// This is the compiler's own release table, not the activation map: a mapped
+    /// slot can be stale, which is why `nodes` above collects none of it, while a
+    /// value-route slot carries its own receipt — the route stamps it nil, so a
+    /// slot still holding a heap value is a release that did not run.
+    ///
+    /// The parked `signal`'s own value is excluded: a terminal payload is the
+    /// fiber's result, read through `fiber/value`, and the free-time signal scan
+    /// answers for it.
+    pub owed: Vec<Value>,
+    /// The same for the parked frames' **slot-routed** releases: a static region
+    /// slot still mapped in a parked activation is a `DecrefRegion` that did not
+    /// run. Carried with its establishing generation so a consumer can tell a live
+    /// mapping from a leftover the frame's own release already answered for.
+    pub owed_regions: Vec<crate::hir::region::MappedRegion>,
+    /// The value the fiber's signal carries, if any — the payload a discharge
+    /// must leave standing. A consumer skips an [`Self::owed`] entry living in
+    /// this value's region: a terminal payload is the fiber's result and a
+    /// non-terminal one is the [`Self::signal`] discharge's own, and a frame may
+    /// well hold the very value the payload names.
+    pub protect: Option<Value>,
 }
 
 impl Fiber {
@@ -269,6 +296,8 @@ impl Fiber {
     /// across two discharges.
     pub fn take_parked_state(&mut self) -> ParkedState {
         let mut nodes = Vec::new();
+        let mut owed = Vec::new();
+        let mut owed_regions = Vec::new();
         let mut owns_signal = false;
         for (i, frame) in self
             .suspended
@@ -282,6 +311,26 @@ impl Fiber {
                     owns_signal = true;
                 }
                 nodes.extend(f.activation_owner_node);
+                // The releases this frame still owed. Its locals sit at the base
+                // of the saved stack (the activation's own frame base, the stack
+                // having been emptied at entry), so the emitter's slot indexes
+                // address them directly.
+                for slot in f.code.frame_release_slots.iter() {
+                    match f.stack.get(*slot as usize) {
+                        Some(v) if v.as_heap_ptr().is_some() => owed.push(*v),
+                        _ => {}
+                    }
+                }
+                // The slot-routed half: a static region slot still mapped in the
+                // parked activation is a `DecrefRegion` that did not run, the
+                // release having taken the mapping wherever it did. Named by the
+                // frame's own function so a caller's leftovers past a tail call
+                // stay out.
+                for slot in f.code.frame_release_regions.iter() {
+                    if let Some(m) = f.activation_region_map.get(slot) {
+                        owed_regions.push(*m);
+                    }
+                }
             }
         }
         let signal = match self.signal {
@@ -290,7 +339,19 @@ impl Fiber {
             }
             _ => None,
         };
-        ParkedState { nodes, signal }
+        // The signal's payload leaves with the fiber's result — read through
+        // `fiber/value`, or accounted by the signal discharge below — so a slot
+        // naming its region is not this discharge's to release. Reported rather
+        // than filtered here: the region behind a value is the heap's to resolve,
+        // and both consumers have one.
+        let protect = signal.or(self.signal).map(|(_, v)| v);
+        ParkedState {
+            nodes,
+            signal,
+            owed,
+            owed_regions,
+            protect,
+        }
     }
 
     /// Create a new fiber from a closure with the given signal mask.

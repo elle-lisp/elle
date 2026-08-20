@@ -330,6 +330,95 @@ impl VM {
             .and_then(|frame| frame.remove(&static_id.get()))
             .map(|m| m.region)
     }
+    /// Run the releases an activation abandoned by an **error** still owed
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes").
+    ///
+    /// An error leaves through the signal machinery, so none of the frame's
+    /// remaining instructions run — and every release it still owed is among
+    /// them. `Code::frame_release_slots` names each one by the local slot its
+    /// value route reads: the route is `LoadLocal s; DecrefValueRegion;
+    /// StoreLocal s nil`, so a slot still holding a heap value is a release that
+    /// did not run, and releasing what it holds is exactly what the abandoned
+    /// instruction would have done. The stamp is repeated here for the same
+    /// reason the route stamps it — a slot released twice is an over-free.
+    /// [`Self::release_abandoned_regions`] is the same reading of the other route.
+    ///
+    /// `payload` is the value leaving with the signal. The raising frame may be
+    /// the one that owns the payload's region — a native hands back a value read
+    /// out of an argument, and `protect` delivers it to the catcher as data — so
+    /// a slot naming that region is skipped and its release stays owed.
+    pub(crate) fn release_abandoned_frame(&mut self, code: &crate::value::Code, payload: Value) {
+        self.release_abandoned_regions(code, payload);
+        if code.frame_release_slots.is_empty() {
+            return;
+        }
+        let heap = unsafe { &mut *self.heap_ptr };
+        let payload_region = crate::value::arena::region_of(heap, payload);
+        let base = self.current_frame_base();
+        let slots = code.frame_release_slots.clone();
+        for slot in slots.iter() {
+            let index = base + *slot as usize;
+            let Some(value) = self.fiber.stack.get(index).copied() else {
+                continue;
+            };
+            let heap = unsafe { &mut *self.heap_ptr };
+            let Some(region) = crate::value::arena::result_region_of(heap, value) else {
+                continue;
+            };
+            if payload_region == Some(region) {
+                continue;
+            }
+            self.fiber.stack[index] = Value::NIL;
+            Self::freelog_abandoned("value route", *slot as u32, region);
+            self.heap().decref_region(region);
+        }
+    }
+    /// Name this release in the free log, so `--trace=free` attributes a page to
+    /// the walk rather than to whichever emitted release set the reason last.
+    fn freelog_abandoned(route: &str, slot: u32, region: RuntimeRegion) {
+        if crate::value::fiberheap::freelog::enabled() {
+            crate::value::fiberheap::freelog::set_reason_owned(format!(
+                "abandoned frame ({route} slot {slot}, runtime region {region})"
+            ));
+        }
+    }
+    /// The slot-routed half of [`Self::release_abandoned_frame`]: the releases the
+    /// abandoned activation owed through `DecrefRegion`. That route's receipt is
+    /// the activation map — the alloc mints the mapping and the release takes it —
+    /// so a slot still mapped is a release that did not run.
+    ///
+    /// Restricted to the slots THIS function releases for. The map outlives a
+    /// frame-replacing tail call, so it can also hold a caller's leftovers, whose
+    /// references the callee's own machinery answers for; naming only this
+    /// function's slots leaves those out by construction.
+    fn release_abandoned_regions(&mut self, code: &crate::value::Code, payload: Value) {
+        if code.frame_release_regions.is_empty() {
+            return;
+        }
+        let heap = unsafe { &mut *self.heap_ptr };
+        let payload_region = crate::value::arena::region_of(heap, payload);
+        let owed: Vec<RuntimeRegion> = {
+            let Some(frame) = self.fiber.activation_region_maps.last() else {
+                return;
+            };
+            code.frame_release_regions
+                .iter()
+                .filter_map(|slot| frame.get(slot).copied())
+                .filter(|m| payload_region != Some(m.region))
+                .map(|m| m.region)
+                .collect()
+        };
+        if let Some(frame) = self.fiber.activation_region_maps.last_mut() {
+            for slot in code.frame_release_regions.iter() {
+                frame.remove(slot);
+            }
+        }
+        for r in owed {
+            Self::freelog_abandoned("slot route", 0, r);
+            self.heap().decref_region_if_present(r);
+        }
+    }
     /// Push a fresh region-remap frame on closure entry, with its (empty)
     /// parallel owner-node slot (docs/impl/region/owner.md § "Owner nodes").
     #[inline]

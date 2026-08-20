@@ -249,6 +249,20 @@ impl<'a> Lowerer<'a> {
                         if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
                             self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
                         }
+                        // Record the route for the abandoned-frame walk
+                        // (docs/impl/region/mechanism.md § "An abandoned frame
+                        // runs the releases it still owes"). The slot IS the
+                        // release: the instructions above release whatever it
+                        // holds and stamp it nil, so an error exit finding a
+                        // heap value there runs a release that did not run. Only
+                        // this site records — a route the emitter declined above
+                        // (a mutated binding, a reassigned slot, a cell release,
+                        // a transfer adopt) has no entry, and neither does the
+                        // env route, whose slot carries no nil stamp to say the
+                        // release already ran.
+                        if !self.current_func.frame_release_slots.contains(&slot) {
+                            self.current_func.frame_release_slots.push(slot);
+                        }
                     }
                     if crate::config::get().has_trace("rc") {
                         // The hir_id here is the `decref_point` HirId — where
@@ -515,6 +529,17 @@ impl<'a> Lowerer<'a> {
                 "[trace:rc:emit] emit_decref_region hir_id={:?} region={} span={}",
                 self.current_hir_id, region_id, self.current_span,
             );
+        }
+        // Record the slot for the abandoned-frame walk (docs/impl/region/mechanism.md
+        // § "An abandoned frame runs the releases it still owes"). The slot-resolved
+        // route's receipt is the activation map itself: the alloc mints the mapping
+        // and this instruction TAKES it (`take_runtime_region_for_drop_slot`), so a
+        // slot still mapped when the frame is abandoned is a release that did not
+        // run. Only a slot this function actually emits for is recorded, so the map's
+        // other entries — a caller's leftovers past a frame-replacing tail call —
+        // stay out of the walk.
+        if !self.current_func.frame_release_regions.contains(&region_id) {
+            self.current_func.frame_release_regions.push(region_id);
         }
         self.emit(LirInstr::DecrefRegion { region_id });
     }

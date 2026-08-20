@@ -192,6 +192,12 @@ impl VM {
         // fiber was created from, so a self-recursive fiber body resolves its
         // self-reference to that closure.
         self.pending_entry_closure = self.fiber.closure_value;
+        // This entrant PARKS the body's frame on an error exit (below) so the
+        // restarts system can replay it, which replays the releases among its
+        // remaining instructions — so the abandoned-frame walk must not run them
+        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+        // it still owes").
+        self.pending_error_park = true;
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &env_rc);
 
         // If the fiber signaled (not normal completion), save context for resumption.

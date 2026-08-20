@@ -230,3 +230,102 @@ fn decref_region_emitted_once_for_merged_pair() {
 // fix under guardfree) and the splice/`apply` path by
 // region-splice-tail-return.lisp (a correctness guard — the splice UAF is
 // masked by the args-array leak, so it asserts the result value instead).
+
+// ── The abandoned-frame release tables ───────────────────────────
+//
+// A frame abandoned by an error runs the releases it still owes, off the two
+// tables the emitter records as it emits each route
+// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+// still owes"). The tables are only sound because they name exactly the routes
+// the emitter WROTE — a route it declined has no entry and so can never be run
+// twice — which is what these pin.
+
+/// Every `(slot, DecrefValueRegion)` pair a function emits: the slot a
+/// `LoadLocal` fed straight into the release. The "unbound call result" route
+/// releases off a register no `LoadLocal` produced and is deliberately absent.
+fn emitted_value_route_slots(func: &LirFunction) -> Vec<u16> {
+    let mut out = Vec::new();
+    for block in &func.blocks {
+        let instrs: Vec<&LirInstr> = block.instructions.iter().map(|i| &i.instr).collect();
+        for (i, instr) in instrs.iter().enumerate() {
+            let LirInstr::DecrefValueRegion { src } = instr else {
+                continue;
+            };
+            if let Some(LirInstr::LoadLocal { dst, slot }) = i.checked_sub(1).map(|p| instrs[p]) {
+                if dst == src {
+                    out.push(*slot);
+                }
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Every static region slot a function's `DecrefRegion`s name.
+fn emitted_slot_route_regions(func: &LirFunction) -> Vec<u32> {
+    let mut out: Vec<u32> = func
+        .blocks
+        .iter()
+        .flat_map(|b| b.instructions.iter())
+        .filter_map(|i| match &i.instr {
+            LirInstr::DecrefRegion { region_id } => Some(region_id.get()),
+            _ => None,
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+#[test]
+fn frame_release_tables_name_exactly_the_routes_emitted() {
+    // The walk's whole premise: a table entry IS a release the function emits,
+    // so running it at an abandoned exit runs that instruction and no other.
+    // Counterfactual — a table built from the region set rather than from the
+    // emit site would carry the routes the emitter declined (a mutated slot, a
+    // cell box, a transfer adopt) and release a reference nobody owes.
+    let module = compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
+    for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
+        let mut recorded = func.frame_release_slots.clone();
+        recorded.sort_unstable();
+        assert_eq!(
+            recorded,
+            emitted_value_route_slots(func),
+            "frame_release_slots must be exactly the slots a value route loaded from",
+        );
+        let mut regions: Vec<u32> = func.frame_release_regions.iter().map(|r| r.get()).collect();
+        regions.sort_unstable();
+        assert_eq!(
+            regions,
+            emitted_slot_route_regions(func),
+            "frame_release_regions must be exactly the slots a DecrefRegion named",
+        );
+    }
+}
+
+#[test]
+fn a_reassigned_binding_records_no_value_route() {
+    // A reassigned binding's slot is not a release route at all — its occupant
+    // at the release point is whatever was stored last — so `emit_decref_for_region`
+    // skips it (docs/impl/region/bindings.md § "a mutated slot is not a release
+    // route"). The table is written where the route is EMITTED, so the skip
+    // carries into it and the walk can never load that slot.
+    let module = compile_to_lir("(begin (var x (string \"a\")) (assign x (string \"b\")) x)");
+    // The shape has a reassigned binding holding heap values, so there IS a
+    // release to skip; without this the equality below could hold vacuously.
+    assert!(
+        count_decref_regions(&module) >= 1,
+        "the shape must carry a release for the skip to be about",
+    );
+    for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
+        let mut recorded = func.frame_release_slots.clone();
+        recorded.sort_unstable();
+        assert_eq!(
+            recorded,
+            emitted_value_route_slots(func),
+            "a skipped route must leave no entry behind",
+        );
+    }
+}

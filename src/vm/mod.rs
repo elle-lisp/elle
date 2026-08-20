@@ -42,7 +42,11 @@ impl VM {
             &bytecode.instructions,
             &bytecode.constants,
             &bytecode.child_protos,
-            bytecode.merged_slots.clone(),
+            crate::value::code::CodeTables {
+                merged_slots: bytecode.merged_slots.clone(),
+                frame_release_slots: bytecode.frame_release_slots.clone(),
+                frame_release_regions: bytecode.frame_release_regions.clone(),
+            },
             None,
         )
     }
@@ -150,20 +154,21 @@ impl VM {
         bytecode: &[u8],
         constants: &[Value],
         child_protos: &[Rc<crate::value::ClosureTemplate>],
-        merged_slots: Rc<rustc_hash::FxHashSet<u32>>,
+        tables: crate::value::code::CodeTables,
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<Value, String> {
-        let mut code = crate::value::Code::new(
+        // Carry the function's region tables: the builder-idiom merge set the alloc
+        // dispatch mint-or-reuses (docs/impl/region/merging.md § Merging), and the
+        // two release tables an error exit walks (docs/impl/region/mechanism.md
+        // § "An abandoned frame runs the releases it still owes"). The caller
+        // supplies them from the `Bytecode`/`ClosureTemplate` whose body this runs.
+        let code = crate::value::Code::new(
             Rc::new(bytecode.to_vec()),
             Rc::new(constants.to_vec()),
             Rc::new(LocationMap::new()),
             Rc::new(child_protos.to_vec()),
-        );
-        // Carry the function's builder-idiom merge metadata so the alloc dispatch
-        // mint-or-reuses merged slots (docs/impl/region/merging.md § Merging). The
-        // caller supplies it from the `Bytecode`/`ClosureTemplate` whose body this
-        // runs; empty unless a merge fired.
-        code.merged_slots = merged_slots;
+        )
+        .with_tables(tables);
         self.execute_code(code, closure_env)
     }
 
@@ -429,14 +434,14 @@ impl VM {
             entry_region,
         );
         let synthetic_constants = vec![thunk, ev_run];
-        // The synthetic `(ev/run thunk)` wrapper has no allocations of its own to
-        // merge; the real program's merge metadata rides the thunk template
-        // (`merged_slots`, set above) and resolves when `ev/run` calls the thunk.
+        // The synthetic `(ev/run thunk)` wrapper has no allocations and no releases
+        // of its own; the real program's tables ride the thunk template
+        // (`merged_slots`, set above) and resolve when `ev/run` calls the thunk.
         self.execute_bytecode(
             &synthetic_bc,
             &synthetic_constants,
             &[],
-            crate::value::code::empty_merged_slots(),
+            crate::value::code::CodeTables::default(),
             None,
         )
     }

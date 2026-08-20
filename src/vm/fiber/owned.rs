@@ -22,6 +22,14 @@ pub(crate) struct FiberOwned {
     /// payload), whose one park escape retain is released on the resume path —
     /// which will never come for a terminal fiber (`release_discarded_signal`).
     parked_signal: Option<(SignalBits, Value)>,
+    /// The values the parked frames still owed a release for, off their own
+    /// value-route slots, and the payload those releases must leave standing
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). A frame that can never be re-entered never reaches the
+    /// release, so it runs here.
+    parked_owed: Vec<Value>,
+    parked_owed_regions: Vec<crate::hir::region::MappedRegion>,
+    parked_protect: Option<Value>,
     /// The fiber's own owner node (`Fiber::fiber_owner_node`).
     fiber_node: Option<crate::hir::region::RuntimeRegion>,
 }
@@ -57,6 +65,9 @@ pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberO
     FiberOwned {
         parked_nodes: parked.nodes,
         parked_signal: parked.signal,
+        parked_owed: parked.owed,
+        parked_owed_regions: parked.owed_regions,
+        parked_protect: parked.protect,
         fiber_node: fiber.fiber_owner_node.take(),
     }
 }
@@ -75,8 +86,32 @@ pub(crate) fn release_fiber_owned(
     let FiberOwned {
         parked_nodes,
         parked_signal,
+        parked_owed,
+        parked_owed_regions,
+        parked_protect,
         fiber_node,
     } = owned;
+    // The releases the parked frames still owed. Each is one reference the frame
+    // took and the route that would have dropped it can no longer be reached; the
+    // payload's own region is skipped, its holder being the fiber's result rather
+    // than any frame.
+    let protect_region = parked_protect.and_then(|v| crate::value::arena::region_of(heap, v));
+    for v in parked_owed {
+        let r = crate::value::arena::region_of(heap, v);
+        if r.is_some() && r != protect_region {
+            crate::value::arena::decref_region(heap, r);
+        }
+    }
+    // The slot-routed half. The mapping's generation is checked first: a slot
+    // whose region has since been freed and recycled is a leftover the frame's own
+    // release already answered for, and releasing the id's new incarnation would
+    // free a live region.
+    for m in parked_owed_regions {
+        if heap.generation_raw(m.region.get()) != m.gen || protect_region == Some(m.region) {
+            continue;
+        }
+        heap.decref_region_if_present(m.region);
+    }
     for node in parked_nodes {
         if let Some(fnode) = fiber_node {
             heap.reparent_owned_children(node, fnode);

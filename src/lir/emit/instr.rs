@@ -181,6 +181,8 @@ impl Emitter {
                     name: func.name.clone().map(|s| Rc::from(s.as_str())),
                     region_table: func.region_table.clone(),
                     merged_slots: Rc::new(func.merged_slots.iter().map(|s| s.get()).collect()),
+                    frame_release_slots: Rc::new(sorted_release_slots(func)),
+                    frame_release_regions: Rc::new(sorted_release_regions(func)),
                     child_protos: Rc::new(nested_bytecode.child_protos),
                     ..crate::value::ClosureTemplate::new(
                         Rc::new(nested_bytecode.instructions),

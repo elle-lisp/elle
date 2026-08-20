@@ -283,6 +283,51 @@ impl RegionStore {
                         if let Some(node) = fib.fiber_owner_node.take() {
                             discharged.push(node.get());
                         }
+                        // The releases the parked frames still owed, off their
+                        // own value-route slots (docs/impl/region/mechanism.md
+                        // § "An abandoned frame runs the releases it still
+                        // owes"). A frame this fiber can never re-enter never
+                        // reaches the route that would have dropped them.
+                        // Resolved exactly as the parked signal below is, and
+                        // skipping the payload's own region: that value leaves
+                        // as the fiber's result.
+                        let protect = parked.protect.and_then(|v| {
+                            v.as_heap_ptr().map(|ptr| unsafe {
+                                crate::value::fiberheap::regionpool::region_of_page_ptr(
+                                    ptr, page_size,
+                                )
+                            })
+                        });
+                        for v in &parked.owed {
+                            let Some(ptr) = v.as_heap_ptr() else {
+                                continue;
+                            };
+                            let rid = unsafe {
+                                crate::value::fiberheap::regionpool::region_of_page_ptr(
+                                    ptr, page_size,
+                                )
+                            };
+                            let owned_here = self
+                                .regions
+                                .get(rid as usize)
+                                .and_then(|s| s.as_ref())
+                                .is_some_and(|e| e.pool.owns(ptr));
+                            if rid > 1 && owned_here && protect != Some(rid) {
+                                discharged.push(rid);
+                            }
+                        }
+                        // The slot-routed half. The establishing generation is
+                        // checked first: a mapping whose region has since been
+                        // freed and recycled is a leftover the frame's own release
+                        // already answered for.
+                        for m in &parked.owed_regions {
+                            let rid = m.region.get();
+                            let live = self.generation_raw(rid) == m.gen
+                                && self.regions.get(rid as usize).is_some_and(|s| s.is_some());
+                            if rid > 1 && live && protect != Some(rid) {
+                                discharged.push(rid);
+                            }
+                        }
                         // The parked non-terminal signal's park escape retain
                         // (EmitEscape / SuspendEscape), released at a resume
                         // that will never come. Resolve the value's region
