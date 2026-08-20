@@ -515,3 +515,39 @@ fn test_compile_batch_accepts_list_variadic() {
         result.err(),
     );
 }
+
+#[test]
+fn compile_records_entry_in_code_address_registry() {
+    let mut lir = make_simple_lir();
+    lir.name = Some("registry-probe-solo".to_string());
+    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let code = compiler
+        .compile(&lir, None, HashMap::new(), Vec::new())
+        .expect("Failed to compile");
+    let entry = code.fn_ptr() as usize;
+    let name = crate::jit::registry::snapshot()
+        .into_iter()
+        .find(|(addr, _)| *addr == entry)
+        .map(|(_, name)| name);
+    assert_eq!(name.as_deref(), Some("registry-probe-solo"));
+}
+
+#[test]
+fn compile_batch_records_each_member_in_code_address_registry() {
+    let mut lir = make_simple_lir();
+    lir.name = Some("registry-probe-batch".to_string());
+    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let members = vec![BatchMember {
+        sym: SymbolId(7),
+        lir: &lir,
+    }];
+    let results = compiler
+        .compile_batch(&members, HashMap::new())
+        .expect("Failed to compile batch");
+    let entry = results[0].1.fn_ptr() as usize;
+    let name = crate::jit::registry::snapshot()
+        .into_iter()
+        .find(|(addr, _)| *addr == entry)
+        .map(|(_, name)| name);
+    assert_eq!(name.as_deref(), Some("registry-probe-batch"));
+}

@@ -129,6 +129,22 @@ impl ClosureTemplate {
         }
     }
 
+    /// A human-readable label for this function: its declared name when one
+    /// exists, else its smallest-offset source location, else `<anon>`.
+    /// Lowering names almost nothing, so the location is the label that
+    /// actually identifies a function to a reader — the JIT code-address
+    /// registry records it (docs/impl/jit.md § "The code-address registry").
+    pub fn display_label(&self) -> String {
+        if let Some(name) = self.name.as_deref() {
+            return name.to_string();
+        }
+        self.location_map
+            .iter()
+            .min_by_key(|(off, _)| **off)
+            .map(|(_, loc)| format!("{}", loc))
+            .unwrap_or_else(|| "<anon>".to_string())
+    }
+
     /// The executable code object for this template: bundles the bytecode,
     /// constant pool, and location map (and the child protos)
     /// that the VM threads as the template-derived half of the execution

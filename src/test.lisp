@@ -247,6 +247,15 @@
       (when (and ok? shot)
         (eprintln "── threads at the deadline ──────────────────────────────")
         (eprintln shot)
+        # The photograph cannot symbolize JIT frames (anonymous Cranelift
+        # mappings). The registry is their symbol table — process-global, so
+        # it covers the wedged worker's compiles too. A sampled `???` address
+        # resolves to the nearest preceding entry. docs/impl/jit.md § "The
+        # code-address registry".
+        (let [[map-ok? jit-map] (protect (vm/query "jit/map" nil))]
+          (when (and map-ok? (string? jit-map) (> (length jit-map) 0))
+            (eprintln "── jit code map (addr name; match ??? frames to the nearest preceding addr) ──")
+            (eprintln jit-map)))
         (eprintln "── end threads ──────────────────────────────────────────"))))
   c)
 

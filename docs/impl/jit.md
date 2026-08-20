@@ -49,6 +49,28 @@ dwarfs the program's real work. The `jit/rejections` report exposes a per-
 function `:attempts` count; the negative cache holds `attempts == 1` no matter
 how many times the function is called.
 
+## The code-address registry
+
+Native samplers (`/usr/bin/sample`, `eu-stack`) cannot name JIT frames: the
+code lives in anonymous Cranelift mappings, so a wedged thread's stack shows
+`??? (in <unknown binary>)` exactly where the answer is. The registry closes
+that gap. Every successful compile — solo and batch, on every thread — records
+`(entry address, label)` in one process-global table (`src/jit/registry.rs`).
+The label is the function's declared name when one exists, else its
+smallest-offset source location (`ClosureTemplate::display_label`) — lowering
+names almost nothing, so the location is what actually identifies a function
+to a reader. The table only grows; entries are never removed,
+because a stack captured at any time may reference code whose `JitCode` has
+since been dropped.
+
+`(vm/query "jit/map" nil)` renders the table as one `0x<addr> <name>` line per
+entry, sorted by address. The test runner prints it after the thread
+photograph when a form misses its deadline (`src/test.lisp`,
+`note-timeout-stacks`), so a sampled JIT frame resolves to the nearest
+preceding entry — the registry records entry addresses, not sizes, and
+Cranelift lays functions out contiguously enough for nearest-preceding to
+name the frame.
+
 ## Yield-through-call
 
 For functions that call other functions which might yield, the JIT

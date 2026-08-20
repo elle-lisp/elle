@@ -25,10 +25,16 @@ impl VM {
         args: &[Value],
     ) -> (SignalBits, Value) {
         // Closure must have LIR — primitives, macros, etc. don't.
-        let lir = match &closure.template.lir_function {
+        let mut lir = match &closure.template.lir_function {
             Some(l) => (**l).clone(),
             None => return (SIG_ERROR, rejected(self, "jit", "closure has no LIR")),
         };
+        // Backfill a nameless LIR from the template so the compile records a
+        // readable code-address registry entry (docs/impl/jit.md § "The
+        // code-address registry").
+        if lir.name.is_none() {
+            lir.name = Some(closure.template.display_label());
+        }
 
         // Arity check writes to fiber.signal on mismatch.
         if !self.check_arity(&closure.template.arity, args.len()) {

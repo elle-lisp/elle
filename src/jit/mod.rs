@@ -39,6 +39,7 @@ mod fastpath;
 #[allow(dead_code)]
 mod group;
 mod helpers;
+pub(crate) mod registry;
 mod runtime;
 mod suspend;
 mod translate;

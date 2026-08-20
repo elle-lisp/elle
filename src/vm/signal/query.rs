@@ -19,6 +19,7 @@ impl VM {
     /// - (:"arena/stats" . fiber) — return unified stats struct for a suspended/dead fiber
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
+    /// - (:"jit/map" . _) — the JIT code-address registry as text
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
@@ -319,6 +320,15 @@ impl VM {
             }
             #[cfg(not(feature = "jit"))]
             "jit?" => (SIG_OK, Value::FALSE),
+            // The process-global JIT code-address registry, rendered as one
+            // `0x<addr> <name>` line per compiled function. Read beside a
+            // native thread photograph, whose JIT frames are otherwise
+            // unattributable `???` addresses (docs/impl/jit.md § "The
+            // code-address registry"). Empty string when nothing compiled.
+            #[cfg(feature = "jit")]
+            "jit/map" => (SIG_OK, ctx.string(crate::jit::registry::render())),
+            #[cfg(not(feature = "jit"))]
+            "jit/map" => (SIG_OK, ctx.string(String::new())),
             "vm/config" => self.dispatch_vm_config_read(ctx, arg),
             #[cfg(feature = "mlir")]
             "mlir/compile-spirv" => {

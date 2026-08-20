@@ -115,11 +115,13 @@ impl VM {
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
     ) {
+        let label = closure.template.display_label();
         let task = crate::jit::worker::prepare_task(
             lir_func,
             None,
             (*closure.template.symbol_names).clone(),
             bytecode_ptr as usize,
+            Some(&label),
         );
 
         // Lazily spawn the worker thread on first use
@@ -134,18 +136,10 @@ impl VM {
                 .runtime_config
                 .has_trace_bit(crate::config::trace_bits::JIT)
             {
-                let span = closure
-                    .template
-                    .location_map
-                    .iter()
-                    .min_by_key(|(off, _)| **off)
-                    .map(|(_, loc)| format!("{}", loc))
-                    .unwrap_or_else(|| "<no-loc>".to_string());
                 eprintln!(
-                    "[jit] submitted background compilation: name={} bc_ptr={:#x} span={} bclen={}",
-                    closure.template.name.as_deref().unwrap_or("<anon>"),
+                    "[jit] submitted background compilation: label={} bc_ptr={:#x} bclen={}",
+                    closure.template.display_label(),
                     bytecode_ptr as usize,
-                    span,
                     closure.template.bytecode.len(),
                 );
             }

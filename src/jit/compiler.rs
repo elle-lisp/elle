@@ -182,6 +182,7 @@ impl JitCompiler {
             .finalize_definitions()
             .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
         let fn_ptr = self.module.get_finalized_function(func_id);
+        super::registry::record(fn_ptr as usize, func_name);
 
         // Convert yield point metadata from LIR to JIT format
         let yield_metas: Vec<super::dispatch::YieldPointMeta> = lir
@@ -347,6 +348,13 @@ impl JitCompiler {
             .iter()
             .map(|(sym, fid)| (*sym, self.module.get_finalized_function(*fid)))
             .collect();
+
+        // `fn_ptrs` is index-aligned with `members` (both walk `func_ids`'s
+        // insertion order), so each entry is recorded under its member's name.
+        for (i, (_, ptr)) in fn_ptrs.iter().enumerate() {
+            let name = members[i].lir.name.as_deref().unwrap_or("jit_func");
+            super::registry::record(*ptr as usize, name);
+        }
 
         // Wrap module in shared Arc so all JitCode entries keep it alive
         let shared_module = Arc::new(super::code::ModuleHolder::new(self.module));

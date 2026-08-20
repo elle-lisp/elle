@@ -114,15 +114,24 @@ impl JitWorker {
 
 /// Prepare a `JitTask` from a LirFunction by cloning and stripping
 /// non-Send fields (syntax, doc).
+///
+/// `display_name` backfills a nameless LIR (the common case — lowering
+/// names few functions) from the closure template, so the compile records
+/// a readable entry in the code-address registry
+/// (docs/impl/jit.md § "The code-address registry").
 pub(crate) fn prepare_task(
     lir: &LirFunction,
     self_sym: Option<SymbolId>,
     symbol_names: HashMap<u32, String>,
     bytecode_key: usize,
+    display_name: Option<&str>,
 ) -> JitTask {
     let mut lir = lir.clone();
     lir.syntax = None;
     lir.doc = None;
+    if lir.name.is_none() {
+        lir.name = display_name.map(String::from);
+    }
     JitTask {
         lir,
         self_sym,
