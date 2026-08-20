@@ -20,7 +20,7 @@ impl VM {
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
     /// - (:"jit/map" . _) — the JIT code-address registry as text
-    /// - (:"jit/peek" . "0x<addr>") — four instruction words at a JIT address, or nil
+    /// - (:"jit/peek" . `"0x<addr>"`) — four instruction words at a JIT address, or nil
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
