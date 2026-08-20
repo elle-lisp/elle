@@ -280,8 +280,13 @@ jobs:
         run: make elle
       - name: make doctest
         run: make doctest
+      # --trace=scrub: this runner is where the corpus corrupts (stale reads
+      # surfacing as wrong-typed values, wedges, and segfaults, on the pool
+      # backend only this box exercises). Scrub zeroes each released page, so
+      # the first stale read panics at the deref naming its site instead of
+      # failing minutes later somewhere unrelated. One memset per freed page.
       - name: make smoke
-        run: make smoke
+        run: make smoke ELLE_TEST_FLAGS=--trace=scrub
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
       - name: Run property tests

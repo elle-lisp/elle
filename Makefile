@@ -175,10 +175,17 @@ CORPUS_BATCH ?= 25
 # LC_ALL=C so the byte table and the sort do not follow the caller's locale.
 DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i } { h = 5381; for (i = 1; i <= length($$0); i++) h = (h * 33 + ord[substr($$0, i, 1)]) % 1000003; printf "%07d\t%s\n", h, $$0 }' | LC_ALL=C sort | cut -f2-
 
+# ELLE_TEST_FLAGS threads extra runner flags into every corpus batch — empty
+# by default. The macOS CI job sets `--trace=scrub` here: a released page is
+# zeroed before the pool caches it, so a read through a stale pointer panics
+# at the deref naming its site instead of surfacing minutes later as a
+# wrong-typed value or a wedge (docs/impl/region/diagnostics.md).
+ELLE_TEST_FLAGS ?=
+
 define RUN_CORPUS
 	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
 		| $(DEAL_CORPUS) \
-		| xargs -n $(CORPUS_BATCH) $(ELLE) test \
+		| xargs -n $(CORPUS_BATCH) $(ELLE) test $(ELLE_TEST_FLAGS) \
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 	$(call RUN_ORACLE,--jit=off)
 	$(call RUN_ORACLE,--jit=eager)
