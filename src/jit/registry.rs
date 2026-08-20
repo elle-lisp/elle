@@ -43,3 +43,61 @@ pub(crate) fn render() -> String {
     }
     out
 }
+
+/// How far past a registered entry an address may sit and still be peeked.
+/// Entries record starts, not sizes; a compiled function fits well inside
+/// this, and the residency check below is what actually guards the read.
+const PEEK_SPAN: usize = 1 << 20;
+
+/// True when every page of `[addr, addr+len)` is mapped in this process.
+/// `mincore` answers ENOMEM for an unmapped page, which is what a peek of a
+/// dropped module's address would otherwise fault on.
+fn resident(addr: usize, len: usize) -> bool {
+    let page = (unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).max(4096) as usize;
+    let start = addr & !(page - 1);
+    let span = addr + len - start;
+    let mut vec = vec![0u8; span.div_ceil(page)];
+    unsafe { libc::mincore(start as *mut libc::c_void, span, vec.as_mut_ptr() as *mut _) == 0 }
+}
+
+/// The four 32-bit words at `addr`, rendered `0x<w0> 0x<w1> 0x<w2> 0x<w3>`
+/// in address order — the instructions a sampled PC is parked on, read
+/// beside the photograph the address came from (docs/impl/jit.md § "The
+/// code-address registry"). `None` when the address precedes every entry,
+/// sits more than `PEEK_SPAN` past its nearest one, or its pages are gone.
+pub(crate) fn peek(addr: usize) -> Option<String> {
+    let entries = snapshot();
+    let base = entries.iter().rev().map(|(a, _)| *a).find(|a| *a <= addr)?;
+    if addr - base >= PEEK_SPAN || !resident(addr, 16) {
+        return None;
+    }
+    let words: Vec<String> = (0..4)
+        .map(|i| {
+            let w = unsafe { ((addr + i * 4) as *const u32).read_volatile() };
+            format!("{:#010x}", w)
+        })
+        .collect();
+    Some(words.join(" "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peek_reads_a_registered_span_and_refuses_the_rest() {
+        static WORDS: [u32; 4] = [0x1400_0000, 1, 2, 3];
+        let addr = WORDS.as_ptr() as usize;
+        record(addr, "peek-span-probe");
+        let s = peek(addr).expect("registered resident address answers");
+        assert!(
+            s.starts_with("0x14000000"),
+            "words render in address order: {s}"
+        );
+        assert_eq!(s.split(' ').count(), 4);
+        // Below every entry: nothing precedes a null-page address.
+        assert!(peek(0x10).is_none());
+        // Past the span of its nearest entry.
+        assert!(peek(addr + PEEK_SPAN).is_none());
+    }
+}

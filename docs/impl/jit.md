@@ -71,6 +71,18 @@ preceding entry — the registry records entry addresses, not sizes, and
 Cranelift lays functions out contiguously enough for nearest-preceding to
 name the frame.
 
+`(vm/query "jit/peek" "0x<addr>")` renders the four 32-bit words at a JIT
+address (`0x<w0> 0x<w1> 0x<w2> 0x<w3>`, in address order), or `nil` when the
+address is malformed, lies past every registered block, or its pages are no
+longer resident — a photograph can carry an address whose module has since
+been dropped, and the query must not fault on it. The runner prints the peek
+for each sampled `???` frame beside the map: the map names the function the
+frame belongs to, and the peek shows the instructions the sampled PC is
+actually parked on, which is what separates the code the compiler emitted
+from the bytes the core is executing. A sampler that parks every sample of a
+busy thread on ONE address is showing a single-instruction loop; on AArch64
+the word `0x14000000` is `b .` — an unconditional branch to itself.
+
 ## Yield-through-call
 
 For functions that call other functions which might yield, the JIT

@@ -240,6 +240,19 @@
             (concat (slice out 0 20000) "\n…truncated")
             out))))))
 
+(defn jit-frame-addrs [shot]
+  "The unique `[0x…]` addresses on the photograph's `???` lines — the JIT
+   frames the code map attributes and `jit/peek` reads."
+  (let [@out @[]]
+    (each line in (string/split shot "\n")
+      (when (string/contains? line "???")
+        (let [i (string/find line "[0x")]
+          (when i
+            (let [j (string/find line "]" i)]
+              (when j
+                (push out (slice line (+ i 1) j))))))))
+    (distinct out)))
+
 (defn note-timeout-stacks [c]
   "Print the wedged process's threads when a form misses its deadline."
   (when (= (get c :status) :timeout)
@@ -256,6 +269,18 @@
           (when (and map-ok? (string? jit-map) (> (length jit-map) 0))
             (eprintln "── jit code map (addr name; match ??? frames to the nearest preceding addr) ──")
             (eprintln jit-map)))
+        # The words each sampled JIT frame is parked on. The map names the
+        # frame's function; this shows the bytes its PC is executing, which
+        # is what decides whether the wedge is IN the emitted code or in
+        # what the core fetched (docs/impl/jit.md § "The code-address
+        # registry" — on AArch64, `0x14000000` is a branch to itself).
+        (let [[a-ok? addrs] (protect (jit-frame-addrs shot))]
+          (when (and a-ok? (> (length addrs) 0))
+            (eprintln "── code at sampled jit frames (4 words each) ──")
+            (each a in (take 4 addrs)
+              (let [[p-ok? words] (protect (vm/query "jit/peek" a))]
+                (when (and p-ok? (string? words))
+                  (eprintln (concat a "  " words)))))))
         (eprintln "── end threads ──────────────────────────────────────────"))))
   c)
 
