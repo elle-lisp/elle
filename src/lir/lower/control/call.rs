@@ -500,6 +500,13 @@ impl<'a> Lowerer<'a> {
                     arity_checked,
                     defer_callee_release,
                     deferred_release_slot,
+                    // The borrowed-argument retains this call minted, so a
+                    // SIGNAL exit — which reaches neither the callee's
+                    // owned-param release nor the fall-through block below —
+                    // can consume them itself
+                    // (docs/impl/region/mechanism.md § "What the fall-through
+                    // owes, a signal exit owes too").
+                    borrowed_arg_slots: borrowed_arg_slots.clone(),
                 });
                 // From here the block runs only on the NATIVE fall-through: a
                 // native pushes no bytecode frame and the dispatch loop continues

@@ -810,3 +810,60 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
          (before={other_before:?})",
     );
 }
+
+// ── What the fall-through owes, a signal exit owes too ───────────
+// The post-`TailCall` block consumes the borrowed-argument retains a native
+// callee never took over. That block runs on ONE outcome — the native's normal
+// completion — so a signal exit needs the retains named on the instruction to
+// consume them itself (docs/impl/region/mechanism.md § "What the fall-through
+// owes, a signal exit owes too"). These pin the naming: the runtime can only
+// consume what the lowerer recorded.
+
+/// Every `TailCall` in the module, as its `borrowed_arg_slots` list.
+fn tail_call_borrowed_slots(module: &crate::lir::LirModule) -> Vec<Vec<u16>> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    let mut out = Vec::new();
+    for f in funcs {
+        for b in &f.blocks {
+            for i in &b.instructions {
+                if let LirInstr::TailCall {
+                    borrowed_arg_slots, ..
+                } = &i.instr
+                {
+                    out.push(borrowed_arg_slots.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_borrowed_tail_argument_is_named_on_the_call() {
+    // `x` is an upvalue of `g`, so `g`'s tail call to the native `length` mints a
+    // fresh owning reference for the move and stashes the retained value in a
+    // local. That stash is the only name a signal exit has for the retain.
+    let module =
+        compile_to_lir("(begin (def f (fn (x) (let [g (fn () (length x))] (g)))) (f (list 1 2)))");
+    let slots = tail_call_borrowed_slots(&module);
+    assert!(
+        slots.iter().any(|s| s.len() == 1),
+        "no call named its borrowed tail argument (slots={slots:?}) — a signal \
+         exit can consume only what the instruction names",
+    );
+}
+
+#[test]
+fn an_owned_tail_argument_is_not_named_on_the_call() {
+    // The over-free face: an OWNED argument's release IS the ownership move, and
+    // on a signal exit the payload may be that very value — a fiber carrier hands
+    // over its own fiber argument. Only the frame's EXTRA retain has a count
+    // argument for being consumed early, so an owned argument must not be named.
+    let module = compile_to_lir("(begin (def f (fn () (length (list 1 2)))) (f))");
+    let slots = tail_call_borrowed_slots(&module);
+    assert!(
+        slots.iter().all(|s| s.is_empty()),
+        "an owned tail argument was named as a borrowed retain (slots={slots:?}) — \
+         releasing it at a signal exit drops the reference the move handed over",
+    );
+}

@@ -88,6 +88,7 @@ fn test_instr_tailcall() {
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
         defer_callee_release: false,
         deferred_release_slot: None,
+        borrowed_arg_slots: Vec::new(),
     };
     assert_eq!(format!("{}", instr), "tailcall r0(r1, r2)");
 }

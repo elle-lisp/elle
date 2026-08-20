@@ -59,10 +59,12 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 6;
             }
             // TailCall carries, after the region: the adopt-callee flag (1 byte —
-            // release the callee closure's region at activation end) and the
-            // closure-cycle merged-arena adopt slot (u32, `0` = None). See
-            // `LirInstr::TailCall::{defer_callee_release, deferred_release_slot}`.
-            Instruction::TailCall | Instruction::TailCallChecked if i + 10 < instructions.len() => {
+            // release the callee closure's region at activation end), the
+            // closure-cycle merged-arena adopt slot (u32, `0` = None), and the
+            // borrowed-argument stash slots (a count byte then one u16 each).
+            // See `LirInstr::TailCall::{defer_callee_release,
+            // deferred_release_slot, borrowed_arg_slots}`.
+            Instruction::TailCall | Instruction::TailCallChecked if i + 11 < instructions.len() => {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let region_id = u32::from_be_bytes([
                     instructions[i + 2],
@@ -77,11 +79,13 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     instructions[i + 9],
                     instructions[i + 10],
                 ]);
+                let borrowed = instructions[i + 11] as usize;
                 line.push_str(&format!(
-                    " (args={}, region={}, defer_callee_release={}, deferred_release_slot={})",
-                    arg_count, region_id, adopt, adopt_slot
+                    " (args={}, region={}, defer_callee_release={}, deferred_release_slot={}, \
+                     borrowed_args={})",
+                    arg_count, region_id, adopt, adopt_slot, borrowed
                 ));
-                i += 11;
+                i += 12 + borrowed * 2;
             }
             Instruction::DupN if i < instructions.len() => {
                 let offset = instructions[i];

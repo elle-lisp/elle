@@ -143,22 +143,28 @@ fn disassemble_skips_check_signal_bound_operand() {
 #[test]
 fn disassemble_skips_tail_call_operands() {
     // TailCall carries args(u16) + region(u32) + defer_callee_release(u8) +
-    // deferred_release_slot(u32) = 11 operand bytes. The disassembler must skip
-    // exactly those and decode the following opcode, so the closure-cycle
-    // adopt slot (0 = None) keeps the stream aligned. See
-    // `LirInstr::TailCall::deferred_release_slot`.
+    // deferred_release_slot(u32) + a borrowed-argument stash list (count(u8)
+    // then one u16 each). The disassembler must skip exactly those and decode
+    // the following opcode, so the closure-cycle adopt slot (0 = None) and a
+    // VARIABLE-length stash list both keep the stream aligned. See
+    // `LirInstr::TailCall::{deferred_release_slot, borrowed_arg_slots}`.
     let mut bc = Bytecode::new();
     bc.emit(Instruction::TailCall);
     bc.emit_u16(2); // arg_count
     bc.emit_u32(7); // region slot
     bc.emit_byte(0); // defer_callee_release = false
     bc.emit_u32(9); // deferred_release_slot = Some(9)
+    bc.emit_byte(2); // borrowed_arg_slots: two stashes
+    bc.emit_u16(4);
+    bc.emit_u16(5);
     bc.emit(Instruction::Return);
     let lines = disassemble_lines(&bc.instructions);
     assert_eq!(lines.len(), 2, "got: {lines:?}");
     assert!(lines[0].contains("TailCall"), "got: {lines:?}");
     assert!(
-        lines[0].contains("defer_callee_release=0") && lines[0].contains("deferred_release_slot=9"),
+        lines[0].contains("defer_callee_release=0")
+            && lines[0].contains("deferred_release_slot=9")
+            && lines[0].contains("borrowed_args=2"),
         "got: {lines:?}"
     );
     assert!(lines[1].contains("Return"), "got: {lines:?}");

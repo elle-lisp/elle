@@ -23,6 +23,7 @@ fn test_jit_tail_call_compiles() {
             arity_checked: false,
             defer_callee_release: false,
             deferred_release_slot: None,
+            borrowed_arg_slots: Vec::new(),
             region: elle::hir::region::StaticRegion::new(2).unwrap(),
         },
         span(),

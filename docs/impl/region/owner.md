@@ -386,11 +386,18 @@ region cannot be dying while it runs. Pinned by
 
 **The bounded residual: a dead continuation's pending value releases.** A discarded fiber's
 parked frames still hold values whose releases live only in the continuation that will
-never run — parked operand-stack temporaries, call-slot scratch (a string literal
-materialized for a denied call), and a borrowed tail arg's retain stranded by a native tail
-call's ERROR exit (the restart replay would consume them; a discard cannot: the per-value
-ownership is compiler knowledge, and a blanket release of the parked stack or the parked
-activation map double-frees — a mapped slot can be stale where its value's release was
-emitted value-based or died past a tail call). This class is bounded per discarded fiber,
-measured by the `abort-discard`/`denied-discard` oracle rates.
+never run — parked operand-stack temporaries, and call-slot scratch (a string literal
+materialized for a denied call). The restart replay would consume them; a discard cannot,
+because the per-value ownership is compiler knowledge and a blanket release of the parked
+stack or the parked activation map double-frees — a mapped slot can be stale where its
+value's release was emitted value-based or died past a tail call. This class is bounded per
+discarded fiber, measured by the `denied-discard` oracle rate.
+
+One member of it is closed and is no longer part of the residual: a **borrowed tail
+argument's** retain, which the frame mints so a callee has a reference to release. That
+retain has one consumer per path, and a native tail call's SIGNAL exit — an error, a
+suspend, a fiber carrier, a capability denial — reaches neither of them, so the exit
+consumes it itself ([mechanism.md](mechanism.md) § "What the fall-through owes, a signal
+exit owes too"). Its first stranded reference was often the fiber value the abort carried,
+which pinned the body closure and everything the parked frame held behind it.
 

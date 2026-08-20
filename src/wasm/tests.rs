@@ -161,6 +161,7 @@ fn tail_calling_closure() -> LirFunction {
                     region: static_region(2),
                     defer_callee_release: false,
                     deferred_release_slot: None,
+                    borrowed_arg_slots: Vec::new(),
                 },
             ],
             Terminator::Return(Reg(1)),

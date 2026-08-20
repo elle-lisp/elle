@@ -64,6 +64,7 @@ fn tail_call_frame_delivers_nil_locals() {
     bc.emit_u32(2); // static result-region slot (unused by a closure callee, must be nonzero)
     bc.emit_byte(0); // defer_callee_release: off — the deferral is not under test
     bc.emit_u32(0); // deferred_release_slot: none
+    bc.emit_byte(0); // borrowed_arg_slots: none — a zero-arg call borrows nothing
     bc.emit(Instruction::Return);
 
     let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));

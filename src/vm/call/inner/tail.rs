@@ -3,6 +3,65 @@
 use super::*;
 
 impl VM {
+    /// Resolve this tail call's borrowed-argument retains to physical regions
+    /// and CONSUME the local each one is stashed in, without releasing anything
+    /// yet (docs/impl/region/mechanism.md § "What the fall-through owes, a
+    /// signal exit owes too").
+    ///
+    /// Stamping the local `nil` is what makes the release count once: a frame
+    /// that leaves by a signal can still be REPLAYED — a suspending signal parks
+    /// the continuation at the post-`TailCall` ip, and an `:error` fiber is
+    /// resumable for the restarts system — so the very `DecrefValueRegion` this
+    /// stands in for is reached a second time, where it now loads an immediate
+    /// and no-ops. The stash belongs to the block alone: it is written once
+    /// before the call and read once after it, for this release and nothing
+    /// else.
+    ///
+    /// Resolving and releasing are split so the release runs AFTER the signal
+    /// handler: the handler may install the very value as the signal's payload
+    /// (a fiber carrier hands over its own fiber argument) or swap the live
+    /// fiber out from under the frame whose locals name it.
+    fn take_borrowed_arg_retains(
+        &mut self,
+        slots: &[u16],
+    ) -> Vec<crate::hir::region::RuntimeRegion> {
+        if slots.is_empty() {
+            return Vec::new();
+        }
+        let frame_base = self.current_frame_base();
+        let heap = unsafe { &mut *self.heap_ptr };
+        let mut regions = Vec::with_capacity(slots.len());
+        for &slot in slots {
+            let Some(cell) = self.fiber.stack.get_mut(frame_base + slot as usize) else {
+                continue;
+            };
+            let value = *cell;
+            *cell = Value::NIL;
+            regions.extend(crate::value::arena::result_region_of(heap, value));
+        }
+        regions
+    }
+
+    /// Release the regions [`Self::take_borrowed_arg_retains`] resolved. Split
+    /// from the resolution so the signal handler runs between the two — see that
+    /// method for why.
+    fn run_borrowed_arg_retains(&mut self, regions: Vec<crate::hir::region::RuntimeRegion>) {
+        if regions.is_empty() {
+            return;
+        }
+        let heap = unsafe { &mut *self.heap_ptr };
+        for region in regions {
+            if crate::config::get().has_trace("rc") {
+                eprintln!(
+                    "[trace:rc] borrowed-arg retain released({region}) rc={} \
+                     (tail-call signal exit)",
+                    heap.region_rc(region)
+                );
+            }
+            heap.decref_region(region);
+        }
+    }
+
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions via tail signal handler, sets up pending
@@ -10,6 +69,15 @@ impl VM {
     ///
     /// When `checked` is true, the compiler verified arity at compile time
     /// and the runtime skips the arity check for primitives and closures.
+    ///
+    /// `borrowed_arg_slots` names the frame locals holding this call's
+    /// borrowed-argument retains. That retain has exactly one consumer per path:
+    /// a frame-replacing closure callee's owned-param release, or the
+    /// post-`TailCall` fall-through block, which runs on one outcome only — the
+    /// native's normal completion. Every SIGNAL exit reaches neither, so it
+    /// consumes the retain here instead (docs/impl/region/mechanism.md § "What
+    /// the fall-through owes, a signal exit owes too").
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn tail_call_inner(
         &mut self,
         func: Value,
@@ -18,6 +86,7 @@ impl VM {
         region_id: StaticRegion,
         defer_callee_release: bool,
         deferred_release_slot: Option<StaticRegion>,
+        borrowed_arg_slots: &[u16],
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             let blocked = def
@@ -26,9 +95,15 @@ impl VM {
                 .intersection(self.fiber.withheld)
                 .intersection(crate::signals::CAP_MASK);
             if !blocked.is_empty() {
-                return Some(self.handle_capability_denial_tail(def, blocked, &args));
+                // The denial never runs the native at all, so the fall-through
+                // block is abandoned exactly as it is on any other signal exit.
+                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
+                let bits = self.handle_capability_denial_tail(def, blocked, &args);
+                self.run_borrowed_arg_retains(owed);
+                return Some(bits);
             }
             if !checked && !def.arity.matches(args.len()) {
+                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
                 self.set_error(
                     "arity-error",
                     format!(
@@ -38,6 +113,7 @@ impl VM {
                         args.len()
                     ),
                 );
+                self.run_borrowed_arg_retains(owed);
                 return Some(SIG_ERROR);
             }
             // Fresh per-execution result region + pass-through retain, shared
@@ -88,7 +164,16 @@ impl VM {
                 self.fiber.stack.push(value);
                 return None;
             }
-            return Some(self.handle_primitive_signal_tail(bits, value));
+            // The signal exit abandons the fall-through block, so it consumes
+            // the borrowed-argument retains that block would have. The NAMES are
+            // taken first — before the handler, which may swap fibers under us —
+            // and the regions released after it, so a payload that carries one
+            // of these values (a fiber carrier's own argument, an `IoRequest`
+            // embedding a port) is still held while the handler installs it.
+            let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
+            let bits = self.handle_primitive_signal_tail(bits, value);
+            self.run_borrowed_arg_retains(owed);
+            return Some(bits);
         }
 
         if let Some((id, default)) = func.as_parameter() {

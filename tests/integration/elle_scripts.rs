@@ -573,6 +573,24 @@ fn region_tail_frame_exit_uaf() {
     );
 }
 
+// Guard — a native tail call that leaves by a SIGNAL consumes the borrowed
+// argument retains the abandoned post-`TailCall` block would have consumed
+// (docs/impl/region/mechanism.md § "What the fall-through owes, a signal exit
+// owes too"). Each is a release on a path that ran none before, so three faces
+// must survive it: the value the signal PAYLOAD carries (a fiber carrier hands
+// over its own fiber argument), the REPLAY of a parked or restarted frame that
+// reaches the same release a second time, and an OUTER holder the caught error
+// returns to. Every read below happens after the exit ran, so an over-release
+// faults there — SIGSEGV under guardfree. The leak face is
+// `region-tail-signal-exit.lisp`.
+#[test]
+fn region_tail_signal_exit_uaf() {
+    run_elle_script_with_args(
+        "region-tail-signal-exit-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `def` evaluates to what it bound, so its initializer's demise must
 // not be narrowed onto the initializer when nothing reads the binding
 // (docs/impl/region/mechanism.md § "A binder's init release lands after the slot

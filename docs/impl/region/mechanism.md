@@ -1321,6 +1321,73 @@ other reference, held in an env cell the callee rewrites, held in a sibling's
 forward cell the callee reads on every recursion, captured by a closure
 that escapes, or read after the call must survive the moved release).
 
+### What the fall-through owes, a signal exit owes too
+
+The relocation above decides which releases *leave* the post-`TailCall` block. What it
+cannot decide is whether the block ever runs. The block belongs to the native
+fall-through, and a native reaches it on exactly one outcome: **normal completion**
+(`bits.is_empty()`, the `SignalAction::Ok` classification). Every other outcome — an
+error, a suspend, a fiber carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate`), a
+capability denial — leaves through the signal machinery, which abandons this frame's
+continuation.
+
+One release in that block is the frame's own **extra** reference, and it is the one the
+signal exit runs. A tail call hands its callee one fresh owning reference per **borrowed**
+argument, because a captured upvalue is owned by the closure env rather than by this
+activation: pure-moving it would hand the callee a reference the caller never had (§ "A
+release past a frame-replacing tail call is not a release"). That retain has exactly one
+consumer per path — a frame-replacing closure callee's owned-param release, or, the frame
+not being replaced by a native, the fall-through block's own `DecrefValueRegion`. A signal
+exit reaches neither, so it consumes the retain itself. The count argument is the
+borrowedness: the value has a holder that is not this frame, by the definition of the
+class, so dropping the extra reference frees nothing.
+
+**Every OTHER release in that block stays.** They divide in two and neither half has that
+argument. An **argument's** own release is the ownership move, and a signal exit is exactly
+where the payload may BE that argument — a fiber carrier returns its fiber argument, a
+yielding io op hands the scheduler a request embedding its port — so the signal machinery
+accounts for it on the path it takes. Everything else the block still holds is a release the
+relocation declined to move, which it declines only when escape refuses `frame_held_regions`
+— the same count argument, refused. Running either would be a new release on a path that
+owed none, with nothing to fund it.
+
+**A frame that leaves by a signal can still be replayed.** A suspending signal parks
+the continuation at the post-`TailCall` ip and the resume re-enters it (owner.md
+§ "Park/unpark symmetry"); an `:error` fiber is resumable too, so a restart replays
+the same block. Running the release at the signal exit and again at the replay would
+be a double release, so the exit **stamps the stash local `nil`** as it takes the value:
+the replayed `DecrefValueRegion` then loads an immediate and no-ops — the same
+self-cancelling discipline a replicated release relies on (§ "The relocation point
+outlives the block"). The stash is the block's alone, written once before the call and read
+once after it, for this release and nothing else.
+
+Resolving the region and releasing it are **two steps**, with the signal handler between
+them: the handler installs the payload (which may be this very value) and may swap the live
+fiber out from under the frame whose locals name it, so the names are taken first and the
+references dropped after.
+
+What this closes is one member of a **dead continuation's** pending value releases. A fiber
+abandoned while parked at such an exit — an aborted fiber the restarts system keeps
+resumable, a capability-denied fiber nobody restarts — stranded the retain per call, and its
+first stranded reference is often the fiber value itself, which then pins the body closure,
+its captures and its parked payload behind it. What remains stranded is the denied call's own
+argument scratch (owner.md § "The bounded residual").
+
+The **JIT** tier keeps today's behaviour: `elle_jit_tail_call` carries neither this
+channel nor the callee-adoption channels (`defer_callee_release`,
+`deferred_release_slot`), so a compiled frame that leaves by a signal strands the
+retain as before — a bounded over-keep, never an over-free.
+
+Pinned by `tests/elle/region-tail-signal-exit.lisp` (the reclamation, with the
+fiber-carrier exit, a heap payload beside it, and a restarted `:error` fiber driven as rows),
+the `abort-discard` probe in `tests/elle/oracle.lisp` (the per-op rate),
+`lir::lower::tests::release::frameexit::{a_borrowed_tail_argument_is_named_on_the_call,
+an_owned_tail_argument_is_not_named_on_the_call}` (the naming pins, both faces), and
+`tests/elle/region-tail-signal-exit-uaf.lisp` (the soundness complement — a value the signal
+payload carries, a restarted `:error` fiber that replays the block, a suspending handoff, and
+a caught error whose handler reads the released value's holder must all survive the exit's
+release).
+
 ## Compile-time region selection (coalescing)
 
 Where the compiler can prove a value is a **fresh local allocation whose region

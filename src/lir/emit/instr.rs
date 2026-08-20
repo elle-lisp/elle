@@ -288,6 +288,7 @@ impl Emitter {
                 region,
                 defer_callee_release,
                 deferred_release_slot,
+                borrowed_arg_slots,
                 // The stack-based VM leaves a normally-completing native's
                 // result on the operand stack for `Return` to pop; `dst` is a
                 // JIT-only binding (see `LirInstr::TailCall`).
@@ -337,6 +338,19 @@ impl Emitter {
                 // `LirInstr::TailCall::deferred_release_slot`.
                 self.bytecode
                     .emit_u32(deferred_release_slot.map_or(0, |s| s.get()));
+                // The borrowed-argument stash slots, so a signal exit can
+                // consume the retains the fall-through block below would have
+                // (docs/impl/region/mechanism.md § "What the fall-through owes,
+                // a signal exit owes too"). A count byte then one u16 slot each,
+                // so a call with no borrowed argument — the overwhelming
+                // majority — costs exactly the zero byte. Truncated at 255: a
+                // longer argument list than any real call has, whose tail keeps
+                // the over-keep the abandoned block always had.
+                let n = borrowed_arg_slots.len().min(u8::MAX as usize);
+                self.bytecode.emit_byte(n as u8);
+                for &slot in &borrowed_arg_slots[..n] {
+                    self.bytecode.emit_u16(slot);
+                }
             }
 
             LirInstr::List {

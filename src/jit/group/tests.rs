@@ -316,6 +316,7 @@ fn test_find_targets_with_tail_call() {
                         region: crate::hir::region::StaticRegion::new(2).unwrap(),
                         defer_callee_release: false,
                         deferred_release_slot: None,
+                        borrowed_arg_slots: Vec::new(),
                     },
                 ],
                 Terminator::Unreachable,

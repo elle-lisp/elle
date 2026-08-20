@@ -154,6 +154,16 @@ impl VM {
         // `StaticRegion` is `NonZeroU32`, so a real slot is never 0). See
         // `LirInstr::TailCall::deferred_release_slot`.
         let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
+        // The borrowed-argument stash slots. Decoded unconditionally so `ip`
+        // stays aligned; a SIGNAL exit consumes their retains
+        // (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
+        // exit owes too") and the normal fall-through ignores them — it runs the
+        // block's own `DecrefValueRegion`s.
+        let borrowed_count = self.read_u8(bytecode, ip) as usize;
+        let mut borrowed_arg_slots = Vec::with_capacity(borrowed_count);
+        for _ in 0..borrowed_count {
+            borrowed_arg_slots.push(self.read_u16(bytecode, ip));
+        }
         let func = self
             .fiber
             .stack
@@ -178,6 +188,7 @@ impl VM {
             region_id,
             defer_callee_release,
             deferred_release_slot,
+            &borrowed_arg_slots,
         )
     }
 
@@ -223,8 +234,9 @@ impl VM {
         // Splice/apply tail call (`TailCallArrayMut`): the closure-callee deferred
         // release and the closure-cycle merged-arena release slot are not wired through this
         // path yet — `false`/`None` keep today's behaviour (no regression). The
-        // common `(f …)` tail call uses `TailCall`, which carries both.
-        self.tail_call_inner(func, args, checked, region_id, false, None)
+        // common `(f …)` tail call uses `TailCall`, which carries both — and the
+        // borrowed-argument stash list with them.
+        self.tail_call_inner(func, args, checked, region_id, false, None, &[])
     }
 
     /// Dispatch a collection-as-function call-index (`(arr i)` / `(m :k)` /

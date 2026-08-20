@@ -244,7 +244,17 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard" "abort-discard"])
+                   "cancel-discard"])
+# `abort-discard` is a CLOSED control now (undeclared, like `rest-array-copy`, so a
+# regression to open trips the completeness gate loudly rather than being absorbed
+# back under F2): what it measured was the borrowed-argument
+# retain a native tail call's SIGNAL exit strands. The post-`TailCall` block that
+# consumes that retain runs on the native's normal completion alone, so the exit
+# consumes it instead — stamping the stash local `nil` so a replayed continuation's
+# copy of the same release no-ops (docs/impl/region/mechanism.md § "What the
+# fall-through owes, a signal exit owes too"). Its first stranded reference was the
+# aborted fiber's own value, which pinned the body closure and everything the parked
+# frame held behind it.
 # `spawn-join` is a CLOSED control now (undeclared, like `rest-array-copy`), so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # under F2 — which is not where it belonged: what it measured was the frame-held
@@ -1245,22 +1255,24 @@
                            9) |:yield|)]
         (fiber/resume f)
         (fiber/cancel f :dead)
-        (fiber/status f))) 0]  # `fiber/abort` of a PARKED fiber (F2). Abort injects an error
-   # and resumes the fiber for unwinding; with no in-body handler it lands `:error`,
-   # which the model keeps RESUMABLE (the restarts system), so its re-parked frame
-   # strands the DEAD CONTINUATION's pending value releases — the borrowed tail
-   # arg's retain from the abort call's error exit, and call-slot scratch — which
-   # only a restart replay could consume (docs/impl/region/owner.md § "The bounded
-   # residual"). The park-symmetry mechanisms (carrier, owner nodes, parked-signal
-   # retain, the fiber region itself) are closed; `denied-discard` (3) is the same
-   # residual class for a capability denial. Shrink-only.
+        (fiber/status f))) 0]  # `fiber/abort` of a PARKED fiber. `fiber/abort` is a
+   # native tail call here, and its fiber argument is a captured upvalue — a BORROWED
+   # tail argument, for which the frame mints a fresh owning reference so the callee
+   # has one to release. The abort leaves by SIG_ABORT, which reaches neither consumer
+   # of that retain (a frame-replacing closure callee's owned-param release, or the
+   # post-`TailCall` fall-through the native's normal completion runs), so the signal
+   # exit consumes it itself (docs/impl/region/mechanism.md § "What the fall-through
+   # owes, a signal exit owes too"). The stranded reference was the fiber's own, which
+   # pinned the body closure and the parked frame's payload behind it. A CLOSED control
+   # now, beside `denied-discard`, whose residual is the DENIED call's own argument
+   # scratch and stays open under F2.
    ["abort-discard"
     (fn [j]
       (let [f (fiber/new (fn []
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 4]])
+        (protect (fiber/abort f "boom")))) 0]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape

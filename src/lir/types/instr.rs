@@ -142,6 +142,20 @@ pub enum LirInstr {
         /// from `defer_callee_release` (the MEMBER path, `region_of(callee)`), never both
         /// set on one call.
         deferred_release_slot: Option<StaticRegion>,
+        /// The frame locals holding this call's BORROWED arguments — the fresh
+        /// owning reference the frame mints per borrowed argument so the callee
+        /// has one to release (rules.md Rule 5, move-on-tail-call), stashed
+        /// where the post-`TailCall` block can name it.
+        ///
+        /// That retain has exactly one consumer per path: a frame-replacing
+        /// CLOSURE callee's owned-param release, or — the frame not being
+        /// replaced by a native — the fall-through block's own
+        /// `DecrefValueRegion`. A native that leaves by a SIGNAL reaches
+        /// neither, so the runtime consumes it there instead
+        /// (docs/impl/region/mechanism.md § "What the fall-through owes, a
+        /// signal exit owes too"). Empty for a call with no borrowed argument,
+        /// which is the overwhelming majority.
+        borrowed_arg_slots: Vec<u16>,
     },
 
     // === Data Construction ===
