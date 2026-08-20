@@ -269,11 +269,18 @@ smoke-wasm: elle-wasm  ## Corpus via elle test (+ wasm tier) + whole-file --wasm
 			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle tests WASM pass (full)"; exit 1; }
 
+# A literate doc is one whole program, not one corpus form: the scheduler docs
+# (processes.md, threads.md) run a dozen process systems in sequence, which is
+# minutes of debug-profile CPU — the corpus TIMEOUT kills them mid-run on any
+# debug binary. Same shape as ORACLE_TIMEOUT: a wider per-file budget, so every
+# other file still fails fast on a hang. Read the budget from a timed run.
+DOCTEST_TIMEOUT ?= 180s
+
 doctest:   ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' docs/*.md docs/regions/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
 		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
+			'timeout $(DOCTEST_TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
 EMBED_TARGET_DIR = $(CURDIR)/target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
