@@ -48,7 +48,7 @@ cranelift-native = { version = "0.131", optional = true }
 target-lexicon = { version = "0.13", optional = true }
 
 # WASM backend (optional, enable with --features wasm)
-wasmtime = { version = "44", features = ["incremental-cache"], optional = true }
+wasmtime = { version = "46", features = ["incremental-cache"], optional = true }
 wasm-encoder = { version = "0.246", optional = true }
 
 # MLIR backend (optional, requires LLVM 22 + MLIR)
