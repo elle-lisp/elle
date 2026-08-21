@@ -1,38 +1,45 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use elle::pipeline::{compile, eval, eval_all};
-use elle::primitives::register_primitives;
-use elle::{read_str, SymbolTable, VM};
+use elle::runtime::RuntimeCore;
+use elle::value::FiberHeap;
+use elle::{read_str, SymbolTable};
 
-fn setup() -> (VM, SymbolTable) {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    (vm, symbols)
+// A bare Elle instance for the benches: primitives registered, a fresh
+// `CompileCtx` (core.lisp + prelude), and the VM wired to its compile context —
+// but no stdlib. The compile pipeline takes the compile context explicitly as a
+// parameter, so every `compile`/`eval`/`eval_all` call below threads
+// `core.parts()`.
+fn setup() -> RuntimeCore {
+    RuntimeCore::bare()
 }
 
 // DEFENSE: Separate parsing from execution to measure each phase independently
 fn bench_parsing(c: &mut Criterion) {
     let mut group = c.benchmark_group("parsing");
     let mut symbols = SymbolTable::new();
+    // `read_str` is born in a fresh region on the caller's heap (the read result
+    // escapes value-based), so the parse benches need an instance heap to allocate
+    // into. The benchmark process is short-lived; the read residue is irrelevant.
+    let mut heap = FiberHeap::new();
 
     // Simple expression
     group.bench_function("simple_number", |b| {
-        b.iter(|| black_box(read_str("42", &mut symbols).unwrap()));
+        b.iter(|| black_box(read_str("42", &mut heap, &mut symbols).unwrap()));
     });
 
     // List with numbers
     group.bench_function("list_literal", |b| {
-        b.iter(|| black_box(read_str("(1 2 3 4 5)", &mut symbols).unwrap()));
+        b.iter(|| black_box(read_str("(1 2 3 4 5)", &mut heap, &mut symbols).unwrap()));
     });
 
     // Nested expression
     group.bench_function("nested_expr", |b| {
-        b.iter(|| black_box(read_str("(+ (* 2 3) (- 10 5))", &mut symbols).unwrap()));
+        b.iter(|| black_box(read_str("(+ (* 2 3) (- 10 5))", &mut heap, &mut symbols).unwrap()));
     });
 
     // Deep nesting
     group.bench_function("deep_nesting", |b| {
-        b.iter(|| black_box(read_str("(((((1)))))", &mut symbols).unwrap()));
+        b.iter(|| black_box(read_str("(((((1)))))", &mut heap, &mut symbols).unwrap()));
     });
 
     // Large list
@@ -44,7 +51,7 @@ fn bench_parsing(c: &mut Criterion) {
             .join(" ")
     );
     group.bench_function("large_list_100", |b| {
-        b.iter(|| black_box(read_str(&large_list, &mut symbols).unwrap()));
+        b.iter(|| black_box(read_str(&large_list, &mut heap, &mut symbols).unwrap()));
     });
 
     group.finish();
@@ -93,11 +100,11 @@ fn bench_compilation(c: &mut Criterion) {
     // Simple arithmetic
     group.bench_function("simple_arithmetic", |b| {
         b.iter_batched(
-            || {
-                let (_, symbols) = setup();
-                symbols
+            setup,
+            |mut core| {
+                let (_, symbols, cctx) = core.parts();
+                black_box(compile("(+ 1 2)", symbols, cctx, "<benchmark>").unwrap())
             },
-            |mut symbols| black_box(compile("(+ 1 2)", &mut symbols, "<benchmark>").unwrap()),
             criterion::BatchSize::SmallInput,
         );
     });
@@ -105,12 +112,10 @@ fn bench_compilation(c: &mut Criterion) {
     // Conditional
     group.bench_function("conditional", |b| {
         b.iter_batched(
-            || {
-                let (_, symbols) = setup();
-                symbols
-            },
-            |mut symbols| {
-                black_box(compile("(if (> 5 3) 100 200)", &mut symbols, "<benchmark>").unwrap())
+            setup,
+            |mut core| {
+                let (_, symbols, cctx) = core.parts();
+                black_box(compile("(if (> 5 3) 100 200)", symbols, cctx, "<benchmark>").unwrap())
             },
             criterion::BatchSize::SmallInput,
         );
@@ -119,13 +124,11 @@ fn bench_compilation(c: &mut Criterion) {
     // Nested expressions
     group.bench_function("nested_arithmetic", |b| {
         b.iter_batched(
-            || {
-                let (_, symbols) = setup();
-                symbols
-            },
-            |mut symbols| {
+            setup,
+            |mut core| {
+                let (_, symbols, cctx) = core.parts();
                 black_box(
-                    compile("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols, "<benchmark>").unwrap(),
+                    compile("(+ (* 2 3) (- 10 (/ 8 2)))", symbols, cctx, "<benchmark>").unwrap(),
                 )
             },
             criterion::BatchSize::SmallInput,
@@ -141,31 +144,36 @@ fn bench_vm_execution(c: &mut Criterion) {
 
     // Integer arithmetic (specialized ops)
     group.bench_function("int_add", |b| {
-        let (mut vm, mut symbols) = setup();
-        let result = compile("(+ 1 2 3 4 5)", &mut symbols, "<benchmark>").unwrap();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
+        let result = compile("(+ 1 2 3 4 5)", symbols, cctx, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // Mixed int/float arithmetic
     group.bench_function("mixed_arithmetic", |b| {
-        let (mut vm, mut symbols) = setup();
-        let result = compile("(+ 1 2.5 3)", &mut symbols, "<benchmark>").unwrap();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
+        let result = compile("(+ 1 2.5 3)", symbols, cctx, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // Comparisons
     group.bench_function("comparison", |b| {
-        let (mut vm, mut symbols) = setup();
-        let result = compile("(< 5 10)", &mut symbols, "<benchmark>").unwrap();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
+        let result = compile("(< 5 10)", symbols, cctx, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // List construction
     group.bench_function("pair", |b| {
-        let (mut vm, mut symbols) = setup();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
         let result = compile(
             "(pair 1 (pair 2 (pair 3 nil)))",
-            &mut symbols,
+            symbols,
+            cctx,
             "<benchmark>",
         )
         .unwrap();
@@ -174,8 +182,9 @@ fn bench_vm_execution(c: &mut Criterion) {
 
     // List access
     group.bench_function("first", |b| {
-        let (mut vm, mut symbols) = setup();
-        let result = compile("(first (list 1 2 3))", &mut symbols, "<benchmark>").unwrap();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
+        let result = compile("(first (list 1 2 3))", symbols, cctx, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
@@ -188,17 +197,20 @@ fn bench_conditionals(c: &mut Criterion) {
 
     // Simple if
     group.bench_function("if_true", |b| {
-        let (mut vm, mut symbols) = setup();
-        let result = compile("(if (> 5 3) 100 200)", &mut symbols, "<benchmark>").unwrap();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
+        let result = compile("(if (> 5 3) 100 200)", symbols, cctx, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // Nested if
     group.bench_function("nested_if", |b| {
-        let (mut vm, mut symbols) = setup();
+        let mut core = setup();
+        let (vm, symbols, cctx) = core.parts();
         let result = compile(
             "(if (> 5 3) (if (< 2 4) 1 2) 3)",
-            &mut symbols,
+            symbols,
+            cctx,
             "<benchmark>",
         )
         .unwrap();
@@ -216,8 +228,9 @@ fn bench_end_to_end(c: &mut Criterion) {
     group.bench_function("simple", |b| {
         b.iter_batched(
             setup,
-            |(mut vm, mut symbols)| {
-                black_box(eval("(+ 1 2 3)", &mut symbols, &mut vm, "<benchmark>").unwrap())
+            |mut core| {
+                let (vm, symbols, cctx) = core.parts();
+                black_box(eval("(+ 1 2 3)", symbols, vm, cctx, "<benchmark>").unwrap())
             },
             criterion::BatchSize::SmallInput,
         );
@@ -227,12 +240,14 @@ fn bench_end_to_end(c: &mut Criterion) {
     group.bench_function("complex", |b| {
         b.iter_batched(
             setup,
-            |(mut vm, mut symbols)| {
+            |mut core| {
+                let (vm, symbols, cctx) = core.parts();
                 black_box(
                     eval(
                         "(+ (* 2 3) (- 10 (/ 8 2)))",
-                        &mut symbols,
-                        &mut vm,
+                        symbols,
+                        vm,
+                        cctx,
                         "<benchmark>",
                     )
                     .unwrap(),
@@ -255,7 +270,8 @@ fn bench_scalability(c: &mut Criterion) {
             BenchmarkId::new("list_construction", size),
             size,
             |b, &size| {
-                let (mut vm, mut symbols) = setup();
+                let mut core = setup();
+                let (vm, symbols, cctx) = core.parts();
 
                 let expr_str = format!(
                     "(list {})",
@@ -264,7 +280,7 @@ fn bench_scalability(c: &mut Criterion) {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
-                let result = compile(&expr_str, &mut symbols, "<benchmark>").unwrap();
+                let result = compile(&expr_str, symbols, cctx, "<benchmark>").unwrap();
 
                 b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
             },
@@ -275,7 +291,8 @@ fn bench_scalability(c: &mut Criterion) {
             BenchmarkId::new("addition_chain", size),
             size,
             |b, &size| {
-                let (mut vm, mut symbols) = setup();
+                let mut core = setup();
+                let (vm, symbols, cctx) = core.parts();
 
                 let expr_str = format!(
                     "(+ {})",
@@ -284,7 +301,7 @@ fn bench_scalability(c: &mut Criterion) {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
-                let result = compile(&expr_str, &mut symbols, "<benchmark>").unwrap();
+                let result = compile(&expr_str, symbols, cctx, "<benchmark>").unwrap();
 
                 b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
             },
@@ -301,36 +318,33 @@ fn bench_memory_operations(c: &mut Criterion) {
     // Rc cloning (happens on every value copy)
     group.bench_function("value_clone", |b| {
         let mut symbols = SymbolTable::new();
-        let value = read_str("(1 2 3 4 5)", &mut symbols).unwrap();
+        let mut heap = FiberHeap::new();
+        let value = read_str("(1 2 3 4 5)", &mut heap, &mut symbols).unwrap();
         b.iter(|| black_box(value));
     });
 
     // List traversal
     group.bench_function("list_to_vec", |b| {
         let mut symbols = SymbolTable::new();
-        let value = read_str("(1 2 3 4 5 6 7 8 9 10)", &mut symbols).unwrap();
+        let mut heap = FiberHeap::new();
+        let value = read_str("(1 2 3 4 5 6 7 8 9 10)", &mut heap, &mut symbols).unwrap();
         b.iter(|| black_box(value.list_to_vec().unwrap()));
     });
 
     group.finish();
 }
 
-// Fresh VM + SymbolTable with primitives registered, no prelude loaded.
-// Used by bench_macro_expansion so prelude loading is included in each iteration.
-fn setup_vm() -> (VM, SymbolTable) {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    register_primitives(&mut vm, &mut symbols);
-    (vm, symbols)
-}
-
 // DEFENSE: Macro expansion throughput — measures the full pipeline cost
-// (including prelude loading) for macro-heavy Elle snippets.
+// (expand → analyze → lower → emit → execute) for macro-heavy Elle snippets.
 //
-// Each iteration uses a fresh VM so the transformer cache starts cold,
-// matching the cost a user pays per compilation unit. The caching benefit
-// (issue #562) shows up within a single iteration when the same macro is
-// invoked many times: the first call compiles the transformer closure;
+// Each batch gets a fresh instance (`setup` → `RuntimeCore::bare`), so the
+// per-compile transformer cache starts cold — matching the cost a user pays per
+// compilation unit. (core.lisp + the prelude are loaded once when the instance
+// is built, in the unmeasured batch setup; under the explicit-`CompileCtx`
+// design each eval threads its own compile context, so there is nothing to
+// reload per eval.) The caching
+// benefit (issue #562) shows up within a single `eval_all` when the same macro
+// is invoked many times: the first call compiles the transformer closure;
 // subsequent calls reuse it via VM::call_closure.
 fn bench_macro_expansion(c: &mut Criterion) {
     let mut group = c.benchmark_group("macro_expansion");
@@ -344,9 +358,10 @@ fn bench_macro_expansion(c: &mut Criterion) {
             .collect::<Vec<_>>()
             .join("\n");
         b.iter_batched(
-            setup_vm,
-            |(mut vm, mut symbols)| {
-                black_box(eval_all(&source, &mut symbols, &mut vm, "<bench>").unwrap())
+            setup,
+            |mut core| {
+                let (vm, symbols, cctx) = core.parts();
+                black_box(eval_all(&source, symbols, vm, cctx, "<bench>").unwrap())
             },
             criterion::BatchSize::SmallInput,
         );
@@ -358,9 +373,10 @@ fn bench_macro_expansion(c: &mut Criterion) {
     group.bench_function("thread_first_9", |b| {
         let source = "(-> 1 (+ 2) (+ 3) (+ 4) (+ 5) (+ 6) (+ 7) (+ 8) (+ 9) (+ 10))";
         b.iter_batched(
-            setup_vm,
-            |(mut vm, mut symbols)| {
-                black_box(eval_all(source, &mut symbols, &mut vm, "<bench>").unwrap())
+            setup,
+            |mut core| {
+                let (vm, symbols, cctx) = core.parts();
+                black_box(eval_all(source, symbols, vm, cctx, "<bench>").unwrap())
             },
             criterion::BatchSize::SmallInput,
         );
@@ -374,9 +390,10 @@ fn bench_macro_expansion(c: &mut Criterion) {
             .collect::<Vec<_>>()
             .join("\n");
         b.iter_batched(
-            setup_vm,
-            |(mut vm, mut symbols)| {
-                black_box(eval_all(&source, &mut symbols, &mut vm, "<bench>").unwrap())
+            setup,
+            |mut core| {
+                let (vm, symbols, cctx) = core.parts();
+                black_box(eval_all(&source, symbols, vm, cctx, "<bench>").unwrap())
             },
             criterion::BatchSize::SmallInput,
         );

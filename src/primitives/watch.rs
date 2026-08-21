@@ -2,28 +2,34 @@
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::io::watch::FsWatcher;
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
-use crate::value::{error_val, sorted_struct_get, Value};
+use crate::value::{sorted_struct_get, Value};
 
 /// (watch) — create a filesystem watcher, returns an External handle.
-fn prim_watch(_args: &[Value]) -> (SignalBits, Value) {
+fn prim_watch(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     match FsWatcher::new() {
-        Ok(w) => (SIG_OK, Value::external("fs-watcher", w)),
-        Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+        Ok(w) => (SIG_OK, ctx.external("fs-watcher", w)),
+        Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
     }
 }
 
 /// (watch-add watcher path) or (watch-add watcher path {:recursive bool})
-fn prim_watch_add(args: &[Value]) -> (SignalBits, Value) {
+fn prim_watch_add(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let watcher = match args[0].as_external::<FsWatcher>() {
         Some(w) => w,
         None => {
             return (
                 SIG_ERROR,
-                error_val("type-error", "watch-add: first argument must be a watcher"),
+                ctx.error("type-error", "watch-add: first argument must be a watcher"),
             )
         }
     };
@@ -32,7 +38,7 @@ fn prim_watch_add(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     "watch-add: second argument must be a string path",
                 ),
@@ -56,18 +62,21 @@ fn prim_watch_add(args: &[Value]) -> (SignalBits, Value) {
     };
     match watcher.add(&path, recursive) {
         Ok(()) => (SIG_OK, Value::NIL),
-        Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+        Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
     }
 }
 
 /// (watch-remove watcher path)
-fn prim_watch_remove(args: &[Value]) -> (SignalBits, Value) {
+fn prim_watch_remove(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let watcher = match args[0].as_external::<FsWatcher>() {
         Some(w) => w,
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     "watch-remove: first argument must be a watcher",
                 ),
@@ -79,7 +88,7 @@ fn prim_watch_remove(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     "watch-remove: second argument must be a string path",
                 ),
@@ -88,30 +97,39 @@ fn prim_watch_remove(args: &[Value]) -> (SignalBits, Value) {
     };
     match watcher.remove(&path) {
         Ok(()) => (SIG_OK, Value::NIL),
-        Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+        Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
     }
 }
 
 /// (watch-next watcher) — async: yields SIG_IO, resumes with event batch.
-fn prim_watch_next(args: &[Value]) -> (SignalBits, Value) {
+fn prim_watch_next(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     // Validate it's a watcher before yielding
     if args[0].as_external::<FsWatcher>().is_none() {
         return (
             SIG_ERROR,
-            error_val("type-error", "watch-next: argument must be a watcher"),
+            ctx.error("type-error", "watch-next: argument must be a watcher"),
         );
     }
-    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::WatchNext, args[0]))
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::new(ctx, IoOp::WatchNext, args[0]),
+    )
 }
 
 /// (watch-close watcher)
-fn prim_watch_close(args: &[Value]) -> (SignalBits, Value) {
+fn prim_watch_close(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let watcher = match args[0].as_external::<FsWatcher>() {
         Some(w) => w,
         None => {
             return (
                 SIG_ERROR,
-                error_val("type-error", "watch-close: argument must be a watcher"),
+                ctx.error("type-error", "watch-close: argument must be a watcher"),
             )
         }
     };
@@ -119,63 +137,52 @@ fn prim_watch_close(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::NIL)
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "watch",
-        func: prim_watch,
+primitive! {
+    "watch" => prim_watch {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Create a filesystem watcher. Returns a watcher handle for use with watch-add, watch-next, watch-close.",
-        params: &[],
         category: "watch",
         example: "(def w (watch))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-add",
-        func: prim_watch_add,
+        effect: RegionEffect::Fresh,
+    }
+    "watch-add" => prim_watch_add {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Add a path to the watcher. Recursive by default. Optional third arg: {:recursive false}.",
         params: &["watcher", "path", "opts?"],
         category: "watch",
         example: "(watch-add w \"src/\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-remove",
-        func: prim_watch_remove,
+        effect: RegionEffect::Immediate,
+    }
+    "watch-remove" => prim_watch_remove {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Remove a watched path from the watcher.",
         params: &["watcher", "path"],
         category: "watch",
         example: "(watch-remove w \"src/\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-next",
-        func: prim_watch_next,
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
+        effect: RegionEffect::Immediate,
+    }
+    "watch-next" => prim_watch_next {
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Wait for filesystem events. Yields to the scheduler; resumes with an array of event structs [{:kind :modify :path \"...\"}]. Event kinds: :create, :modify, :remove, :rename. On macOS (kqueue), :create is reported as :modify because kqueue does not distinguish them at the directory level.",
         params: &["watcher"],
         category: "watch",
         example: "(watch-next w)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-close",
-        func: prim_watch_close,
+        // Opaque: stores nothing, but the event array is minted at completion on
+        // the origin heap (`Alloc::new(completion_heap_ptr(..))`, like sig-next /
+        // sys/resolve), neither this call's region nor an arg's. No clique,
+        // non-fresh result. (NOT Fresh: no caller-region buffer is pre-allocated.)
+        effect: RegionEffect::Opaque,
+    }
+    "watch-close" => prim_watch_close {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close the watcher and release its resources.",
         params: &["watcher"],
         category: "watch",
         example: "(watch-close w)",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Immediate,
+    }
+}

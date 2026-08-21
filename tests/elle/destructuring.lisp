@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Integration tests for destructuring patterns in def, var, let, let*, fn, defn
 #
 # Migrated from tests/integration/destructuring.rs
@@ -1085,3 +1085,46 @@
 (let [[ok? _] (protect ((fn () ((fn (a &keys {:x x & rest}) rest) 1 :y 20))))]
   (assert (not ok?)
           "keys destructure missing required key signals error even with rest"))
+
+# ============================================================
+# Regression: &keys/&named collection errors must not strand the
+# error value in the freed collection region (UAF).
+# ============================================================
+#
+# `&keys`/`&named` collection builds the kwarg struct in a fresh per-value
+# region (collect_struct_in_own_region). On a collection error — odd kwargs,
+# non-keyword key, duplicate key, unknown &named key — that region is freed.
+# The error struct must be born OUTSIDE it (in the caller's durable region),
+# never inside: a `protect`/`fiber` thunk reads the error as its terminal
+# signal AFTER the region is gone, so an in-region error is a use-after-free
+# (region-generation guard: "stale region deref"). One shot reads plausible
+# freed memory; looping recycles the region id so the guard fires
+# deterministically. See docs/impl/region/generations.md.
+(var kw-err-iters 0)
+(while (< kw-err-iters 400)  # odd number of keyword arguments
+  (let [[ok? _] (protect ((fn () ((fn (a &keys opts) opts) 1 :x 10 :y))))]
+    (assert (not ok?) "kwargs odd args error in protected fiber (no UAF)"))  # non-keyword key
+  (let [[ok? _] (protect ((fn () ((fn (a &keys opts) opts) 1 42 10))))]
+    (assert (not ok?) "kwargs non-keyword key error in protected fiber (no UAF)"))  # duplicate keyword key
+  (let [[ok? _] (protect ((fn () ((fn (a &keys opts) (get opts :x)) 1 :x 1 :x 2))))]
+    (assert (not ok?) "kwargs duplicate key error in protected fiber (no UAF)"))  # unknown &named parameter
+  (let [[ok? _] (protect ((fn ()
+                            ((fn (a &named host) host) 1 :host "db" :port 1))))]
+    (assert (not ok?) "named unknown key error in protected fiber (no UAF)"))
+  (assign kw-err-iters (+ kw-err-iters 1)))
+
+# The recovered error must be a well-formed, intact error struct — born in a
+# live region, not read out of the freed collection region. We assert the
+# spec-level contract (kind :argument-error, a non-empty :message string), NOT
+# any exact wording: a value salvaged from freed/recycled memory would fail to
+# be a struct, carry the wrong kind, or yield a garbage/empty message.
+(let [[ok? err] (protect ((fn () ((fn (a &keys opts) opts) 1 :x 10 :y))))]
+  (assert (not ok?) "kwargs odd args: signalled")
+  (assert (struct? err) "kwargs odd args: error is an intact struct")
+  (assert (= (get err :error) :argument-error)
+          "kwargs odd args: error kind is :argument-error")
+  (let [msg (get err :message)]
+    (assert (string? msg)
+            "kwargs odd args: :message is a string (not freed garbage)")
+    (assert (not (empty? msg))
+            "kwargs odd args: :message is non-empty (survived the freed region)")))

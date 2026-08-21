@@ -27,6 +27,33 @@ pub(super) enum CollectorParams<'s> {
     Named(&'s [Syntax]),
 }
 
+/// The collector marker spellings, recognized at exactly one point
+/// (`CollectorKind::of`). Adding a marker means a new variant and one
+/// `parse_params` match arm — not another copy of the mutual-exclusion
+/// and validation logic.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CollectorKind {
+    /// `&` — rest list
+    Rest,
+    /// `&keys` — keyword struct
+    Keys,
+    /// `&named` — named keyword parameters
+    Named,
+}
+
+impl CollectorKind {
+    fn of(name: &str) -> Option<CollectorKind> {
+        if crate::syntax::is_rest_marker(name) {
+            return Some(CollectorKind::Rest);
+        }
+        match name {
+            "&keys" => Some(CollectorKind::Keys),
+            "&named" => Some(CollectorKind::Named),
+            _ => None,
+        }
+    }
+}
+
 impl<'a> Analyzer<'a> {
     /// Check if an expression is a var or def form and return all names being defined.
     /// For simple defines like `(def x ...)`, returns one name.
@@ -65,7 +92,7 @@ impl<'a> Analyzer<'a> {
         match &syntax.kind {
             SyntaxKind::Symbol(name)
                 if name == "_"
-                    || name == "&"
+                    || crate::syntax::is_rest_marker(name)
                     || name == "&opt"
                     || name == "&keys"
                     || name == "&named" =>
@@ -86,7 +113,7 @@ impl<'a> Analyzer<'a> {
                 // split at & first to avoid treating the rest binding as a value slot
                 let amp_pos = items
                     .iter()
-                    .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+                    .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if crate::syntax::is_rest_marker(n)));
                 let pairs_end = amp_pos.unwrap_or(items.len());
                 // Extract names from value slots (odd indices within the pairs section)
                 for item in items[..pairs_end].iter().skip(1).step_by(2) {
@@ -148,16 +175,16 @@ impl<'a> Analyzer<'a> {
         items: &'s [Syntax],
         span: &Span,
     ) -> Result<(&'s [Syntax], Option<&'s Syntax>), String> {
-        let amp_pos = items
-            .iter()
-            .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+        let amp_pos = items.iter().position(
+            |s| matches!(&s.kind, SyntaxKind::Symbol(n) if crate::syntax::is_rest_marker(n)),
+        );
         match amp_pos {
             None => Ok((items, None)),
             Some(pos) => {
                 // Check for multiple &
                 let second = items[pos + 1..]
                     .iter()
-                    .any(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+                    .any(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if crate::syntax::is_rest_marker(n)));
                 if second {
                     return Err(format!("{}: multiple & in pattern", span));
                 }
@@ -190,55 +217,32 @@ impl<'a> Analyzer<'a> {
         items: &'s [Syntax],
         span: &Span,
     ) -> Result<ParsedParams<'s>, String> {
-        // Find positions of all markers
+        // Find positions of all markers. The collector kinds share one
+        // mutually-exclusive slot: a second collector of ANY kind is an
+        // error, enforced once here instead of per-spelling.
         let mut opt_pos = None;
-        let mut amp_pos = None; // &
-        let mut keys_pos = None; // &keys
-        let mut named_pos = None; // &named
+        let mut collector_marker: Option<(CollectorKind, usize)> = None;
 
         for (i, s) in items.iter().enumerate() {
             if let SyntaxKind::Symbol(name) = &s.kind {
-                match name.as_str() {
-                    "&opt" => {
-                        if opt_pos.is_some() {
-                            return Err(format!("{}: duplicate &opt", span));
-                        }
-                        opt_pos = Some(i);
+                if name == "&opt" {
+                    if opt_pos.is_some() {
+                        return Err(format!("{}: duplicate &opt", span));
                     }
-                    "&" => {
-                        if amp_pos.is_some() || keys_pos.is_some() || named_pos.is_some() {
-                            return Err(format!(
-                                "{}: multiple collectors (& / &keys / &named)",
-                                span
-                            ));
-                        }
-                        amp_pos = Some(i);
+                    opt_pos = Some(i);
+                } else if let Some(kind) = CollectorKind::of(name) {
+                    if collector_marker.is_some() {
+                        return Err(format!(
+                            "{}: multiple collectors (& / &keys / &named)",
+                            span
+                        ));
                     }
-                    "&keys" => {
-                        if amp_pos.is_some() || keys_pos.is_some() || named_pos.is_some() {
-                            return Err(format!(
-                                "{}: multiple collectors (& / &keys / &named)",
-                                span
-                            ));
-                        }
-                        keys_pos = Some(i);
-                    }
-                    "&named" => {
-                        if amp_pos.is_some() || keys_pos.is_some() || named_pos.is_some() {
-                            return Err(format!(
-                                "{}: multiple collectors (& / &keys / &named)",
-                                span
-                            ));
-                        }
-                        named_pos = Some(i);
-                    }
-                    _ => {}
+                    collector_marker = Some((kind, i));
                 }
             }
         }
 
-        // Determine collector position (earliest of &, &keys, &named)
-        let collector_pos = amp_pos.or(keys_pos).or(named_pos);
+        let collector_pos = collector_marker.map(|(_, i)| i);
 
         // Validate ordering: &opt must come before collector
         if let (Some(opt), Some(coll)) = (opt_pos, collector_pos) {
@@ -271,45 +275,48 @@ impl<'a> Analyzer<'a> {
         };
 
         // Parse collector
-        let collector = if let Some(pos) = amp_pos {
-            let remaining = &items[pos + 1..];
-            if remaining.len() != 1 {
-                return Err(format!(
-                    "{}: & must be followed by exactly one pattern",
-                    span
-                ));
-            }
-            Some(CollectorParams::Rest(&remaining[0]))
-        } else if let Some(pos) = keys_pos {
-            let remaining = &items[pos + 1..];
-            if remaining.len() != 1 {
-                return Err(format!(
-                    "{}: &keys must be followed by exactly one binding (symbol or destructure pattern)",
-                    span
-                ));
-            }
-            Some(CollectorParams::Keys(&remaining[0]))
-        } else if let Some(pos) = named_pos {
-            let remaining = &items[pos + 1..];
-            if remaining.is_empty() {
-                return Err(format!(
-                    "{}: &named must be followed by at least one symbol",
-                    span
-                ));
-            }
-            // Validate all are symbols
-            for s in remaining {
-                if s.as_symbol().is_none() {
+        let collector = match collector_marker {
+            Some((CollectorKind::Rest, pos)) => {
+                let remaining = &items[pos + 1..];
+                if remaining.len() != 1 {
                     return Err(format!(
-                        "{}: &named parameters must be symbols, got {}",
-                        span,
-                        s.kind_label()
+                        "{}: & must be followed by exactly one pattern",
+                        span
                     ));
                 }
+                Some(CollectorParams::Rest(&remaining[0]))
             }
-            Some(CollectorParams::Named(remaining))
-        } else {
-            None
+            Some((CollectorKind::Keys, pos)) => {
+                let remaining = &items[pos + 1..];
+                if remaining.len() != 1 {
+                    return Err(format!(
+                        "{}: &keys must be followed by exactly one binding (symbol or destructure pattern)",
+                        span
+                    ));
+                }
+                Some(CollectorParams::Keys(&remaining[0]))
+            }
+            Some((CollectorKind::Named, pos)) => {
+                let remaining = &items[pos + 1..];
+                if remaining.is_empty() {
+                    return Err(format!(
+                        "{}: &named must be followed by at least one symbol",
+                        span
+                    ));
+                }
+                // Validate all are symbols
+                for s in remaining {
+                    if s.as_symbol().is_none() {
+                        return Err(format!(
+                            "{}: &named parameters must be symbols, got {}",
+                            span,
+                            s.kind_label()
+                        ));
+                    }
+                }
+                Some(CollectorParams::Named(remaining))
+            }
+            None => None,
         };
 
         Ok(ParsedParams {
@@ -449,16 +456,16 @@ impl<'a> Analyzer<'a> {
         items: &'s [Syntax],
         span: &Span,
     ) -> Result<(&'s [Syntax], Option<&'s Syntax>), String> {
-        let amp_pos = items
-            .iter()
-            .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+        let amp_pos = items.iter().position(
+            |s| matches!(&s.kind, SyntaxKind::Symbol(n) if crate::syntax::is_rest_marker(n)),
+        );
         match amp_pos {
             None => Ok((items, None)),
             Some(pos) => {
                 // Validate: no second &
                 let has_second = items[pos + 1..]
                     .iter()
-                    .any(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+                    .any(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if crate::syntax::is_rest_marker(n)));
                 if has_second {
                     return Err(format!("{}: multiple & in struct pattern", span));
                 }

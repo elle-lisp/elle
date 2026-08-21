@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 12)
 
 # Regression test: let* + yield + calls that store heap objects externally.
 #
@@ -53,10 +53,6 @@
 
 (ev/sleep 0.05)
 
-(if (empty? errors)
-  (println "PASS: let* + yield + external heap store")
-  (begin
-    (println "FAIL: use-after-free detected:")
-    (each e in (freeze errors)
-      (println "  " e))
-    (exit 1)))
+(assert (empty? errors)
+        (string "use-after-free detected: " (string/join (freeze errors) "; ")))
+(println "PASS: let* + yield + external heap store")

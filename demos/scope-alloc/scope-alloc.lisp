@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 
 # Scope Allocation Workload — measuring escape analysis tiers
 #

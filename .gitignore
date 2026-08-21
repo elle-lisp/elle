@@ -26,11 +26,20 @@ demos/embedding/chost
 aws-models/
 lib/aws/*.lisp
 !lib/aws/sigv4.lisp
-wip.md
 
 # Node.js dependencies
 node_modules/
 package*.json
-wip.md
 .claude/
 demos/embedding/chost
+
+# Root-level markdown: ignore lowercase dev-notes (wip.md, why.md, …); keep only
+# explicitly-named SCREAMINGCAPS docs. Add a new doc here to track it.
+/*.md
+!/AGENTS.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/DEVLOG.md
+!/INSTALL.md
+!/QUICKSTART.md
+!/README.md

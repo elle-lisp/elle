@@ -5,9 +5,8 @@ Shared test helpers for the Elle test suite.
 ## Responsibility
 
 Provide canonical eval and setup functions so test files don't need to copy-paste their own variants. Includes:
-- Fresh VM creation with primitives and stdlib
-- Cached VM reuse for property tests (eliminates per-case bootstrap cost)
-- Symbol table context management
+- Fresh `Runtime` creation with primitives and stdlib
+- Cached `RuntimeCore` reuse for property tests (eliminates per-case bootstrap cost)
 - Proptest configuration respecting `PROPTEST_CASES` env var
 
 Does NOT:
@@ -15,44 +14,46 @@ Does NOT:
 - Define test cases (that's individual test files)
 - Manage test fixtures (that's `tests/fixtures/`)
 
+Every helper drives a `Runtime` (`elle::runtime`), the one per-instance owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. The compile state each eval names is the instance's own (`rt.parts()`), so two test instances never share stdlib exports or REPL definitions. `Runtime` also points the VM at its own symbol table and `CompileCtx`, so executed code that resolves through the VM sees this instance's state.
+
 ## Key functions
 
-### Fresh VM creation
+### Fresh Runtime creation
 
-**`eval_source(input: &str) -> Result<Value, String>`** — Evaluate Elle source through the full pipeline. Creates a fresh VM with primitives and stdlib on every call. Use this when you need a guaranteed-fresh VM (rare — prefer `eval_reuse` for property tests).
+**`eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R`** — Evaluate Elle source through the full pipeline and hand the result to `f` while the `Runtime` (and its heap) is still alive, tearing down only after `f` returns. A heap-valued result is a tagged pointer into that heap, so inspect it *inside* `f` and return only OWNED data (scalars, `String`, counts) — never the `Value` itself, which would dangle past teardown. Creates a fresh `Runtime` with primitives and stdlib on every call; use this when you need a guaranteed-fresh instance (rare — prefer `eval_reuse` for property tests).
 
 ```rust
 use crate::common::eval_source;
-let result = eval_source("(+ 1 2)").unwrap();
-assert_eq!(result, Value::int(3));
+eval_source("(+ 1 2)", |r| assert_eq!(r.unwrap(), Value::int(3)));
 ```
 
-**`eval_source_bare(input: &str) -> Result<Value, String>`** — Same as `eval_source` but without stdlib. Creates a fresh VM on every call. Prelude macros (defn, let*, ->, ->>, when, unless, try/catch, etc.) are still available — they're loaded by `compile_all`'s internal `Expander::load_prelude`, not by `init_stdlib`. Use this for tests that never call stdlib functions (map, filter, fold, etc.).
+**`eval_source_bare<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R`** — Same as `eval_source` but without stdlib. Creates a fresh `Runtime` on every call. Prelude macros (defn, let*, ->, ->>, when, unless, try/catch, etc.) are still available — they're loaded into the `CompileCtx`'s expander, not by stdlib loading. Use this for tests that never call stdlib functions (map, filter, fold, etc.).
 
 ```rust
 use crate::common::eval_source_bare;
-let result = eval_source_bare("(+ 1 2)").unwrap();
-assert_eq!(result, Value::int(3));
+eval_source_bare("(+ 1 2)", |r| assert_eq!(r.unwrap(), Value::int(3)));
 ```
 
-**`setup() -> (SymbolTable, VM)`** — Returns an initialized (SymbolTable, VM) pair with primitives and stdlib registered. Sets the symbol table context but does NOT set VM context. Use this when you need direct access to the VM or symbol table (e.g., calling `analyze()` or `compile()` directly).
+**`eval_source_unscheduled<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R`** — Like `eval_source` (stdlib loaded) but runs without the async scheduler — a plain `vm.execute`, no `ev/run` wrapping. Same scoped-callback discipline (inspect inside `f`). Use this only for the rare test that asserts behavior outside a scheduler.
+
+**`setup() -> Runtime`** — Returns an initialized `Runtime` with primitives and stdlib registered, contexts installed. Hand out the disjoint `(vm, symbols, cctx)` borrows via `rt.parts()`. Use this when you need direct access to the VM, symbol table, or compile context (e.g., calling `compile_file()` directly).
 
 ```rust
 use crate::common::setup;
-let (mut symbols, mut vm) = setup();
-let result = analyze("(+ 1 2)", &mut symbols, &mut vm, "<test>").unwrap();
+let mut rt = setup();
+let (vm, symbols, cctx) = rt.parts();
 ```
 
-### Cached VM reuse (for property tests)
+### Cached reuse (for property tests)
 
-**`eval_reuse(input: &str) -> Result<Value, String>`** — Evaluate Elle source with a cached VM (primitives + stdlib). The VM is created once per thread and reused across calls. Between calls, the fiber is reset and globals are restored to their post-initialization snapshot. **Use this for property tests that need stdlib functions** (map, filter, reverse, etc.).
+**`eval_reuse(input: &str) -> Result<Value, String>`** — Evaluate Elle source with a cached `RuntimeCore` (primitives + stdlib). The core is created once per thread and reused across calls. Between calls the fiber is reset. **Use this for property tests that need stdlib functions** (map, filter, reverse, etc.).
 
 ```rust
 use crate::common::eval_reuse as eval_source;
 let result = eval_source("(reverse (list 1 2 3))").unwrap();
 ```
 
-**`eval_reuse_bare(input: &str) -> Result<Value, String>`** — Evaluate Elle source with a cached VM (primitives only, no stdlib). Same caching behavior as `eval_reuse`. **Use this for property tests that don't need stdlib** — this is the common case. Most property test files alias this as `eval_source`:
+**`eval_reuse_bare(input: &str) -> Result<Value, String>`** — Evaluate Elle source with a cached `RuntimeCore` (primitives only, no stdlib). Same caching behavior as `eval_reuse`. **Use this for property tests that don't need stdlib** — this is the common case. Most property test files alias this as `eval_source`:
 
 ```rust
 use crate::common::eval_reuse_bare as eval_source;
@@ -87,51 +88,47 @@ proptest! {
 
 ## Caching strategy
 
-The cached VM approach eliminates per-case bootstrap cost:
+The cached `RuntimeCore` approach eliminates per-case bootstrap cost:
 
-1. **First call**: Create VM, register primitives, load stdlib, snapshot globals
-2. **Subsequent calls**: Reset fiber, restore globals from snapshot, reuse VM
-3. **Between cases**: Fiber is reset, globals are restored, JIT cache is cleared
+1. **First call**: Create the core, register primitives, load stdlib, build the `CompileCtx`
+2. **Subsequent calls**: Reset the fiber, clear the JIT cache, reuse the core
+3. **Between cases**: Fiber is reset and the JIT cache is cleared
+
+`RuntimeCore` (not `Runtime`) is cached deliberately: a `Runtime` runs a teardown sweep on `Drop`, and a thread-local that drops at thread exit would run that sweep at an unpredictable point. `RuntimeCore` has no such `Drop`, so caching it is safe.
 
 This is safe because:
-- Each test case is independent (globals are restored)
 - Fiber state is reset (no cross-case contamination)
 - JIT cache is cleared (no stale compiled code)
 
 ## Files
 
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~180 | `eval_source`, `eval_source_bare`, `eval_reuse`, `eval_reuse_bare`, `setup`, `proptest_cases` |
+| File | Content |
+|------|---------|
+| `mod.rs` | `eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`, `setup`, `proptest_cases` |
 
 ## Invariants
 
-1. **Symbol table context must be set during stdlib init.** The `setup()` function sets context before `init_stdlib()` so that macros using `gensym` work correctly.
+1. **Each cached core points its VM at its own symbol table.** `RuntimeCore::bare` wires this up before stdlib load, so stdlib-load gensym (and all name resolution) resolves through it.
 
-2. **Context must be cleared after use.** Leaving context pointers set can affect subsequent tests. `eval_source()` and `eval_source_bare()` clear context after use; `setup()` does not (caller is responsible).
+2. **Cached cores are thread-local.** Each thread has its own cache. No synchronization needed.
 
-3. **Cached VMs are thread-local.** Each thread has its own cache. No synchronization needed.
+3. **Fiber is reset between cases.** `reset_fiber()` clears the operand stack and call stack, ensuring clean state for the next case.
 
-4. **Globals snapshot is taken post-initialization.** The snapshot includes all stdlib definitions. Between cases, globals are restored to this snapshot.
-
-5. **Fiber is reset between cases.** `reset_fiber()` clears the operand stack and call stack, ensuring clean state for the next case.
-
-6. **JIT cache is cleared between cases.** Prevents stale compiled code from affecting subsequent cases.
+4. **JIT cache is cleared between cases.** Prevents stale compiled code from affecting subsequent cases.
 
 ## When to use each function
 
 | Function | When to use |
 |----------|------------|
-| `eval_source()` | Integration tests that need a guaranteed-fresh VM |
+| `eval_source()` | Integration tests that need a guaranteed-fresh Runtime |
 | `eval_source_bare()` | Integration tests that don't need stdlib |
+| `eval_source_unscheduled()` | Tests asserting behavior outside the async scheduler |
 | `eval_reuse()` | Property tests that need stdlib functions |
 | `eval_reuse_bare()` | Property tests that don't need stdlib (common case) |
-| `setup()` | Tests that need direct access to VM or SymbolTable |
+| `setup()` | Tests that need direct access to VM, SymbolTable, or CompileCtx |
 | `proptest_cases()` | All property tests (inside `proptest!` block) |
 
 ## Common pitfalls
 
-- **Using `eval_source()` in property tests**: Creates a fresh VM for every case, which is slow. Use `eval_reuse()` or `eval_reuse_bare()` instead.
-- **Forgetting to set context in `setup()`**: If you call `setup()` and then use macros, set context manually: `set_vm_context(&mut vm as *mut VM); set_symbol_table(&mut symbols as *mut SymbolTable);`
-- **Not clearing context after `setup()`**: If you use `setup()` and then call other test functions, clear context: `set_vm_context(std::ptr::null_mut()); set_symbol_table(std::ptr::null_mut());`
-- **Assuming globals are isolated**: Globals are restored between cases, but if you modify a global and then call another test function, the modification persists. Use `eval_reuse()` or `eval_reuse_bare()` to ensure isolation.
+- **Using `eval_source()` in property tests**: Creates a fresh Runtime for every case, which is slow. Use `eval_reuse()` or `eval_reuse_bare()` instead.
+- **Holding `rt.parts()` borrows too long**: `parts()` hands out disjoint `&mut` borrows of the VM, symbol table, and compile context; finish using them before calling `parts()` again.

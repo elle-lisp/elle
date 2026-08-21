@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # vm/config tests
 #
 # Tests the unified runtime configuration system: vm/config read/write,
@@ -55,8 +55,14 @@
 
 # ── Trace keyword sets ────────────────────────────────────────────────
 
-# Initially empty (no --trace flag)
-(assert (empty? (vm/config :trace)) "trace set initially empty")
+# The harness may start this process with trace flags of its own
+# (ELLE_TEST_FLAGS=--trace=...), so the initial set is a baseline to
+# restore at the end of this section — asserted only to lack the
+# keywords the section sets itself.
+(def saved-trace (vm/config :trace))
+(assert (not (contains? saved-trace :call)) "test keyword :call not pre-set")
+(assert (not (contains? saved-trace :signal)) "test keyword :signal not pre-set")
+(assert (not (contains? saved-trace :fiber)) "test keyword :fiber not pre-set")
 
 # Setting trace keywords
 (vm/config-set :trace |:call|)
@@ -84,8 +90,9 @@
   (assert (contains? t :mlir) "future flag :mlir accepted")
   (assert (contains? t :gpu) "future flag :gpu accepted"))
 
-# Clean up
-(vm/config-set :trace ||)
+# Restore the harness's own trace flags: vm/config-set :trace replaces
+# the whole set, so every set above dropped them.
+(vm/config-set :trace saved-trace)
 
 # ── Custom JIT policy via closure ─────────────────────────────────────
 

@@ -147,17 +147,3 @@ resolves at the call site. Used for anaphoric macros:
 ```
 
 `(syntax->datum stx)` strips scope information, returning the plain value.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~520 | `Syntax`, `SyntaxKind`, `ScopeId`, `set_scopes_recursive` |
-| `span.rs` | ~50 | `Span` type |
-| `expand/mod.rs` | ~280 | `Expander` struct, context, entry point |
-| `expand/macro_expand.rs` | ~80 | VM-based macro expansion via `eval_syntax` |
-| `expand/quasiquote.rs` | ~200 | Quasiquote-to-code conversion |
-| `expand/introspection.rs` | ~100 | `macro?`, `expand-macro` |
-| `expand/tests.rs` | ~537 | Expansion tests |
-| `convert.rs` | ~100 | `Syntax` ↔ `Value` conversion |
-| `display.rs` | ~100 | Pretty printing |

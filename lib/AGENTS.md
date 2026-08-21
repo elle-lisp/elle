@@ -35,7 +35,7 @@ Agent guide for `lib/http.lisp` — Pure Elle HTTP/1.1 client and server.
 ## Purpose
 
 HTTP/1.1 over TCP using Elle's existing stream and scheduler primitives.
-Single file. No Rust changes (other than `port/path`, added in Chunk 0).
+Single file, pure Elle (it relies on the native `port/path` primitive).
 
 HTTPS and compression are opt-in via `&named` args on the module init:
 

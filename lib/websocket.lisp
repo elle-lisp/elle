@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/websocket.lisp — WebSocket client and server (RFC 6455)
 ##
 ## Parameterized module:
@@ -99,15 +99,14 @@
 
   (defn open-transport [parsed]
     "Open transport to parsed URL's host:port."
-    (let [ip (first (sys/resolve parsed:host))]
-      (if (= parsed:scheme "wss")
-        (begin
-          (when (nil? tls)
-            (error {:error :ws-error
-                    :reason :tls-not-configured
-                    :message "wss:// requires :tls plugin passed to (import \"std/websocket\")"}))
-          (tls-transport (tls:connect parsed:host parsed:port {})))
-        (tcp-transport (tcp/connect ip parsed:port)))))
+    (if (= parsed:scheme "wss")
+      (begin
+        (when (nil? tls)
+          (error {:error :ws-error
+                  :reason :tls-not-configured
+                  :message "wss:// requires :tls plugin passed to (import \"std/websocket\")"}))
+        (tls-transport (tls:connect parsed:host parsed:port {})))
+      (tcp-transport (tcp/connect parsed:host parsed:port))))
 
   ## ── Transport helpers ───────────────────────────────────────────────
 

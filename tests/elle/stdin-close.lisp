@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/stdin-close.lisp — verify (port/close *stdin*) cancels
 ## an in-flight read and the child program exits cleanly.
 ##
@@ -23,7 +23,10 @@
         "./target/release/elle"
         "./target/debug/elle")))
 
-(def child-file (string "/tmp/elle-stdin-close-child-" (sys/pid) ".lisp"))
+# The scratch dir is already unique per process, so the child script
+# needs no pid suffix.
+(def scratch (file/mktempdir))
+(def child-file (path/join scratch "stdin-close-child.lisp"))
 
 (def child-code
   "## Spawn a fiber that blocks on stdin, close *stdin* from the main
@@ -52,5 +55,7 @@
           (string "child must exit 0 after close-stdin; got exit=" (get r :exit)))
   (assert (string/contains? (or (get r :stderr) "") "child: exiting")
           (string "child must reach the 'exiting' line; stderr=" (get r :stderr))))
+
+(file/delete-dir-all scratch)
 
 (println "stdin-close: all tests passed")

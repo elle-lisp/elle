@@ -4,7 +4,6 @@ use super::Expander;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::vm::VM;
-use crate::Value;
 
 impl Expander {
     /// Convert quasiquote to code that constructs the value at runtime
@@ -86,7 +85,11 @@ impl Expander {
             // together with the definition-site scopes ensures correct
             // resolution even when the call site shadows the same name.
             SyntaxKind::Symbol(_) => Ok(Syntax::new(
-                SyntaxKind::SyntaxLiteral(Value::syntax(syntax.clone())),
+                // Carry the template symbol as plain compile-time data (its scope
+                // set rides along in the `Syntax`), NOT a heap `Value`. The
+                // analyzer materializes it as a fresh ordinary allocation per
+                // execution.
+                SyntaxKind::SyntaxLiteral(std::rc::Rc::new(syntax.clone())),
                 span.clone(),
             )),
 

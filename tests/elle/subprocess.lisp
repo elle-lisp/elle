@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Subprocess integration tests
 
 
@@ -79,6 +79,26 @@
              (subprocess/kill proc :sigterm)
              (subprocess/wait proc))]
   (assert (not (= exit 0)) "subprocess/kill :sigterm: nonzero exit"))
+
+# ── child signal mask is reset ───────────────────────────────────────────────
+#
+# A spawned child must NOT inherit elle's internal signal mask. Elle blocks the
+# absorb set on the main thread and ALL signals on worker threads (for its
+# signalfd machinery); fork copies that mask and exec preserves it. If SIGTERM
+# leaked in pending-blocked, the child would ignore `subprocess/kill … :sigterm`
+# (only SIGKILL would land), wedging a clean shutdown.
+#
+# Assert the BEHAVIOR, not the mechanism (portable — no /proc, and it exercises
+# the real worker-thread fork path under the runner): a child sent SIGTERM must
+# die FROM SIGTERM (subprocess/wait → -15, the negated signal number), not
+# survive to exit normally (→ 0). A leaked mask resolves in ~1s (the sleep runs
+# out) rather than hanging, and reports the exit code it saw instead.
+(let [proc (subprocess/exec "sleep" ["1"])]
+  (subprocess/kill proc :sigterm)
+  (let [exit (subprocess/wait proc)]
+    (assert (= exit -15)
+            (string "child did not die from SIGTERM (subprocess/wait=" exit
+                    ") — elle's blocked signal mask leaked into the child"))))
 
 # ── port/lines with subprocess ────────────────────────────────────────────────
 

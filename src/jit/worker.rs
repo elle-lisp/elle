@@ -43,10 +43,10 @@ unsafe impl Send for JitResult {}
 
 /// Background JIT compilation worker.
 ///
-/// Owns a dedicated thread with a persistent `FiberHeap` for
-/// `translate_const` allocations (String/Keyword/Symbol constants).
-/// The heap is never freed — constants embedded in native code remain
-/// valid for the lifetime of the process.
+/// Owns a dedicated thread that Cranelift-compiles LIR to native code.
+/// Compilation allocates no Elle values: string constants arrive
+/// pre-resolved as `ValueConst`, and symbols/keywords are immediates — so the
+/// worker needs no heap of its own.
 pub(crate) struct JitWorker {
     tx: crossbeam_channel::Sender<JitTask>,
     rx: crossbeam_channel::Receiver<JitResult>,
@@ -64,12 +64,6 @@ impl JitWorker {
             .name("elle-jit".into())
             .spawn(move || {
                 crate::io::sigfd::mask_all_signals_on_this_thread();
-                // Install a persistent fiber heap on this thread.
-                // translate_const allocates String/Keyword/Symbol Values
-                // in the thread-local heap. Since the heap is never freed,
-                // these constants remain valid (kept reachable via
-                // JitCode::closure_constants).
-                crate::value::fiberheap::install_root_heap();
 
                 while let Ok(task) = task_rx.recv() {
                     let key = task.bytecode_key;
@@ -120,15 +114,24 @@ impl JitWorker {
 
 /// Prepare a `JitTask` from a LirFunction by cloning and stripping
 /// non-Send fields (syntax, doc).
+///
+/// `display_name` backfills a nameless LIR (the common case — lowering
+/// names few functions) from the closure template, so the compile records
+/// a readable entry in the code-address registry
+/// (docs/impl/jit.md § "The code-address registry").
 pub(crate) fn prepare_task(
     lir: &LirFunction,
     self_sym: Option<SymbolId>,
     symbol_names: HashMap<u32, String>,
     bytecode_key: usize,
+    display_name: Option<&str>,
 ) -> JitTask {
     let mut lir = lir.clone();
     lir.syntax = None;
     lir.doc = None;
+    if lir.name.is_none() {
+        lir.name = display_name.map(String::from);
+    }
     JitTask {
         lir,
         self_sym,
@@ -136,3 +139,9 @@ pub(crate) fn prepare_task(
         bytecode_key,
     }
 }
+
+// A string literal lowers to `MaterializeConst` in every position (value:
+// `HirKind::String`; pattern: the materialize-compare-free in
+// `lir/lower/pattern.rs`), which the JIT translates via
+// `elle_jit_materialize_const` — so no raw `LirConst::String` reaches the
+// translator.

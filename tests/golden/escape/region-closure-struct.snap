@@ -1,0 +1,68 @@
+[needs_capture]
+  b0(make-adder) local mutated=false immutable=true needs_capture=false
+  b1(__file_expr_#0) local mutated=false immutable=false needs_capture=false
+  b2(__file_expr_#1) local mutated=false immutable=false needs_capture=false
+  b3(x) param mutated=false immutable=true needs_capture=false
+  b4(box) local mutated=false immutable=true needs_capture=false
+  b5(~) local mutated=false immutable=true needs_capture=false
+  b6(~) local mutated=false immutable=true needs_capture=false
+  b7(y) param mutated=false immutable=true needs_capture=false
+  b8(~) local mutated=false immutable=true needs_capture=false
+  b9(~) local mutated=false immutable=true needs_capture=false
+  b10(~) local mutated=false immutable=true needs_capture=false
+  b11(~) local mutated=false immutable=true needs_capture=false
+  b12(a) local mutated=false immutable=true needs_capture=false
+  b13(~) local mutated=false immutable=true needs_capture=false
+  b14(~) local mutated=false immutable=true needs_capture=false
+  b15(v) local mutated=false immutable=true needs_capture=false
+  b16(~) local mutated=false immutable=true needs_capture=false
+  b17(G#0) local mutated=false immutable=true needs_capture=false
+  b18(G#1) local mutated=false immutable=true needs_capture=false
+  b19(~) local mutated=false immutable=true needs_capture=false
+  b20(~) local mutated=false immutable=true needs_capture=false
+[lambda_captures]
+  #1 params=[b3(x)] captures=[]
+  #9 params=[] captures=[b4(box)<Local>]
+  #16 params=[b7(y)] captures=[b4(box)<Local>]
+[return_frontier]
+  [r2, r20, r4, r9]
+[suppressed_decref_regions]
+  []
+[region_instrs]
+  ; entry <anon>
+    block0: DecrefRegion s0
+    block0: DecrefValueRegion v19
+    block0: DecrefValueRegion v22
+    block0: DecrefValueRegion v29
+    block0: DecrefValueRegion v33
+    block2: DecrefRegion s1
+    block2: DecrefRegion s2
+    block4: IncrefValueRegion v63
+    block4: DecrefValueRegion v64
+    block3: DecrefValueRegion v66
+    block3: DecrefValueRegion v68
+    block3: DecrefRegion s3
+    block3: IncrefValueRegion v73
+    block3: DecrefValueRegion v74
+  ; closure[0] <anon>
+    block0: DecrefValueRegion v5
+    block0: IncrefRegion s4
+    block0: IncrefRegion s4
+    block0: DecrefValueRegion v19
+    block0: TailCall defer_callee_release=false
+    block0: IncrefValueRegion v18
+    block0: DecrefValueRegion v21
+    block0: DecrefRegion s5
+    block0: DecrefRegion s6
+  ; closure[1] <anon>
+    block0: TailCall defer_callee_release=false
+    block0: IncrefValueRegion v2
+    block0: DecrefValueRegion v3
+  ; closure[2] <anon>
+    block0: DecrefValueRegion v13
+    block0: DecrefValueRegion v15
+    block0: DecrefValueRegion v20
+    block0: DecrefValueRegion v23
+    block0: TailCall defer_callee_release=false
+    block0: IncrefValueRegion v29
+    block0: DecrefValueRegion v30

@@ -32,9 +32,20 @@
 //!                      Vec<AnnotatedSyntax>
 //! ```
 
+use super::pos::{BlankCount, ByteOffset, LineNum};
 use crate::syntax::{Span, Syntax, SyntaxKind};
 
 // ── Trivia types ──────────────────────────────────────────────
+
+/// A comment's text and source position, handed from the lexer/comment layer
+/// to [`collect_trivia`]. A named replacement for what was an anonymous
+/// `(String, usize, u32)` tuple, so the offset and line can't be transposed.
+#[derive(Debug, Clone)]
+pub struct CommentInfo {
+    pub text: String,
+    pub offset: ByteOffset,
+    pub line: LineNum,
+}
 
 /// A piece of source trivia — a comment or blank lines.
 /// Positioned by byte offset for attachment to Syntax nodes.
@@ -44,21 +55,21 @@ pub enum Trivia {
     /// `text` includes the `#` prefix, with trailing newline stripped.
     Comment {
         text: String,
-        byte_offset: usize,
-        line: u32,
+        byte_offset: ByteOffset,
+        line: LineNum,
     },
     /// One or more consecutive blank lines.
     BlankLines {
-        count: u32,
-        byte_offset: usize,
+        count: BlankCount,
+        byte_offset: ByteOffset,
         /// Line number of the first blank line.
-        line: u32,
+        line: LineNum,
     },
 }
 
 impl Trivia {
     /// Byte offset where this trivia starts in the source.
-    pub fn byte_offset(&self) -> usize {
+    pub fn byte_offset(&self) -> ByteOffset {
         match self {
             Trivia::Comment { byte_offset, .. } => *byte_offset,
             Trivia::BlankLines { byte_offset, .. } => *byte_offset,
@@ -66,7 +77,7 @@ impl Trivia {
     }
 
     /// Line number of this trivia.
-    pub fn line(&self) -> u32 {
+    pub fn line(&self) -> LineNum {
         match self {
             Trivia::Comment { line, .. } => *line,
             Trivia::BlankLines { line, .. } => *line,
@@ -123,22 +134,20 @@ impl AnnotatedSyntax {
 /// Comments come from the lexer's `CommentMap` (which has accurate
 /// byte offsets). Blank lines are scanned from the source directly.
 /// This function merges both sources into a single sorted list.
-pub fn collect_trivia(
-    source: &str,
-    comments: &[(String, usize, u32)], // (text, byte_offset, line)
-) -> Vec<Trivia> {
+pub fn collect_trivia(source: &str, comments: &[CommentInfo]) -> Vec<Trivia> {
     let mut trivia: Vec<Trivia> = Vec::new();
 
     // Add comments from the lexer
-    for (text, byte_offset, line) in comments {
+    for ci in comments {
         trivia.push(Trivia::Comment {
-            text: text.clone(),
-            byte_offset: *byte_offset,
-            line: *line,
+            text: ci.text.clone(),
+            byte_offset: ci.offset,
+            line: ci.line,
         });
     }
 
-    // Scan for blank lines
+    // Scan for blank lines. The running offset/line/count stay raw integers
+    // and are wrapped in their position newtypes only at the push site.
     let mut offset = 0usize;
     let mut blank_start: Option<(usize, u32)> = None;
     let mut blank_count: u32 = 0;
@@ -156,9 +165,9 @@ pub fn collect_trivia(
             if let Some((boff, line)) = blank_start.take() {
                 if blank_count > 0 {
                     trivia.push(Trivia::BlankLines {
-                        count: blank_count,
-                        byte_offset: boff,
-                        line,
+                        count: BlankCount::new(blank_count),
+                        byte_offset: ByteOffset::new(boff),
+                        line: LineNum::new(line),
                     });
                 }
                 blank_count = 0;
@@ -170,9 +179,9 @@ pub fn collect_trivia(
     // Flush trailing blank lines
     if let Some((boff, line)) = blank_start.take() {
         trivia.push(Trivia::BlankLines {
-            count: blank_count,
-            byte_offset: boff,
-            line,
+            count: BlankCount::new(blank_count),
+            byte_offset: ByteOffset::new(boff),
+            line: LineNum::new(line),
         });
     }
 
@@ -183,18 +192,22 @@ pub fn collect_trivia(
 
 // ── Attachment pass ───────────────────────────────────────────
 
-/// Line number (1-based) of a byte offset in `source`.
-fn line_at_offset(source: &str, offset: usize) -> u32 {
+/// Line number (1-based) of a byte offset in `source`. A free function (not a
+/// closure) so both `attach_trivia_to_forms` and `attach_to_children` share it.
+/// Iterates `char_indices`, so `i` is a BYTE index — comparing a char index
+/// (`chars().enumerate()`) against a byte offset would misplace every comment
+/// after the first non-ASCII source byte.
+fn line_at_offset(source: &str, offset: ByteOffset) -> LineNum {
     let mut line: u32 = 1;
     for (i, ch) in source.char_indices() {
-        if i >= offset {
+        if i >= offset.get() {
             break;
         }
         if ch == '\n' {
             line += 1;
         }
     }
-    line
+    LineNum::new(line)
 }
 
 /// Attach trivia to top-level Syntax forms.
@@ -218,8 +231,10 @@ fn attach_trivia_to_forms(
     }
 
     // Pre-compute span starts for looking ahead to next form
-    let form_spans: Vec<(usize, usize)> =
-        forms.iter().map(|f| (f.span.start, f.span.end)).collect();
+    let form_spans: Vec<(ByteOffset, ByteOffset)> = forms
+        .iter()
+        .map(|f| (ByteOffset::new(f.span.start), ByteOffset::new(f.span.end)))
+        .collect();
 
     let mut all_attached = Vec::new();
     let mut trivia_idx: usize = 0;
@@ -231,7 +246,7 @@ fn attach_trivia_to_forms(
         let mut leading = Vec::new();
         while trivia_idx < trivia.len() {
             let t = &trivia[trivia_idx];
-            if t.byte_offset() >= span.start {
+            if t.byte_offset() >= ByteOffset::new(span.start) {
                 break;
             }
             leading.push(t.clone());
@@ -247,11 +262,11 @@ fn attach_trivia_to_forms(
         let mut trailing = Vec::new();
         let is_last_form = form_idx + 1 >= form_spans.len();
         if !is_last_form {
-            let form_end_line = line_at_offset(source, span.end);
+            let form_end_line = line_at_offset(source, ByteOffset::new(span.end));
             let next_start = form_spans
                 .get(form_idx + 1)
                 .map(|(s, _)| *s)
-                .unwrap_or(usize::MAX);
+                .unwrap_or(ByteOffset::MAX);
 
             // Collect only comments on the same line as the form ends
             while trivia_idx < trivia.len() {
@@ -325,7 +340,7 @@ fn attach_to_children(
         let mut leading = Vec::new();
         while *trivia_idx < trivia.len() {
             let t = &trivia[*trivia_idx];
-            if t.byte_offset() >= span.start {
+            if t.byte_offset() >= ByteOffset::new(span.start) {
                 break;
             }
             leading.push(t.clone());
@@ -337,24 +352,25 @@ fn attach_to_children(
 
         // Skip trivia items that fall inside this child's span but were
         // not consumed by grandchildren (e.g. blank lines inside strings).
-        while *trivia_idx < trivia.len() && trivia[*trivia_idx].byte_offset() < span.end {
+        while *trivia_idx < trivia.len()
+            && trivia[*trivia_idx].byte_offset() < ByteOffset::new(span.end)
+        {
             *trivia_idx += 1;
         }
 
-        // Trailing trivia: after this child but before the next child (or
-        // the parent's close). Only comments on the SAME line as the child
-        // ends are inline-trailing; an own-line comment is a *leading*
-        // comment of the following child, so it is left for the next
-        // child's leading collection (matching the top-level pass). The
-        // last child has no following sibling, so everything up to the
-        // parent's close attaches to it — otherwise it would be dropped by
-        // the parent's inside-span skip above.
+        // Trailing trivia: after this child but before the next child (or the
+        // parent's close). Only a comment on the SAME line as the child ends is
+        // inline-trailing; an own-line comment is a *leading* comment of the
+        // following child, so it is left for the next child's leading collection
+        // (matching the top-level pass). The last child has no following sibling,
+        // so everything up to the parent's close attaches to it — otherwise the
+        // caller's inside-span skip would drop it.
         let is_last = i + 1 == children.len();
         let next_start = children
             .get(i + 1)
-            .map(|c| c.span.start)
-            .unwrap_or(parent.span.end);
-        let child_end_line = line_at_offset(source, span.end);
+            .map(|c| ByteOffset::new(c.span.start))
+            .unwrap_or(ByteOffset::new(parent.span.end));
+        let child_end_line = line_at_offset(source, ByteOffset::new(span.end));
         let mut trailing = Vec::new();
         while *trivia_idx < trivia.len() {
             let t = &trivia[*trivia_idx];
@@ -389,92 +405,4 @@ fn attach_to_children(
 // ── Tests ─────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_collect_trivia_empty() {
-        let trivia = collect_trivia("", &[]);
-        assert!(trivia.is_empty());
-    }
-
-    #[test]
-    fn test_collect_trivia_no_trivia() {
-        let trivia = collect_trivia("(+ 1 2)", &[]);
-        assert!(trivia.is_empty());
-    }
-
-    #[test]
-    fn test_collect_trivia_comment() {
-        let comments = vec![("# hello".to_string(), 0, 1)];
-        let trivia = collect_trivia("# hello\n(+ 1 2)", &comments);
-        assert_eq!(trivia.len(), 1);
-        assert!(matches!(&trivia[0], Trivia::Comment { text, .. } if text == "# hello"));
-    }
-
-    #[test]
-    fn test_collect_trivia_blank_lines() {
-        let trivia = collect_trivia("a\n\n\nb", &[]);
-        assert_eq!(trivia.len(), 1);
-        assert!(matches!(&trivia[0], Trivia::BlankLines { count: 2, .. }));
-    }
-
-    #[test]
-    fn test_collect_trivia_sorted() {
-        let comments = vec![("# second".to_string(), 5, 2)];
-        let source = "# first\n# second\n42";
-        let mut trivia = collect_trivia(source, &comments);
-        // Add first comment manually (it's not in comments because it would
-        // be at byte offset 0)
-        trivia.push(Trivia::Comment {
-            text: "# first".to_string(),
-            byte_offset: 0,
-            line: 1,
-        });
-        trivia.sort_by_key(|t| t.byte_offset());
-        assert!(trivia[0].byte_offset() < trivia[1].byte_offset());
-    }
-
-    #[test]
-    fn test_annotated_atom() {
-        let syntax = Syntax::new(SyntaxKind::Int(42), Span::new(0, 2, 1, 1));
-        let (annotated, dangling) = AnnotatedSyntax::build_toplevel(vec![syntax], &[], "42");
-        assert_eq!(annotated.len(), 1);
-        assert!(matches!(annotated[0].kind(), SyntaxKind::Int(42)));
-        assert!(annotated[0].leading.is_empty());
-        assert!(annotated[0].children.is_empty());
-        assert!(dangling.is_empty());
-    }
-
-    #[test]
-    fn test_annotated_with_leading_comment() {
-        let syntax = Syntax::new(SyntaxKind::Int(42), Span::new(9, 11, 2, 1));
-        let trivia = vec![Trivia::Comment {
-            text: "# before".to_string(),
-            byte_offset: 0,
-            line: 1,
-        }];
-        let (annotated, dangling) =
-            AnnotatedSyntax::build_toplevel(vec![syntax], &trivia, "# before\n42");
-        assert_eq!(annotated.len(), 1);
-        assert_eq!(annotated[0].leading.len(), 1);
-        assert!(
-            matches!(&annotated[0].leading[0], Trivia::Comment { text, .. } if text == "# before")
-        );
-        assert!(dangling.is_empty());
-    }
-
-    #[test]
-    fn test_annotated_list_children() {
-        let syntax = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("+".into()), Span::new(1, 2, 1, 2)),
-                Syntax::new(SyntaxKind::Int(1), Span::new(3, 4, 1, 4)),
-                Syntax::new(SyntaxKind::Int(2), Span::new(5, 6, 1, 6)),
-            ]),
-            Span::new(0, 7, 1, 1),
-        );
-        let (annotated, _dangling) = AnnotatedSyntax::build_toplevel(vec![syntax], &[], "(+ 1 2)");
-        assert_eq!(annotated[0].children.len(), 3);
-    }
-}
+mod tests;

@@ -19,7 +19,6 @@ Provide the complete Elle implementation:
 | `lib.rs` | Public API exports, crate documentation |
 | `main.rs` | CLI entry point (REPL, file execution, lint, LSP, rewrite) |
 | `arithmetic.rs` | Unified arithmetic operations (shared by VM and primitives) |
-| `context.rs` | Thread-local VM and symbol table context |
 | `plugin.rs` | Dynamic plugin loading for `.so` cdylib crates |
 | `path.rs` | UTF-8 path operations (wraps camino, path-clean, pathdiff) |
 
@@ -80,14 +79,3 @@ Source locations flow through the entire pipeline: Syntax spans → HIR spans �
 - `tests/` — Comprehensive test suite
 - `examples/` — Executable semantics documentation
 - `plugins/` — Dynamically-loaded plugin crates
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `lib.rs` | 75 | Public API exports |
-| `main.rs` | 433 | CLI entry point |
-| `arithmetic.rs` | 270 | Unified arithmetic operations |
-| `context.rs` | 56 | Thread-local VM/symbol table context |
-| `plugin.rs` | 102 | Plugin loading |
-| `path.rs` | 359 | UTF-8 path operations |

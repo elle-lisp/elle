@@ -1,27 +1,26 @@
 # Testing Strategy
 
-Where every test belongs and how to run them.
+Which *kind* of test to write, and where it belongs.
+
+> For how the test systems work and how to run them — the agent-first runner
+> (`elle test`), the session DB, `make smoke`/`make test`, reading results — see
+> [`docs/testing.md`](../testing.md). This document is the **decision tree**:
+> given a thing to test, is it an Elle script or a Rust test, and which kind?
 
 ## Test execution order
 
+`make test` gates in this order; fail fast, cheapest first:
 
-Both locally and in CI, tests run in this order. Fail fast: if a cheaper tier
-fails, skip the expensive ones.
+| Tier | What | Purpose |
+|------|------|---------|
+| 1 | `make smoke` → `elle test tests/elle/*.lisp` | The Elle corpus (semantics) across the vm and jit policies, in one process, recorded to a session DB |
+| 2 | doctests + the embedding demo | Documentation examples and the C/Rust host |
+| 3 | `cargo test` (fmt, clippy, crosscheck, rustdoc, unit, integration) | Rust tests (compile errors, error messages, type inspection); the cross-check compiles the macOS `cfg(target_os)` arms this box never builds |
+| 4 | `cargo test property::` | Property tests (invariants across generated inputs) |
 
-| Tier | What | Time | Purpose |
-|------|------|------|---------|
-| 1 | `examples/*.lisp` | ~2s | Smoke test across the whole language surface |
-| 2 | `tests/elle/*.lisp` | ~6s | Behavioral tests (Elle semantics) |
-| 3 | `cargo test` (unit + integration) | ~15min | Rust tests (compile errors, error messages, type inspection) |
-| 4 | `cargo test property::` | ~30min | Property tests (invariants across generated inputs) |
-
-Examples are the cheapest full-pipeline smoke test: reader, expander, analyzer,
-lowerer, emitter, VM, and a broad swath of primitives in ~2 seconds. If an
-example fails, nothing else is worth running.
-
-Elle test scripts are the next tier: they verify language semantics by running
-Elle code directly, with no Rust-level setup. They're faster than integration
-tests because they skip Rust type inspection and error message matching.
+The Elle corpus is the cheapest full-pipeline check: reader, expander, analyzer,
+lowerer, emitter, VM, JIT, and a broad swath of primitives. If it fails, the
+session DB names every failing form (`elle test --summary`).
 
 Integration tests are slower because they require Rust-level setup (VM
 construction, symbol table initialization, error message inspection).
@@ -53,6 +52,11 @@ destructuring syntax, arity mismatches at known call sites.
 → **Rust integration test.** The code cannot be run as an Elle script because
 it does not compile. Use `eval_source(input).is_err()` and inspect the error
 message.
+
+The same rule covers Unicode generation tests: corpus files compile on the
+shared runner VM, which uses the default generation, so a file that selects
+another generation with `(unicode! N)` cannot join the corpus. Build a
+`Runtime::with_unicode(...)` in a Rust integration test instead.
 
 **3. Does the test assert that something fails at runtime and need to inspect
 the error message for specific content?**
@@ -125,9 +129,11 @@ still available with `eval_source_bare`.
 
 ## Running tests
 
+For the Elle corpus and the runner (`elle test`, `--summary`, `--query`,
+`make smoke`), see [`docs/testing.md`](../testing.md). The Rust suite:
 
 ```bash
-# Full test suite
+# Full Rust suite
 cargo test --workspace
 
 # Just the main crate
@@ -136,23 +142,15 @@ cargo test
 # Specific test by name
 cargo test test_name
 
-# All tests in a category
-cargo test property::          # All property tests
-cargo test integration::       # All integration tests
-cargo test unittests::         # All unit tests
-cargo test vm::                # All VM tests
-cargo test elle::              # All Elle script tests
+# A category
+cargo test property::          # property tests
+cargo test integration::       # integration tests
+cargo test unittests::         # unit tests
 
-# Run all examples as tests
-cargo test --test '*'
-
-# Run with output
+# With output
 cargo test test_name -- --nocapture
 
-# Run a single example file
-cargo run -- examples/closures.lisp
-
-# Run a single Elle script
+# A single Elle file directly (not via the runner)
 cargo run -- tests/elle/core.lisp
 ```
 
@@ -162,10 +160,13 @@ cargo run -- tests/elle/core.lisp
 
 ### Elle test script
 
-1. Add assertions to an existing `tests/elle/*.lisp` or create a new file
-2. Import `examples/assertions.lisp` at the top
-3. Use `assert-eq`, `assert-true`, etc. from the library
-4. Run: `cargo run -- tests/elle/myfile.lisp`
+1. Add `(assert COND "message")` forms to an existing `tests/elle/*.lisp` or a
+   new file (the runner scavenges the first assert message as the label).
+2. Gate optional dependencies in-file with `:gated` — never `(exit 0)`.
+3. Run via the runner: `elle test tests/elle/myfile.lisp`.
+
+See [`docs/testing.md`](../testing.md) § Adding an Elle test for gating, native
+teardown, and reading results.
 
 ### Rust integration test
 

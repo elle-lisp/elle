@@ -134,6 +134,24 @@ consumed (Dead), a frame yields (Yielded), or a frame errors (Error).
 **`handle_fiber_resume`:** Dispatches New (call_wasm_closure) vs Paused
 (drive_resume_chain). Sets fiber status and signal on completion.
 
+**Uncaught-suspend propagation + re-drive.** A `(fiber/resume child)` whose
+`child` suspends on a scheduler wait/io its mask does not cover must PROPAGATE
+that suspension to the resumer (so the scheduler drives it), then RE-DRIVE
+`child` when the resumer is itself resumed — the WASM analogue of the VM's
+`SuspendedFrame::FiberResume`. `route_emit` parks `child`, records it under the
+parent in `pending_redrive`, and returns `SIG_YIELD | bits`; `rt_yield` stamps
+the parent's continuation frame with `redrive_child`; `drive_resume_chain`
+honours that marker (via `redrive_child`) before resuming the frame. This is
+what makes `protect`/`defer`/`with` around a suspending body work. Pinned by
+tests/elle/wasm-protect-suspend.lisp.
+
+**Signal handling in `rt_call`.** `rt_call` intercepts three fiber signals from a
+native call's return: `SIG_RESUME` (`fiber/resume` → `handle_fiber_resume`),
+`SIG_PROPAGATE` (`fiber/propagate` → `handle_fiber_propagate`, which re-raises
+the named child's caught signal as this call's own), and `SIG_IO` (via
+`maybe_execute_io`). The tail-call host (`rt_prepare_tail_call`) mirrors the
+RESUME and PROPAGATE handoffs.
+
 ## CPS state-machine transform
 
 Yielding functions become re-entrant via compile-time state machine:
@@ -171,10 +189,21 @@ WASM bytes and reuses pre-compiled modules on cache hit (~3ms vs ~400ms).
 `--wasm=N` enables tiered execution: the bytecode VM runs by default,
 and hot closures are compiled to per-closure WASM modules on demand.
 
-**Constraints on per-closure compilation:**
-- No `MakeClosure` instructions (nested closures stay on bytecode VM)
-- No `TailCall`/`TailCallArrayMut` (uses `return_call_indirect` with callee table indices)
-- No `Yield` terminators (suspension frame management)
+**Constraints on per-closure compilation** — enforced by the
+`standalone_emittable` gate in `emit.rs` (`emit_single_closure` returns `None`;
+the tiered/precache callers fall back to the VM / full-module dispatch). A
+standalone module serves one closure through hosts whose suspension and
+tail-call imports are panic stubs (`lazy/env.rs`) and whose funcref table has a
+single entry, so the gate refuses every shape whose execution would reach one:
+- No `TailCall`/`TailCallArrayMut` (`return_call_indirect` needs callee table
+  indices + `rt_prepare_tail_call`)
+- No `SuspendingCall` and no `Emit` terminators — any signal emission, yield
+  and `(error …)` alike, routes through `rt_yield`'s suspension-frame
+  machinery (host-call errors are unaffected: they return via the status word)
+- No `MakeClosure` without module context (`ClosureId` resolution; nested
+  closures stay on the bytecode VM)
+
+Pinned by `wasm::tests::standalone_emission_refuses_*`.
 
 **Self-recursive call optimization:** When `rt_call` detects a call to the
 same closure currently executing in WASM (same bytecode pointer), it dispatches

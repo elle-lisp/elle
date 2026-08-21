@@ -55,7 +55,7 @@ Tests are organized by feature area:
 | `strings.lisp` | String operations |
 | `tables.lisp` | Table operations |
 | `fibers.lisp` | Fiber operations |
-| `coroutines.lisp` | Coroutine behavior |
+| `coroutines.lisp` | Fiber behavior |
 | `signals.lisp` | Signal system |
 | `closures.lisp` | Closure behavior |
 | `recursion.lisp` | Recursive functions |
@@ -102,14 +102,6 @@ If the script exits with code 0, the test passes. If it exits with code 1, the t
 
    (assert (= (my-feature 42) 42) "my-feature identity")
    ```
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~140 | Test harness that runs Elle scripts |
-| (individual test files) | ~50-200 each | Feature-specific Elle scripts |
-
 ## Invariants
 
 1. **Scripts are self-contained.** Each script uses `(assert)` directly and runs independently.

@@ -33,6 +33,61 @@ pub(crate) fn check_call_arity(
     }
 }
 
+/// Recommend an immutable binding for a mutable one that is never reassigned.
+///
+/// A binding declared mutable (`var`, or an `@`-prefixed `def`/`let` name) but
+/// never the target of an `assign` is a *false-mutable*: its value may still be
+/// mutated in place (e.g. `(let [buf @""] (push buf x))`), but the binding
+/// itself never changes, so it can be a plain immutable `def`/`let`. The check
+/// reads only the two arena facts that decide it — declared-immutability and
+/// whether an `assign` ever targeted the binding — so it cannot confuse a
+/// mutable binding with a mutable value.
+///
+/// Throwaway (`_`-prefixed), synthetic, primitive, and parameter bindings are
+/// exempt. Callers invoke this at binding-introduction sites (`def`/`let`/
+/// `letrec`); loop variables (rebound via `recur`, not `assign`) and pattern
+/// bindings are excluded by never being passed here.
+pub(crate) fn check_mutable_never_assigned(
+    binding: crate::hir::Binding,
+    arena: &crate::hir::BindingArena,
+    location: &Option<SourceLoc>,
+    symbol_table: &crate::SymbolTable,
+    function: Option<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let inner = arena.get(binding);
+    if inner.scope != crate::hir::arena::BindingScope::Local
+        || inner.is_immutable
+        || inner.is_mutated
+        || inner.is_synthetic
+        || inner.is_primitive
+    {
+        return;
+    }
+    let Some(name) = symbol_table.name(inner.name) else {
+        return;
+    };
+    // `_`-prefixed names are the throwaway / compiler-temporary convention
+    // (e.g. the `__destructure_tmp` binder); a lint that recommends making them
+    // immutable is noise, not signal.
+    if name.starts_with('_') {
+        return;
+    }
+    let mut diag = Diagnostic::new(
+        Severity::Warning,
+        "W003",
+        "mutable-binding-never-assigned",
+        format!("mutable binding '{name}' is never reassigned"),
+        location.clone(),
+    );
+    diag.suggestions.push(format!(
+        "declare '{name}' immutable (use `def`/`let` without `@`, not `var`); \
+         if its value is mutated in place, that is unaffected — only the binding changes"
+    ));
+    diag.function = function.map(str::to_string);
+    diagnostics.push(diag);
+}
+
 /// Get arity of a built-in function by looking up `PrimitiveDef::PRIMITIVES` tables.
 pub(crate) fn builtin_arity(name: &str) -> Option<Arity> {
     for table in ALL_TABLES {
@@ -46,50 +101,4 @@ pub(crate) fn builtin_arity(name: &str) -> Option<Arity> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_builtin_arity() {
-        use crate::value::Arity;
-        // +, pair moved to stdlib; test with remaining Rust primitives
-        assert_eq!(builtin_arity("abs"), Some(Arity::Exact(1)));
-        assert_eq!(builtin_arity("list"), Some(Arity::AtLeast(0)));
-        assert_eq!(builtin_arity("undefined"), None);
-    }
-
-    #[test]
-    fn test_variadic_builtins_no_false_w002() {
-        // list is variadic (AtLeast(0)); calling with multiple args must not produce W002
-        let mut symbols = crate::SymbolTable::new();
-        let mut diagnostics = Vec::new();
-
-        let list = symbols.intern("list");
-        check_call_arity(list, 3, &None, &symbols, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "W002 false positive for (list 1 2 3)"
-        );
-
-        check_call_arity(list, 5, &None, &symbols, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "W002 false positive for (list 1 2 3 4 5)"
-        );
-    }
-
-    #[test]
-    fn test_exact_arity_still_warns() {
-        // abs expects exactly 1 arg
-        let mut symbols = crate::SymbolTable::new();
-        let mut diagnostics = Vec::new();
-
-        let abs = symbols.intern("abs");
-        check_call_arity(abs, 0, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (abs)");
-
-        diagnostics.clear();
-        check_call_arity(abs, 2, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (abs 1 2)");
-    }
-}
+mod tests;

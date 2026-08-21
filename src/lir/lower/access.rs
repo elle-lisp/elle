@@ -13,10 +13,10 @@ impl<'a> Lowerer<'a> {
     /// destructuring instruction at each step.
     pub(super) fn load_access_path(
         &mut self,
-        access: &super::decision::AccessPath,
+        access: &crate::hir::decision::AccessPath,
         scrutinee_slot: u16,
     ) -> Result<Reg, String> {
-        use super::decision::AccessPath;
+        use crate::hir::decision::AccessPath;
         match access {
             AccessPath::Root => {
                 let dst = self.fresh_reg();

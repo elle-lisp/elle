@@ -1,11 +1,11 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Fiber control-passing stress tests
 ##
 ## Tests sustained resume loops and deep nesting to verify
 ## signal propagation works correctly over many iterations.
 
 # ============================================================================
-# Sustained coroutine resume (25 iterations, direct yield)
+# Sustained fiber resume (25 iterations, direct yield)
 # ============================================================================
 
 (begin
@@ -24,7 +24,7 @@
   (assert (= (fiber/resume co) 25) "sustained direct yield: final return"))
 
 # ============================================================================
-# Sustained coroutine with resume values
+# Sustained fiber with resume values
 # ============================================================================
 
 (begin
@@ -36,7 +36,7 @@
                        (let [v (yield acc)]
                          (assign acc (+ acc v)))
                        (assign i (+ i 1))))
-                   acc)) |:yield|))  # First resume starts the coroutine, yields acc=0
+                   acc)) |:yield|))  # First resume starts the fiber, yields acc=0
   (assert (= (fiber/resume co) 0) "resume values: initial acc")
   (let [@expected 0
         @i 1]
@@ -53,7 +53,7 @@
       (assign i (+ i 1)))))
 
 # ============================================================================
-# Sustained fiber/resume (raw fibers, not coroutines)
+# Sustained fiber/resume (raw fibers)
 # ============================================================================
 
 (begin
@@ -144,7 +144,7 @@
   (assert (= (fiber/resume co) :done) "deep chain: final"))
 
 # ============================================================================
-# Interleaved sustained coroutines
+# Interleaved sustained fibers
 # ============================================================================
 
 (begin
@@ -186,8 +186,8 @@
           "yield-through-call resume: final"))
 
 # ============================================================================
-# SIG_IO inside coroutine body (print emits SIG_IO which propagates
-# out of coroutine since mask=SIG_YIELD doesn't catch SIG_IO)
+# SIG_IO inside fiber body (print emits SIG_IO which propagates
+# out of fiber since mask=SIG_YIELD doesn't catch SIG_IO)
 # ============================================================================
 
 (begin
@@ -202,12 +202,12 @@
                  (let [a (wrapper3 10)]
                    (let [b (wrapper3 20)]
                      (list a b)))) |:yield|))
-  (assert (= (fiber/resume co) 10) "IO-in-coroutine: first yield")
-  (assert (= (fiber/resume co 100) 20) "IO-in-coroutine: second yield")
-  (assert (= (fiber/resume co 200) (list 101 201)) "IO-in-coroutine: final"))
+  (assert (= (fiber/resume co) 10) "IO-in-fiber: first yield")
+  (assert (= (fiber/resume co 100) 20) "IO-in-fiber: second yield")
+  (assert (= (fiber/resume co 200) (list 101 201)) "IO-in-fiber: final"))
 
 # ============================================================================
-# Coroutine with print wrapping fiber/resume in caller
+# Fiber with print wrapping fiber/resume in caller
 # ============================================================================
 
 (begin

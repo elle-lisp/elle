@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 12)
 
 # Mandelbrot Explorer — GTK4 + Cairo, GPU-accelerated with CPU fallback
 #

@@ -11,7 +11,7 @@
 //! - `controlflow.rs` — CFG emission, block dispatch, terminators
 //! - `suspend.rs` — CPS suspension/resume, spill/restore, block splitting
 
-use crate::lir::{ClosureId, Label, LirFunction, Reg};
+use crate::lir::{ClosureId, Label, LirFunction, LirInstr, Reg, Terminator};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -27,6 +27,83 @@ pub struct EmitResult {
     /// Bytecode for each closure, indexed by table index.
     /// Used by spawn to execute WASM closures in new threads.
     pub closure_bytecodes: Vec<super::host::ClosureBytecode>,
+    /// Byte offset in linear memory where this module's env stack must begin.
+    /// Sized above the module's widest args region so no call's args clobber a
+    /// live closure env (see `env_stack_base`). The host initializes
+    /// `ElleHost::env_stack_ptr` to this value.
+    pub env_stack_base: usize,
+}
+
+/// Upper bound (in 16-byte slots) on the args region a single instruction
+/// marshals at `ARGS_BASE` before a host call. The args region and the env stack
+/// share linear memory — args grow up from `ARGS_BASE`, envs up from
+/// `env_stack_base` — so the env stack must clear the widest such region or a
+/// wide call's args overwrite a live closure env (a >128-field struct literal is
+/// a >256-arg call to the `struct` primitive; `call-u16.lisp` and
+/// `wasm::tests::wasm_full_wide_call_from_closure_preserves_env` pin it).
+///
+/// A conservative over-estimate: it need not track each emitter's exact byte
+/// layout (over-reserving costs only a little linear memory), only bound every
+/// variable-length marshaling site. The fixed-arity ops (`emit_data_op1`/`2`,
+/// `emit_call_array`, …) marshal at most a handful of slots, far under the
+/// default 240-slot window, so they contribute 0 here.
+fn instr_args_slots(instr: &LirInstr) -> usize {
+    match instr {
+        // Args written one 16-byte slot each (`emit_call` / the closure-tail path).
+        LirInstr::Call { args, .. }
+        | LirInstr::SuspendingCall { args, .. }
+        | LirInstr::TailCall { args, .. } => args.len(),
+        // Elements written one slot each (`emit_data_op_n`, OP_MAKE_ARRAY).
+        LirInstr::MakeArrayMut { elements, .. } => elements.len(),
+        // Captures, then 8 fixed meta slots plus the locals-mask words. The margin
+        // covers the mask words (one per 64 captured locals) without a nested
+        // closure lookup here.
+        LirInstr::MakeClosure { captures, .. } => captures.len() + 72,
+        // `src` slot plus one per excluded key (`OP_STRUCT_REST`).
+        LirInstr::StructRest { exclude_keys, .. } => 1 + exclude_keys.len(),
+        // Each pair is written with a 32-byte stride (two 16-byte slots).
+        LirInstr::PushParamFrame { pairs } => pairs.len() * 2,
+        _ => 0,
+    }
+}
+
+/// Byte offset where `module`'s env stack must begin, given the widest args
+/// region any of its functions marshals (see `instr_args_slots`). Floored at the
+/// default `ENV_STACK_BASE` and page-aligned above the args region so a live
+/// closure env never overlaps a call's args.
+pub(super) fn env_stack_base(module: &crate::lir::LirModule) -> usize {
+    let max_slots = std::iter::once(&module.entry)
+        .chain(module.closures.iter())
+        .flat_map(|func| func.blocks.iter())
+        .flat_map(|block| block.instructions.iter())
+        .map(|si| instr_args_slots(&si.instr))
+        .max()
+        .unwrap_or(0);
+    env_stack_base_for_slots(max_slots)
+}
+
+/// Env-stack base for a single function's widest args region — the tiered
+/// per-closure path (`emit_single_closure_module`), which compiles one function
+/// with no nested closures.
+pub(super) fn env_stack_base_for_func(func: &LirFunction) -> usize {
+    let max_slots = func
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .map(|si| instr_args_slots(&si.instr))
+        .max()
+        .unwrap_or(0);
+    env_stack_base_for_slots(max_slots)
+}
+
+fn env_stack_base_for_slots(max_slots: usize) -> usize {
+    // 4096-byte aligned above the args region — tidy page-ish base, and the
+    // default `ENV_STACK_BASE` (4096) already carries a 240-slot window, so a
+    // module with only ordinary-arity calls keeps the default.
+    let needed = ARGS_BASE as usize + max_slots * 16;
+    needed
+        .next_multiple_of(4096)
+        .max(super::host::ENV_STACK_BASE)
 }
 
 /// Emit a WASM module from an LirModule.
@@ -36,28 +113,63 @@ pub struct EmitResult {
 pub fn emit_module(
     module: &crate::lir::LirModule,
     stubbed: std::collections::HashSet<ClosureId>,
+    heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    symbols: *mut crate::symbol::SymbolTable,
 ) -> EmitResult {
-    let mut emitter = WasmEmitter::new();
+    let mut emitter = WasmEmitter::new(heap_ptr);
     emitter.stubbed_closures = stubbed;
+    emitter.symbols = symbols;
     emitter.emit_module_from_lir(module)
 }
 
-/// Emit a WASM module containing a single closure function.
+/// Whether `func` can be served as a standalone single-closure module.
 ///
-/// Used by tiered compilation: the bytecode VM compiles individual hot
-/// closures to WASM on demand. The module has the same host imports as
-/// the full module but contains only one function (at table index 0).
+/// A standalone module runs through hosts whose suspension and tail-call
+/// imports are panic stubs (`lazy/env.rs`) and whose funcref table has a
+/// single entry, so every shape whose execution would reach one of them is
+/// refused here rather than detonated at runtime
+/// (src/wasm/AGENTS.md § "Constraints on per-closure compilation"):
 ///
-/// Emit a standalone WASM module for a single closure.
+/// - `TailCall`/`TailCallArrayMut` — `return_call_indirect` needs callee
+///   funcref-table indices and `rt_prepare_tail_call`;
+/// - `SuspendingCall` and `Emit` terminators — every signal emission, yield
+///   and `(error …)` alike, routes through `rt_yield`'s suspension-frame
+///   machinery (a host-call error is unaffected: it returns via the status
+///   word);
+/// - `MakeClosure` without module context — no `ClosureId` resolution.
 ///
-/// All instruction types are supported:
-/// - MakeClosure/TailCall via host-mediated dispatch
-/// - Yield via CPS transform (same as full module) + rt_yield on host
+/// Pinned by `wasm::tests::standalone_emission_refuses_*`.
+fn standalone_emittable(func: &LirFunction, has_module_context: bool) -> bool {
+    func.blocks.iter().all(|b| {
+        b.instructions.iter().all(|si| match &si.instr {
+            LirInstr::TailCall { .. }
+            | LirInstr::TailCallArrayMut { .. }
+            | LirInstr::SuspendingCall { .. } => false,
+            LirInstr::MakeClosure { .. } => has_module_context,
+            _ => true,
+        }) && !matches!(b.terminator.terminator, Terminator::Emit { .. })
+    })
+}
+
+/// Emit a standalone WASM module for a single closure (at table index 0).
+///
+/// Used by tiered compilation (the bytecode VM compiles individual hot
+/// closures on demand) and by per-closure precaching. The module has the same
+/// host imports as the full module but contains only one function. Returns
+/// `None` for a closure the standalone hosts cannot serve
+/// (`standalone_emittable` above); the tiered caller falls back to the
+/// bytecode VM, the precache caller to full-module dispatch.
 pub fn emit_single_closure(
     func: &LirFunction,
     module: Option<&crate::lir::LirModule>,
+    heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    symbols: *mut crate::symbol::SymbolTable,
 ) -> Option<EmitResult> {
-    let mut emitter = WasmEmitter::new();
+    if !standalone_emittable(func, module.is_some()) {
+        return None;
+    }
+    let mut emitter = WasmEmitter::new(heap_ptr);
+    emitter.symbols = symbols;
     // Provide module context for MakeClosure → ClosureId resolution
     if let Some(m) = module {
         emitter.module_closures = Some(m.closures.clone());
@@ -91,6 +203,16 @@ pub(super) const FN_ENTRY: u32 = 11;
 
 // Linear memory layout
 pub(super) const ARGS_BASE: i32 = 256;
+
+/// Reserved 16-byte slot in linear memory holding the **executing closure**
+/// (tag at `SELF_SLOT`, payload at `SELF_SLOT + 8`) — the WASM analogue of the
+/// interpreter's `Fiber::current_closure` and the JIT's `self_tag_payload`. A
+/// `LoadSelf` reads it; the host writes it at every closure entry
+/// (`call_wasm_closure` / `call_precached_closure` / `rt_prepare_tail_call` / the
+/// tiered self-dispatch), restores it around a nested call (shared linear memory),
+/// and carries it across suspend/resume on the `WasmSuspensionFrame`. Lives in the
+/// free scratch below `ARGS_BASE` (the signal occupies `[0, 8)`; args start at 256).
+pub(in crate::wasm) const SELF_SLOT: i32 = 16;
 
 /// Data operation codes for rt_data_op.
 ///
@@ -132,6 +254,9 @@ pub(super) enum DataOp {
     IntrThawOp = 31,
     IntrIdenticalOp = 32,
     IntrPushOp = 33,
+    IntrStringPushOp = 34,
+    IntrBytesPushOp = 35,
+    MatchFail = 36,
 }
 
 // Re-export as i32 constants for backward compat in instruction.rs
@@ -139,6 +264,7 @@ pub(super) const OP_CONS: i32 = DataOp::Pair as i32;
 pub(super) const OP_CAR: i32 = DataOp::First as i32;
 pub(super) const OP_CDR: i32 = DataOp::Rest as i32;
 pub(super) const OP_CAR_DESTRUCTURE: i32 = DataOp::FirstDestructure as i32;
+pub(super) const OP_MATCH_FAIL: i32 = DataOp::MatchFail as i32;
 pub(super) const OP_CDR_DESTRUCTURE: i32 = DataOp::RestDestructure as i32;
 pub(super) const OP_CAR_OR_NIL: i32 = DataOp::FirstOrNil as i32;
 pub(super) const OP_CDR_OR_NIL: i32 = DataOp::RestOrNil as i32;
@@ -168,6 +294,8 @@ pub(super) const OP_INTR_FREEZE: i32 = DataOp::IntrFreezeOp as i32;
 pub(super) const OP_INTR_THAW: i32 = DataOp::IntrThawOp as i32;
 pub(super) const OP_INTR_IDENTICAL: i32 = DataOp::IntrIdenticalOp as i32;
 pub(super) const OP_INTR_PUSH: i32 = DataOp::IntrPushOp as i32;
+pub(super) const OP_INTR_STRING_PUSH: i32 = DataOp::IntrStringPushOp as i32;
+pub(super) const OP_INTR_BYTES_PUSH: i32 = DataOp::IntrBytesPushOp as i32;
 
 /// Info about a resume state, used to generate the resume prologue.
 pub(super) struct ResumeStateInfo {
@@ -176,8 +304,6 @@ pub(super) struct ResumeStateInfo {
     pub state_id: u32,
     /// Block index to jump to after restoring registers.
     pub target_block_idx: i32,
-    /// Number of saved register+local pairs.
-    pub num_saved: u32,
 }
 
 /// Info about a call-site continuation (virtual resume block).
@@ -219,10 +345,25 @@ pub(super) struct WasmEmitter {
     pub stubbed_closures: std::collections::HashSet<ClosureId>,
     /// Per-suspend-point live register sets for sparse spilling.
     pub spill_live_map: super::liveness::SpillLiveMap,
+    /// The driving instance's heap, on which compile-time const-pool Values
+    /// (string / compound literals baked into the module) are built. The module
+    /// holds these for its lifetime, so they live on the instance heap that
+    /// outlives it.
+    pub heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    /// The driving instance's symbol table, needed to intern a quoted *symbol*
+    /// leaf when baking a compound literal into the const pool
+    /// (`ConstTemplate::materialize`). Null on the standalone/tiered path
+    /// (`lazy.rs`), which has no instance table in scope; a compound-symbol
+    /// literal there would panic in `materialize`, so `standalone_emittable`
+    /// keeps such closures on the bytecode VM. The full-module path always sets
+    /// it (src/wasm/tests.rs `wasm_full_bakes_quoted_symbol_literal`).
+    pub symbols: *mut crate::symbol::SymbolTable,
 }
 
+mod functions;
+
 impl WasmEmitter {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(heap_ptr: *mut crate::value::fiberheap::FiberHeap) -> Self {
         WasmEmitter {
             label_to_idx: HashMap::new(),
             num_regs: 0,
@@ -249,6 +390,8 @@ impl WasmEmitter {
             module_closures: None,
             stubbed_closures: std::collections::HashSet::new(),
             spill_live_map: HashMap::new(),
+            heap_ptr,
+            symbols: std::ptr::null_mut(),
         }
     }
 
@@ -365,331 +508,6 @@ impl WasmEmitter {
         imports.import("elle", "rt_get_resume_value", EntityType::Function(11));
         imports.import("elle", "rt_load_saved_reg", EntityType::Function(12));
         module.section(&imports);
-    }
-
-    pub(super) fn emit_module_from_lir(
-        &mut self,
-        lir_module: &crate::lir::LirModule,
-    ) -> EmitResult {
-        let num_closures = lir_module.closures.len() as u32;
-
-        self.closure_id_to_table_idx.clear();
-        for i in 0..lir_module.closures.len() {
-            self.closure_id_to_table_idx
-                .insert(ClosureId(i as u32), i as u32);
-        }
-        self.module_closures = Some(lir_module.closures.clone());
-
-        let mut module = Module::new();
-        self.emit_types_and_imports(&mut module);
-
-        // Function section
-        let mut functions = FunctionSection::new();
-        functions.function(0);
-        for _ in 0..num_closures {
-            functions.function(5);
-        }
-        module.section(&functions);
-
-        // Table section
-        if num_closures > 0 {
-            let mut tables = TableSection::new();
-            tables.table(TableType {
-                element_type: RefType::FUNCREF,
-                minimum: num_closures as u64,
-                maximum: Some(num_closures as u64),
-                shared: false,
-                table64: false,
-            });
-            module.section(&tables);
-        }
-
-        // Memory section
-        let mut memories = MemorySection::new();
-        memories.memory(MemoryType {
-            minimum: 1,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        });
-        module.section(&memories);
-
-        // Export section
-        let mut exports = ExportSection::new();
-        exports.export("__elle_entry", ExportKind::Func, FN_ENTRY);
-        exports.export("__elle_memory", ExportKind::Memory, 0);
-        if num_closures > 0 {
-            exports.export("__elle_table", ExportKind::Table, 0);
-        }
-        module.section(&exports);
-
-        // Element section
-        if num_closures > 0 {
-            let mut elements = ElementSection::new();
-            let func_indices: Vec<u32> = (0..num_closures).map(|i| FN_ENTRY + 1 + i).collect();
-            elements.active(
-                Some(0),
-                &ConstExpr::i32_const(0),
-                Elements::Functions(func_indices.into()),
-            );
-            module.section(&elements);
-        }
-
-        // Code section
-        //
-        // Emit closures BEFORE the entry function so that stdlib closure
-        // constants get stable pool indices regardless of user code.
-        // Wasmtime's incremental compilation cache keys on per-function
-        // WASM bytes, so stable indices → cache hits across programs.
-        // The code section must list functions in declaration order
-        // (entry first), so we buffer the closure bodies.
-        let mut closure_bodies = Vec::with_capacity(lir_module.closures.len());
-        for (i, closure_func) in lir_module.closures.iter().enumerate() {
-            self.current_table_idx = i as u32;
-            if self.stubbed_closures.contains(&ClosureId(i as u32)) {
-                // Emit a minimal stub — this closure is pre-compiled
-                // as a standalone Module and dispatched via rt_call.
-                // The stub is never reached at runtime.
-                let mut stub =
-                    Function::new([(1, ValType::I64), (1, ValType::I64), (1, ValType::I64)]);
-                stub.instruction(&Instruction::Unreachable);
-                stub.instruction(&Instruction::End);
-                closure_bodies.push(stub);
-            } else {
-                let closure_body = self.emit_closure_function(closure_func);
-                closure_bodies.push(closure_body);
-            }
-        }
-        let entry_body = self.emit_function(&lir_module.entry);
-        let mut code = CodeSection::new();
-        code.function(&entry_body);
-        for closure_body in &closure_bodies {
-            code.function(closure_body);
-        }
-        module.section(&code);
-
-        // Dual-compile bytecode for spawn.
-        // Use emit_module which handles MakeClosure → ClosureId resolution.
-        let mut bc_emitter = crate::lir::Emitter::new();
-        let bc_compiled = bc_emitter.emit_module_closures(lir_module);
-        let mut closure_bytecodes = Vec::with_capacity(bc_compiled.len());
-        for (bytecode, _, _) in bc_compiled {
-            closure_bytecodes.push((
-                std::rc::Rc::new(bytecode.instructions),
-                std::rc::Rc::new(bytecode.constants),
-            ));
-        }
-
-        EmitResult {
-            wasm_bytes: module.finish(),
-            const_pool: std::mem::take(&mut self.const_pool),
-            closure_bytecodes,
-        }
-    }
-
-    fn emit_single_closure_module(&mut self, func: &LirFunction) -> EmitResult {
-        let mut module = Module::new();
-        self.emit_types_and_imports(&mut module);
-
-        let mut functions = FunctionSection::new();
-        functions.function(5);
-        module.section(&functions);
-
-        let mut tables = TableSection::new();
-        tables.table(TableType {
-            element_type: RefType::FUNCREF,
-            minimum: 1,
-            maximum: Some(1),
-            shared: false,
-            table64: false,
-        });
-        module.section(&tables);
-
-        let mut memories = MemorySection::new();
-        memories.memory(MemoryType {
-            minimum: 1,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        });
-        module.section(&memories);
-
-        let mut exports = ExportSection::new();
-        exports.export("__elle_closure", ExportKind::Func, FN_ENTRY);
-        exports.export("__elle_memory", ExportKind::Memory, 0);
-        exports.export("__elle_table", ExportKind::Table, 0);
-        module.section(&exports);
-
-        let mut elements = ElementSection::new();
-        elements.active(
-            Some(0),
-            &ConstExpr::i32_const(0),
-            Elements::Functions(vec![FN_ENTRY].into()),
-        );
-        module.section(&elements);
-
-        let mut code = CodeSection::new();
-        self.current_table_idx = 0;
-        let closure_body = self.emit_closure_function(func);
-        code.function(&closure_body);
-        module.section(&code);
-
-        EmitResult {
-            wasm_bytes: module.finish(),
-            const_pool: std::mem::take(&mut self.const_pool),
-            closure_bytecodes: Vec::new(),
-        }
-    }
-
-    /// Emit the entry function body.
-    pub(super) fn emit_function(&mut self, func: &LirFunction) -> Function {
-        self.label_to_idx.clear();
-        for (idx, block) in func.blocks.iter().enumerate() {
-            self.label_to_idx.insert(block.label, idx);
-        }
-
-        let alloc = super::regalloc::allocate(func, func.num_locals as u32);
-        let n = alloc.max_slots;
-        self.reg_to_slot = alloc.reg_to_slot;
-        self.num_regs = n;
-        self.local_offset = 1;
-        self.is_closure = false;
-        self.may_suspend = false;
-        self.ctx_local = 0;
-        self.num_stack_locals = 0;
-        self.signal_local = 1 + n * 2 + 1;
-
-        let mut f = Function::new([
-            (n, ValType::I64),
-            (n, ValType::I64),
-            (1, ValType::I32),
-            (1, ValType::I64),
-        ]);
-
-        self.emit_cfg(&mut f, func);
-        f.instruction(&Instruction::End);
-        f
-    }
-
-    /// Emit a closure function body.
-    pub(super) fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
-        let split_func;
-        let func = if func.signal.may_suspend() {
-            // ClosureId is Copy and survives block splitting/cloning
-            // — no pointer remapping needed.
-            let split_blocks = Self::split_blocks_at_suspending_calls(&func.blocks);
-            split_func = LirFunction {
-                blocks: split_blocks,
-                ..func.clone()
-            };
-            &split_func
-        } else {
-            func
-        };
-
-        self.label_to_idx.clear();
-        for (idx, block) in func.blocks.iter().enumerate() {
-            self.label_to_idx.insert(block.label, idx);
-        }
-
-        let alloc = super::regalloc::allocate(func, 0);
-        let n = alloc.max_slots;
-        if crate::config::get().has_trace("wasm") {
-            eprintln!(
-                "[emit] closure {:?}: {} virtual regs → {} slots",
-                func.name, func.num_regs, n
-            );
-        }
-        self.reg_to_slot = alloc.reg_to_slot;
-        self.num_regs = n;
-        self.local_offset = 4;
-        self.is_closure = true;
-        self.ctx_local = 3;
-        self.num_stack_locals = func.num_locals as u32;
-        self.may_suspend = func.signal.may_suspend();
-        self.current_num_captures = func.num_captures;
-        // Build LBox mask
-        let nc = func.num_captures as u64;
-        let capture_bits = if nc >= 64 { u64::MAX } else { (1u64 << nc) - 1 };
-        let param_bits = if nc >= 64 {
-            u64::MAX
-        } else {
-            func.capture_params_mask.wrapping_shl(nc as u32)
-        };
-        let np = nc + func.num_params as u64;
-        let local_bits = if np >= 64 {
-            u64::MAX
-        } else {
-            func.capture_locals_mask.wrapping_shl(np as u32)
-        };
-        self.env_lbox_mask = capture_bits | param_bits | local_bits;
-        self.next_resume_state = 1;
-        self.resume_states.clear();
-        self.call_continuations.clear();
-
-        let m = self.num_stack_locals;
-        self.signal_local = 4 + 2 * n + 2 * m;
-
-        if self.may_suspend {
-            self.resume_tag_local = 4 + 2 * n + 2 * m + 4;
-            self.resume_pay_local = 4 + 2 * n + 2 * m + 5;
-
-            self.pre_scan_resume_states(func);
-            self.next_resume_state = 1;
-
-            // Compute per-suspend-point liveness for sparse spilling.
-            if crate::config::get().wasm_sparse_spill {
-                self.spill_live_map = super::liveness::compute_spill_liveness(
-                    func,
-                    &self.label_to_idx,
-                    &self.reg_to_slot,
-                    n,
-                );
-            } else {
-                self.spill_live_map.clear();
-            }
-
-            if crate::config::get().has_trace("wasm") {
-                eprintln!(
-                    "[emit] suspending closure: name={:?} regs={} locals={} captures={} params={}",
-                    func.name, func.num_regs, func.num_locals, func.num_captures, func.num_params
-                );
-                for block in &func.blocks {
-                    eprintln!("[emit]   Block {:?}:", block.label);
-                    for si in &block.instructions {
-                        eprintln!("[emit]     {:?}", si.instr);
-                    }
-                    eprintln!("[emit]     term: {:?}", block.terminator.terminator);
-                }
-            }
-
-            let mut f = Function::new([
-                (n, ValType::I64),
-                (n, ValType::I64),
-                (m, ValType::I64),
-                (m, ValType::I64),
-                (1, ValType::I64),
-                (3, ValType::I32),
-                (2, ValType::I64),
-            ]);
-            self.emit_cfg(&mut f, func);
-            f.instruction(&Instruction::End);
-            f
-        } else {
-            let mut f = Function::new([
-                (n, ValType::I64),
-                (n, ValType::I64),
-                (m, ValType::I64),
-                (m, ValType::I64),
-                (1, ValType::I64),
-                (3, ValType::I32),
-            ]);
-            self.emit_cfg(&mut f, func);
-            f.instruction(&Instruction::End);
-            f
-        }
     }
 
     // --- Local accessors ---

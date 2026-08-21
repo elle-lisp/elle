@@ -7,8 +7,10 @@ executes Elle code, and extracts results.
 ## Concepts
 
 **Elle as a library.** The `elle` crate exposes everything needed to embed
-a full Elle runtime: VM, SymbolTable, compilation pipeline, and stdlib.
-The host owns the VM and controls its lifetime.
+a full Elle runtime: a `Runtime` that owns the VM, SymbolTable, compile
+context, and heap, plus the compilation pipeline and stdlib. The host owns
+the `Runtime` and controls its lifetime; two embedded instances in one
+process each own their own, so neither sees the other's definitions.
 
 **Scheduler cooperation.** All Elle I/O is async — it requires a scheduler.
 `execute_scheduled` wraps user code in `ev/run` automatically. For hosts
@@ -24,18 +26,27 @@ its own event loop between steps.
 
 The init sequence:
 
-1. `VM::new()` + `SymbolTable::new()` — create runtime state
-2. `register_primitives(&mut vm, &mut symbols)` — install builtins
-3. `set_vm_context` + `set_symbol_table` — set thread-local context
-4. `init_stdlib(&mut vm, &mut symbols)` — load stdlib
-5. Register custom primitives via `PrimitiveDef` + `register_repl_binding`
-6. `compile_file(source, &mut symbols, filename)` — compile to bytecode
-7. `vm.execute_scheduled(&bytecode, &symbols)` — run under async scheduler
-8. `set_vm_context(null_mut())` — clear context when done
+1. `Runtime::new()` — build a per-instance runtime: it constructs the VM,
+   symbol table, compile context, and heap; registers primitives (wiring
+   the VM at its own symbol table and compile context); and loads the
+   stdlib. (`Runtime::without_stdlib()` skips the stdlib.)
+   `Runtime::with_unicode(gen)` selects the Unicode segmentation
+   generation for the VM's whole life; `Runtime::new()` uses the newest
+   vendored generation. See the "Unicode version" section in
+   [`strings.md`](strings.md).
+2. Register custom primitives via `PrimitiveDef`, then
+   `rt.compile_and_heap()` → `CompileCtx::register_repl_binding` so the
+   compiler sees them.
+3. `let (vm, symbols, cctx) = rt.parts();` — borrow the three pieces the
+   pipeline needs at once.
+4. `compile_file(source, symbols, cctx, filename)` — compile to bytecode.
+5. `vm.execute_scheduled(&bytecode, symbols)` — run under async scheduler.
+6. Drop the `Runtime` (or call `rt.teardown()`) to run the region-RC
+   teardown sweep when done.
 
 Custom primitives are `fn(&[Value]) -> (SignalBits, Value)` wrapped in a
 `PrimitiveDef` struct with metadata (name, arity, signal, docs). Register
-with `register_repl_binding` so the compiler sees them.
+the resulting value through `register_repl_binding` so the compiler sees it.
 
 See `demos/embedding/src/main.rs` for the complete Rust host demo.
 

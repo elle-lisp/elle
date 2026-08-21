@@ -53,7 +53,7 @@ make smoke                 # run all tests (~30s)
 | [fibers](docs/signals/fibers.md) | Fiber basics, signal masks, status |
 | [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope, processes |
 | [threads](docs/threads.md) | OS threads, channels |
-| [fibers](docs/fibers.md) | fiber/new with \|:yield\| mask, fiber/resume, generators |
+| [fiber primitives](docs/signals/primitives.md) | fiber/new with \|:yield\| mask, fiber/resume, generators |
 | [parameters](docs/parameters.md) | Dynamic parameters, parameterize |
 | [macros](docs/macros.md) | defmacro, syntax-case, hygiene |
 | [modules](docs/modules.md) | import, closure-as-module pattern |
@@ -71,8 +71,9 @@ make smoke                 # run all tests (~30s)
 |------|---------|
 | [runtime](docs/runtime.md) | Runtime signals, fuel budgets |
 | [scheduler](docs/scheduler.md) | Async scheduler, io_uring |
+| [debugger](docs/debugger.md) | Breakpoints, stepping, frame inspection, record/replay |
 | [embedding](docs/embedding.md) | Using Elle as a library |
-| [memory](docs/memory.md) | Arenas, scope allocation |
+| [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
 | [processes](docs/processes.md) | Erlang-style processes, GenServer, supervisors |
 
 ## Implementation
@@ -95,11 +96,9 @@ make smoke                 # run all tests (~30s)
 
 | File | Content |
 |------|---------|
-| [plugins](docs/plugins.md) | 29 shipped plugins |
+| [plugins](docs/plugins.md) | Rust plugins and `std/` modules |
 | [stdlib](docs/stdlib.md) | Standard library and prelude |
 | [intrinsics](docs/intrinsics.md) | %-intrinsics (silent bytecode ops) |
 | [testing](docs/analysis/testing.md) | Test patterns, make smoke/test |
 | [debugging](docs/analysis/debugging.md) | Debugging and introspection |
 | [cookbook](docs/cookbook/index.md) | Recipes for cross-cutting changes |
-| [DEVLOG](DEVLOG.md) | Per-PR development log (generated from diffs) |
-| [CHANGELOG](CHANGELOG.md) | Changelog by subsystem arc (agent-optimized) |

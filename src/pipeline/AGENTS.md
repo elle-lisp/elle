@@ -140,13 +140,3 @@ Properties:
     via `with_compilation_cache(|vm, expander, meta| { ... })` — the `RefCell`
     borrow is held for the duration of the closure, so re-entrancy is caught
     by the type system (runtime borrow panic) rather than convention.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~25 | Re-exports, `CompileResult`, `AnalyzeResult` |
-| `compile.rs` | ~195 | `compile`, `compile_all` (internal), `compile_file`, `classify_form` |
-| `analyze.rs` | ~75 | `analyze`, `analyze_file` |
-| `eval.rs` | ~105 | `eval`, `eval_all`, `eval_file`, `eval_syntax` |
-| `cache.rs` | ~50 | Thread-local `Expander` and `VM` caching for macro expansion |

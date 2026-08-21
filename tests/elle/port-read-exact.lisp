@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/port-read-exact.lisp — `port/read-exact` semantics.
 #
 # `port/read` follows POSIX "up to N" semantics and never resubmits
@@ -10,14 +10,18 @@
 # the kernel to hand it back in pieces, exposing the resubmission
 # path) cases, plus the EOF-before-N → nil case.
 
+# Scratch dir for the file-port fixtures; removed at the bottom of the file.
+(def scratch (file/mktempdir))
+
 (def small-text "hello world goodbye")
 
-(spit "/tmp/elle-port-read-exact-small" small-text)
+(def small-path (path/join scratch "small"))
+(spit small-path small-text)
 
 # ── 1. Text-mode file port: N is graphemes, result is a string of (length N).
 #      ASCII case — bytes and graphemes coincide, but the contract is
 #      grapheme-counted regardless.
-(let [p (port/open "/tmp/elle-port-read-exact-small" :read)]
+(let [p (port/open small-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p 5)]
@@ -30,14 +34,14 @@
 
 # ── 2. EOF before N → nil.  Note: count is graphemes here, and we ask for
 #      more graphemes than the file has, regardless of byte size.
-(let [p (port/open "/tmp/elle-port-read-exact-small" :read)]
+(let [p (port/open small-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p (+ (length small-text) 100))]
       (assert (nil? d) "2a: EOF before N -> nil (not partial)"))))
 
 # ── 3. Zero count returns empty (string on text port, no kernel I/O needed).
-(let [p (port/open "/tmp/elle-port-read-exact-small" :read)]
+(let [p (port/open small-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p 0)]
@@ -46,8 +50,9 @@
 # ── 3b. Multi-byte UTF-8 grapheme: a single 'é' is 2 bytes but 1 grapheme.
 #      port/read-exact 1 must reassemble both bytes and return the string "é"
 #      of length 1.  Plain byte-counted code would split the codepoint.
-(spit "/tmp/elle-port-read-exact-utf8" "café")
-(let [p (port/open "/tmp/elle-port-read-exact-utf8" :read)]
+(def utf8-path (path/join scratch "utf8"))
+(spit utf8-path "café")
+(let [p (port/open utf8-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p 3)]
@@ -61,8 +66,9 @@
 #       (port/read-exact p 1) on "café", the second byte of 'é' must NOT
 #       leak into subsequent reads.  Use a deliberately-mismatched read
 #       size so any byte-vs-grapheme confusion would surface.
-(spit "/tmp/elle-port-read-exact-utf8b" "café!")
-(let [p (port/open "/tmp/elle-port-read-exact-utf8b" :read)]
+(def utf8b-path (path/join scratch "utf8b"))
+(spit utf8b-path "café!")
+(let [p (port/open utf8b-path :read)]
   (defer
     (port/close p)
     (let [a (port/read-exact p 1)
@@ -80,8 +86,9 @@
 #       is the path the completion-side grapheme split exists for —
 #       without it the read-line over-read leaks extra graphemes into
 #       the read-exact result.
-(spit "/tmp/elle-port-read-exact-mixed" "header\nbody-café-trailer\n")
-(let [p (port/open "/tmp/elle-port-read-exact-mixed" :read)]
+(def mixed-path (path/join scratch "mixed"))
+(spit mixed-path "header\nbody-café-trailer\n")
+(let [p (port/open mixed-path :read)]
   (defer
     (port/close p)
     (let [hdr (port/read-line p)]
@@ -102,14 +109,19 @@
 # port/read call.  port/read-exact must loop to assemble the whole
 # payload, byte-for-byte.
 
-(def value-size 200000)
+(def value-size 100000)
+# Build the payload by doubling a period-10 ASCII pattern (O(log n)
+# concats) rather than a 200 000-iteration per-byte push loop, which
+# dominated the suite runtime.  Sent over a binary port, so the bytes
+# are '0'..'9' = 48..57; built a bit past value-size and the reader
+# takes exactly value-size, leaving the rest unread.
 (def big-bytes
-  (let [@b @""
-        @i 0]
-    (while (< i value-size)
-      (push b (string (mod i 10)))
-      (assign i (+ i 1)))
-    (freeze b)))
+  (let [@s "0123456789"
+        @len 10]
+    (while (< len value-size)
+      (assign s (concat s s))
+      (assign len (* len 2)))
+    s))
 
 (def listener (tcp/listen "127.0.0.1" 0))
 (def server-port
@@ -135,8 +147,7 @@
       # short-read split points.  d is bytes (TCP is Binary encoding);
       # walking every index would dominate the test runtime in the
       # VM-only path, so we sample.  '0'..'9' as bytes is 48+(i mod 10).
-      (let [check-at @[0 1 2 100 1000 65535 65536 65537 131071 131072 131073
-                       (- value-size 1)]
+      (let [check-at @[0 1 2 100 1000 65535 65536 65537 (- value-size 1)]
             @j 0
             @mismatch nil]
         (while (and (nil? mismatch) (< j (length check-at)))
@@ -152,4 +163,55 @@
 (protect (port/close listener))
 (protect (ev/join-protected server-fiber))
 
+# ── 5. Large TEXT read-exact canary.  On a text port N counts grapheme
+# clusters, not bytes — with multibyte content the byte count far
+# exceeds N, so the runtime must size its read buffer for bytes
+# (graphemes * worst-case UTF-8 width) and chunk the kernel reads at the
+# page size while still returning exactly N graphemes.  A regression in
+# the buffer sizing or the >64 KiB chunked-resubmit path surfaces here
+# as a short, nil, or garbled string.  Content alternates 'é' (2 bytes)
+# and 'a' (1 byte), so bytes ≈ 1.5 × graphemes.
+# Build "éa…" of exactly n graphemes by doubling (O(log n) concats —
+# a per-grapheme loop at this size would dominate the suite runtime).
+# n must be 2 × a power of two so doubling the 2-grapheme base lands on
+# n exactly, no grapheme-unsafe slice needed.
+(defn make-text [n]
+  (let [@s "éa"
+        @len 2]
+    (while (< len n)
+      (assign s (concat s s))
+      (assign len (* len 2)))
+    s))
+
+(defn text-roundtrip [n label]
+  (let [payload (make-text n)
+        l (tcp/listen "127.0.0.1" 0)
+        lport (let [path (port/path l)]
+                (parse-int (slice path (+ 1 (string/find path ":")))))
+        srv (ev/spawn (fn []
+                        (let [client (tcp/accept l :encoding :text)]
+                          (port/write client payload)
+                          (port/flush client)
+                          (port/close client))))]
+    (let [sock (tcp/connect "127.0.0.1" lport :encoding :text)]
+      (defer
+        (protect (port/close sock))
+        (let [d (port/read-exact sock n)]
+          (assert (string? d) (concat label "a: returns a string"))
+          (assert (= (length d) n)
+                  (concat label "b: got " (string (length d))
+                          " graphemes, want " (string n)))
+          (assert (= d payload)
+                  (concat label "c: content matches byte-for-byte")))))
+    (protect (port/close l))
+    (protect (ev/join-protected srv))))
+
+# Moderate: ~3 KiB of bytes — fits one read, no resubmit.
+(text-roundtrip 2048 "5")
+# Over-large: 65536 graphemes ≈ 98 KiB of bytes — past the 64 KiB
+# loopback recv buffer and the MAX_READ_CHUNK cap, forcing chunked
+# resubmission across the page boundary.
+(text-roundtrip 65536 "6")
+
+(file/delete-dir-all scratch)
 (println "port-read-exact: all tests passed")

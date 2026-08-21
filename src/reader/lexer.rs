@@ -1,4 +1,4 @@
-use super::token::{SourceLoc, Token, TokenWithLoc};
+use super::token::{SourceLoc, Token, TokenWithLoc, UNKNOWN_FILE};
 
 /// Fast delimiter check - O(1) instead of string contains O(n)
 /// Checks if a character is a Lisp delimiter
@@ -28,14 +28,7 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Lexer {
-            input,
-            bytes: input.as_bytes(),
-            pos: 0,
-            line: 1,
-            col: 1,
-            file: "<unknown>".to_string(),
-        }
+        Lexer::with_file(input, UNKNOWN_FILE)
     }
 
     pub fn with_file(input: &'a str, file: impl Into<String>) -> Self {
@@ -51,6 +44,16 @@ impl<'a> Lexer<'a> {
 
     fn get_loc(&self) -> SourceLoc {
         SourceLoc::new(&self.file, self.line, self.col)
+    }
+
+    /// Bundle `token` with the span running from `start_pos` to the cursor's
+    /// current position. Every arm of `next_token_with_loc` captures `loc` and
+    /// `start_pos` before consuming the lexeme and then calls this once it has
+    /// advanced past it, so the `len = pos - start_pos`, `byte_offset =
+    /// start_pos` relationship lives here rather than being re-derived (and
+    /// re-typo'd) at each of the ~28 token sites.
+    fn spanned(&self, token: Token<'a>, loc: SourceLoc, start_pos: usize) -> TokenWithLoc<'a> {
+        TokenWithLoc::new(token, loc, self.pos - start_pos, start_pos)
     }
 
     pub(super) fn current(&self) -> Option<char> {
@@ -189,122 +192,56 @@ impl<'a> Lexer<'a> {
             None => Ok(None),
             Some('#') => {
                 let text = self.read_comment();
-                let len = self.pos - start_pos;
-                Ok(Some(TokenWithLoc {
-                    token: Token::Comment(text),
-                    loc,
-                    len,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::Comment(text), loc, start_pos)))
             }
             Some('(') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::LeftParen,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::LeftParen, loc, start_pos)))
             }
             Some(')') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::RightParen,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::RightParen, loc, start_pos)))
             }
             Some('[') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::LeftBracket,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::LeftBracket, loc, start_pos)))
             }
             Some(']') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::RightBracket,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::RightBracket, loc, start_pos)))
             }
             Some('{') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::LeftBrace,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::LeftBrace, loc, start_pos)))
             }
             Some('}') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::RightBrace,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::RightBrace, loc, start_pos)))
             }
             Some('\'') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::Quote,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::Quote, loc, start_pos)))
             }
             Some('`') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::Quasiquote,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::Quasiquote, loc, start_pos)))
             }
             Some(',') => {
                 self.advance();
                 if self.current() == Some(';') {
                     self.advance();
-                    Ok(Some(TokenWithLoc {
-                        token: Token::UnquoteSplicing,
-                        loc,
-                        len: self.pos - start_pos,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::UnquoteSplicing, loc, start_pos)))
                 } else {
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Unquote,
-                        loc,
-                        len: self.pos - start_pos,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Unquote, loc, start_pos)))
                 }
             }
             Some(';') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::Splice,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::Splice, loc, start_pos)))
             }
             Some('|') => {
                 self.advance();
-                Ok(Some(TokenWithLoc {
-                    token: Token::Pipe,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::Pipe, loc, start_pos)))
             }
             Some('@') => {
                 self.advance();
@@ -312,42 +249,22 @@ impl<'a> Lexer<'a> {
                     // @| → mutable set literal delimiter
                     Some('|') => {
                         self.advance();
-                        Ok(Some(TokenWithLoc {
-                            token: Token::AtPipe,
-                            loc,
-                            len: self.pos - start_pos,
-                            byte_offset: start_pos,
-                        }))
+                        Ok(Some(self.spanned(Token::AtPipe, loc, start_pos)))
                     }
                     // @b[ → mutable bytes literal
                     Some('b') if self.peek(1) == Some('[') => {
                         self.advance(); // consume 'b'
                         self.advance(); // consume '['
-                        Ok(Some(TokenWithLoc {
-                            token: Token::AtBytesBracket,
-                            loc,
-                            len: self.pos - start_pos,
-                            byte_offset: start_pos,
-                        }))
+                        Ok(Some(self.spanned(Token::AtBytesBracket, loc, start_pos)))
                     }
                     // @symbol → symbol with @ prefix (e.g. @set, @array)
                     Some(c) if is_symbol_start(c) => {
                         let (_, end) = self.read_symbol();
                         let name = self.slice(start_pos, end);
-                        Ok(Some(TokenWithLoc {
-                            token: Token::Symbol(name),
-                            loc,
-                            len: self.pos - start_pos,
-                            byte_offset: start_pos,
-                        }))
+                        Ok(Some(self.spanned(Token::Symbol(name), loc, start_pos)))
                     }
                     // @[, @{, @" → collection sugar
-                    _ => Ok(Some(TokenWithLoc {
-                        token: Token::ListSugar,
-                        loc,
-                        len: self.pos - start_pos,
-                        byte_offset: start_pos,
-                    })),
+                    _ => Ok(Some(self.spanned(Token::ListSugar, loc, start_pos))),
                 }
             }
             Some(':') => {
@@ -371,23 +288,12 @@ impl<'a> Lexer<'a> {
                     } else {
                         self.slice(start, end)
                     };
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Keyword(keyword),
-                        loc,
-                        len: self.pos - start_pos,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Keyword(keyword), loc, start_pos)))
                 }
             }
             Some('"') => {
                 let token = Token::String(self.read_string()?);
-                let len = self.pos - start_pos;
-                Ok(Some(TokenWithLoc {
-                    token,
-                    loc,
-                    len,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(token, loc, start_pos)))
             }
             Some(c) if c.is_ascii_digit() || c == '-' || c == '+' => {
                 // Check if it's a number or symbol
@@ -395,40 +301,18 @@ impl<'a> Lexer<'a> {
                     if (c == '-' || c == '+') && !next.is_ascii_digit() {
                         let (start, end) = self.read_symbol();
                         let sym = self.slice(start, end);
-                        Ok(Some(TokenWithLoc {
-                            token: Token::Symbol(sym),
-                            loc,
-                            len: self.pos - start_pos,
-                            byte_offset: start_pos,
-                        }))
+                        Ok(Some(self.spanned(Token::Symbol(sym), loc, start_pos)))
                     } else {
                         let token = self.read_number()?;
-                        let len = self.pos - start_pos;
-                        Ok(Some(TokenWithLoc {
-                            token,
-                            loc,
-                            len,
-                            byte_offset: start_pos,
-                        }))
+                        Ok(Some(self.spanned(token, loc, start_pos)))
                     }
                 } else if c == '-' || c == '+' {
                     let (start, end) = self.read_symbol();
                     let sym = self.slice(start, end);
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Symbol(sym),
-                        loc,
-                        len: self.pos - start_pos,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Symbol(sym), loc, start_pos)))
                 } else {
                     let token = self.read_number()?;
-                    let len = self.pos - start_pos;
-                    Ok(Some(TokenWithLoc {
-                        token,
-                        loc,
-                        len,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(token, loc, start_pos)))
                 }
             }
 
@@ -436,46 +320,20 @@ impl<'a> Lexer<'a> {
             Some('b') if self.peek(1) == Some('[') => {
                 self.advance(); // consume 'b'
                 self.advance(); // consume '['
-                Ok(Some(TokenWithLoc {
-                    token: Token::BytesBracket,
-                    loc,
-                    len: self.pos - start_pos,
-                    byte_offset: start_pos,
-                }))
+                Ok(Some(self.spanned(Token::BytesBracket, loc, start_pos)))
             }
 
             Some(_) => {
                 let (start, end) = self.read_symbol();
                 let sym = self.slice(start, end);
-                let len = self.pos - start_pos;
                 if sym == "nil" {
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Nil,
-                        loc,
-                        len,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Nil, loc, start_pos)))
                 } else if sym == "true" {
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Bool(true),
-                        loc,
-                        len,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Bool(true), loc, start_pos)))
                 } else if sym == "false" {
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Bool(false),
-                        loc,
-                        len,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Bool(false), loc, start_pos)))
                 } else {
-                    Ok(Some(TokenWithLoc {
-                        token: Token::Symbol(sym),
-                        loc,
-                        len,
-                        byte_offset: start_pos,
-                    }))
+                    Ok(Some(self.spanned(Token::Symbol(sym), loc, start_pos)))
                 }
             }
         }
@@ -488,91 +346,4 @@ impl<'a> Lexer<'a> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn lex_single(input: &str) -> Token<'_> {
-        let mut lexer = Lexer::new(input);
-        lexer.next_token().unwrap().unwrap()
-    }
-
-    #[test]
-    fn true_word_lexes_as_bool() {
-        assert!(matches!(lex_single("true"), Token::Bool(true)));
-    }
-
-    #[test]
-    fn false_word_lexes_as_bool() {
-        assert!(matches!(lex_single("false"), Token::Bool(false)));
-    }
-
-    #[test]
-    fn true_question_mark_is_symbol() {
-        assert!(matches!(lex_single("true?"), Token::Symbol("true?")));
-    }
-
-    #[test]
-    fn trueish_is_symbol() {
-        assert!(matches!(lex_single("trueish"), Token::Symbol("trueish")));
-    }
-
-    #[test]
-    fn false_positive_is_symbol() {
-        assert!(matches!(
-            lex_single("false-positive"),
-            Token::Symbol("false-positive")
-        ));
-    }
-
-    #[test]
-    fn truetrue_is_symbol() {
-        assert!(matches!(lex_single("truetrue"), Token::Symbol("truetrue")));
-    }
-
-    #[test]
-    fn comment_is_token() {
-        let mut lexer = Lexer::new("# hello");
-        let tok = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(tok, Token::Comment(s) if s == "# hello"));
-    }
-
-    #[test]
-    fn doc_comment_is_token() {
-        let mut lexer = Lexer::new("## doc text");
-        let tok = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(tok, Token::Comment(s) if s == "## doc text"));
-    }
-
-    #[test]
-    fn comment_before_code() {
-        let mut lexer = Lexer::new("# comment\n42");
-        let first = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(first, Token::Comment(_)));
-        let second = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(second, Token::Integer(42)));
-    }
-
-    #[test]
-    fn comment_after_code() {
-        let mut lexer = Lexer::new("42 # inline comment");
-        let first = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(first, Token::Integer(42)));
-        let second = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(second, Token::Comment(s) if s.contains("inline comment")));
-    }
-
-    #[test]
-    fn comment_at_eof() {
-        let mut lexer = Lexer::new("# trailing");
-        let tok = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(tok, Token::Comment(s) if s == "# trailing"));
-        assert!(lexer.next_token().unwrap().is_none());
-    }
-
-    #[test]
-    fn comment_with_special_chars() {
-        let mut lexer = Lexer::new("# (parens) [brackets] 'quote");
-        let tok = lexer.next_token().unwrap().unwrap();
-        assert!(matches!(tok, Token::Comment(s) if s.contains("(parens)")));
-    }
-}
+mod tests;

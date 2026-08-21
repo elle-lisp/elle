@@ -1,88 +1,73 @@
 //! Tests for FiberHeap.
 
 use super::*;
+use crate::hir::region::RuntimeRegion;
 use crate::value::heap::{HeapObject, Pair};
 
+/// Wrap a raw id as a `RuntimeRegion` for tests (panics on 0).
+fn rr(n: u32) -> RuntimeRegion {
+    RuntimeRegion::new(n).unwrap()
+}
+
+/// Each `FiberHeap` owns an independent trace cell — two coexisting instances in
+/// one process never share a diagnostic toggle (the multi-instance correctness the
+/// trace relocation restores). Setting one heap's cell leaves the other's at zero,
+/// and a heap hands out a *clone* of its one cell, not a fresh one each call.
 #[test]
-fn test_fiber_heap_alloc() {
-    let mut heap = FiberHeap::new();
-    let s = heap.alloc_inline_slice::<u8>(b"hello");
-    let v = heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 1);
-    assert!(v.is_heap());
-    unsafe {
-        let obj = crate::value::arena::deref(v);
-        match obj {
-            HeapObject::LString { s, .. } => assert_eq!(s.as_slice(), b"hello"),
-            _ => panic!("Expected String"),
-        }
-    }
+fn heaps_have_independent_trace_cells() {
+    use std::sync::atomic::Ordering;
+    let h1 = FiberHeap::new();
+    let h2 = FiberHeap::new();
+    let c1 = h1.trace_cell();
+    let c2 = h2.trace_cell();
+
+    c1.store(crate::config::trace_bits::PAGES, Ordering::Relaxed);
+    assert_eq!(c1.load(Ordering::Relaxed), crate::config::trace_bits::PAGES);
+    assert_eq!(
+        c2.load(Ordering::Relaxed),
+        0,
+        "a second heap's trace cell must be independent of the first's"
+    );
+    assert_eq!(
+        h1.trace_cell().load(Ordering::Relaxed),
+        crate::config::trace_bits::PAGES,
+        "trace_cell() returns a clone of the one heap cell, so the write is visible"
+    );
 }
 
 #[test]
-fn test_fiber_heap_clear_runs_destructors() {
-    // After the Phase 1–2 redesign, LString bytes live inline in the arena
-    // and don't need per-object Drop. The arena itself reclaims everything
-    // on clear(). No HeapObject variant currently needs individual Drop, so
-    // this test now verifies that clear() resets the live count regardless.
+fn test_fiber_heap_alloc_in_region() {
     let mut heap = FiberHeap::new();
-    let sa = heap.alloc_inline_slice::<u8>(b"a");
-    heap.alloc(HeapObject::LString {
-        s: sa,
-        traits: Value::NIL,
-    });
-    let sb = heap.alloc_inline_slice::<u8>(b"b");
-    heap.alloc(HeapObject::LString {
-        s: sb,
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-    assert_eq!(heap.len(), 3); // 3 total objects allocated
+    let v = heap.alloc_in_region(
+        HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)),
+        rr(2),
+    );
+    assert_eq!(heap.len(), 1);
+    assert!(v.is_heap());
+}
+
+#[test]
+fn test_fiber_heap_clear() {
+    let mut heap = FiberHeap::new();
+    heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)), rr(2));
+    heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)), rr(2));
+    heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)), rr(3));
+    assert_eq!(heap.len(), 3);
     heap.clear();
     assert_eq!(heap.len(), 0);
     assert!(heap.is_empty());
 }
 
 #[test]
-fn test_fiber_heap_non_drop_types_not_tracked() {
-    let mut heap = FiberHeap::new();
-    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-    // HeapObject::Float is no longer allocated — floats are immediate in 16-byte Value.
-    // Use another non-drop type instead.
-    heap.alloc(HeapObject::Pair(Pair::new(Value::TRUE, Value::EMPTY_LIST)));
-    heap.alloc(HeapObject::LBox {
-        cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
-        traits: Value::NIL,
-    });
-    // 3 total objects; only the LBox needs Drop tracking. LBox wraps
-    // its value in `Rc<RefCell<Value>>` for cross-fiber sharing, so
-    // dropping it must decrement the Rc's strong count. The two Pair
-    // cells are pure bit-copies and need no Drop.
-    assert_eq!(heap.len(), 3);
-    assert_eq!(heap.dtor_count(), 1);
-}
-
-#[test]
 fn test_fiber_heap_needs_drop_exhaustive() {
-    // This test exists to document which tags need Drop.
-    // If a new HeapTag variant is added, `needs_drop` won't compile
-    // until a decision is made.
     assert!(!needs_drop(HeapTag::Pair));
     assert!(!needs_drop(HeapTag::Float));
-    assert!(!needs_drop(HeapTag::NativeFn));
     assert!(!needs_drop(HeapTag::LibHandle));
     assert!(!needs_drop(HeapTag::ManagedPointer));
     assert!(!needs_drop(HeapTag::Parameter));
 
-    // LBox and CaptureCell now wrap their value in Rc<RefCell<Value>>
-    // so that cross-fiber sharing survives deep_copy_to_outbox. Dropping
-    // the Rc decrements the strong count — must be tracked.
     assert!(needs_drop(HeapTag::LBox));
     assert!(needs_drop(HeapTag::CaptureCell));
-
     assert!(needs_drop(HeapTag::LString));
     assert!(needs_drop(HeapTag::LArrayMut));
     assert!(needs_drop(HeapTag::LStructMut));
@@ -103,549 +88,302 @@ fn test_fiber_heap_needs_drop_exhaustive() {
 }
 
 #[test]
-fn test_install_and_uninstall() {
-    let mut heap = Box::new(FiberHeap::new());
-    let ptr = &mut *heap as *mut FiberHeap;
-    unsafe {
-        install_fiber_heap(ptr);
-    }
-    assert!(is_fiber_heap_installed());
-    assert!(with_current_heap_mut(|h| h.len()).is_some());
-    uninstall_fiber_heap();
-    assert!(!is_fiber_heap_installed());
-}
-
-#[test]
-fn test_no_heap_by_default() {
-    // Ensure no heap is installed (may have been left by another test)
-    uninstall_fiber_heap();
-    assert!(!is_fiber_heap_installed());
-    assert!(with_current_heap_mut(|h| h.len()).is_none());
-}
-
-#[test]
-fn test_save_restore() {
-    let mut heap_a = Box::new(FiberHeap::new());
-    let mut heap_b = Box::new(FiberHeap::new());
-    let sa = heap_a.alloc_inline_slice::<u8>(b"a");
-    heap_a.alloc(HeapObject::LString {
-        s: sa,
-        traits: Value::NIL,
-    });
-    let sb1 = heap_b.alloc_inline_slice::<u8>(b"b1");
-    heap_b.alloc(HeapObject::LString {
-        s: sb1,
-        traits: Value::NIL,
-    });
-    let sb2 = heap_b.alloc_inline_slice::<u8>(b"b2");
-    heap_b.alloc(HeapObject::LString {
-        s: sb2,
-        traits: Value::NIL,
-    });
-
-    let ptr_a = &mut *heap_a as *mut FiberHeap;
-    let ptr_b = &mut *heap_b as *mut FiberHeap;
-
-    unsafe {
-        install_fiber_heap(ptr_a);
-    }
-    assert_eq!(with_current_heap_mut(|h| h.len()), Some(1));
-
-    let saved = save_current_heap();
-    unsafe {
-        install_fiber_heap(ptr_b);
-    }
-    assert_eq!(with_current_heap_mut(|h| h.len()), Some(2));
-
-    unsafe {
-        restore_saved_heap(saved);
-    }
-    assert_eq!(with_current_heap_mut(|h| h.len()), Some(1));
-
-    uninstall_fiber_heap();
-}
-
-// ── Scope mark stack tests ────────────────────────────────────
-
-#[test]
-#[should_panic(expected = "RegionExit without matching RegionEnter")]
-fn test_scope_mark_pop_empty_panics() {
+fn free_region_physical_frees_matching_slots() {
     let mut heap = FiberHeap::new();
-    heap.pop_scope_mark_and_release();
-}
-
-// ── ROOT_HEAP tests ─────────────────────────────────────────────
-
-#[test]
-fn test_ensure_root_heap_idempotent() {
-    // ensure_root_heap() must return the same pointer on every call.
-    let p1 = ensure_root_heap();
-    let p2 = ensure_root_heap();
-    let p3 = ensure_root_heap();
-    assert!(!p1.is_null());
-    assert_eq!(p1, p2);
-    assert_eq!(p2, p3);
-}
-
-#[test]
-fn test_vm_new_installs_root_heap() {
-    use crate::vm::core::VM;
-    let _vm = VM::new();
-    // After VM::new(), the current heap pointer must be non-null.
-    assert!(is_fiber_heap_installed());
-    // Clean up: uninstall so we don't interfere with subsequent tests.
-    // (ROOT_HEAP thread-local persists, but CURRENT_FIBER_HEAP can be
-    //  uninstalled for test isolation.)
-    uninstall_fiber_heap();
-}
-
-// ── Chunk 3: lazy root heap init via alloc() ──────────────────────
-
-#[test]
-fn test_alloc_without_installed_heap_lazy_inits() {
-    // alloc() with no heap installed triggers lazy root heap installation.
-    uninstall_fiber_heap();
-    // alloc() should not panic even with no heap installed.
-    // Go through Value::string so the inline slice alloc also lazy-inits.
-    let v = Value::string("lazy-test");
-    assert!(v.is_heap());
-    // Root heap is now installed.
-    assert!(is_fiber_heap_installed());
-    // Clean up
-    uninstall_fiber_heap();
-}
-
-// ── Shared allocator ownership tests ──────────────────────────────
-
-#[test]
-fn test_shared_alloc_routing() {
-    let mut heap = FiberHeap::new();
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-
-    // Allocate via FiberHeap — should route to shared
-    let s = heap.alloc_inline_slice::<u8>(b"routed");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-
-    // Private pool should be untouched
-    assert_eq!(heap.len(), 0);
-
-    // Shared allocator should have the allocation
-    let sa = unsafe { &*sa_ptr };
-    assert_eq!(sa.len(), 1);
-}
-
-#[test]
-fn test_private_alloc_when_no_shared() {
-    let mut heap = FiberHeap::new();
-    // shared_alloc is null by default
-    assert!(heap.shared_alloc().is_null());
-
-    let s = heap.alloc_inline_slice::<u8>(b"private");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 1);
-    assert_eq!(heap.dtor_count(), 1);
-}
-
-#[test]
-fn test_drop_tears_down_owned_shared() {
-    // Create a FiberHeap with a shared allocator containing allocations,
-    // then drop it. If Drop doesn't teardown, we'd leak inner heap allocs.
-    let mut heap = FiberHeap::new();
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-    let s = heap.alloc_inline_slice::<u8>(b"will-be-dropped");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-    // Drop runs here — should not leak or panic.
-    drop(heap);
-}
-
-// ── Shared allocator teardown lifecycle ────────────────────────────
-
-#[test]
-fn test_multiple_shared_allocs_all_torn_down() {
-    // Create 3 shared allocators, allocate into each, verify clear()
-    // tears down all three.
-    let mut heap = FiberHeap::new();
-
-    // Create 3 shared allocs, allocate strings into each
-    let sa1 = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa1);
-    let s1 = heap.alloc_inline_slice::<u8>(b"sa1-val");
-    heap.alloc(HeapObject::LString {
-        s: s1,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    let sa2 = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa2);
-    let s2 = heap.alloc_inline_slice::<u8>(b"sa2-val");
-    heap.alloc(HeapObject::LString {
-        s: s2,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    let sa3 = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa3);
-    let s3 = heap.alloc_inline_slice::<u8>(b"sa3-val");
-    heap.alloc(HeapObject::LString {
-        s: s3,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    assert_eq!(heap.shared_count(), 3);
-    assert_eq!(unsafe { &*sa1 }.len(), 1);
-    assert_eq!(unsafe { &*sa2 }.len(), 1);
-    assert_eq!(unsafe { &*sa3 }.len(), 1);
-
-    heap.clear();
-    assert_eq!(heap.shared_count(), 0);
-    assert!(heap.shared_alloc().is_null());
-}
-
-#[test]
-fn test_shared_alloc_survives_private_clear() {
-    // Shared allocs are NOT affected by private pool operations.
-    // Private alloc_count/dtors are separate from shared.
-    let mut heap = FiberHeap::new();
-
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-    let s_shared = heap.alloc_inline_slice::<u8>(b"in-shared");
-    heap.alloc(HeapObject::LString {
-        s: s_shared,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    // Allocate privately
-    let s_private = heap.alloc_inline_slice::<u8>(b"in-private");
-    heap.alloc(HeapObject::LString {
-        s: s_private,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 1); // private count
-    assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared count
-
-    // Mark/release on private pool does not touch shared
-    let mark = heap.mark();
-    let s_scoped = heap.alloc_inline_slice::<u8>(b"scoped");
-    heap.alloc(HeapObject::LString {
-        s: s_scoped,
-        traits: Value::NIL,
-    });
-    heap.release(mark);
-    assert_eq!(heap.len(), 1); // back to 1
-    assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared unchanged
-}
-
-// ── Flip* instructions ─────────────────────────────────────────────
-
-fn alloc_drop_tracked(heap: &mut FiberHeap) {
-    // Allocate an LString — it's in `needs_drop=true` territory, so it
-    // enters both `allocs` and `dtors` lists. This is exactly the kind
-    // of allocation the rotation/flip path needs to free.
-    let s = heap.alloc_inline_slice::<u8>(b"x");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-}
-
-#[test]
-fn flip_enter_and_exit_balance() {
-    let mut heap = FiberHeap::new();
-    assert_eq!(heap.flip_depth(), 0);
-    heap.flip_enter();
-    assert_eq!(heap.flip_depth(), 1);
-    heap.flip_enter();
-    assert_eq!(heap.flip_depth(), 2);
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 1);
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
-}
-
-#[test]
-fn flip_swap_resets_current_iteration_count() {
-    // `FlipSwap` has the same semantics as the trampoline's implicit
-    // rotation: current iteration's allocations move into the swap
-    // pool, and `alloc_count` resets to the base mark. The previous
-    // iteration (now swap) is reclaimed at the *next* swap/exit.
-    let mut heap = FiberHeap::new();
-    heap.flip_enter();
-
-    alloc_drop_tracked(&mut heap);
-    assert_eq!(heap.len(), 1, "current iteration has 1 live object");
-
-    heap.flip_swap();
-    assert_eq!(
-        heap.len(),
-        0,
-        "after swap, current iteration's count is back at base"
+    heap.alloc_in_region(
+        HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)),
+        rr(4),
     );
-
-    alloc_drop_tracked(&mut heap);
-    assert_eq!(heap.len(), 1);
-
-    heap.flip_swap();
-    assert_eq!(heap.len(), 0);
-
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
+    let v2 = heap.alloc_in_region(
+        HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)),
+        rr(2),
+    );
+    assert!(v2.is_heap());
+    heap.decref_region_if_present(rr(4));
+    heap.decref_region_if_present(rr(2));
 }
 
 #[test]
-fn flip_exit_restores_caller_swap_pool() {
-    // A nested flip frame must not touch the caller's swap generation.
-    // After an inner enter/swap/exit, the outer's next swap continues
-    // to see the generation it set up before nesting — i.e. the swap
-    // pool pointer is restored, not overwritten.
+#[should_panic(expected = "stale region")]
+fn region_of_panics_on_stale_value_in_debug() {
+    // The arena-level funnel (docs/impl/region/generations.md § "Region generations"):
+    // every runtime RC decision reads a value's region through
+    // arena::region_of, so the generation check there converts a stale-id
+    // deref from a silent wrong read into a deterministic panic.
+    let mut heap = FiberHeap::new();
+    let r = heap.new_runtime_region();
+    let v = heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)), r);
+    heap.decref_region(r); // rc 1→0: region freed, page cached stale-but-intact
+    let _ = crate::value::arena::region_of(&heap, v);
+}
+
+#[test]
+#[should_panic(expected = "stale region")]
+fn pass_through_borrow_detonates_at_region_of() {
+    // The pass-through borrow's check is `region_of` itself — NOT a
+    // recorded-generation handle like the cross-fiber param snapshot
+    // (docs/impl/region/generations.md § "Two borrow shapes"). The
+    // `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`) hand back
+    // a value that aliases into the *source* collection's region with NO incref —
+    // an uncounted borrow (unlike a *native* `first`/`rest`/`get`, whose result the
+    // pass-through retain in `dispatch_native_call` counts). Such a borrow is a
+    // transient SSA value with a compile-time-bounded lifetime and no persistent
+    // home to record a handle on; it is sound only while its source region outlives
+    // it, which the region solver upholds by lifetime extension. This pins the
+    // runtime backstop: a borrow held past its source region's free detonates at the
+    // borrow's next `region_of` (the page-stamp generation check), deterministically
+    // at the deref rather than as a later silent wrong read.
     //
-    // We observe this through `rotation_freed`: once the outer calls
-    // `flip_swap` again after the inner returns, its own (pre-inner)
-    // swap pool must be the one that gets torn down. If the inner
-    // stomped the outer's swap_pool, the outer's next swap would have
-    // nothing to free.
+    // Counterfactual: without the generation check, `region_of` would hand back the
+    // freed region's id (recycled or stale) and the dangling borrow would read on.
     let mut heap = FiberHeap::new();
-
-    heap.flip_enter();
-    alloc_drop_tracked(&mut heap); // outer iter 0
-    heap.flip_swap(); // outer iter 0 → outer's swap pool
-
-    let freed_before = heap.rotation_freed;
-
-    // Inner frame does its own rotations; must not see or touch
-    // outer's swap pool.
-    heap.flip_enter();
-    alloc_drop_tracked(&mut heap);
-    heap.flip_swap();
-    alloc_drop_tracked(&mut heap);
-    heap.flip_exit();
-
-    // Now outer does another swap. Its saved swap pool (containing
-    // outer's iter 0) should be what gets freed.
-    alloc_drop_tracked(&mut heap); // outer iter 1
-    heap.flip_swap();
-
-    assert!(
-        heap.rotation_freed > freed_before,
-        "outer's swap pool survived the inner frame \
-         (rotation_freed did not advance: before={}, after={})",
-        freed_before,
-        heap.rotation_freed
-    );
-
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
+    // The collection and a co-located element share one region `r` — a `%pair`'s car
+    // living in the pair's own region. Same-region allocations add no RC, so `r`'s
+    // rc is 1: the collection's single owning reference.
+    let r = heap.new_runtime_region();
+    let _collection =
+        heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)), r);
+    // `(%get collection k)` / `(%first collection)` yields this co-located element as
+    // an uncounted borrow into `r` — modelled by simply holding the Value: nothing
+    // increfs `r`.
+    let borrowed = heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)), r);
+    // The collection's owner releases `r` at its decref_point (rc 1→0: freed, pages
+    // cached stale-but-intact). The borrow now dangles.
+    heap.decref_region(r);
+    // The dangling borrow's next region-classifying deref detonates here.
+    let _ = crate::value::arena::region_of(&heap, borrowed);
 }
 
-#[test]
-fn flip_noop_without_frame() {
-    // Isolated FlipSwap or FlipExit (no matching FlipEnter) must be
-    // safe no-ops — the bytecode could be malformed, or the function
-    // could have been lowered without auto-insertion and we still
-    // want the instructions to be callable.
-    let mut heap = FiberHeap::new();
-    heap.flip_swap();
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
-}
-
-// ── Region slot recycling tests ──────────────────────────────────────
+// The `ensure_raw` backstop (docs/impl/region/generations.md § "Region
+// generations"): a garbage region id must NOT drive the lazy region-table
+// resize. A corrupt page-header read (the diagnosed cause was a misidentified
+// page base — closed by the `region_of_ptr` ownership-validated walk and the
+// page-header magic — but a stale/foreign read could also reach here) can hand
+// back an id near `u32::MAX`. Without the backstop `ensure_raw` resizes the
+// table to that id (~584 GB) and OOM-aborts far from the bug. With it, the
+// implausible id detonates at the incref, naming the hazard, in every build (the
+// failure observed as `elle test tests/elle/oracle.lisp` aborting with `memory
+// allocation of 584115526960 bytes failed`).
 //
-// These tests verify that RegionExit returns slab slots to the free list.
-// They are #[ignore] until scope eligibility for while/loop is routed
-// through region inference (follow-up branch).
-
+// Counterfactual: pre-backstop this call resizes `regions` to ~u32::MAX entries
+// (an OOM); post-backstop it panics before any resize.
 #[test]
-fn region_exit_returns_slots_to_free_list() {
-    // RegionExit must return slab slots to the free list so subsequent
-    // allocations reuse them. This is the Phase 1 enabling condition:
-    // escape-analysis-gated scope reclamation can safely deallocate
-    // because the analysis proves no values escape the scope.
+#[should_panic(expected = "physically implausible")]
+fn incref_on_implausible_region_id_detonates_not_resizes() {
     let mut heap = FiberHeap::new();
-
-    // Allocate 3 objects outside any scope (these are "base" objects).
-    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-    let base_live = heap.root_live();
-    assert_eq!(base_live, 3);
-
-    // Enter a scope, allocate 4 objects, exit scope.
-    heap.push_scope_mark();
-    let v1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
-    let v2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
-    let v3 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(3), Value::NIL)));
-    let v4 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(4), Value::NIL)));
-    assert_eq!(heap.root_live(), base_live + 4);
-
-    // RegionExit runs dtors (none for Pair) and returns slab slots.
-    heap.pop_scope_mark_and_release();
-    assert_eq!(
-        heap.root_live(),
-        base_live,
-        "RegionExit must return scoped slots to the free list"
-    );
-
-    // The scope-exit Values are now dangling — do not dereference them.
-    // But new allocations should reuse those freed slots.
-    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(10), Value::NIL)));
-    let n2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(20), Value::NIL)));
-
-    // Verify slot reuse: the new pointers should match the freed ones.
-    // (The free list is LIFO, so we expect reverse order.)
-    let freed_ptrs: [usize; 4] = [
-        v1.as_heap_ptr().unwrap() as usize,
-        v2.as_heap_ptr().unwrap() as usize,
-        v3.as_heap_ptr().unwrap() as usize,
-        v4.as_heap_ptr().unwrap() as usize,
-    ];
-    let new_ptr1 = n1.as_heap_ptr().unwrap() as usize;
-    let new_ptr2 = n2.as_heap_ptr().unwrap() as usize;
-    assert!(
-        freed_ptrs.contains(&new_ptr1),
-        "new allocation must reuse a freed slot"
-    );
-    assert!(
-        freed_ptrs.contains(&new_ptr2),
-        "new allocation must reuse a freed slot"
-    );
-
-    assert_eq!(heap.root_live(), base_live + 2);
+    heap.incref_region(rr(u32::MAX));
 }
 
+// `RuntimeRegion` is mortal by construction: ids 0 and 1 are reserved and
+// *unrepresentable* as a `RuntimeRegion`, so the runtime decref/alloc paths
+// cannot be called with either — a compile error, not a runtime assert.
 #[test]
-fn region_exit_reclaims_dtor_objects() {
-    // RegionExit must run destructors AND return slots for objects that
-    // need Drop (LString, Closure, etc.). Verifies that dtor ordering
-    // is correct (dtors run before slot dealloc).
+fn region_zero_and_one_are_unrepresentable() {
+    assert!(RuntimeRegion::new(0).is_none());
+    assert!(
+        RuntimeRegion::new(1).is_none(),
+        "id 1 is reserved — never a freeable RuntimeRegion",
+    );
+    assert_eq!(RuntimeRegion::new(2).map(|r| r.get()), Some(2));
+    assert_eq!(RuntimeRegion::new(7).map(|r| r.get()), Some(7));
+}
+
+// Regression: the macro-transformer-cache use-after-free demonstrated by
+// `demos/fib/fib.lisp` — intermittent startup panic
+// `Macro 'error': transformer is not a closure`.
+//
+// A transient region (the per-compilation/per-expansion scratch region built
+// by `pipeline::compile::with_transient` and `expand_macro_call`) must mint its
+// physical region id from the per-heap `new_runtime_region` pool — the single
+// physical-region allocator that every runtime allocation uses — NOT from the
+// global `new_static_region()` counter. The two counters (`NEXT_STATIC_REGION` in
+// lir/lower vs `RegionStore::next_physical`) are independent yet both
+// index the same `RegionStore`, so a transient's `new_static_region()`
+// value can equal a LIVE runtime region's `new_runtime_region()` id. The
+// transient's `decref_region_if_present` then frees that live region — a
+// use-after-free that violates docs/impl/region/rules.md invariant #1 ("no freeing
+// while RC > 0"). A cached macro transformer closure lives in such a
+// runtime region; when a later macro expansion's transient collides with
+// it, the cached closure's region is freed and recycled, and the next
+// lookup derefs a non-closure.
+//
+// Counterfactual: force the EXACT collision. Make a live region whose id
+// equals the value the next `new_static_region()` will return — i.e. the id
+// a pre-fix transient mints. Pre-fix the transient frees this live region
+// (its RC drops to 0); post-fix the transient draws from the per-heap
+// `new_runtime_region` pool and cannot pick this id, so the live region
+// survives. This is the fib UAF in miniature.
+#[test]
+fn transient_does_not_free_a_live_region_sharing_its_id() {
     let mut heap = FiberHeap::new();
 
-    let s = heap.alloc_inline_slice::<u8>(b"scoped-string");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.dtor_count(), 1);
+    // `new_static_region()` returns the current global counter then advances,
+    // so the *next* call returns `g + 1`. Nothing between here and the
+    // transient calls it, so a pre-fix transient mints exactly `g + 1`.
+    let g = crate::lir::lower::new_static_region();
+    let colliding = rr(g.get() + 1);
+    heap.alloc_in_region(
+        HeapObject::Pair(Pair::new(Value::int(7), Value::NIL)),
+        colliding,
+    );
+    assert_eq!(heap.region_rc(colliding), 1);
 
-    heap.push_scope_mark();
-    let s1 = heap.alloc_inline_slice::<u8>(b"a");
-    heap.alloc(HeapObject::LString {
-        s: s1,
-        traits: Value::NIL,
-    });
-    let s2 = heap.alloc_inline_slice::<u8>(b"b");
-    heap.alloc(HeapObject::LString {
-        s: s2,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.dtor_count(), 3);
-    let live_before = heap.root_live();
-
-    heap.pop_scope_mark_and_release();
+    // The transient minted from the per-heap pool, allocated into, then freed —
+    // exactly what `with_transient` / `expand_macro_call` do now (no macro).
+    {
+        let rid = heap.new_runtime_region();
+        heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)), rid);
+        heap.decref_region_if_present(rid);
+    }
 
     assert_eq!(
-        heap.dtor_count(),
+        heap.region_rc(colliding),
         1,
-        "RegionExit must run and truncate scoped dtors"
-    );
-    assert_eq!(
-        heap.root_live(),
-        live_before - 2,
-        "RegionExit must return 2 scoped slots to the free list"
+        "a transient region freed a LIVE region sharing its id — the \
+         macro-transformer-cache UAF: a transient drew its id from the global \
+         new_static_region() counter, colliding with a live runtime region \
+         (docs/impl/region/rules.md invariant #1: no freeing while RC > 0)"
     );
 }
 
+// Allocator invariant: `new_runtime_region` must never hand out an id that
+// already names a LIVE region. Physical ids reach the RegionStore from two
+// independent sources — this per-heap counter AND raw `new_static_region()`
+// static-slot ids that some paths use directly (or that `incref`/`ensure`
+// re-animate after a premature free). The ranges overlap, so `next_physical`
+// can climb onto a still-live region; issuing it would alias two logical
+// regions onto one id → use-after-free (demos/fib/fib.lisp's torn-read abort
+// during macro expansion). new_runtime_region must skip any live id.
 #[test]
-fn region_exit_call_returns_middle_range() {
-    // RegionExitCall pops two marks and frees only the range between
-    // them (arg temporaries). Objects before mark1 and after mark2
-    // are preserved. Slots in the middle are returned to the free list.
+fn new_runtime_region_never_reissues_a_live_region() {
     let mut heap = FiberHeap::new();
 
-    // Pre-region objects
-    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-    let pre_live = heap.root_live();
+    // A region created directly at an id `next_physical` (starts at 2) will
+    // climb into — models a raw static-slot id used as a physical region.
+    let raw = rr(64);
+    heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)), raw);
+    assert_eq!(heap.region_rc(raw), 1, "the raw region must be live");
 
-    // mark1: region start
-    heap.push_scope_mark();
+    // Minting past `raw` must never re-issue it while it is live.
+    for _ in 0..256 {
+        let id = heap.new_runtime_region();
+        assert_ne!(
+            id, raw,
+            "new_runtime_region re-issued LIVE region {raw} — aliasing two logical \
+             regions onto one id is a use-after-free"
+        );
+    }
+    // The live region is untouched.
+    assert_eq!(heap.region_rc(raw), 1);
+}
 
-    // Arg temporaries (these get freed)
-    let t1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
-    let t2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
-    let temp_live = heap.root_live();
+// Proof of the single-allocator property that makes the collision
+// impossible: a transient must mint its physical id from the per-heap
+// `new_runtime_region` pool, so a freed id is recycled and the next transient
+// reuses it. Advancing the global counter first decouples it from the
+// small per-heap id, making the counterfactual order-independent.
+#[test]
+fn transient_region_id_comes_from_heap_pool_not_global_counter() {
+    let mut heap = FiberHeap::new();
 
-    // mark2: barrier after args
-    heap.push_scope_mark();
-
-    // Callee's allocations (preserved)
-    heap.alloc(HeapObject::Pair(Pair::new(Value::int(3), Value::NIL)));
-    assert_eq!(heap.root_live(), temp_live + 1);
-
-    heap.pop_call_scope_marks_and_release();
-
-    // Only the 2 arg temporaries were freed
-    assert_eq!(
-        heap.root_live(),
-        pre_live + 1,
-        "RegionExitCall must free exactly the middle range"
+    // Allocate into a physical region, then free it so its id is recycled
+    // onto the heap's free-list (free_runtime_region_pages pushes ids >= 2).
+    let recycled = heap.new_runtime_region();
+    heap.alloc_in_region(
+        HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)),
+        recycled,
     );
+    heap.decref_region_if_present(recycled);
 
-    // New allocation should reuse one of the freed temporary slots
-    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(99), Value::NIL)));
-    let temp_ptrs: [usize; 2] = [
-        t1.as_heap_ptr().unwrap() as usize,
-        t2.as_heap_ptr().unwrap() as usize,
-    ];
-    assert!(
-        temp_ptrs.contains(&(n1.as_heap_ptr().unwrap() as usize)),
-        "new allocation must reuse a freed temporary slot"
+    // Push the global counter well past the small per-heap id so a pre-fix
+    // transient (drawing from it) cannot coincidentally equal `recycled`.
+    for _ in 0..8 {
+        let _ = crate::lir::lower::new_static_region();
+    }
+
+    // The transient must reuse the recycled id, proving it draws from the
+    // per-heap physical pool. A pre-fix transient drawing a global
+    // `new_static_region()` value would never equal the recycled id.
+    let tid = heap.new_runtime_region();
+    assert_eq!(
+        tid, recycled,
+        "a transient region must mint from the per-heap physical pool \
+         (got {tid}, expected recycled heap id {recycled}); minting from the \
+         global new_static_region() counter collides with live runtime regions"
     );
 }
 
+// A closure built by SHARING another closure's environment has its env
+// RegionSlice *backing* in the SOURCE closure's region, not its own. The
+// canonical producers are `squelch` and `attune` (src/primitives/meta.rs),
+// which build `Closure { template, env: src.env, .. }` — the comment there
+// notes "RegionSlice copy is a (ptr, len) pair", i.e. the backing stays put.
+//
+// That is a Rule-5 cross-region escape: the new closure (in region B) holds a
+// reference into region A (the source's env backing). The alloc-time scan
+// (`find_object_cross_refs`, Closure arm) MUST incref A — otherwise A is freed
+// at its owning-scope decref while the new closure still reads its env. The
+// observed symptom is the protect+squelch+nested-yield hang: `populate_env`
+// reads a freed page on first fiber resume (b.lisp / signals.lisp), because
+// `safe = (squelch outer …)` shares `outer`'s env and `outer`'s region is
+// released at rc=1 right after the `def`.
+//
+// Counterfactual: pre-fix the Closure arm only scans the env *Values*, never
+// the env backing, so `region_rc(A)` stays 1 after the closure alloc and the
+// owning decref frees A out from under the live closure. The Fiber arm already
+// does this (Fix 1's "EXPERIMENT"); closures need the same edge.
 #[test]
-fn region_exit_nested_scopes_dealloc_innermost_first() {
-    // Nested RegionEnter/RegionExit must dealloc innermost scope's slots
-    // first, then outer scope's. The free list is LIFO, so inner slots
-    // are reused first.
+fn closure_sharing_env_increfs_the_env_backing_region() {
+    use crate::value::fiber::SignalBits;
+    use crate::value::{Arity, Closure, ClosureTemplate};
+    use std::rc::Rc;
+
     let mut heap = FiberHeap::new();
+    let region_a = rr(2); // where the shared env backing lives (the "outer" region)
+    let region_b = rr(3); // where the squelch-style closure that shares it lives
 
-    heap.push_scope_mark();
-    let inner1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
-    heap.push_scope_mark();
-    let inner2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
-    assert_eq!(heap.root_live(), 2);
+    // The env backing must be a real page in A (non-empty: an empty env uses a
+    // dangling sentinel ptr that belongs to no region).
+    let env = heap.alloc_region_slice_in_region(&[Value::int(1)], region_a);
+    assert_eq!(
+        heap.region_rc(region_a),
+        1,
+        "A owns its env backing slice (rc=1, the owning-scope ref)"
+    );
 
-    // Exit inner scope — only inner2's slot is freed
-    heap.pop_scope_mark_and_release();
-    assert_eq!(heap.root_live(), 1);
+    let template = Rc::new(ClosureTemplate::new(
+        Rc::new(Vec::new()),
+        Arity::Exact(0),
+        Rc::new(Vec::new()),
+    ));
+    // Mirror prim_squelch: a NEW closure that SHARES the env (backed in A) but
+    // is itself allocated into a different region B.
+    let shared = Closure {
+        template: crate::value::TemplateRef::new(template),
+        env,
+        squelch_mask: SignalBits::EMPTY,
+    };
+    heap.alloc_in_region(
+        HeapObject::Closure {
+            closure: shared,
+            traits: Value::NIL,
+        },
+        region_b,
+    );
 
-    // Exit outer scope — inner1's slot is freed
-    heap.pop_scope_mark_and_release();
-    assert_eq!(heap.root_live(), 0);
+    assert_eq!(
+        heap.region_rc(region_a),
+        2,
+        "allocating a closure whose env backing lives in region A must incref A \
+         (the env-sharing cross-region escape); without it A is freed under the \
+         live closure — the squelch/protect env UAF"
+    );
 
-    // Both slots should be reused
-    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(10), Value::NIL)));
-    let freed_ptrs: [usize; 2] = [
-        inner1.as_heap_ptr().unwrap() as usize,
-        inner2.as_heap_ptr().unwrap() as usize,
-    ];
+    // The owning-scope decref of A must then leave it alive (the closure in B
+    // still references the env backing). Pre-fix this frees A (rc 1 → 0).
+    heap.decref_region(region_a);
     assert!(
-        freed_ptrs.contains(&(n1.as_heap_ptr().unwrap() as usize)),
-        "new allocation must reuse a freed slot"
+        heap.region_rc(region_a) >= 1,
+        "region A freed while a live closure still shares its env backing — UAF"
     );
 }

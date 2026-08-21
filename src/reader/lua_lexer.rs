@@ -3,6 +3,7 @@
 //! Produces `LuaToken` values with source locations. Numbers reuse the
 //! patterns from `numeric.rs` (decimal, hex, scientific notation).
 
+use super::scan::{CharCursor, CharIdx};
 use super::token::SourceLoc;
 
 /// Token types for the Lua surface syntax.
@@ -84,47 +85,51 @@ pub struct LuaTokenLoc {
     pub len: usize,
 }
 
+impl LuaTokenLoc {
+    /// Bundle a token with its source location and byte length. Reached through
+    /// [`LuaLexer::spanned`] for lexemes whose length is measured from the
+    /// cursor; called directly for zero/one-width synthetic tokens (Eof) here
+    /// and for the parser's Eof sentinel.
+    pub(super) fn new(token: LuaToken, loc: SourceLoc, len: usize) -> Self {
+        LuaTokenLoc { token, loc, len }
+    }
+}
+
 pub struct LuaLexer {
-    input: Vec<char>,
-    pos: usize,
-    line: usize,
-    col: usize,
+    cursor: CharCursor,
     file: String,
 }
+
+mod literals;
 
 impl LuaLexer {
     pub fn new(input: &str, file: &str) -> Self {
         LuaLexer {
-            input: input.chars().collect(),
-            pos: 0,
-            line: 1,
-            col: 1,
+            cursor: CharCursor::new(input),
             file: file.to_string(),
         }
     }
 
     fn loc(&self) -> SourceLoc {
-        SourceLoc::new(&self.file, self.line, self.col)
+        SourceLoc::new(&self.file, self.cursor.line(), self.cursor.col())
+    }
+
+    /// Bundle `token` with the span from `start` to the cursor's current
+    /// position, deriving `len` via the cursor in one place.
+    fn spanned(&self, token: LuaToken, loc: SourceLoc, start: CharIdx) -> LuaTokenLoc {
+        LuaTokenLoc::new(token, loc, self.cursor.offset_from(start))
     }
 
     fn peek(&self) -> Option<char> {
-        self.input.get(self.pos).copied()
+        self.cursor.peek()
     }
 
     fn peek2(&self) -> Option<char> {
-        self.input.get(self.pos + 1).copied()
+        self.cursor.nth(1)
     }
 
     fn advance(&mut self) -> Option<char> {
-        let c = self.peek()?;
-        self.pos += 1;
-        if c == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
-        }
-        Some(c)
+        self.cursor.advance()
     }
 
     fn skip_whitespace(&mut self) {
@@ -147,13 +152,16 @@ impl LuaLexer {
 
     fn skip_block_comment(&mut self, level: usize) -> Result<(), String> {
         // We've already consumed `--[=*[`
-        let start_line = self.line;
+        let start_line = self.cursor.line();
         loop {
             match self.advance() {
                 None => {
                     return Err(format!(
                         "{}:{}:{}: unterminated block comment starting at line {}",
-                        self.file, self.line, self.col, start_line
+                        self.file,
+                        self.cursor.line(),
+                        self.cursor.col(),
+                        start_line
                     ));
                 }
                 Some(']') => {
@@ -172,218 +180,8 @@ impl LuaLexer {
         }
     }
 
-    fn read_string(&mut self, quote: char) -> Result<String, String> {
-        let start_loc = self.loc();
-        self.advance(); // skip opening quote
-        let mut s = std::string::String::new();
-        loop {
-            match self.advance() {
-                None => {
-                    return Err(format!("{}: unterminated string", start_loc.position()));
-                }
-                Some('\\') => match self.advance() {
-                    None => {
-                        return Err(format!(
-                            "{}: unterminated string escape",
-                            start_loc.position()
-                        ));
-                    }
-                    Some('n') => s.push('\n'),
-                    Some('t') => s.push('\t'),
-                    Some('r') => s.push('\r'),
-                    Some('a') => s.push('\x07'), // bell
-                    Some('b') => s.push('\x08'), // backspace
-                    Some('f') => s.push('\x0C'), // form feed
-                    Some('v') => s.push('\x0B'), // vertical tab
-                    Some('\\') => s.push('\\'),
-                    Some('\'') => s.push('\''),
-                    Some('"') => s.push('"'),
-                    Some('0') => s.push('\0'),
-                    Some('x') => {
-                        // \xNN hex escape
-                        let mut hex = String::new();
-                        for _ in 0..2 {
-                            match self.advance() {
-                                Some(c) if c.is_ascii_hexdigit() => hex.push(c),
-                                _ => {
-                                    return Err(format!(
-                                        "{}: invalid \\x escape",
-                                        start_loc.position()
-                                    ))
-                                }
-                            }
-                        }
-                        let val = u8::from_str_radix(&hex, 16).unwrap();
-                        s.push(val as char);
-                    }
-                    Some(c) if c.is_ascii_digit() => {
-                        // \ddd decimal escape (1-3 digits)
-                        let mut digits = String::new();
-                        digits.push(c);
-                        for _ in 0..2 {
-                            if let Some(d) = self.peek() {
-                                if d.is_ascii_digit() {
-                                    digits.push(d);
-                                    self.advance();
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                        let val: u32 = digits.parse().unwrap();
-                        if val > 255 {
-                            return Err(format!(
-                                "{}: decimal escape too large: \\{}",
-                                start_loc.position(),
-                                digits
-                            ));
-                        }
-                        s.push(char::from(val as u8));
-                    }
-                    Some(c) => {
-                        return Err(format!(
-                            "{}: unknown escape sequence \\{}",
-                            start_loc.position(),
-                            c
-                        ));
-                    }
-                },
-                Some(c) if c == quote => return Ok(s),
-                Some(c) => s.push(c),
-            }
-        }
-    }
-
-    /// Count `=` signs after current `[` and consume them + the closing `[`.
-    /// Returns the level (number of `=` signs).
-    fn read_long_string_open(&mut self) -> usize {
-        // We've already consumed the first `[`
-        let mut level = 0;
-        while self.peek() == Some('=') {
-            self.advance();
-            level += 1;
-        }
-        self.advance(); // skip closing `[`
-        level
-    }
-
-    fn read_long_string(&mut self, level: usize) -> Result<String, String> {
-        let start_loc = self.loc();
-        let mut s = std::string::String::new();
-        // Skip optional leading newline
-        if self.peek() == Some('\n') {
-            self.advance();
-        }
-        loop {
-            match self.advance() {
-                None => {
-                    return Err(format!(
-                        "{}: unterminated long string",
-                        start_loc.position()
-                    ));
-                }
-                Some(']') => {
-                    // Check for `]=*]` with matching level
-                    let mut eq_count = 0;
-                    while self.peek() == Some('=') {
-                        eq_count += 1;
-                        self.advance();
-                    }
-                    if eq_count == level && self.peek() == Some(']') {
-                        self.advance();
-                        return Ok(s);
-                    }
-                    // Not a match — push what we consumed
-                    s.push(']');
-                    for _ in 0..eq_count {
-                        s.push('=');
-                    }
-                }
-                Some(c) => s.push(c),
-            }
-        }
-    }
-
-    fn read_number(&mut self) -> Result<LuaToken, String> {
-        let start = self.pos;
-        let mut is_float = false;
-
-        // Hex literal
-        if self.peek() == Some('0') && matches!(self.peek2(), Some('x') | Some('X')) {
-            self.advance(); // 0
-            self.advance(); // x
-            while let Some(c) = self.peek() {
-                if c.is_ascii_hexdigit() || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            let s: String = self.input[start..self.pos]
-                .iter()
-                .filter(|c| **c != '_')
-                .collect();
-            let val =
-                i64::from_str_radix(&s[2..], 16).map_err(|e| format!("bad hex literal: {}", e))?;
-            return Ok(LuaToken::Int(val));
-        }
-
-        // Decimal integer or float
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == '_' {
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
-        // Fractional part
-        if self.peek() == Some('.') && self.peek2().is_some_and(|c| c.is_ascii_digit()) {
-            is_float = true;
-            self.advance(); // .
-            while let Some(c) = self.peek() {
-                if c.is_ascii_digit() || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-        }
-
-        // Exponent
-        if matches!(self.peek(), Some('e') | Some('E')) {
-            is_float = true;
-            self.advance();
-            if matches!(self.peek(), Some('+') | Some('-')) {
-                self.advance();
-            }
-            while let Some(c) = self.peek() {
-                if c.is_ascii_digit() {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-        }
-
-        let s: String = self.input[start..self.pos]
-            .iter()
-            .filter(|c| **c != '_')
-            .collect();
-
-        if is_float {
-            let val: f64 = s.parse().map_err(|e| format!("bad float literal: {}", e))?;
-            Ok(LuaToken::Float(val))
-        } else {
-            let val: i64 = s
-                .parse()
-                .map_err(|e| format!("bad integer literal: {}", e))?;
-            Ok(LuaToken::Int(val))
-        }
-    }
-
     fn read_ident(&mut self) -> String {
-        let start = self.pos;
+        let start = self.cursor.pos();
         while let Some(c) = self.peek() {
             if c.is_alphanumeric() || c == '_' {
                 self.advance();
@@ -391,7 +189,7 @@ impl LuaLexer {
                 break;
             }
         }
-        self.input[start..self.pos].iter().collect()
+        self.cursor.span(start).iter().collect()
     }
 
     fn keyword_or_ident(&self, s: &str) -> LuaToken {
@@ -427,15 +225,11 @@ impl LuaLexer {
         loop {
             self.skip_whitespace();
             let loc = self.loc();
-            let start_pos = self.pos;
+            let start_pos = self.cursor.pos();
 
             let c = match self.peek() {
                 None => {
-                    tokens.push(LuaTokenLoc {
-                        token: LuaToken::Eof,
-                        loc,
-                        len: 0,
-                    });
+                    tokens.push(LuaTokenLoc::new(LuaToken::Eof, loc, 0));
                     return Ok(tokens);
                 }
                 Some(c) => c,
@@ -447,8 +241,7 @@ impl LuaLexer {
                     self.advance();
                     // Check for block comment --[=*[ ... ]=*]
                     if self.peek() == Some('[')
-                        && (self.input.get(self.pos + 1) == Some(&'[')
-                            || self.input.get(self.pos + 1) == Some(&'='))
+                        && (self.cursor.nth(1) == Some('[') || self.cursor.nth(1) == Some('='))
                     {
                         self.advance(); // [
                         let level = self.read_long_string_open();
@@ -604,123 +397,18 @@ impl LuaLexer {
                 _ => {
                     return Err(format!(
                         "{}:{}:{}: unexpected character '{}'",
-                        self.file, self.line, self.col, c
+                        self.file,
+                        self.cursor.line(),
+                        self.cursor.col(),
+                        c
                     ));
                 }
             };
 
-            let len = self.pos - start_pos;
-            tokens.push(LuaTokenLoc { token, loc, len });
+            tokens.push(self.spanned(token, loc, start_pos));
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn lex(input: &str) -> Vec<LuaToken> {
-        let mut lexer = LuaLexer::new(input, "<test>");
-        lexer
-            .tokenize()
-            .unwrap()
-            .into_iter()
-            .map(|t| t.token)
-            .collect()
-    }
-
-    #[test]
-    fn test_basic_tokens() {
-        let tokens = lex("local x = 42");
-        assert_eq!(
-            tokens,
-            vec![
-                LuaToken::Local,
-                LuaToken::Ident("x".into()),
-                LuaToken::Assign,
-                LuaToken::Int(42),
-                LuaToken::Eof
-            ]
-        );
-    }
-
-    #[test]
-    fn test_strings() {
-        let tokens = lex(r#""hello" 'world'"#);
-        assert_eq!(
-            tokens,
-            vec![
-                LuaToken::String("hello".into()),
-                LuaToken::String("world".into()),
-                LuaToken::Eof
-            ]
-        );
-    }
-
-    #[test]
-    fn test_comments() {
-        let tokens = lex("x -- comment\ny");
-        assert_eq!(
-            tokens,
-            vec![
-                LuaToken::Ident("x".into()),
-                LuaToken::Ident("y".into()),
-                LuaToken::Eof
-            ]
-        );
-    }
-
-    #[test]
-    fn test_block_comment() {
-        let tokens = lex("x --[[ block\ncomment ]] y");
-        assert_eq!(
-            tokens,
-            vec![
-                LuaToken::Ident("x".into()),
-                LuaToken::Ident("y".into()),
-                LuaToken::Eof
-            ]
-        );
-    }
-
-    #[test]
-    fn test_operators() {
-        let tokens = lex("~= <= >= == ..");
-        assert_eq!(
-            tokens,
-            vec![
-                LuaToken::Neq,
-                LuaToken::Le,
-                LuaToken::Ge,
-                LuaToken::Eq,
-                LuaToken::DotDot,
-                LuaToken::Eof
-            ]
-        );
-    }
-
-    #[test]
-    fn test_long_string() {
-        let tokens = lex("[[hello\nworld]]");
-        assert_eq!(
-            tokens,
-            vec![LuaToken::String("hello\nworld".into()), LuaToken::Eof]
-        );
-    }
-
-    #[test]
-    #[allow(clippy::approx_constant)]
-    fn test_float() {
-        let tokens = lex("3.14 1e10");
-        assert_eq!(
-            tokens,
-            vec![LuaToken::Float(3.14), LuaToken::Float(1e10), LuaToken::Eof]
-        );
-    }
-
-    #[test]
-    fn test_hex() {
-        let tokens = lex("0xFF");
-        assert_eq!(tokens, vec![LuaToken::Int(255), LuaToken::Eof]);
-    }
-}
+mod tests;

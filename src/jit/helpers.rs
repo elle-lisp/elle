@@ -60,13 +60,10 @@ impl<'a> FunctionTranslator<'a> {
                 let p = builder.ins().iconst(I64, f64::to_bits(*f) as i64);
                 (t, p)
             }
-            LirConst::String(s) => {
-                // Create heap-allocated string at JIT-compile time, embed tag+payload.
-                // The string lives on Rc heap; kept alive by LirFunction's constant pool.
-                let v = crate::value::Value::string(s.clone());
-                let t = builder.ins().iconst(I64, v.tag as i64);
-                let p = builder.ins().iconst(I64, v.payload as i64);
-                (t, p)
+            LirConst::String(_) => {
+                // String constants are pre-resolved to ValueConst in prepare_task()
+                // before crossing the thread boundary to the JIT worker.
+                unreachable!("LirConst::String should be pre-resolved to ValueConst")
             }
             LirConst::Symbol(id) => {
                 let v = crate::value::Value::symbol(id.0);
@@ -82,6 +79,9 @@ impl<'a> FunctionTranslator<'a> {
             }
             LirConst::ClosureRef(_) => {
                 panic!("bug: ClosureRef in JIT — should have been patched during reconstruction")
+            }
+            LirConst::ValueRef(_) => {
+                panic!("bug: ValueRef in JIT — should have been patched during reconstruction")
             }
         }
     }
@@ -233,8 +233,11 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
-    /// Call a helper with two Values + vm. Returns (tag, payload).
-    /// Signature: (atag, apay, btag, bpay, vm) -> (tag, payload)
+    /// Call a helper with two Values + a trailing runtime pointer. Returns
+    /// (tag, payload). Signature: (atag, apay, btag, bpay, ptr) -> (tag, payload).
+    /// `ptr` is the helper's own capability: a raw `*mut VM` for the array-mutation
+    /// helpers, or this activation's `*mut JitCtx` for the VM-resolving intrinsics
+    /// (`del`/`has`/`%array-push`/`%string-push`/`%bytes-push`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_value_binary_vm(
         &mut self,
@@ -253,22 +256,9 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
-    /// Call elle_jit_rotate_pools to rotate slab pools at a self-tail-call boundary.
-    /// Signature: (vm) -> void
-    pub(crate) fn call_rotate_pools(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        vm: cranelift_codegen::ir::Value,
-    ) -> Result<(), JitError> {
-        let func_ref = self
-            .module
-            .declare_func_in_func(self.helpers.rotate_pools, builder.func);
-        builder.ins().call(func_ref, &[vm]);
-        Ok(())
-    }
-
     /// Call the elle_jit_call helper.
     /// Signature: (func_tag, func_payload, args_ptr, nargs, vm) -> (tag, payload)
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_call(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -277,18 +267,21 @@ impl<'a> FunctionTranslator<'a> {
         args_ptr: cranelift_codegen::ir::Value,
         nargs: cranelift_codegen::ir::Value,
         vm: cranelift_codegen::ir::Value,
+        region_id: cranelift_codegen::ir::Value,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.call, builder.func);
-        let call = builder
-            .ins()
-            .call(func_ref, &[func_tag, func_payload, args_ptr, nargs, vm]);
+        let call = builder.ins().call(
+            func_ref,
+            &[func_tag, func_payload, args_ptr, nargs, vm, region_id],
+        );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
     /// Call the elle_jit_tail_call helper.
     /// Signature: (func_tag, func_payload, args_ptr, nargs, vm) -> (tag, payload)
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_tail_call(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -297,13 +290,39 @@ impl<'a> FunctionTranslator<'a> {
         args_ptr: cranelift_codegen::ir::Value,
         nargs: cranelift_codegen::ir::Value,
         vm: cranelift_codegen::ir::Value,
+        region_id: cranelift_codegen::ir::Value,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.tail_call, builder.func);
-        let call = builder
-            .ins()
-            .call(func_ref, &[func_tag, func_payload, args_ptr, nargs, vm]);
+        let call = builder.ins().call(
+            func_ref,
+            &[func_tag, func_payload, args_ptr, nargs, vm, region_id],
+        );
+        Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
+    }
+
+    /// Call the elle_jit_call_array / elle_jit_tail_call_array helper.
+    /// Signature: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id)
+    /// -> (tag, payload). `region_id` routes the native result allocation and
+    /// gates the pass-through retain, exactly as for the non-array call path.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn call_helper_call_array(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        func_id: FuncId,
+        func_tag: cranelift_codegen::ir::Value,
+        func_payload: cranelift_codegen::ir::Value,
+        arr_tag: cranelift_codegen::ir::Value,
+        arr_payload: cranelift_codegen::ir::Value,
+        vm: cranelift_codegen::ir::Value,
+        region_id: cranelift_codegen::ir::Value,
+    ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
+        let func_ref = self.module.declare_func_in_func(func_id, builder.func);
+        let call = builder.ins().call(
+            func_ref,
+            &[func_tag, func_payload, arr_tag, arr_payload, vm, region_id],
+        );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 

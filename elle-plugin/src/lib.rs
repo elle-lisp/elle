@@ -10,6 +10,18 @@
 //! existing plugins.
 
 use std::ffi::c_void;
+mod accessors;
+
+// ── ABI version ───────────────────────────────────────────────────────
+
+/// The ABI version this SDK speaks. The host advertises its own version in
+/// `ElleApiLoader::version`; `define_plugin!`'s init refuses to load against a
+/// host whose version differs, turning an incompatible calling convention into a
+/// clean load failure instead of undefined behaviour.
+///
+/// v3 added a leading opaque `*mut ElleCtx` (per-call region + heap capability)
+/// to every primitive and to the allocating constructors.
+pub const ABI_VERSION: u32 = 3;
 
 // ── Signal constants ──────────────────────────────────────────────────
 
@@ -42,6 +54,16 @@ pub struct ElleResult {
     pub value: ElleValue,
 }
 
+/// Opaque per-call capability. The host hands every primitive a `*mut ElleCtx`
+/// as its first argument; the plugin passes it, unchanged, into any allocating
+/// constructor (`make_string`, `make_array`, …) so the result lands in the call's
+/// region on the call's heap. The plugin never dereferences it — its layout is
+/// elle-internal.
+#[repr(C)]
+pub struct ElleCtx {
+    _opaque: [u8; 0],
+}
+
 /// Key-value pair for struct construction.
 #[repr(C)]
 pub struct ElleKV {
@@ -64,9 +86,12 @@ pub struct ElleApiLoader {
 /// Primitive function signature for the stable ABI.
 ///
 /// Unlike internal primitives (which receive `&[Value]`), stable-ABI
-/// primitives receive a raw pointer + length. The plugin accesses the
-/// API via the global `api()` accessor provided by `define_plugin!`.
-pub type EllePrimFn = extern "C" fn(args: *const ElleValue, nargs: usize) -> ElleResult;
+/// primitives receive an opaque per-call `ctx`, then a raw pointer + length.
+/// The plugin accesses the API via the global `api()` accessor provided by
+/// `define_plugin!`, and passes `ctx` into every allocating call
+/// (`api().string(ctx, …)`).
+pub type EllePrimFn =
+    extern "C" fn(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult;
 
 /// Primitive metadata (all C-compatible).
 ///
@@ -154,16 +179,17 @@ elle_api! {
     fn make_float(f64) -> ElleValue;
     fn make_bool(bool) -> ElleValue;
     fn make_nil() -> ElleValue;
-    fn make_string(*const u8, usize) -> ElleValue;
-    fn make_bytes(*const u8, usize) -> ElleValue;
+    fn make_string(*mut ElleCtx, *const u8, usize) -> ElleValue;
+    fn make_bytes(*mut ElleCtx, *const u8, usize) -> ElleValue;
     fn make_keyword(*const u8, usize) -> ElleValue;
-    fn make_array(*const ElleValue, usize) -> ElleValue;
-    fn make_struct(*const ElleKV, usize) -> ElleValue;
-    fn make_set(*const ElleValue, usize) -> ElleValue;
-    fn make_error(*const u8, usize, *const u8, usize) -> ElleValue;
+    fn make_array(*mut ElleCtx, *const ElleValue, usize) -> ElleValue;
+    fn make_struct(*mut ElleCtx, *const ElleKV, usize) -> ElleValue;
+    fn make_set(*mut ElleCtx, *const ElleValue, usize) -> ElleValue;
+    fn make_error(*mut ElleCtx, *const u8, usize, *const u8, usize) -> ElleValue;
 
     // ── External objects ──────────────────────────────────────────
     fn make_external(
+        *mut ElleCtx,
         *const u8, usize,
         *mut c_void,
         Option<extern "C" fn(*mut c_void)>
@@ -205,13 +231,13 @@ elle_api! {
     fn array_get(ElleValue, usize) -> ElleValue;
 
     // ── List → array ──────────────────────────────────────────────
-    fn list_to_array(ElleValue) -> ElleValue;
+    fn list_to_array(*mut ElleCtx, ElleValue) -> ElleValue;
 
     // ── Equality ──────────────────────────────────────────────────
     fn value_eq(ElleValue, ElleValue) -> bool;
 
     // ── Async ─────────────────────────────────────────────────────
-    fn make_poll_fd(i32, u32) -> ElleValue;
+    fn make_poll_fd(*mut ElleCtx, i32, u32) -> ElleValue;
 
     // ── Keyword interning ─────────────────────────────────────────
     fn intern_keyword(*const u8, usize) -> u64;
@@ -237,27 +263,27 @@ impl Api {
         (self.make_nil)()
     }
 
-    pub fn string(&self, s: &str) -> ElleValue {
-        (self.make_string)(s.as_ptr(), s.len())
+    pub fn string(&self, ctx: *mut ElleCtx, s: &str) -> ElleValue {
+        (self.make_string)(ctx, s.as_ptr(), s.len())
     }
 
-    pub fn bytes(&self, b: &[u8]) -> ElleValue {
-        (self.make_bytes)(b.as_ptr(), b.len())
+    pub fn bytes(&self, ctx: *mut ElleCtx, b: &[u8]) -> ElleValue {
+        (self.make_bytes)(ctx, b.as_ptr(), b.len())
     }
 
     pub fn keyword(&self, s: &str) -> ElleValue {
         (self.make_keyword)(s.as_ptr(), s.len())
     }
 
-    pub fn array(&self, elems: &[ElleValue]) -> ElleValue {
-        (self.make_array)(elems.as_ptr(), elems.len())
+    pub fn array(&self, ctx: *mut ElleCtx, elems: &[ElleValue]) -> ElleValue {
+        (self.make_array)(ctx, elems.as_ptr(), elems.len())
     }
 
-    pub fn set(&self, elems: &[ElleValue]) -> ElleValue {
-        (self.make_set)(elems.as_ptr(), elems.len())
+    pub fn set(&self, ctx: *mut ElleCtx, elems: &[ElleValue]) -> ElleValue {
+        (self.make_set)(ctx, elems.as_ptr(), elems.len())
     }
 
-    pub fn build_struct(&self, fields: &[(&str, ElleValue)]) -> ElleValue {
+    pub fn build_struct(&self, ctx: *mut ElleCtx, fields: &[(&str, ElleValue)]) -> ElleValue {
         let kvs: Vec<ElleKV> = fields
             .iter()
             .map(|(k, v)| ElleKV {
@@ -266,15 +292,15 @@ impl Api {
                 value: *v,
             })
             .collect();
-        (self.make_struct)(kvs.as_ptr(), kvs.len())
+        (self.make_struct)(ctx, kvs.as_ptr(), kvs.len())
     }
 
-    pub fn error(&self, kind: &str, msg: &str) -> ElleValue {
-        (self.make_error)(kind.as_ptr(), kind.len(), msg.as_ptr(), msg.len())
+    pub fn error(&self, ctx: *mut ElleCtx, kind: &str, msg: &str) -> ElleValue {
+        (self.make_error)(ctx, kind.as_ptr(), kind.len(), msg.as_ptr(), msg.len())
     }
 
-    pub fn poll_fd(&self, fd: i32, events: u32) -> ElleValue {
-        (self.make_poll_fd)(fd, events)
+    pub fn poll_fd(&self, ctx: *mut ElleCtx, fd: i32, events: u32) -> ElleValue {
+        (self.make_poll_fd)(ctx, fd, events)
     }
 
     // ── Result helpers ────────────────────────────────────────────
@@ -286,10 +312,10 @@ impl Api {
         }
     }
 
-    pub fn err(&self, kind: &str, msg: &str) -> ElleResult {
+    pub fn err(&self, ctx: *mut ElleCtx, kind: &str, msg: &str) -> ElleResult {
         ElleResult {
             signal: SIG_ERROR,
-            value: self.error(kind, msg),
+            value: self.error(ctx, kind, msg),
         }
     }
 
@@ -305,14 +331,14 @@ impl Api {
     /// Wrap a Rust value as an opaque external object.
     ///
     /// The value is heap-allocated and freed when elle GCs the value.
-    pub fn external<T: 'static>(&self, name: &str, data: T) -> ElleValue {
+    pub fn external<T: 'static>(&self, ctx: *mut ElleCtx, name: &str, data: T) -> ElleValue {
         let ptr = Box::into_raw(Box::new(data)) as *mut c_void;
         extern "C" fn drop_fn<T>(p: *mut c_void) {
             unsafe {
                 drop(Box::from_raw(p as *mut T));
             }
         }
-        (self.make_external)(name.as_ptr(), name.len(), ptr, Some(drop_fn::<T>))
+        (self.make_external)(ctx, name.as_ptr(), name.len(), ptr, Some(drop_fn::<T>))
     }
 
     /// Extract a reference to a previously-wrapped external object.
@@ -341,191 +367,6 @@ impl Api {
             None
         } else {
             Some(unsafe { &mut *(ptr as *mut T) })
-        }
-    }
-
-    // ── Accessor helpers ──────────────────────────────────────────
-
-    pub fn get_int(&self, v: ElleValue) -> Option<i64> {
-        let mut out = 0i64;
-        if (self.as_int)(v, &mut out) {
-            Some(out)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_float(&self, v: ElleValue) -> Option<f64> {
-        let mut out = 0f64;
-        if (self.as_float)(v, &mut out) {
-            Some(out)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_bool(&self, v: ElleValue) -> Option<bool> {
-        match (self.as_bool)(v) {
-            0 => Some(false),
-            1 => Some(true),
-            _ => None,
-        }
-    }
-
-    pub fn get_string<'a>(&self, v: ElleValue) -> Option<&'a str> {
-        let mut len = 0usize;
-        let ptr = (self.as_string)(v, &mut len);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) })
-        }
-    }
-
-    pub fn get_bytes<'a>(&self, v: ElleValue) -> Option<&'a [u8]> {
-        let mut len = 0usize;
-        let ptr = (self.as_bytes)(v, &mut len);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { std::slice::from_raw_parts(ptr, len) })
-        }
-    }
-
-    pub fn get_array_len(&self, v: ElleValue) -> Option<usize> {
-        let len = (self.array_len)(v);
-        if len < 0 {
-            None
-        } else {
-            Some(len as usize)
-        }
-    }
-
-    pub fn get_array_item(&self, v: ElleValue, idx: usize) -> ElleValue {
-        (self.array_get)(v, idx)
-    }
-
-    /// Convert a proper list (cons chain) to an immutable array.
-    /// Returns `None` if the value is not a proper list.
-    pub fn list_to_array(&self, v: ElleValue) -> Option<ElleValue> {
-        let result = (self.list_to_array)(v);
-        if self.check_nil(result) {
-            None
-        } else {
-            Some(result)
-        }
-    }
-
-    pub fn get_struct_field(&self, v: ElleValue, key: &str) -> ElleValue {
-        (self.struct_get)(v, key.as_ptr(), key.len())
-    }
-
-    pub fn get_struct_len(&self, v: ElleValue) -> Option<usize> {
-        let n = (self.struct_len)(v);
-        if n < 0 {
-            None
-        } else {
-            Some(n as usize)
-        }
-    }
-
-    pub fn get_struct_key<'a>(&self, v: ElleValue, idx: usize) -> Option<&'a str> {
-        let mut len = 0usize;
-        let ptr = (self.struct_key)(v, idx, &mut len);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) })
-        }
-    }
-
-    pub fn get_struct_value(&self, v: ElleValue, idx: usize) -> ElleValue {
-        (self.struct_value)(v, idx)
-    }
-
-    /// Iterate struct entries as (key, value) pairs.
-    pub fn struct_entries(&self, v: ElleValue) -> Vec<(&str, ElleValue)> {
-        let n = match self.get_struct_len(v) {
-            Some(n) => n,
-            None => return Vec::new(),
-        };
-        let mut out = Vec::with_capacity(n);
-        for i in 0..n {
-            if let Some(k) = self.get_struct_key(v, i) {
-                out.push((k, self.get_struct_value(v, i)));
-            }
-        }
-        out
-    }
-
-    pub fn kw_intern(&self, name: &str) -> u64 {
-        (self.intern_keyword)(name.as_ptr(), name.len())
-    }
-
-    pub fn kw_name<'a>(&self, hash: u64) -> Option<&'a str> {
-        let mut len = 0usize;
-        let ptr = (self.keyword_name)(hash, &mut len);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) })
-        }
-    }
-
-    // ── Type predicates ────────────────────────────────────────
-
-    pub fn check_string(&self, v: ElleValue) -> bool {
-        (self.is_string)(v)
-    }
-    pub fn check_keyword(&self, v: ElleValue) -> bool {
-        (self.is_keyword)(v)
-    }
-    pub fn check_bytes(&self, v: ElleValue) -> bool {
-        (self.is_bytes)(v)
-    }
-    pub fn check_array(&self, v: ElleValue) -> bool {
-        (self.is_array)(v)
-    }
-    pub fn check_struct(&self, v: ElleValue) -> bool {
-        (self.is_struct)(v)
-    }
-    pub fn check_int(&self, v: ElleValue) -> bool {
-        (self.is_int)(v)
-    }
-    pub fn check_float(&self, v: ElleValue) -> bool {
-        (self.is_float)(v)
-    }
-    pub fn check_bool(&self, v: ElleValue) -> bool {
-        (self.is_bool_val)(v)
-    }
-    pub fn check_nil(&self, v: ElleValue) -> bool {
-        (self.is_nil)(v)
-    }
-    pub fn check_external(&self, v: ElleValue) -> bool {
-        (self.is_external)(v)
-    }
-
-    pub fn get_keyword_name<'a>(&self, v: ElleValue) -> Option<&'a str> {
-        let mut len = 0usize;
-        let ptr = (self.as_keyword_name)(v, &mut len);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) })
-        }
-    }
-
-    pub fn eq(&self, a: ElleValue, b: ElleValue) -> bool {
-        (self.value_eq)(a, b)
-    }
-
-    pub fn type_name<'a>(&self, v: ElleValue) -> &'a str {
-        let mut len = 0usize;
-        let ptr = (self.type_name_of)(v, &mut len);
-        if ptr.is_null() || len == 0 {
-            "unknown"
-        } else {
-            unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
         }
     }
 
@@ -587,6 +428,12 @@ macro_rules! define_plugin {
             loader: &$crate::ElleApiLoader,
             ctx: &mut $crate::EllePluginCtx,
         ) -> i32 {
+            // Refuse a host speaking a different ABI: the primitive calling
+            // convention is version-specific (v3 threads an opaque per-call ctx),
+            // so a mismatch would corrupt every call. Fail the load instead.
+            if loader.version != $crate::ABI_VERSION {
+                return -2;
+            }
             let resolved = match $crate::Api::load(loader) {
                 Ok(a) => a,
                 Err(_name) => return -1,

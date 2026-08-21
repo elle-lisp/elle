@@ -15,14 +15,14 @@ front end (reader → expander → analyzer → HIR → LIR).
 elle --wasm=full script.lisp
 
 # With disk cache (amortizes Wasmtime compilation)
-elle --wasm=full --cache=/tmp/elle-wasm script.lisp
+elle --wasm=full --cache=target/elle-wasm script.lisp
 
 # Debug output (host call tracing)
 elle --wasm=full --debug-wasm script.lisp
 
 # Dump the generated WASM module
 elle --wasm=full --wasm-dump script.lisp
-# => writes /tmp/elle-wasm-dump.wasm (inspect with wasm-tools)
+# => writes /dev/shm/elle-wasm-dump.wasm (inspect with wasm-tools)
 
 # Without stdlib (for testing the emitter in isolation)
 elle --wasm=full --wasm-no-stdlib script.lisp
@@ -52,7 +52,7 @@ Two execution modes:
 ### Pipeline (full-module)
 
 ```text
-1. Concatenate stdlib + user source (wrapped in ev/run)
+1. Concatenate stdlib + user source (build_full_source)
 2. Parse → expand → analyze → lower → LIR (compile_file_to_lir)
 3. Collect nested closures from MakeClosure instructions
 4. Emit each closure as a WASM function (emit_closure_function)
@@ -61,6 +61,37 @@ Two execution modes:
 7. Compile via Wasmtime (cranelift) → native code
 8. Instantiate and call __elle_entry
 ```
+
+In step 1 the user code is not wrapped whole in a single `(ev/run (fn [] …))`.
+That naive wrap makes every user top-level `def` a *fn-body* binding, where
+redefinition (`(def a 10) (def a (+ a 1))`) is a duplicate-binding error — yet a
+file's top level uses sequential shadowing, so the VM accepts it. To match the
+VM, `build_scheduled_toplevel` keeps user **definitions** at the file-letrec top
+level and wraps only runs of consecutive **expressions** in `(ev/run (fn [] …))`,
+preserving order so a spawn and its join stay in one scheduler session. This is
+the source-level analogue of the VM's `execute_scheduled`, which wraps the
+scheduler around already-top-level-analyzed bytecode.
+
+Splicing stdlib as *source* (step 1) makes stdlib callable from WASM at
+**runtime** — but it does nothing for **compile time**. Macro expansion in
+step 2 runs on the compile context's macro VM, and a prelude or user macro's
+transformer body may call a stdlib function while expanding (`assert`'s
+transformer calls `pair?` to detect a comparison form). So the full-module
+path also loads stdlib into the compile context (`init_stdlib` in
+`eval_wasm_raw`) on a heap shared with the macro VM, exactly as the bytecode
+runtime does. Without it, expansion fails with `undefined variable: pair?`
+before any WASM is emitted. The two mechanisms are independent: the
+source-splice serves runtime calls, the `init_stdlib` load serves macro
+expansion. User references still bind to the spliced letrec definitions
+(lexical scope shadows the registered exports), so the emitted WASM calls the
+compiled stdlib.
+
+A quoted **symbol** inside a *compound* literal (`(quote (= a 2))`, which
+`assert`'s comparison branch emits) is baked into the const pool at emit time,
+which must intern each symbol into the driving instance's table. The emitter
+threads that table (`WasmEmitter::symbols`) on every full-module path; the
+standalone/tiered path has no instance table and refuses such closures via
+`standalone_emittable` instead.
 
 ### Value representation
 
@@ -102,6 +133,30 @@ Tail calls use `return_call_indirect` (WASM tail-call proposal) via
 `rt_prepare_tail_call`, which resolves the target and builds the
 callee's env at the caller's env position.
 
+### Callee dispatch spectrum
+
+`rt_call` and `rt_prepare_tail_call` resolve the target value and dispatch
+on its runtime type, mirroring the interpreter's `call_inner` /
+`tail_call_inner` so every callee shape behaves identically across tiers:
+
+- **Compiled closure** (`wasm_func_idx` set) — the common case; run in the
+  module's function table (or a pre-compiled per-closure `Module`).
+- **NativeFn** / **parameter** — dispatched host-side directly.
+- **Bytecode closure** (`wasm_func_idx == None`) — `core.lisp`, the prelude,
+  and any closure the module never compiled run via the host VM
+  (`run_bytecode_closure`); only stdlib is compiled into the full module.
+- **Callable collection** — a struct/array/set/string/bytes applied as a
+  function (`(struct :k)`, `(arr i)`, `(set x)`) indexes the collection via
+  the shared `call_collection` path (`run_collection_call`). The async
+  scheduler's request dispatch relies on this: `handle-wait` reads
+  `(request :op)` / `(request :fiber)` off a struct request.
+
+The last two are the host-VM fallbacks: without them a call reaching a
+bytecode closure or a collection-as-function raises a `cannot call …` type
+error that terminates the compiled entry. Pinned by
+`tests/elle/wasm-bytecode-closure-call.lisp` and
+`tests/elle/wasm-collection-call.lisp`.
+
 ### Suspension and resume
 
 Yielding closures use a CPS-like scheme:
@@ -116,6 +171,22 @@ Yielding closures use a CPS-like scheme:
 4. For yield-through-call (callee yields through a non-yielding
    caller), the caller's frame is saved too, forming a chain.
    `drive_resume_chain` in `resume.rs` walks the chain.
+
+### Cross-thread spawn (dual-compiled bytecode)
+
+`sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread **bytecode**
+VM and run it there — WASM functions are not callable off the main store. So the
+full-module emitter *dual-compiles*: alongside the WASM body it emits ordinary
+bytecode for every closure (`emit_module_closures`), stored on the host as
+`closure_bytecodes` (instructions + constants + **child prototypes**). When
+`rt_make_closure` builds a WASM closure value it stitches this bytecode into the
+`ClosureTemplate`, so a spawned worker can run `template.code()` on the VM.
+
+The child prototypes are essential: a closure's bytecode `MakeClosure`
+instructions index the template's `child_protos` (the nested-lambda blueprints).
+Reconstructing the template without them leaves that list empty and the worker
+panics on its first `MakeClosure` (`src/vm/closure.rs`). Pinned by
+`wasm::tests::wasm_full_spawn_*`.
 
 ### Register allocation
 
@@ -190,9 +261,88 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
+### Debug builds optimize dependencies
+
+The `830ms cold` figure is a release build. A **debug** build applies
+
+```toml
+[profile.dev.package."*"]
+opt-level = 3
+```
+
+so every dependency — `cranelift-codegen`/`cranelift-frontend`/`regalloc2`
+included — compiles optimized while `elle` itself stays at `opt-level = 0` with
+full debug assertions. Without the override those crates build at `opt-level =
+0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
+call-per-op and a single stdlib module takes **~10s** to Wasmtime-compile
+(profiled: `cranelift_bitset` / `SSABuilder` self-time dominates); with it the
+cold compile drops to **~0.016s**. (`--cache=<dir>` amortizes either way.)
+
+`cranelift-codegen` is shared between the WASM path (via `wasmtime`) and the
+**Cranelift JIT** (`cranelift-jit`), so optimizing it also speeds up JIT
+compilation. The generated JIT *code* is unchanged: the JIT pins its own output
+at `opt_level = "speed"` (`src/jit/compiler.rs`) independent of how
+`cranelift-codegen` was itself built, so the tier is behaviour-identical across
+the override — only compile *latency* moves. A faster background compile does
+shift *when* a hot function crosses from the interpreter to JIT mid-execution,
+so two crossover invariants are each pinned by a test that fails if the shift
+mishandles the boundary: a fuel-suspended callee's frame survives the JIT tier
+(`tests/elle/fuel-jit-preempt.lisp`), and a value emitted from JIT-compiled code
+is retained as it escapes into `fiber.signal`, where the resumer reads it
+(`tests/elle/region-jit-emit-escape-uaf.lisp`).
+
+## Full-module coverage and its two teardown/lowering invariants
+
+The full-module tier runs the whole corpus under `make smoke-wasm` except
+`eval.lisp`/`eval-env.lisp` (dynamic compilation is not a WASM backend feature —
+`WASM_SKIP` in the Makefile). Two invariants that this tier — and only this tier —
+must uphold are worth calling out, because each is invisible on the VM/JIT path
+and each is pinned by a specific corpus file run under `--wasm=full`.
+
+- **io-backend externals are quiesced before the heap's teardown free-sweep.**
+  Every region instruction is a structural no-op on this tier (its emitter
+  lowers each to nothing — `src/wasm/instruction/dispatch.rs`), so a scheduler
+  I/O backend — a
+  heap `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map
+  holds `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a
+  POSIX signal waiter, a spawned-process waiter) — is never reclaimed during
+  execution. It strands to `RegionStore::teardown_all`, which frees regions in id
+  order, not lifetime order. If the backend's `Drop` ran the cancel-and-drain
+  there, `drain_cqes` → `complete_port_op` would dereference a `Port` an earlier
+  region in the same sweep already freed. So `eval_wasm_raw` drains every
+  io-backend (`FiberHeap::collect_external_data("io-backend")` →
+  `IoBackend::quiesce`) after execution returns and *before* the heap drops, when
+  every value is still live; the backend's own `Drop` then finds nothing pending.
+  The VM never hits this — its live region reclamation drops the backend while its
+  `Port`s are still valid. Canonical reference: `tests/elle/posix.lisp`.
+
+- **a fn-local reassigned mutable binding's slot is never value-route decref'd +
+  nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack
+  slot, holding a live value for the binding's whole scope. The region analysis
+  can still keep a spurious assign-value region for an immediate-valued counter
+  (`(assign ii (%add ii 1))`) whose `decref_point` lands inside the loop; the
+  lowerer's value-route release would nil-stamp that slot before the increment
+  reads it, and the emitter's inline `BinOp Add` would read `Nil` as 0, sticking
+  the counter so the loop never terminates. `emit_decrefs_for` refuses the value
+  route for any slot in `reassigned_local_slots` (fed from
+  `RegionInfo::reassigned_local_bindings`), an over-keep, never a mid-scope
+  nil-stamp. This is a lowering the VM/JIT (bytecode-derived LIR) never take. The
+  branch-result-loop nil-stamp guard is untouched — the suppression keys on the
+  slot's binding, not the branch-union region
+  (`tests/elle/region-branch-result-loop-uaf.lisp` stays green). Canonical
+  reference: `tests/elle/region-capture-cell-loop-uaf.lisp`.
+
 ## Testing
 
+CI gates on `make check-wasm` only: the feature compiles, and the full-module
+tier boots one module (the `[wasm]` marker proves the tier engaged — a
+non-wasm binary accepts `--wasm=full` and silently runs the VM). The corpus
+passes below do not gate CI while the tier carries no production workloads.
+
 ```bash
+# Build gate: feature compiles, tier boots (the CI gate)
+make check-wasm
+
 # WASM smoke tests (all elle scripts except eval)
 make smoke-wasm
 
@@ -214,7 +364,7 @@ cargo test wasm
 | `--wasm=N` | Tiered WASM compilation (threshold N-1) |
 | `--cache=path` | Disk cache for compiled WASM modules |
 | `--debug-wasm` | Print host call traces to stderr |
-| `--wasm-dump` | Write WASM bytes to `/tmp/elle-wasm-dump.wasm` |
+| `--wasm-dump` | Write WASM bytes to `/dev/shm/elle-wasm-dump.wasm` |
 | `--wasm-lir` | Print LIR before WASM emission |
 | `--wasm-no-stdlib` | Skip stdlib (for emitter testing) |
 | `--jit=0` | Disable cranelift optimization in Wasmtime |

@@ -12,7 +12,6 @@
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
-use crate::primitives::registration::ALL_TABLES;
 use crate::signals::SIG_IO;
 use crate::value::fiber::SignalBits;
 use crate::value::repr::TAG_HEAP_START;
@@ -20,18 +19,33 @@ use crate::value::Value;
 
 use super::handle::HandleTable;
 
-/// Bytecode + constants for a closure, used by spawn for cross-thread execution.
-pub type ClosureBytecode = (std::rc::Rc<Vec<u8>>, std::rc::Rc<Vec<Value>>);
+/// Bytecode + constants + child prototypes for a closure, used by spawn for
+/// cross-thread execution. `rt_make_closure` reconstructs a `ClosureTemplate`
+/// from these, and the OS-thread VM worker runs that template's bytecode. The
+/// child prototypes are the nested-lambda blueprints the bytecode's `MakeClosure`
+/// instructions index — omitting them makes the worker panic on its first
+/// `MakeClosure` (src/wasm/tests.rs `wasm_full_spawn_runs_nested_closure`).
+pub type ClosureBytecode = (
+    std::rc::Rc<Vec<u8>>,
+    std::rc::Rc<Vec<Value>>,
+    std::rc::Rc<Vec<std::rc::Rc<crate::value::closure::ClosureTemplate>>>,
+);
 
 /// A pre-compiled standalone closure Module with its constant pool.
 #[derive(Clone)]
 pub struct PrecachedClosure {
     pub module: wasmtime::Module,
     pub const_pool: Vec<Value>,
+    /// Byte offset where this closure's env stack must begin — above its widest
+    /// args region so a wide call in its body cannot clobber its own env
+    /// (`emit::env_stack_base_for_func`).
+    pub env_stack_base: usize,
 }
 
-/// Base address for the env stack in linear memory.
-/// Each `call_wasm_closure` allocates a region starting from here.
+/// Default base address for the env stack in linear memory, used when a module's
+/// widest args region fits under it. A wider module raises it per
+/// `emit::env_stack_base`. Each `call_wasm_closure` allocates a region starting
+/// from the store's `env_stack_ptr`.
 pub const ENV_STACK_BASE: usize = 4096;
 
 /// Saved state for a suspended WASM closure.
@@ -55,6 +69,21 @@ pub struct WasmSuspensionFrame {
     /// Full signal bits at the yield point. Preserves SIG_IO and other
     /// bits so the scheduler can detect I/O requests on the fiber.
     pub signal_bits: u64,
+    /// The executing closure (`SELF_SLOT`) at the yield point — (tag, payload).
+    /// `rt_yield` snapshots it from linear memory; `resume_wasm_closure` writes it
+    /// back before re-invoking, so a `LoadSelf` after resume names the closure that
+    /// suspended (not whichever ran most recently on this store's shared memory).
+    pub self_tag: i64,
+    pub self_payload: i64,
+    /// A child fiber this frame must RE-DRIVE before resuming its own
+    /// continuation. Set when a `(fiber/resume child)` in this frame's body
+    /// suspended because `child` emitted a scheduler wait/io its narrow mask does
+    /// not cover: the resumer parks holding that wait and the scheduler drives it,
+    /// so on resume the scheduler's value must feed a re-drive of `child` — not
+    /// this frame's continuation — until `child` completes. The WASM analogue of
+    /// the VM's `SuspendedFrame::FiberResume` (src/vm/fiber/trampoline.rs). Pinned
+    /// by tests/elle/wasm-protect-suspend.lisp.
+    pub redrive_child: Option<Value>,
 }
 
 /// Host state stored in the Wasmtime `Store<ElleHost>`.
@@ -77,7 +106,7 @@ pub struct ElleHost {
     /// frame; PopParamFrame pops.
     pub param_frames: Vec<Vec<(u32, Value)>>,
     /// Per-fiber suspension frames. Keyed by fiber ID (FiberHandle pointer
-    /// address). Each fiber's frames are independent — nested coroutine
+    /// address). Each fiber's frames are independent — nested fiber
     /// resumes don't interfere with the parent fiber's frames.
     ///
     /// Frames are pushed to the back (innermost first during yield-through-call)
@@ -89,6 +118,13 @@ pub struct ElleHost {
     /// popped on exit. rt_yield and rt_load_saved_reg use the top entry
     /// to find the correct fiber's frame list.
     pub fiber_id_stack: Vec<usize>,
+    /// A pending child re-drive keyed by the PARENT fiber's ID. Set by
+    /// `route_emit` when a `(fiber/resume child)` propagates `child`'s uncaught
+    /// wait/io through the parent; consumed by `rt_yield` when it pushes the
+    /// parent's continuation frame, stamping that frame's `redrive_child`. Between
+    /// the two the parent's `fiber/resume` SuspendingCall is the only host call,
+    /// so the mapping reaches exactly the right frame.
+    pub pending_redrive: std::collections::HashMap<usize, Value>,
     /// Resume value passed by the scheduler (fiber/resume). Set before
     /// re-invoking a suspended function; consumed by rt_get_resume_value.
     pub resume_value: Option<(i64, i64)>,
@@ -108,6 +144,12 @@ pub struct ElleHost {
     /// Indexed by table index (= ClosureId). When set, rt_call dispatches
     /// to the pre-compiled Module instead of call_indirect on the full table.
     pub precached_closures: Vec<Option<PrecachedClosure>>,
+    /// The driving VM, threaded so host primitive calls build a VM-bearing
+    /// `NativeCtx` (docs/impl/region/ctx.md). Set by every Store-creation site
+    /// from the VM in scope (the lazy tier's `run_wasm` pointer, `eval_wasm_raw`'s
+    /// own VM, or an enclosing wasm call's host); null only on a freshly
+    /// constructed host before that install, which never runs a primitive.
+    pub vm: *mut crate::vm::VM,
 }
 
 impl ElleHost {
@@ -121,12 +163,14 @@ impl ElleHost {
             param_frames: Vec::new(),
             suspension_frames: std::collections::HashMap::new(),
             fiber_id_stack: Vec::new(),
+            pending_redrive: std::collections::HashMap::new(),
             resume_value: None,
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
             debug: crate::config::get().has_trace("wasm"),
             io_backend: None,
             precached_closures: Vec::new(),
+            vm: std::ptr::null_mut(),
         }
     }
 }
@@ -138,6 +182,14 @@ impl Default for ElleHost {
 }
 
 impl ElleHost {
+    /// Raw pointer to the driving instance's heap (`vm.heap_ptr`). The WASM host
+    /// builds every result / env / error value on the instance's own heap, reached
+    /// through the threaded VM. Non-null whenever wasm executes (the VM is set at
+    /// store creation; a freshly constructed host runs no code before that).
+    pub(crate) fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap {
+        unsafe { (*self.vm).heap_ptr }
+    }
+
     /// Get the current fiber's ID from the stack, or 0 for top-level.
     pub fn current_fiber_id(&self) -> usize {
         self.fiber_id_stack.last().copied().unwrap_or(0)
@@ -180,6 +232,20 @@ impl ElleHost {
     pub fn back_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
         let id = self.current_fiber_id();
         self.suspension_frames.get_mut(&id)?.back_mut()
+    }
+
+    /// The child fiber the current fiber's FRONT frame must re-drive before
+    /// resuming, if any (see `WasmSuspensionFrame::redrive_child`).
+    pub fn first_frame_redrive_child(&self) -> Option<Value> {
+        self.first_suspension_frame().and_then(|f| f.redrive_child)
+    }
+
+    /// Clear the FRONT frame's re-drive marker — called once the child has been
+    /// driven to completion, so the frame resumes its own continuation next.
+    pub fn clear_first_frame_redrive(&mut self) {
+        if let Some(frame) = self.first_suspension_frame_mut() {
+            frame.redrive_child = None;
+        }
     }
 
     /// Check if the current fiber has any suspension frames.
@@ -235,10 +301,18 @@ impl ElleHost {
     /// Returns (signal_bits, result_value).
     pub fn call_primitive(&mut self, prim_id: u32, args: &[Value]) -> (SignalBits, Value) {
         let def = self.primitives[prim_id as usize];
+        let heap = unsafe { &mut *self.heap_ptr() };
+        // Mint the boundary's fresh result region explicitly so it can be both
+        // threaded to `call_plugin` (the plugin region slot — no `NativeCtx`
+        // region getter survives) and owned by the ctx the native body uses. The
+        // VM comes from the host (`self.vm`), so a re-entrant primitive reaches it
+        // through `ctx.vm()` (docs/impl/region/ctx.md).
+        let region = heap.new_runtime_region();
+        let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, self.vm);
         if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
-            crate::plugin_api::call_plugin(def, args)
+            crate::plugin_api::call_plugin(def, &mut ctx, args, region)
         } else {
-            (def.func)(args)
+            (def.func)(&mut ctx, args)
         }
     }
 
@@ -265,7 +339,7 @@ impl ElleHost {
 
         if let Some(backend_val) = self.find_io_backend() {
             if let Some(async_be) = backend_val.as_external::<AnyBackend>() {
-                if let Ok(_id) = async_be.0.submit(request) {
+                if let Ok(_id) = async_be.0.submit(request, self.heap_ptr()) {
                     if let Ok(completions) = async_be.0.wait(-1) {
                         if let Some(c) = completions.into_iter().next() {
                             return match c.result {
@@ -288,23 +362,24 @@ impl ElleHost {
     ) -> (crate::value::fiber::SignalBits, Value) {
         let backend = match &self.io_backend {
             Some(_) => self.io_backend.as_ref().unwrap(),
-            None => match crate::io::aio::AsyncBackend::new() {
+            None => match crate::io::aio::AsyncBackend::new_with_unicode(
+                unsafe { &*self.vm }.unicode_generation(),
+            ) {
                 Ok(be) => {
                     self.io_backend = Some(AnyBackend(Box::new(be)));
                     self.io_backend.as_ref().unwrap()
                 }
                 Err(e) => {
+                    let heap = unsafe { &mut *self.heap_ptr() };
+                    let ctx = crate::primitives::ctx::Alloc::new(heap);
                     return (
                         crate::value::fiber::SIG_ERROR,
-                        crate::value::error_val(
-                            "io-error",
-                            format!("failed to create I/O backend: {}", e),
-                        ),
+                        ctx.error("io-error", format!("failed to create I/O backend: {}", e)),
                     );
                 }
             },
         };
-        if let Ok(_id) = backend.0.submit(request) {
+        if let Ok(_id) = backend.0.submit(request, self.heap_ptr()) {
             if let Ok(completions) = backend.0.wait(-1) {
                 if let Some(c) = completions.into_iter().next() {
                     return match c.result {
@@ -314,9 +389,11 @@ impl ElleHost {
                 }
             }
         }
+        let heap = unsafe { &mut *self.heap_ptr() };
+        let ctx = crate::primitives::ctx::Alloc::new(heap);
         (
             crate::value::fiber::SIG_ERROR,
-            crate::value::error_val("io-error", "I/O submission failed"),
+            ctx.error("io-error", "I/O submission failed"),
         )
     }
 
@@ -351,6 +428,9 @@ pub trait WasmEnvHost {
     fn env_stack_ptr(&self) -> usize;
     fn set_env_stack_ptr(&mut self, ptr: usize);
     fn value_to_wasm(&mut self, value: Value) -> (i64, i64);
+    /// Raw pointer to the driving instance's heap, so the generic env builder
+    /// allocates capture cells on the instance's own heap (`vm.heap_ptr`).
+    fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap;
 }
 
 impl WasmEnvHost for ElleHost {
@@ -363,35 +443,29 @@ impl WasmEnvHost for ElleHost {
     fn value_to_wasm(&mut self, value: Value) -> (i64, i64) {
         self.value_to_wasm(value)
     }
-}
-
-/// Build a flattened dispatch table from ALL_TABLES.
-///
-/// Each primitive gets a sequential index. This table is used by the
-/// WASM emitter to assign prim_ids and by the host to dispatch calls.
-fn build_primitive_table() -> Vec<&'static PrimitiveDef> {
-    let mut table = Vec::new();
-    for primitives in ALL_TABLES {
-        for def in *primitives {
-            table.push(def);
-        }
+    fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap {
+        ElleHost::heap_ptr(self)
     }
-    table
 }
 
-/// Build a name → prim_id lookup for the WASM emitter.
-///
-/// Maps primitive names (and aliases) to their dispatch table index.
+/// The WASM host's dispatch table (index = `prim_id`). This is the canonical
+/// registry snapshot, so the host resolves a `prim_id` to the SAME def an
+/// immediate native-fn `Value{TAG_NATIVE_FN, prim_id}` names — one prim_id space
+/// across the value representation, the WASM emitter, and host dispatch.
+fn build_primitive_table() -> Vec<&'static PrimitiveDef> {
+    crate::primitives::prim_table_snapshot()
+}
+
+/// Build a name → `prim_id` lookup for the WASM emitter, over the canonical
+/// registry table — so the ids the emitter bakes agree with the host's dispatch
+/// table and the immediate native-fn payloads.
 pub fn build_primitive_id_map() -> std::collections::HashMap<String, u32> {
     let mut map = std::collections::HashMap::new();
-    let mut id: u32 = 0;
-    for primitives in ALL_TABLES {
-        for def in *primitives {
-            map.insert(def.name.to_string(), id);
-            for alias in def.aliases {
-                map.insert((*alias).to_string(), id);
-            }
-            id += 1;
+    for (id, def) in crate::primitives::prim_table_snapshot().iter().enumerate() {
+        let id = id as u32;
+        map.insert(def.name.to_string(), id);
+        for alias in def.aliases {
+            map.insert((*alias).to_string(), id);
         }
     }
     map

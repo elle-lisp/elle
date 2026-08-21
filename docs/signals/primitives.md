@@ -10,7 +10,7 @@ User-facing fiber operations and patterns.
 | `fiber/new` | `(fn mask) → fiber` | Create fiber from closure with signal mask |
 | `fiber/resume` | `(fiber value) → value` | Resume fiber, delivering a value# returns signal value |
 | `emit` | `(bits value) → (suspends)` | Emit signal from current fiber |
-| `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:suspended`, `:dead`, `:error` |
+| `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:paused`, `:dead`, `:error` |
 | `fiber/value` | `(fiber) → value` | Signal payload or return value |
 | `fiber/bits` | `(fiber) → int` | Signal bits from last signal |
 | `fiber/mask` | `(fiber) → int` | Capability mask |
@@ -26,11 +26,10 @@ to perform the context switch.
 
 
 
-## Coroutines
+## Generators
 
 
-A coroutine is a usage pattern, not a type. It's a fiber whose closure
-yields:
+A generator is a fiber whose closure yields values:
 
 ```text
 (def gen (fiber/new (fn () (yield 1) (yield 2) (yield 3)) |:yield|))
@@ -40,7 +39,7 @@ yields:
 (fiber/resume gen nil)  # → SIG_OK, (fiber/value gen) → nil
 ```
 
-The coroutine pattern — a fiber whose closure yields values — is the
+The generator pattern — a fiber whose closure yields values — is the
 basis of Elle's stream and generator abstractions.
 
 
@@ -67,7 +66,25 @@ delivering a recovery value — this enables restart-style error handling.
 Uncaught errors crash the runtime; no `ev/join` is needed for error
 propagation.
 
-`try`/`catch` will be sugar for this pattern (blocked on macro system).
+So a failed fiber answers `:paused` — the same keyword as a fiber waiting to
+resume — and only `SIG_ERROR` in `fiber/bits` tells the two apart. That makes
+"is this fiber finished?" a question about intent rather than state, and it
+has two different answers:
+
+- **A resumer** decides. `fiber/error?` and `fiber/done?` answer for the
+  terminal statuses alone, because a paused fiber holding an error is a
+  fiber you may still resume with a recovery value. `port/lines` and the
+  other generators rely on this: a read error suspends the generator, and
+  the stream resumes it to surface that error as an element.
+- **A scheduler** already decided, when it routed the fiber to completion.
+  It records that in its own completion map, so it reads that map rather
+  than re-deriving from a status that cannot distinguish the two cases. A
+  status test there reads a failed program as still running, and then waits
+  for it against orphans that can never finish on their own.
+
+`tests/elle/ev-run-error-teardown.lisp` pins the distinction and the wait.
+
+`try`/`catch` is a prelude macro that wraps this pattern (`src/prelude.lisp`).
 
 
 
@@ -75,7 +92,7 @@ propagation.
 
 
 Whether a signal is terminal or resumable is a **handler decision**, not a
-signal property. Any signal leaves the child in `Suspended` status. The
+signal property. Any signal leaves the child in `Paused` status. The
 handler either:
 
 - **Resumes** the child (delivering a value) → resumable
@@ -131,6 +148,22 @@ child's actual outcome determines what the parent sees.
 (fiber/abort f :reason)   # :cleanup printed, f is now :error
 ```
 
+#### Unwinding that suspends
+
+An abort ends the fiber only when the unwinding runs to its end. The
+unwinding is ordinary code, so it can suspend: a `defer` cleanup that
+writes to a port emits `:io`, and so does a `protect` body that continues
+into an I/O call after it captures the injected error. The abort then
+returns that signal, and the fiber stays `:paused` with the request in
+`fiber/value` — the same result `fiber/resume` gives for the same call.
+The next resume continues the unwinding from where it stopped.
+
+The rule holds at every depth. A fiber parked at `(fiber/resume child)`
+runs its own continuation only after the child's unwinding finishes, so a
+`defer` inside a `defer` still runs the inner body before the outer
+cleanup. `tests/elle/unwind-suspend.lisp` pins the four shapes —
+`protect`, `try`, `defer`, and one `defer` inside another.
+
 ### Aliases
 
 `cancel` is an alias for `fiber/cancel`. `abort` is an alias for `fiber/abort`.
@@ -142,14 +175,15 @@ child's actual outcome determines what the parent sees.
 
 `VM::with_child_fiber()` is the single entry point for switching execution from
 a parent fiber to a child fiber. It owns the full lifecycle of a fiber resume:
-wiring the parent/child chain, swapping the active fiber and heap, executing the
-child's bytecode, and restoring everything before returning the result to the
-caller. All `fiber/resume` calls go through this function.
+wiring the parent/child chain, swapping the active fiber, executing the child's
+bytecode, and restoring everything before returning the result to the caller.
+All `fiber/resume` calls go through this function.
 
-The protocol is more complex than a simple stack switch because each fiber owns
-its own heap. Swapping fibers therefore requires saving the current heap pointer,
-installing the child's heap, running the child, then restoring the parent's
-heap — in that order, with no leaks.
+There is one heap per VM, and every fiber — root and children alike — shares
+it. Switching fibers is therefore just a stack/active-fiber swap; the heap
+pointer never moves. A value a child allocates and yields lives in its own
+region with RC > 0 and outlives the child without any copy; the parent reads a
+16-byte `Value` into that same heap.
 
 ```mermaid
 sequenceDiagram
@@ -157,7 +191,6 @@ sequenceDiagram
     participant VM as VM.with_child_fiber()
     participant Parent as Parent Fiber
     participant Child as Child Fiber
-    participant Heap as Thread-Local Heap
 
     Note over VM: Step 1: Take child from handle
     VM->>Child: FiberHandle::take()
@@ -170,22 +203,9 @@ sequenceDiagram
     VM->>Child: child.parent = weak(parent_handle)
     VM->>Child: child.parent_value = parent_value
 
-    Note over VM: Step 3: Swap fibers
+    Note over VM: Step 3: Swap fibers (no heap swap — one shared VM heap)
     VM->>VM: mem::swap(vm.fiber, child_fiber)
     Note over VM: vm.fiber = child, child_fiber = parent
-
-    Note over VM: Step 3a: Install child's heap
-    VM->>Heap: save_current_heap() [parent's]
-    VM->>Heap: install_fiber_heap(child.heap)
-    VM->>Child: heap.init_active_allocator()
-
-    Note over VM: Step 3b: Shared allocator (if child may yield/IO)
-    alt Parent has shared_alloc (chain: A→B→C)
-        VM->>Child: propagate parent's shared_alloc ptr
-    else Parent has no shared_alloc
-        VM->>Parent: create_shared_allocator() on parent's heap
-        VM->>Child: set_shared_alloc(new ptr)
-    end
 
     Note over VM: Step 4: Execute
     VM->>Child: execute(vm) [runs child's bytecode]
@@ -198,14 +218,10 @@ sequenceDiagram
         VM->>Child: status = Paused
     end
 
-    Note over VM: Step 6: Extract result
+    Note over VM: Step 6: Extract result (pin region if terminal signal)
     VM->>Child: read fiber.signal → (bits, value)
 
-    Note over VM: Step 7a: Clear child's shared_alloc
-    VM->>Child: heap.clear_shared_alloc()
-
     Note over VM: Step 7: Swap back
-    VM->>Heap: restore_saved_heap() [parent's]
     VM->>VM: mem::swap(vm.fiber, child_fiber)
     Note over VM: vm.fiber = parent, child_fiber = child
 
@@ -218,37 +234,24 @@ sequenceDiagram
 
 ### Swap protocol invariants
 
-**Heap pointer is never lost.** The parent's heap pointer is saved before the
-child's is installed (step 3a), and restored before the swap-back (step 7).
-These two operations are always paired; there is no code path that installs the
-child's heap without a corresponding restore.
+**One heap, no heap swap.** All fibers share the VM's single heap, so the swap
+is a pure active-fiber switch (step 3). There is no per-fiber heap pointer to
+save or restore.
 
-**Shared allocator is gated on signal.** A shared allocator is only provisioned
-for children whose signal type includes yield or I/O (step 3b). Silent children
-do not participate in shared allocation, so no unnecessary allocator is created.
-
-**Child's shared allocator is cleared before swap-back.** Step 7a runs before
-step 7. This ordering prevents a dangling pointer: once the parent's heap
-context is restored, any pointer into the child's shared allocator would be
-invalid. Clearing first ensures the child holds no reference it cannot safely
-access after the context changes.
+**A terminal result's region is pinned.** A fiber that returns, errors, or
+halts holds its result in `signal`, read later via `fiber/value` after control
+has left it. Before swap-back, the result's region is incref'd (step 6) so the
+parent's `DecrefValueRegion` on the resume result cannot free it out from under
+the fiber; the matching release happens when the fiber itself is freed.
+Suspending signals (yield, I/O) are excluded — their value is consumed
+transiently and the fiber runs again, so the normal value flow governs it.
 
 **Child fiber is always returned to its handle.** Step 8 runs unconditionally,
 including on error paths. A fiber that was taken from its handle at step 1 is
 always put back. Callers can always re-resume a paused fiber or inspect a dead
 one; the handle is never left empty by a failed resume.
 
-### Per-resume shared allocator accumulation (tech debt)
-
-Each resume of a yielding or I/O child that has no pre-existing shared
-allocator creates a new shared allocator on the parent's heap (step 3b, else
-branch). Old shared allocators accumulate in `FiberHeap::owned_shared` and are
-not reclaimed until `FiberHeap::clear()` is called (typically at fiber death).
-For long-lived fibers that are resumed many times, this means unbounded growth
-of `owned_shared`. The fix is to reuse the existing shared allocator across
-resumes rather than creating a new one each time.
-
-Source: `src/vm/fiber.rs`
+Source: `src/vm/fiber/child.rs`
 
 
 

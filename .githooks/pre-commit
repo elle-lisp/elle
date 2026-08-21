@@ -1,9 +1,14 @@
 #!/bin/sh
 # Pre-commit hook:
 #   1. Auto-format staged .lisp files with `elle fmt` and re-stage.
-#   2. If staged .rs files exist, gate on cargo fmt / clippy / rustdoc —
-#      same checks `make test` runs, scoped to Rust-touching commits so
+#   2. Auto-format staged .rs files with `cargo fmt` and re-stage.
+#   3. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
+#      checks that CAN'T be auto-fixed, scoped to Rust-touching commits so
 #      Lisp-only commits don't pay the Cargo cost.
+#
+# Formatting is fixed, never gated: an unformatted file is reformatted and
+# re-staged, not rejected. CI's `make fmt-check` is the hard format gate (CI
+# can't rewrite your tree); the local hook just keeps every commit clean.
 
 # ── Lisp ────────────────────────────────────────────────────────────
 if [ -n "$ELLE" ]; then
@@ -24,11 +29,15 @@ if [ -n "$staged_lisp" ]; then
 fi
 
 # ── Rust ────────────────────────────────────────────────────────────
-if git diff --cached --name-only | grep -q '\.rs$'; then
-  if ! cargo fmt -- --check; then
-    echo "pre-commit: cargo fmt check failed. Run 'cargo fmt' and re-stage."
-    exit 1
-  fi
+staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+if [ -n "$staged_rs" ]; then
+  # Auto-format and re-stage (mirrors the Lisp path above; never gates on
+  # formatting). `cargo fmt` formats the workspace; we re-stage only the files
+  # this commit already touched, so staged content stays in sync.
+  cargo fmt
+  for f in $staged_rs; do
+    [ -f "$f" ] && git add "$f"
+  done
 
   if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
     echo "pre-commit: clippy failed. Fix warnings and re-stage."

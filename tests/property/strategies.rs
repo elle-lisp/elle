@@ -58,7 +58,10 @@ fn arb_value_depth(depth: u32) -> BoxedStrategy<Value> {
             1 => Just(Value::float(f64::INFINITY)),
             1 => Just(Value::float(f64::NEG_INFINITY)),
             3 => (0u32..10000).prop_map(Value::symbol),
-            5 => "[a-zA-Z0-9_ ]{0,20}".prop_map(Value::string),
+            5 => "[a-zA-Z0-9_ ]{0,20}".prop_map(|s| {
+                let h = elle::primitives::ctx::TestHeap::new();
+                h.ctx().string(s)
+            }),
             1 => Just(Value::keyword("test")),
             1 => Just(Value::keyword("a")),
             1 => Just(Value::keyword("key")),
@@ -72,15 +75,22 @@ fn arb_value_depth(depth: u32) -> BoxedStrategy<Value> {
             10 => leaf,
             // Pair cells
             2 => (inner.clone(), arb_value_depth(depth - 1))
-                .prop_map(|(first, rest)| Value::pair(first, rest)),
+                .prop_map(|(first, rest)| {
+                    let h = elle::primitives::ctx::TestHeap::new();
+                    h.ctx().pair(first, rest)
+                }),
             // Proper lists (0-5 elements)
             2 => prop::collection::vec(arb_value_depth(depth - 1), 0..=5)
                 .prop_map(|elems| {
-                    elems.into_iter().rev().fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc))
+                    let h = elle::primitives::ctx::TestHeap::new();
+                    elems.into_iter().rev().fold(Value::EMPTY_LIST, |acc, v| h.ctx().pair(v, acc))
                 }),
             // Arrays (0-5 elements)
             1 => prop::collection::vec(arb_value_depth(depth - 1), 0..=5)
-                .prop_map(Value::array),
+                .prop_map(|elems| {
+                    let h = elle::primitives::ctx::TestHeap::new();
+                    h.ctx().array(elems)
+                }),
         ]
         .boxed()
     }
@@ -154,13 +164,21 @@ pub fn arb_value_for_type(desc: &TypeDesc) -> BoxedStrategy<Value> {
         TypeDesc::Struct(sd) => {
             let field_strats: Vec<BoxedStrategy<Value>> =
                 sd.fields.iter().map(arb_value_for_type).collect();
-            field_strats.prop_map(Value::array).boxed()
+            field_strats
+                .prop_map(|fields| {
+                    let h = elle::primitives::ctx::TestHeap::new();
+                    h.ctx().array(fields)
+                })
+                .boxed()
         }
         TypeDesc::Array(elem, count) => {
             let count = *count;
             let elem_strat = arb_value_for_type(elem);
             prop::collection::vec(elem_strat, count..=count)
-                .prop_map(Value::array)
+                .prop_map(|elems| {
+                    let h = elle::primitives::ctx::TestHeap::new();
+                    h.ctx().array(elems)
+                })
                 .boxed()
         }
         // For types we don't generate values for (Void, Str, etc.), just use a dummy
@@ -187,7 +205,10 @@ pub fn arb_struct_and_values() -> BoxedStrategy<(StructDesc, Value)> {
             let field_strats: Vec<BoxedStrategy<Value>> =
                 sd.fields.iter().map(arb_value_for_type).collect();
             let sd_clone = sd.clone();
-            field_strats.prop_map(move |vals| (sd_clone.clone(), Value::array_mut(vals)))
+            field_strats.prop_map(move |vals| {
+                let h = elle::primitives::ctx::TestHeap::new();
+                (sd_clone.clone(), h.ctx().array_mut(vals))
+            })
         })
         .boxed()
 }

@@ -1,0 +1,1112 @@
+use super::*;
+
+/// End-to-end reclamation of the **mutually-recursive** immutable closure cycle by
+/// the closure-cycle MERGE. A local `letrec` (`ping`/`pong`) builds an immutable
+/// reference cycle: each closure's env references the other, captured at the
+/// `letrec`, never mutated. Per-region RC cannot collect it (region/rules.md Rule
+/// 8); unlike a *mutable* `@array` cycle (the deliberate class-8 boundary) an
+/// immutable one is reclaimable, and the merge collapses the closures+cells onto one
+/// arena freed at the enclosing scope.
+///
+/// The merge is unconditional, so the counterfactual is bounded-vs-discriminator,
+/// not flag-off-vs-on (the flag no longer discriminates): the cycle must read
+/// bounded at BOTH flag settings, while the `LEAK_DISCRIMINATOR` (a bare @array
+/// cycle) leaks flag-off — proving the gauge detects per-run region growth.
+#[test]
+fn region_ownership_reclaims_mutual_recursion_closure_cycle() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertion below is vacuous",
+    );
+    // ping <-> pong: two closures whose envs reference each other (immutable cycle).
+    let src = "(begin (letrec [ping (fn [n] (if (%lt n 1) :done (pong (%sub n 1)))) \
+                               pong (fn [n] (ping n))] \
+                        (ping 3)) \
+                     nil)";
+    let growth = steady_region_growth(src);
+    assert!(
+        growth <= 0,
+        "the immutable ping/pong closure cycle must be reclaimed by the closure-cycle \
+         merge — per-run live-region growth {growth} must be <= 0 (the discriminator \
+         leaks {leak} per run, so the gauge is live)",
+    );
+}
+
+/// PROMPTNESS of the closure-cycle merge's drop site (docs/impl/region/letrec.md
+/// § "Drop site — the binding scope"). A *discarded*
+/// top-level letrec closure cycle must be freed at its BINDING SCOPE — the `letrec`
+/// that prebinds its capture cells — its true last use, NOT held to the enclosing
+/// post-dominator (the file `Begin`, i.e. program teardown). This is also the
+/// counterweight to the handed-out-member reading: a cycle nothing carries out of the
+/// binding scope must keep the tight drop, never inherit a later one. The capture cell is
+/// keyed by the letrec NODE, whose enclosing-scope stack excludes itself, so the
+/// allocation-site post-dominator dropped at the letrec's PARENT (the file Begin for
+/// a top-level cycle) — a program-duration over-keep that, summed over many such
+/// cycles, is unbounded RSS.
+///
+/// Oracle: build N distinct top-level letrec cycles between two `arena/region-count`
+/// samples. Each merged cycle is one region. DISCARDED (used, then dropped), each
+/// must free at its own letrec, so the count delta stays near zero. The
+/// DISCRIMINATOR retains each cycle's closure in a program-lifetime array — a
+/// cross-region store that RC-pins the merged region — so the delta legitimately
+/// grows ~N, proving the gauge detects per-cycle region retention (else a dead gauge
+/// paints the discarded case green for free). The merge fires identically in both;
+/// only the external RC holder differs. The store is the same shape that makes the
+/// earlier (enclosing-Begin) drop sound: a foreign reference into the merged region
+/// is RC-counted and outlives the single decref.
+#[test]
+fn closure_cycle_discarded_release_is_prompt() {
+    use crate::pipeline::compile_file_repl;
+
+    // N distinct top-level letrec cycles between two region-count samples. RETAIN
+    // splices a push of each cycle's closure into a program-lifetime `@keep`
+    // (RC-pinned → grows the count); the discard variant uses then drops it.
+    fn region_growth(retain: bool) -> i64 {
+        const N: usize = 200;
+        let mut rt = Runtime::without_stdlib();
+        let mut src = String::from("(def @keep @[])\n(def c0 (arena/region-count))\n");
+        for k in 0..N {
+            let body = if retain {
+                format!("(%array-push keep r{k})")
+            } else {
+                format!("(r{k} 2)")
+            };
+            // RETAIN uses r{k} in value position (the push), which disables
+            // call-site argument forwarding — the diverging guard proves `m` instead.
+            src.push_str(&format!(
+                "(letrec [r{k} (fn [m] (when (%not (%int? m)) (error :m)) \
+                   (if (%lt m 1) :done (r{k} (%sub m 1))))] {body})\n"
+            ));
+        }
+        // `arena/region-count` results are opaque to inference; the match-arm
+        // dispatch proves them :integer for the closing `%sub` (no stdlib `-` here).
+        src.push_str(
+            "(def c1 (arena/region-count))\n\
+             (match (type-of c1) :integer (match (type-of c0) :integer (%sub c1 c0) _ -1) _ -1)",
+        );
+        let result = {
+            let (_vm, symbols, cctx) = rt.parts();
+            compile_file_repl(&src, symbols, cctx, "<embed>")
+                .expect("compiles")
+                .0
+        };
+        let (vm, symbols, cctx) = rt.parts();
+        vm.execute_scheduled(&result.bytecode, symbols, cctx)
+            .expect("runs")
+            .as_int()
+            .expect("program returns the region-count delta as an int")
+    }
+
+    let discarded = region_growth(false);
+    let retained = region_growth(true);
+    assert!(
+        retained > 150,
+        "precondition: retaining each cycle's closure in a program-lifetime array \
+         legitimately grows the live region count ~N (got {retained}); if small, the \
+         gauge is not detecting per-cycle retention and the assertion below is vacuous",
+    );
+    assert!(
+        discarded < 50,
+        "a discarded top-level letrec closure cycle must be freed at its binding-scope \
+         letrec, not held to program teardown — region growth over 200 cycles must be \
+         near zero, got {discarded} (~200 means each merged cycle survives to the file \
+         Begin scope-exit, the coarse allocation-site drop)",
+    );
+}
+
+/// Companion to the mutual case: a **self-recursive** `letrec` closure (`loop`
+/// references itself) — the most pervasive recursive shape (every recursive local fn).
+/// Unlike the mutual cycle this is **cell-free**: the self-edge does not mark `loop`
+/// captured (`hir/arena.rs::mark_captured`), so it has no forward cell and no
+/// cell↔closure cycle — its self-reference resolves to the executing closure
+/// (`LoadSelf` / a self-call). The per-call closure region is reclaimed by ordinary RC
+/// (the tail-call deferred release for a self-tail-loop), NOT the merge (which serves the
+/// cell-bearing mutual cycle). Same bounded-vs-discriminator counterfactual as the
+/// mutual case: reclaimed self-recursion reads bounded region growth beside a leaking
+/// bare-@array-cycle discriminator, and — being cell-free RC/adopt, flag-independent
+/// like the merge — bounded at both flag settings.
+#[test]
+fn region_ownership_reclaims_self_recursion_closure_cycle() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertion below is vacuous",
+    );
+    // loop references itself: a cell-free self-recursion (no forward cell, LoadSelf).
+    let src = "(begin (letrec [loop (fn [n] (if (%lt n 1) :done (loop (%sub n 1))))] \
+                        (loop 3)) \
+                     nil)";
+    let growth = steady_region_growth(src);
+    assert!(
+        growth <= 0,
+        "the cell-free self-recursive closure must be reclaimed by ordinary RC / the \
+         tail-call deferred release — per-run live-region growth {growth} must be <= 0 (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
+    );
+}
+
+/// Per-CALL reclamation of a self-recursive local closure (`letrec`) NESTED in a function
+/// body, invoked many times within ONE run — the universal shape (every recursive local
+/// helper; every variadic operator `+`/`<`, whose body is a `(letrec [go …] …)` over its
+/// varargs). The `{self,mutual}_recursion` tests above build a TOP-LEVEL letrec and re-run
+/// the whole program, so they never invoke a nested letrec; this drives a nested one many
+/// times within one run.
+///
+/// A self-recursive `loop` is **cell-free**: its self-edge does not mark it captured
+/// (`hir/arena.rs::mark_captured`), so there is no forward cell and no cell↔closure cycle —
+/// its self-reference resolves to the executing closure (`LoadSelf` / a self-call). The
+/// closure is an ordinary per-call region whose demise the recursive `TailCall` strands as
+/// dead code; the tail-call deferred release (`lir/lower/control/call.rs::tail_callee_defers_release`,
+/// `stranded_self_bindings`) supplies the once-only release at the recursion's normal
+/// completion, so the region is reclaimed per call — RC-identical to a top-level recursive
+/// `defn`. (The merge is unrelated here: it serves the cell-bearing MUTUAL cycle, not this
+/// cell-free self-recursion.)
+///
+/// Oracle: per-iteration live-region growth via `arena/region-count`, sampled mid-run BY
+/// THE PROGRAM (after 50 then 250 invocations) and returned as the raw delta, exactly as
+/// `reassign_toplevel_prior_release_is_bounded` does. The self-referential accumulator
+/// `(assign acc (%pair n acc))` is the built-in discriminator: every prior IS live, so
+/// its delta legitimately grows ~200 — proving the gauge detects per-iteration growth, so
+/// a near-zero delta for the letrec call is real reclamation, not a dead gauge.
+#[test]
+fn closure_cycle_nested_letrec_reclaims_per_call() {
+    // Subject: `f` wraps a self-recursive letrec closure; each `(f 3)` builds and discards
+    // one cell↔closure cycle, which must be reclaimed per call.
+    let call_growth = mid_run_growth(
+        Runtime::new(),
+        "(def f (fn [k] \
+            (letrec [loop (fn [m] (if (%lt m 1) :done (loop (%sub m 1))))] \
+              (loop k))))",
+        "(f 3)",
+        "arena/region-count",
+    );
+    // Discriminator: the self-referential accumulator legitimately retains every prior.
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
+
+    assert!(
+        live_chain_growth > 150,
+        "precondition: the self-referential accumulator legitimately retains every prior, \
+         so region growth over 200 iterations must be large (~200) — got \
+         {live_chain_growth}; if small, the gauge is not seeing per-iteration region \
+         growth and the assertion below is vacuous",
+    );
+    assert!(
+        call_growth < 50,
+        "a cell-free self-recursive local closure nested in an invoked function must be \
+         reclaimed per call by the tail-call deferred release — region growth over 200 calls must be \
+         near zero, got {call_growth} (each call's stranded closure region leaks to program \
+         teardown if the adopt does not supply its release)",
+    );
+}
+
+/// Per-CALL reclamation of an in-lambda MUTUAL letrec cycle — the closure-cycle
+/// merge's in-lambda case (docs/impl/region/letrec.md § The letrec closure-cycle
+/// merge; oracle.lisp `recur-local-mutual`). Each `(f 3)` builds one ev↔od
+/// cell↔closure cycle inside `f`'s body; the merge collapses the four members
+/// (two closures + two forward cells) onto one arena, and — the letrec body
+/// `(ev k)` being a tail call to a member — the tail-call deferred release releases that
+/// arena once at the recursion's normal completion. `(f 0)` is the base-case-only
+/// path: the recursion never rotates to a sibling, so the ENTRY call's adopt is
+/// the sole release channel — a marking that only covered interior rotations
+/// would leak exactly this path.
+///
+/// The merge is unconditional (it rides `compute_merges`, not the
+/// `--region-ownership` spike), so growth must be bounded at BOTH flag settings.
+/// Oracle: per-iteration live-region growth via `arena/region-count`, sampled
+/// mid-run BY THE PROGRAM (after 50 then 250 calls), beside the self-referential
+/// accumulator discriminator whose growth proves the gauge is live.
+#[test]
+fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
+    let prelude = "(def f (fn [k] \
+        (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
+                 od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
+          (ev k))))";
+
+    // Discriminator: the self-referential accumulator legitimately retains every
+    // prior, proving the gauge detects per-iteration region growth.
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live_chain_growth > 150,
+        "precondition: the live accumulator retains every prior, so region growth \
+         over 200 iterations must be large (~200) — got {live_chain_growth}; if \
+         small, the gauge is dead and the assertions below are vacuous",
+    );
+
+    let rotating = mid_run_growth(Runtime::new(), prelude, "(f 3)", "arena/region-count");
+    assert!(
+        rotating < 50,
+        "an in-lambda mutual letrec cycle must be reclaimed per call by the \
+         closure-cycle merge + the tail-call deferred release — region growth over 200 calls \
+         must be near zero, got {rotating} (each call's merged arena leaks if the \
+         cycle is refused or the stranded binding-scope drop is never supplied)",
+    );
+    let base_case = mid_run_growth(Runtime::new(), prelude, "(f 0)", "arena/region-count");
+    assert!(
+        base_case < 50,
+        "the base-case-only path (`(f 0)` — no sibling rotation) must also reclaim: \
+         the ENTRY tail call's adopt is the sole release channel there — region \
+         growth over 200 calls must be near zero, got {base_case}",
+    );
+}
+
+/// Per-CALL reclamation where ONE tail call carries BOTH deferred channels
+/// (docs/impl/region/letrec.md § "The arena channel and the callee channel are
+/// independent"). `go` is self-recursive AND sibling-captured, so it keeps a
+/// forward cell the single-closure self-edge admission collapses onto its closure
+/// region; `outer` captures that cell, and the letrec body tail-calls `outer`.
+/// That `TailCall` therefore names the arena in `deferred_release_slot` and flags
+/// `defer_callee_release` for `outer`'s own per-call region — two regions, two
+/// references the frame owns, neither substitutable for the other.
+///
+/// Running only one is not a partial win but no win at all: `outer`'s counted
+/// `closure ⊇ cell` edge holds the arena off zero, so the arena's decref frees
+/// nothing while `outer`'s region survives. The gauge is per-iteration live-region
+/// growth beside the live-chain discriminator, so a regression that drops either
+/// channel reads as ~5 objects in 2 regions per call.
+#[test]
+fn region_ownership_reclaims_sibling_captured_member_per_call() {
+    let prelude = "(def f (fn [k] \
+        (letrec [go (fn [m] (if (%lt m 1) :done (go (%sub m 1)))) \
+                 outer (fn [m] (go m))] \
+          (outer k))))";
+
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live_chain_growth > 150,
+        "precondition: the live accumulator retains every prior, so region growth \
+         over 200 iterations must be large (~200) — got {live_chain_growth}; if \
+         small, the gauge is dead and the assertions below are vacuous",
+    );
+
+    let growth = mid_run_growth(Runtime::new(), prelude, "(f 3)", "arena/region-count");
+    assert!(
+        growth < 50,
+        "a letrec whose sibling captures a self-recursive member must reclaim both \
+         regions per call — the merged arena and the sibling callee — region growth \
+         over 200 calls must be near zero, got {growth} (reading the two deferred \
+         channels as alternatives reclaims neither: the sibling's counted edge holds \
+         the arena off zero)",
+    );
+    let base_case = mid_run_growth(Runtime::new(), prelude, "(f 0)", "arena/region-count");
+    assert!(
+        base_case < 50,
+        "the base-case-only path must also reclaim both regions — the body's single \
+         tail call to the sibling is the sole release point either way — region \
+         growth over 200 calls must be near zero, got {base_case}",
+    );
+}
+
+/// Per-call reclamation of a cell-free self-recursive `letrec` closure
+/// (docs/impl/selfrec.md), isolated WITHOUT the stdlib so nothing else churns the
+/// region count. The subject is the same shape as
+/// `closure_cycle_nested_letrec_reclaims_per_call` but boolean-only, so it runs on
+/// `Runtime::without_stdlib()` (no integer trait dispatch): `loop` is a self-recursive
+/// in-lambda binding — cell-free (its self-edge does not mark it captured, so it has no
+/// forward cell; the self-reference resolves to the executing closure) — whose `(loop k)`
+/// letrec body is a tail call.
+///
+/// The closure is an ordinary per-call region whose scope-end `DecrefRegion` the
+/// frame-replacing `(loop k)` `TailCall` strands as dead code, so without the adopt every
+/// `(f false)` would leak one region. The program samples `arena/region-count` across 10
+/// discarded `loop` closures; with the tail-scoped adopt (`tail_callee_defers_release` /
+/// `stranded_self_bindings`) the region is freed once at the recursion's normal completion,
+/// so the delta stays bounded — RC-identical to a top-level recursive `defn`.
+#[test]
+fn self_recursive_loop_reclaims_per_call_no_stdlib() {
+    use crate::pipeline::compile_file_repl;
+    // ONE compile so `f` and `loop` resolve in the same arena (a fresh REPL compile
+    // renumbers global slots — a separate `(f false)` compile would mis-resolve `f`).
+    let src = "(def f (fn [k] (letrec [loop (fn [m] (if m :done (loop true)))] (loop k)))) \
+        (f false) \
+        (def a (arena/region-count)) \
+        (f false) (f false) (f false) (f false) (f false) \
+        (f false) (f false) (f false) (f false) (f false) \
+        (def b (arena/region-count)) \
+        (match (type-of b) :integer (match (type-of a) :integer (%sub b a) _ -1) _ -1)";
+    let mut rt = Runtime::without_stdlib();
+    let res = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    let delta = vm
+        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .expect("runs")
+        .as_int()
+        .expect("program returns the region-count delta as an int");
+    assert!(
+        delta <= 2,
+        "a cell-free self-recursive loop closure must be reclaimed per call: live region \
+         growth over 10 discarded closures must be ~0, got {delta} — its per-call region \
+         leaks if the tail-call deferred release does not supply the tail-call-stranded scope-end \
+         DecrefRegion",
+    );
+}
+
+/// Per-call reclamation of the same cell-free closure where the `letrec` BODY's
+/// tail is a **branch** whose arms each leave through a frame-replacing callee
+/// (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE,
+/// not of the region's class"). The recursion has completed by the branch, so the
+/// deferral channel does not apply here: the release the frame owes is the
+/// scope-end one, emitted at a merge label no arm arrives at, and the frame-exit
+/// relocation supplies it by replicating the release ahead of each arm's
+/// `TailCall`. A replica counts once only where the run nil-stamps the slot it
+/// read, so the closure region takes the value route of the slot its `letrec`
+/// binder recorded rather than its default release by region id.
+///
+/// Boolean-only for `Runtime::without_stdlib()`, and both arms are driven, since
+/// the claim is that exactly one release runs on each path. The closure and its
+/// env are two regions per call, so a surviving strand grows the sample by ~20
+/// over the ten discarded calls.
+#[test]
+fn self_recursive_loop_under_a_branch_tail_reclaims_per_call() {
+    use crate::pipeline::compile_file_repl;
+    // ONE compile, as `self_recursive_loop_reclaims_per_call_no_stdlib`: a fresh
+    // REPL compile renumbers global slots.
+    let src = "(def s (fn [] :a)) (def s2 (fn [] :b)) \
+        (def f (fn [k t] \
+          (letrec [loop (fn [m] (if m :done (loop true)))] \
+            (loop k) \
+            (if t (s) (s2))))) \
+        (f false true) \
+        (def a (arena/region-count)) \
+        (f false true) (f false false) (f false true) (f false false) \
+        (f false true) (f false false) (f false true) (f false false) \
+        (f false true) (f false false) \
+        (def b (arena/region-count)) \
+        (match (type-of b) :integer (match (type-of a) :integer (%sub b a) _ -1) _ -1)";
+    let mut rt = Runtime::without_stdlib();
+    let res = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    let delta = vm
+        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .expect("runs")
+        .as_int()
+        .expect("program returns the region-count delta as an int");
+    assert!(
+        delta <= 2,
+        "a cell-free self-recursive closure under a BRANCH body tail must be \
+         reclaimed per call: live region growth over 10 discarded closures must be \
+         ~0, got {delta} — its scope-end release lands at a merge label no arm \
+         arrives at unless the relocation replicates it into each of them",
+    );
+}
+
+/// Per-call reclamation of a stranded recursive closure the recursion **RETURNS** —
+/// the return-funded admission (docs/impl/selfrec.md § "The deferral needs no escape
+/// gate"). Each subject's letrec/def body is a frame-replacing tail
+/// call, so the closure region's scope-end `DecrefRegion` is dead (or suppressed) and
+/// the tail-call deferred release is the region's only release channel. Returning the
+/// closure does not withdraw that channel: the callee's `Return` mints the caller's
+/// reference *before* `trampoline_loop` breaks and runs the deferred decref, so the
+/// count between the two is the caller's and the deferral drops only the frame's own.
+///
+/// Two shapes, one per binder face of the dead drop — a `letrec` self-loop (whose demise
+/// is the letrec scope end) and a `def` self-loop (whose demise is the binding's last
+/// use, which for this body IS the tail call). Each result is DISCARDED at the
+/// call site, so nothing legitimately retains it and the whole per-call region must
+/// come back. Boolean-only bodies keep them on `Runtime::without_stdlib()`, where no
+/// trait dispatch churns the region count.
+///
+/// A returned member of a MUTUAL SCC is deliberately not here: it is not cell-free, so
+/// its release is the closure-cycle merge's arena rather than this stranded-self channel.
+/// The merge admits it on the same return-mint argument (region/letrec.md § The frontier
+/// gate) and `region_ownership_reclaims_returned_mutual_cycle_per_call` is its gauge.
+///
+/// Counterfactual: each reads ~200 (one stranded region per call, closure + env
+/// together) while the return facet blanket-refuses the deferral; ~0 once the refusal
+/// narrows to the fiber frontier. The live accumulator beside them proves the gauge
+/// sees per-call region growth at all.
+#[test]
+fn recursive_returned_closure_reclaims_per_call() {
+    let growth = |prelude: &str, body: &str| {
+        mid_run_growth(
+            Runtime::without_stdlib(),
+            prelude,
+            body,
+            "arena/region-count",
+        )
+    };
+
+    let live = mid_run_discriminator(Runtime::without_stdlib(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    // `letrec` self-loop: the scope-end DecrefRegion is emitted past the `(loop k)`
+    // TailCall (dead code), so the deferral is the sole channel.
+    let letrec_self = growth(
+        "(def frec (fn [k] (letrec [loop (fn [m] (if m loop (loop true)))] (loop k))))",
+        "(frec false)",
+    );
+    assert!(
+        letrec_self < 50,
+        "a returned cell-free self-recursive `letrec` closure must still be reclaimed \
+         per call — its caller's reference is the `Return` mint, and the deferred \
+         release drops only the frame's own: region growth over 200 discarded calls \
+         must be ~0, got {letrec_self}",
+    );
+
+    // `def` self-loop: the demise is the binding's last use, which for this body is the
+    // `(loop k)` TailCall itself — the same dead block, reached through the other binder.
+    let define_self = growth(
+        "(def fdef (fn [k] (def loop (fn [m] (if m loop (loop true)))) (loop k)))",
+        "(fdef false)",
+    );
+    assert!(
+        define_self < 50,
+        "a returned cell-free self-recursive `def` closure must be reclaimed per call \
+         (its release is dead past the tail call, so the deferral is the only channel): \
+         region growth over 200 discarded calls must be ~0, got {define_self}",
+    );
+}
+
+/// Per-call reclamation of a stranded recursive closure that crosses the **fiber
+/// frontier** — the other half of the unconditional deferral (docs/impl/selfrec.md §
+/// "The deferral needs no escape gate"). Each subject's letrec body hands the closure
+/// across a fiber boundary and then tail-calls it, so its scope-end `DecrefRegion` is
+/// dead past the frame replacement and the deferral is the region's only channel.
+///
+/// Crossing the frontier is not a reason to withhold that channel, because the crossing
+/// counts a reference of its own: an emitted value takes the park retain into
+/// `fiber.signal` (which the resumer's result release consumes), and a `chan/send`
+/// message is increfed at the send site until a receive builds the result carrying it.
+/// The deferral drops the frame's own reference and no other, and it runs at the
+/// recursion's normal completion — after the crossing, which is a node of the same body.
+///
+/// Three shapes: the emit seed (`yield`, driven by an external resume per op) through
+/// both binder routes, and the `Sends` seed (`chan/send`, received in place). Each
+/// discards the delivered closure, so nothing legitimately retains it and the whole
+/// per-call region must come back.
+///
+/// Counterfactual: both read ~200 — one stranded region per call, closure and env
+/// together — while the deferral refuses a fiber-crossing binding; ~0 once the channel
+/// is unconditional. The live accumulator beside them proves the gauge sees per-call
+/// region growth at all.
+#[test]
+fn fiber_crossing_recursive_closure_reclaims_per_call() {
+    let live = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    // The emit seed: `go` is yielded to the resumer, then tail-called. The fiber body
+    // loops forever, so one `(fiber/resume f nil)` runs exactly one `step` — the yield
+    // parks it, and the next resume runs the recursion and reaches the next yield.
+    let emitted = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) 0 (go (- m 1))))] \
+              (yield go) \
+              (go k)))) \
+         (def f (fiber/new (fn [] (forever (step 3))) |:yield|))",
+        "(fiber/resume f nil)",
+        "arena/region-count",
+    );
+    assert!(
+        emitted < 50,
+        "a YIELDED cell-free self-recursive closure must still be reclaimed per call — \
+         the emit's park retain is the resumer's reference and the deferred release \
+         drops only the frame's: region growth over 200 resumes must be ~0, got {emitted}",
+    );
+
+    // The `def` binder face of the same crossing: a self-recursive `def` reaches the
+    // strand by the other route (its would-be-live release is suppressed rather than
+    // left as dead code), so the crossing must be sound through both binders.
+    let emitted_define = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (def go (fn [m] (if (< m 1) 0 (go (- m 1))))) \
+            (yield go) \
+            (go k))) \
+         (def f (fiber/new (fn [] (forever (step 3))) |:yield|))",
+        "(fiber/resume f nil)",
+        "arena/region-count",
+    );
+    assert!(
+        emitted_define < 50,
+        "a YIELDED cell-free self-recursive `def` closure must be reclaimed per call \
+         through the other binder route: region growth over 200 resumes must be ~0, \
+         got {emitted_define}",
+    );
+
+    // The `Sends` seed: `go` is sent over a channel, then tail-called. The receive
+    // pulls it back in the same op and discards it, so the send-site incref is
+    // released before the next op and only the frame's reference is in question.
+    let sent = mid_run_growth(
+        Runtime::new(),
+        "(def [snd rcv] (chan)) \
+         (def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) 0 (go (- m 1))))] \
+              (chan/send snd go) \
+              (go k)))) \
+         (def once (fn [] (step 3) (get (chan/recv rcv) 1)))",
+        "(once)",
+        "arena/region-count",
+    );
+    assert!(
+        sent < 50,
+        "a SENT cell-free self-recursive closure must be reclaimed per call — the send \
+         site counts the message until it is received, so the deferral drops only the \
+         frame's reference: region growth over 200 calls must be ~0, got {sent}",
+    );
+}
+
+/// The strand's premise is a tail call to the binding, not a body that IS one
+/// (docs/impl/selfrec.md § the placement table; `lower_letrec`). A letrec body reaches
+/// its tail call through statements — `(begin (stmt …) (go k))` — and ANF names that
+/// call's result, so the body is a `Begin` whose last element binds the call and
+/// returns the binding. Read as "the whole body is a tail call" that shape is not one,
+/// the binding is never stranded, and its scope-end `DecrefRegion` sits past the
+/// frame-replacing `TailCall` with no channel to supply it.
+///
+/// The ordinary demise reading covers the shape only while nothing else claims the
+/// closure: as soon as it escapes — here by the RETURN facet, the recursion handing
+/// itself back — the release no longer lands at the call node, and the strand is the
+/// only channel left. Both subjects below discard the returned closure, so the whole
+/// per-call region must come back.
+///
+/// Counterfactual: ~200 — one region per call, closure and env together — while the
+/// marking demands a wholly-tail-call body; ~0 once it asks for a tail call to the
+/// binding.
+#[test]
+fn statement_bodied_letrec_strands_its_self_recursive_member() {
+    let live = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    // A statement, then the tail call. `go` returns itself, so the return facet keeps
+    // the demise off the call node and the strand is the only channel.
+    let statement = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) go (go (- m 1))))] \
+              (+ k 1) \
+              (go k))))",
+        "(step 3)",
+        "arena/region-count",
+    );
+    assert!(
+        statement < 50,
+        "a letrec whose body reaches its tail call through a statement must strand its \
+         cell-free self-recursive member: region growth over 200 calls must be ~0, got \
+         {statement}",
+    );
+
+    // The same through a BRANCH, where only one arm leaves through the tail call. The
+    // other arm keeps the live scope-end release, so the two channels must stay
+    // mutually exclusive per path rather than both firing.
+    let branched = mid_run_growth(
+        Runtime::new(),
+        "(def step (fn [k] \
+            (letrec [go (fn [m] (if (< m 1) go (go (- m 1))))] \
+              (if (< k 0) go (go k)))))",
+        "(step 3)",
+        "arena/region-count",
+    );
+    assert!(
+        branched < 50,
+        "a letrec body only one arm of which tail-calls the member must reclaim per \
+         call — the arm that falls through runs the live scope-end release and records \
+         no deferral: region growth over 200 calls must be ~0, got {branched}",
+    );
+}
+
+/// A tail-position `(or param …)` (or `(and …)`) that SHORT-CIRCUIT-returns an owned heap
+/// param must hand the caller an owning reference to it, exactly like `(if param param …)`.
+///
+/// Under the prediction-free return model (`src/hir/return_incref.rs`), every returned value
+/// is wrapped in `Return`, which mints an `IncrefValueRegion` (the caller's owning reference)
+/// and lets the region analysis extend the value's region `decref_point` past that mint. The
+/// return-wrapping pass treats `or`/`and` as tail-transparent and pushes `Return` only into
+/// the LAST operand — so a SHORT-CIRCUIT value (a non-last operand returned because it was
+/// truthy/falsy) gets neither the mint nor the decref-point extension. Its owned-param decref
+/// then fires before the value is returned, freeing it out from under the caller: a
+/// `tag/object mismatch — list` use-after-free (witnessed standalone by `lib/http.lisp`'s
+/// `merge-query`, whose `(or url-query encoded)` passthrough-returns its first arg).
+///
+/// `mq` here is NOT self-recursive, so this is independent of the self-recursion machinery:
+/// it pins the `or`/`and` short-circuit-return mint. Counterfactual: panics before the fix
+/// that wraps the whole tail `or`/`and` in `Return`; returns "hi" cleanly after.
+#[test]
+fn tail_or_short_circuit_returns_owned_param_no_uaf() {
+    use crate::pipeline::compile_file_repl;
+    let src = "(def m ((fn [] \
+        (defn mq [url] (or url \"z\")) \
+        {:run (fn [] (mq \"hi\"))}))) \
+        (m:run)";
+    let mut rt = Runtime::new();
+    let res = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    let v = vm
+        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .expect("a tail `(or param …)` returning an owned heap param must not double-free it");
+    assert!(
+        v.is_string(),
+        "the passthrough `(or url \"z\")` returns the string param \"hi\", got {v:?}"
+    );
+}
+
+/// A cell-free self-recursive `def` nested in a lambda, exercised through ACTUAL per-call
+/// recursion with heap-allocating arithmetic (`<`/`-`, whose stdlib bodies churn regions),
+/// under the FULL stdlib — the universal shape of a module-level `(defn …)` that recurses
+/// (every `lib/*.lisp` helper). This is the strong companion to the boolean
+/// `…_no_double_free` test below: the boolean shape never allocates inside the recursion, so
+/// a prematurely-freed closure region's page is not recycled before the recursion ends — the
+/// use-after-free reads stale-but-intact memory and stays silent. With heap-churning
+/// arithmetic that freed page is recycled mid-recursion, so the self-call re-dispatch (which
+/// re-enters the executing closure living in that region) reads a foreign object and trips
+/// the `tag/object mismatch — list` panic at `arena.rs`.
+///
+/// A self-recursive `def`'s closure region demises at the binding's last use, which for
+/// this body is the `(loop k)` tail call — dead code past the frame replacement. So
+/// `lower_define` STRANDS the binding (`stranded_self_bindings`) and the tail-call
+/// deferred release is the sole, once-only release, reproducing the `letrec` path's
+/// accounting. The gauge (region growth over 200 calls) additionally pins the region is
+/// reclaimed per call — a leak would grow it unbounded.
+///
+/// Counterfactual: panics with the `tag/object mismatch` UAF before the `def`-stranding
+/// fix; runs clean and bounded after.
+#[test]
+fn self_recursive_define_with_arith_reclaims_per_call() {
+    // Subject: a self-recursive `def` (not `letrec`) nested in a lambda, recursing with
+    // heap-allocating stdlib `<`/`-` so a freed `R_cell` page is recycled mid-recursion.
+    // A crash inside the run panics here (the RED counterfactual); a leak grows the delta.
+    let call_growth = mid_run_growth(
+        Runtime::new(),
+        "(def f (fn [k] \
+            (def loop (fn [m] (if (< m 1) :done (loop (- m 1))))) \
+            (loop k)))",
+        "(f 3)",
+        "arena/region-count",
+    );
+    // Discriminator: the self-referential accumulator legitimately retains every prior, so
+    // the gauge MUST see large growth here — else the bounded assertion below is vacuous.
+    let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
+
+    assert!(
+        live_chain_growth > 150,
+        "precondition: the live accumulator retains every prior, so region growth over 200 \
+         iterations must be large (~200) — got {live_chain_growth}; a small value means the \
+         gauge is dead and the assertion below is vacuous",
+    );
+    assert!(
+        call_growth < 50,
+        "a cell-free self-recursive `def` closure must be reclaimed per call by the \
+         tail-call deferred release — region growth over 200 calls must be near zero, got {call_growth} \
+         (its per-call closure region leaks, or worse, is freed before the `(loop k)` tail \
+         call re-enters it)",
+    );
+}
+
+/// The OTHER `def` rows of the placement table (docs/impl/selfrec.md § the placement
+/// table): a body that does not tail-call the binding.
+///
+/// A `def` has no scope NODE, so the analysis leaves its closure region's demise at the
+/// binding's last use — and a use of the binding as a CALLEE resolves through `last_use`
+/// to the node that CONSUMES it, the call. The release is therefore emitted where that
+/// call has returned and the recursion has completed, which is the ordinary live
+/// `DecrefRegion` and needs no strand, no relocation and no deferral. Only when the
+/// consuming call is itself the frame-replacing tail call (`…_with_arith_…` above) is
+/// the point dead and the deferral its channel.
+///
+/// Three bodies, one per way the recursion's result can be consumed short of tail-calling
+/// the binding: as a tail call's ARGUMENT, under a non-tail consumer, and discarded as a
+/// statement. Run under the FULL stdlib with heap-allocating `<`/`-` so a prematurely
+/// freed closure page is recycled mid-recursion and the latent use-after-free panics
+/// (`tag/object mismatch`) instead of reading stale-but-intact memory.
+///
+/// Counterfactual: each reads ~200 — one stranded region per call — if the closure
+/// region's ordinary release is withheld; ~0 with it standing.
+#[test]
+fn self_recursive_define_off_tail_reclaims_per_call() {
+    let growth = |body: &str| {
+        mid_run_growth(
+            Runtime::new(),
+            &format!(
+                "(def sub1 (fn [x] (- x 1))) \
+                 (def f (fn [k] \
+                    (def loop (fn [m] (if (< m 1) 0 (loop (- m 1))))) \
+                    {body}))"
+            ),
+            "(f 3)",
+            "arena/region-count",
+        )
+    };
+    let live = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so region \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+
+    for (label, body) in [
+        ("a tail call's argument", "(sub1 (loop k))"),
+        ("a non-tail consumer", "(+ (loop k) 0)"),
+        ("a discarded statement", "(begin (loop k) 0)"),
+    ] {
+        let g = growth(body);
+        assert!(
+            g < 50,
+            "a cell-free self-recursive `def` whose body consumes the recursion through \
+             {label} must be reclaimed per call by its ordinary release: region growth \
+             over 200 calls must be ~0, got {g}",
+        );
+    }
+}
+
+/// The binder rule underneath the `def` rows above (docs/impl/region/mechanism.md § "A
+/// binder's init release lands after the slot store"): an UNUSED `def` whose initializer
+/// allocates must still release it.
+///
+/// This is the `def` face of `region-unused-let-binding.lisp`. The last-use narrowing
+/// pulls an unread binding's init demise back to where the value was made — correct for
+/// every binder whose value is its BODY, and wrong for the one binder whose value IS the
+/// initializer, because the lowerer then emits the release before `lower_define` has
+/// stored the value and it reloads the binder's stamped `nil`. Nothing is freed and the
+/// initializer's region is held to fiber teardown.
+///
+/// `Runtime::without_stdlib` keeps the reading to the shape under test, and the gauge is
+/// the OBJECT count: the strand is one cons cell per call, in a region the pool hands
+/// straight back out, so `arena/region-count` reads it as flat. Counterfactual: ~200 while
+/// the demise sits on the initializer, ~0 once it sits on the `def`.
+#[test]
+fn unused_define_init_reclaims_per_call() {
+    let live = mid_run_discriminator(Runtime::without_stdlib(), "arena/count");
+    assert!(
+        live > 150,
+        "gauge-live: the self-referential accumulator retains every prior, so object \
+         growth over 200 iterations must be ~200 — got {live}; if small the gauge is \
+         dead and every assertion below is vacuous",
+    );
+    let unused = mid_run_growth(
+        Runtime::without_stdlib(),
+        "(def f (fn [k] (def x (list k k)) 0))",
+        "(f 3)",
+        "arena/count",
+    );
+    assert!(
+        unused < 50,
+        "the heap initializer of a `def` nothing reads must be released: object growth \
+         over 200 calls must be ~0, got {unused} — narrowed onto the initializer the \
+         release is emitted before the binder's slot store and reloads the stamped `nil`",
+    );
+}
+
+/// A self-recursive `def` nested in a lambda is cell-free (docs/impl/selfrec.md), handled
+/// exactly like a self-recursive `letrec`: no forward cell, the self-reference resolves to
+/// the executing closure. `lower_define` STRANDS the binding (`stranded_self_bindings`) so
+/// the tail-call deferred release is the sole release — the closure region must be freed
+/// EXACTLY once. Both the dead-block decref and the deferral firing is a double-free.
+/// This pins that the program runs to completion (the double-free was a `DecrefRegion(...) —
+/// phantom region or double-free` panic in `regionstore/refcount.rs`).
+#[test]
+fn self_recursive_define_in_lambda_no_double_free() {
+    use crate::pipeline::compile_file_repl;
+    let src = "(def outer (fn [k] \
+        (def loop (fn [m] (if m :done (loop true)))) \
+        (loop k))) \
+        (outer false)";
+    let mut rt = Runtime::without_stdlib();
+    let res = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    let v = vm
+        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .expect("a cell-free self-recursive `def` must not double-free its closure region");
+    assert!(
+        v.is_keyword(),
+        "the recursive `def` returns the :done keyword, got {v:?}"
+    );
+}
+
+/// A self-recursive `def` that is ALSO captured by a sibling is NOT cell-free: the
+/// sibling capture makes it `needs_capture`, so it keeps a forward cell whose cascade
+/// owns the closure region's single release (docs/impl/selfrec.md § the cell-free gate).
+/// `lower_define`/`lower_letrec` therefore must NOT strand it — stranding a cell-held
+/// binding makes the tail-call deferred release decref its region a SECOND time, under the still-live
+/// cell (the captured-self-tail double-free). This is the runtime peer to
+/// `tests/elle/region-selfrec-captured-tail-release.lisp`: `loop` self-recurses AND is
+/// captured by `other`, so it must run to completion with its region freed exactly once.
+/// A regression that re-strands it trips the `tail_callee_defers_release` consumer assertion
+/// (a loud panic at the seam) or, in release, the `DecrefRegion` double-free panic.
+#[test]
+fn self_recursive_and_sibling_captured_no_double_free() {
+    use crate::pipeline::compile_file_repl;
+    let src = "(def outer (fn [k] \
+        (def loop (fn [m] (if m :done (loop true)))) \
+        (def other (fn [] (loop k))) \
+        (other))) \
+        (outer false)";
+    let mut rt = Runtime::without_stdlib();
+    let res = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, symbols, cctx) = rt.parts();
+    let v = vm
+        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .expect("a sibling-captured self-recursive `def` must not double-free its closure region");
+    assert!(
+        v.is_keyword(),
+        "the sibling-captured recursive `def` returns the :done keyword, got {v:?}"
+    );
+}
+
+/// The closure-cycle merge's **return-funded admission**
+/// (docs/impl/region/letrec.md § The frontier gate): the ev/od cycle with a member
+/// RETURNED still reclaims per call. One base case apart from
+/// `region_ownership_reclaims_mutual_recursion_closure_cycle`, `ev` hands back `ev`
+/// itself, so `ev`'s region carries escape's return facet — which used to refuse the
+/// whole SCC to Shared, where per-region RC cannot collect a cycle and both closures
+/// and both forward cells stayed live once per call.
+///
+/// The facet is not a reason to refuse: the merge collapses the returned member's
+/// region onto the arena, so the value handed out lives IN the arena and the mint that
+/// funds the caller raises the arena's own count. The letrec body's tail is a call to
+/// the MEMBER `ev`, so the binding-scope `DecrefRegion` is dead past that
+/// frame-replacing `TailCall` and the release rides the member deferral, which runs at
+/// the recursion's normal completion — after the mint. The caller then discards the
+/// result and the arena reaches zero.
+///
+/// The other two body shapes that hand the value over themselves are gauged by
+/// [`region_ownership_reclaims_returned_cycle_every_frame_exit`].
+///
+/// Same bounded-vs-discriminator counterfactual as the non-returning case: the merge is
+/// unconditional, so the pin is per-run region growth beside the leaking bare-@array
+/// cycle, whose slope proves the gauge is live.
+#[test]
+fn region_ownership_reclaims_returned_mutual_cycle_per_call() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertion below is vacuous",
+    );
+    // `ev` is RETURNED (a value use), which disables call-site param joins — the
+    // diverging guards prove the `%lt`/`%sub` operands. The result is discarded.
+    let src = "(def f (fn [k] \
+                 (letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                               (if (%lt m 1) ev (od (%sub m 1)))) \
+                          od (fn [m] (when (%not (%int? m)) (error :m)) \
+                               (if (%lt m 1) ev (ev (%sub m 1))))] \
+                   (ev k)))) \
+               (begin (f 3) nil)";
+    let growth = steady_region_growth(src);
+    assert!(
+        growth <= 0,
+        "a RETURNED member's ev/od cycle must be reclaimed by the return-funded merge \
+         admission — per-run live-region growth {growth} must be <= 0 (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
+    );
+}
+
+/// The return-funded admission turns on ONE structural fact — the letrec body hands the
+/// value over itself, every tail exit of it leaving the frame — and this drives the two
+/// remaining ways it can do that beside the member tail call above
+/// (docs/impl/region/letrec.md § The frontier gate).
+///
+/// A NON-member tail call reaches the caller's mint by either of its callee's
+/// resolutions: a closure replaces the frame and the release rides
+/// `deferred_release_slot` to the recursion's completion, a native keeps it and falls
+/// through to the binding-scope `DecrefRegion` the lowerer emits at the `Letrec` node —
+/// after the mint the call itself emits at the call site. A bare member VALUE tail has
+/// no tail call at all, and the frame's own `Return` (which functionalization places
+/// inside the letrec body, the letrec being the frame's tail) is what mints first.
+///
+/// The cycle bound OUT of tail position is not a frame exit at all and reclaims for a
+/// different reason; [`region_ownership_reclaims_returned_cycle_bound_out_of_tail_position`]
+/// is its gauge. The bare-`@array` discriminator asserted first is what proves the
+/// bounded assertions here are measuring reclamation rather than a dead gauge.
+#[test]
+fn region_ownership_reclaims_returned_cycle_every_frame_exit() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertions below are vacuous",
+    );
+    // The ev/od cycle, spelled once; each case differs only in the letrec BODY and in
+    // what encloses it. `ev` is returned (a value use), which disables call-site param
+    // joins — the diverging guards prove the `%lt`/`%sub` operands.
+    let cycle = "letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (od (%sub m 1)))) \
+                         od (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (ev (%sub m 1))))]";
+
+    let foreign = steady_region_growth(&format!(
+        "(def g (fn [x] x)) (def f (fn [k] ({cycle} (g (ev k))))) (begin (f 3) nil)"
+    ));
+    assert!(
+        foreign <= 0,
+        "a returned cycle whose body tail-calls a NON-member must be reclaimed — both \
+         of that callee's resolutions release after the mint — but per-run live-region \
+         growth is {foreign} (the discriminator leaks {leak} per run, so the gauge is \
+         live)",
+    );
+
+    let value = steady_region_growth(&format!("(def f (fn [k] ({cycle} ev))) (begin (f 3) nil)"));
+    assert!(
+        value <= 0,
+        "a returned cycle whose body's tail is a bare member VALUE must be reclaimed — \
+         the frame's `Return` sits inside the letrec body and mints before the \
+         binding-scope drop — but per-run live-region growth is {value} (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
+    );
+}
+
+/// The cycle whose letrec is NOT its frame's tail: bound to `c` and handed on by a
+/// later statement, so the body falls out to a bare member value and `c` names the
+/// member's region directly (docs/impl/region/letrec.md § "Drop site — following a
+/// handed-out member"). No mint stands between the letrec and the binding scope, so a
+/// release pinned there would free the arena under `c`; the merge instead adopts the
+/// point the last-use rule already computed for the handed-out member — the enclosing
+/// `Return`, whose mint precedes that node's own releases — and waives the sole-held
+/// proxy for the member it followed.
+///
+/// Two shapes, because the two halves of that reading are independent: the value is
+/// RETURNED out of `f` (the release rides the `Return` pin), and the value is CALLED
+/// inside `f` and never handed further (the release rides its ordinary last use). Both
+/// reclaim the whole cycle — two closures and two forward cells — per call.
+///
+/// Counterfactual: both read the discriminator's slope while the cycle is refused to
+/// Shared, where per-region RC cannot collect it.
+#[test]
+fn region_ownership_reclaims_returned_cycle_bound_out_of_tail_position() {
+    let leak = leak_discriminator();
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is not detecting per-run growth and the bounded \
+         assertions below are vacuous",
+    );
+    let cycle = "letrec [ev (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (od (%sub m 1)))) \
+                         od (fn [m] (when (%not (%int? m)) (error :m)) \
+                              (if (%lt m 1) ev (ev (%sub m 1))))]";
+
+    let returned = steady_region_growth(&format!(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] (let [c ({cycle} ev)] (g k) c))) \
+         (begin (f 3) nil)"
+    ));
+    assert!(
+        returned <= 0,
+        "a cycle bound out of tail position and RETURNED must be reclaimed — the \
+         handed-out member's release is pinned at the enclosing `Return`, after its \
+         mint — but per-run live-region growth is {returned} (the discriminator leaks \
+         {leak} per run, so the gauge is live)",
+    );
+
+    let called = steady_region_growth(&format!(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] (let [c ({cycle} ev)] (g k) (begin (c 3) nil)))) \
+         (begin (f 3) nil)"
+    ));
+    assert!(
+        called <= 0,
+        "a cycle bound out of tail position and CALLED in place must be reclaimed — the \
+         handed-out member's release sits at its ordinary last use, which post-dominates \
+         the binding scope — but per-run live-region growth is {called} (the \
+         discriminator leaks {leak} per run, so the gauge is live)",
+    );
+}
+
+/// Per-CALL reclamation of a **one-way** sibling capture — `go` calls `helper`,
+/// `helper` does not call back. There is no SCC, so no merge and no cycle channel:
+/// `helper` simply keeps a prebound forward cell for `go`'s benefit and per-region RC
+/// reclaims the pair. What decides whether it does is where the CELL's release lands.
+/// Its binding-scope `DecrefRegion` sits past the letrec body's frame-replacing tail
+/// call, and the frame-exit relocation's count argument is read over holder BINDINGS —
+/// which name the closure region a cell points at, never the cell's own. So the cell
+/// carries its binding's verdict one indirection out, and stranding it strands the
+/// sibling with it: the cell's reference is what holds that closure's region off zero
+/// (docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
+/// its binding is").
+///
+/// Two shapes, one per face: nothing leaves the frame, and the capturer is RETURNED
+/// (where the counted `closure ⊇ cell` edge is what stands between the relocated
+/// release and the caller's minted reference). Both
+/// leak three objects in two regions per call — the cell, plus the sibling closure and
+/// its env — when the cell's release stays in the dead block.
+#[test]
+fn region_ownership_reclaims_sibling_captured_forward_cell_per_call() {
+    let live_chain = mid_run_discriminator(Runtime::new(), "arena/region-count");
+    assert!(
+        live_chain > 150,
+        "precondition: the self-referential accumulator legitimately retains every \
+         prior, so region growth over 200 iterations must be large (~200) — got \
+         {live_chain}; if small the gauge is dead and the assertions below are vacuous",
+    );
+
+    let plain = mid_run_growth(
+        Runtime::new(),
+        "(def f (fn [k] \
+            (letrec [helper (fn [x] (%sub x 1)) \
+                     go (fn [m] (helper m))] \
+              (go k))))",
+        "(f 3)",
+        "arena/region-count",
+    );
+    assert!(
+        plain < 50,
+        "a one-way sibling capture must be reclaimed per call — region growth over 200 \
+         calls must be near zero, got {plain} (the forward cell's binding-scope release \
+         is dead past the letrec body's tail call, and the sibling closure it holds \
+         cannot reach zero until the cell does)",
+    );
+
+    let returned = mid_run_growth(
+        Runtime::new(),
+        "(def f (fn [k] \
+            (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
+                     go (fn [m] (when (%not (%int? m)) (error :m)) \
+                          (if (%lt m 1) go (go (helper m))))] \
+              (go k))))",
+        "(f 3)",
+        "arena/region-count",
+    );
+    assert!(
+        returned < 50,
+        "the same pair with the CAPTURER handed back must also reclaim — escape marks \
+         the sibling escaping by the return facet and no other, so the tail callee's \
+         `closure ⊇ cell` edge funds the relocated release — but region growth over 200 \
+         calls is {returned} (the discriminator grows {live_chain}, so the gauge is live)",
+    );
+}

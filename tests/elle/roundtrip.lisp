@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # ── literal round-trip: (string x) matches the literal syntax of x ────
 #
 # Every type's string representation must match its literal input form,

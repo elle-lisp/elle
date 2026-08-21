@@ -77,7 +77,8 @@ bytecode. Error messages include file:line:col information.
   for subprocess lifecycle
 - **`port`** — Port type (file descriptor wrapper with direction, encoding, kind)
 - **`error`** — `LocationMap` for bytecode offset → source location mapping
-- **`context`** — Thread-local VM and symbol table context management
+- **`runtime`** — Per-instance `Runtime`/`RuntimeCore` owning the VM, symbol
+  table, compile context, and heap; handed out via `rt.parts()`
 - **`symbol`** — Symbol interning table
 - **`config`** — Global CLI configuration (parsed once at startup)
 
@@ -96,6 +97,8 @@ bytecode. Error messages include file:line:col information.
 - **`rewrite`** — Source-to-source token-level rewriting engine
 - **`formatter`** — Code formatting for Elle source
 - **`epoch`** — Epoch-based migration system for breaking changes
+- **`segment`** — Unicode grapheme segmentation seam; vendored table
+  generations, per-VM selection
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives.
   See [`docs/plugins.md`](docs/plugins.md) for the full list.
 - **`path`** — UTF-8 path operations
@@ -172,13 +175,27 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 ## Testing
 
 **⚠️ NEVER run `cargo test --workspace` without explicit user instruction.**
-It takes ~30 minutes. Use `make test` (~2min) for pre-commit verification.
+It takes ~30 minutes.
 
 | Command | Runtime | What it does |
 |---------|---------|-------------|
-| `make smoke` | ~15s | Elle examples only |
-| `make test` | ~2min | build + examples + elle scripts + unit tests |
+| `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
+| `make smoke` | ~30min release | corpus + doctests + embedding |
+| `make test` | smoke + ~5min | smoke, then fmt, clippy, macOS cross-check, rustdoc, unit and integration tests |
+| `make crosscheck` | ~1min | Clippy over the macOS `cfg(target_os)` arms — needs `rustup target add x86_64-apple-darwin` |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
+
+**Pass the release binary to anything that runs the corpus.** `make smoke` and
+`make smoke-elle` default to the debug binary outside CI, which takes hours
+rather than ~30 minutes:
+
+```sh
+make smoke-elle ELLE=./target/release/elle CARGO_PROFILE=--release
+```
+
+**Never read a batched suite's exit status through a pipe.** `make smoke-elle |
+tail` reports `tail`'s exit, not the suite's, so a failed batch looks green.
+Redirect to a file, or use `elle test --summary`.
 
 For test organization, helpers, and how to add tests:
 [`docs/testing.md`](docs/testing.md).

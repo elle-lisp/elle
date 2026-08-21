@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/websocket.lisp — WebSocket module tests
 
 
@@ -7,8 +7,8 @@
 (let [[h-ok? _] (protect (import "plugin/hash"))
       [r-ok? _] (protect (import "plugin/random"))]
   (unless (and h-ok? r-ok?)
-    (println "SKIP: plugin/hash or plugin/random not available")
-    (exit 0)))
+    (error (struct :error :gated
+                   :reason "plugin/hash or plugin/random not available"))))
 
 ## ── Init ─────────────────────────────────────────────────────────
 
@@ -43,7 +43,9 @@
   "Transport wrapper for a raw TCP port."
   (def @wbuf @[])
   {:read (fn [n] (port/read tcp n))
-   :read-line (fn [] (port/read-line tcp))
+   :read-line (fn []
+                (let [line (port/read-line tcp)]
+                  (when line (string line))))
    :write (fn [data]
             (let [d (if (bytes? data) data (bytes data))]
               (push wbuf d)))

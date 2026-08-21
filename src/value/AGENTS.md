@@ -5,7 +5,7 @@ Runtime value representation using a tagged union.
 ## Responsibility
 
 - Define the `Value` type (16-byte tagged-union representation)
-- Provide heap-allocated types (Closure, Fiber, Cons, etc.)
+- Provide heap-allocated types (Closure, Fiber, Pair, etc.)
 - Handle value display and thread-safe transfer
 
 ## Submodules
@@ -16,35 +16,31 @@ Runtime value representation using a tagged union.
 | `repr/constructors.rs` | Value construction methods |
 | `repr/accessors.rs` | Value field access and type checking |
 | `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
-| `repr/tests.rs` | Value encoding tests |
-| `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey` |
-| `closure.rs` | `Closure` struct with bytecode, env, and `location_map` |
-| `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
-| `error.rs` | `error_val()`, `error_val_extra()`, and `format_error()` helpers for error structs |
+| `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
+| `closure.rs` | `Closure` (template + env + squelch mask), `ClosureTemplate`, `TemplateRef` |
+| `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
+| `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs (docs/impl/region/errors.md) |
 | `ffi.rs` | `LibHandle` for C interop |
-| `fiberheap/` | `FiberHeap` struct (SlabPool/BumpArena + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership + outbox), thread-local routing, `region_enter`/`region_exit`. Used by all fibers including root. |
-| `shared_alloc.rs` | `SharedAllocator` for zero-copy inter-fiber value exchange |
-| `arena.rs` | Heap arena: `alloc`, `deref`, `ArenaMark`, `ArenaGuard`, mark/release lifecycle. All allocations go through `FiberHeap`. |
-| `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope`, `LSet`, `LSetMut` (re-exports arena functions) |
-| `send.rs` | `SendValue` wrapper for thread-safe transfer |
+| `fiberheap/` | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`. One heap per VM, shared by all of that VM's fibers. |
+| `arena.rs` | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
+| `heap.rs` | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle`, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
+| `send/` | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
-| `intern.rs` | String interning (SSO fallback and heap interning for strings only) |
-| `keyword.rs` | Hash-based keyword identity: FNV-1a hash, global name table, DSO routing |
+| `keyword.rs` | Hash-based keyword identity: FNV-1a hash (full 64-bit), global name table, DSO routing |
 
 ## Key types
 
 | Type | Location | Purpose |
 |------|----------|---------|
 | `Value` | `repr/mod.rs` | 16-byte tagged-union value (Copy) |
-| `Closure` | `closure.rs` | Bytecode + env + arity + signal + location_map + syntax |
+| `Closure` | `closure.rs` | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code (bytecode, constants, arity, `location_map`, `doc`, `syntax`) lives on the `Rc`-shared `ClosureTemplate`. |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
-| `FiberHeap` | `fiberheap/` | Per-fiber allocator (SlabPool/BumpArena) with destructor tracking and shared alloc ownership |
-| `SharedAllocator` | `shared_alloc.rs` | Bump allocator for zero-copy inter-fiber value exchange |
-| `Parameter` | `heap.rs` | Dynamic binding with id and default value, looked up at runtime |
-| `LSet` | `heap.rs` | Immutable set (`BTreeSet<Value>`), no `RefCell` |
-| `LSetMut` | `heap.rs` | Mutable set (`RefCell<BTreeSet<Value>>`) (type name `:@set`) |
+| `FiberHeap` | `fiberheap/` | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region (`value/fiber.rs`) |
+| `Parameter` | `heap.rs` | Dynamic parameter with id and default value, looked up at runtime |
+| `LSet` | `heap.rs` | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
+| `LSetMut` | `heap.rs` | Mutable set (`Rc<RefCell<BTreeSet<Value>>>`) (type name `:@set`) |
 
 ### Fiber fields for parent/child chain
 
@@ -62,62 +58,69 @@ so that `fiber/parent` and `fiber/child` return identity-preserving values
 These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 | `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
 | `Frame` | `fiber.rs` | Single call frame (closure + ip + base) |
-| `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Suspended, Dead, Error |
-| `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64), SIG_HALT(256) |
+| `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Paused, Dead, Error |
+| `SignalBits` | `fiber/signalbits.rs` | Newtype over `u64` (re-exported from `fiber.rs`). The `SIG_*` constants are defined in `crate::signals`: SIG_OK(0), SIG_ERROR(1<<0), SIG_YIELD(1<<1), SIG_DEBUG(1<<2), SIG_RESUME(1<<3), SIG_FFI(1<<4), SIG_PROPAGATE(1<<5), SIG_HALT(1<<8) (among others) |
 | `Arity` | `types.rs` | Function arity (Exact, AtLeast, Range) |
 | `SymbolId` | `types.rs` | Interned symbol identifier |
-| `SendValue` | `send.rs` | Thread-safe value wrapper |
+| `SendValue` | `send/` | Thread-safe value wrapper |
 
 ## Invariants
+
+0. **The mutable-store seam.** The raw `RefCell` accessors for the
+   `Value`-bearing mutable containers (`as_array_mut_raw`,
+   `as_struct_mut_raw`, `as_set_mut_raw`, `as_lbox_raw`,
+   `as_capture_cell_raw` — conversions.rs) are `pub(in crate::value)`.
+   Outside `value/`, reads go through the borrow-only `ReadCell` accessors
+   (`as_array_mut` & co.) or copy-outs (`lbox_get`, `capture_cell_get`), and
+   every store/remove goes through the tracked funnels in `arena.rs`
+   (`push_with_incref`, `struct_put_with_rebind`,
+   `capture_store_with_rebind`, …) — docs/impl/region/rules.md Rule 5, mutable store:
+   an uncounted container store is a compile error. Membership-neutral
+   mutation uses `with_array_mut_neutral`.
 
 1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data is `Rc`.
    The `traits: Value` field on heap variants is also `Copy`.
 
-2. **`traits` field is always NIL or an immutable struct.** The `with-traits`
-   primitive validates that trait tables are immutable `LStruct` values. `NIL`
-   means "no traits attached". No other type is valid.
+2. **`traits` field is always NIL or a struct.** The `with-traits`
+   primitive validates that the trait table is a struct — either an immutable
+   `LStruct` or a mutable `LStructMut` (`src/primitives/traits.rs`
+   `prim_with_traits`). `NIL` means "no traits attached". No other type is valid.
 
 3. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST`
      is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref)
-       and `CaptureCell` (compiler-created for mutable captures and mutated parameters,
-       auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
-       Immutable captured locals do not need lboxes — they are captured by value.
+4. **Two box types exist as distinct heap variants.** `HeapObject::LBox`
+       (user-created via `box`, explicit deref, not auto-unwrapped) and
+       `HeapObject::CaptureCell` (compiler-created for mutable captures and
+       mutated parameters, auto-unwrapped by `LoadUpvalue`, never user-visible).
+       Both wrap `Rc<RefCell<Value>>`. Immutable captured locals do not need a
+       cell — they are captured by value.
 
-5. **`Closure` has `location_map`, `doc`, and `syntax`.** The `location_map: Rc<LocationMap>`
-     field maps bytecode offsets to source locations for error reporting. The
-     `doc: Option<Value>` field carries the docstring extracted from the function
-     body, threaded from HIR through LIR. The `syntax: Option<Rc<Syntax>>` field
-     stores the original lambda `Syntax` node, used by `eval` to reconstruct
-     closures in the environment. Most construction sites set this to `None`;
-     it is populated by the emitter for user-defined lambdas.
+5. **Per-function code lives on `ClosureTemplate`, not `Closure`.** A `Closure`
+     is just a `TemplateRef` + captured env (`RegionSlice<Value>`) + a
+     `squelch_mask`. The code object (`ClosureTemplate`) carries `location_map:
+     Rc<LocationMap>` (bytecode offset → source location), `doc: Option<Rc<str>>`
+     (the docstring extracted from the function body, threaded from HIR through
+     LIR), and `syntax: Option<Rc<Syntax>>` (the original lambda `Syntax` node,
+     used by `eval` to reconstruct closures). The template is `Rc`-shared across
+     closure instances, so cloning a `Closure` is O(1).
 
 6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
      transfer between threads, cloning `Rc` contents as needed. Trait tables
      are serialized as part of the value — they are NOT stripped on cross-thread
      transfer.
 
-7. **`SuspendedFrame` replaces both `SavedContext` and `ContinuationFrame`.**
-     A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
-     constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
-     Signal suspension has an empty stack; yield suspension captures the stack.
-
-8. **Shared allocators enable zero-copy fiber exchange.** When a yielding child
-     fiber allocates heap objects, those allocations route to a `SharedAllocator`
-     owned by the parent's `FiberHeap` (or the child's own `FiberHeap` for
-     root→child chains). The parent reads yielded values directly — no deep copy.
-     `FiberHeap.shared_alloc` is a raw `*mut SharedAllocator` set during
-     `with_child_fiber` and nulled on swap-back. Routing: when `shared_alloc`
-     is non-null, `FiberHeap::alloc()` routes all allocations to the shared
-     allocator.   Only yielding fibers (signal includes `SIG_YIELD`) get shared allocators.
+7. **`SuspendedFrame` captures everything needed to resume.** A single type
+     holds the bytecode, constants, env, IP, and operand stack for a suspended
+     fiber. Signal suspension has an empty stack; yield suspension captures the
+     stack.
 
 ## Value encoding
 
 The tagged union uses a `(tag: u64, payload: u64)` pair:
 
-- **Immediate**: nil, bool, int (full-range i64), symbol, keyword, float
-- **Heap pointer**: cons, array, table, closure, fiber, lbox, parameter, syntax, binding, etc.
+- **Immediate**: nil, bool, int (full-range i64), symbol, keyword, float, native-fn (`TAG_NATIVE_FN`, payload = `prim_id`)
+- **Heap pointer**: pair, array, struct, closure, fiber, lbox, parameter, syntax, set, etc.
 
 ### Syntax objects
 
@@ -133,21 +136,26 @@ types are in `src/` — neither is in a separate crate.
 
 ### Binding objects
 
-**Removed.** Compile-time binding metadata is now stored in
-`hir::arena::BindingArena`. `Binding` is a `u32` index, not a heap object.
-`HeapObject::Binding` still exists in this crate for backward compatibility
-(to be removed in a follow-up Value migration PR), but it is no longer used
-by the compilation pipeline.
+There is no `Binding` heap variant. Compile-time binding metadata lives in
+`hir::arena::BindingArena`; `Binding` is a `u32` index, not a `Value`.
+
+### Native functions
+
+There is no `NativeFn` heap variant. Native functions are **immediate** values
+(`TAG_NATIVE_FN`, payload = `prim_id`) — no heap cell. The `NativeFn` *type*
+in `types.rs` is `&'static PrimitiveDef`, the static primitive definition the
+`prim_id` resolves to.
 
 ### Set types
 
 Two set types exist, following the immutable/mutable split:
 
-- **`LSet(BTreeSet<Value>)`** — immutable set, no `RefCell`. Created via
-  `Value::set()`. Accessed via `Value::as_set()`. Displays as `|1 2 3|`.
+- **`LSet { data: RegionSlice<Value> }`** — immutable set, stored region-inline,
+  no `RefCell`. Created via `Value::set()` (takes a `BTreeSet<Value>` and freezes
+  it into the slice). Accessed via `Value::as_set()`. Displays as `|1 2 3|`.
   `type_name()` returns `"set"`. Type keyword: `:set`.
 
-- **`LSetMut(RefCell<BTreeSet<Value>>)`** — mutable set, wrapped in `RefCell`.
+- **`LSetMut { data: Rc<RefCell<BTreeSet<Value>>> }`** — mutable set.
   Created via `Value::set_mut()`. Accessed via `Value::as_set_mut()`. Displays
   as `@|1 2 3|`. `type_name()` returns `"@set"`. Type keyword: `:@set`.
 
@@ -158,20 +166,21 @@ after insertion).
 
 Predicates: `is_set()` and `is_set_mut()` for type checking.
 
-Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
+Create values via methods: `Value::int(42)`, `Value::pair(head, tail)`,
 `Value::closure(c)`, `Value::set(btree_set)`,
 `Value::set_mut(btree_set)`. Don't construct enum variants directly.
 
 ## Trait table field
 
 Every user-facing heap variant carries a `traits: Value` field (16 bytes).
-Initialized to `Value::NIL` (meaning "no traits"). Only an immutable `LStruct`
-may be stored here; the `with-traits` primitive validates this at call time.
+Initialized to `Value::NIL` (meaning "no traits"). Only a struct — `LStruct` or
+`LStructMut` — may be stored here; the `with-traits` primitive validates this at
+call time.
 
 The field is **invisible to structural equality, ordering, and hashing**:
 `PartialEq`, `Ord`, and `Hash` on `Value` ignore the `traits` field.
 
-### Variants that carry `traits` (19 types)
+### Variants that carry `traits` (20 types)
 
 | Variant | Note |
 |---------|------|
@@ -185,21 +194,23 @@ The field is **invisible to structural equality, ordering, and hashing**:
 | `LBytesMut` | mutable @bytes — RefCell data shared on `with-traits` |
 | `LSet` | immutable set |
 | `LSetMut` | mutable @set — RefCell data shared on `with-traits` |
-| `Cons` | cons cell |
+| `Pair` | list pair |
 | `Closure` | closure |
 | `LBox` | mutable box — RefCell data shared on `with-traits` |
+| `CaptureCell` | compiler-created mutable-capture cell |
 | `Fiber` | fiber — FiberHandle (Rc) cloned on `with-traits` |
-| `Syntax` | syntax object — Rc<Syntax> cloned on `with-traits` |
+| `Syntax` | syntax object — Box<Syntax> cloned on `with-traits` |
 | `ManagedPointer` | managed FFI pointer — Cell<Option<usize>> cloned on `with-traits` |
 | `External` | opaque plugin object — Rc<dyn Any> cloned on `with-traits` |
 | `Parameter` | dynamic parameter |
 | `ThreadHandle` | thread handle — Arc<Mutex<...>> cloned on `with-traits` |
 
-### Variants that do NOT carry `traits` (6 infrastructure types)
+### Variants that do NOT carry `traits` (5 infrastructure types)
 
-`Float`, `NativeFn`, `LibHandle`, `Binding`, `FFISignature`, `FFIType`.
+`Float`, `LibHandle`, `FFISignature`, `FFIType`, `ClosureTemplate`.
 
-`with-traits` on these returns a `:type-error`.
+`HeapObject::traits()` returns `Value::NIL` for these. (Native-fns are
+immediates, not heap objects, so they are not in this list.)
 
 ### SendValue behavior
 
@@ -210,28 +221,5 @@ cross-thread transfer intact via the intern table in `SendBundle`. The
 receiving thread reconstructs the trait table in `into_value_inner` and
 stores the result in the new `traits` field of the heap object.
 
-Each `SendValue` variant for the 19 traitable types carries a
+Each `SendValue` variant for the traitable types carries a
 `traits: Box<SendValue>` field (or `traits: SendValue` if not recursive).
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~40 | Re-exports |
-| `repr/mod.rs` | ~280 | Tagged-union Value type, tag encoding |
-| `repr/constructors.rs` | ~250 | Value construction methods |
-| `repr/accessors.rs` | ~670 | Value field access and type checking |
-| `repr/traits.rs` | ~150 | Display, Debug, Clone implementations |
-| `repr/tests.rs` | ~100 | Value encoding tests |
-| `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
-| `closure.rs` | ~70 | Closure struct |
-| `fiber.rs` | ~540 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
-| `fiberheap/` | ~890 | FiberHeap (SlabPool/BumpArena + destructor tracking + scope marks + scope stats + ActiveAlloc + shared alloc ownership/routing + outbox), thread-local routing, `needs_drop`, `region_enter`/`region_exit` |
-| `shared_alloc.rs` | ~180 | SharedAllocator (bump + destructor tracking), teardown, Drop impl |
-| `error.rs` | ~150 | error_val(), error_val_extra(), and format_error() helpers |
-| `ffi.rs` | ~22 | LibHandle |
-| `arena.rs` | ~318 | Heap arena: mark/release, alloc, deref, ArenaGuard, ArenaMark |
-| `heap.rs` | ~512 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, LSet, LSetMut (re-exports arena functions) |
-| `send.rs` | ~150 | SendValue for thread transfer |
-| `display.rs` | ~100 | Display formatting |
-| `intern.rs` | ~100 | Symbol interning |

@@ -14,7 +14,8 @@ fn get_elle_binary() -> &'static str {
 #[test]
 fn meta_origin_returns_file_and_line_for_defn() {
     // Write a small script that defines a function and prints meta/origin on it.
-    let path = std::env::temp_dir().join("elle_meta_origin_test.lisp");
+    let dir = crate::common::ScratchDir::new("meta-origin");
+    let path = dir.join("origin.lisp");
     std::fs::write(&path, "(defn foo () 42)\n(print (meta/origin foo))\n")
         .expect("failed to write temp file");
 
@@ -24,9 +25,6 @@ fn meta_origin_returns_file_and_line_for_defn() {
         .arg(&path_str)
         .output()
         .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", get_elle_binary()));
-
-    // Clean up regardless of outcome.
-    let _ = std::fs::remove_file(&path);
 
     let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
     let stderr = String::from_utf8_lossy(&output.stderr);

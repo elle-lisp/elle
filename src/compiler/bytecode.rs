@@ -2,342 +2,11 @@ use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
 
-/// Per-field escape analysis info for cross-module projection.
-#[derive(Debug, Clone, Copy)]
-pub struct FieldEscapeInfo {
-    /// True when the field's closure is rotation-safe AND param-safe.
-    pub rotation_safe: bool,
-    /// True when the field's closure is outward-safe (no external
-    /// heap stores, even if it returns heap values).
-    pub outward_safe: bool,
-}
+mod disasm;
+pub use disasm::*;
 
-/// Bytecode instruction set
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Instruction {
-    /// Load constant from constant pool
-    LoadConst,
-
-    /// Load local variable (index u16)
-    LoadLocal,
-
-    /// Store local variable (index u16)
-    StoreLocal,
-
-    /// Load from closure environment
-    LoadUpvalue,
-
-    /// Load from closure environment WITHOUT unwrapping cells (for capture forwarding)
-    LoadUpvalueRaw,
-
-    /// Store to closure environment
-    StoreUpvalue,
-
-    /// Pop value from stack
-    Pop,
-
-    /// Duplicate top of stack
-    Dup,
-
-    /// Duplicate value at offset from top of stack (offset u8)
-    /// offset 0 = top, offset 1 = second from top, etc.
-    DupN,
-
-    /// Function call (arg_count)
-    Call,
-
-    /// Tail call (arg_count)
-    TailCall,
-
-    /// Return from function
-    Return,
-
-    /// Jump unconditionally (offset i32)
-    Jump,
-
-    /// Jump if false (offset i32)
-    JumpIfFalse,
-
-    /// Jump if true (offset i32)
-    JumpIfTrue,
-
-    /// Create closure (const_idx, num_upvalues)
-    MakeClosure,
-
-    /// Pair cell construction
-    Pair,
-
-    /// First operation
-    First,
-
-    /// Rest operation
-    Rest,
-
-    /// Array construction (size)
-    MakeArrayMut,
-
-    /// Array ref (index)
-    ArrayMutRef,
-
-    /// Array set (index)
-    ArrayMutSet,
-
-    /// Specialized arithmetic operations
-    AddInt,
-    SubInt,
-    MulInt,
-    DivInt,
-
-    /// Generic arithmetic (handles floats)
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-
-    /// Bitwise operations
-    BitAnd,
-    BitOr,
-    BitXor,
-    BitNot,
-    Shl,
-    Shr,
-
-    /// Comparisons
-    Eq,
-    Lt,
-    Gt,
-    Le,
-    Ge,
-
-    /// Type checks
-    IsNil,
-    IsEmptyList,
-    IsPair,
-    IsNumber,
-    IsSymbol,
-
-    /// Not operation
-    Not,
-
-    /// Nil constant
-    Nil,
-
-    /// Boolean constants
-    True,
-    False,
-
-    /// Wrap value in a capture cell for shared mutable access (Phase 4)
-    /// Pops value from stack, wraps it in a capture cell, pushes the cell
-    MakeCapture,
-
-    /// Unwrap a capture cell to get its value
-    UnwrapCapture,
-
-    /// Update a capture cell's value
-    UpdateCapture,
-
-    /// Emit a signal (suspends execution). Operand: u16 signal bits.
-    /// `(emit :yield val)` emits SIG_YIELD; `(emit :io val)` emits SIG_IO.
-    Emit,
-
-    /// Empty list constant
-    EmptyList,
-
-    /// First for destructuring: signals error if not a cons cell.
-    FirstDestructure,
-
-    /// Rest for destructuring: signals error if not a cons cell.
-    RestDestructure,
-
-    /// Array ref for destructuring: signals error if not an array or out of bounds.
-    /// Operand: u16 index (immediate)
-    ArrayMutRefDestructure,
-    /// Array slice from index (for & rest destructuring): returns sub-array from index to end
-    /// Operand: u16 index (immediate)
-    ArrayMutSliceFrom,
-
-    /// Type check: is value an array (immutable)?
-    IsArray,
-    /// Type check: is value an @array (mutable)?
-    IsArrayMut,
-    /// Type check: is value a struct?
-    IsStruct,
-    /// Type check: is value a @struct?
-    IsStructMut,
-    /// Get array length as integer
-    ArrayMutLen,
-    /// Table/struct get with silent nil (for destructuring): returns nil if key missing or wrong type.
-    /// Operand: u16 constant pool index (keyword key)
-    StructGetOrNil,
-
-    /// Table/struct get for destructuring: signals error if key missing or wrong type.
-    /// Operand: u16 constant pool index (keyword key)
-    StructGetDestructure,
-
-    /// First with silent nil (for parameter destructuring): returns nil if not a cons cell.
-    /// Used by &opt/(required) parameter destructuring where absent values → nil.
-    FirstOrNil,
-    /// Rest with silent empty-list (for parameter destructuring): returns EMPTY_LIST if not a pair.
-    /// Used by &opt/(required) parameter destructuring.
-    RestOrNil,
-    /// Array ref with silent nil (for parameter destructuring): returns nil if out of bounds.
-    /// Operand: u16 index (immediate)
-    ArrayMutRefOrNil,
-
-    /// Runtime eval: pop expr and env from stack, compile+execute, push result.
-    Eval,
-
-    /// Extend array with elements of another indexed type (for splice).
-    /// Pops source, pops array, pushes extended array.
-    ArrayMutExtend,
-    /// Push a single value onto an array (for splice).
-    /// Pops value, pops array, pushes array with value appended.
-    ArrayMutPush,
-    /// Call function with elements of an array as arguments (for splice).
-    /// Pops args array, pops function, calls function with array elements.
-    CallArrayMut,
-    /// Tail call with elements of an array as arguments (for splice).
-    /// Pops args array, pops function, tail calls with array elements.
-    TailCallArrayMut,
-
-    /// Enter an allocation region (scope boundary for allocator).
-    /// No operands. Pushes a scope mark on the current FiberHeap.
-    /// Effective for all fibers including root (after issue-525).
-    RegionEnter,
-
-    /// Exit an allocation region (scope boundary for allocator).
-    /// No operands. Pops scope mark and releases scoped objects.
-    /// Effective for all fibers including root (after issue-525).
-    RegionExit,
-
-    /// Exit a call-scoped allocation region.
-    /// No operands. Pops two scope marks (barrier + region start),
-    /// frees only the range between them (arg temporaries).
-    RegionExitCall,
-
-    /// Rotate loop scope marks (soft — no slot deallocation).
-    /// Resets alloc_count, runs dtors, truncates tracking vecs.
-    /// Used when loop params may chain across iterations.
-    RegionRotate,
-
-    /// Rotate loop scope marks (hard — with slot deallocation).
-    /// Same as RegionRotate but returns slab slots to the free list.
-    /// Used when no loop param references previous iteration's allocs.
-    RegionRotateDealloc,
-    /// Rotate loop scope marks (refcount-aware — skip pinned values).
-    RegionRotateRefcounted,
-    /// Pop scope mark and release refcount-0 objects only.
-    RegionExitRefcounted,
-
-    /// Push a parameter frame onto the fiber's param_frames stack.
-    /// Operand: u8 count (number of (param, value) pairs on the stack).
-    /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
-    /// Validates each param is a Parameter; signals error if not.
-    PushParamFrame,
-
-    /// Pop the top parameter frame from the fiber's param_frames stack.
-    /// No operands, no stack effect.
-    PopParamFrame,
-
-    /// Type check: is value an immutable set?
-    IsSet,
-    /// Type check: is value a mutable set?
-    IsSetMut,
-
-    /// Check that a closure's signal satisfies a bound.
-    /// Operand: u32 allowed_bits.
-    /// Pops the value from the stack. If it's a closure whose
-    /// `signal.bits & !allowed_bits != 0`, signals `:error`.
-    /// Non-closures pass silently.
-    CheckSignalBound,
-
-    /// Struct rest for destructuring: collect all keys from src NOT in excluded keys.
-    /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
-    /// Source struct is popped from the stack; result pushed.
-    StructRest,
-
-    /// Enter outbox routing context. No operands.
-    /// Toggles allocation routing to the outbox (for yield-bound values).
-    OutboxEnter,
-
-    /// Exit outbox routing context. No operands.
-    /// Reverts allocation routing to the private heap.
-    OutboxExit,
-
-    /// Push an explicit rotation frame. No operands.
-    /// Captures the current heap state so `FlipSwap` can rotate relative
-    /// to it and `FlipExit` can tear down this frame's swap pool without
-    /// touching the caller's. Emitted at function entry when the function
-    /// wants explicit rotation (e.g., a self-tail-recursive loop).
-    FlipEnter,
-
-    /// Rotate generations using the top flip frame. No operands.
-    /// Equivalent to the trampoline's implicit `rotate_pools` but keyed
-    /// off the flip stack. Emitted before a self-tail-call.
-    FlipSwap,
-
-    /// Pop the top flip frame and tear down its trailing swap pool. No
-    /// operands. Emitted before every Return in a flip-wrapped function.
-    FlipExit,
-
-    /// Convert int → float. Pops value, pushes float. Identity on floats.
-    IntToFloat,
-    /// Convert float → int (truncation). Pops value, pushes int. Identity on ints.
-    FloatToInt,
-
-    // === New intrinsic opcodes ===
-    /// Not-equal comparison
-    Ne,
-    /// Bitwise complement
-    BitNotIntr,
-    /// Type check: is value a boolean?
-    IsBool,
-    /// Type check: is value an integer?
-    IsInt,
-    /// Type check: is value a float?
-    IsFloat,
-    /// Type check: is value a string (immutable or mutable)?
-    IsString,
-    /// Type check: is value a keyword?
-    IsKeyword,
-    /// Type check: is value bytes (immutable or mutable)?
-    IsBytes,
-    /// Type check: is value a box?
-    IsBox,
-    /// Type check: is value a closure?
-    IsClosure,
-    /// Type check: is value a fiber?
-    IsFiber,
-    /// Get type keyword for a value
-    TypeOf,
-    /// Polymorphic length
-    Length,
-    /// Polymorphic get (pops key, pops collection, pushes result)
-    IntrGet,
-    /// Polymorphic put (pops value, pops key, pops collection, pushes result)
-    IntrPut,
-    /// Polymorphic del (pops key, pops collection, pushes result)
-    IntrDel,
-    /// Polymorphic has? (pops key, pops collection, pushes bool)
-    IntrHas,
-    /// Polymorphic push (pops value, pops collection, pushes result)
-    IntrPush,
-    /// @array pop (pops @array, pushes popped value)
-    IntrPop,
-    /// Mutable → immutable copy
-    IntrFreeze,
-    /// Immutable → mutable copy
-    IntrThaw,
-    /// Bitwise tag+payload equality (pops b, pops a, pushes bool)
-    Identical,
-
-    /// Arity-checked function call (arg_count). Compiler verified arity.
-    CallChecked,
-    /// Arity-checked tail call (arg_count). Compiler verified arity.
-    TailCallChecked,
-}
+mod instruction;
+pub use instruction::*;
 
 /// Compiled bytecode with constants
 #[derive(Debug, Clone)]
@@ -361,12 +30,33 @@ pub struct Bytecode {
     /// compilation. When an importing file sees `module:field`, the analyzer
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
-    /// Escape projection: maps keyword field names to escape analysis
-    /// properties. Populated during lowering for module-pattern files
-    /// that return a struct of closures. When an importing file sees
-    /// `module:field` as a callee, the lowerer uses this projection to
-    /// determine safety properties.
-    pub escape_projection: Option<std::collections::HashMap<String, FieldEscapeInfo>>,
+    /// Blueprints for this code object's `MakeClosure` instructions. Each
+    /// `MakeClosure` pushes its nested-lambda template here and emits the index;
+    /// the VM/JIT materialize a fresh region-allocated `HeapObject::ClosureTemplate`
+    /// per execution (a heap literal is an ordinary, reclaimable allocation).
+    /// Threaded into the executing `Code` so each template is reclaimed by region
+    /// RC, never pinned for the process lifetime.
+    pub child_protos: Vec<std::rc::Rc<crate::value::closure::ClosureTemplate>>,
+    /// The static region slots this (top-level / entry) function's allocations
+    /// SHARE after a builder-idiom merge (docs/impl/region/merging.md § Merging),
+    /// carried from the entry `LirFunction.merged_slots` so the executing `Code`
+    /// can mint-or-reuse them. The per-lambda equivalent rides
+    /// `ClosureTemplate.merged_slots`; this is the entry-function path
+    /// (`Bytecode → Code`), which would otherwise read empty. Empty unless a merge
+    /// fired (a builder idiom seeded by a nested `%pair` literal), so inert when
+    /// no merge exists.
+    pub merged_slots: std::rc::Rc<rustc_hash::FxHashSet<u32>>,
+    /// The local slots this (top-level / entry) function's value-routed releases
+    /// read, carried from the entry `LirFunction.frame_release_slots` so the
+    /// executing `Code` can walk them at an error exit
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). The per-lambda equivalent rides
+    /// `ClosureTemplate.frame_release_slots`; this is the entry-function path
+    /// (`Bytecode → Code`), which would otherwise read empty.
+    pub frame_release_slots: std::rc::Rc<Vec<u16>>,
+    /// The `DecrefRegion` half of the same table, carried the same way — the
+    /// static region slots this entry function's slot-routed releases name.
+    pub frame_release_regions: std::rc::Rc<Vec<u32>>,
 }
 
 impl Bytecode {
@@ -378,7 +68,10 @@ impl Bytecode {
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
-            escape_projection: None,
+            child_protos: Vec::new(),
+            merged_slots: crate::value::code::empty_merged_slots(),
+            frame_release_slots: crate::value::code::empty_frame_release_slots(),
+            frame_release_regions: crate::value::code::empty_frame_release_regions(),
         }
     }
 
@@ -441,6 +134,16 @@ impl Bytecode {
         self.instructions.push((value & 0xff) as u8);
     }
 
+    /// Emit a u32 (big-endian). Used for region-id operands, which are
+    /// minted fresh per allocation-site and thus need the full 32-bit
+    /// space (see docs/regions/semantics.md — every value its own region).
+    pub fn emit_u32(&mut self, value: u32) {
+        self.instructions.push((value >> 24) as u8);
+        self.instructions.push((value >> 16) as u8);
+        self.instructions.push((value >> 8) as u8);
+        self.instructions.push((value & 0xff) as u8);
+    }
+
     /// Emit an i16 (big-endian)
     pub fn emit_i16(&mut self, value: i16) {
         self.emit_u16(value as u16);
@@ -483,146 +186,6 @@ impl Default for Bytecode {
 
 // ── Debug formatting ────────────────────────────────────────────────
 
-/// Disassemble bytecode and return one string per instruction
-pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut i = 0;
-
-    while i < instructions.len() {
-        let byte = instructions[i];
-        let instr: Instruction = unsafe { std::mem::transmute(byte) };
-        let mut line = format!("[{}] {:?}", i, instr);
-        i += 1;
-
-        match instr {
-            Instruction::LoadConst if i + 1 < instructions.len() => {
-                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (const_idx={})", idx));
-                i += 2;
-            }
-            Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue
-                if i + 3 < instructions.len() =>
-            {
-                let offset = i32::from_be_bytes([
-                    instructions[i],
-                    instructions[i + 1],
-                    instructions[i + 2],
-                    instructions[i + 3],
-                ]);
-                let target = (i + 4) as i64 + offset as i64;
-                line.push_str(&format!(" (offset={}, target={})", offset, target));
-                i += 4;
-            }
-            Instruction::LoadLocal | Instruction::StoreLocal if i + 1 < instructions.len() => {
-                let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (index={})", index));
-                i += 2;
-            }
-            Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue
-                if i + 2 < instructions.len() =>
-            {
-                let depth = instructions[i];
-                let index = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
-                line.push_str(&format!(" (depth={}, index={})", depth, index));
-                i += 3;
-            }
-            Instruction::Call
-            | Instruction::TailCall
-            | Instruction::CallChecked
-            | Instruction::TailCallChecked
-                if i + 1 < instructions.len() =>
-            {
-                let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (args={})", arg_count));
-                i += 2;
-            }
-            Instruction::DupN if i < instructions.len() => {
-                let offset = instructions[i];
-                line.push_str(&format!(" (offset={})", offset));
-                i += 1;
-            }
-            Instruction::MakeClosure if i + 3 < instructions.len() => {
-                let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                let num_captures =
-                    ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
-                line.push_str(&format!(
-                    " (const_idx={}, num_captures={})",
-                    const_idx, num_captures
-                ));
-                i += 4;
-            }
-            Instruction::ArrayMutRefDestructure
-            | Instruction::ArrayMutSliceFrom
-            | Instruction::ArrayMutRefOrNil
-                if i + 1 < instructions.len() =>
-            {
-                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (index={})", idx));
-                i += 2;
-            }
-            Instruction::StructGetOrNil | Instruction::StructGetDestructure
-                if i + 1 < instructions.len() =>
-            {
-                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (const_idx={})", idx));
-                i += 2;
-            }
-            Instruction::StructRest if i + 1 < instructions.len() => {
-                let count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                i += 2;
-                let mut keys = Vec::new();
-                for _ in 0..count {
-                    if i + 1 < instructions.len() {
-                        let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                        i += 2;
-                        keys.push(format!("const[{}]", idx));
-                    }
-                }
-                line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
-            }
-            Instruction::Eval => {
-                // No operands — pops 2 from stack, pushes 1
-            }
-            Instruction::ArrayMutExtend | Instruction::ArrayMutPush => {
-                // No operands
-            }
-            Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
-                // No operands (arg count is dynamic, determined by array length)
-            }
-            Instruction::RegionEnter
-            | Instruction::RegionExit
-            | Instruction::RegionExitCall
-            | Instruction::RegionRotate
-            | Instruction::RegionRotateDealloc
-            | Instruction::RegionRotateRefcounted
-            | Instruction::RegionExitRefcounted
-            | Instruction::OutboxEnter
-            | Instruction::OutboxExit
-            | Instruction::FlipEnter
-            | Instruction::FlipSwap
-            | Instruction::FlipExit => {
-                // No operands
-            }
-            Instruction::IntToFloat | Instruction::FloatToInt => {
-                // No operands — pop one, push one
-            }
-            Instruction::PushParamFrame if i < instructions.len() => {
-                let count = instructions[i];
-                line.push_str(&format!(" (count={})", count));
-                i += 1;
-            }
-            Instruction::PopParamFrame => {
-                // No operands
-            }
-            _ => {}
-        }
-
-        lines.push(line);
-    }
-
-    lines
-}
-
 /// Disassemble bytecode with proper instruction names and operands
 pub fn disassemble(instructions: &[u8]) -> String {
     disassemble_lines(instructions)
@@ -645,99 +208,31 @@ pub fn format_bytecode_with_constants(instructions: &[u8], constants: &[crate::V
     output
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bytecode_emission() {
-        let mut bc = Bytecode::new();
-        bc.emit(Instruction::LoadConst);
-        bc.emit_u16(0);
-        bc.emit(Instruction::Return);
-        assert_eq!(bc.instructions.len(), 4);
+/// Pretty print a whole compiled unit: the entry bytecode plus every nested
+/// lambda's template (`child_protos`), recursively, each labeled by its
+/// `MakeClosure` const_idx path so a dump can be matched to the instruction
+/// that materializes it.
+pub fn format_bytecode_with_protos(bytecode: &Bytecode) -> String {
+    let mut output = format_bytecode_with_constants(&bytecode.instructions, &bytecode.constants);
+    for (i, proto) in bytecode.child_protos.iter().enumerate() {
+        format_proto(&mut output, &format!("{}", i), proto);
     }
+    output
+}
 
-    #[test]
-    fn test_constant_deduplication() {
-        let mut bc = Bytecode::new();
-        let idx1 = bc.add_constant(Value::int(42));
-        let idx2 = bc.add_constant(Value::int(42));
-        assert_eq!(idx1, idx2);
-        assert_eq!(bc.constants.len(), 1);
-    }
-
-    #[test]
-    fn test_instruction_roundtrip() {
-        // Test that all arithmetic/bitwise instructions can be emitted and decoded
-        let instructions = [
-            Instruction::Add,
-            Instruction::Sub,
-            Instruction::Mul,
-            Instruction::Div,
-            Instruction::Rem,
-            Instruction::BitAnd,
-            Instruction::BitOr,
-            Instruction::BitXor,
-            Instruction::BitNot,
-            Instruction::Shl,
-            Instruction::Shr,
-        ];
-
-        for instr in instructions {
-            let mut bc = Bytecode::new();
-            bc.emit(instr);
-            let byte = bc.instructions[0];
-            let decoded: Instruction = unsafe { std::mem::transmute(byte) };
-            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
-        }
-    }
-
-    #[test]
-    fn test_region_instruction_roundtrip() {
-        for instr in [Instruction::RegionEnter, Instruction::RegionExit] {
-            let mut bc = Bytecode::new();
-            bc.emit(instr);
-            assert_eq!(
-                bc.instructions.len(),
-                1,
-                "Region instruction should be 1 byte"
-            );
-            let decoded: Instruction = unsafe { std::mem::transmute(bc.instructions[0]) };
-            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
-        }
-    }
-
-    #[test]
-    fn test_bytecode_variants_distinct() {
-        // Catch accidental duplication of variants (they all get auto-
-        // numbered by the compiler, so any duplicate would be a compile
-        // error anyway — but this test additionally guards against a
-        // refactor that collapses two variants into one). All repr values
-        // must be distinct; pick a few representative ones and spot-check.
-        assert_ne!(
-            Instruction::StructGetDestructure as u8,
-            Instruction::StructGetOrNil as u8,
-            "StructGetDestructure must have a distinct byte value from StructGetOrNil"
-        );
-        assert_ne!(
-            Instruction::FirstDestructure as u8,
-            Instruction::RestDestructure as u8,
-        );
-        assert_ne!(
-            Instruction::OutboxEnter as u8,
-            Instruction::OutboxExit as u8,
-        );
-    }
-
-    #[test]
-    fn test_region_disassembly() {
-        let mut bc = Bytecode::new();
-        bc.emit(Instruction::RegionEnter);
-        bc.emit(Instruction::RegionExit);
-        let lines = disassemble_lines(&bc.instructions);
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("RegionEnter"));
-        assert!(lines[1].contains("RegionExit"));
+fn format_proto(output: &mut String, path: &str, proto: &crate::value::closure::ClosureTemplate) {
+    output.push_str(&format!(
+        "\n── proto [{}] {} (captures={}, params={}) ──\n",
+        path,
+        proto.name.as_deref().unwrap_or("<anon>"),
+        proto.num_captures,
+        proto.num_params,
+    ));
+    output.push_str(&disassemble(&proto.bytecode));
+    for (i, child) in proto.child_protos.iter().enumerate() {
+        format_proto(output, &format!("{path}.{i}"), child);
     }
 }
+
+#[cfg(test)]
+mod tests;

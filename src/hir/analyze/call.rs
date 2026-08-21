@@ -98,7 +98,6 @@ impl<'a> Analyzer<'a> {
         // the target file's signal projection and stash it for the binding
         // analysis to pick up via `last_import_projection`.
         self.last_import_projection = None;
-        self.last_import_escape_projection = None;
         if let HirKind::Call {
             func: inner_func,
             args: inner_args,
@@ -109,10 +108,13 @@ impl<'a> Analyzer<'a> {
                 if let Some(first) = inner_args.first() {
                     if let HirKind::String(spec) = &first.expr.kind {
                         if let Some(resolved) = crate::primitives::modules::resolve_import(spec) {
-                            self.last_import_projection =
-                                crate::pipeline::get_or_compile_projection(&resolved);
-                            self.last_import_escape_projection =
-                                crate::pipeline::get_or_compile_escape_projection(&resolved);
+                            // Resolve via the owning instance's compile context
+                            // (set by the file frontend). Absent it — pure
+                            // analysis — the import keeps the conservative
+                            // `Polymorphic` projection.
+                            self.last_import_projection = self.import_ctx.and_then(|ptr| unsafe {
+                                (*ptr).get_or_compile_projection(&resolved)
+                            });
                         }
                     }
                 }
@@ -234,6 +236,28 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The signal of a genuine primitive/global binding, looked up by name.
+    ///
+    /// `primitive_signals` is keyed by `SymbolId`, but its keys come from the
+    /// `CompileCtx`'s throwaway setup `SymbolTable`, NOT the table this analyzer
+    /// resolves user code against. The two agree only on the primitive prefix
+    /// they both intern first; any later symbol (core/prelude/user) can land on
+    /// a colliding id. So a by-name lookup is sound ONLY for a binding that is
+    /// actually a primitive — `bind_primitives` sets `is_primitive` and always
+    /// seeds `signal_env` for those, so this by-name path never even fires for a
+    /// real primitive (that hits `signal_env` first). Gating on `is_primitive`
+    /// therefore keeps a same-named — or id-aliased — *user* binding (e.g. a
+    /// `var` shadowing `length`, or one reassigned via `assign`, which clears its
+    /// `signal_env` entry) from inheriting an unrelated global's signal instead
+    /// of the sound conservative `unknown`.
+    fn primitive_signal_of(&self, binding: Binding) -> Option<Signal> {
+        let b = self.arena.get(binding);
+        if !b.is_primitive {
+            return None;
+        }
+        self.primitive_signals.get(&b.name).copied()
+    }
+
     /// Get the raw callee signal without resolving polymorphic signals.
     pub(crate) fn get_raw_callee_signal(&self, func: &Hir) -> Signal {
         match &func.kind {
@@ -243,11 +267,7 @@ impl<'a> Analyzer<'a> {
             HirKind::Var(binding) => {
                 if let Some(signal) = self.signal_env.get(binding) {
                     *signal
-                } else if let Some(signal) = self
-                    .primitive_signals
-                    .get(&self.arena.get(*binding).name)
-                    .cloned()
-                {
+                } else if let Some(signal) = self.primitive_signal_of(*binding) {
                     signal
                 } else if matches!(self.arena.get(*binding).scope, BindingScope::Parameter)
                     && self.current_lambda_params.contains(binding)
@@ -354,11 +374,7 @@ impl<'a> Analyzer<'a> {
                 .signal_env
                 .get(binding)
                 .cloned()
-                .or_else(|| {
-                    self.primitive_signals
-                        .get(&self.arena.get(*binding).name)
-                        .cloned()
-                })
+                .or_else(|| self.primitive_signal_of(*binding))
                 .unwrap_or(Signal::unknown()),
             // Opaque expression as argument — effects are indeterminate.
             _ => Signal::unknown(),

@@ -6,74 +6,22 @@ use crate::io::completion;
 use crate::io::pending::PendingOp;
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
+    ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
 };
-use crate::io::threadpool::{PoolCompletion, PoolOp, StdinOpKind, StdinThread, ThreadPoolBackend};
+use crate::io::threadpool::{
+    Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
+};
 use crate::io::types::{FdState, PortKey};
-use crate::io::Completion;
-use crate::port::{Direction, Encoding, Port, PortKind};
-use crate::value::{error_val, Value};
+use crate::io::{Completion, SubmissionId};
+use crate::port::{Encoding, Port, PortKind};
+use crate::value::Value;
 
 use std::cell::RefCell;
 
-/// Convert a `StdinCompletion` into a `Completion`, releasing the buffer.
-fn stdin_to_completion(
-    sc: crate::io::threadpool::StdinCompletion,
-    pending: &mut HashMap<u64, PendingOp>,
-    buffer_pool: &mut BufferPool,
-) -> Option<Completion> {
-    let pending_op = pending.remove(&sc.id)?;
-    buffer_pool.release(pending_op.buffer_handle());
-    Some(match sc.result {
-        Ok(data) if data.is_empty() => Completion {
-            id: sc.id,
-            result: Ok(Value::NIL),
-        },
-        Ok(data) => Completion {
-            id: sc.id,
-            result: Ok(Value::string(
-                String::from_utf8_lossy(&data)
-                    .trim_end_matches('\n')
-                    .trim_end_matches('\r'),
-            )),
-        },
-        Err(e) => Completion {
-            id: sc.id,
-            result: Err(error_val("io-error", e)),
-        },
-    })
-}
-
-/// Convert a `PoolCompletion` into a `Completion`, handling Connect fd stash.
-fn pool_to_completion(
-    pc: PoolCompletion,
-    pending: &mut HashMap<u64, PendingOp>,
-    fd_states: &mut HashMap<PortKey, FdState>,
-    buffer_pool: &mut BufferPool,
-) -> Option<Completion> {
-    let mut pending_op = pending.remove(&pc.id)?;
-    if let PendingOp::Connect {
-        ref mut connect_fd, ..
-    } = pending_op
-    {
-        if pc.result_code > 0 {
-            *connect_fd = Some(pc.result_code);
-        }
-    }
-    let bh = pending_op.buffer_handle();
-    Some(completion::process_raw_completion(
-        pc.id,
-        pc.result_code,
-        pc.data,
-        &pending_op,
-        fd_states,
-        buffer_pool,
-        bh,
-    ))
-}
+use convert::cook_raw;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -82,16 +30,45 @@ pub struct AsyncBackend {
 }
 
 struct AsyncBackendInner {
+    /// The owning VM's Unicode generation, captured at backend construction.
+    /// Grapheme-counted text reads (`read-exact` on a text port) split the
+    /// byte stream at cluster boundaries with it, on and off the VM thread.
+    unicode_generation: crate::segment::Generation,
     fd_states: HashMap<PortKey, FdState>,
-    pending: HashMap<u64, PendingOp>,
+    pending: HashMap<SubmissionId, PendingOp>,
+    /// Submissions whose result no fiber will receive. The `pending` entry
+    /// stays, so the worker's completion is still matched, counted and
+    /// released; only the cooked value is dropped. Dropping the entry instead
+    /// would strand the submission — the worker it runs on and the descriptor
+    /// it names would never come back. See src/io/AGENTS.md
+    /// § "I/O Cancellation".
+    cancelled: std::collections::HashSet<SubmissionId>,
+    /// Descriptors kept open past their port's close because a submitted
+    /// operation still names them. A worker resolves its fd when it runs, so a
+    /// number handed back to the OS while an operation holds it can be given
+    /// to a new socket that the stale operation then reads.
+    retired: HashMap<RawFd, std::os::unix::io::OwnedFd>,
     completions: VecDeque<Completion>,
     next_id: u64,
+    // `platform` is declared before `buffer_pool` so it drops first: tearing
+    // the io_uring ring down (closing its fd, which makes the kernel cancel and
+    // finish in-flight ops) before the pool frees is a second line of defence
+    // behind `quiesce_pending`, so a kernel write can never land in a freed
+    // pool slot. See `Drop for AsyncBackend` and docs/io.md "Backend teardown".
+    platform: PlatformBackend,
     buffer_pool: BufferPool,
     stdin_thread: Option<StdinThread>,
-    platform: PlatformBackend,
-    /// Thread pool for network operations. Always available regardless
-    /// of whether io_uring is the primary platform backend.
-    network_pool: ThreadPoolBackend,
+    /// The one completion channel every background worker feeds — the thread
+    /// pool (everything that can't lift to io_uring: getaddrinfo, `Task`, and
+    /// all I/O on the pool platform) and the stdin worker. The scheduler's
+    /// blocking wait reads exactly this one source.
+    hub: CompletionHub,
+    /// The requesting instance's heap, captured from `submit`'s `origin_heap`.
+    /// A backend serves exactly one instance (it is created per scheduler), so
+    /// this is constant once set; every completion the scheduler-thread harvest
+    /// builds is born on it (`crate::io::completion_heap_ptr`). Set on the first
+    /// `submit` that carries a heap.
+    origin_heap: *mut crate::value::fiberheap::FiberHeap,
 }
 
 // --- Platform backend dispatch ---
@@ -99,12 +76,24 @@ struct AsyncBackendInner {
 pub(crate) enum PlatformBackend {
     #[cfg(target_os = "linux")]
     Uring(Box<io_uring::IoUring>),
-    ThreadPool(ThreadPoolBackend),
+    /// The pool platform (macOS, or Linux `--no-uring`). There is no separate
+    /// pool object — all pool work runs through the shared `CompletionHub`; this
+    /// variant only marks which `wait()` path the scheduler takes.
+    ThreadPool,
 }
 
 /// High bit tag for timeout CQE user_data.
 #[cfg(target_os = "linux")]
 pub(crate) const TIMEOUT_USER_DATA_TAG: u64 = 1 << 63;
+
+/// Sentinel `user_data` for the standing eventfd `POLL_ADD` that bridges hub
+/// completions into the io_uring wait. Distinct by construction from every
+/// minted `SubmissionId` (those count up from 1; `mint_id` asserts it never
+/// reaches this) and from `TIMEOUT_USER_DATA_TAG` (the high bit — this value's
+/// high bit is clear, so it is never mistaken for a timeout CQE). `drain_cqes`
+/// matches it before the timeout tag and the `pending` lookup.
+#[cfg(target_os = "linux")]
+pub(crate) const EVENTFD_USER_DATA: u64 = u64::MAX >> 1;
 
 impl std::fmt::Debug for AsyncBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -117,1532 +106,170 @@ impl AsyncBackend {
     ///
     /// On Linux with the `io-uring` feature, attempts io_uring first.
     /// Falls back to thread-pool on failure or on non-Linux platforms.
+    /// Uses the process-default Unicode generation; a backend serving a VM
+    /// with an explicit generation is built via [`Self::new_with_unicode`].
     pub fn new() -> Result<Self, String> {
-        let platform = Self::create_platform_backend();
+        Self::new_with_unicode(crate::config::get().unicode_generation())
+    }
+
+    /// Create a new async backend serving a VM with the given Unicode
+    /// generation.
+    pub fn new_with_unicode(gen: crate::segment::Generation) -> Result<Self, String> {
+        let mut platform = Self::create_platform_backend();
+        let mut hub = CompletionHub::new();
+        // On the uring platform, wire the eventfd bridge: a hub worker raises
+        // the eventfd after publishing, and a standing POLL_ADD on the ring
+        // turns that edge into a CQE so the scheduler's single io_uring wait
+        // returns. No-op on the pool-only platforms (no ring, no eventfd).
+        Self::wire_eventfd_bridge(&mut platform, &mut hub)?;
         Ok(AsyncBackend {
             inner: RefCell::new(AsyncBackendInner {
+                unicode_generation: gen,
                 fd_states: HashMap::new(),
                 pending: HashMap::new(),
+                cancelled: std::collections::HashSet::new(),
+                retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
                 buffer_pool: BufferPool::new(),
                 stdin_thread: None,
                 platform,
-                network_pool: ThreadPoolBackend::new(),
+                hub,
+                origin_heap: std::ptr::null_mut(),
             }),
         })
+    }
+
+    /// A backend on the THREAD-POOL platform, whatever this host would pick.
+    ///
+    /// The pool is what every non-Linux build runs (`create_platform_backend`
+    /// has no other arm there) and what a Linux host runs when io_uring is
+    /// unavailable or `--no-uring` is set. Its wait path differs from the ring's,
+    /// so the properties that hold on one are not evidence about the other. A
+    /// test that built the host's default backend would exercise the ring on a
+    /// Linux dev box and the pool on CI — silently checking different code on
+    /// each, which is how a pool-only defect stays invisible. This constructor
+    /// makes the platform an explicit choice of the test rather than a property
+    /// of the box it runs on.
+    /// No eventfd bridge is wired: the pool platform has no ring to bridge into,
+    /// so its hub channel is the sole waitable — the same shape a non-Linux build
+    /// comes up with.
+    #[cfg(test)]
+    pub(crate) fn new_thread_pool() -> Result<Self, String> {
+        Ok(AsyncBackend {
+            inner: RefCell::new(AsyncBackendInner {
+                unicode_generation: crate::config::get().unicode_generation(),
+                fd_states: HashMap::new(),
+                pending: HashMap::new(),
+                cancelled: std::collections::HashSet::new(),
+                retired: HashMap::new(),
+                completions: VecDeque::new(),
+                next_id: 1,
+                buffer_pool: BufferPool::new(),
+                stdin_thread: None,
+                platform: PlatformBackend::ThreadPool,
+                hub: CompletionHub::new(),
+                origin_heap: std::ptr::null_mut(),
+            }),
+        })
+    }
+
+    /// Create the bridge eventfd, hand it to the hub (which owns and closes it),
+    /// and arm the standing `POLL_ADD` on the ring. Only the uring platform has
+    /// a ring to bridge into; every other platform leaves the hub eventfd-less
+    /// (its channel is itself the sole waitable). A failure here propagates so a
+    /// backend can never come up with a half-wired, deaf bridge.
+    #[cfg(target_os = "linux")]
+    fn wire_eventfd_bridge(
+        platform: &mut PlatformBackend,
+        hub: &mut CompletionHub,
+    ) -> Result<(), String> {
+        if let PlatformBackend::Uring(ring) = platform {
+            let efd = crate::io::eventfd::create()
+                .map_err(|e| format!("io backend: eventfd bridge: {}", e))?;
+            // Store before arming: an arm failure then drops the hub on the
+            // error path, closing the fd we just created.
+            hub.set_eventfd(efd);
+            crate::io::uring::arm_eventfd_poll(ring, efd)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn wire_eventfd_bridge(
+        _platform: &mut PlatformBackend,
+        _hub: &mut CompletionHub,
+    ) -> Result<(), String> {
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
         if crate::config::get().no_uring {
-            return PlatformBackend::ThreadPool(ThreadPoolBackend::new());
+            return PlatformBackend::ThreadPool;
         }
         match io_uring::IoUring::new(256) {
             Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
-            Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
+            Err(_) => PlatformBackend::ThreadPool,
         }
     }
 
     #[cfg(not(target_os = "linux"))]
     fn create_platform_backend() -> PlatformBackend {
-        PlatformBackend::ThreadPool(ThreadPoolBackend::new())
+        PlatformBackend::ThreadPool
     }
 
-    /// Submit an I/O request. Returns a submission ID.
-    pub(crate) fn submit(&self, request: &IoRequest) -> Result<u64, String> {
-        // Portless operations — handle before port extraction.
-        if let IoOp::Connect { ref addr } = request.op {
-            return self.submit_connect(addr, request.timeout);
-        }
-        if let IoOp::Sleep { duration } = request.op {
-            return self.submit_sleep(duration);
-        }
-
-        // Subprocess ops: portless (Spawn) or ProcessHandle-in-port (ProcessWait).
-        if let IoOp::Spawn(ref req) = request.op {
-            return self.submit_spawn(req);
-        }
-        if let IoOp::ProcessWait = request.op {
-            return self.submit_process_wait(&request.port);
-        }
-
-        // Resolve is portless — always goes to the thread pool.
-        if let IoOp::Resolve { ref hostname } = request.op {
-            return self.submit_resolve(hostname);
-        }
-
-        // WatchNext is portless — the FsWatcher External is in request.port.
-        if let IoOp::WatchNext = request.op {
-            return self.submit_watch_next(&request.port);
-        }
-
-        // SigNext is portless — the SignalReceiver External is in request.port.
-        if let IoOp::SigNext = request.op {
-            return self.submit_sig_next(&request.port);
-        }
-
-        // Open is portless — creates a new port rather than operating on one.
-        if let IoOp::Open {
-            ref path,
-            flags,
-            mode,
-            direction,
-            encoding,
-        } = request.op
-        {
-            return self.submit_open(path, flags, mode, direction, encoding, request.timeout);
-        }
-
-        // Task: run closure on thread pool.
-        if let IoOp::Task(ref task_fn) = request.op {
-            return self.submit_task(task_fn);
-        }
-
-        // PollFd: poll a raw fd for readiness.
-        if let IoOp::PollFd { fd, events } = request.op {
-            return self.submit_poll_fd(fd, events, request.timeout);
-        }
-
-        // ChanSelectPark: poll a chan/wait-ready eventfd until any
-        // registered sender signals it or the timeout elapses.  The
-        // guard owns the fd(s) and the wake-list registrations and is
-        // transferred into PendingOp::ChanSelectPark so cleanup runs
-        // exactly once on completion / cancellation.
-        if let IoOp::ChanSelectPark(ref guard_cell) = request.op {
-            let guard = guard_cell
-                .take()
-                .ok_or_else(|| "io/submit: ChanSelectPark guard already consumed".to_string())?;
-            return self.submit_chan_select_park(guard, request.timeout);
-        }
-
-        let port = request
-            .port
-            .as_external::<Port>()
-            .ok_or_else(|| "io/submit: request contains non-port value".to_string())?;
-
-        // Close: cancel pending ops on this fd, then close the port.
-        // Must come before the is_closed() check since the port is open
-        // when close is requested.
-        if matches!(&request.op, IoOp::Close) {
-            let port_key = PortKey::from_port(port);
-            // Stdin close has its own path: the dedicated stdin worker
-            // thread reads via blocking poll(2)+read(2) on fd 0, not
-            // through io_uring. Signal the thread to shut down — the
-            // worker detects the self-pipe wakeup inside its next
-            // `poll(2)`, sends a `stdin closed` error completion for
-            // whatever read was in flight, drains any further
-            // requests as cancelled, and exits.
-            //
-            // We do NOT take/drop `stdin_thread` here: dropping joins
-            // the worker, which would block the scheduler **on this
-            // very thread** before the worker's cancellation
-            // completion can be drained by the main poll loop and
-            // delivered to the fiber waiting on the read. The fiber
-            // would then sit in `ev/join` indefinitely. Leave the
-            // struct in place; the worker reaps itself via channel
-            // disconnect at AsyncBackend drop time.
-            //
-            // See `docs/io.md` "Closing `*stdin*`".
-            if matches!(port_key, PortKey::Stdin) {
-                {
-                    let inner = self.inner.borrow();
-                    if let Some(ref st) = inner.stdin_thread {
-                        st.shutdown();
-                    }
-                }
-                port.close();
-                let mut inner = self.inner.borrow_mut();
-                let id = inner.next_id;
-                inner.next_id += 1;
-                inner.completions.push_back(Completion {
-                    id,
-                    result: Ok(Value::NIL),
-                });
-                return Ok(id);
-            }
-            if let PortKey::Fd(fd) = &port_key {
-                let mut inner = self.inner.borrow_mut();
-                // Cancel all pending ops on this fd
-                let ids_to_cancel: Vec<u64> = inner
-                    .pending
-                    .iter()
-                    .filter_map(|(&op_id, op)| match op {
-                        PendingOp::Port { port_key: pk, .. } if *pk == port_key => Some(op_id),
-                        _ => None,
-                    })
-                    .collect();
-
-                for _op_id in ids_to_cancel {
-                    match inner.platform {
-                        #[cfg(target_os = "linux")]
-                        PlatformBackend::Uring(ref mut ring) => {
-                            let _ = crate::io::uring::submit_uring_cancel(ring, _op_id);
-                        }
-                        PlatformBackend::ThreadPool(_) => {
-                            // Thread pool: shutdown the fd to unblock any thread
-                            // stuck in accept/read/recv. Do NOT remove the pending
-                            // entry — let the thread's error completion flow back
-                            // so the fiber resumes and can exit cleanly.
-                            //
-                            // Caveat: shutdown() wakes a blocked read on a
-                            // *connected* socket everywhere, but on macOS/BSD it
-                            // returns ENOTCONN on a *listening* socket and does
-                            // NOT wake a blocked accept() (Linux does, EINVAL).
-                            unsafe { libc::shutdown(*fd, libc::SHUT_RDWR) };
-                        }
-                    }
-                }
-
-                // Remove fd state
-                inner.fd_states.remove(&PortKey::Fd(*fd));
-
-                drop(inner);
-            }
-
-            // Now actually close the port (drops the fd).
-            port.close();
-
-            // Queue immediate completion.
-            let mut inner = self.inner.borrow_mut();
-            let id = inner.next_id;
-            inner.next_id += 1;
-            inner.completions.push_back(Completion {
-                id,
-                result: Ok(Value::NIL),
-            });
-            return Ok(id);
-        }
-
-        if port.is_closed() {
-            return Err("io/submit: port is closed".into());
-        }
-
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-
-        let port_key = PortKey::from_port(port);
-
-        // Seek and Tell: synchronous file-only ops — handle as immediate completions.
-        // Must come before stdin routing and buffer allocation.
-        if matches!(&request.op, IoOp::Seek { .. } | IoOp::Tell) {
-            return inner.handle_seek_tell(id, port, &port_key, &request.op);
-        }
-
-        // For stdin, route to stdin thread
-        if matches!(port_key, PortKey::Stdin) {
-            return inner.submit_stdin(id, &request.op);
-        }
-
-        // Determine fd
-        let fd = match &port_key {
-            PortKey::Stdout => 1,
-            PortKey::Stderr => 2,
-            PortKey::Fd(raw) => *raw,
-            PortKey::Stdin => unreachable!(),
-        };
-
-        let buf_handle = inner.buffer_pool.alloc(4096);
-
-        // Flush on socket/pipe/stdio ports is a no-op: fsync(2) returns EINVAL on
-        // non-file fds (sockets, pipes, and stdio when redirected to pipes in subprocesses).
-        // Return an immediate successful completion rather than submitting to the pool.
-        if matches!(&request.op, IoOp::Flush)
-            && matches!(
-                port.kind(),
-                PortKind::TcpStream
-                    | PortKind::UnixStream
-                    | PortKind::UdpSocket
-                    | PortKind::Pipe
-                    | PortKind::Stdout
-                    | PortKind::Stderr
-            )
-        {
-            inner.buffer_pool.release(buf_handle);
-            inner.completions.push_back(Completion {
-                id,
-                result: Ok(Value::NIL),
-            });
-            return Ok(id);
-        }
-
-        // ReadLine / Read: check per-fd buffer first.
-        // When a previous raw libc::read returned more data than one line (common
-        // with TCP), the excess is stored in fd_states[port_key].buffer.
-        // Serve subsequent reads from the buffer before submitting to the pool.
-        //
-        // `read_buffered` tracks how many bytes were already in the buffer
-        // when a Read request can't be fully served — the completion handler
-        // must prepend those bytes to the fd data.
-        let mut read_buffered: usize = 0;
-        {
-            let state = inner
-                .fd_states
-                .entry(port_key.clone())
-                .or_insert_with(FdState::new);
-            match &request.op {
-                IoOp::ReadLine => {
-                    if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
-                        let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                        let s = String::from_utf8_lossy(&line_bytes);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        inner.buffer_pool.release(buf_handle);
-                        inner.completions.push_back(Completion {
-                            id,
-                            result: Ok(Value::string(trimmed)),
-                        });
-                        return Ok(id);
-                    }
-                }
-                IoOp::Read { count } => {
-                    if state.buffer.len() >= *count {
-                        // Buffer has enough — serve entirely from buffer.
-                        let chunk: Vec<u8> = state.buffer.drain(..*count).collect();
-                        let value = match port.encoding() {
-                            Encoding::Text => {
-                                Value::string(String::from_utf8_lossy(&chunk).as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(chunk),
-                        };
-                        inner.buffer_pool.release(buf_handle);
-                        inner.completions.push_back(Completion {
-                            id,
-                            result: Ok(value),
-                        });
-                        return Ok(id);
-                    }
-                    // Buffer has partial data — leave it in place and submit
-                    // a read for the remaining bytes. The completion handler
-                    // will prepend the buffered bytes.
-                    read_buffered = state.buffer.len();
-                }
-                IoOp::ReadExact { count } => {
-                    // ReadExact's unit is whatever the port is measured in:
-                    // bytes for Binary, graphemes for Text.  If the buffered
-                    // prefix already contains `count` units, serve from buffer.
-                    let early = match port.encoding() {
-                        Encoding::Binary => {
-                            if state.buffer.len() >= *count {
-                                Some(*count)
-                            } else {
-                                None
-                            }
-                        }
-                        Encoding::Text => crate::io::nth_grapheme_byte_end(&state.buffer, *count),
-                    };
-                    if let Some(take_bytes) = early {
-                        let chunk: Vec<u8> = state.buffer.drain(..take_bytes).collect();
-                        let value = match port.encoding() {
-                            Encoding::Text => {
-                                Value::string(String::from_utf8_lossy(&chunk).as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(chunk),
-                        };
-                        inner.buffer_pool.release(buf_handle);
-                        inner.completions.push_back(Completion {
-                            id,
-                            result: Ok(value),
-                        });
-                        return Ok(id);
-                    }
-                    // Not enough yet — leave buffered bytes in place.  For
-                    // Binary the kernel-read size is reduced by what's
-                    // buffered; for Text we always ask the kernel for
-                    // `count` more bytes (best-case ASCII estimate) and
-                    // resubmit on short reads — see the completion-side
-                    // resubmit gate.
-                    if matches!(port.encoding(), Encoding::Binary) {
-                        read_buffered = state.buffer.len();
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Dispatch by operation type
-        match &request.op {
-            IoOp::Accept {
-                ref options,
-                encoding,
-            } => {
-                let listener_kind = Some(port.kind());
-
-                let AsyncBackendInner {
-                    ref mut platform,
-                    ref mut network_pool,
-                    ref mut pending,
-                    buffer_pool: _,
-                    ..
-                } = *inner;
-
-                match platform {
-                    #[cfg(target_os = "linux")]
-                    PlatformBackend::Uring(ring) => {
-                        crate::io::uring::submit_uring_accept(ring, id, fd, request.timeout)?;
-                    }
-                    PlatformBackend::ThreadPool(_) => {
-                        network_pool.submit(id, PoolOp::Accept { fd })?;
-                    }
-                }
-
-                pending.insert(
-                    id,
-                    PendingOp::Port {
-                        op: IoOp::Accept {
-                            options: options.clone(),
-                            encoding: *encoding,
-                        },
-                        port_key,
-                        port: request.port,
-                        buffer_handle: buf_handle,
-                        listener_kind,
-                    },
-                );
-                Ok(id)
-            }
-            IoOp::SendTo {
-                ref addr,
-                port_num,
-                ref data,
-            } => {
-                let bytes = Self::extract_write_bytes(data);
-
-                let AsyncBackendInner {
-                    ref mut platform,
-                    ref mut network_pool,
-                    ref mut pending,
-                    ref mut buffer_pool,
-                    ..
-                } = *inner;
-
-                match platform {
-                    #[cfg(target_os = "linux")]
-                    PlatformBackend::Uring(ring) => {
-                        let payload = format!("{}:{}\0", addr, port_num).into_bytes();
-                        let mut full_payload = payload;
-                        full_payload.extend_from_slice(&bytes);
-                        crate::io::uring::submit_uring_sendto(
-                            ring,
-                            id,
-                            fd,
-                            &full_payload,
-                            request.timeout,
-                            buffer_pool,
-                        )?;
-                    }
-                    PlatformBackend::ThreadPool(_) => {
-                        let _ = buffer_pool;
-                        network_pool.submit(
-                            id,
-                            PoolOp::SendTo {
-                                fd,
-                                addr: addr.clone(),
-                                port: *port_num,
-                                data: bytes,
-                            },
-                        )?;
-                    }
-                }
-
-                pending.insert(
-                    id,
-                    PendingOp::Port {
-                        op: IoOp::SendTo {
-                            addr: addr.clone(),
-                            port_num: *port_num,
-                            data: *data,
-                        },
-                        port_key,
-                        port: request.port,
-                        buffer_handle: buf_handle,
-                        listener_kind: None,
-                    },
-                );
-                Ok(id)
-            }
-            IoOp::RecvFrom { count } => {
-                let AsyncBackendInner {
-                    ref mut platform,
-                    ref mut network_pool,
-                    ref mut pending,
-                    ref mut buffer_pool,
-                    ..
-                } = *inner;
-
-                match platform {
-                    #[cfg(target_os = "linux")]
-                    PlatformBackend::Uring(ring) => {
-                        crate::io::uring::submit_uring_recvfrom(
-                            ring,
-                            id,
-                            fd,
-                            *count,
-                            request.timeout,
-                            buffer_pool,
-                        )?;
-                    }
-                    PlatformBackend::ThreadPool(_) => {
-                        let _ = buffer_pool;
-                        network_pool.submit(id, PoolOp::RecvFrom { fd, size: *count })?;
-                    }
-                }
-
-                pending.insert(
-                    id,
-                    PendingOp::Port {
-                        op: IoOp::RecvFrom { count: *count },
-                        port_key,
-                        port: request.port,
-                        buffer_handle: buf_handle,
-                        listener_kind: None,
-                    },
-                );
-                Ok(id)
-            }
-            IoOp::Shutdown { how } => {
-                let AsyncBackendInner {
-                    ref mut platform,
-                    ref mut network_pool,
-                    ref mut pending,
-                    ref mut buffer_pool,
-                    ..
-                } = *inner;
-
-                match platform {
-                    #[cfg(target_os = "linux")]
-                    PlatformBackend::Uring(ring) => {
-                        crate::io::uring::submit_uring_shutdown(
-                            ring,
-                            id,
-                            fd,
-                            *how,
-                            request.timeout,
-                            buffer_pool,
-                        )?;
-                    }
-                    PlatformBackend::ThreadPool(_) => {
-                        let _ = buffer_pool;
-                        network_pool.submit(id, PoolOp::Shutdown { fd, how: *how })?;
-                    }
-                }
-
-                pending.insert(
-                    id,
-                    PendingOp::Port {
-                        op: IoOp::Shutdown { how: *how },
-                        port_key,
-                        port: request.port,
-                        buffer_handle: buf_handle,
-                        listener_kind: None,
-                    },
-                );
-                Ok(id)
-            }
-            // Stream I/O ops (ReadLine, Read, ReadAll, Write, Flush)
-            _ => {
-                let AsyncBackendInner {
-                    ref mut platform,
-                    ref mut buffer_pool,
-                    ref mut pending,
-                    ..
-                } = *inner;
-
-                match platform {
-                    #[cfg(target_os = "linux")]
-                    PlatformBackend::Uring(ring) => {
-                        crate::io::uring::submit_uring_stream(
-                            ring,
-                            id,
-                            fd,
-                            &request.op,
-                            request.timeout,
-                            buffer_pool,
-                            buf_handle,
-                            read_buffered,
-                        )?;
-                    }
-                    PlatformBackend::ThreadPool(pool) => {
-                        let _ = buffer_pool;
-                        let pool_op = match &request.op {
-                            IoOp::ReadLine => PoolOp::ReadLine { fd },
-                            IoOp::ReadAll => PoolOp::ReadAll { fd },
-                            IoOp::Read { count } => PoolOp::Read {
-                                fd,
-                                size: *count - read_buffered,
-                            },
-                            IoOp::ReadExact { count } => {
-                                let is_text = matches!(port.encoding(), Encoding::Text);
-                                if is_text {
-                                    // Grapheme-counted: the worker grows its
-                                    // own buffer and loops until `count`
-                                    // graphemes are present.  `read_buffered`
-                                    // bytes already sitting in fd_state are
-                                    // handled by the completion path on the
-                                    // combined buffer.
-                                    PoolOp::ReadExact {
-                                        fd,
-                                        size: *count,
-                                        graphemes: true,
-                                    }
-                                } else {
-                                    PoolOp::ReadExact {
-                                        fd,
-                                        size: *count - read_buffered,
-                                        graphemes: false,
-                                    }
-                                }
-                            }
-                            IoOp::Write { data } => {
-                                let bytes = Self::extract_write_bytes(data);
-                                PoolOp::Write { fd, data: bytes }
-                            }
-                            IoOp::Flush => PoolOp::Flush { fd },
-                            _ => unreachable!(),
-                        };
-                        pool.submit(id, pool_op)?;
-                    }
-                }
-
-                pending.insert(
-                    id,
-                    PendingOp::Port {
-                        op: match &request.op {
-                            IoOp::ReadLine => IoOp::ReadLine,
-                            IoOp::Read { count } => IoOp::Read { count: *count },
-                            IoOp::ReadExact { count } => IoOp::ReadExact { count: *count },
-                            IoOp::ReadAll => IoOp::ReadAll,
-                            IoOp::Write { data } => IoOp::Write { data: *data },
-                            IoOp::Flush => IoOp::Flush,
-                            _ => unreachable!(),
-                        },
-                        port_key,
-                        port: request.port,
-                        buffer_handle: buf_handle,
-                        listener_kind: None,
-                    },
-                );
-                Ok(id)
-            }
+    /// Cancel and drain every in-flight io_uring operation so no kernel-owned
+    /// buffer outlives this backend. Idempotent — a no-op once `pending` is
+    /// empty. Called from `Drop`; also callable directly (tests). See
+    /// `AsyncBackendInner::quiesce_pending` and docs/io.md "Backend teardown".
+    pub(crate) fn quiesce(&self) {
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
+            inner.quiesce_pending();
         }
     }
 
-    /// Submit a Connect operation. Connect creates a new port, so
-    /// request.port is Value::NIL — we handle it separately.
-    #[allow(unused_variables)]
-    fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>) -> Result<u64, String> {
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ref mut buffer_pool,
-            ..
-        } = *inner;
-
-        let uring_fd = match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                match crate::io::uring::submit_uring_connect(
-                    ring,
-                    id,
-                    addr,
-                    timeout,
-                    buffer_pool,
-                    buf_handle,
-                ) {
-                    Ok(fd) => Some(fd),
-                    Err(_) => {
-                        // io_uring connect requires a parsed IP address.
-                        // If parsing failed (hostname), fall back to thread pool
-                        // which uses TcpStream::connect (calls getaddrinfo internally).
-                        let pool_op = match addr {
-                            ConnectAddr::Tcp {
-                                addr: host,
-                                port,
-                                ref options,
-                                ..
-                            } => PoolOp::ConnectTcp {
-                                addr: crate::io::sockaddr::format_host_port(host, *port),
-                                options: options.clone(),
-                            },
-                            ConnectAddr::Unix {
-                                path, ref options, ..
-                            } => PoolOp::ConnectUnix {
-                                path: path.clone(),
-                                options: options.clone(),
-                            },
-                        };
-                        network_pool.submit(id, pool_op)?;
-                        None
-                    }
-                }
-            }
-            PlatformBackend::ThreadPool(_) => {
-                let _ = buffer_pool;
-                let pool_op = match addr {
-                    ConnectAddr::Tcp {
-                        addr: host,
-                        port,
-                        ref options,
-                        ..
-                    } => PoolOp::ConnectTcp {
-                        addr: crate::io::sockaddr::format_host_port(host, *port),
-                        options: options.clone(),
-                    },
-                    ConnectAddr::Unix {
-                        path, ref options, ..
-                    } => PoolOp::ConnectUnix {
-                        path: path.clone(),
-                        options: options.clone(),
-                    },
-                };
-                network_pool.submit(id, pool_op)?;
-                None
-            }
-        };
-
-        pending.insert(
-            id,
-            PendingOp::Connect {
-                addr: match addr {
-                    ConnectAddr::Tcp {
-                        addr: host,
-                        port,
-                        ref options,
-                        encoding,
-                    } => ConnectAddr::Tcp {
-                        addr: host.clone(),
-                        port: *port,
-                        options: options.clone(),
-                        encoding: *encoding,
-                    },
-                    ConnectAddr::Unix {
-                        path,
-                        ref options,
-                        encoding,
-                    } => ConnectAddr::Unix {
-                        path: path.clone(),
-                        options: options.clone(),
-                        encoding: *encoding,
-                    },
-                },
-                buffer_handle: buf_handle,
-                connect_fd: uring_fd,
-            },
-        );
-        Ok(id)
+    /// True when the platform backend is io_uring (vs the thread-pool
+    /// fallback). Tests gate uring-specific assertions on this.
+    #[cfg(all(target_os = "linux", test))]
+    pub(crate) fn is_uring(&self) -> bool {
+        matches!(self.inner.borrow().platform, PlatformBackend::Uring(_))
     }
 
-    /// Submit a Sleep operation. No port — just a timer.
-    fn submit_sleep(&self, duration: Duration) -> Result<u64, String> {
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_sleep(ring, id, duration)?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                let nanos = duration.as_nanos() as u64;
-                network_pool.submit(id, PoolOp::Sleep { nanos })?;
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::Sleep {
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Submit a ChanSelectPark operation — wait for a `chan/wait-ready`
-    /// wake fd to become readable, or for the timeout to elapse.
-    /// Internally the same shape as `submit_poll_fd` (POLL_ADD on uring,
-    /// `poll(2)` on the thread pool) but the `PendingOp::ChanSelectPark`
-    /// retains the guard so its Drop closes the fd and deregisters from
-    /// every `WakeList` exactly once.
-    fn submit_chan_select_park(
-        &self,
-        guard: crate::primitives::chan::ChanSelectGuard,
-        timeout: Option<Duration>,
-    ) -> Result<u64, String> {
-        let fd = guard.poll_fd();
-        let events = libc::POLLIN as u32;
-
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_poll_add(ring, id, fd, events, timeout)?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                let timeout_ms = timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
-                network_pool.submit(
-                    id,
-                    PoolOp::PollFd {
-                        fd,
-                        events,
-                        timeout_ms,
-                    },
-                )?;
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::ChanSelectPark {
-                buffer_handle: buf_handle,
-                guard,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Submit a PollFd operation — wait for a raw fd to become ready.
-    fn submit_poll_fd(
-        &self,
-        fd: std::os::unix::io::RawFd,
-        events: u32,
-        timeout: Option<Duration>,
-    ) -> Result<u64, String> {
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_poll_add(ring, id, fd, events, timeout)?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                let timeout_ms = timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
-                network_pool.submit(
-                    id,
-                    PoolOp::PollFd {
-                        fd,
-                        events,
-                        timeout_ms,
-                    },
-                )?;
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::PollFd {
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Submit a DNS resolution. Always dispatched to the thread pool.
-    fn submit_resolve(&self, hostname: &str) -> Result<u64, String> {
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-        inner.network_pool.submit(
-            id,
-            PoolOp::Resolve {
-                hostname: hostname.to_string(),
-            },
-        )?;
-        inner.pending.insert(
-            id,
-            PendingOp::Resolve {
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Submit a watch-next operation. Reads from the inotify fd.
-    #[allow(unused_variables)]
-    fn submit_watch_next(&self, watcher_val: &Value) -> Result<u64, String> {
-        use crate::io::watch::FsWatcher;
-
-        let watcher = watcher_val
-            .as_external::<FsWatcher>()
-            .ok_or("watch-next: expected a watcher handle")?;
-        let fd = watcher.raw_fd()?;
-
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(4096);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ref mut buffer_pool,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_watch_next(ring, id, fd, buffer_pool, buf_handle)?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                network_pool.submit(id, PoolOp::WatchRead { fd })?;
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::WatchNext {
-                watcher: *watcher_val,
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Submit a sig-next operation. Reads from the signalfd / kqueue fd.
-    /// Buffer is sized for several batched signalfd_siginfo structs (Linux)
-    /// or several kevent result pairs (macOS).
-    #[allow(unused_variables)]
-    fn submit_sig_next(&self, receiver_val: &Value) -> Result<u64, String> {
-        use crate::io::sigfd::{posix_trace, SignalReceiver};
-
-        let receiver = receiver_val
-            .as_external::<SignalReceiver>()
-            .ok_or("sig-next: expected a signal receiver handle")?;
-        let fd = receiver.raw_fd()?;
-        posix_trace(format_args!("submit_sig_next fd={}", fd));
-
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        // signalfd_siginfo is 128 bytes on Linux; round up generously.
-        let buf_handle = inner.buffer_pool.alloc(1024);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ref mut buffer_pool,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                // Dedicated io_uring + signalfd path: a single
-                // IORING_OP_READ on the signalfd, completing via the
-                // kernel's poll pipeline with no elle-side worker
-                // thread. Threadpool is reached only when --no-uring
-                // is in effect (see PlatformBackend::ThreadPool arm).
-                crate::io::uring::submit_uring_sig_next(ring, id, fd, buffer_pool, buf_handle)?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                network_pool.submit(id, PoolOp::SigfdRead { fd })?;
-                #[cfg(target_os = "macos")]
-                network_pool.submit(
-                    id,
-                    PoolOp::KqSigRead {
-                        fd,
-                        // Worker pthread_sigmask-unblocks these so kqueue's
-                        // EVFILT_SIGNAL has a thread the kernel can pick
-                        // as the delivery target — see kq_sig_read_blocking
-                        // in src/io/threadpool.rs.
-                        signals: receiver.signals(),
-                    },
-                )?;
-                #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
-                {
-                    let _ = (id, fd);
-                    return Err("sig-next: not supported on this platform".into());
-                }
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::SigNext {
-                receiver: *receiver_val,
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Submit a file open operation. Open creates a new port, so
-    /// request.port is Value::NIL — we handle it before the port guard.
-    #[allow(unused_variables)]
-    fn submit_open(
-        &self,
-        path: &str,
-        flags: i32,
-        mode: u32,
-        direction: Direction,
-        encoding: Encoding,
-        timeout: Option<Duration>,
-    ) -> Result<u64, String> {
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let c_path = std::ffi::CString::new(path)
-            .map_err(|_| format!("port/open: path contains null byte: {}", path))?;
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ref mut buffer_pool,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_open(
-                    ring,
-                    id,
-                    &c_path,
-                    flags,
-                    mode,
-                    timeout,
-                    buffer_pool,
-                    buf_handle,
-                )?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                let _ = buffer_pool;
-                network_pool.submit(
-                    id,
-                    PoolOp::Open {
-                        path: c_path,
-                        flags,
-                        mode,
-                    },
-                )?;
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::Open {
-                path: path.to_string(),
-                direction,
-                encoding,
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    fn submit_spawn(&self, req: &SpawnRequest) -> Result<u64, String> {
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let result = req.spawn_to_struct();
-
-        inner.completions.push_back(Completion { id, result });
-
-        // Spawn is an immediate completion — no CQE will arrive.
-        // Release the placeholder buffer (was alloc(0), nothing stored).
-        inner.buffer_pool.release(buf_handle);
-        Ok(id)
-    }
-
-    #[allow(unused_variables)]
-    fn submit_task(&self, task_fn: &TaskFn) -> Result<u64, String> {
-        let closure = task_fn
-            .take()
-            .ok_or_else(|| "io/submit: task closure already consumed".to_string())?;
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut network_pool,
-            ref mut pending,
-            ..
-        } = *inner;
-
-        // Tasks always go to the thread pool (no io_uring equivalent).
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(_) => {
-                // Even on io_uring platforms, tasks run on the network pool
-                // to avoid starving fd I/O ops on the main pool.
-                network_pool.submit(id, PoolOp::Task(closure))?;
-            }
-            PlatformBackend::ThreadPool(ref mut pool) => {
-                pool.submit(id, PoolOp::Task(closure))?;
-            }
-        }
-
-        pending.insert(
-            id,
-            PendingOp::Task {
-                buffer_handle: buf_handle,
-            },
-        );
-        Ok(id)
-    }
-
-    fn submit_process_wait(&self, handle_val: &Value) -> Result<u64, String> {
-        let handle = handle_val
-            .as_external::<ProcessHandle>()
-            .ok_or_else(|| "io/submit: ProcessWait requires a process handle".to_string())?;
-
-        // Fast path: already exited (cached). Push immediate completion, no pending entry.
-        {
-            let state = handle.inner.borrow();
-            if let ProcessState::Exited(code) = &*state {
-                let mut inner = self.inner.borrow_mut();
-                let id = inner.next_id;
-                inner.next_id += 1;
-                inner.completions.push_back(Completion {
-                    id,
-                    result: Ok(Value::int(*code as i64)),
-                });
-                return Ok(id);
-            }
-        }
-
-        let pid = handle.pid();
-        let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
-        let buf_handle = inner.buffer_pool.alloc(0);
-
-        // Allocate siginfo_t for the kernel to fill on child exit.
-        // Must live until the CQE arrives — stored in PendingOp.
-        // SAFETY: zeroed() is valid for siginfo_t (all-zero is a valid initialized state).
-        let siginfo_ptr = {
-            let si: Box<libc::siginfo_t> = unsafe { Box::new(std::mem::zeroed()) };
-            Box::into_raw(si)
-        };
-
-        let AsyncBackendInner {
-            ref mut platform,
-            ref mut pending,
-            ..
-        } = *inner;
-
-        match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ring) => {
-                if let Err(e) =
-                    crate::io::uring::submit_uring_process_wait(ring, id, pid, siginfo_ptr)
-                {
-                    // SAFETY: we own siginfo_ptr, just allocated above; reclaim it on error.
-                    unsafe { drop(Box::from_raw(siginfo_ptr)) };
-                    return Err(e);
-                }
-            }
-            PlatformBackend::ThreadPool(ref mut pool) => {
-                // No siginfo needed for thread pool path — reclaim the allocation.
-                unsafe { drop(Box::from_raw(siginfo_ptr)) };
-                pool.submit(id, PoolOp::ProcessWait { pid })?;
-            }
-        }
-
-        // For the thread pool path, siginfo_ptr was already freed above.
-        // Store null so the completion handler knows to use the raw result integer.
-        let stored_siginfo = match platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(_) => siginfo_ptr,
-            PlatformBackend::ThreadPool(_) => std::ptr::null_mut(),
-        };
-
-        pending.insert(
-            id,
-            PendingOp::ProcessWait {
-                buffer_handle: buf_handle,
-                handle_val: *handle_val,
-                siginfo: stored_siginfo,
-            },
-        );
-        Ok(id)
-    }
-
-    /// Cancel a pending I/O operation by submission ID.
-    ///
-    /// For io_uring: submits IORING_OP_ASYNC_CANCEL. The original SQE will
-    /// generate a CQE with result = -ECANCELED; the cancel SQE's CQE is
-    /// tagged and skipped by drain_cqes.
-    ///
-    /// For thread pool: no-op (thread pool operations cannot be cancelled
-    /// mid-flight; the scheduler removes the pending entry and the completion
-    /// is discarded when it arrives).
-    pub(crate) fn cancel(&self, id: u64) -> Result<(), String> {
-        let mut inner = self.inner.borrow_mut();
-        match inner.platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ref mut ring) => {
-                crate::io::uring::submit_uring_cancel(ring, id)?;
-            }
-            PlatformBackend::ThreadPool(_) => {
-                // Thread pool: just remove from pending. The thread will
-                // complete eventually; the completion will be discarded
-                // because the pending entry is gone.
-                inner.pending.remove(&id);
-            }
-        }
-        Ok(())
-    }
-
-    /// Non-blocking poll for completions.
-    pub(crate) fn poll(&self) -> Vec<Completion> {
-        let mut inner = self.inner.borrow_mut();
-        inner.drain_platform_completions();
-        inner.drain_stdin_completions();
-        inner.completions.drain(..).collect()
-    }
-
-    /// Blocking wait for completions.
-    /// `timeout_ms`: negative = wait forever, 0 = poll, positive = wait up to N ms.
-    pub(crate) fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String> {
-        let mut inner = self.inner.borrow_mut();
-
-        // First drain any buffered completions
-        inner.drain_platform_completions();
-        inner.drain_stdin_completions();
-        if !inner.completions.is_empty() {
-            return Ok(inner.completions.drain(..).collect());
-        }
-
-        // Nothing buffered — block on platform
-        let timeout = if timeout_ms < 0 {
-            None
-        } else {
-            Some(timeout_ms as u64)
-        };
-
-        // When stdin has pending ops and io_uring has nothing submitted,
-        // block on the stdin receiver directly instead of io_uring (which
-        // would block forever). This happens when the MCP server is a
-        // subprocess reading from a pipe via StdinThread.
-        if let Some(ref stdin_thread) = inner.stdin_thread {
-            // Check if all pending ops are stdin ops. Stdin ops go through
-            // StdinThread, not io_uring. If io_uring has nothing to wait on,
-            // block on the stdin receiver directly.
-            let all_pending_are_stdin = !inner.pending.is_empty()
-                && inner.pending.values().all(|op| {
-                    matches!(
-                        op,
-                        PendingOp::Port {
-                            port_key: PortKey::Stdin,
-                            ..
-                        }
-                    )
-                });
-
-            if all_pending_are_stdin {
-                // All pending ops are stdin ops — block on stdin receiver.
-                let timeout_dur = timeout.map(std::time::Duration::from_millis);
-                let recv_result = match timeout_dur {
-                    Some(dur) => stdin_thread.receiver().recv_timeout(dur).ok(),
-                    None => stdin_thread.receiver().recv().ok(),
-                };
-                if let Some(sc) = recv_result {
-                    let inner = &mut *inner;
-                    if let Some(c) =
-                        stdin_to_completion(sc, &mut inner.pending, &mut inner.buffer_pool)
-                    {
-                        inner.completions.push_back(c);
-                    }
-                }
-                return Ok(inner.completions.drain(..).collect());
-            }
-        }
-
-        // Destructure to get independent borrows of each field.
-        // Check if any pending op is a stdin op — needed by the uring
-        // branch below.  Computed before the destructure borrow.
-        let has_stdin_pending = inner.stdin_thread.is_some()
-            && inner.pending.values().any(|op| {
-                matches!(
-                    op,
-                    PendingOp::Port {
-                        port_key: PortKey::Stdin,
-                        ..
-                    }
-                )
-            });
-
-        // Scoped so the borrows end before drain_stdin_completions.
-        {
-            let AsyncBackendInner {
-                ref mut platform,
-                ref mut network_pool,
-                ref mut pending,
-                ref mut buffer_pool,
-                ref mut fd_states,
-                ref mut completions,
-                ref stdin_thread,
-                ..
-            } = *inner;
-
-            match platform {
-                #[cfg(target_os = "linux")]
-                PlatformBackend::Uring(ring) => {
-                    if has_stdin_pending || network_pool.has_in_flight() {
-                        // Stdin reads go through StdinThread, not io_uring.
-                        // Network pool ops also bypass io_uring.  In both
-                        // cases we must poll uring non-blocking and then
-                        // wait on the channel source(s) so we don't block
-                        // forever inside wait_uring while a completion sits
-                        // on a channel.
-                        crate::io::uring::wait_uring(
-                            ring,
-                            Some(0), // poll only
-                            pending,
-                            buffer_pool,
-                            fd_states,
-                            completions,
-                        )?;
-
-                        // Wait on whichever channel sources are active.
-                        let wait_ms = timeout.unwrap_or(100).min(100);
-                        let wait_dur = std::time::Duration::from_millis(wait_ms);
-
-                        let stdin_rx = if has_stdin_pending {
-                            stdin_thread.as_ref().unwrap().receiver().clone()
-                        } else {
-                            crossbeam_channel::never()
-                        };
-                        let net_rx = if network_pool.has_in_flight() {
-                            network_pool.receiver().clone()
-                        } else {
-                            crossbeam_channel::never()
-                        };
-
-                        crossbeam_channel::select! {
-                            recv(stdin_rx) -> msg => {
-                                if let Ok(sc) = msg {
-                                    if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
-                                        completions.push_back(c);
-                                    }
-                                }
-                            }
-                            recv(net_rx) -> msg => {
-                                if let Ok(pc) = msg {
-                                    network_pool.record_completion();
-                                    if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                        completions.push_back(c);
-                                    }
-                                }
-                            }
-                            default(wait_dur) => {}
-                        }
-                    } else {
-                        crate::io::uring::wait_uring(
-                            ring,
-                            timeout,
-                            pending,
-                            buffer_pool,
-                            fd_states,
-                            completions,
-                        )?;
-                    }
-                }
-                PlatformBackend::ThreadPool(pool) => {
-                    // Three possible channel sources:
-                    //   1. platform pool (file I/O, timers, ev/spawn work)
-                    //   2. network pool  (connect, accept, etc.)
-                    //   3. stdin thread  (port/read-line on stdin)
-                    //
-                    // We select across all active sources using never()
-                    // for inactive ones so those arms are never chosen.
-                    let pool_active = pool.has_in_flight();
-                    let net_active = network_pool.has_in_flight();
-
-                    if !pool_active && !net_active && !has_stdin_pending {
-                        // Nothing to wait for.
-                    } else if !pool_active && !net_active {
-                        // Only stdin — handled by drain_stdin_completions below.
-                    } else {
-                        // Select across all active channel sources.
-                        // Uses never() for inactive sources so those arms
-                        // are never chosen.  Respects the caller's timeout:
-                        // None = block until a completion arrives, Some(ms) =
-                        // bounded wait.
-                        let pool_rx = if pool_active {
-                            pool.receiver().clone()
-                        } else {
-                            crossbeam_channel::never()
-                        };
-                        let net_rx = if net_active {
-                            network_pool.receiver().clone()
-                        } else {
-                            crossbeam_channel::never()
-                        };
-                        let stdin_rx = if has_stdin_pending {
-                            stdin_thread.as_ref().unwrap().receiver().clone()
-                        } else {
-                            crossbeam_channel::never()
-                        };
-
-                        // Non-blocking drain first.
-                        let mut got = false;
-                        for sc in stdin_rx.try_iter() {
-                            if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
-                                completions.push_back(c);
-                            }
-                            got = true;
-                        }
-                        for pc in pool.poll() {
-                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
-                            {
-                                completions.push_back(c);
-                            }
-                            got = true;
-                        }
-                        for pc in network_pool.poll() {
-                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
-                            {
-                                completions.push_back(c);
-                            }
-                            got = true;
-                        }
-
-                        if !got {
-                            match timeout {
-                                Some(ms) => {
-                                    let dur = std::time::Duration::from_millis(ms);
-                                    crossbeam_channel::select! {
-                                        recv(pool_rx) -> msg => {
-                                            if let Ok(pc) = msg {
-                                                pool.record_completion();
-                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                                    completions.push_back(c);
-                                                }
-                                            }
-                                        }
-                                        recv(net_rx) -> msg => {
-                                            if let Ok(pc) = msg {
-                                                network_pool.record_completion();
-                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                                    completions.push_back(c);
-                                                }
-                                            }
-                                        }
-                                        recv(stdin_rx) -> msg => {
-                                            if let Ok(sc) = msg {
-                                                if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
-                                                    completions.push_back(c);
-                                                }
-                                            }
-                                        }
-                                        default(dur) => {}
-                                    }
-                                }
-                                None => {
-                                    crossbeam_channel::select! {
-                                        recv(pool_rx) -> msg => {
-                                            if let Ok(pc) = msg {
-                                                pool.record_completion();
-                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                                    completions.push_back(c);
-                                                }
-                                            }
-                                        }
-                                        recv(net_rx) -> msg => {
-                                            if let Ok(pc) = msg {
-                                                network_pool.record_completion();
-                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                                    completions.push_back(c);
-                                                }
-                                            }
-                                        }
-                                        recv(stdin_rx) -> msg => {
-                                            if let Ok(sc) = msg {
-                                                if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
-                                                    completions.push_back(c);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Also drain stdin completions
-        inner.drain_stdin_completions();
-
-        Ok(inner.completions.drain(..).collect())
-    }
-
-    pub(crate) fn extract_write_bytes(data: &Value) -> Vec<u8> {
-        if let Some(s) = data.with_string(|s| s.as_bytes().to_vec()) {
-            s
-        } else if let Some(b) = data.as_bytes() {
-            b.to_vec()
-        } else if let Some(b) = data.as_bytes_mut() {
-            b.borrow().clone()
-        } else if let Some(b) = data.as_string_mut() {
-            b.borrow().clone()
-        } else {
-            format!("{}", data).into_bytes()
-        }
-    }
-
-    /// Check if there are pending operations.
-    /// Used by the async scheduler (Chunk 6) to determine when to exit the event loop.
-    #[allow(dead_code)]
-    pub(crate) fn has_pending(&self) -> bool {
-        let inner = self.inner.borrow();
-        !inner.pending.is_empty()
+    /// The ids of every operation still in flight, ascending. Tests pin the
+    /// submission frame with it: one submission files one pending entry, and
+    /// the entry is keyed by the id `submit` returned.
+    #[cfg(test)]
+    pub(crate) fn pending_ids(&self) -> Vec<SubmissionId> {
+        let mut ids: Vec<SubmissionId> = self.inner.borrow().pending.keys().copied().collect();
+        ids.sort();
+        ids
     }
 }
 
+impl Drop for AsyncBackend {
+    fn drop(&mut self) {
+        // Bring the ring to a quiescent state before its buffer pool and SQ/CQ
+        // are freed: any operation still in flight (submitted but never reaped,
+        // e.g. `io/submit` with no matching `io/wait`) has the kernel holding a
+        // write pointer into a pool/arena buffer. Reaping it here keeps that
+        // write from landing in freed heap.
+        self.quiesce();
+    }
+}
+
+mod convert;
+mod poll;
+mod requests;
+mod submit;
+
 impl crate::io::IoBackend for AsyncBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String> {
-        self.submit(request)
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<SubmissionId, String> {
+        self.submit(request, origin_heap)
     }
 
     fn poll(&self) -> Vec<Completion> {
@@ -1653,136 +280,290 @@ impl crate::io::IoBackend for AsyncBackend {
         self.wait(timeout_ms)
     }
 
-    fn cancel(&self, id: u64) -> Result<(), String> {
+    fn workers(&self) -> usize {
+        self.workers()
+    }
+
+    fn cancel(&self, id: SubmissionId) -> Result<(), String> {
         self.cancel(id)
+    }
+
+    fn quiesce(&self) {
+        self.quiesce();
     }
 }
 
 impl AsyncBackendInner {
-    /// Drain completions from the platform backend into self.completions.
-    fn drain_platform_completions(&mut self) {
+    /// Cancel and drain every in-flight io_uring operation so no kernel-owned
+    /// buffer outlives the backend.
+    ///
+    /// An io_uring SQE references a buffer the kernel writes into
+    /// asynchronously — a `BufferPool` slot (`read-all`/`open`/`write`) or the
+    /// fiber's arena buffer (`read`/`read-line`). If the backend is dropped
+    /// with an op still in flight (submitted but never reaped, e.g. `io/submit`
+    /// with no `io/wait`), the pool and ring are freed while the kernel still
+    /// owns that pointer, and the eventual write lands in freed heap
+    /// (`malloc(): unsorted double linked list corrupted`). Cancel each pending
+    /// op — a cancelled io_uring read completes with `-ECANCELED` — and drain
+    /// the resulting CQEs (which release the buffers) so nothing kernel-owned
+    /// survives this call.
+    ///
+    /// Ops serviced by the stdin/network channels post no CQE here; they make
+    /// no progress, so we stop after the first pass that neither shrinks
+    /// `pending` nor drains a completion. Those workers copy results through
+    /// channels and never write into a freed pooled buffer, so leaving them is
+    /// safe. The pass count is bounded as a backstop against an op that keeps
+    /// re-submitting (a continuously-readable fd reaped via resubmission).
+    #[cfg(target_os = "linux")]
+    fn quiesce_pending(&mut self) {
+        if !matches!(self.platform, PlatformBackend::Uring(_)) || self.pending.is_empty() {
+            return;
+        }
+        let mut sink: VecDeque<Completion> = VecDeque::new();
+        let mut passes = 0u32;
+        while !self.pending.is_empty() && passes < 64 {
+            passes += 1;
+            let before = self.pending.len();
+            let ids: Vec<SubmissionId> = self.pending.keys().copied().collect();
+
+            // Cancel everything still pending. A cancel for an id the ring
+            // doesn't know (a stdin/network op) returns a tagged `-ENOENT` CQE
+            // that `drain_cqes` skips, so it is harmless.
+            if let PlatformBackend::Uring(ref mut ring) = self.platform {
+                for id in &ids {
+                    let _ = crate::io::uring::submit_uring_cancel(ring, *id);
+                }
+            }
+
+            // Wait briefly for the cancellation CQEs, then drain them. A cancel
+            // posts its CQE promptly, so 50ms is a ceiling, not the expected
+            // latency.
+            let origin_heap = self.origin_heap;
+            let gen = self.unicode_generation;
+            let AsyncBackendInner {
+                ref mut platform,
+                ref mut pending,
+                ref mut buffer_pool,
+                ref mut fd_states,
+                ..
+            } = *self;
+            if let PlatformBackend::Uring(ring) = platform {
+                let ts = io_uring::types::Timespec::new().sec(0).nsec(50_000_000);
+                let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+                match ring.submitter().submit_with_args(1, &args) {
+                    Ok(_) => {}
+                    Err(e) if e.raw_os_error() == Some(libc::ETIME) => {}
+                    Err(e) if e.raw_os_error() == Some(libc::EINTR) => {}
+                    Err(_) => break,
+                }
+                // Teardown: the ring is about to close, so the standing eventfd
+                // POLL_ADD is left to be cancelled with everything else. We do
+                // not service it (no re-arm) — a fired sentinel is just skipped.
+                let mut bridge_fired = false;
+                crate::io::uring::drain_cqes(
+                    ring,
+                    pending,
+                    buffer_pool,
+                    fd_states,
+                    &mut sink,
+                    origin_heap,
+                    gen,
+                    &mut bridge_fired,
+                );
+            }
+
+            let drained = !sink.is_empty();
+            sink.clear();
+            // No CQE and no shrink ⇒ only channel-serviced ops remain; stop.
+            if !drained && self.pending.len() >= before {
+                break;
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn quiesce_pending(&mut self) {}
+
+    /// Mint the next unique, monotonically increasing submission id.
+    fn mint_id(&mut self) -> SubmissionId {
+        // The eventfd bridge reserves `EVENTFD_USER_DATA` as a CQE sentinel; a
+        // minted id colliding with it would make `drain_cqes` mis-route a real
+        // completion as the bridge wake. Unreachable in practice (the counter
+        // would need 2^63 submits) — asserted so a future change can't break it.
+        #[cfg(target_os = "linux")]
+        debug_assert_ne!(
+            self.next_id, EVENTFD_USER_DATA,
+            "submission id counter reached the eventfd bridge sentinel"
+        );
+        let id = SubmissionId::from_raw(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// Drain everything ready now into self.completions: the ring's CQEs (uring
+    /// platform) and the shared hub (pool + stdin workers), on both platforms.
+    fn drain_ready(&mut self) {
+        self.drain_uring_completions();
+        self.drain_hub();
+    }
+
+    /// Drain the io_uring completion queue into self.completions. A no-op on the
+    /// pool platform (no ring); all its work surfaces through `drain_hub`.
+    ///
+    /// This is the non-blocking drain (poll path, and the pre/post passes of a
+    /// blocking wait). If it consumes the standing eventfd bridge `POLL_ADD`
+    /// CQE, it clears the eventfd and re-arms the one-shot poll here — otherwise
+    /// the next blocking wait would have no armed poll watching the bridge and a
+    /// hub worker's wake would be lost.
+    fn drain_uring_completions(&mut self) {
+        // Only the ring arm below consumes these; the pool platform compiles
+        // that arm out and would see three unused bindings.
+        #[cfg(target_os = "linux")]
+        let origin_heap = self.origin_heap;
+        #[cfg(target_os = "linux")]
+        let gen = self.unicode_generation;
+        #[cfg(target_os = "linux")]
+        let eventfd = self.hub.eventfd();
         match &mut self.platform {
             #[cfg(target_os = "linux")]
             PlatformBackend::Uring(ring) => {
+                let mut eventfd_fired = false;
                 crate::io::uring::drain_cqes(
                     ring,
                     &mut self.pending,
                     &mut self.buffer_pool,
                     &mut self.fd_states,
                     &mut self.completions,
+                    origin_heap,
+                    gen,
+                    &mut eventfd_fired,
                 );
-            }
-            PlatformBackend::ThreadPool(pool) => {
-                let raw = pool.poll();
-                for PoolCompletion {
-                    id,
-                    result_code,
-                    data,
-                } in raw
-                {
-                    if let Some(pending) = self.pending.remove(&id) {
-                        let buf_handle = pending.buffer_handle();
-                        let c = completion::process_raw_completion(
-                            id,
-                            result_code,
-                            data,
-                            &pending,
-                            &mut self.fd_states,
-                            &mut self.buffer_pool,
-                            buf_handle,
+                if eventfd_fired {
+                    if let Some(efd) = eventfd {
+                        crate::io::eventfd::drain(efd);
+                        // Re-arm of a single SQE into a 256-deep ring is
+                        // infallible in practice; assert so a regression is loud
+                        // in tests rather than a silent deaf bridge in release.
+                        let rearmed = crate::io::uring::arm_eventfd_poll(ring, efd);
+                        debug_assert!(
+                            rearmed.is_ok(),
+                            "eventfd bridge re-arm failed in poll path: {:?}",
+                            rearmed
                         );
-                        self.completions.push_back(c);
                     }
                 }
             }
+            PlatformBackend::ThreadPool => {}
         }
-        // Also drain network pool (Accept, Connect, SendTo, RecvFrom, Shutdown).
-        self.drain_network_completions();
     }
 
-    /// Drain completions from the network thread pool into self.completions.
-    /// The network pool handles Accept, Connect, SendTo, RecvFrom, Shutdown.
-    fn drain_network_completions(&mut self) {
-        let raw = self.network_pool.poll();
-        for PoolCompletion {
-            id,
-            result_code,
-            data,
-        } in raw
-        {
-            if let Some(mut pending) = self.pending.remove(&id) {
-                // Thread pool Connect: result_code is the new fd.
-                // Stash it in connect_fd so the completion handler finds it there.
-                if let PendingOp::Connect {
-                    ref mut connect_fd, ..
-                } = pending
-                {
-                    if result_code > 0 {
-                        *connect_fd = Some(result_code);
-                    }
-                }
-                let buf_handle = pending.buffer_handle();
-                let c = completion::process_raw_completion(
-                    id,
-                    result_code,
-                    data,
-                    &pending,
-                    &mut self.fd_states,
-                    &mut self.buffer_pool,
-                    buf_handle,
-                );
-                self.completions.push_back(c);
+    /// Drain the shared completion hub (thread-pool workers + stdin worker) into
+    /// self.completions. This is the single hub drain site: `drain_raw`
+    /// decrements `in_flight` once per item, and `cook_raw` turns each
+    /// `RawCompletion` into a `Completion` — returning `None` (and so discarding)
+    /// a cancelled op whose `pending` entry is already gone.
+    fn drain_hub(&mut self) {
+        let origin_heap = self.origin_heap;
+        let gen = self.unicode_generation;
+        let AsyncBackendInner {
+            ref mut hub,
+            ref mut pending,
+            ref mut cancelled,
+            ref mut retired,
+            ref mut fd_states,
+            ref mut buffer_pool,
+            ref mut completions,
+            ..
+        } = *self;
+        for rc in hub.drain_raw() {
+            let id = SubmissionId::from_raw(match &rc {
+                crate::io::threadpool::RawCompletion::Pool(pc) => pc.id,
+                crate::io::threadpool::RawCompletion::Stdin(sc) => sc.id,
+            });
+            let cooked = cook_raw(
+                rc,
+                pending,
+                cancelled,
+                fd_states,
+                buffer_pool,
+                origin_heap,
+                gen,
+            );
+            hub.forget_stop(id);
+            if let Some(c) = cooked {
+                completions.push_back(c);
             }
         }
+        Self::close_drained_fds(pending, fd_states, retired);
+    }
+
+    /// Close every retired descriptor no submitted operation names any more.
+    ///
+    /// A descriptor reaches `retired` when its port was closed while an
+    /// operation still held it; this is where it is finally handed back to the
+    /// OS. Its `fd_states` entry goes with it, so per-fd buffering never spans
+    /// two ports that happened to share a number.
+    fn close_drained_fds(
+        pending: &HashMap<SubmissionId, PendingOp>,
+        fd_states: &mut HashMap<PortKey, FdState>,
+        retired: &mut HashMap<RawFd, std::os::unix::io::OwnedFd>,
+    ) {
+        if retired.is_empty() {
+            return;
+        }
+        retired.retain(|fd, _owned| {
+            let still_named = pending
+                .values()
+                .any(|op| matches!(op, PendingOp::Port { port_key, .. } if port_key.names_fd(*fd)));
+            if !still_named {
+                crate::io::types::discard_fd_state(fd_states, *fd);
+            }
+            // Dropping the `OwnedFd` with the entry is what closes it.
+            still_named
+        });
     }
 
     /// Submit a stdin operation.
-    fn submit_stdin(&mut self, id: u64, op: &IoOp) -> Result<u64, String> {
-        let stdin_thread = self.stdin_thread.get_or_insert_with(StdinThread::new);
+    fn submit_stdin(&mut self, id: SubmissionId, op: &PortOp) -> Result<SubmissionId, String> {
+        // The stdin worker reports through the shared hub like every other
+        // worker — hand it a sender clone and the bridge eventfd at spawn.
+        let sender = self.hub.sender();
+        let eventfd = self.hub.eventfd();
+        let stdin_thread = self
+            .stdin_thread
+            .get_or_insert_with(|| StdinThread::new(sender, eventfd));
+        // The worker reads; it has no write, socket or seek path.
         let op_kind = match op {
-            IoOp::ReadLine => StdinOpKind::ReadLine,
-            IoOp::Read { count } => StdinOpKind::Read { count: *count },
-            IoOp::ReadAll => StdinOpKind::ReadAll,
-            IoOp::ReadExact { .. }
-            | IoOp::Write { .. }
-            | IoOp::Flush
-            | IoOp::Accept { .. }
-            | IoOp::Connect { .. }
-            | IoOp::SendTo { .. }
-            | IoOp::RecvFrom { .. }
-            | IoOp::Shutdown { .. }
-            | IoOp::Sleep { .. }
-            | IoOp::Spawn(_)
-            | IoOp::ProcessWait
-            | IoOp::Open { .. }
-            | IoOp::Seek { .. }
-            | IoOp::Tell
-            | IoOp::Task(_)
-            | IoOp::Resolve { .. }
-            | IoOp::WatchNext
-            | IoOp::SigNext
-            | IoOp::Close
-            | IoOp::PollFd { .. }
-            | IoOp::ChanSelectPark(_) => {
+            PortOp::ReadLine { .. } => StdinOpKind::ReadLine,
+            PortOp::Read { count, .. } => StdinOpKind::Read { count: *count },
+            PortOp::ReadAll => StdinOpKind::ReadAll,
+            PortOp::ReadExact { .. }
+            | PortOp::Write { .. }
+            | PortOp::Flush
+            | PortOp::Accept { .. }
+            | PortOp::SendTo { .. }
+            | PortOp::RecvFrom { .. }
+            | PortOp::Shutdown { .. } => {
                 return Err("io/submit: unsupported operation on stdin".into())
             }
         };
         stdin_thread.submit(id, op_kind)?;
-        // No buffer needed for stdin (thread manages its own)
+        // Count the stdin request in the combined in-flight tally so the
+        // scheduler knows to block on the hub for its completion.
+        self.hub.note_submit();
         let buf_handle = self.buffer_pool.alloc(0);
         self.pending.insert(
             id,
             PendingOp::Port {
-                op: match op {
-                    IoOp::ReadLine => IoOp::ReadLine,
-                    IoOp::Read { count } => IoOp::Read { count: *count },
-                    IoOp::ReadAll => IoOp::ReadAll,
-                    _ => unreachable!(),
-                },
+                op: op.clone(),
                 port_key: PortKey::Stdin,
-                port: Value::NIL, // stdin has no port Value
-                buffer_handle: buf_handle,
+                port: Value::NIL,
+                buffer_handle: Some(buf_handle),
                 listener_kind: None,
+                filled: 0,
+                // The stdin worker owns its own blocking read; nothing here
+                // resubmits through the ring, so there is no link to re-arm.
+                timeout: None,
             },
         );
         Ok(id)
@@ -1799,11 +580,11 @@ impl AsyncBackendInner {
     /// After Tell: buffer is read-only; the formula is kernel_offset - buffer.len().
     fn handle_seek_tell(
         &mut self,
-        id: u64,
+        id: SubmissionId,
         port: &Port,
         port_key: &PortKey,
         op: &IoOp,
-    ) -> Result<u64, String> {
+    ) -> Result<SubmissionId, String> {
         if port.kind() != PortKind::File {
             let err_msg = match op {
                 IoOp::Seek { .. } => {
@@ -1812,10 +593,10 @@ impl AsyncBackendInner {
                 IoOp::Tell => format!("port/tell: expected file port, got {:?}", port.kind()),
                 _ => unreachable!(),
             };
-            self.completions.push_back(Completion {
+            self.completions.push_back(Completion::err(
                 id,
-                result: Err(error_val("type-error", err_msg)),
-            });
+                crate::io::io_error("type-error", err_msg, self.origin_heap),
+            ));
             return Ok(id);
         }
 
@@ -1824,7 +605,6 @@ impl AsyncBackendInner {
                 // Discard buffered bytes — kernel offset and logical position diverge otherwise.
                 if let Some(state) = self.fd_states.get_mut(port_key) {
                     state.buffer.clear();
-                    state.status = crate::io::types::FdStatus::Open;
                 }
                 port.with_fd(|fd| {
                     let raw = fd.as_raw_fd();
@@ -1867,821 +647,14 @@ impl AsyncBackendInner {
             _ => unreachable!(),
         };
 
-        self.completions.push_back(Completion {
+        let origin_heap = self.origin_heap;
+        self.completions.push_back(Completion::new(
             id,
-            result: result.map_err(|e| error_val("io-error", e.to_string())),
-        });
+            result.map_err(|e| crate::io::io_error("io-error", e.to_string(), origin_heap)),
+        ));
         Ok(id)
-    }
-
-    /// Drain stdin completions.
-    fn drain_stdin_completions(&mut self) {
-        if let Some(ref stdin_thread) = self.stdin_thread {
-            for sc in stdin_thread.poll_completions() {
-                if let Some(c) = stdin_to_completion(sc, &mut self.pending, &mut self.buffer_pool) {
-                    self.completions.push_back(c);
-                }
-            }
-        }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::io::request::{IoOp, IoRequest};
-    use crate::port::{Direction, Encoding, Port};
-    use crate::value::heap::TableKey;
-    use crate::value::sorted_struct_get;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn write_temp_file(content: &str) -> String {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = format!("/tmp/elle-test-async-{}-{}", std::process::id(), n);
-        std::fs::write(&path, content).unwrap();
-        path
-    }
-
-    fn open_read_port(path: &str) -> Value {
-        let file = std::fs::File::open(path).unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        Value::external(
-            "port",
-            Port::new_file(fd, Direction::Read, Encoding::Text, path.to_string()),
-        )
-    }
-
-    fn open_write_port(path: &str) -> Value {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        Value::external(
-            "port",
-            Port::new_file(fd, Direction::Write, Encoding::Text, path.to_string()),
-        )
-    }
-
-    #[test]
-    fn test_async_backend_new() {
-        let backend = AsyncBackend::new();
-        assert!(backend.is_ok());
-    }
-
-    #[test]
-    fn test_submit_returns_monotonic_ids() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("hello");
-        let port = open_read_port(&path);
-
-        let req1 = IoRequest {
-            op: IoOp::ReadAll,
-            port,
-            timeout: None,
-        };
-        let req2 = IoRequest {
-            op: IoOp::ReadAll,
-            port,
-            timeout: None,
-        };
-
-        let id1 = backend.submit(&req1).unwrap();
-        let id2 = backend.submit(&req2).unwrap();
-        assert!(id2 > id1, "IDs must be monotonically increasing");
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_submit_closed_port_errors() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("test");
-        let port_val = open_read_port(&path);
-        let port = port_val.as_external::<Port>().unwrap();
-        port.close();
-
-        let req = IoRequest {
-            op: IoOp::ReadAll,
-            port: port_val,
-            timeout: None,
-        };
-        let result = backend.submit(&req);
-        assert!(result.is_err());
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_poll_empty_when_no_completions() {
-        let backend = AsyncBackend::new().unwrap();
-        let completions = backend.poll();
-        assert!(completions.is_empty());
-    }
-
-    #[test]
-    fn test_submit_and_wait_read() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("async read test");
-        let port = open_read_port(&path);
-
-        let req = IoRequest {
-            op: IoOp::ReadAll,
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_submit_and_wait_write() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = format!("/tmp/elle-test-async-write-{}", std::process::id());
-        let port = open_write_port(&path);
-
-        let req = IoRequest {
-            op: IoOp::Write {
-                data: Value::string("async write"),
-            },
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "async write");
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_completion_to_value_success() {
-        let c = Completion {
-            id: 42,
-            result: Ok(Value::string("hello")),
-        };
-        let v = c.to_value();
-        let fields = v.as_struct().unwrap();
-        assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
-                .unwrap()
-                .as_int(),
-            Some(42)
-        );
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .is_nil()
-        );
-    }
-
-    #[test]
-    fn test_completion_to_value_error() {
-        let c = Completion {
-            id: 7,
-            result: Err(error_val("io-error", "test error")),
-        };
-        let v = c.to_value();
-        let fields = v.as_struct().unwrap();
-        assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
-                .unwrap()
-                .as_int(),
-            Some(7)
-        );
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("value".into()))
-                .unwrap()
-                .is_nil()
-        );
-        assert!(
-            !sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .is_nil()
-        );
-    }
-
-    #[test]
-    fn test_wait_timeout_zero_returns_empty() {
-        let backend = AsyncBackend::new().unwrap();
-        let completions = backend.wait(0).unwrap();
-        assert!(completions.is_empty());
-    }
-
-    /// Regression test: wait() must not return 0 completions when an accept
-    /// SQE is in-flight and a connection arrives within the timeout window.
-    ///
-    /// Previously, submit_with_args() could return early (EINTR or spurious
-    /// wakeup) and the discarded error caused wait() to return 0 completions
-    /// even though the accept had not yet completed. The fix: loop wait() until
-    /// at least one completion arrives or the deadline passes.
-    #[test]
-    fn test_accept_wait_does_not_return_zero_completions_spuriously() {
-        use std::os::unix::io::FromRawFd;
-        use std::sync::{Arc, Barrier};
-
-        let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
-            assert!(fd >= 0);
-            let opt: libc::c_int = 1;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            );
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            addr.sin_family = libc::AF_INET as libc::sa_family_t;
-            addr.sin_port = 0;
-            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
-            assert_eq!(
-                libc::bind(
-                    fd,
-                    &addr as *const _ as *const libc::sockaddr,
-                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
-                ),
-                0
-            );
-            assert_eq!(libc::listen(fd, 128), 0);
-            fd
-        };
-        let bound_port = unsafe {
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            libc::getsockname(
-                listener_fd,
-                &mut addr as *mut _ as *mut libc::sockaddr,
-                &mut len,
-            );
-            u16::from_be(addr.sin_port)
-        };
-        let listener_port = Value::external(
-            "port",
-            Port::new_tcp_listener(
-                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
-                format!("127.0.0.1:{}", bound_port),
-            ),
-        );
-
-        let backend = AsyncBackend::new().unwrap();
-        let accept_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Accept {
-                    options: Default::default(),
-                    encoding: crate::port::Encoding::Binary,
-                },
-                port: listener_port,
-                timeout: None,
-            })
-            .unwrap();
-
-        // Use a barrier so the connect happens only after we're about to call wait().
-        // This maximises the chance that wait() sees 0 completions on the first
-        // drain and must block — the scenario where the spurious-return bug fires.
-        let barrier = Arc::new(Barrier::new(2));
-        let barrier2 = barrier.clone();
-        let handle = std::thread::spawn(move || {
-            barrier2.wait(); // released just before wait() is called
-            std::net::TcpStream::connect(format!("127.0.0.1:{}", bound_port)).unwrap()
-        });
-
-        barrier.wait(); // release the connector thread
-                        // wait() must return exactly 1 completion — the accept.
-                        // If it returns 0, the bug is confirmed.
-        let completions = backend.wait(5000).unwrap();
-        assert_eq!(
-            completions.len(),
-            1,
-            "wait() returned {} completions — expected 1 (spurious early return bug)",
-            completions.len()
-        );
-        assert_eq!(completions[0].id, accept_id);
-        assert!(completions[0].result.is_ok());
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_accept_via_uring() {
-        use std::os::unix::io::FromRawFd;
-
-        // Create a TCP listener via libc
-        let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
-            assert!(fd >= 0, "socket() failed");
-
-            let opt: libc::c_int = 1;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            );
-
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            addr.sin_family = libc::AF_INET as libc::sa_family_t;
-            addr.sin_port = 0; // ephemeral port
-            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
-
-            let ret = libc::bind(
-                fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-            );
-            assert_eq!(ret, 0, "bind() failed: {}", std::io::Error::last_os_error());
-
-            let ret = libc::listen(fd, 128);
-            assert_eq!(ret, 0, "listen() failed");
-
-            fd
-        };
-
-        // Get the bound port
-        let bound_port = unsafe {
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            libc::getsockname(
-                listener_fd,
-                &mut addr as *mut _ as *mut libc::sockaddr,
-                &mut len,
-            );
-            u16::from_be(addr.sin_port)
-        };
-
-        let listener_port = Value::external(
-            "port",
-            Port::new_tcp_listener(
-                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
-                format!("127.0.0.1:{}", bound_port),
-            ),
-        );
-
-        let backend = AsyncBackend::new().unwrap();
-
-        // Submit Accept
-        let accept_req = IoRequest {
-            op: IoOp::Accept {
-                options: Default::default(),
-                encoding: crate::port::Encoding::Binary,
-            },
-            port: listener_port,
-            timeout: None,
-        };
-        let accept_id = backend.submit(&accept_req).unwrap();
-
-        // Connect from a background thread
-        let port_copy = bound_port;
-        let handle = std::thread::spawn(move || {
-            // Small delay to ensure accept is submitted
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            let _stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port_copy)).unwrap();
-        });
-
-        // Wait for the accept completion
-        let completions = backend.wait(5000).unwrap();
-        assert_eq!(
-            completions.len(),
-            1,
-            "expected 1 completion, got {}",
-            completions.len()
-        );
-        assert_eq!(completions[0].id, accept_id);
-        assert!(
-            completions[0].result.is_ok(),
-            "accept failed: {:?}",
-            completions[0].result
-        );
-
-        // The result should be a port
-        let accepted = completions[0].result.as_ref().unwrap();
-        assert_eq!(
-            accepted.external_type_name(),
-            Some("port"),
-            "expected a port value"
-        );
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_connect_via_uring() {
-        // Create a TCP listener via std
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let bound_addr = listener.local_addr().unwrap();
-
-        // Accept from a background thread so we don't deadlock
-        let handle = std::thread::spawn(move || {
-            let _accepted = listener.accept().unwrap();
-            // Keep the accepted connection alive until the test is done
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        });
-
-        let backend = AsyncBackend::new().unwrap();
-
-        // Submit Connect
-        let connect_req = IoRequest {
-            op: IoOp::Connect {
-                addr: crate::io::request::ConnectAddr::Tcp {
-                    addr: "127.0.0.1".to_string(),
-                    port: bound_addr.port(),
-                    options: Default::default(),
-                    encoding: crate::port::Encoding::Binary,
-                },
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let connect_id = backend.submit(&connect_req).unwrap();
-
-        // Wait for the connect completion
-        let completions = backend.wait(5000).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, connect_id);
-        assert!(
-            completions[0].result.is_ok(),
-            "connect failed: {:?}",
-            completions[0].result
-        );
-
-        let connected = completions[0].result.as_ref().unwrap();
-        assert_eq!(connected.external_type_name(), Some("port"));
-
-        handle.join().unwrap();
-    }
-
-    /// Accept + connect on the same io_uring ring — the scheduler scenario.
-    /// One fiber does tcp/accept, another does tcp/connect, both SQEs on
-    /// the same ring. Both completions must arrive.
-    #[test]
-    fn test_accept_and_connect_concurrent() {
-        use std::os::unix::io::FromRawFd;
-
-        // Create a non-blocking TCP listener via libc
-        let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
-            assert!(fd >= 0);
-            let opt: libc::c_int = 1;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            );
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            addr.sin_family = libc::AF_INET as libc::sa_family_t;
-            addr.sin_port = 0;
-            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
-            libc::bind(
-                fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-            );
-            libc::listen(fd, 128);
-            fd
-        };
-
-        let bound_port = unsafe {
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            libc::getsockname(
-                listener_fd,
-                &mut addr as *mut _ as *mut libc::sockaddr,
-                &mut len,
-            );
-            u16::from_be(addr.sin_port)
-        };
-
-        let listener_port = Value::external(
-            "port",
-            Port::new_tcp_listener(
-                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
-                format!("127.0.0.1:{}", bound_port),
-            ),
-        );
-
-        let backend = AsyncBackend::new().unwrap();
-
-        let accept_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Accept {
-                    options: Default::default(),
-                    encoding: crate::port::Encoding::Binary,
-                },
-                port: listener_port,
-                timeout: None,
-            })
-            .unwrap();
-
-        let connect_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Connect {
-                    addr: crate::io::request::ConnectAddr::Tcp {
-                        addr: "127.0.0.1".to_string(),
-                        port: bound_port,
-                        options: Default::default(),
-                        encoding: crate::port::Encoding::Binary,
-                    },
-                },
-                port: Value::NIL,
-                timeout: None,
-            })
-            .unwrap();
-
-        // Collect completions — may arrive in 1 or 2 wait calls.
-        let mut all = Vec::new();
-        for _ in 0..5 {
-            let cs = backend.wait(2000).unwrap();
-            all.extend(cs);
-            if all.len() >= 2 {
-                break;
-            }
-        }
-
-        assert_eq!(all.len(), 2, "expected 2 completions, got {}", all.len());
-        for c in &all {
-            assert!(c.result.is_ok(), "id={} failed: {:?}", c.id, c.result);
-        }
-        let ids: Vec<u64> = all.iter().map(|c| c.id).collect();
-        assert!(ids.contains(&accept_id), "missing accept");
-        assert!(ids.contains(&connect_id), "missing connect");
-    }
-
-    fn open_rw_port(path: &str) -> Value {
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        Value::external(
-            "port",
-            Port::new_file(fd, Direction::ReadWrite, Encoding::Text, path.to_string()),
-        )
-    }
-
-    #[test]
-    fn test_async_seek_returns_immediate_completion() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("hello world");
-        let port = open_rw_port(&path);
-
-        let req = IoRequest {
-            op: IoOp::Seek {
-                offset: 6,
-                whence: libc::SEEK_SET,
-            },
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-
-        // Seek is immediate — no wait needed
-        let completions = backend.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
-        assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(6));
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_async_tell_returns_immediate_completion() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("hello");
-        let port = open_rw_port(&path);
-
-        let req = IoRequest {
-            op: IoOp::Tell,
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-
-        let completions = backend.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
-        assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(0));
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_async_seek_non_file_port_errors() {
-        let backend = AsyncBackend::new().unwrap();
-        let stdin_port = Value::external("port", Port::stdin());
-
-        let req = IoRequest {
-            op: IoOp::Seek {
-                offset: 0,
-                whence: libc::SEEK_SET,
-            },
-            port: stdin_port,
-            timeout: None,
-        };
-        // stdin has PortKind::Stdin — seek must fail immediately
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_err());
-    }
-
-    #[test]
-    fn test_async_submit_spawn_echo() {
-        use crate::io::request::{SpawnRequest, StdioDisposition};
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Spawn(SpawnRequest {
-                program: "/bin/echo".to_string(),
-                args: vec!["hello-async".to_string()],
-                env: None,
-                cwd: None,
-                stdin: StdioDisposition::Null,
-                stdout: StdioDisposition::Pipe,
-                stderr: StdioDisposition::Null,
-            }),
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        let val = completions[0].result.as_ref().expect("spawn failed");
-        let fields = val.as_struct().expect("expected struct");
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("pid".into()))
-                .unwrap()
-                .as_int()
-                .unwrap()
-                > 0
-        );
-    }
-
-    /// Test IORING_OP_WAITID via async backend.
-    /// Requires Linux kernel 6.7+. The test skips gracefully on older kernels
-    /// by checking for -EINVAL completion.
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_async_submit_process_wait_uring() {
-        use crate::io::request::{IoOp, IoRequest, ProcessHandle};
-
-        let child = std::process::Command::new("/bin/true").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
-
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::ProcessWait,
-            port: handle_val,
-            timeout: None,
-        };
-        let id = backend.submit(&req);
-
-        match id {
-            Err(e) if e.contains("thread-pool") => {
-                // Thread-pool backend: ProcessWait not supported. Skip.
-            }
-            Err(e) => panic!("submit failed unexpectedly: {}", e),
-            Ok(id) => {
-                let completions = backend.wait(5000).unwrap();
-                assert_eq!(completions.len(), 1);
-                assert_eq!(completions[0].id, id);
-                match &completions[0].result {
-                    Err(e) => {
-                        // -EINVAL means IORING_OP_WAITID not supported on this kernel. Skip.
-                        let msg = format!("{:?}", e);
-                        if msg.contains("22")
-                            || msg.contains("EINVAL")
-                            || msg.contains("waitid failed")
-                        {
-                            return; // kernel < 6.7
-                        }
-                        panic!("ProcessWait failed: {:?}", e);
-                    }
-                    Ok(val) => {
-                        assert_eq!(val.as_int(), Some(0), "expected exit 0");
-                    }
-                }
-            }
-        }
-    }
-
-    // ── IoOp::Open integration tests ─────────────────────────────────────────
-
-    #[test]
-    fn test_async_open_regular_file_returns_port() {
-        let path = format!("/tmp/elle-test-async-open-{}", std::process::id());
-        std::fs::write(&path, "async open test").unwrap();
-
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
-                path: path.clone(),
-                flags: libc::O_RDONLY | libc::O_CLOEXEC,
-                mode: 0o666,
-                direction: crate::port::Direction::Read,
-                encoding: crate::port::Encoding::Text,
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(
-            completions[0].result.is_ok(),
-            "open should succeed for existing file: {:?}",
-            completions[0].result
-        );
-        // Result must be a port value
-        let val = completions[0].result.as_ref().unwrap();
-        assert_eq!(
-            val.external_type_name(),
-            Some("port"),
-            "open result must be a port"
-        );
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_async_open_nonexistent_path_errors() {
-        let path = "/tmp/elle-test-async-open-nonexistent-dir/nofile";
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
-                path: path.to_string(),
-                flags: libc::O_RDONLY | libc::O_CLOEXEC,
-                mode: 0o666,
-                direction: crate::port::Direction::Read,
-                encoding: crate::port::Encoding::Text,
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(
-            completions[0].result.is_err(),
-            "open must error for nonexistent path"
-        );
-    }
-
-    #[test]
-    fn test_async_open_with_timeout_succeeds_on_regular_file() {
-        let path = format!("/tmp/elle-test-async-open-timeout-{}", std::process::id());
-        std::fs::write(&path, "timeout test").unwrap();
-
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
-                path: path.clone(),
-                flags: libc::O_RDONLY | libc::O_CLOEXEC,
-                mode: 0o666,
-                direction: crate::port::Direction::Read,
-                encoding: crate::port::Encoding::Text,
-            },
-            port: Value::NIL,
-            timeout: Some(std::time::Duration::from_millis(5000)),
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        // Regular file opens instantly — should succeed before the 5s timeout.
-        assert!(
-            completions[0].result.is_ok(),
-            "open with generous timeout must succeed for regular file: {:?}",
-            completions[0].result
-        );
-
-        std::fs::remove_file(&path).ok();
-    }
-}
+mod tests;

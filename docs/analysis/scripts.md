@@ -124,7 +124,7 @@ case counts uniformly without modifying test files.
 |---------------|---------------|---------|
 | Cheap (pure Rust, no eval) | 1000 | Value roundtrips, signal combine |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
-| Expensive (multiple evals, fibers, coroutines) | 10–50 | Pipeline properties, fiber determinism |
+| Expensive (multiple evals, fibers) | 10–50 | Pipeline properties, fiber determinism |
 
 ### Running property tests
 

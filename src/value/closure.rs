@@ -7,10 +7,12 @@
 //! externally; `template.signal` is the underlying code's signal.
 
 use crate::error::LocationMap;
+use crate::hir::region::StaticRegion;
 use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
-use crate::value::inline_slice::InlineSlice;
+use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
+use crate::value::CaptureMask;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -35,22 +37,22 @@ pub struct ClosureTemplate {
     /// Bitmask indicating which parameters need box wrapping.
     /// Bit i set means parameter i is mutated and needs a LocalLBox.
     pub capture_params_mask: u64,
-    /// Bitmask indicating which locally-defined variables need box wrapping.
-    /// Bit i set means locally-defined variable i needs a LocalLBox.
-    pub capture_locals_mask: u64,
+    /// Which locally-defined variables need box wrapping (a capture cell).
+    /// Slot i set means locally-defined variable i needs a LocalLBox. Unbounded
+    /// in width (see `CaptureMask`) — an uncaptured local at any index gets a
+    /// bare-NIL env slot, never a leaked dead cell.
+    pub capture_locals_mask: CaptureMask,
     /// Symbol ID → name mapping for cross-thread portability.
     pub symbol_names: Rc<HashMap<u32, String>>,
     /// Bytecode offset → source location mapping for error reporting.
     pub location_map: Rc<LocationMap>,
-    /// True when pool rotation is safe during tail-call iteration.
-    /// A rotation-safe function doesn't escape heap values to external
-    /// mutable structures, so temporaries can be freed between iterations.
-    pub rotation_safe: bool,
     /// LIR function for deferred JIT compilation.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
     /// Module's closure list for JIT MakeClosure resolution.
-    /// Optional docstring from the source lambda
-    pub doc: Option<Value>,
+    /// Optional docstring from the source lambda. Plain `Rc<str>` compile-time
+    /// data riding the template, never a heap `Value`; `(doc f)` materializes a
+    /// fresh ordinary (reclaimable) string from it on demand.
+    pub doc: Option<Rc<str>>,
     /// Original syntax node for eval environment reconstruction
     pub syntax: Option<Rc<crate::syntax::Syntax>>,
     /// How varargs are collected (List or Struct).
@@ -58,12 +60,6 @@ pub struct ClosureTemplate {
     pub vararg_kind: crate::hir::VarargKind,
     /// Optional name of this closure (for debugging/stack traces).
     pub name: Option<Rc<str>>,
-    /// True when the body's final expression is provably not a heap pointer.
-    /// Used by fiber resume to decide whether shared allocation is needed.
-    pub result_is_immediate: bool,
-    /// True when the body contains `set!` to a captured binding with a
-    /// potentially heap-allocated value. Used by fiber resume.
-    pub has_outward_heap_set: bool,
     /// WASM function table index (if compiled to WASM backend).
     /// When set, rt_call dispatches to this WASM function instead of bytecode.
     pub wasm_func_idx: Option<u32>,
@@ -71,9 +67,110 @@ pub struct ClosureTemplate {
     /// SPIR-V is a property of the code, not the instance — all closures
     /// from the same lambda share the template, so the cache is shared.
     pub spirv: std::cell::OnceCell<Vec<u8>>,
+    /// Per-function region table: the compile-time region slots
+    /// (`StaticRegion`, each ≥ 2) this template's function minted, cloned
+    /// from its `LirFunction`. Empty when the function has no allocations
+    /// (the common case). Every slot is ≥ 2 (slot 1 is reserved and never minted).
+    pub region_table: Vec<StaticRegion>,
+    /// The static region slots this function's allocations SHARE after a
+    /// builder-idiom merge (docs/impl/region/merging.md § Merging), cloned from its
+    /// `LirFunction` and threaded into the executing `Code` (`code()`), where the
+    /// alloc dispatch consults it for mint-or-reuse. Empty unless a merge fired,
+    /// so byte-identical to the plain mint on the default path.
+    pub merged_slots: Rc<rustc_hash::FxHashSet<u32>>,
+    /// The local slots this function's value-routed releases read, cloned from
+    /// its `LirFunction` and threaded into the executing `Code` (`code()`),
+    /// where an error exit walks them to run the releases the abandoned frame
+    /// still owed (docs/impl/region/mechanism.md § "An abandoned frame runs the
+    /// releases it still owes"). Empty for a body with no value route.
+    pub frame_release_slots: Rc<Vec<u16>>,
+    /// The `DecrefRegion` half of the same table — the static region slots this
+    /// function's slot-routed releases name, threaded into the executing `Code`
+    /// beside the value-route slots.
+    pub frame_release_regions: Rc<Vec<u32>>,
+    /// Blueprints for the nested lambdas this code object's `MakeClosure`
+    /// instructions materialize. Plain compile-time data (one `Rc` per nested
+    /// lambda), **not** heap `Value`s in any region — a `MakeClosure` indexes
+    /// this list and materializes a FRESH region-allocated
+    /// `HeapObject::ClosureTemplate` per execution (a heap literal is an ordinary,
+    /// reclaimable allocation; closure templates are no exception). Reclaimed by
+    /// region RC when this template drops.
+    pub child_protos: Rc<Vec<Rc<ClosureTemplate>>>,
 }
 
 impl ClosureTemplate {
+    /// Create a new ClosureTemplate with the three required fields;
+    /// all other fields default to zero/empty/None.
+    pub fn new(bytecode: Rc<Vec<u8>>, arity: Arity, constants: Rc<Vec<Value>>) -> Self {
+        ClosureTemplate {
+            bytecode,
+            arity,
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants,
+            signal: Signal::silent(),
+            capture_params_mask: 0,
+            capture_locals_mask: CaptureMask::empty(),
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            lir_function: None,
+            doc: None,
+            syntax: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+            wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
+            region_table: Vec::new(),
+            merged_slots: Rc::new(rustc_hash::FxHashSet::default()),
+            frame_release_slots: crate::value::code::empty_frame_release_slots(),
+            frame_release_regions: crate::value::code::empty_frame_release_regions(),
+            child_protos: Rc::new(Vec::new()),
+        }
+    }
+
+    /// A human-readable label for this function: its declared name when one
+    /// exists, else its smallest-offset source location, else `<anon>`.
+    /// Lowering names almost nothing, so the location is the label that
+    /// actually identifies a function to a reader — the JIT code-address
+    /// registry records it (docs/impl/jit.md § "The code-address registry").
+    pub fn display_label(&self) -> String {
+        if let Some(name) = self.name.as_deref() {
+            return name.to_string();
+        }
+        self.location_map
+            .iter()
+            .min_by_key(|(off, _)| **off)
+            .map(|(_, loc)| format!("{}", loc))
+            .unwrap_or_else(|| "<anon>".to_string())
+    }
+
+    /// The executable code object for this template: bundles the bytecode,
+    /// constant pool, and location map (and the child protos)
+    /// that the VM threads as the template-derived half of the execution
+    /// context. See [`crate::value::Code`]. Cheap — clones three `Rc`s.
+    pub fn code(&self) -> crate::value::Code {
+        let mut code = crate::value::Code::new(
+            self.bytecode.clone(),
+            self.constants.clone(),
+            self.location_map.clone(),
+            self.child_protos.clone(),
+        );
+        // Carry this function's merge metadata into the executing context so the
+        // alloc dispatch can mint-or-reuse merged slots (an `Rc` bump, not an
+        // allocation). Empty unless a merge fired, so inert on the default path.
+        code.merged_slots = self.merged_slots.clone();
+        // Carry the value-route release table so an error exit can run the
+        // releases this body's abandoned frame still owed (an `Rc` bump).
+        code.frame_release_slots = self.frame_release_slots.clone();
+        code.frame_release_regions = self.frame_release_regions.clone();
+        // The body's prologue reserves one stack position per local, so operands
+        // sit above them; carry the count so the dispatch loop can check that
+        // nothing pops into the reserved region (`Code::reserved_locals`).
+        code.reserved_locals = self.num_locals;
+        code
+    }
+
     /// True if signal and structural checks pass for GPU eligibility.
     ///
     /// This is a necessary but not sufficient condition — the full
@@ -90,24 +187,111 @@ impl ClosureTemplate {
             && self.signal.propagates == 0
             && matches!(self.arity, Arity::Exact(_))
             && self.capture_params_mask == 0
-            && self.capture_locals_mask == 0
+            && self.capture_locals_mask.is_empty()
+    }
+}
+
+/// A reference to a closure's per-definition template.
+///
+/// This is the **seam** between a `Closure` and its `ClosureTemplate` so the
+/// template's storage can change without touching the ~190 call sites that read
+/// `closure.template.<field>`: `Deref` makes every such read transparent
+/// (a closure template is an ordinary, reclaimable allocation, no exception).
+/// Two representations live behind it:
+///
+/// - `Shared(Rc<ClosureTemplate>)` — the `Rc`-shared form, used by the
+///   bootstrap sites that have no natural region (the fiber/ffi thunks, the
+///   JIT-suspend reconstruct, cross-thread send deserialization, the top-level
+///   entry thunk, and unit tests).
+/// - `Region(Value)` — a region-allocated `HeapObject::ClosureTemplate` the
+///   `MakeClosure` opcode materializes per execution; the closure *instance*
+///   holds this as a normal cross-region reference (increfed at the instance's
+///   alloc by `find_object_cross_refs`, cascade-decsumed when its region frees).
+///   User-code templates are reclaimed by region RC, not pinned for the
+///   process lifetime.
+///
+/// `Deref` resolves a `Region` Value through the arena; the materialized
+/// template lives as long as the closure that references it (co-region RC), so
+/// the deref is sound for the instance's lifetime.
+#[derive(Debug, Clone)]
+pub enum TemplateRef {
+    /// `Rc`-shared template — bootstrap sites with no natural region.
+    Shared(Rc<ClosureTemplate>),
+    /// Region-allocated `HeapObject::ClosureTemplate`, referenced by `Value`.
+    Region(Value),
+}
+
+impl TemplateRef {
+    /// Wrap an `Rc<ClosureTemplate>` as a `Shared` template reference.
+    pub fn new(template: Rc<ClosureTemplate>) -> Self {
+        TemplateRef::Shared(template)
+    }
+
+    /// Wrap a region-allocated `HeapObject::ClosureTemplate` `Value` as a
+    /// `Region` template reference. The `Value` must point to a live
+    /// `HeapObject::ClosureTemplate`; `Deref` asserts the tag on access.
+    pub fn region(template: Value) -> Self {
+        TemplateRef::Region(template)
+    }
+}
+
+impl std::ops::Deref for TemplateRef {
+    type Target = ClosureTemplate;
+    #[inline]
+    fn deref(&self) -> &ClosureTemplate {
+        match self {
+            TemplateRef::Shared(rc) => rc,
+            TemplateRef::Region(v) => {
+                let obj: &'static crate::value::heap::HeapObject =
+                    unsafe { crate::value::arena::deref(*v) };
+                match obj {
+                    crate::value::heap::HeapObject::ClosureTemplate(t) => t,
+                    other => unreachable!(
+                        "TemplateRef::Region must point to a ClosureTemplate, got {}",
+                        other.type_name()
+                    ),
+                }
+            }
+        }
+    }
+}
+
+impl From<Rc<ClosureTemplate>> for TemplateRef {
+    fn from(t: Rc<ClosureTemplate>) -> Self {
+        TemplateRef::Shared(t)
     }
 }
 
 /// Closure with captured environment
 #[derive(Debug, Clone)]
 pub struct Closure {
-    /// Shared per-definition data
-    pub template: Rc<ClosureTemplate>,
-    /// Captured environment (upvalues). Arena-allocated inline slice; its
+    /// Shared per-definition data, behind the `TemplateRef` seam.
+    pub template: TemplateRef,
+    /// Captured environment (upvalues). Region-allocated `RegionSlice`; its
     /// lifetime matches the arena that allocated the enclosing Closure.
-    pub env: InlineSlice<Value>,
+    pub env: RegionSlice<Value>,
     /// Per-instance squelch mask. Empty = no squelch; non-empty bits identify
     /// signals that are suppressed at the call boundary and converted to errors.
     pub squelch_mask: SignalBits,
 }
 
 impl Closure {
+    /// Build a closure from a template (anything convertible into a
+    /// `TemplateRef` — e.g. an `Rc<ClosureTemplate>`), a captured environment,
+    /// and a squelch mask. Prefer this over the struct literal so the template
+    /// representation stays behind the `TemplateRef` seam.
+    pub fn new(
+        template: impl Into<TemplateRef>,
+        env: RegionSlice<Value>,
+        squelch_mask: SignalBits,
+    ) -> Self {
+        Closure {
+            template: template.into(),
+            env,
+            squelch_mask,
+        }
+    }
+
     /// Returns the effective signal of this closure, accounting for any squelch mask.
     /// When the squelch mask suppresses signals the closure may emit:
     /// - Suppressed bits are cleared from the result
@@ -176,228 +360,7 @@ impl PartialEq for Closure {
     }
 }
 
+// Tests migrated to tests/elle/value-closure.lisp
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_template() -> Rc<ClosureTemplate> {
-        Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        })
-    }
-
-    #[test]
-    fn test_closure_signal() {
-        let closure = Closure {
-            template: make_template(),
-            env: InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure.signal(), Signal::silent());
-        assert_eq!(closure.effective_signal(), Signal::silent());
-    }
-
-    #[test]
-    fn test_closure_env_capacity() {
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(3),
-            num_locals: 5,
-            num_captures: 2,
-            num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure = Closure {
-            template,
-            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::NIL, Value::NIL]),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure.env_capacity(), 7);
-
-        let template2 = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::AtLeast(2),
-            num_locals: 4,
-            num_captures: 1,
-            num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure2 = Closure {
-            template: template2,
-            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::NIL]),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure2.env_capacity(), 5);
-
-        let template3 = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Range(1, 3),
-            num_locals: 3,
-            num_captures: 0,
-            num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure3 = Closure {
-            template: template3,
-            env: InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure3.env_capacity(), 3);
-    }
-
-    #[test]
-    fn test_effective_signal_no_squelch() {
-        let closure = Closure {
-            template: make_template(),
-            env: InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure.effective_signal(), Signal::silent());
-    }
-
-    #[test]
-    fn test_effective_signal_squelch_clears_bits() {
-        use crate::signals::SIG_YIELD;
-        let template = Rc::new(ClosureTemplate {
-            signal: Signal::yields(),
-            ..(*make_template()).clone()
-        });
-        let closure = Closure {
-            template,
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD,
-        };
-        let eff = closure.effective_signal();
-        assert_eq!(eff.bits, crate::signals::SIG_ERROR);
-        assert_eq!(eff.propagates, 0);
-    }
-
-    #[test]
-    fn test_effective_signal_squelch_no_effect_on_silent() {
-        use crate::signals::SIG_YIELD;
-        let closure = Closure {
-            template: make_template(), // signal = silent()
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD,
-        };
-        assert_eq!(closure.effective_signal(), Signal::silent());
-    }
-
-    #[test]
-    fn test_effective_signal_partial_squelch() {
-        use crate::signals::{SIG_ERROR, SIG_IO, SIG_YIELD};
-        let template = Rc::new(ClosureTemplate {
-            signal: Signal {
-                bits: SIG_YIELD.union(SIG_IO),
-                propagates: 0,
-            },
-            ..(*make_template()).clone()
-        });
-        let closure = Closure {
-            template,
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD, // only squelch yield
-        };
-        let eff = closure.effective_signal();
-        // SIG_YIELD cleared, SIG_IO still set, SIG_ERROR added
-        assert!(eff.bits.contains(SIG_ERROR), "SIG_ERROR should be set");
-        assert!(!eff.bits.contains(SIG_YIELD), "SIG_YIELD should be cleared");
-        assert!(eff.bits.contains(SIG_IO), "SIG_IO should remain set");
-    }
-
-    #[test]
-    fn test_effective_signal_composable() {
-        use crate::signals::{SIG_ERROR, SIG_IO, SIG_YIELD};
-        let template = Rc::new(ClosureTemplate {
-            signal: Signal {
-                bits: SIG_YIELD.union(SIG_IO),
-                propagates: 0,
-            },
-            ..(*make_template()).clone()
-        });
-        let closure1 = Closure {
-            template: template.clone(),
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD,
-        };
-        // Simulate composing a second squelch
-        let closure2 = Closure {
-            template: template.clone(),
-            env: InlineSlice::empty(),
-            squelch_mask: closure1.squelch_mask.union(SIG_IO),
-        };
-        let eff = closure2.effective_signal();
-        assert!(eff.bits.contains(SIG_ERROR), "SIG_ERROR should be set");
-        assert!(!eff.bits.contains(SIG_YIELD), "SIG_YIELD should be cleared");
-        assert!(!eff.bits.contains(SIG_IO), "SIG_IO should be cleared");
-    }
-}
+mod tests;

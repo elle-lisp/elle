@@ -1,9 +1,13 @@
 //! Display and Debug implementations for values
 //!
-//! This module contains the Display and Debug trait implementations
-//! for the tagged-union Value type, providing human-readable representations
-//! of values for debugging and user output.
+//! The tagged-union `Value` renders through one body, `fmt_value`, parameterized
+//! by a `debug` flag and an optional `&SymbolTable`. Symbol-name resolution is
+//! per-instance (docs/impl/region/ctx.md § "Symbols through the ctx"): a bare
+//! `Display`/`Debug` carries no table and renders a symbol as `#<sym:id>`, while
+//! [`Value::display_with`] / [`Value::debug_with`] thread an instance's table so
+//! names resolve all the way down.
 
+use crate::symbol::SymbolTable;
 use crate::value::cycle::{fmt_enter, HareState};
 use crate::value::Value;
 use std::fmt;
@@ -51,11 +55,6 @@ fn fmt_bytes_mut(blob: &std::cell::RefCell<Vec<u8>>, f: &mut fmt::Formatter<'_>)
     write!(f, "]")
 }
 
-/// Resolve a symbol ID to its name via the thread-local symbol table.
-fn resolve_symbol(id: u32) -> Option<String> {
-    crate::context::resolve_symbol_name(id)
-}
-
 /// Format a float, ensuring whole numbers display with a trailing `.0`
 /// so that `3.0` prints as `3.0`, not `3`.
 fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
@@ -76,282 +75,74 @@ fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
     }
 }
 
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Handle immediate values
-        if self.is_nil() {
-            return write!(f, "nil");
-        }
-
-        if self.is_empty_list() {
-            return write!(f, "()");
-        }
-
-        if self.is_undefined() {
-            return write!(f, "#<undefined>");
-        }
-
-        if let Some(b) = self.as_bool() {
-            return write!(f, "{}", b);
-        }
-
-        if let Some(n) = self.as_int() {
-            return write!(f, "{}", n);
-        }
-
-        if let Some(n) = self.as_float() {
-            return write_float(f, n);
-        }
-
-        if let Some(id) = self.as_symbol() {
-            return if let Some(name) = resolve_symbol(id) {
-                write!(f, "'{}", name)
-            } else {
-                write!(f, "#<sym:{}>", id)
-            };
-        }
-
-        if let Some(name) = self.as_keyword_name() {
-            return write!(f, ":{}", name);
-        }
-
-        if let Some(addr) = self.as_pointer() {
-            return write!(f, "<pointer 0x{:x}>", addr);
-        }
-
-        // SSO string (not heap)
-        if self.is_string() {
-            return self.with_string(|s| write!(f, "{}", s)).unwrap_or(Ok(()));
-        }
-
-        // Handle heap values
-        if !self.is_heap() {
-            return write!(
-                f,
-                "<unknown:tag={:#x},payload={:#x}>",
-                self.tag, self.payload
-            );
-        }
-
-        // Pair cell (list)
-        if let Some(_cons) = self.as_pair() {
-            return self.fmt_cons(f);
-        }
-
-        // Array
-        if let Some(vec_ref) = self.as_array_mut() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "@[<cycle>]"),
-            };
-            let vec = vec_ref.borrow();
-            write!(f, "@[")?;
-            for (i, v) in vec.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", v)?;
-            }
-            return write!(f, "]");
-        }
-
-        // @struct (mutable)
-        if let Some(table_ref) = self.as_struct_mut() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "@{{<cycle>}}"),
-            };
-            let table = table_ref.borrow();
-            write!(f, "@{{")?;
-            let mut first = true;
-            for (k, v) in table.iter() {
-                if !first {
-                    write!(f, " ")?;
-                }
-                first = false;
-                write!(f, "{} {:?}", k, v)?;
-            }
-            return write!(f, "}}");
-        }
-
-        // struct (immutable)
-        if let Some(struct_map) = self.as_struct() {
-            write!(f, "{{")?;
-            let mut first = true;
-            for (k, v) in struct_map.iter() {
-                if !first {
-                    write!(f, " ")?;
-                }
-                first = false;
-                write!(f, "{} {:?}", k, v)?;
-            }
-            return write!(f, "}}");
-        }
-
-        // Closure
-        if self.is_closure() {
-            return write!(f, "<closure>");
-        }
-
-        // Box
-        if let Some(cell_ref) = self.as_lbox() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "<box <cycle>>"),
-            };
-            let val = cell_ref.borrow();
-            return write!(f, "<box {}>", val);
-        }
-
-        // Fiber
-        if let Some(handle) = self.as_fiber() {
-            return match handle.try_with(|fib| fib.status.as_str()) {
-                Some(status) => write!(f, "<fiber:{}>", status),
-                None => write!(f, "<fiber:taken>"),
-            };
-        }
-
-        // Managed pointer
-        if let Some(cell) = self.as_managed_pointer() {
-            return match cell.get() {
-                Some(addr) => write!(f, "<pointer 0x{:x}>", addr),
-                None => write!(f, "<freed-pointer>"),
-            };
-        }
-
-        // Syntax object
-        if let Some(s) = self.as_syntax() {
-            return write!(f, "#<syntax:{}>", s);
-        }
-
-        // Parameter
-        if let Some((id, _)) = self.as_parameter() {
-            return write!(f, "<parameter:{}>", id);
-        }
-
-        if let Some(buf_ref) = self.as_string_mut() {
-            return fmt_string_mut(buf_ref, f);
-        }
-        if let Some(b) = self.as_bytes() {
-            return fmt_bytes(b, f);
-        }
-        if let Some(blob_ref) = self.as_bytes_mut() {
-            return fmt_bytes_mut(blob_ref, f);
-        }
-
-        // Array (immutable)
-        if let Some(elems) = self.as_array() {
-            write!(f, "[")?;
-            for (i, v) in elems.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", v)?;
-            }
-            return write!(f, "]");
-        }
-
-        // Set (immutable)
-        if let Some(set) = self.as_set() {
-            write!(f, "|")?;
-            for (i, v) in set.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", v)?;
-            }
-            return write!(f, "|");
-        }
-
-        // Set (mutable)
-        if let Some(set_ref) = self.as_set_mut() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "@|<cycle>|"),
-            };
-            let set = set_ref.borrow();
-            write!(f, "@|")?;
-            for (i, v) in set.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", v)?;
-            }
-            return write!(f, "|");
-        }
-
-        // FFI signature
-        if self.as_ffi_signature().is_some() {
-            return write!(f, "<ffi-signature>");
-        }
-
-        // FFI type descriptor
-        if let Some(desc) = self.as_ffi_type() {
-            return match desc {
-                crate::ffi::types::TypeDesc::Struct(sd) if sd.fields.len() <= 5 => {
-                    let names: Vec<String> = sd.fields.iter().map(|f| f.short_name()).collect();
-                    write!(f, "<ffi-type:struct({})>", names.join(", "))
-                }
-                _ => write!(f, "<ffi-type:{}>", desc.short_name()),
-            };
-        }
-
-        // Library handle
-        if let Some(id) = self.as_lib_handle() {
-            return write!(f, "<lib-handle:{}>", id);
-        }
-
-        // External object — delegate to type-specific Display if available
-        if let Some(port) = self.as_external::<crate::port::Port>() {
-            return write!(f, "{}", port);
-        }
-        if let Some(name) = self.external_type_name() {
-            return write!(f, "#<{}>", name);
-        }
-
-        // Default for unknown heap types
-        write!(f, "<heap:{:#x}>", self.payload)
+/// Format a `Value`, optionally resolving symbol names through `symbols`. The one
+/// rendering body for both `Display` (`debug == false`) and `Debug`
+/// (`debug == true`); it recurses by calling itself, so a threaded table reaches
+/// every nested symbol. `symbols` is `None` for a bare trait render — a symbol
+/// then prints `#<sym:id>` — and `Some` when a caller threads its instance's
+/// table via [`Value::display_with`] / [`Value::debug_with`]
+/// (docs/impl/region/ctx.md § "Symbols through the ctx").
+///
+/// Where the two renderings diverge they branch on `debug`: strings (Debug quotes
+/// and escapes), and the element/key recursion of cons/array/set/struct. A struct
+/// value is always rendered in Debug style (matching the historical
+/// `"{} {:?}"`/`"{:?} {:?}"`); a box's contents are always rendered in Display
+/// style (matching the historical Debug-delegates-to-Display for boxes).
+pub(crate) fn fmt_value(
+    v: &Value,
+    symbols: Option<&SymbolTable>,
+    debug: bool,
+    f: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    // Immediates shared verbatim by both renderings.
+    if v.is_nil() {
+        return write!(f, "nil");
     }
-}
-
-impl fmt::Debug for Value {
-    /// Machine-readable representation. Strings are quoted, bools are true/false.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_nil() {
-            return write!(f, "nil");
-        }
-        if self.is_empty_list() {
-            return write!(f, "()");
-        }
-        if self.is_undefined() {
-            return write!(f, "#<undefined>");
-        }
-        if let Some(b) = self.as_bool() {
-            return write!(f, "{}", if b { "true" } else { "false" });
-        }
-        if let Some(n) = self.as_int() {
-            return write!(f, "{}", n);
-        }
-        if let Some(n) = self.as_float() {
-            return write_float(f, n);
-        }
-        if let Some(id) = self.as_symbol() {
-            return if let Some(name) = resolve_symbol(id) {
-                write!(f, "'{}", name)
-            } else {
-                write!(f, "#<sym:{}>", id)
-            };
-        }
-        if let Some(name) = self.as_keyword_name() {
-            return write!(f, ":{}", name);
-        }
-        if let Some(addr) = self.as_pointer() {
-            return write!(f, "<pointer 0x{:x}>", addr);
-        }
-        // SSO string or heap LString — quoted with escaping
-        if self.is_string() {
-            return self
-                .with_string(|s| {
+    if v.is_empty_list() {
+        return write!(f, "()");
+    }
+    if v.is_undefined() {
+        return write!(f, "#<undefined>");
+    }
+    if let Some(b) = v.as_bool() {
+        return write!(f, "{}", b);
+    }
+    if let Some(n) = v.as_int() {
+        return write!(f, "{}", n);
+    }
+    if let Some(n) = v.as_float() {
+        return write_float(f, n);
+    }
+    if let Some(id) = v.as_symbol() {
+        // Identical in Display and Debug: the bare name if the threaded table
+        // resolves it, else `#<sym:id>`. The name carries no leading `'` —
+        // Scheme/CL print a symbol as its bare name (`'` is reader syntax for
+        // `quote`, not part of a symbol's printed form), and this matches the
+        // `string`/`println` path (`src/primitives/convert.rs`), so a list of
+        // symbols renders the same `(a b c)` everywhere it appears (a bare
+        // `Display`, a struct field, an error's `:syntax` form). A symbol stays
+        // distinguishable from a `"string"` in Debug mode (strings quote) and
+        // from a `:keyword` always.
+        return match symbols.and_then(|s| s.name(crate::value::SymbolId(id))) {
+            Some(name) => write!(f, "{}", name),
+            None => write!(f, "#<sym:{}>", id),
+        };
+    }
+    if let Some(name) = v.as_keyword_name() {
+        return write!(f, ":{}", name);
+    }
+    if let Some(addr) = v.as_pointer() {
+        return write!(f, "<pointer 0x{:x}>", addr);
+    }
+    // Native-fn is an immediate (tag below the heap boundary) — never deref.
+    if v.is_native_fn() {
+        return write!(f, "<native-fn>");
+    }
+    // String (SSO or heap): Debug quotes and escapes; Display prints raw.
+    if v.is_string() {
+        return v
+            .with_string(|s| {
+                if debug {
                     write!(f, "\"")?;
                     for ch in s.chars() {
                         match ch {
@@ -361,205 +152,304 @@ impl fmt::Debug for Value {
                         }
                     }
                     write!(f, "\"")
-                })
-                .unwrap_or(Ok(()));
-        }
-        if !self.is_heap() {
-            return write!(
-                f,
-                "<unknown:tag={:#x},payload={:#x}>",
-                self.tag, self.payload
-            );
-        }
-        // Pair cell — use Debug recursively
-        if self.as_pair().is_some() {
-            return self.fmt_cons_debug(f);
-        }
-        // Array
-        if let Some(vec_ref) = self.as_array_mut() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "@[<cycle>]"),
-            };
-            let vec = vec_ref.borrow();
-            write!(f, "@[")?;
-            for (i, v) in vec.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
+                } else {
+                    write!(f, "{}", s)
                 }
-                write!(f, "{:?}", v)?;
-            }
-            return write!(f, "]");
-        }
-        if let Some(buf_ref) = self.as_string_mut() {
-            return fmt_string_mut(buf_ref, f);
-        }
-        if let Some(b) = self.as_bytes() {
-            return fmt_bytes(b, f);
-        }
-        if let Some(blob_ref) = self.as_bytes_mut() {
-            return fmt_bytes_mut(blob_ref, f);
-        }
-        // Array (immutable)
-        if let Some(elems) = self.as_array() {
-            write!(f, "[")?;
-            for (i, v) in elems.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{:?}", v)?;
-            }
-            return write!(f, "]");
-        }
-        // Set (immutable)
-        if let Some(set) = self.as_set() {
-            write!(f, "|")?;
-            for (i, v) in set.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{:?}", v)?;
-            }
-            return write!(f, "|");
-        }
-        // Set (mutable)
-        if let Some(set_ref) = self.as_set_mut() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "@|<cycle>|"),
-            };
-            let set = set_ref.borrow();
-            write!(f, "@|")?;
-            for (i, v) in set.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{:?}", v)?;
-            }
-            return write!(f, "|");
-        }
-        // Struct (immutable) — use Debug for keys and values
-        if let Some(struct_map) = self.as_struct() {
-            write!(f, "{{")?;
-            let mut first = true;
-            for (k, v) in struct_map.iter() {
-                if !first {
-                    write!(f, " ")?;
-                }
-                first = false;
-                write!(f, "{:?} {:?}", k, v)?;
-            }
-            return write!(f, "}}");
-        }
-        // Struct (mutable) — use Debug for keys and values
-        if let Some(table_ref) = self.as_struct_mut() {
-            let _guard = match fmt_enter(self.payload as usize) {
-                Some(g) => g,
-                None => return write!(f, "@{{<cycle>}}"),
-            };
-            let table = table_ref.borrow();
-            write!(f, "@{{")?;
-            let mut first = true;
-            for (k, v) in table.iter() {
-                if !first {
-                    write!(f, " ")?;
-                }
-                first = false;
-                write!(f, "{:?} {:?}", k, v)?;
-            }
-            return write!(f, "}}");
-        }
-        // Everything else — delegate to Display
-        write!(f, "{}", self)
+            })
+            .unwrap_or(Ok(()));
     }
-}
 
-impl Value {
-    /// Format a cons cell (list) with cycle detection.
-    /// `debug` controls whether elements use `{:?}` (true) or `{}` (false).
-    fn fmt_cons_inner(&self, f: &mut fmt::Formatter<'_>, debug: bool) -> fmt::Result {
-        write!(f, "(")?;
-        let mut current = *self;
-        let mut hare = HareState::new(*self);
-        let mut first = true;
-        loop {
-            if current.is_nil() || current.is_empty_list() {
-                break;
+    // Handle heap values.
+    if !v.is_heap() {
+        return write!(f, "<unknown:tag={:#x},payload={:#x}>", v.tag, v.payload);
+    }
+
+    // Pair cell (list).
+    if v.as_pair().is_some() {
+        return fmt_cons(v, symbols, debug, f);
+    }
+
+    // Array (@array, mutable).
+    if let Some(vec_ref) = v.as_array_mut_raw() {
+        let _guard = match fmt_enter(v.payload as usize) {
+            Some(g) => g,
+            None => return write!(f, "@[<cycle>]"),
+        };
+        let vec = vec_ref.borrow();
+        write!(f, "@[")?;
+        for (i, item) in vec.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ")?;
             }
+            fmt_value(item, symbols, debug, f)?;
+        }
+        return write!(f, "]");
+    }
+
+    // @struct (mutable). The key follows the outer mode; the value is always
+    // rendered Debug-style.
+    if let Some(table_ref) = v.as_struct_mut_raw() {
+        let _guard = match fmt_enter(v.payload as usize) {
+            Some(g) => g,
+            None => return write!(f, "@{{<cycle>}}"),
+        };
+        let table = table_ref.borrow();
+        write!(f, "@{{")?;
+        let mut first = true;
+        for (k, val) in table.iter() {
             if !first {
                 write!(f, " ")?;
             }
             first = false;
-            if let Some(c) = current.as_pair() {
-                if debug {
-                    write!(f, "{:?}", c.first)?;
-                } else {
-                    write!(f, "{}", c.first)?;
-                }
-                current = c.rest;
-                if current.is_heap() && hare.advance(current) {
-                    write!(f, " . <cycle>")?;
-                    break;
-                }
-            } else {
-                if debug {
-                    write!(f, ". {:?}", current)?;
-                } else {
-                    write!(f, ". {}", current)?;
-                }
+            crate::value::types::fmt_table_key(k, symbols, debug, f)?;
+            write!(f, " ")?;
+            fmt_value(val, symbols, true, f)?;
+        }
+        return write!(f, "}}");
+    }
+
+    // struct (immutable).
+    if let Some(struct_map) = v.as_struct() {
+        write!(f, "{{")?;
+        let mut first = true;
+        for (k, val) in struct_map.iter() {
+            if !first {
+                write!(f, " ")?;
+            }
+            first = false;
+            crate::value::types::fmt_table_key(k, symbols, debug, f)?;
+            write!(f, " ")?;
+            fmt_value(val, symbols, true, f)?;
+        }
+        return write!(f, "}}");
+    }
+
+    // Closure.
+    if v.is_closure() {
+        return write!(f, "<closure>");
+    }
+
+    // Box — inner always rendered in Display mode (the original Debug impl had no
+    // box arm and fell through to Display).
+    if let Some(cell_ref) = v.as_lbox_raw() {
+        let _guard = match fmt_enter(v.payload as usize) {
+            Some(g) => g,
+            None => return write!(f, "<box <cycle>>"),
+        };
+        let val = cell_ref.borrow();
+        write!(f, "<box ")?;
+        fmt_value(&val, symbols, false, f)?;
+        return write!(f, ">");
+    }
+
+    // Fiber.
+    if let Some(handle) = v.as_fiber() {
+        return match handle.try_with(|fib| fib.status.as_str()) {
+            Some(status) => write!(f, "<fiber:{}>", status),
+            None => write!(f, "<fiber:taken>"),
+        };
+    }
+
+    // Managed pointer.
+    if let Some(cell) = v.as_managed_pointer() {
+        return match cell.get() {
+            Some(addr) => write!(f, "<pointer 0x{:x}>", addr),
+            None => write!(f, "<freed-pointer>"),
+        };
+    }
+
+    // Syntax object.
+    if let Some(s) = v.as_syntax() {
+        return write!(f, "#<syntax:{}>", s);
+    }
+
+    // Parameter.
+    if let Some((id, _)) = v.as_parameter() {
+        return write!(f, "<parameter:{}>", id);
+    }
+
+    if let Some(buf_ref) = v.as_string_mut() {
+        return fmt_string_mut(buf_ref, f);
+    }
+    if let Some(b) = v.as_bytes() {
+        return fmt_bytes(b, f);
+    }
+    if let Some(blob_ref) = v.as_bytes_mut() {
+        return fmt_bytes_mut(blob_ref, f);
+    }
+
+    // Array (immutable).
+    if let Some(elems) = v.as_array() {
+        write!(f, "[")?;
+        for (i, item) in elems.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ")?;
+            }
+            fmt_value(item, symbols, debug, f)?;
+        }
+        return write!(f, "]");
+    }
+
+    // Set (immutable).
+    if let Some(set) = v.as_set() {
+        write!(f, "|")?;
+        for (i, item) in set.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ")?;
+            }
+            fmt_value(item, symbols, debug, f)?;
+        }
+        return write!(f, "|");
+    }
+
+    // Set (mutable).
+    if let Some(set_ref) = v.as_set_mut_raw() {
+        let _guard = match fmt_enter(v.payload as usize) {
+            Some(g) => g,
+            None => return write!(f, "@|<cycle>|"),
+        };
+        let set = set_ref.borrow();
+        write!(f, "@|")?;
+        for (i, item) in set.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ")?;
+            }
+            fmt_value(item, symbols, debug, f)?;
+        }
+        return write!(f, "|");
+    }
+
+    // FFI signature.
+    if v.as_ffi_signature().is_some() {
+        return write!(f, "<ffi-signature>");
+    }
+
+    // FFI type descriptor.
+    if let Some(desc) = v.as_ffi_type() {
+        return match desc {
+            crate::ffi::types::TypeDesc::Struct(sd) if sd.fields.len() <= 5 => {
+                let names: Vec<String> = sd.fields.iter().map(|fld| fld.short_name()).collect();
+                write!(f, "<ffi-type:struct({})>", names.join(", "))
+            }
+            _ => write!(f, "<ffi-type:{}>", desc.short_name()),
+        };
+    }
+
+    // Library handle.
+    if let Some(id) = v.as_lib_handle() {
+        return write!(f, "<lib-handle:{}>", id);
+    }
+
+    // External object — delegate to type-specific Display if available.
+    if let Some(port) = v.as_external::<crate::port::Port>() {
+        return write!(f, "{}", port);
+    }
+    if let Some(name) = v.external_type_name() {
+        return write!(f, "#<{}>", name);
+    }
+
+    // Default for unknown heap types.
+    write!(f, "<heap:{:#x}>", v.payload)
+}
+
+/// Format a cons cell (list) with cycle detection, threading `symbols` and the
+/// `debug` mode to every element. `debug` selects element rendering: `{:?}` vs
+/// `{}` in the original two impls.
+fn fmt_cons(
+    v: &Value,
+    symbols: Option<&SymbolTable>,
+    debug: bool,
+    f: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    write!(f, "(")?;
+    let mut current = *v;
+    let mut hare = HareState::new(*v);
+    let mut first = true;
+    loop {
+        if current.is_nil() || current.is_empty_list() {
+            break;
+        }
+        if !first {
+            write!(f, " ")?;
+        }
+        first = false;
+        if let Some(c) = current.as_pair() {
+            fmt_value(&c.first, symbols, debug, f)?;
+            current = c.rest;
+            if current.is_heap() && hare.advance(current) {
+                write!(f, " . <cycle>")?;
                 break;
             }
+        } else {
+            write!(f, ". ")?;
+            fmt_value(&current, symbols, debug, f)?;
+            break;
         }
-        write!(f, ")")
+    }
+    write!(f, ")")
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt_value(self, None, false, f)
+    }
+}
+
+impl fmt::Debug for Value {
+    /// Machine-readable representation. Strings are quoted, bools are true/false.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt_value(self, None, true, f)
+    }
+}
+
+/// A `Value` paired with a symbol table for name-resolving rendering. Returned by
+/// [`Value::display_with`]; its `Display` resolves symbol names (the bare `name`)
+/// through the table, where a bare `Display`/`Debug` (no table) would print
+/// `#<sym:id>`.
+pub struct DisplayWith<'a> {
+    value: Value,
+    symbols: Option<&'a SymbolTable>,
+}
+
+impl fmt::Display for DisplayWith<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt_value(&self.value, self.symbols, false, f)
+    }
+}
+
+/// Like [`DisplayWith`] but renders in `Debug` style (quoted strings, etc.).
+/// Returned by [`Value::debug_with`]. It implements `Display` (not `Debug`) so
+/// `format!("{}", v.debug_with(symbols))` threads the table.
+pub struct DebugWith<'a> {
+    value: Value,
+    symbols: Option<&'a SymbolTable>,
+}
+
+impl fmt::Display for DebugWith<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt_value(&self.value, self.symbols, true, f)
+    }
+}
+
+impl Value {
+    /// Render through `symbols`, resolving symbol names (`'name`); pass `None` to
+    /// render `#<sym:id>`. The threaded-table alternative to a bare `Display`
+    /// (docs/impl/region/ctx.md § "Symbols through the ctx").
+    pub fn display_with<'a>(&self, symbols: Option<&'a SymbolTable>) -> DisplayWith<'a> {
+        DisplayWith {
+            value: *self,
+            symbols,
+        }
     }
 
-    fn fmt_cons_debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_cons_inner(f, true)
-    }
-
-    fn fmt_cons(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_cons_inner(f, false)
+    /// `Debug`-style render through `symbols` (quoted strings, resolved names).
+    pub fn debug_with<'a>(&self, symbols: Option<&'a SymbolTable>) -> DebugWith<'a> {
+        DebugWith {
+            value: *self,
+            symbols,
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::value::error::error_val;
-
-    /// Debug repr of a string containing a double-quote must escape it.
-    #[test]
-    fn test_debug_string_escapes_double_quote() {
-        let val = Value::string("say \"hello\"");
-        let repr = format!("{:?}", val);
-        assert_eq!(repr, r#""say \"hello\"""#);
-    }
-
-    /// Debug repr of a string containing a backslash must escape it.
-    #[test]
-    fn test_debug_string_escapes_backslash() {
-        let val = Value::string("path\\to\\file");
-        let repr = format!("{:?}", val);
-        assert_eq!(repr, r#""path\\to\\file""#);
-    }
-
-    /// Debug repr of a string containing both backslash and double-quote.
-    /// Backslash must be escaped before quote (order matters).
-    #[test]
-    fn test_debug_string_escapes_backslash_and_quote() {
-        let val = Value::string("a\\\"b");
-        let repr = format!("{:?}", val);
-        assert_eq!(repr, r#""a\\\"b""#);
-    }
-
-    /// Display of a struct with a string value must quote and escape the string.
-    #[test]
-    fn test_display_struct_quotes_string_values() {
-        let err = error_val("type-error", "expected \"integer\"");
-        let repr = format!("{}", err);
-        // The struct has :error and :message keys (BTreeMap, sorted by key).
-        // :error → :type-error (keyword, no quotes)
-        // :message → "expected \"integer\"" (string, quoted and escaped)
-        assert!(repr.contains(r#""expected \"integer\"""#), "got: {}", repr);
-    }
-}
+mod tests;

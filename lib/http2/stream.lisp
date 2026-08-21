@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2/stream.lisp — HTTP/2 stream state machine + flow control
 ##
 ## Loaded via:

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Module system — parametric modules, qualified symbols, selective import
 
 # ============================================================================
@@ -94,3 +94,16 @@
   (assert (= (c2:count) 0) "counter: c2 independent, still zero")
   (c2:inc)
   (assert (= (c2:count) 1) "counter: c2 incremented once"))
+
+# ============================================================================
+# 8. Top-level `protect` in an imported module — SIG_SWITCH must not leak
+# ============================================================================
+
+# `protect` expands to fiber/new + fiber/resume. An imported module's forms run
+# nested inside the caller's fiber, so that resume returns the VM-internal
+# SIG_SWITCH trampoline signal. The import executor must drain it (as the root
+# dispatch and `eval` do); if it leaks, the import dies with
+# "import: unexpected signal 0x2000". Regression for that leak.
+(let [m ((import-file "tests/modules/protect-toplevel.lisp"))]
+  (assert (= (m:ok) true)
+          "top-level protect module imports without leaking SIG_SWITCH"))

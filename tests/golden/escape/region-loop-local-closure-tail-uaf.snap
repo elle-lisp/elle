@@ -1,0 +1,100 @@
+[needs_capture]
+  b0(small?) local mutated=false immutable=true needs_capture=false
+  b1(drive-pair) local mutated=false immutable=true needs_capture=false
+  b2(drive-struct) local mutated=false immutable=true needs_capture=false
+  b3(__file_expr_#0) local mutated=false immutable=false needs_capture=false
+  b4(__file_expr_#1) local mutated=false immutable=false needs_capture=false
+  b5(__file_expr_#2) local mutated=false immutable=false needs_capture=false
+  b6(__file_expr_#3) local mutated=false immutable=false needs_capture=false
+  b7(__file_expr_#4) local mutated=false immutable=false needs_capture=false
+  b8(d#0) param mutated=false immutable=true needs_capture=false
+  b9(d10k) param mutated=false immutable=true needs_capture=false
+  b10(n) param mutated=false immutable=true needs_capture=false
+  b11(before) local mutated=false immutable=true needs_capture=false
+  b12(i) local mutated=true immutable=false needs_capture=true
+  b13(g) local mutated=false immutable=true needs_capture=false
+  b14(~) local mutated=false immutable=true needs_capture=false
+  b15(n) param mutated=false immutable=true needs_capture=false
+  b16(before) local mutated=false immutable=true needs_capture=false
+  b17(i) local mutated=true immutable=false needs_capture=true
+  b18(g) local mutated=false immutable=true needs_capture=false
+  b19(~) local mutated=false immutable=true needs_capture=false
+  b20(d#0) local mutated=false immutable=true needs_capture=false
+  b21(d10k) local mutated=false immutable=true needs_capture=false
+  b22(G#0) local mutated=false immutable=true needs_capture=false
+  b23(~) local mutated=false immutable=true needs_capture=false
+  b24(~) local mutated=false immutable=true needs_capture=false
+  b25(d#0) local mutated=false immutable=true needs_capture=false
+  b26(d10k) local mutated=false immutable=true needs_capture=false
+  b27(G#1) local mutated=false immutable=true needs_capture=false
+  b28(~) local mutated=false immutable=true needs_capture=false
+  b29(~) local mutated=false immutable=true needs_capture=false
+[lambda_captures]
+  #1 params=[b8(d#0), b9(d10k)] captures=[]
+  #10 params=[b10(n)] captures=[]
+  #29 params=[] captures=[b12(i)<Local>]
+  #53 params=[b15(n)] captures=[]
+  #72 params=[] captures=[b17(i)<Local>]
+[return_frontier]
+  [r10, r33, r4]
+[suppressed_decref_regions]
+  []
+[region_instrs]
+  ; entry <anon>
+    block0: DecrefValueRegion v22
+    block0: DecrefValueRegion v27
+    block0: DecrefRegion s0
+    block2: DecrefValueRegion v56
+    block2: DecrefValueRegion v58
+    block2: DecrefRegion s1
+    block2: DecrefRegion s2
+    block2: DecrefValueRegion v67
+    block2: DecrefRegion s3
+    block4: IncrefValueRegion v70
+    block4: DecrefValueRegion v71
+    block3: DecrefRegion s4
+    block3: DecrefRegion s5
+    block6: DecrefValueRegion v100
+    block6: DecrefValueRegion v102
+    block6: DecrefRegion s6
+    block6: DecrefRegion s7
+    block6: DecrefValueRegion v111
+    block6: DecrefRegion s8
+    block8: IncrefValueRegion v114
+    block8: DecrefValueRegion v115
+    block7: DecrefRegion s9
+    block7: IncrefValueRegion v120
+    block7: DecrefValueRegion v121
+    block7: DecrefValueRegion v123
+    block7: DecrefValueRegion v125
+  ; closure[0] <anon>
+    block0: DecrefValueRegion v5
+    block1: IncrefValueRegion v11
+    block1: DecrefValueRegion v12
+  ; closure[1] <anon>
+    block4: IncrefRegion s10
+    block4: DecrefValueRegion v18
+    block4: DecrefRegion s11
+    block3: DecrefValueRegion v25
+    block3: DecrefCellRegion v27
+    block1: DecrefValueRegion v34
+    block1: DecrefValueRegion v36
+    block1: IncrefValueRegion v33
+  ; closure[2] <anon>
+    block0: IncrefRegion s12
+    block0: DecrefRegion s12
+  ; closure[3] <anon>
+    block4: IncrefRegion s13
+    block4: DecrefValueRegion v18
+    block4: DecrefRegion s14
+    block3: DecrefValueRegion v25
+    block3: DecrefCellRegion v27
+    block1: DecrefValueRegion v34
+    block1: DecrefValueRegion v36
+    block1: IncrefValueRegion v33
+  ; closure[4] <anon>
+    block0: IncrefValueRegion v1
+    block0: TailCall defer_callee_release=false
+    block0: IncrefValueRegion v4
+    block0: DecrefValueRegion v5
+    block0: DecrefValueRegion v6

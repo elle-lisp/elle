@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 
 ## FFI integration tests
 ## Tests the full pipeline: Elle source → compiler → VM → libffi → C

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http.lisp — Pure Elle HTTP/1.1 client and server
 ##
 ## Plain HTTP only:
@@ -744,7 +744,7 @@
         {:transport t :status status-line:status :headers resp-headers})))
 
   (defn sse-get [url &named headers last-event-id @reconnect]
-    "Open an SSE connection to url and return a coroutine that yields
+    "Open an SSE connection to url and return a fiber that yields
      events until the stream terminates. Each event is a struct:
        {:event \"message\" :data \"...\" :id \"...\" :retry 3000}
 
@@ -954,399 +954,450 @@
 
   (defn run-internal-tests []
     "Sanity checks on internal wire-format helpers. Called via (http:test)."
+    # Scratch files live in a fresh directory under the platform temp
+    # root (honors TMPDIR); with-temp-dir deletes the whole tree after
+    # the body, even when an assert fails, so runs never litter.
+    (with-temp-dir dir
+                   (defn scratch [name]
+                     "Path for a scratch file under this run's temp dir."
+                     (path/join dir name))
 
-    # header->kw
-    (assert (= (header->kw "Content-Type") :content-type)
-            "header->kw Content-Type")
-    (assert (= (header->kw "Host") :host) "header->kw Host")
-    (assert (= (header->kw "X-Custom-Header") :x-custom-header)
-            "header->kw X-Custom-Header")
-    (assert (= (header->kw "content-type") :content-type) "header->kw lowercase")
+                   # header->kw
+                   (assert (= (header->kw "Content-Type") :content-type)
+                           "header->kw Content-Type")
+                   (assert (= (header->kw "Host") :host) "header->kw Host")
+                   (assert (= (header->kw "X-Custom-Header") :x-custom-header)
+                           "header->kw X-Custom-Header")
+                   (assert (= (header->kw "content-type") :content-type)
+                           "header->kw lowercase")
 
-    # kw->header
-    (assert (= (kw->header :content-type) "Content-Type")
-            "kw->header content-type")
-    (assert (= (kw->header :host) "Host") "kw->header host")
-    (assert (= (kw->header :x-custom-header) "X-Custom-Header")
-            "kw->header x-custom-header")
-    (assert (= (kw->header :content-length) "Content-Length")
-            "kw->header content-length")
+                   # kw->header
+                   (assert (= (kw->header :content-type) "Content-Type")
+                           "kw->header content-type")
+                   (assert (= (kw->header :host) "Host") "kw->header host")
+                   (assert (= (kw->header :x-custom-header) "X-Custom-Header")
+                           "kw->header x-custom-header")
+                   (assert (= (kw->header :content-length) "Content-Length")
+                           "kw->header content-length")
 
-    # round-trip
-    (assert (= (kw->header (header->kw "Content-Type")) "Content-Type")
-            "header round-trip Content-Type")
-    (assert (= (kw->header (header->kw "Host")) "Host") "header round-trip Host")
+                   # round-trip
+                   (assert (= (kw->header (header->kw "Content-Type"))
+                              "Content-Type") "header round-trip Content-Type")
+                   (assert (= (kw->header (header->kw "Host")) "Host")
+                           "header round-trip Host")
 
-    # read-headers via file transport
-    (spit "/tmp/elle-http-test-headers"
-          "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-headers"
-                         :read (fn [t]
-                                 (let [h (read-headers t)]
-                                   (assert (= h:content-type "text/plain")
-                                   "read-headers content-type")
-                                   (assert (= h:host "example.com")
-                                   "read-headers host")
-                                   (assert (= h:content-length "42")
-                                   "read-headers content-length"))))
+                   # read-headers via file transport
+                   (spit (scratch "headers")
+                         "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
+                   (with-file-transport (scratch "headers")
+                                        :read (fn [t]
+                                          (let [h (read-headers t)]
+                                            (assert (= h:content-type
+                                            "text/plain")
+                                            "read-headers content-type")
+                                            (assert (= h:host "example.com")
+                                            "read-headers host")
+                                            (assert (= h:content-length "42")
+                                            "read-headers content-length"))))
 
-    # read-headers trims whitespace
-    (spit "/tmp/elle-http-test-headers-ws" "X-Foo:   bar baz   \r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-headers-ws"
-                         :read (fn [t]
-                                 (let [h (read-headers t)]
-                                   (assert (= h:x-foo "bar baz")
-                                   "read-headers trims whitespace"))))
+                   # read-headers trims whitespace
+                   (spit (scratch "headers-ws") "X-Foo:   bar baz   \r\n\r\n")
+                   (with-file-transport (scratch "headers-ws")
+                                        :read (fn [t]
+                                          (let [h (read-headers t)]
+                                            (assert (= h:x-foo "bar baz")
+                                            "read-headers trims whitespace"))))
 
-    # read-headers malformed
-    (spit "/tmp/elle-http-test-headers-bad" "no-colon-here\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-headers-bad"
-                         :read (fn [t]
-                                 (let [[ok? _] (protect (read-headers t))]
-                                   (assert (not ok?)
-                                   "read-headers malformed signals error"))))
+                   # read-headers malformed
+                   (spit (scratch "headers-bad") "no-colon-here\r\n\r\n")
+                   (with-file-transport (scratch "headers-bad")
+                                        :read (fn [t]
+                                          (let [[ok? _] (protect (read-headers t))]
+                                            (assert (not ok?)
+                                            "read-headers malformed signals error"))))
 
-    # write-headers
-    (with-file-transport "/tmp/elle-http-test-write-headers"
-                         :write (fn [t]
-                                  (write-headers t
-                                  {:content-type "text/plain"
-                                   :content-length "11"})
-                                  (t-write t "\r\n")
-                                  (t-flush t)))
-    (let [content (slurp "/tmp/elle-http-test-write-headers")]
-      (assert (string/contains? content "Content-Type: text/plain")
-              "write-headers content-type")
-      (assert (string/contains? content "Content-Length: 11")
-              "write-headers content-length"))
+                   # write-headers
+                   (with-file-transport (scratch "write-headers")
+                                        :write (fn [t]
+                                          (write-headers t
+                                          {:content-type "text/plain"
+                                          :content-length "11"})
+                                          (t-write t "\r\n")
+                                          (t-flush t)))
+                   (let [content (slurp (scratch "write-headers"))]
+                     (assert (string/contains? content
+                             "Content-Type: text/plain")
+                             "write-headers content-type")
+                     (assert (string/contains? content "Content-Length: 11")
+                             "write-headers content-length"))
 
-    # read-request-line
-    (spit "/tmp/elle-http-test-req-line" "GET /path HTTP/1.1\r\n")
-    (with-file-transport "/tmp/elle-http-test-req-line"
-                         :read (fn [t]
-                                 (let [rl (read-request-line t)]
-                                   (assert (= rl:method "GET")
-                                   "request-line method")
-                                   (assert (= rl:path "/path")
-                                   "request-line path")
-                                   (assert (= rl:version "HTTP/1.1")
-                                   "request-line version"))))
+                   # read-request-line
+                   (spit (scratch "req-line") "GET /path HTTP/1.1\r\n")
+                   (with-file-transport (scratch "req-line")
+                                        :read (fn [t]
+                                          (let [rl (read-request-line t)]
+                                            (assert (= rl:method "GET")
+                                            "request-line method")
+                                            (assert (= rl:path "/path")
+                                            "request-line path")
+                                            (assert (= rl:version "HTTP/1.1")
+                                            "request-line version"))))
 
-    # read-status-line
-    (spit "/tmp/elle-http-test-status-200" "HTTP/1.1 200 OK\r\n")
-    (with-file-transport "/tmp/elle-http-test-status-200"
-                         :read (fn [t]
-                                 (let [sl (read-status-line t)]
-                                   (assert (= sl:version "HTTP/1.1")
-                                   "status-line version")
-                                   (assert (= sl:status 200)
-                                   "status-line status")
-                                   (assert (= sl:reason "OK")
-                                   "status-line reason"))))
+                   # read-status-line
+                   (spit (scratch "status-200") "HTTP/1.1 200 OK\r\n")
+                   (with-file-transport (scratch "status-200")
+                                        :read (fn [t]
+                                          (let [sl (read-status-line t)]
+                                            (assert (= sl:version "HTTP/1.1")
+                                            "status-line version")
+                                            (assert (= sl:status 200)
+                                            "status-line status")
+                                            (assert (= sl:reason "OK")
+                                            "status-line reason"))))
 
-    # read-body with Content-Length
-    (spit "/tmp/elle-http-test-body" "hello world")
-    (with-file-transport "/tmp/elle-http-test-body"
-                         :read (fn [t]
-                                 (let [body (read-body t {:content-length "11"})]
-                                   (assert (= body "hello world")
-                                   "read-body with content-length"))))
+                   # read-body with Content-Length
+                   (spit (scratch "body") "hello world")
+                   (with-file-transport (scratch "body")
+                                        :read (fn [t]
+                                          (let [body (read-body t
+                                            {:content-length "11"})]
+                                            (assert (= body "hello world")
+                                            "read-body with content-length"))))
 
-    # read-body without Content-Length
-    (spit "/tmp/elle-http-test-body-no-cl" "ignored")
-    (with-file-transport "/tmp/elle-http-test-body-no-cl"
-                         :read (fn [t]
-                                 (let [body (read-body t {})]
-                                   (assert (nil? body)
-                                   "read-body without content-length is nil"))))
+                   # read-body without Content-Length
+                   (spit (scratch "body-no-cl") "ignored")
+                   (with-file-transport (scratch "body-no-cl")
+                                        :read (fn [t]
+                                          (let [body (read-body t {})]
+                                            (assert (nil? body)
+                                            "read-body without content-length is nil"))))
 
-    # chunk-size: hex digits, with optional extension, error cases
-    (assert (= (chunk-size "0") 0) "chunk-size 0")
-    (assert (= (chunk-size "a") 10) "chunk-size a")
-    (assert (= (chunk-size "1a") 26) "chunk-size 1a")
-    (assert (= (chunk-size "FF") 255) "chunk-size FF (uppercase)")
-    (assert (= (chunk-size "10;ext=value") 16) "chunk-size with extension")
-    (assert (= (chunk-size "  20  ") 32) "chunk-size trims whitespace")
-    (let [[ok? _] (protect (chunk-size nil))]
-      (assert (not ok?) "chunk-size nil signals error"))
-    (let [[ok? _] (protect (chunk-size ""))]
-      (assert (not ok?) "chunk-size empty signals error"))
-    (let [[ok? _] (protect (chunk-size ";ext"))]
-      (assert (not ok?) "chunk-size bare extension signals error"))
+                   # chunk-size: hex digits, with optional extension, error cases
+                   (assert (= (chunk-size "0") 0) "chunk-size 0")
+                   (assert (= (chunk-size "a") 10) "chunk-size a")
+                   (assert (= (chunk-size "1a") 26) "chunk-size 1a")
+                   (assert (= (chunk-size "FF") 255) "chunk-size FF (uppercase)")
+                   (assert (= (chunk-size "10;ext=value") 16)
+                           "chunk-size with extension")
+                   (assert (= (chunk-size "  20  ") 32)
+                           "chunk-size trims whitespace")
+                   (let [[ok? _] (protect (chunk-size nil))]
+                     (assert (not ok?) "chunk-size nil signals error"))
+                   (let [[ok? _] (protect (chunk-size ""))]
+                     (assert (not ok?) "chunk-size empty signals error"))
+                   (let [[ok? _] (protect (chunk-size ";ext"))]
+                     (assert (not ok?) "chunk-size bare extension signals error"))
 
-    # chunked? predicate
-    (assert (chunked? {:transfer-encoding "chunked"}) "chunked? lowercase")
-    (assert (chunked? {:transfer-encoding "Chunked"}) "chunked? mixed-case")
-    (assert (chunked? {:transfer-encoding "gzip, chunked"}) "chunked? with gzip")
-    (assert (not (chunked? {})) "chunked? absent")
-    (assert (not (chunked? {:transfer-encoding "gzip"})) "chunked? gzip-only")
+                   # chunked? predicate
+                   (assert (chunked? {:transfer-encoding "chunked"})
+                           "chunked? lowercase")
+                   (assert (chunked? {:transfer-encoding "Chunked"})
+                           "chunked? mixed-case")
+                   (assert (chunked? {:transfer-encoding "gzip, chunked"})
+                           "chunked? with gzip")
+                   (assert (not (chunked? {})) "chunked? absent")
+                   (assert (not (chunked? {:transfer-encoding "gzip"}))
+                           "chunked? gzip-only")
 
-    # read-chunked-body: happy path
-    (spit "/tmp/elle-http-test-chunked" "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-chunked"
-                         :read (fn [t]
-                                 (let [body (read-chunked-body t)]
-                                   (assert (= body "hello world")
-                                   "read-chunked-body concatenates chunks"))))
+                   # read-chunked-body: happy path
+                   (spit (scratch "chunked")
+                         "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
+                   (with-file-transport (scratch "chunked")
+                                        :read (fn [t]
+                                          (let [body (read-chunked-body t)]
+                                            (assert (= body "hello world")
+                                            "read-chunked-body concatenates chunks"))))
 
-    # read-chunked-body: chunk extensions are ignored
-    (spit "/tmp/elle-http-test-chunked-ext" "3;ext=foo\r\nabc\r\n0\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-chunked-ext"
-                         :read (fn [t]
-                                 (let [body (read-chunked-body t)]
-                                   (assert (= body "abc")
-                                   "read-chunked-body ignores extensions"))))
+                   # read-chunked-body: chunk extensions are ignored
+                   (spit (scratch "chunked-ext") "3;ext=foo\r\nabc\r\n0\r\n\r\n")
+                   (with-file-transport (scratch "chunked-ext")
+                                        :read (fn [t]
+                                          (let [body (read-chunked-body t)]
+                                            (assert (= body "abc")
+                                            "read-chunked-body ignores extensions"))))
 
-    # read-chunked-body: trailers are discarded
-    (spit "/tmp/elle-http-test-chunked-trail"
-          "4\r\ndata\r\n0\r\nX-Trailer: value\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-chunked-trail"
-                         :read (fn [t]
-                                 (let [body (read-chunked-body t)]
-                                   (assert (= body "data")
-                                   "read-chunked-body discards trailers"))))
+                   # read-chunked-body: trailers are discarded
+                   (spit (scratch "chunked-trail")
+                         "4\r\ndata\r\n0\r\nX-Trailer: value\r\n\r\n")
+                   (with-file-transport (scratch "chunked-trail")
+                                        :read (fn [t]
+                                          (let [body (read-chunked-body t)]
+                                            (assert (= body "data")
+                                            "read-chunked-body discards trailers"))))
 
-    # read-chunked-body: hex sizes
-    (spit "/tmp/elle-http-test-chunked-hex"
-          "1a\r\nabcdefghijklmnopqrstuvwxyz\r\n0\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-chunked-hex"
-                         :read (fn [t]
-                                 (let [body (read-chunked-body t)]
-                                   (assert (= body "abcdefghijklmnopqrstuvwxyz")
-                                   "read-chunked-body hex-encoded size"))))
+                   # read-chunked-body: hex sizes
+                   (spit (scratch "chunked-hex")
+                         "1a\r\nabcdefghijklmnopqrstuvwxyz\r\n0\r\n\r\n")
+                   (with-file-transport (scratch "chunked-hex")
+                                        :read (fn [t]
+                                          (let [body (read-chunked-body t)]
+                                            (assert (= body
+                                            "abcdefghijklmnopqrstuvwxyz")
+                                            "read-chunked-body hex-encoded size"))))
 
-    # read-chunked-body: empty body (just the 0-chunk)
-    (spit "/tmp/elle-http-test-chunked-empty" "0\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-chunked-empty"
-                         :read (fn [t]
-                                 (let [body (read-chunked-body t)]
-                                   (assert (= body "")
-                                   "read-chunked-body empty body"))))
+                   # read-chunked-body: empty body (just the 0-chunk)
+                   (spit (scratch "chunked-empty") "0\r\n\r\n")
+                   (with-file-transport (scratch "chunked-empty")
+                                        :read (fn [t]
+                                          (let [body (read-chunked-body t)]
+                                            (assert (= body "")
+                                            "read-chunked-body empty body"))))
 
-    # read-body dispatches on Transfer-Encoding before Content-Length
-    (spit "/tmp/elle-http-test-body-chunked" "5\r\nhello\r\n0\r\n\r\n")
-    (with-file-transport "/tmp/elle-http-test-body-chunked"
-                         :read (fn [t]
-                                 (let [body (read-body t
-                                       {:transfer-encoding "chunked"
-                                        :content-length "999"})]
-                                   (assert (= body "hello")
-                                   "read-body prefers chunked over content-length"))))
+                   # read-body dispatches on Transfer-Encoding before Content-Length
+                   (spit (scratch "body-chunked") "5\r\nhello\r\n0\r\n\r\n")
+                   (with-file-transport (scratch "body-chunked")
+                                        :read (fn [t]
+                                          (let [body (read-body t
+                                            {:transfer-encoding "chunked"
+                                            :content-length "999"})]
+                                            (assert (= body "hello")
+                                            "read-body prefers chunked over content-length"))))
 
-    # write-chunk: produces hex-size + CRLF + data + CRLF
-    (with-file-transport "/tmp/elle-http-test-write-chunk"
-                         :write (fn [t]
-                                  (write-chunk t "hi")
-                                  (write-chunk t "there")
-                                  (write-last-chunk t)
-                                  (t-flush t)))
-    (let [content (slurp "/tmp/elle-http-test-write-chunk")]
-      (assert (= content "2\r\nhi\r\n5\r\nthere\r\n0\r\n\r\n")
-              "write-chunk + write-last-chunk produce correct framing"))
+                   # write-chunk: produces hex-size + CRLF + data + CRLF
+                   (with-file-transport (scratch "write-chunk")
+                                        :write (fn [t]
+                                          (write-chunk t "hi")
+                                          (write-chunk t "there")
+                                          (write-last-chunk t)
+                                          (t-flush t)))
+                   (let [content (slurp (scratch "write-chunk"))]
+                     (assert (= content "2\r\nhi\r\n5\r\nthere\r\n0\r\n\r\n")
+                             "write-chunk + write-last-chunk produce correct framing"))
 
-    # write-chunk: empty chunk is a no-op
-    (with-file-transport "/tmp/elle-http-test-write-chunk-empty"
-                         :write (fn [t]
-                                  (write-chunk t "")
-                                  (write-last-chunk t)
-                                  (t-flush t)))
-    (let [content (slurp "/tmp/elle-http-test-write-chunk-empty")]
-      (assert (= content "0\r\n\r\n") "write-chunk empty is a no-op"))
+                   # write-chunk: empty chunk is a no-op
+                   (with-file-transport (scratch "write-chunk-empty")
+                                        :write (fn [t]
+                                          (write-chunk t "")
+                                          (write-last-chunk t)
+                                          (t-flush t)))
+                   (let [content (slurp (scratch "write-chunk-empty"))]
+                     (assert (= content "0\r\n\r\n")
+                             "write-chunk empty is a no-op"))
 
-    # round-trip: write chunks, read them back
-    (with-file-transport "/tmp/elle-http-test-chunk-roundtrip"
-                         :write (fn [t]
-                                  (write-chunk t "one ")
-                                  (write-chunk t "two ")
-                                  (write-chunk t "three")
-                                  (write-last-chunk t)
-                                  (t-flush t)))
-    (with-file-transport "/tmp/elle-http-test-chunk-roundtrip"
-                         :read (fn [t]
-                                 (let [body (read-chunked-body t)]
-                                   (assert (= body "one two three")
-                                   "chunk round-trip"))))
+                   # round-trip: write chunks, read them back
+                   (with-file-transport (scratch "chunk-roundtrip")
+                                        :write (fn [t]
+                                          (write-chunk t "one ")
+                                          (write-chunk t "two ")
+                                          (write-chunk t "three")
+                                          (write-last-chunk t)
+                                          (t-flush t)))
+                   (with-file-transport (scratch "chunk-roundtrip")
+                                        :read (fn [t]
+                                          (let [body (read-chunked-body t)]
+                                            (assert (= body "one two three")
+                                            "chunk round-trip"))))
 
-    # full request parse
-    (spit "/tmp/elle-http-test-full-req"
-          "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
-    (let [out @[nil nil nil nil]]
-      (with-file-transport "/tmp/elle-http-test-full-req"
-                           :read (fn [t]
-                                   (let [rl (read-request-line t)]
-                                     (put out 0 rl:method)
-                                     (put out 1 rl:path)
-                                     (let [h (read-headers t)]
-                                       (put out 2 h:host)
-                                       (let [body (read-body t h)]
-                                         (put out 3 body))))))
-      (assert (= (get out 0) "POST") "full req method")
-      (assert (= (get out 1) "/submit") "full req path")
-      (assert (= (get out 2) "localhost") "full req host")
-      (assert (= (get out 3) "data") "full req body"))
+                   # full request parse
+                   (spit (scratch "full-req")
+                         "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
+                   (let [out @[nil nil nil nil]]
+                     (with-file-transport (scratch "full-req")
+                     :read (fn [t]
+                             (let [rl (read-request-line t)]
+                               (put out 0 rl:method)
+                               (put out 1 rl:path)
+                               (let [h (read-headers t)]
+                                 (put out 2 h:host)
+                                 (let [body (read-body t h)]
+                                   (put out 3 body))))))
+                     (assert (= (get out 0) "POST") "full req method")
+                     (assert (= (get out 1) "/submit") "full req path")
+                     (assert (= (get out 2) "localhost") "full req host")
+                     (assert (= (get out 3) "data") "full req body"))
 
-    # https URL without :tls plugin: clear error
-    (when (nil? tls)
-      (let [[ok? err] (protect (http-get "https://example.com/"))]
-        (assert (not ok?) "https without tls signals error")
-        (assert (= err:reason :tls-not-configured)
-                "https without tls reports :tls-not-configured")))
+                   # https URL without :tls plugin: clear error
+                   (when (nil? tls)
+                     (let [[ok? err] (protect (http-get "https://example.com/"))]
+                       (assert (not ok?) "https without tls signals error")
+                       (assert (= err:reason :tls-not-configured)
+                               "https without tls reports :tls-not-configured")))
 
-    # query-encode: scalars
-    (assert (= (query-encode {}) "") "query-encode empty → empty string")
-    (assert (= (query-encode {:page 2}) "page=2") "query-encode integer value")
-    (assert (= (query-encode {:q "hello world"}) "q=hello%20world")
-            "query-encode percent-encodes spaces")
-    (assert (= (query-encode {:flag true}) "flag=true")
-            "query-encode boolean true")
-    (assert (= (query-encode {:flag false}) "flag=false")
-            "query-encode boolean false")
+                   # query-encode: scalars
+                   (assert (= (query-encode {}) "")
+                           "query-encode empty → empty string")
+                   (assert (= (query-encode {:page 2}) "page=2")
+                           "query-encode integer value")
+                   (assert (= (query-encode {:q "hello world"})
+                              "q=hello%20world")
+                           "query-encode percent-encodes spaces")
+                   (assert (= (query-encode {:flag true}) "flag=true")
+                           "query-encode boolean true")
+                   (assert (= (query-encode {:flag false}) "flag=false")
+                           "query-encode boolean false")
 
-    # query-encode: keyword values render as bare strings (no colon)
-    (assert (= (query-encode {:sort :asc}) "sort=asc")
-            "query-encode keyword strips colon")
+                   # query-encode: keyword values render as bare strings (no colon)
+                   (assert (= (query-encode {:sort :asc}) "sort=asc")
+                           "query-encode keyword strips colon")
 
-    # query-encode: nil values are dropped
-    (assert (= (query-encode {:a 1 :b nil :c 3}) "a=1&c=3")
-            "query-encode omits nil values")
+                   # query-encode: nil values are dropped
+                   (assert (= (query-encode {:a 1 :b nil :c 3}) "a=1&c=3")
+                           "query-encode omits nil values")
 
-    # query-encode: arrays/lists produce repeated keys
-    (assert (= (query-encode {:tag ["a" "b" "c"]}) "tag=a&tag=b&tag=c")
-            "query-encode repeats array values")
+                   # query-encode: arrays/lists produce repeated keys
+                   (assert (= (query-encode {:tag ["a" "b" "c"]})
+                              "tag=a&tag=b&tag=c")
+                           "query-encode repeats array values")
 
-    # query-encode: reserved characters in keys and values are encoded
-    (assert (= (query-encode {"a b" "c&d=e"}) "a%20b=c%26d%3De")
-            "query-encode encodes reserved characters in both keys and values")
+                   # query-encode: reserved characters in keys and values are encoded
+                   (assert (= (query-encode {"a b" "c&d=e"}) "a%20b=c%26d%3De")
+                           "query-encode encodes reserved characters in both keys and values")
 
-    # merge-query: struct merges with existing URL query
-    (assert (= (merge-query "fmt=json" {:page 2}) "fmt=json&page=2")
-            "merge-query appends struct to url query")
-    (assert (= (merge-query nil {:page 2}) "page=2")
-            "merge-query with nil url query")
-    (assert (= (merge-query "fmt=json" nil) "fmt=json")
-            "merge-query with nil extra keeps url query")
-    (assert (= (merge-query "fmt=json" "page=2") "fmt=json&page=2")
-            "merge-query accepts pre-encoded string")
-    (assert (nil? (merge-query nil nil)) "merge-query nil+nil is nil")
+                   # merge-query: struct merges with existing URL query
+                   (assert (= (merge-query "fmt=json" {:page 2})
+                              "fmt=json&page=2")
+                           "merge-query appends struct to url query")
+                   (assert (= (merge-query nil {:page 2}) "page=2")
+                           "merge-query with nil url query")
+                   (assert (= (merge-query "fmt=json" nil) "fmt=json")
+                           "merge-query with nil extra keeps url query")
+                   (assert (= (merge-query "fmt=json" "page=2")
+                              "fmt=json&page=2")
+                           "merge-query accepts pre-encoded string")
+                   (assert (nil? (merge-query nil nil))
+                           "merge-query nil+nil is nil")
 
-    # strip-line-terminator: parity between tcp and tls transports.
-    # port/read-line strips newlines; tls:read-line does not; tls-transport
-    # reconciles them so wire-format helpers see a single semantics.
-    (assert (= (strip-line-terminator "hi\r\n") "hi")
-            "strip-line-terminator CRLF")
-    (assert (= (strip-line-terminator "hi\n") "hi") "strip-line-terminator LF")
-    (assert (= (strip-line-terminator "hi\r") "hi") "strip-line-terminator CR")
-    (assert (= (strip-line-terminator "hi") "hi")
-            "strip-line-terminator no terminator")
-    (assert (= (strip-line-terminator "") "") "strip-line-terminator empty")
-    (assert (nil? (strip-line-terminator nil))
-            "strip-line-terminator nil passthrough")
+                   # strip-line-terminator: parity between tcp and tls transports.
+                   # port/read-line strips newlines; tls:read-line does not; tls-transport
+                   # reconciles them so wire-format helpers see a single semantics.
+                   (assert (= (strip-line-terminator "hi\r\n") "hi")
+                           "strip-line-terminator CRLF")
+                   (assert (= (strip-line-terminator "hi\n") "hi")
+                           "strip-line-terminator LF")
+                   (assert (= (strip-line-terminator "hi\r") "hi")
+                           "strip-line-terminator CR")
+                   (assert (= (strip-line-terminator "hi") "hi")
+                           "strip-line-terminator no terminator")
+                   (assert (= (strip-line-terminator "") "")
+                           "strip-line-terminator empty")
+                   (assert (nil? (strip-line-terminator nil))
+                           "strip-line-terminator nil passthrough")
 
-    # redirect-limit normalization
-    (assert (= (redirect-limit nil) 0) "redirect-limit nil → 0")
-    (assert (= (redirect-limit false) 0) "redirect-limit false → 0")
-    (assert (= (redirect-limit true) (default-redirect-limit))
-            "redirect-limit true → default")
-    (assert (= (redirect-limit 3) 3) "redirect-limit integer passthrough")
-    (let [[ok? _] (protect (redirect-limit "bogus"))]
-      (assert (not ok?) "redirect-limit rejects non-integer/non-bool"))
+                   # redirect-limit normalization
+                   (assert (= (redirect-limit nil) 0) "redirect-limit nil → 0")
+                   (assert (= (redirect-limit false) 0)
+                           "redirect-limit false → 0")
+                   (assert (= (redirect-limit true) (default-redirect-limit))
+                           "redirect-limit true → default")
+                   (assert (= (redirect-limit 3) 3)
+                           "redirect-limit integer passthrough")
+                   (let [[ok? _] (protect (redirect-limit "bogus"))]
+                     (assert (not ok?)
+                             "redirect-limit rejects non-integer/non-bool"))
 
-    # resolve-location
-    (let [base (parse-url "http://example.com/foo")]
-      (assert (= (resolve-location base "https://other.com/bar")
-                 "https://other.com/bar")
-              "resolve-location absolute URL passthrough")
-      (assert (= (resolve-location base "//other.com/bar")
-                 "http://other.com/bar") "resolve-location scheme-relative")
-      (assert (= (resolve-location base "/new/path")
-                 "http://example.com:80/new/path")
-              "resolve-location absolute path"))
+                   # resolve-location
+                   (let [base (parse-url "http://example.com/foo")]
+                     (assert (= (resolve-location base "https://other.com/bar")
+                                "https://other.com/bar")
+                             "resolve-location absolute URL passthrough")
+                     (assert (= (resolve-location base "//other.com/bar")
+                                "http://other.com/bar")
+                             "resolve-location scheme-relative")
+                     (assert (= (resolve-location base "/new/path")
+                                "http://example.com:80/new/path")
+                             "resolve-location absolute path"))
 
-    # redirect-statuses / get-rewrite-statuses
-    (each s [301 302 303 307 308]
-      (assert (redirect-statuses s) (string/format "status {} is a redirect" s)))
-    (assert (not (redirect-statuses 200)) "200 is not a redirect")
-    (assert (not (redirect-statuses 500)) "500 is not a redirect")
-    (each s [301 302 303]
-      (assert (get-rewrite-statuses s)
-              (string/format "status {} rewrites to GET" s)))
-    (each s [307 308]
-      (assert (not (get-rewrite-statuses s))
-              (string/format "status {} preserves method" s)))
+                   # redirect-statuses / get-rewrite-statuses
+                   (each s [301 302 303 307 308]
+                     (assert (redirect-statuses s)
+                             (string/format "status {} is a redirect" s)))
+                   (assert (not (redirect-statuses 200)) "200 is not a redirect")
+                   (assert (not (redirect-statuses 500)) "500 is not a redirect")
+                   (each s [301 302 303]
+                     (assert (get-rewrite-statuses s)
+                             (string/format "status {} rewrites to GET" s)))
+                   (each s [307 308]
+                     (assert (not (get-rewrite-statuses s))
+                             (string/format "status {} preserves method" s)))
 
-    # SSE: field parsing
-    (let [f (sse-parse-field "event: update")]
-      (assert (= f:field "event") "sse-parse-field event name"))
-    (let [f (sse-parse-field "data: hello")]
-      (assert (= f:value "hello")
-              "sse-parse-field eats one leading space on value"))
-    (let [f (sse-parse-field "data:hello")]
-      (assert (= f:value "hello") "sse-parse-field no space is fine too"))
-    (assert (nil? (sse-parse-field ": comment"))
-            "sse-parse-field treats : prefix as comment")
-    (assert (nil? (sse-parse-field "")) "sse-parse-field skips empty line")
-    (let [f (sse-parse-field "field-no-colon")]
-      (assert (= f:field "field-no-colon")
-              "sse-parse-field colonless line is field")
-      (assert (= f:value "") "sse-parse-field colonless value is empty"))
+                   # SSE: field parsing
+                   (let [f (sse-parse-field "event: update")]
+                     (assert (= f:field "event") "sse-parse-field event name"))
+                   (let [f (sse-parse-field "data: hello")]
+                     (assert (= f:value "hello")
+                             "sse-parse-field eats one leading space on value"))
+                   (let [f (sse-parse-field "data:hello")]
+                     (assert (= f:value "hello")
+                             "sse-parse-field no space is fine too"))
+                   (assert (nil? (sse-parse-field ": comment"))
+                           "sse-parse-field treats : prefix as comment")
+                   (assert (nil? (sse-parse-field ""))
+                           "sse-parse-field skips empty line")
+                   (let [f (sse-parse-field "field-no-colon")]
+                     (assert (= f:field "field-no-colon")
+                             "sse-parse-field colonless line is field")
+                     (assert (= f:value "")
+                             "sse-parse-field colonless value is empty"))
 
-    # SSE: sse-handle-line dispatches events on blank lines
-    (let [events @[]
-          state @{:event-type nil :data-lines @[] :last-id nil :retry nil}]
-      (defn collect [e]
-        (push events e))
-      (sse-handle-line state "event: ping" collect)
-      (sse-handle-line state "data: one" collect)
-      (sse-handle-line state "data: two" collect)
-      (sse-handle-line state "id: 42" collect)
-      (sse-handle-line state "" collect)  # dispatch
-      (sse-handle-line state "data: alone" collect)
-      (sse-handle-line state "" collect)  # dispatch (no event, inherits id)
-      (assert (= (length events) 2) "sse-handle-line: 2 events")
-      (let [e0 (get events 0)]
-        (assert (= e0:event "ping") "SSE event name")
-        (assert (= e0:data "one\ntwo") "SSE multi-line data joined")
-        (assert (= e0:id "42") "SSE id captured"))
-      (let [e1 (get events 1)]
-        (assert (= e1:event "message") "SSE default event type")
-        (assert (= e1:id "42") "SSE id persists across events")))
+                   # SSE: sse-handle-line dispatches events on blank lines
+                   (let [events @[]
+                         state @{:event-type nil
+                                 :data-lines @[]
+                                 :last-id nil
+                                 :retry nil}]
+                     (defn collect [e]
+                       (push events e))
+                     (sse-handle-line state "event: ping" collect)
+                     (sse-handle-line state "data: one" collect)
+                     (sse-handle-line state "data: two" collect)
+                     (sse-handle-line state "id: 42" collect)
+                     (sse-handle-line state "" collect)  # dispatch
+                     (sse-handle-line state "data: alone" collect)
+                     (sse-handle-line state "" collect)  # dispatch (no event, inherits id)
+                     (assert (= (length events) 2) "sse-handle-line: 2 events")
+                     (let [e0 (get events 0)]
+                       (assert (= e0:event "ping") "SSE event name")
+                       (assert (= e0:data "one\ntwo")
+                               "SSE multi-line data joined")
+                       (assert (= e0:id "42") "SSE id captured"))
+                     (let [e1 (get events 1)]
+                       (assert (= e1:event "message") "SSE default event type")
+                       (assert (= e1:id "42") "SSE id persists across events")))
 
-    # SSE: format-sse-event round-trips basics
-    (assert (= (format-sse-event {:event "message" :data "hi"}) "data: hi\n\n")
-            "format-sse-event default event skips 'event:' line")
-    (assert (= (format-sse-event {:event "tick" :data "1" :id "a"})
-               "event: tick\nid: a\ndata: 1\n\n") "format-sse-event full frame")
-    (assert (= (format-sse-event {:data "line1\nline2"})
-               "data: line1\ndata: line2\n\n")
-            "format-sse-event splits multi-line data")
-    (assert (= (format-sse-event {:retry 5000}) "retry: 5000\n\n")
-            "format-sse-event retry-only event")
+                   # SSE: format-sse-event round-trips basics
+                   (assert (= (format-sse-event {:event "message" :data "hi"})
+                              "data: hi\n\n")
+                           "format-sse-event default event skips 'event:' line")
+                   (assert (= (format-sse-event {:event "tick" :data "1" :id "a"})
+                              "event: tick\nid: a\ndata: 1\n\n")
+                           "format-sse-event full frame")
+                   (assert (= (format-sse-event {:data "line1\nline2"})
+                              "data: line1\ndata: line2\n\n")
+                           "format-sse-event splits multi-line data")
+                   (assert (= (format-sse-event {:retry 5000}) "retry: 5000\n\n")
+                           "format-sse-event retry-only event")
 
-    # SSE: parse + format round-trip
-    (let [events @[]
-          state @{:event-type nil :data-lines @[] :last-id nil :retry nil}
-          wire (format-sse-event {:event "tick" :data "hello" :id "7"})]
-      (each line in (string/split wire "\n")
-        (sse-handle-line state line (fn [e] (push events e))))
-      (assert (= (length events) 1) "SSE round-trip: one event")
-      (let [e (get events 0)]
-        (assert (= e:event "tick") "SSE round-trip: event")
-        (assert (= e:data "hello") "SSE round-trip: data")
-        (assert (= e:id "7") "SSE round-trip: id")))
+                   # SSE: parse + format round-trip
+                   (let [events @[]
+                         state @{:event-type nil
+                                 :data-lines @[]
+                                 :last-id nil
+                                 :retry nil}
+                         wire (format-sse-event {:event "tick"
+                         :data "hello"
+                         :id "7"})]
+                     (each line in (string/split wire "\n")
+                       (sse-handle-line state line (fn [e] (push events e))))
+                     (assert (= (length events) 1) "SSE round-trip: one event")
+                     (let [e (get events 0)]
+                       (assert (= e:event "tick") "SSE round-trip: event")
+                       (assert (= e:data "hello") "SSE round-trip: data")
+                       (assert (= e:id "7") "SSE round-trip: id")))
 
-    # SSE: sse-response builds a chunked streaming response
-    (let [resp (sse-response (fn [send]
-                               (send {:data "first"})
-                               (send {:event "tick" :data "1"})))]
-      (assert (= resp:status 200) "sse-response: status 200")
-      (assert (= (get resp:headers :content-type) "text/event-stream")
-              "sse-response: content-type")
-      (assert (string/contains? (string/lowercase (get resp:headers
-                                :transfer-encoding)) "chunked")
-              "sse-response: transfer-encoding chunked")
-      (assert (fn? resp:body) "sse-response: body is a closure"))
+                   # SSE: sse-response builds a chunked streaming response
+                   (let [resp (sse-response (fn [send]
+                           (send {:data "first"})
+                           (send {:event "tick" :data "1"})))]
+                     (assert (= resp:status 200) "sse-response: status 200")
+                     (assert (= (get resp:headers :content-type)
+                                "text/event-stream")
+                             "sse-response: content-type")
+                     (assert (string/contains? (string/lowercase (get resp:headers
+                             :transfer-encoding)) "chunked")
+                             "sse-response: transfer-encoding chunked")
+                     (assert (fn? resp:body) "sse-response: body is a closure"))
 
-    true)
+                   true))
 
   ## ── Exports ─────────────────────────────────────────────────────────
 

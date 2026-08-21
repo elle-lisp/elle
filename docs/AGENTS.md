@@ -48,7 +48,7 @@ Design documents, language references, and contributor guides for Elle.
 | `impl/mlir.md` | MLIR/LLVM tier-2 CPU backend |
 | `impl/spirv.md` | SPIR-V emission (compiler-generated + hand-written DSL) |
 | `impl/gpu.md` | End-to-end GPU compute (MLIR + SPIR-V + Vulkan) |
-| `impl/differential.md` | Cross-tier agreement harness (`compile/run-on`) |
+| `impl/differential.md` | Cross-tier agreement: `compile/run-on` + the runner's diverge status |
 | `impl/values.md` | Value representation, tagged union |
 
 ### Reference Material
@@ -125,27 +125,3 @@ Root AGENTS.md references these docs:
 - `types.md` — for type system details
 - `signals.md` — for signal annotations
 - `testing.md` — for test organization
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `README.md` | ~60 | Human-facing entry point with grouped table of contents |
-| `AGENTS.md` | ~150 | Agent-facing navigation index with cross-references |
-| `language.md` | 1356 | Complete language reference |
-| `types.md` | 444 | Type system definition |
-| `semantics.md` | 154 | Authoritative semantics |
-| `macros.md` | 334 | Macro system design |
-| `signals.md` | ~1200 | Signal system design and error signalling |
-| `cookbook.md` | 647 | Recipes for common changes |
-| `testing.md` | 472 | Testing strategy |
-| `pipeline.md` | 256 | Compilation pipeline |
-| `config.md` | ~150 | Runtime configuration: vm/config API, trace keywords, JIT/WASM policies, CLI sugar |
-| `debugging.md` | 220 | Debugging toolkit |
-| `oddities.md` | 280 | Intentional design oddities |
-| `fibers.md` | 312 | Fiber architecture |
-| `ffi.md` | ~480 | FFI design |
-| `modules.md` | ~240 | Module system design |
-| `reference/janet.md` | ~200 | Janet language reference |
-| `reference/janet-compiler.md` | ~150 | Janet compiler design |
-| `reference/janet-destructuring.md` | ~100 | Janet destructuring patterns |

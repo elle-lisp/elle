@@ -9,13 +9,10 @@ mod eval;
 
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
-pub use cache::{
-    get_or_compile_escape_projection, get_or_compile_projection, lookup_stdlib_value,
-    register_repl_binding, register_repl_macros, update_cache_with_stdlib,
-};
+pub use cache::CompileCtx;
 pub use compile::{
-    compile, compile_file, compile_file_repl, compile_file_to_fhir, compile_file_to_lir,
-    splice_includes,
+    compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
+    compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 
@@ -23,7 +20,6 @@ pub use eval::{eval, eval_all, eval_file, eval_syntax};
 #[derive(Debug)]
 pub struct CompileResult {
     pub bytecode: crate::compiler::Bytecode,
-    pub scope_stats: crate::lir::lower::ScopeStats,
 }
 
 /// Analysis-only result (no bytecode generation)

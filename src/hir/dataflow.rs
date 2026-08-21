@@ -7,7 +7,9 @@ use super::arena::BindingArena;
 use super::binding::Binding;
 use super::defuse::{DefUseBuilder, ValueOrigin};
 use super::expr::{Hir, HirId};
-use super::liveness::{build_binding_index, BitSet, LivenessAnalyzer};
+use super::liveness::{
+    build_binding_index, compute_last_use, compute_order, BitSet, LivenessAnalyzer,
+};
 
 use std::collections::HashMap;
 
@@ -25,6 +27,10 @@ pub struct DataflowInfo {
     pub binding_index: HashMap<Binding, usize>,
     /// Dense bit index → Binding
     pub index_binding: Vec<Binding>,
+    /// HirId where the value produced by `alloc_hir_id` is last used.
+    /// Equals `alloc_hir_id` itself if the allocation has no use anywhere.
+    /// Populated by the per-HirId last-use extension of liveness analysis.
+    pub last_use: HashMap<HirId, HirId>,
 }
 
 /// Run the complete dataflow analysis on a functionalized HIR tree.
@@ -42,6 +48,10 @@ pub fn analyze_dataflow(hir: &Hir) -> DataflowInfo {
     let empty = la.empty_set();
     la.analyze(hir, &empty);
 
+    // Phase 4: per-HirId last-use (drives region `decref_point` placement)
+    let order = compute_order(hir);
+    let last_use = compute_last_use(hir, &du.uses, &order).per_node;
+
     DataflowInfo {
         def_site: du.def_site,
         uses: du.uses,
@@ -49,6 +59,7 @@ pub fn analyze_dataflow(hir: &Hir) -> DataflowInfo {
         live_out: la.live_out,
         binding_index,
         index_binding,
+        last_use,
     }
 }
 

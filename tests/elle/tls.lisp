@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## TLS library integration tests — Chunk 4: handshake only
 ##
 ## Requires network access (connects to example.com:443).
@@ -18,9 +18,9 @@
   (let [[ok? r] (protect (import-file "target/release/libelle_tls.so"))]
     (if ok? [ok? r] (protect (import-file "target/debug/libelle_tls.so")))))
 
-(when (not ok?)
-  (print "SKIP: elle-tls plugin not built (run: cargo build -p elle-tls)\n")
-  (exit 0))
+(unless ok?
+  (error (struct :error :gated
+                 :reason "elle-tls plugin not built (run: cargo build -p elle-tls)")))
 
 ## Extract the handshake-complete? primitive for use in assertions.
 ## (Must be accessed via plugin struct — not resolvable as a global name.)
@@ -102,8 +102,11 @@
 ## TLS client in the same the async scheduler, verifies the full round-trip.
 
 ## Generate test certificates. If openssl is not available or fails, skip.
-(let [cert-path "/tmp/elle-tls-test.cert.pem"
-      key-path "/tmp/elle-tls-test.key.pem"]
+## The scratch dir is created here — after the plugin gate above — so a
+## gated exit leaks nothing; it is removed at the end of the file.
+(def scratch (file/mktempdir))
+(let [cert-path (path/join scratch "cert.pem")
+      key-path (path/join scratch "key.pem")]
   (let [gen-result (subprocess/system "openssl"
                                       ["req" "-x509" "-newkey" "rsa:2048"
                                        "-keyout" key-path "-out" cert-path
@@ -230,5 +233,7 @@
                       (string (get err :error)))))
     (println "tls chunk 7: connect to plain-HTTP port rejected ✓\n"))
   (println "tls chunk 7: connect to plain-HTTP port SKIPPED (no network)\n"))
+
+(file/delete-dir-all scratch)
 
 (println "tls chunk 7: all error cases PASSED\n")

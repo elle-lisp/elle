@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Tests for primitives migrated from Rust to Elle stdlib.
 ## Covers: drop, range
 

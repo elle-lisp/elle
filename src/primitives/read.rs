@@ -1,10 +1,10 @@
 //! Read primitives (string → value)
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::def::RegionEffect;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 /// Parse the first form from a string.
 ///
@@ -15,39 +15,35 @@ use crate::value::{error_val, Value};
 /// (read "42")         # → 42
 /// (read "true")       # → true
 /// ```
-pub(crate) fn prim_read(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_read(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("read: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "read", "string");
     };
 
     // Parse the first form
     let syntax = match read_syntax(&source, "<read>") {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, error_val("read-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("read-error", e)),
     };
 
-    // Convert Syntax to Value — needs symbol table for interning symbols
-    let symbols = unsafe {
-        match crate::context::get_symbol_table() {
-            Some(ptr) => &mut *ptr,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "read: symbol table not available"),
-                )
-            }
-        }
-    };
+    // Convert Syntax to Value — needs the symbol table for interning symbols.
+    // Reached through the driving VM (this instance's own table). Raw deref:
+    // `to_value` takes both the table and `ctx`.
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("internal-error", "read: symbol table not available"),
+        );
+    }
+    let symbols = unsafe { &mut *symbols_ptr };
 
-    (SIG_OK, syntax.to_value(symbols))
+    (SIG_OK, syntax.to_value(symbols, ctx))
 }
 
 /// Parse all forms from a string.
@@ -58,61 +54,56 @@ pub(crate) fn prim_read(args: &[Value]) -> (SignalBits, Value) {
 /// (read-all "1 2 3")  # → (1 2 3)
 /// (read-all "(+ 1 2) (- 3 4)")  # → ((+ 1 2) (- 3 4))
 /// ```
-pub(crate) fn prim_read_all(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_read_all(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("read-all: expected string, got {}", args[0].type_name()),
-            ),
-        );
+        return type_error!(ctx, args[0], "read-all", "string");
     };
 
     let syntaxes = match read_syntax_all(&source, "<read>") {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, error_val("read-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("read-error", e)),
     };
 
-    let symbols = unsafe {
-        match crate::context::get_symbol_table() {
-            Some(ptr) => &mut *ptr,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "read-all: symbol table not available"),
-                )
-            }
-        }
-    };
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("internal-error", "read-all: symbol table not available"),
+        );
+    }
+    let symbols = unsafe { &mut *symbols_ptr };
 
-    let values: Vec<Value> = syntaxes.iter().map(|s| s.to_value(symbols)).collect();
-    (SIG_OK, crate::value::list(values))
+    // Each form materializes through the ctx (its region), as does the list
+    // result that wraps them — one region for the whole reply.
+    let mut values: Vec<Value> = Vec::with_capacity(syntaxes.len());
+    for s in &syntaxes {
+        values.push(s.to_value(symbols, ctx));
+    }
+    (SIG_OK, ctx.list(values))
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "read",
-        func: prim_read,
+primitive! {
+    "read" => prim_read {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Parse the first form from a string, returning a value",
         params: &["str"],
         category: "meta",
         example: "(read \"(+ 1 2)\") #=> (+ 1 2)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "read-all",
-        func: prim_read_all,
+        effect: RegionEffect::Fresh,
+    }
+    "read-all" => prim_read_all {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Parse all forms from a string, returning a list of values",
         params: &["str"],
         category: "meta",
         example: "(read-all \"1 2 3\") #=> (1 2 3)",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Fresh,
+    }
+}

@@ -2,17 +2,20 @@
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, IoOp};
-use crate::io::types::{FdState, FdStatus, PortKey};
-use crate::io::Completion;
+use crate::io::request::PortOp;
+use crate::io::types::{FdState, PortKey};
+use crate::io::{Completion, SubmissionId};
 use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
 /// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
+mod port;
+use port::complete_port_op;
+
 fn set_tcp_nodelay(fd: &OwnedFd) {
     unsafe {
         let opt: libc::c_int = 1;
@@ -31,17 +34,37 @@ fn errno_message(errno: i32) -> String {
     std::io::Error::from_raw_os_error(errno).to_string()
 }
 
+/// True when this errno says the caller's `:timeout` elapsed rather than the
+/// operation failing.
+///
+/// Three paths arrive here. io_uring cancels an operation whose linked timeout
+/// fired, which reports `ECANCELED`. A thread-pool worker whose own bounded
+/// wait expired reports `ETIMEDOUT`, and so does a kernel that gave up on a
+/// TCP handshake. The caller asked one question of all three, so they carry one
+/// answer: the `:timeout` error kind rather than a generic `:io-error`.
+fn is_timeout_errno(errno: i32) -> bool {
+    errno == libc::ECANCELED || errno == libc::ETIMEDOUT
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn process_raw_completion(
-    id: u64,
+    id: SubmissionId,
     result_code: i32,
     data: Vec<u8>,
     pending: &PendingOp,
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
-    buf_handle: BufferHandle,
+    buf_handle: Option<BufferHandle>,
+    // The requesting instance's heap; completion values are born on it
+    // (`crate::io::completion_heap_ptr`).
+    origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    // The owning VM's Unicode generation, forwarded to the port arm.
+    gen: crate::segment::Generation,
 ) -> Completion {
-    // Release the buffer back to the pool
-    buffer_pool.release(buf_handle);
+    // Release the buffer back to the pool (if present — reads don't use BufferPool)
+    if let Some(bh) = buf_handle {
+        buffer_pool.release(bh);
+    }
 
     match pending {
         PendingOp::ProcessWait {
@@ -57,13 +80,14 @@ pub(super) fn process_raw_completion(
                     unsafe { drop(Box::from_raw(*siginfo)) };
                 }
                 let errno = -result_code;
-                return Completion {
+                return Completion::err(
                     id,
-                    result: Err(error_val(
+                    crate::io::io_error(
                         "exec-error",
                         format!("subprocess/wait: waitid failed: errno {}", errno),
-                    )),
-                };
+                        origin_heap,
+                    ),
+                );
             }
 
             let exit_code: i32 = if siginfo.is_null() {
@@ -104,28 +128,21 @@ pub(super) fn process_raw_completion(
                 *state = crate::io::request::ProcessState::Exited(exit_code);
             }
 
-            Completion {
-                id,
-                result: Ok(Value::int(exit_code as i64)),
-            }
+            Completion::ok(id, Value::int(exit_code as i64))
         }
         PendingOp::Sleep { .. } => {
             // Sleep completes with -ETIME (62) on io_uring, or 0 on thread pool.
             // Both are success for a timer.
-            Completion {
-                id,
-                result: Ok(Value::NIL),
-            }
+            Completion::ok(id, Value::NIL)
         }
         PendingOp::Open {
             path,
-            direction,
-            encoding,
+            port: port_val,
             ..
         } => {
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = errno == 125; // ECANCELED from linked timeout
+                let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
@@ -133,76 +150,60 @@ pub(super) fn process_raw_completion(
                     format!("port/open: {}: {}", path, os_err)
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion {
-                    id,
-                    result: Err(error_val(error_type, msg)),
-                };
+                return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
             }
             // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
-            // No fallible operations between here and OwnedFd::from_raw_fd.
             let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
-            let port = Port::new_file(fd, *direction, *encoding, path.clone());
-            Completion {
-                id,
-                result: Ok(Value::external("port", port)),
-            }
+            // Fill the fd into the pre-allocated port (born in the solver's region).
+            let port_ref = port_val
+                .as_external::<Port>()
+                .expect("PendingOp::Open port must be a Port");
+            port_ref.set_fd(fd);
+            Completion::ok(id, *port_val)
         }
         PendingOp::Connect {
-            addr, connect_fd, ..
+            connect_fd,
+            port: port_val,
+            ..
         } => {
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = errno == 125;
+                let is_timeout = is_timeout_errno(errno);
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
                     format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion {
-                    id,
-                    result: Err(error_val(error_type, msg)),
-                };
+                return Completion::err(id, crate::io::io_error(error_type, msg, origin_heap));
             }
-            // Connect: fd and address come from PendingOp (set at submission time).
-            // io_uring: connect_fd = pre-created socket, result_code = 0.
-            // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
-            // io_uring: fd is pre-created in connect_fd. Thread pool: fd is result_code.
+            // Connect: fd comes from PendingOp (set at submission time).
             let fd = connect_fd.unwrap_or(result_code as RawFd);
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-            let peer_addr = match addr {
-                ConnectAddr::Tcp {
-                    addr: host, port, ..
-                } => crate::io::sockaddr::format_host_port(host, *port),
-                ConnectAddr::Unix { path, .. } => path.clone(),
-            };
-            let encoding = addr.encoding();
-            let new_port = match addr {
-                ConnectAddr::Tcp { .. } => {
-                    set_tcp_nodelay(&fd);
-                    Port::new_tcp_stream(fd, peer_addr).with_encoding(encoding)
-                }
-                ConnectAddr::Unix { .. } => {
-                    Port::new_unix_stream(fd, peer_addr).with_encoding(encoding)
-                }
-            };
-            Completion {
-                id,
-                result: Ok(Value::external("port", new_port)),
+            // Port was pre-allocated by the caller (with the requested
+            // encoding already set on the Port — see prim_tcp_connect /
+            // prim_unix_connect). Set the fd on the existing port; no
+            // need to recreate it here.
+            if matches!(
+                port_val.as_external::<Port>().map(|p| p.kind()),
+                Some(PortKind::TcpStream)
+            ) {
+                set_tcp_nodelay(&fd);
             }
+            let port_ref = port_val
+                .as_external::<Port>()
+                .expect("PendingOp::Connect port must be a Port");
+            port_ref.set_fd(fd);
+            Completion::ok(id, *port_val)
         }
         PendingOp::Task { .. } => {
             if result_code < 0 {
                 let msg = String::from_utf8_lossy(&data).to_string();
-                Completion {
-                    id,
-                    result: Err(error_val("task-error", msg)),
-                }
+                Completion::err(id, crate::io::io_error("task-error", msg, origin_heap))
             } else {
-                Completion {
-                    id,
-                    result: Ok(Value::bytes(data)),
-                }
+                let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+                let ctx = crate::primitives::ctx::Alloc::new(heap);
+                Completion::ok(id, ctx.bytes(data))
             }
         }
         PendingOp::WatchNext { watcher, .. } => {
@@ -215,10 +216,7 @@ pub(super) fn process_raw_completion(
                         std::io::Error::from_raw_os_error(-result_code)
                     )
                 };
-                return Completion {
-                    id,
-                    result: Err(error_val("io-error", msg)),
-                };
+                return Completion::err(id, crate::io::io_error("io-error", msg, origin_heap));
             }
             // Parse inotify events from raw bytes
             let events = if let Some(w) = watcher.as_external::<crate::io::watch::FsWatcher>() {
@@ -226,7 +224,11 @@ pub(super) fn process_raw_completion(
             } else {
                 Vec::new()
             };
-            // Convert to Elle array of structs
+            // Convert to Elle array of structs. One shared region (the ctx's) for
+            // the whole nested result: the strings live inside the structs, which
+            // live inside the array.
+            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
             let event_values: Vec<Value> = events
                 .iter()
                 .map(|ev| {
@@ -235,25 +237,29 @@ pub(super) fn process_raw_completion(
                         crate::value::heap::TableKey::Keyword("kind".into()),
                         Value::keyword(ev.kind.as_keyword()),
                     );
-                    fields.insert(
-                        crate::value::heap::TableKey::Keyword("path".into()),
-                        Value::string(ev.path.to_string_lossy().as_ref()),
-                    );
-                    Value::struct_from(fields)
+                    let path = ctx.string(ev.path.to_string_lossy().as_ref());
+                    fields.insert(crate::value::heap::TableKey::Keyword("path".into()), path);
+                    ctx.struct_from(fields)
                 })
                 .collect();
-            Completion {
-                id,
-                result: Ok(Value::array(event_values)),
-            }
+            Completion::ok(id, ctx.array(event_values))
         }
         PendingOp::SigNext { receiver, .. } => {
-            crate::io::sigfd::posix_trace(format_args!(
-                "completion: SigNext id={} result_code={} data_len={}",
-                id,
-                result_code,
-                data.len()
-            ));
+            // The receiver's own instance trace cell gates these diagnostics
+            // per-instance (the completion runs on the scheduler thread, off any VM).
+            let recv = receiver.as_external::<crate::io::sigfd::SignalReceiver>();
+            let trace = recv.map(|r| r.trace());
+            if let Some(t) = &trace {
+                crate::io::sigfd::posix_trace(
+                    t,
+                    format_args!(
+                        "completion: SigNext id={} result_code={} data_len={}",
+                        id,
+                        result_code,
+                        data.len()
+                    ),
+                );
+            }
             if result_code <= 0 {
                 let msg = if result_code == 0 {
                     "signal receiver closed".to_string()
@@ -263,21 +269,22 @@ pub(super) fn process_raw_completion(
                         std::io::Error::from_raw_os_error(-result_code)
                     )
                 };
-                return Completion {
-                    id,
-                    result: Err(error_val("io-error", msg)),
-                };
+                return Completion::err(id, crate::io::io_error("io-error", msg, origin_heap));
             }
-            let events = if let Some(r) = receiver.as_external::<crate::io::sigfd::SignalReceiver>()
-            {
+            let events = if let Some(r) = recv {
                 r.parse_events(&data[..result_code as usize])
             } else {
                 Vec::new()
             };
-            crate::io::sigfd::posix_trace(format_args!(
-                "completion: SigNext parsed {} events",
-                events.len()
-            ));
+            if let Some(t) = &trace {
+                crate::io::sigfd::posix_trace(
+                    t,
+                    format_args!("completion: SigNext parsed {} events", events.len()),
+                );
+            }
+            // One shared region (the ctx's): each event struct lives inside the array.
+            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
             let event_values: Vec<Value> = events
                 .iter()
                 .map(|ev| {
@@ -309,34 +316,37 @@ pub(super) fn process_raw_completion(
                         crate::value::heap::TableKey::Keyword("count".into()),
                         Value::int(ev.count as i64),
                     );
-                    Value::struct_from(fields)
+                    ctx.struct_from(fields)
                 })
                 .collect();
-            Completion {
-                id,
-                result: Ok(Value::array(event_values)),
-            }
+            Completion::ok(id, ctx.array(event_values))
         }
         PendingOp::PollFd { .. } => {
             // result_code is the revents mask (positive) or negative errno.
+            //
+            // `ev/poll-fd` answers an expired wait with 0 rather than an error,
+            // which is what lets a caller poll in a loop — `wayland/event-loop`
+            // and `glib-wait` both do. Both backends report the expiry as an
+            // errno, so both are mapped back to that 0 here: `ETIMEDOUT` from
+            // the pool worker's bound, `ECANCELED` from the ring's linked
+            // timeout, which cannot say which of the two ended the wait. A
+            // genuine `io/cancel` also lands on `ECANCELED`, and its completion
+            // is discarded before it reaches a fiber.
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = errno == 125; // ECANCELED from linked timeout
-                let msg = if is_timeout {
-                    "ev/poll-fd: timed out".to_string()
-                } else {
-                    format!("ev/poll-fd: poll error: errno {}", errno)
-                };
-                let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion {
+                if is_timeout_errno(errno) {
+                    return Completion::ok(id, Value::int(0));
+                }
+                return Completion::err(
                     id,
-                    result: Err(error_val(error_type, msg)),
-                };
+                    crate::io::io_error(
+                        "io-error",
+                        format!("ev/poll-fd: poll error: errno {}", errno),
+                        origin_heap,
+                    ),
+                );
             }
-            Completion {
-                id,
-                result: Ok(Value::int(result_code as i64)),
-            }
+            Completion::ok(id, Value::int(result_code as i64))
         }
         PendingOp::ChanSelectPark { .. } => {
             // The guard inside this PendingOp owns the fd(s) and the
@@ -347,10 +357,7 @@ pub(super) fn process_raw_completion(
             // value" from "timed out" via chan/try-select + its own
             // deadline tracking.  Returning nil keeps the protocol
             // stateless.
-            Completion {
-                id,
-                result: Ok(Value::NIL),
-            }
+            Completion::ok(id, Value::NIL)
         }
         PendingOp::Resolve { .. } => {
             if result_code < 0 {
@@ -359,321 +366,22 @@ pub(super) fn process_raw_completion(
                 } else {
                     String::from_utf8_lossy(&data).to_string()
                 };
-                return Completion {
-                    id,
-                    result: Err(error_val("dns-error", msg)),
-                };
+                return Completion::err(id, crate::io::io_error("dns-error", msg, origin_heap));
             }
-            // data contains newline-separated IP address strings.
+            // data contains newline-separated IP address strings. One shared
+            // region (the ctx's): each string lives inside the array.
             let ips_str = String::from_utf8_lossy(&data);
+            let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
             let ips: Vec<Value> = ips_str
                 .lines()
                 .filter(|s| !s.is_empty())
-                .map(Value::string)
+                .map(|s| ctx.string(s))
                 .collect();
-            Completion {
-                id,
-                result: Ok(Value::array(ips)),
-            }
+            Completion::ok(id, ctx.array(ips))
         }
-        PendingOp::Port {
-            op,
-            port_key,
-            port,
-            listener_kind,
-            ..
-        } => {
-            if result_code < 0 {
-                // Error
-                let errno = -result_code;
-                let is_timeout = errno == 125; // ECANCELED
-                let msg = if is_timeout {
-                    "I/O operation timed out".to_string()
-                } else {
-                    format!("I/O error: {}", errno_message(errno))
-                };
-                let error_type = if is_timeout { "timeout" } else { "io-error" };
-                let state = fd_states
-                    .entry(port_key.clone())
-                    .or_insert_with(FdState::new);
-                state.status = FdStatus::Error;
-                return Completion {
-                    id,
-                    result: Err(error_val(error_type, msg)),
-                };
-            }
-
-            if result_code == 0
-                && matches!(
-                    op,
-                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
-                )
-            {
-                // EOF for read operations
-                let state = fd_states
-                    .entry(port_key.clone())
-                    .or_insert_with(FdState::new);
-                state.status = FdStatus::Eof;
-
-                // For ReadLine: check buffer for a partial last line
-                // (file content without trailing newline).
-                if matches!(op, IoOp::ReadLine) && !state.buffer.is_empty() {
-                    let remainder: Vec<u8> = state.buffer.drain(..).collect();
-                    let s = String::from_utf8_lossy(&remainder);
-                    let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                    return Completion {
-                        id,
-                        result: Ok(Value::string(trimmed)),
-                    };
-                }
-
-                // For Read: return accumulated buffer on EOF (short-read
-                // resubmission buffered partial data before hitting EOF).
-                if matches!(op, IoOp::Read { .. }) && !state.buffer.is_empty() {
-                    let partial: Vec<u8> = state.buffer.drain(..).collect();
-                    if let Some(p) = port.as_external::<Port>() {
-                        return Completion {
-                            id,
-                            result: Ok(match p.encoding() {
-                                Encoding::Text => {
-                                    let s = String::from_utf8_lossy(&partial);
-                                    Value::string(s.as_ref())
-                                }
-                                Encoding::Binary => Value::bytes(partial),
-                            }),
-                        };
-                    }
-                }
-
-                // For ReadExact: EOF before the full count is a failed
-                // read — discard whatever partial sat in the buffer and
-                // return nil so the caller can distinguish "got n bytes"
-                // from "stream ended early".  Callers who want the
-                // partial should use Read.
-                if matches!(op, IoOp::ReadExact { .. }) {
-                    state.buffer.clear();
-                    return Completion {
-                        id,
-                        result: Ok(Value::NIL),
-                    };
-                }
-
-                // For ReadAll: return accumulated buffer on EOF
-                // (empty bytes/string for empty files, not nil).
-                if matches!(op, IoOp::ReadAll) {
-                    let all: Vec<u8> = state.buffer.drain(..).collect();
-                    let value = if let Some(p) = port.as_external::<Port>() {
-                        match p.encoding() {
-                            Encoding::Text => Value::string(String::from_utf8_lossy(&all).as_ref()),
-                            Encoding::Binary => Value::bytes(all),
-                        }
-                    } else {
-                        Value::bytes(all)
-                    };
-                    return Completion {
-                        id,
-                        result: Ok(value),
-                    };
-                }
-
-                return Completion {
-                    id,
-                    result: Ok(Value::NIL),
-                };
-            }
-
-            // Success
-            let value = match op {
-                IoOp::ReadLine => {
-                    // Per-fd buffering: append raw data, extract one line.
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
-                    state.buffer.extend_from_slice(&data);
-
-                    if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
-                        let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                        let s = String::from_utf8_lossy(&line_bytes);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        Value::string(trimmed)
-                    } else {
-                        // No newline — partial line at EOF. Drain everything.
-                        let all: Vec<u8> = state.buffer.drain(..).collect();
-                        let s = String::from_utf8_lossy(&all);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        Value::string(trimmed)
-                    }
-                }
-                IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll => {
-                    // Prepend any bytes left in the fd_state buffer from a
-                    // previous over-read (e.g. ReadLine read past the line
-                    // boundary, or a previous short-read for this op).  The
-                    // submit/resubmit path reduced the kernel read count by
-                    // what was buffered.
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
-                    let combined = if !state.buffer.is_empty() {
-                        let mut buf: Vec<u8> = state.buffer.drain(..).collect();
-                        buf.extend_from_slice(&data);
-                        buf
-                    } else {
-                        data
-                    };
-                    // ReadExact on a text port is grapheme-counted: split
-                    // at the Nth grapheme boundary and stash the trailing
-                    // bytes for the next read.  Other paths (binary Read /
-                    // ReadExact / ReadAll, text Read, text ReadAll) return
-                    // the full combined buffer per their existing contract.
-                    let text_exact_count = match op {
-                        IoOp::ReadExact { count } => port
-                            .as_external::<Port>()
-                            .filter(|p| matches!(p.encoding(), Encoding::Text))
-                            .map(|_| *count),
-                        _ => None,
-                    };
-                    if let Some(n) = text_exact_count {
-                        if let Some(end) = crate::io::nth_grapheme_byte_end(&combined, n) {
-                            let leftover = combined[end..].to_vec();
-                            if !leftover.is_empty() {
-                                state.buffer.extend_from_slice(&leftover);
-                            }
-                            Value::string(String::from_utf8_lossy(&combined[..end]).as_ref())
-                        } else {
-                            // The resubmit gate should have caught this and
-                            // looped; reaching here means the gate's grapheme
-                            // probe and ours disagree (impossible given the
-                            // same input).  Treat defensively as nil.
-                            Value::NIL
-                        }
-                    } else if let Some(p) = port.as_external::<Port>() {
-                        match p.encoding() {
-                            Encoding::Text => {
-                                let s = String::from_utf8_lossy(&combined);
-                                Value::string(s.as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(combined),
-                        }
-                    } else {
-                        Value::string(String::from_utf8_lossy(&combined).as_ref())
-                    }
-                }
-                IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
-                IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-                IoOp::Accept {
-                    ref options,
-                    encoding,
-                } => {
-                    // Accept: result_code is the new fd (from both io_uring and thread pool).
-                    // Peer address is obtained via getpeername() — works uniformly.
-                    let fd = result_code;
-                    let peer_addr = crate::io::sockaddr::peer_address(fd);
-                    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-                    // Apply user-specified socket options to the accepted fd.
-                    crate::io::request::apply_socket_options(fd.as_raw_fd(), options);
-                    let new_port = match listener_kind {
-                        Some(PortKind::TcpListener) => {
-                            set_tcp_nodelay(&fd);
-                            Port::new_tcp_stream(fd, peer_addr).with_encoding(*encoding)
-                        }
-                        Some(PortKind::UnixListener) => {
-                            Port::new_unix_stream(fd, peer_addr).with_encoding(*encoding)
-                        }
-                        _ => {
-                            return Completion {
-                                id,
-                                result: Err(error_val("io-error", "invalid listener kind")),
-                            };
-                        }
-                    };
-                    Value::external("port", new_port)
-                }
-                IoOp::Connect { .. } => {
-                    // Connect ops use PendingOp::Connect, not PendingOp::Port
-                    unreachable!("Connect should use PendingOp::Connect variant")
-                }
-                IoOp::Spawn(_) | IoOp::ProcessWait => {
-                    // Subprocess ops are dispatched before the port guard and never
-                    // produce a PendingOp::Port entry — they cannot reach this branch.
-                    unreachable!("Spawn/ProcessWait should be dispatched before port guard")
-                }
-                IoOp::Open { .. } => {
-                    // Open ops use PendingOp::Open, not PendingOp::Port — cannot reach here.
-                    unreachable!("Open should use PendingOp::Open variant")
-                }
-                IoOp::Seek { .. } | IoOp::Tell => {
-                    // Seek/Tell are immediate completions (lseek syscall, no io_uring).
-                    // They never produce a PendingOp::Port entry — cannot reach here.
-                    unreachable!(
-                        "Seek/Tell are handled as immediate completions before PendingOp insertion"
-                    )
-                }
-                IoOp::Task(_) => {
-                    // Task ops use PendingOp::Task, not PendingOp::Port — cannot reach here.
-                    unreachable!("Task should use PendingOp::Task variant")
-                }
-                IoOp::Resolve { .. } => {
-                    unreachable!("Resolve is portless; cannot reach PendingOp::Port")
-                }
-                IoOp::WatchNext => {
-                    unreachable!("WatchNext uses PendingOp::WatchNext, not PendingOp::Port")
-                }
-                IoOp::SigNext => {
-                    unreachable!("SigNext uses PendingOp::SigNext, not PendingOp::Port")
-                }
-                IoOp::PollFd { .. } => {
-                    unreachable!("PollFd is portless; cannot reach PendingOp::Port")
-                }
-                IoOp::ChanSelectPark(_) => {
-                    unreachable!(
-                        "ChanSelectPark uses PendingOp::ChanSelectPark, not PendingOp::Port"
-                    )
-                }
-                // Close completion: port already closed in submit. Return nil.
-                IoOp::Close => Value::NIL,
-                IoOp::RecvFrom { .. } => {
-                    // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
-                    if data.len() < 4 {
-                        return Completion {
-                            id,
-                            result: Err(error_val("io-error", "invalid recvfrom data")),
-                        };
-                    }
-                    let addr_len =
-                        u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as libc::socklen_t;
-                    let addr_offset = 4 + std::mem::size_of::<libc::sockaddr_storage>();
-                    if data.len() < addr_offset {
-                        return Completion {
-                            id,
-                            result: Err(error_val("io-error", "invalid recvfrom data")),
-                        };
-                    }
-                    let addr_bytes = &data[4..4 + std::mem::size_of::<libc::sockaddr_storage>()];
-                    let addr_storage = unsafe {
-                        let mut storage: libc::sockaddr_storage = std::mem::zeroed();
-                        std::ptr::copy_nonoverlapping(
-                            addr_bytes.as_ptr(),
-                            &mut storage as *mut _ as *mut u8,
-                            std::mem::size_of::<libc::sockaddr_storage>(),
-                        );
-                        storage
-                    };
-                    let (addr_str, port_num) = crate::io::sockaddr::parse(&addr_storage, addr_len);
-                    let payload = data[addr_offset..].to_vec();
-                    let mut fields = std::collections::BTreeMap::new();
-                    fields.insert(TableKey::Keyword("data".into()), Value::bytes(payload));
-                    fields.insert(TableKey::Keyword("addr".into()), Value::string(addr_str));
-                    fields.insert(
-                        TableKey::Keyword("port".into()),
-                        Value::int(port_num as i64),
-                    );
-                    Value::struct_from(fields)
-                }
-            };
-            Completion {
-                id,
-                result: Ok(value),
-            }
+        PendingOp::Port { .. } => {
+            complete_port_op(id, result_code, data, pending, fd_states, origin_heap, gen)
         }
     }
 }

@@ -1,11 +1,12 @@
 //! PendingOp — in-flight async I/O operation tracking.
 
 use crate::io::pool::BufferHandle;
-use crate::io::request::{ConnectAddr, IoOp};
+use crate::io::request::{ConnectAddr, PortOp};
 use crate::io::types::PortKey;
-use crate::port::{Direction, Encoding, PortKind};
+use crate::port::PortKind;
 use crate::value::Value;
 use std::os::unix::io::RawFd;
+use std::time::Duration;
 
 /// Pending async I/O operation.
 ///
@@ -16,20 +17,41 @@ use std::os::unix::io::RawFd;
 pub(crate) enum PendingOp {
     /// Operation on an existing port.
     Port {
-        op: IoOp,
+        op: PortOp,
         port_key: PortKey,
         port: Value,
-        buffer_handle: BufferHandle,
+        /// BufferPool handle for non-read operations. `None` for Read/ReadLine
+        /// (which use pre-allocated fiber-heap buffers instead).
+        buffer_handle: Option<BufferHandle>,
         /// For Accept: which kind of listener (TcpListener or UnixListener).
         listener_kind: Option<PortKind>,
+        /// Bytes of this operation's payload already transferred: read into
+        /// the fiber's pre-allocated buffer, or written out to the fd. Both
+        /// directions resubmit the remainder from this offset, and the
+        /// completion reports `filled + result_code`. Zero for ops that move
+        /// no payload.
+        filled: usize,
+        /// The request's timeout, carried so a resubmission can re-arm the
+        /// `LinkTimeout` that bounds it. A payload too large for one syscall
+        /// completes over several SQEs, and `:timeout` means "give up after
+        /// this long" for each of them rather than for the first alone.
+        /// `None` leaves the operation unbounded.
+        ///
+        /// Only the io_uring backend re-arms a `LinkTimeout`; the thread pool
+        /// bounds the op in the worker, so on that platform every submit site
+        /// still fills this field and nothing reads it back.
+        timeout: Option<Duration>,
     },
-    /// Connect to a remote address. Creates a new port on completion.
+    /// Connect to a remote address.
     Connect {
+        #[allow(dead_code)]
         addr: ConnectAddr,
         buffer_handle: BufferHandle,
         /// io_uring: pre-created socket fd. Thread pool: set to result fd
         /// on completion. Cleared on connect failure (fd closed).
         connect_fd: Option<RawFd>,
+        /// Pre-allocated port Value (born in the solver's region at the call site).
+        port: Value,
     },
     /// Async timer. No port.
     Sleep { buffer_handle: BufferHandle },
@@ -49,11 +71,11 @@ pub(crate) enum PendingOp {
     /// For thread pool: path is owned by the PoolOp::Open; buffer_handle is a
     /// dummy allocation (0 bytes).
     Open {
-        /// The file path (for error messages and Port construction).
+        /// The file path (for error messages).
         path: String,
-        direction: Direction,
-        encoding: Encoding,
         buffer_handle: BufferHandle,
+        /// Pre-allocated port Value (born in the solver's region at the call site).
+        port: Value,
     },
     /// Background task — arbitrary closure running on thread pool.
     Task { buffer_handle: BufferHandle },
@@ -83,39 +105,49 @@ pub(crate) enum PendingOp {
 }
 
 impl PendingOp {
-    pub(crate) fn buffer_handle(&self) -> BufferHandle {
+    /// Get the BufferHandle, if any. Returns `None` for read operations
+    /// (which use pre-allocated fiber-heap buffers) and `Some(handle)` for
+    /// all other operations.
+    pub(crate) fn buffer_handle(&self) -> Option<BufferHandle> {
         match self {
             PendingOp::Port { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Open { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Task { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
-            PendingOp::WatchNext { buffer_handle, .. } => *buffer_handle,
-            PendingOp::SigNext { buffer_handle, .. } => *buffer_handle,
-            PendingOp::PollFd { buffer_handle, .. } => *buffer_handle,
-            PendingOp::ChanSelectPark { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Connect { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Sleep { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::SigNext { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::PollFd { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::ChanSelectPark { buffer_handle, .. } => Some(*buffer_handle),
         }
     }
 
-    /// Only the io_uring backend rebinds a pending op's buffer (buffer
-    /// reinsertion on short reads, `uring.rs`), so this is unused where
-    /// io_uring isn't compiled — the thread-pool backend never moves buffers.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub(super) fn buffer_handle_mut(&mut self) -> &mut BufferHandle {
+    pub(super) fn filled(&self) -> usize {
         match self {
-            PendingOp::Port { buffer_handle, .. } => buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => buffer_handle,
-            PendingOp::Open { buffer_handle, .. } => buffer_handle,
-            PendingOp::Task { buffer_handle, .. } => buffer_handle,
-            PendingOp::Resolve { buffer_handle, .. } => buffer_handle,
-            PendingOp::WatchNext { buffer_handle, .. } => buffer_handle,
-            PendingOp::SigNext { buffer_handle, .. } => buffer_handle,
-            PendingOp::PollFd { buffer_handle, .. } => buffer_handle,
-            PendingOp::ChanSelectPark { buffer_handle, .. } => buffer_handle,
+            PendingOp::Port { filled, .. } => *filled,
+            _ => 0,
+        }
+    }
+
+    /// The request's timeout, for a backend re-arming the bound on a
+    /// resubmission. `None` for ops that carry no deadline.
+    ///
+    /// Only `io::uring::drain` calls this, so the allow is narrowed to the
+    /// platforms that compile that module out rather than blanket `dead_code`.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(super) fn timeout(&self) -> Option<Duration> {
+        match self {
+            PendingOp::Port { timeout, .. } => *timeout,
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn set_filled(&mut self, val: usize) {
+        if let PendingOp::Port { filled, .. } = self {
+            *filled = val;
         }
     }
 }

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # SPIR-V builder tests
 #
 # Tests the lib/spirv.lisp builder, including control flow extensions
@@ -8,6 +8,9 @@
 
 # spirv-val may not be installed (e.g. CI without vulkan-tools)
 (def has-spirv-val (= (get (subprocess/system "which" ["spirv-val"]) :exit) 0))
+
+# Scratch dir for the .spv files handed to spirv-val.
+(def scratch (file/mktempdir))
 
 ## ── Helper: IEEE 754 f32 bit pattern ──────────────────────
 ## Standalone f32-bits for testing (no vulkan plugin needed).
@@ -231,11 +234,12 @@
                                       b (s:const-u 0x0F)
                                       r (s:ior a b)]
                                  (s:store 0 id (s:u2f r)))) f32-bits)
-       p (port/open "/tmp/elle-spirv-bitwise.spv" :write)
+       spv-file (path/join scratch "bitwise.spv")
+       p (port/open spv-file :write)
        _ (port/write p bytecode)
        _ (port/close p)]
   (when has-spirv-val
-    (let [result (subprocess/system "spirv-val" ["/tmp/elle-spirv-bitwise.spv"])]
+    (let [result (subprocess/system "spirv-val" [spv-file])]
       (when (not (= (result :exit) 0))
         (eprintln "spirv-val stderr:" (result :stderr)))
       (assert (= (result :exit) 0) "spirv: bitwise ior validates"))))
@@ -247,11 +251,12 @@
                                       val (s:const-u 0x42280000)  # f32 bit pattern for 42.0
                                       as-f (s:bitcast-u2f val)]
                                  (s:store 0 id as-f))) f32-bits)
-       p (port/open "/tmp/elle-spirv-bitcast.spv" :write)
+       spv-file (path/join scratch "bitcast.spv")
+       p (port/open spv-file :write)
        _ (port/write p bytecode)
        _ (port/close p)]
   (when has-spirv-val
-    (let [result (subprocess/system "spirv-val" ["/tmp/elle-spirv-bitcast.spv"])]
+    (let [result (subprocess/system "spirv-val" [spv-file])]
       (assert (= (result :exit) 0) "spirv: bitcast validates"))))
 
 ## ── 14. umin on GPU ──────────────────────────────────────
@@ -262,11 +267,14 @@
                                       b (s:const-u 255)
                                       r (s:umin a b)]
                                  (s:store 0 id (s:u2f r)))) f32-bits)
-       p (port/open "/tmp/elle-spirv-umin.spv" :write)
+       spv-file (path/join scratch "umin.spv")
+       p (port/open spv-file :write)
        _ (port/write p bytecode)
        _ (port/close p)]
   (when has-spirv-val
-    (let [result (subprocess/system "spirv-val" ["/tmp/elle-spirv-umin.spv"])]
+    (let [result (subprocess/system "spirv-val" [spv-file])]
       (assert (= (result :exit) 0) "spirv: umin validates"))))
+
+(file/delete-dir-all scratch)
 
 (println "All SPIR-V tests passed")

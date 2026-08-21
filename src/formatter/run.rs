@@ -262,36 +262,61 @@ fn run_stdin(check: bool, config: &FormatterConfig, opts: &FmtOpts) -> i32 {
     0
 }
 
+/// The columns of a line's CODE opening delimiters, 0-based.
+///
+/// A `(`, `[`, or `{` inside a string literal or a comment is text, not
+/// nesting: the formatter places those characters itself, so counting them
+/// would make `--check` reject `elle fmt`'s own output. Each line is scanned on
+/// its own — Elle has no multi-line string literal — so an unterminated quote
+/// cannot mask the lines that follow.
+fn code_delimiter_columns(line: &str) -> Vec<usize> {
+    let mut columns = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (col, ch) in line.chars().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '#' if !in_string => break, // comment to end of line
+            '(' | '[' | '{' if !in_string => columns.push(col),
+            _ => {}
+        }
+    }
+    columns
+}
+
 /// Check for lines with opening delimiters past column thresholds.
 /// Returns Some(exit_code) if violations found, None if clean.
 fn check_columns(file_path: &str, formatted: &str, line_length: usize) -> Option<i32> {
     let mut has_warning = false;
     let mut has_error = false;
-    let openers = ['(', '[', '{'];
     let warn_col = line_length * 3 / 4; // 75% of line length (60 for default 80)
 
     for (line_num, line) in formatted.lines().enumerate() {
-        for (col, ch) in line.chars().enumerate() {
-            if openers.contains(&ch) {
-                if col >= line_length {
-                    eprintln!(
-                        "error: {}:{}:{}: opening delimiter past column {}",
-                        file_path,
-                        line_num + 1,
-                        col + 1,
-                        line_length,
-                    );
-                    has_error = true;
-                } else if col >= warn_col {
-                    eprintln!(
-                        "warning: {}:{}:{}: opening delimiter past column {}, consider refactoring",
-                        file_path,
-                        line_num + 1,
-                        col + 1,
-                        warn_col,
-                    );
-                    has_warning = true;
-                }
+        for col in code_delimiter_columns(line) {
+            if col >= line_length {
+                eprintln!(
+                    "error: {}:{}:{}: opening delimiter past column {}",
+                    file_path,
+                    line_num + 1,
+                    col + 1,
+                    line_length,
+                );
+                has_error = true;
+            } else if col >= warn_col {
+                eprintln!(
+                    "warning: {}:{}:{}: opening delimiter past column {}, consider refactoring",
+                    file_path,
+                    line_num + 1,
+                    col + 1,
+                    warn_col,
+                );
+                has_warning = true;
             }
         }
     }
@@ -331,126 +356,4 @@ fn print_help() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::epoch::CURRENT_EPOCH;
-
-    #[test]
-    fn test_fmt_upgrades_epoch() {
-        let config = FormatterConfig::default();
-        let input = "(elle/epoch 0)\n(assert-true x \"test\")\n";
-        let result = rewrite_and_format(input, "<test>", &config).unwrap();
-        assert!(
-            result.contains(&format!("(elle/epoch {})", CURRENT_EPOCH)),
-            "should upgrade epoch tag, got: {:?}",
-            result
-        );
-        assert!(
-            !result.contains("assert-true"),
-            "old symbol should be rewritten, got: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_fmt_current_epoch_unchanged() {
-        let config = FormatterConfig::default();
-        let input = format!("(elle/epoch {})\n(println \"hello\")\n", CURRENT_EPOCH);
-        let result = rewrite_and_format(&input, "<test>", &config).unwrap();
-        assert_eq!(result, input, "current-epoch file should be unchanged");
-    }
-
-    #[test]
-    fn test_fmt_no_epoch_gets_one() {
-        let config = FormatterConfig::default();
-        let input = "(println \"hello\")\n";
-        let result = rewrite_and_format(input, "<test>", &config).unwrap();
-        assert!(
-            result.contains(&format!("(elle/epoch {})", CURRENT_EPOCH)),
-            "should inject epoch tag, got: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_fmt_epoch_upgrade_idempotent() {
-        let config = FormatterConfig::default();
-        let input = "(elle/epoch 0)\n(assert-true x \"test\")\n";
-        let first = rewrite_and_format(input, "<test>", &config).unwrap();
-        let second = rewrite_and_format(&first, "<test>", &config).unwrap();
-        assert_eq!(first, second, "rewrite+format must be idempotent");
-    }
-
-    #[test]
-    fn test_no_epoch_skips_injection() {
-        let config = FormatterConfig::default();
-        let opts = FmtOpts {
-            no_epoch: true,
-            preserve_margin: false,
-        };
-        let input = "(defn foo [x]\n  (+ x 1))\n";
-        let result = do_format(input, "<test>", &config, &opts).unwrap();
-        assert!(
-            !result.contains("elle/epoch"),
-            "--no-epoch should not inject epoch, got: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_preserve_left_margin() {
-        let config = FormatterConfig::default();
-        let opts = FmtOpts {
-            no_epoch: true,
-            preserve_margin: true,
-        };
-        let input = "    (defn foo [x]\n      (+ x 1))\n";
-        let result = do_format(input, "<test>", &config, &opts).unwrap();
-        assert!(
-            result.starts_with("    (defn foo [x]"),
-            "should preserve 4-space margin, got: {:?}",
-            result
-        );
-        // Body should be margin + 2 indent = 6 spaces
-        let lines: Vec<&str> = result.lines().collect();
-        assert!(
-            lines[1].starts_with("      "),
-            "body should be at margin+2, got: {:?}",
-            lines[1]
-        );
-    }
-
-    #[test]
-    fn test_preserve_left_margin_idempotent() {
-        let config = FormatterConfig::default();
-        let opts = FmtOpts {
-            no_epoch: true,
-            preserve_margin: true,
-        };
-        let input = "        (defn foo [x]\n          (+ x 1))\n";
-        let first = do_format(input, "<test>", &config, &opts).unwrap();
-        let second = do_format(&first, "<test>", &config, &opts).unwrap();
-        assert_eq!(first, second, "plm must be idempotent");
-    }
-
-    #[test]
-    fn test_strip_left_margin_basic() {
-        let (stripped, margin) = strip_left_margin("    (foo)\n      (bar)\n");
-        assert_eq!(margin, "    ");
-        assert_eq!(stripped, "(foo)\n  (bar)\n");
-    }
-
-    #[test]
-    fn test_strip_left_margin_zero() {
-        let (stripped, margin) = strip_left_margin("(foo)\n  (bar)\n");
-        assert_eq!(margin, "");
-        assert_eq!(stripped, "(foo)\n  (bar)\n");
-    }
-
-    #[test]
-    fn test_strip_left_margin_blank_lines() {
-        let (stripped, margin) = strip_left_margin("    (foo)\n\n    (bar)\n");
-        assert_eq!(margin, "    ");
-        assert!(stripped.contains("\n\n"), "blank lines should be preserved");
-    }
-}
+mod tests;

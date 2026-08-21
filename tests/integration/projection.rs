@@ -7,7 +7,6 @@
 // signal-narrowing operation and computes the result signal statically.
 
 use elle::hir::HirKind;
-use elle::pipeline::analyze_file;
 use elle::primitives::register_primitives;
 use elle::signals::{Signal, SIG_IO, SIG_YIELD};
 use elle::symbol::SymbolTable;
@@ -18,6 +17,30 @@ fn setup() -> (SymbolTable, VM) {
     let mut vm = VM::new();
     let _signals = register_primitives(&mut vm, &mut symbols);
     (symbols, vm)
+}
+
+// Local `analyze_file` shim preserving the pre-CompileCtx arity. These tests
+// analyze a single module file in isolation (no stdlib, no execution), so a
+// fresh `CompileCtx` per call (primitives + core + prelude) gives exactly the
+// old bare path; no projection or compile-time state is shared across calls.
+fn analyze_file(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+    source_name: &str,
+) -> Result<elle::pipeline::AnalyzeResult, String> {
+    let mut cctx = elle::pipeline::CompileCtx::new();
+    elle::pipeline::analyze_file(source, symbols, vm, &mut cctx, source_name)
+}
+
+// Local `compile_file` shim, same rationale as `analyze_file`.
+fn compile_file(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<elle::CompileResult, String> {
+    let mut cctx = elle::pipeline::CompileCtx::new();
+    elle::pipeline::compile_file(source, symbols, &mut cctx, source_name)
 }
 
 // ============================================================================
@@ -160,13 +183,16 @@ safe
 #[test]
 fn test_projection_bytecode_field() {
     // compile_file should populate signal_projection on the bytecode.
+    // `(numeric!)` proves the params for the intrinsic operand contract
+    // without adding an :error guard — the projections must stay silent
+    // for the may_suspend assertions below.
     let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
+(defn add [x y] (numeric!) (%add x y))
+(defn double [x] (numeric!) (%mul x 2))
 {:add add :double double}
 "#;
     let mut symbols = SymbolTable::new();
-    let result = elle::pipeline::compile_file(source, &mut symbols, "<test>").unwrap();
+    let result = compile_file(source, &mut symbols, "<test>").unwrap();
     let proj = result.bytecode.signal_projection;
     assert!(
         proj.is_some(),
@@ -194,7 +220,7 @@ fn test_projection_non_struct_returns_none() {
     // A file returning a plain value (not a struct) should have no projection.
     let source = "(%add 1 2)";
     let mut symbols = SymbolTable::new();
-    let result = elle::pipeline::compile_file(source, &mut symbols, "<test>").unwrap();
+    let result = compile_file(source, &mut symbols, "<test>").unwrap();
     assert!(
         result.bytecode.signal_projection.is_none(),
         "non-struct file should have no projection"
@@ -209,7 +235,7 @@ fn test_projection_yields_function() {
 {:producer producer}
 "#;
     let mut symbols = SymbolTable::new();
-    let result = elle::pipeline::compile_file(source, &mut symbols, "<test>").unwrap();
+    let result = compile_file(source, &mut symbols, "<test>").unwrap();
     let proj = result.bytecode.signal_projection.unwrap();
     assert!(
         proj["producer"].may_yield(),

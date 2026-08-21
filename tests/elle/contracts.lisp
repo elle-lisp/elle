@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/contracts.lisp — Tests for lib/contract.lisp
 ## Chunk 1: validators, combinators, validate
 

@@ -169,6 +169,32 @@ The destructor runs even on error.
 # rlog is @[:opened :used :closed]
 ```
 
+## Cleanup around async I/O
+
+The four forms hold their order when the body waits on the scheduler.
+`protect` and `try` capture an error from an async call — a timed-out
+`tcp/accept`, a `port/open` on a fifo nobody reads — and the code after
+the capture runs before any enclosing cleanup:
+
+```lisp
+(def listener (tcp/listen "127.0.0.1" 0))
+(def order @[])
+
+(with-temp-dir dir
+  (def [ok? err] (protect (tcp/accept listener :timeout 20)))
+  (assert (not ok?) "nobody connects, so the accept fails")
+  (file/write (path/join dir "note") "the directory is still here")
+  (push order :body))
+
+(assert (= (freeze order) [:body]) "the body ran to its end")
+(port/close listener)
+```
+
+`with-temp-dir` deletes the directory when the body ends, not when the
+body's own error handling ends. The same holds for `with`, for a `defer`
+inside a `defer`, and for a body that does more I/O after the capture.
+`tests/elle/unwind-suspend.lisp` pins the order for each shape.
+
 ## Error propagation
 
 Errors bubble up through the call stack until caught.

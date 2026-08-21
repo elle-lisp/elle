@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/http2/modules.lisp — submodule unit tests
 
 (let [m ((import "std/http2/huffman"))]

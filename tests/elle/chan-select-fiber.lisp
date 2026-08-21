@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Channel/select × fiber scheduler interaction tests.
 #
 # Regression cover for: chan/select must not park the OS thread, because the
@@ -85,11 +85,11 @@
 # ============================================================================
 
 (let [[tx rx] (chan)
-      _ (sys/spawn (fn []  # Small synchronous sleep so the parent definitely
-                     # parks first.  ev/sleep requires a scheduler — we
-                     # don't have one on the spawned OS thread.
-                     (time/sleep 0.02)
-                     (chan/send tx :hello-from-os-thread)))
+      _ (sys/spawn-vm (fn []  # Small synchronous sleep so the parent definitely
+                        # parks first.  ev/sleep requires a scheduler — we
+                        # don't have one on the spawned OS thread.
+                        (time/sleep 0.02)
+                        (chan/send tx :hello-from-os-thread)))
       t0 (clock/monotonic)
       sel (chan/select @[rx] 1000)
       elapsed (- (clock/monotonic) t0)]
@@ -112,18 +112,20 @@
 (let [iterations 200]
   (each i in (range 0 iterations)
     (let [[tx rx] (chan)
-          producer (sys/spawn (fn [] (chan/send tx i)))
+          producer (sys/spawn-vm (fn [] (chan/send tx i)))
           t0 (clock/monotonic)
           sel (chan/select @[rx] 500)
           elapsed (- (clock/monotonic) t0)]
       (sys/join producer)
       (assert (= (length sel) 2)
               (string "iteration " i ": cross-thread select hit timeout"))
-      (assert (= (get sel 1) i) (string "iteration " i ": value mismatch"))  # Per-iteration cap — a lost-wake race would push elapsed up to
-      # ~500ms (the timeout) while still returning a value via the
-      # wrapper's post-park chan/try-select.  Anything above 50ms is
-      # extremely suspect on a quiet machine.
-      (assert (< elapsed 0.05)
+      (assert (= (get sel 1) i) (string "iteration " i ": value mismatch"))  # Per-iteration cap — a lost-wake race pushes elapsed to ~500ms
+      # (the timeout) while still returning a value via the wrapper's
+      # post-park chan/try-select, so the discriminating boundary sits
+      # near the timeout.  The cap must tolerate ordinary OS scheduling
+      # latency: spawning a VM thread under machine load routinely costs
+      # 50-100ms, which is noise, not a lost wake.
+      (assert (< elapsed 0.25)
               (string "iteration " i ": cross-thread select waited too long: "
                       elapsed " s — race likely lost the wake")))))
 

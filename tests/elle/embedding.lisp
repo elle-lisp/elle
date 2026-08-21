@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # embedding.lisp — step-based scheduler test
 #
 # Exercises ev/step from Elle: create scheduler manually, spawn a fiber,

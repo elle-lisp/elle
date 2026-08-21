@@ -1,15 +1,13 @@
 // `--flip=on` CLI surface tests.
 //
-// With `--flip=on`, the lowerer post-processes each function to insert
-// FlipEnter at entry, FlipSwap before every tail call, and FlipExit
-// before every Return. These tests verify:
-//   1. Injection happens only when the flag is set.
-//   2. Programs that were correct before `--flip=on` stay correct — the
-//      Flip instructions are semantically equivalent to the trampoline's
-//      implicit rotation.
+// The `--flip=on/off` flag is accepted for compatibility but is a no-op.
+// Flip reclamation is gone: no flip bytecode exists for the lowerer to
+// emit, and nothing consults the flag. Regions reclaim instead — a region
+// frees at `FreeRegion(ρ)` when its RC reaches 0, in every loop and
+// tail-call shape alike.
 //
-// We observe (1) via `--dump=lir` and (2) by running a small tail-
-// recursive loop that would be memory-unsafe under broken rotation.
+// These tests exist to keep the flag inert. Accepting it costs nothing;
+// having it silently start meaning something again would not.
 
 use std::process::Command;
 
@@ -32,63 +30,22 @@ fn run(args: &[&str], source: &str) -> (String, String, std::process::ExitStatus
 }
 
 #[test]
-fn flip_on_by_default_in_lir() {
-    let (out, _, status) = run(
-        &["--dump=lir"],
-        "(defn loop [n] (if (= n 0) :done (loop (- n 1))))",
-    );
-    assert!(status.success());
-    assert!(
-        out.contains("flip-enter"),
-        "expected flip-enter by default:\n{}",
-        out
-    );
-}
-
-#[test]
-fn flip_off_suppresses_instructions() {
-    let (out, _, status) = run(
-        &["--flip=off", "--dump=lir"],
-        "(defn loop [n] (if (= n 0) :done (loop (- n 1))))",
-    );
-    assert!(status.success());
-    assert!(
-        !out.contains("flip-enter"),
-        "unexpected flip-enter with --flip=off:\n{}",
-        out
-    );
-    assert!(!out.contains("flip-swap"), "unexpected flip-swap:\n{}", out);
-    assert!(!out.contains("flip-exit"), "unexpected flip-exit:\n{}", out);
-}
-
-#[test]
-fn flip_on_injects_at_entry_exit_and_before_tail_call() {
+fn flip_on_no_longer_injects_flip_instructions() {
+    // --flip=on is a no-op; the lowerer emits no flip bytecodes.
     let (out, _, status) = run(
         &["--flip=on", "--dump=lir"],
-        "(defn loop [n] (if (= n 0) :done (loop (- n 1))))",
+        "(defn f [] (def @i 0) (while (%lt i 10) (assign i (%add i 1))))",
     );
     assert!(status.success(), "compile failed with --flip=on");
     assert!(
-        out.contains("flip-enter"),
-        "missing flip-enter with --flip=on:\n{}",
-        out
-    );
-    assert!(
-        out.contains("flip-swap"),
-        "missing flip-swap (tail call rewrite):\n{}",
-        out
-    );
-    assert!(
-        out.contains("flip-exit"),
-        "missing flip-exit (before Return):\n{}",
+        !out.contains("flip-enter"),
+        "flip instructions should not be injected:\n{}",
         out
     );
 }
 
 #[test]
 fn flip_on_runs_a_tail_loop_correctly() {
-    // 10k iterations: would blow the slab if rotation is broken, or
-    // return the wrong result if the swap pool frees live values.
     let (out, _err, status) = run(
         &["--flip=on", "--jit=0"],
         "(defn loop [n] (if (= n 0) :done (loop (- n 1)))) \
@@ -101,27 +58,6 @@ fn flip_on_runs_a_tail_loop_correctly() {
         _err
     );
     assert!(out.contains("done"), "unexpected output: {}", out);
-}
-
-#[test]
-fn flip_on_injects_at_while_back_edge() {
-    let (out, _, status) = run(
-        &["--flip=on", "--dump=lir"],
-        "(defn f [] (def @i 0) (while (%lt i 10) (assign i (%add i 1))))",
-    );
-    assert!(status.success(), "compile failed with --flip=on");
-    let flip_enter_count = out.matches("flip-enter").count();
-    assert!(
-        flip_enter_count >= 2,
-        "expected at least 2 flip-enter (function + while), got {}:\n{}",
-        flip_enter_count,
-        out
-    );
-    assert!(
-        out.matches("flip-swap").count() >= 1,
-        "missing flip-swap for while back-edge:\n{}",
-        out
-    );
 }
 
 #[test]
@@ -184,33 +120,6 @@ fn flip_on_break_from_while() {
         err
     );
     assert!(out.contains("42"), "expected 42, got: {}", out);
-}
-
-#[test]
-fn flip_on_unsafe_while_no_flip_injected() {
-    // A while loop that pushes heap values into an outer mutable array
-    // must NOT get scope marks — push is an arg-escaping primitive that
-    // stores values into a collection outliving the scope.
-    let (out, _, status) = run(
-        &["--flip=on", "--dump=lir"],
-        "(defn f [] \
-           (def @acc @[]) \
-           (def @i 0) \
-           (while (< i 3) \
-             (push acc (string \"v\" i)) \
-             (assign i (+ i 1))) \
-           acc)",
-    );
-    assert!(status.success(), "compile failed with --flip=on");
-    // No region-rotate should appear — push escapes heap values into
-    // the outer collection, making scope reclamation unsafe.
-    let region_rotate_count = out.matches("region-rotate").count();
-    assert!(
-        region_rotate_count == 0,
-        "expected 0 region-rotate (unsafe while with push), got {}:\n{}",
-        region_rotate_count,
-        out
-    );
 }
 
 #[test]

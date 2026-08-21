@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## MQTT plugin integration tests
 ## Tests the mqtt plugin (.so loaded via import-file)
 

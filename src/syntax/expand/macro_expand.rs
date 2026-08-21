@@ -10,17 +10,30 @@
 //! binding resolution and wrapping them as syntax objects would change their
 //! runtime semantics (e.g., `false` wrapped in a syntax object becomes truthy).
 //! Symbols and compound forms are wrapped as `Value::syntax(arg)` to preserve
-//! scope sets through the closure call. `from_value()` unwraps syntax objects
-//! back to `Syntax`, preserving scopes. `add_scope_recursive` then stamps the
-//! intro scope on the result.
+//! scope sets through the closure call.
 //!
-//! Arena management: two phases with distinct guard scopes. Phase 1 (closure
-//! compilation) has no guard — closures are allocated on the root FiberHeap via
-//! `alloc()` and a guard would free them. The one-time compilation cost stays in
-//! the arena.
-//! Phase 2 (closure call + result conversion) has its own guard that frees the
-//! transient result values after converting to owned Syntax. This keeps the
-//! per-invocation arena cost constant after the first call.
+//! Hygiene (Flatt 2016, sets of scopes): each expansion mints a fresh intro
+//! scope, PRE-STAMPS it on the wrapped arguments, and after the transformer
+//! returns, FLIPS it on the whole result (`flip_scope_recursive`): template-
+//! origin identifiers — which never saw the scope — gain it, and argument-
+//! origin identifiers lose it, recovering their use-site scope sets exactly.
+//! A template binder therefore carries the intro scope while inbound
+//! identifiers do not, so under the subset resolution rule the binder cannot
+//! capture them (`tests/integration/macro_hygiene.rs`). `datum->syntax`
+//! (scope_exempt) opts a node out of both operations — the deliberate-capture
+//! escape hatch.
+//!
+//! Arena management: two phases. Phase 1 (closure compilation) is NOT scoped —
+//! the cached transformer closure must survive every call, so it is allocated on
+//! the root FiberHeap via `alloc()` and reclaimed only at teardown
+//! (`release_cached_transformers`). The one-time compilation cost stays resident.
+//! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
+//! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
+//! a per-call mint log records every region the transformer mints, and after the
+//! result is deep-copied to owned Syntax the scope is reclaimed by balancing each
+//! survivor's unexplained references. This keeps the per-invocation region cost
+//! constant — without it every expansion leaked its construction scratch (the
+//! dominant teardown residue, the `Pair` class).
 //!
 //! Known limitations:
 //! - Macros cannot return improper lists (e.g. `(pair 1 2)`). The
@@ -39,7 +52,19 @@ use crate::vm::VM;
 /// Atoms become their direct Value equivalents. Symbols and compounds
 /// become `Value::syntax(arg)` to preserve scope sets through the
 /// closure call.
-fn wrap_macro_arg_value(arg: &Syntax) -> Value {
+///
+/// These are **ordinary mortal allocations** born in the per-expansion transient
+/// `region` the sole caller mints (docs/impl/region/ctx.md — the region is named
+/// explicitly as an argument). That region is part of the expansion's closed allocation scope
+/// (docs/impl/region/rules.md), so the wrapped args are reclaimed with the rest
+/// of the transformer's scratch once the result is deep-copied to owned Syntax —
+/// they do not leak per expansion. Only the heap cases (`String`, compound
+/// `_ => syntax`) take the region; the atom cases are immediates with no region.
+fn wrap_macro_arg_value(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    arg: &Syntax,
+    region: crate::hir::region::RuntimeRegion,
+) -> Value {
     match &arg.kind {
         SyntaxKind::Nil => Value::NIL,
         SyntaxKind::Bool(b) => {
@@ -51,13 +76,101 @@ fn wrap_macro_arg_value(arg: &Syntax) -> Value {
         }
         SyntaxKind::Int(n) => Value::int(*n),
         SyntaxKind::Float(f) => Value::float(*f),
-        SyntaxKind::String(s) => Value::string(s.clone()),
+        SyntaxKind::String(s) => crate::value::build::string(heap, s.clone(), region),
         SyntaxKind::Keyword(k) => Value::keyword(k),
-        _ => Value::syntax(arg.clone()),
+        _ => crate::value::build::syntax(heap, arg.clone(), region),
     }
 }
 
 impl Expander {
+    /// Compile (once) and cache a macro's transformer closure `(fn (params)
+    /// template)`, returning the closure `Value`.
+    ///
+    /// Cache hit: return the stored closure (cheap — `Value` is `Copy`). Cache
+    /// miss: compile via `eval_syntax` and store into BOTH `macro_def`'s cell
+    /// (the within-call clone) and the authoritative `self.macros[name]` entry.
+    ///
+    /// The compiled closure lives in a solver-assigned region from the nested
+    /// compilation; that region is NEVER freed by dropping the `Value` (`Copy`,
+    /// no `Drop`). Whoever owns the surviving cache entry owns the region —
+    /// which is why prelude/core transformers are pre-compiled ONCE into the
+    /// persistent compilation-cache master (`precompile_transformers`) and
+    /// released at teardown (`release_cached_transformers`), instead of being
+    /// re-compiled into each per-compile `Expander` clone and orphaned when the
+    /// clone drops (the corpus-OOM per-compile leak).
+    /// NativeFn allocations inside the body (quasiquote `Value::syntax` wrappers,
+    /// string literals) survive as that closure's bytecode constants, so they
+    /// must share its region, not a transient one.
+    pub(crate) fn ensure_transformer(
+        &mut self,
+        macro_def: &MacroDef,
+        span: &crate::syntax::Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Value, String> {
+        // Prefer the authoritative map entry's cache (it may have been compiled
+        // by a nested expansion since `macro_def` was cloned) over the clone's.
+        if let Some(v) = self
+            .macros
+            .get(&macro_def.name)
+            .and_then(|d| *d.cached_transformer.borrow())
+        {
+            *macro_def.cached_transformer.borrow_mut() = Some(v);
+            return Ok(v);
+        }
+        if let Some(v) = *macro_def.cached_transformer.borrow() {
+            return Ok(v);
+        }
+
+        // Build the fn parameter list: required, &opt optional, & rest.
+        let mut param_items: Vec<Syntax> = macro_def
+            .params
+            .iter()
+            .map(|p| Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()))
+            .collect();
+        if !macro_def.optional_params.is_empty() {
+            param_items.push(Syntax::new(
+                SyntaxKind::Symbol("&opt".to_string()),
+                span.clone(),
+            ));
+            for p in &macro_def.optional_params {
+                param_items.push(Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()));
+            }
+        }
+        if let Some(ref rest_name) = macro_def.rest_param {
+            param_items.push(Syntax::new(
+                SyntaxKind::Symbol("&".to_string()),
+                span.clone(),
+            ));
+            param_items.push(Syntax::new(
+                SyntaxKind::Symbol(rest_name.clone()),
+                span.clone(),
+            ));
+        }
+        let params_list = Syntax::new(SyntaxKind::List(param_items), span.clone());
+
+        // Build `(fn (params...) template)`.
+        let fn_expr = Syntax::new(
+            SyntaxKind::List(vec![
+                Syntax::new(SyntaxKind::Symbol("fn".to_string()), span.clone()),
+                params_list,
+                macro_def.template.clone(),
+            ]),
+            span.clone(),
+        );
+
+        let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
+
+        // Store in the within-call clone AND write back to the authoritative
+        // entry so subsequent expansions (this pipeline call, or — for the
+        // master — every future compile) reuse it.
+        *macro_def.cached_transformer.borrow_mut() = Some(closure_val);
+        if let Some(original) = self.macros.get_mut(&macro_def.name) {
+            *original.cached_transformer.borrow_mut() = Some(closure_val);
+        }
+        Ok(closure_val)
+    }
+
     pub(super) fn expand_macro_call(
         &mut self,
         macro_def: &MacroDef,
@@ -122,126 +235,113 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let span = call_site.span.clone();
 
-        // --- Phase 1: Get or compile the transformer closure (no arena guard) ---
+        // --- Phase 1: Get or compile the transformer closure ---
+        let transformer: Value = self.ensure_transformer(macro_def, &span, symbols, vm)?;
+
+        // --- Phase 2: Call the closure and convert result ---
         //
-        // Cache miss: compile `(fn (p1 p2 & rest) template)` via eval_syntax.
-        // Cache hit: clone the cached Value (cheap — Value is Copy, Rc inside).
-        //
-        // No ArenaGuard here: the closure is allocated into the root FiberHeap
-        // and must persist until stored in the transformer cache. A guard would
-        // release it before caching.
-        // The closure compilation cost (one-time per pipeline call) is left in
-        // the arena; subsequent calls skip this phase entirely.
-        let transformer: Value = {
-            let cached = *macro_def.cached_transformer.borrow();
-            if let Some(v) = cached {
-                v
-            } else {
-                // Build the fn parameter list: required, &opt optional, & rest.
-                let mut param_items: Vec<Syntax> = macro_def
-                    .params
-                    .iter()
-                    .map(|p| Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()))
-                    .collect();
-                if !macro_def.optional_params.is_empty() {
-                    param_items.push(Syntax::new(
-                        SyntaxKind::Symbol("&opt".to_string()),
-                        span.clone(),
-                    ));
-                    for p in &macro_def.optional_params {
-                        param_items.push(Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()));
-                    }
-                }
-                if let Some(ref rest_name) = macro_def.rest_param {
-                    param_items.push(Syntax::new(
-                        SyntaxKind::Symbol("&".to_string()),
-                        span.clone(),
-                    ));
-                    param_items.push(Syntax::new(
-                        SyntaxKind::Symbol(rest_name.clone()),
-                        span.clone(),
-                    ));
-                }
-                let params_list = Syntax::new(SyntaxKind::List(param_items), span.clone());
+        // The per-expansion transient `region_id` is the explicit allocation
+        // region for the Rust-side argument wrapping below (docs/impl/region/ctx.md
+        // — named explicitly as an argument). The transformer's own body allocates elsewhere:
+        // through its ctx (native calls mint fresh result regions) and its
+        // activation region map (data instructions). Those regions, plus
+        // `region_id`, are all captured by the mint scope opened below and
+        // reclaimed together once `Syntax::from_value` has deep-copied the
+        // result to owned Syntax (which builds owned Syntax, not Values).
+        if transformer.as_closure().is_none() {
+            return Err(format!(
+                "Macro '{}': transformer is not a closure",
+                macro_def.name
+            ));
+        }
 
-                // Build `(fn (params...) template)`.
-                let fn_expr = Syntax::new(
-                    SyntaxKind::List(vec![
-                        Syntax::new(SyntaxKind::Symbol("fn".to_string()), span.clone()),
-                        params_list,
-                        macro_def.template.clone(),
-                    ]),
-                    span.clone(),
-                );
+        let opt_start = macro_def.params.len();
+        let opt_end = opt_start + macro_def.optional_params.len();
+        let opt_provided = args.len().min(opt_end);
 
-                // Compile and execute to obtain the closure Value.
-                let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
+        // Hygiene (sets of scopes): mint this expansion's intro scope and
+        // PRE-STAMP it on every argument before the transformer runs. After
+        // the call, flip_scope_recursive removes it from argument-origin
+        // nodes and adds it to template-origin nodes — distinguishing the
+        // two without tracking provenance through the transformer.
+        let intro_scope = self.fresh_intro_scope();
 
-                // Store in this MacroDef instance's cache.
-                *macro_def.cached_transformer.borrow_mut() = Some(closure_val);
-
-                // Write back to the original entry in the macro map so that
-                // subsequent expansions within this pipeline call also benefit.
-                // (The CompilationCache's Expander won't see this update, which
-                // is acceptable — the cache warms per pipeline call.)
-                if let Some(original) = self.macros.get_mut(&macro_def.name) {
-                    *original.cached_transformer.borrow_mut() = Some(closure_val);
-                }
-
-                closure_val
-            }
-        };
-
-        // --- Phase 2: Call the closure and convert result (with arena guard) ---
-        //
-        // The arena guard here covers only the transient allocations from calling
-        // the closure and converting the Value result to Syntax. The closure itself
-        // (`transformer`) was allocated in Phase 1 outside this guard's scope, so
-        // it survives the release. This keeps per-invocation arena cost constant.
-        let result_syntax = {
-            let _arena_guard = crate::value::heap::ArenaGuard::new();
-
-            // --- Wrap arguments as Values ---
-            let closure = transformer.as_closure().ok_or_else(|| {
-                format!("Macro '{}': transformer is not a closure", macro_def.name)
-            })?;
-
-            // Collect fixed param arg values.
-            let mut arg_values: Vec<Value> = args[..macro_def.params.len()]
-                .iter()
-                .map(wrap_macro_arg_value)
-                .collect();
-
-            // Collect optional param arg values (those provided).
-            // Missing optional args are handled by the fn's &opt default (nil).
-            let opt_start = macro_def.params.len();
-            let opt_end = opt_start + macro_def.optional_params.len();
-            let opt_provided = args.len().min(opt_end);
+        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md
+        // § "Macro expansion — a closed allocation scope"): the transformer's
+        // entire `Value` output is deep-copied to owned `Syntax` below, so every
+        // region it mints — the arg-wrap region `region_id`, the constructed
+        // output tree, and the scratch its constructors discard internally — is
+        // dead afterward. Open a mint log around the whole call so the reclaim
+        // pass can balance each survivor's unexplained references by RC. The
+        // reclaim covers every region — root, interior, and orphan scratch — and
+        // subsumes the explicit `region_id` free.
+        crate::value::arena::begin_macro_scope(unsafe { &mut *vm.heap_ptr });
+        // Mint this expansion's transient arg region explicitly: the Rust-side
+        // argument wrapping below allocates into it. It is part of the mint scope
+        // and reclaimed with the rest.
+        let region_id = vm.heap().new_runtime_region();
+        // The expansion's heap, reached through the VM's raw `heap_ptr` (a `Copy`
+        // pointer that holds no borrow), so the `stamp` closure stays `Fn + Copy`
+        // — it captures the pointer, not a `&mut VM` — and the `.map(stamp)` reuse
+        // pattern below keeps compiling while every wrapped arg is born on this
+        // instance's own heap.
+        let heap_ptr = vm.heap_ptr;
+        let result_syntax = (|| {
+            // Wrap arguments as Values born in this expansion's transient region
+            // on this instance's heap.
+            let region = region_id;
+            let stamp = |arg: &Syntax| -> Value {
+                wrap_macro_arg_value(
+                    unsafe { &mut *heap_ptr },
+                    &self.add_scope_recursive(arg.clone(), intro_scope),
+                    region,
+                )
+            };
+            let mut arg_values: Vec<Value> =
+                args[..macro_def.params.len()].iter().map(stamp).collect();
             for arg in &args[opt_start..opt_provided] {
-                arg_values.push(wrap_macro_arg_value(arg));
+                arg_values.push(stamp(arg));
             }
-
-            // Collect rest args — the closure's arity is AtLeast(n) with a rest param,
-            // and VM's populate_env with VarargKind::List collects remaining args into
-            // an Elle list automatically. Pass them as individual Values.
             if macro_def.rest_param.is_some() {
                 for arg in &args[opt_end..] {
-                    arg_values.push(wrap_macro_arg_value(arg));
+                    arg_values.push(stamp(arg));
                 }
             }
 
-            // --- Call the cached closure ---
-            let result_value = vm.call_closure(closure, &arg_values)?;
+            crate::value::fiberheap::freelog::set_context(format!(
+                "macro '{}' at {}",
+                macro_def.name,
+                span.clone()
+            ));
+            // Publish this expansion's intro scope while the transformer
+            // runs: datum->syntax strips it from copied context scopes so
+            // its results carry the context's TRUE use-site scope set
+            // (nested expansions save/restore — strictly synchronous).
+            let prev_intro = crate::syntax::set_current_macro_intro(Some(intro_scope));
+            let call_result = vm.call_closure(transformer, &arg_values);
+            crate::syntax::set_current_macro_intro(prev_intro);
+            let result_value = call_result?;
+            // Deep-copy the result to owned Syntax while the transformer's
+            // scratch is still live; the scope reclaim below then frees ALL of
+            // it (the result tree's root and interior, the arg region, and any
+            // constructor-discarded orphan), balancing each survivor's
+            // unexplained references by RC. The result tree carried a Rule-5
+            // `ReturnValue` escape on its root and one on every tail-flowing
+            // node whose decref the solver suppressed; the reclaim balances them
+            // uniformly, so no per-result decref is needed here.
+            Syntax::from_value(&result_value, symbols, span.clone())
+        })();
+        // Close the mint scope: reclaim every region the transformer minted that
+        // is not held alive by a live edge (and is not a process-lifetime root).
+        // Runs on both Ok and Err — on error there is no expansion to keep, so
+        // all scratch is reclaimed too.
+        crate::value::arena::reclaim_macro_scope(unsafe { &mut *vm.heap_ptr });
+        let result_syntax = result_syntax?;
 
-            // --- Convert result back to Syntax ---
-            // Must happen before _arena_guard drops and frees result_value.
-            Syntax::from_value(&result_value, symbols, span.clone())?
-            // _arena_guard drops here, releasing transient allocations.
-        };
-
-        // Add intro scope for hygiene.
-        let intro_scope = self.fresh_scope();
-        let hygienized = self.add_scope_recursive(result_syntax, intro_scope);
+        // Hygiene flip: template-origin identifiers (never saw the intro
+        // scope) gain it; argument-origin identifiers (pre-stamped above)
+        // lose it, restoring their use-site scope sets exactly.
+        let hygienized = self.flip_scope_recursive(result_syntax, intro_scope);
 
         // Continue expanding the result.
         self.expand(hygienized, symbols, vm)

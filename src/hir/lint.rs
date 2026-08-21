@@ -9,16 +9,22 @@ use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::lint::rules;
 use crate::reader::SourceLoc;
 use crate::symbol::SymbolTable;
+use crate::value::SymbolId;
 
 /// HIR-based linter
 pub struct HirLinter {
     diagnostics: Vec<Diagnostic>,
+    /// The nearest enclosing named function while walking the tree. Stamped onto
+    /// each diagnostic (`Diagnostic::function`) so per-function consumers can
+    /// attribute a finding exactly. `None` at module/top level.
+    current_fn: Option<SymbolId>,
 }
 
 impl HirLinter {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
+            current_fn: None,
         }
     }
 
@@ -54,6 +60,36 @@ impl HirLinter {
         ))
     }
 
+    /// Lint a `def`/`let`/`letrec` binding introduction, then descend into its
+    /// initializer — entering `binding`'s function scope first when the
+    /// initializer is its lambda body, so findings inside attribute to it. This
+    /// is the single site that maintains `current_fn`; loop/match/pattern
+    /// bindings never reach it, which is why their bindings are not flagged.
+    fn check_binding_site(
+        &mut self,
+        binding: crate::hir::Binding,
+        init: &Hir,
+        loc: &Option<SourceLoc>,
+        symbols: &SymbolTable,
+        arena: &BindingArena,
+    ) {
+        let fname = self.current_fn.and_then(|s| symbols.name(s));
+        rules::check_mutable_never_assigned(
+            binding,
+            arena,
+            loc,
+            symbols,
+            fname,
+            &mut self.diagnostics,
+        );
+        let prev = self.current_fn;
+        if !arena.get(binding).is_synthetic && matches!(init.kind, HirKind::Lambda { .. }) {
+            self.current_fn = Some(arena.get(binding).name);
+        }
+        self.check(init, symbols, arena);
+        self.current_fn = prev;
+    }
+
     fn check(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
         let loc = Self::span_to_loc(&hir.span);
 
@@ -69,15 +105,17 @@ impl HirLinter {
             HirKind::Var(_) => {}
 
             HirKind::Let { bindings, body } => {
-                for (_, init) in bindings {
-                    self.check(init, symbols, arena);
+                for (binding, init) in bindings {
+                    let bloc = Self::span_to_loc(&init.span);
+                    self.check_binding_site(*binding, init, &bloc, symbols, arena);
                 }
                 self.check(body, symbols, arena);
             }
 
             HirKind::Letrec { bindings, body } => {
-                for (_, init) in bindings {
-                    self.check(init, symbols, arena);
+                for (binding, init) in bindings {
+                    let bloc = Self::span_to_loc(&init.span);
+                    self.check_binding_site(*binding, init, &bloc, symbols, arena);
                 }
                 self.check(body, symbols, arena);
             }
@@ -149,8 +187,8 @@ impl HirLinter {
                 self.check(value, symbols, arena);
             }
 
-            HirKind::Define { binding: _, value } => {
-                self.check(value, symbols, arena);
+            HirKind::Define { binding, value } => {
+                self.check_binding_site(*binding, value, &loc, symbols, arena);
             }
 
             HirKind::Destructure { value, .. } => {
@@ -189,6 +227,10 @@ impl HirLinter {
                 self.check(expr, symbols, arena);
             }
 
+            HirKind::Return { value } => {
+                self.check(value, symbols, arena);
+            }
+
             HirKind::Eval { expr, env } => {
                 self.check(expr, symbols, arena);
                 self.check(env, symbols, arena);
@@ -219,7 +261,7 @@ impl HirLinter {
                 self.check(value, symbols, arena);
             }
 
-            HirKind::Quote(_) => {}
+            HirKind::Quote(_) | HirKind::QuoteConst(_) => {}
 
             HirKind::Intrinsic { args, .. } => {
                 for a in args {
@@ -239,58 +281,4 @@ impl Default for HirLinter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::pipeline::analyze;
-    use crate::primitives::register_primitives;
-    use crate::vm::VM;
-
-    fn setup() -> (SymbolTable, VM) {
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbols);
-        (symbols, vm)
-    }
-
-    #[test]
-    fn test_hir_linter_creation() {
-        let linter = HirLinter::new();
-        assert_eq!(linter.diagnostics().len(), 0);
-        assert!(!linter.has_errors());
-        assert!(!linter.has_warnings());
-    }
-
-    #[test]
-    fn test_hir_linter_arity_check() {
-        let (mut symbols, mut vm) = setup();
-        // abs expects 1 argument — the analyzer catches this as a hard error
-        let result = analyze("(abs 1 2)", &mut symbols, &mut vm, "<test>");
-        match result {
-            Err(ref msg) => assert!(
-                msg.contains("arity error"),
-                "expected arity error, got: {msg}"
-            ),
-            Ok(_) => panic!("expected arity error for (abs 1 2)"),
-        }
-    }
-
-    #[test]
-    fn test_hir_linter_nested_expressions() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            "(let [camelCase 1] (if true camelCase 0))",
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        );
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols, &analysis.arena);
-
-        // Let bindings don't trigger naming convention checks (only define does)
-        // This is consistent with the legacy linter behavior
-        assert!(!linter.has_warnings());
-    }
-}
+mod tests;

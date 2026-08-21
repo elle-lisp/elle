@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/tls.lisp — TLS client and server for Elle
 ##
 ## TLS client and server using the elle-tls plugin for state machine management.
@@ -11,7 +11,6 @@
 ##     bytes for TCP ports — TCP streams use binary encoding in this runtime)
 ##   - ev/spawn from scheduler
 ##   - port/close for TCP port lifecycle
-##   - subprocess/system for hostname resolution (getent fallback)
 ##
 ## Usage:
 ##   (def tls-plugin (import "plugin/tls"))
@@ -30,29 +29,6 @@
 ##   {:tcp port :tls tls-state}
 ##   :tcp — the underlying TcpStream port
 ##   :tls — the TlsState ExternalObject from the elle-tls plugin
-
-## ── Hostname resolution ─────────────────────────────────────────────────────
-##
-## The io_uring TCP backend requires IP addresses for tcp/connect. Hostnames
-## must be resolved before connecting. We use getent(1) via subprocess to
-## delegate to the system resolver (glibc getaddrinfo), which handles /etc/hosts,
-## systemd-resolved, and any configured DNS forwarder.
-
-(defn first-word [s]
-  "Extract first whitespace-delimited token from string s."
-  (let [sp (string/find s " ")]
-    (if (nil? sp) s (slice s 0 sp))))
-
-(defn first-line [s]
-  "Extract first line from string s."
-  (let [nl (string/find s "\n")]
-    (if (nil? nl) s (slice s 0 nl))))
-
-(defn resolve-host [host]
-  "Resolve hostname to an IP address string for use with tcp/connect.
-   Uses sys/resolve (getaddrinfo) for system-correct resolution that
-   consults /etc/hosts and nsswitch.conf. Returns the first IP address."
-  (first (sys/resolve host)))
 
 ## ── The entry-point thunk ───────────────────────────────────────────────────
 ##
@@ -113,20 +89,17 @@
     "Connect to a TLS server. Returns a tls-conn struct {:tcp port :tls tls-state}.
      Must be called inside a scheduler context (the async scheduler).
 
-     hostname is used for TLS SNI and certificate verification.
-     The hostname is DNS-resolved to an IP before connecting (required by
-     the io_uring backend; the sync backend supports hostname connects directly).
+     hostname is used for TLS SNI and certificate verification, and is passed
+     to tcp/connect, which resolves it and tries each address for the TCP
+     connection.
 
      Optional third argument opts struct:
        :no-verify  bool   — skip certificate verification (dev/test only)
        :ca-file    string — path to PEM CA bundle
        :client-cert string — path to PEM client certificate chain
        :client-key  string — path to PEM client private key"
-    (let* [opts (or (get args 0) {})  # Resolve hostname to IP. The io_uring TCP backend requires an IP
-           # address; hostnames must be resolved before calling tcp/connect.
-           # SNI and cert verification still use the original hostname.
-           ip (resolve-host hostname)
-           tcp-port (tcp/connect ip port-num)  # async
+    (let* [opts (or (get args 0) {})
+           tcp-port (tcp/connect hostname port-num)  # async; resolves hostname
            tls (client-state-fn hostname opts)]
       (let [[ok? result] (protect (tls-handshake tcp-port tls))]
         (unless ok?  # Handshake failed. Close TCP port before re-raising.

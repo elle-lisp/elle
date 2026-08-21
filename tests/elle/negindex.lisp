@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Negative Indexing + Sequence Accessor Widening Tests
 
 # ── get with negative indices ────────────────────────────────────────

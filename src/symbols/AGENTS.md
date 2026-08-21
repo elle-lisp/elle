@@ -12,17 +12,23 @@ this module provides the shared types.
 
 | Type | Purpose |
 |------|---------|
-| `SymbolIndex` | Collection of definitions, usages, and locations |
+| `SymbolIndex` | Definitions, usages, and locations, keyed by `DefId` |
 | `SymbolDef` | Definition info: name, kind, location, arity, docs |
-| `SymbolKind` | `Function`, `Variable`, `Builtin`, `Macro`, `Module` |
+| `SymbolKind` | `Function`, `Variable`, `Builtin`, `Macro`, `Module` (+ `lsp_kind`/`lsp_completion_kind`/`lsp_symbol_kind`) |
+| `DefId` | Per-binding identity (a `u32`) |
+
+`SymbolIndex` is keyed by `DefId`, not the interned name (`SymbolId`): two
+locals both named `x` in different scopes get distinct `DefId`s, so
+rename/find-references never collapse them. `DefId` is derived from the HIR
+`Binding` arena index (`Binding::def_id`) at extraction time and is opaque
+afterward. It is kept a bare `u32` newtype (not a `Binding`) so this module
+stays pipeline-agnostic. `SymbolDef.id` still holds the `SymbolId` for callers
+that group by name; usage-only bindings (e.g. primitives) get a placeholder
+`SymbolDef` with `location: None`.
 
 ## Dependents
 
-- `hir/symbols.rs` — HIR-based symbol extraction builds SymbolIndex
+- `hir/symbols.rs` — HIR-based symbol extraction builds SymbolIndex (keys via `Binding::def_id`)
 - `lsp/` — all IDE features query SymbolIndex
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~175 | Symbol index types (SymbolIndex, SymbolDef, SymbolKind) |
+- `primitives/compile/` — the `compile/*` reflection API (selects the
+  data-bearing binding by name via `binding_for_name`)

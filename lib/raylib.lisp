@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## std/raylib — Raylib bindings for Elle via FFI
 ##
 ## Pure FFI bindings to libraylib (v5.5). No Rust plugin needed.

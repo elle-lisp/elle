@@ -7,7 +7,7 @@ Full-pipeline integration tests: end-to-end behavior verification.
 Test end-to-end pipeline behavior by evaluating Elle source code through the full pipeline (Reader → Expander → Analyzer → Lowerer → Emitter → VM) and checking the result. Cover:
 - Core language features (arithmetic, conditionals, lists, functions)
 - Advanced features (closures, recursion, higher-order functions, match)
-- Concurrency (fibers, coroutines, thread transfer)
+- Concurrency (fibers, thread transfer)
 - Signal enforcement (interprocedural signal tracking)
 - Error reporting (error messages include correct source locations)
 - Destructuring, blocks, splice, booleans, dispatch
@@ -32,7 +32,7 @@ use elle::Value;
 
 #[test]
 fn test_my_feature() {
-    assert_eq!(eval_source("(my-feature 42)").unwrap(), Value::int(42));
+    eval_source("(my-feature 42)", |r| assert_eq!(r.unwrap(), Value::int(42)));
 }
 ```
 
@@ -41,9 +41,10 @@ fn test_my_feature() {
 ```rust
 #[test]
 fn test_error_case() {
-    let result = eval_source("(undefined-function)");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("undefined"));
+    eval_source("(undefined-function)", |result| {
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("undefined"));
+    });
 }
 ```
 
@@ -69,7 +70,7 @@ Tests are organized by feature area in separate files:
 |------|----------|
 | `core.rs` | Basic arithmetic, conditionals, lists, functions |
 | `advanced.rs` | Closures, recursion, higher-order functions |
-| `concurrency.rs` | Fibers, coroutines, thread transfer |
+| `concurrency.rs` | Fibers, thread transfer |
 | `error_reporting.rs` | Error messages with source locations |
 | `repl_exit_codes.rs` | REPL exit code behavior |
 | ~~`coroutines.rs`~~ | Migrated to `tests/elle/coroutines.lisp` |
@@ -102,7 +103,7 @@ Tests are organized by feature area in separate files:
 | `regex.rs` | Regular expressions |
 | ~~`table_keys.rs`~~ | Migrated to `tests/elle/table-keys.lisp` |
 | `glob.rs` | Glob patterns |
-| `elle_scripts.rs` | Elle script tests |
+| `elle_scripts.rs` | Process-global runtime-mode pins (guardfree/no-uring/mlir-off); the corpus itself runs via `elle test` |
 | `environment.rs` | Environment variables |
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |
@@ -114,13 +115,14 @@ Tests are organized by feature area in separate files:
 
 ## Test helpers
 
-All tests use `eval_source()` from `tests/common/mod.rs`:
+All tests use `eval_source()` from `tests/common/mod.rs`. It takes a closure that
+inspects the result while the `Runtime`'s heap is still alive (a heap-valued
+result dangles past teardown otherwise):
 
 ```rust
 use crate::common::eval_source;
 
-let result = eval_source("(+ 1 2)").unwrap();
-assert_eq!(result, Value::int(3));
+eval_source("(+ 1 2)", |r| assert_eq!(r.unwrap(), Value::int(3)));
 ```
 
 For tests that need direct VM access:
@@ -149,14 +151,6 @@ mod myfile {
 ```
 
 This is required because `tests/lib.rs` uses `include!()` to pull in the `mod.rs` file. Without registration, the test file will be ignored.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~140 | Module declarations and includes |
-| (individual test files) | ~100-500 each | Feature-specific tests |
-
 ## Invariants
 
 1. **Tests are independent.** Each test creates a fresh VM (via `eval_source()`) or uses a cached VM with restored globals (via `eval_reuse()`). No cross-test contamination.

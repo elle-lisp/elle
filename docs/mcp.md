@@ -61,7 +61,7 @@ tracking.
 ## Knowledge graph schema
 
 The graph is populated by `analyze_file` (Elle sources) and the
-supporting [`tools/elle-graph.lisp`](../tools/elle-graph.lisp) and [`tools/rust-graph.lisp`](../tools/rust-graph.lisp) scripts.
+supporting [`mcp/elle-graph.lisp`](../mcp/elle-graph.lisp) and [`mcp/rust-graph.lisp`](../mcp/rust-graph.lisp) scripts.
 
 ### Elle function analysis (`urn:elle:Fn`)
 
@@ -137,18 +137,25 @@ HAVING (?captures > 1)
 
 ## Building and running
 
+The server and its scripts live in the `mcp/` git submodule. A fresh clone
+leaves it empty — check it out first:
+
+```bash
+git submodule update --init mcp plugins
+```
+
 ```bash
 # Build elle + MCP plugins (oxigraph, syn) in one invocation
 make mcp
 
 # Default store location: .elle-mcp/store/ (auto-created)
-elle tools/mcp-server.lisp
+elle mcp/mcp-server.lisp
 
 # Explicit store path
-elle tools/mcp-server.lisp -- /path/to/store
+elle mcp/mcp-server.lisp -- /path/to/store
 
 # Via environment variable
-ELLE_MCP_STORE=/path/to/store elle tools/mcp-server.lisp
+ELLE_MCP_STORE=/path/to/store elle mcp/mcp-server.lisp
 ```
 
 The store is persistent — graph data survives across server restarts.
@@ -185,13 +192,13 @@ bulk loading, use the supporting scripts:
 
 ```bash
 # Extract Elle source graph + Rust source graph, load into store
-elle tools/load-all.lisp
+elle mcp/load-all.lisp
 
 # Extract Elle graph only
-elle tools/elle-graph.lisp
+elle mcp/elle-graph.lisp
 
 # Extract Rust graph only (requires syn plugin)
-elle tools/rust-graph.lisp
+elle mcp/rust-graph.lisp
 ```
 
 ## What can an AI agent do with it?
@@ -339,7 +346,7 @@ WHERE {
 ORDER BY ?name
 ```
 
-See [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) for more examples.
+See [`mcp/demo-queries.lisp`](../mcp/demo-queries.lisp) for more examples.
 
 ## Test orchestration
 
@@ -435,7 +442,7 @@ Results are stored as RDF triples:
 
 The MCP server exposes what the compiler already computes. Elle's compilation pipeline performs signal inference, capture analysis, and binding resolution for every file. This information exists whether or not anyone queries it — the MCP server just makes it accessible over JSON-RPC.
 
-**Everything the MCP server provides is available to normal Elle code at runtime.** `compile/analyze`, `compile/signal`, `compile/captures`, `compile/callees` — these are regular Elle functions. The MCP server is just an Elle program (`tools/mcp-server.lisp`) that wraps these primitives in the Model Context Protocol. You can write your own analysis tools using the same functions:
+**Everything the MCP server provides is available to normal Elle code at runtime.** `compile/analyze`, `compile/signal`, `compile/captures`, `compile/callees` — these are regular Elle functions. The MCP server is just an Elle program (`mcp/mcp-server.lisp`) that wraps these primitives in the Model Context Protocol. You can write your own analysis tools using the same functions:
 
 ```text
 (def a (compile/analyze (file/read "my-code.lisp") {:file "my-code.lisp"}))
@@ -469,7 +476,7 @@ The MCP server's `analyze_file` tool handles this — it clears old triples for 
 
 The MCP server is designed for AI coding assistants (Claude, Cursor,
 Copilot, etc.) that support the Model Context Protocol. Configure your
-editor to launch `elle tools/mcp-server.lisp` as an MCP server.
+editor to launch `elle mcp/mcp-server.lisp` as an MCP server.
 
 The server complements the LSP server (`elle lsp`) — LSP handles
 real-time editing features (completions, diagnostics, go-to-definition),
@@ -480,14 +487,14 @@ and code understanding.
 
 | File | Purpose |
 |------|---------|
-| [`tools/elle-graph.lisp`](../tools/elle-graph.lisp) | Extract RDF triples from Elle source files |
-| [`tools/rust-graph.lisp`](../tools/rust-graph.lisp) | Extract RDF triples from Rust source files via syn plugin |
+| [`mcp/elle-graph.lisp`](../mcp/elle-graph.lisp) | Extract RDF triples from Elle source files |
+| [`mcp/rust-graph.lisp`](../mcp/rust-graph.lisp) | Extract RDF triples from Rust source files via syn plugin |
 | [`lib/rdf/elle.lisp`](../lib/rdf/elle.lisp) | Elle→RDF triple generation (`std/rdf/elle`) |
 | [`lib/rdf/rust.lisp`](../lib/rdf/rust.lisp) | Rust→RDF triple generation (`std/rdf/rust`) |
-| [`tools/load-all.lisp`](../tools/load-all.lisp) | Extract both graphs and load into the store |
-| [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) | Example SPARQL queries |
-| [`tools/test-mcp.lisp`](../tools/test-mcp.lisp) | Smoke test: spawns server, exercises all tools |
-| [`tools/semantic-graph.lisp`](../tools/semantic-graph.lisp) | Semantic graph analysis utilities |
+| [`mcp/load-all.lisp`](../mcp/load-all.lisp) | Extract both graphs and load into the store |
+| [`mcp/demo-queries.lisp`](../mcp/demo-queries.lisp) | Example SPARQL queries |
+| [`mcp/test-mcp.lisp`](../mcp/test-mcp.lisp) | Smoke test: spawns server, exercises all tools |
+| [`mcp/semantic-graph.lisp`](../mcp/semantic-graph.lisp) | Semantic graph analysis utilities |
 
 ## Dependencies
 

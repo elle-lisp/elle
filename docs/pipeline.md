@@ -12,18 +12,18 @@ Module: `src/pipeline/` (7 files, ~540 lines of implementation).
 - [The fixpoint loop](#the-fixpoint-loop)
 - [Pre-scanning functions](#pre-scanning-functions-in-srcpipelinescanrs)
 - [Compilation phases (single-form)](#compilation-phases-single-form)
-- [Compilation cache](#compilation-cache-in-srcpipelinecachersrs)
+- [Compile context](#compile-context-in-srcpipelinecachersrs)
 - [Known issues](#known-issues)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `mod.rs` | 28 | Module declarations, re-exports, type definitions |
-| `cache.rs` | 92 | Thread-local compilation cache (VM, Expander, PrimitiveMeta) |
-| `scan.rs` | 97 | Pre-scanning for forward declarations (`prescan_forms`, `scan_define_lambda`, `scan_const_binding`) |
-| `fixpoint.rs` | 81 | Shared fixpoint loop (`run_fixpoint`) parameterized by post-analyze closure |
-| `compile.rs` | 115 | `compile()`, `compile_file()` |
-| `analyze.rs` | 65 | `analyze()`, `analyze_file()` |
-| `eval.rs` | 90 | `eval()`, `eval_all()`, `eval_syntax()` |
+| `mod.rs` | `CompileResult`, `AnalyzeResult`, re-exports |
+| `cache.rs` | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
+| `compile.rs` | `compile()`, `compile_file()`, and the whole-module entry points |
+| `compile/frontend.rs` | Read, expand, and classify forms ahead of analysis |
+| `compile/transforms.rs` | Post-analysis HIR transforms |
+| `analyze.rs` | `analyze()`, `analyze_file()` |
+| `eval.rs` | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
 ## Public API
 
@@ -54,49 +54,52 @@ pub struct AnalyzeResult {
 
 ### Signatures
 
+The compile context (`cctx`) is the per-instance `CompileCtx` threaded
+explicitly as a parameter through every entry point. `compile`/`compile_file`
+expand macros on the context's own macro VM, so they need no caller VM; the
+`eval`/`analyze` family run expansion on the caller's borrowed VM.
+
 ```rust
-pub fn compile(source: &str, symbols: &mut SymbolTable, source_name: &str) -> Result<CompileResult, String>
-pub fn compile_file(source: &str, symbols: &mut SymbolTable, source_name: &str) -> Result<CompileResult, String>
-pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<Value, String>
-pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<Value, String>
-pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<Value, String>
+pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
+pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
+pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
+pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
+pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>
-pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<AnalyzeResult, String>
-pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<AnalyzeResult, String>
+pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
+pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
 ```
 
 ## VM ownership patterns
 
-Two distinct patterns exist, and confusing them causes bugs:
+The macro-expansion VM is owned by the per-instance `CompileCtx` (built once
+with primitives registered, core.lisp, and the prelude). Two distinct patterns
+use it, and confusing them causes bugs:
 
-**Internal VM** (`compile`, `compile_file`): These functions create a fresh
-`VM::new()` and a fresh `Expander::new()`. The internal VM is used only for
-macro expansion during compilation. Macro side effects don't persist. Primitives
-are registered into this VM via `register_primitives`. This is the correct
-pattern for batch compilation where the caller doesn't need a running VM.
+**Context's macro VM** (`compile`, `compile_file`): These expand macros on the
+`CompileCtx`'s own macro VM (`with_macro_expansion`, fiber reset between uses)
+with a cloned `Expander`. They need no caller VM, so they take only
+`symbols` + `cctx`. This is the correct pattern for batch compilation where
+the caller doesn't need a running VM.
 
 **Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`):
 These borrow the caller's `&mut VM`. The same VM is used for both macro
-expansion and (for `eval`) execution. This means macro side effects persist
-in the caller's VM. This is the correct pattern for stdlib initialization
-and macro body evaluation where state must accumulate.
+expansion and (for `eval`) execution, so macro side effects persist in the
+caller's VM. This is the correct pattern for stdlib initialization and macro
+body evaluation where state must accumulate. They obtain a cloned `Expander`
+and `PrimitiveMeta` from the context via `cctx.expander_and_meta()`.
 
-**Hybrid** (`eval_all`): Delegates compilation to `compile_file` (which creates
-an internal VM for macro expansion), then executes each compiled form on the
-caller's borrowed VM. Macro side effects do NOT persist in the caller's VM.
+**Hybrid** (`eval_all`): Delegates compilation to `compile_file` (which expands
+on the context's macro VM), then executes each compiled form on the caller's
+borrowed VM. Macro side effects do NOT persist in the caller's VM.
 
 **`eval_syntax` is special**: It also borrows the caller's `Expander`, not just
 the VM. This is because it's called from inside `Expander::expand_macro_call_inner`
 — the macro expansion engine needs to compile and run a macro body while
 preserving the current expansion context (macro registry, scope state). Nested
-macro calls work because the same Expander is threaded through.
-
-**Primitive metadata divergence**: `compile`/`compile_file` call
-`register_primitives()` which returns signal and arity metadata as a side
-effect of registration. `eval`/`analyze` and friends call `build_primitive_meta()`
-instead, which builds the same metadata without registering anything (the
-caller's VM already has primitives registered). This is why `compile` can work
-with just `&mut SymbolTable` while `eval` needs `&mut VM`.
+macro calls work because the same Expander is threaded through. Its macro-body
+metadata rides on the expander (`eval_meta`), so no separate `CompileCtx`
+borrow is needed mid-expansion.
 
 ## Expander lifecycle
 
@@ -114,8 +117,12 @@ is intentional — Expanders are not cached or reused across top-level calls.
 
 ## The fixpoint loop
 
-Used by `compile_file`, `eval_all` (via `compile_file`), and `analyze_file` to
-correctly infer signals for mutually recursive top-level definitions.
+Signal inference for mutually recursive definitions converges by fixpoint. The
+loop lives in `analyze_file_letrec` (`src/hir/analyze/fileletrec/letrec.rs`),
+not in the pipeline module: `compile_file` and `analyze_file` both classify a
+file's forms and hand them to that one function, so the file *is* a letrec and
+the file-level fixpoint and the letrec fixpoint are the same mechanism. Local
+`(letrec ...)` forms run the same loop in `src/hir/analyze/letrec.rs`.
 
 The signal inference computed here is exposed to tools and agents via:
 - **`compile/signal`** — Get the inferred signal of a function
@@ -126,105 +133,61 @@ See [MCP server documentation](../docs/mcp.md) and [Agent Reasoning](../docs/ana
 
 ### Problem
 
-When compiling `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (f x)))`,
-the analyzer sees `f` before `g` exists. Without pre-scanning, `g` would be
-treated as an unknown name with `Polymorphic` signal, making `f` also
-`Polymorphic` — even if both are actually `Silent`.
+In `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (yield x)))`, a single
+sequential pass analyzes `f` while `g` is still unanalyzed. `f` therefore reads
+whatever `g`'s seed says rather than what `g` turns out to be, and a second
+name in the cycle can make the first one's answer wrong in either direction:
+too low if the seed is optimistic, too high if it is conservative.
 
-### Algorithm (in `src/pipeline/fixpoint.rs`)
+### Algorithm
 
-The algorithm has five phases (not to be confused with the max iteration
-count of 10 within phase 4):
+1. **Pre-bind** every name in the letrec, so each initializer can resolve its
+   siblings. Seed each one's signal with `Signal::silent()`.
 
-1. **Parse and expand** all forms upfront. Expansion is idempotent so this
-   only happens once. (In `compile_file` and `analyze_file` before calling
-   `run_fixpoint`.)
+2. **Analyze initializers** in order. Record each lambda's `inferred_signals`
+   in `signal_env` and its arity in `arity_env` as it is analyzed. Bindings
+   analyzed early in this pass may have read stale sibling signals; the next
+   step is what repairs that.
 
-2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
-    For each match, seed `def_signals` with `Signal::silent()` (optimistic —
-    assume silent) and extract syntactic arity into `def_arities`.
+3. **Iterate to a fixpoint** (bounded at 10 iterations). Re-analyze every
+   lambda binding against the current `signal_env`. If any lambda's
+   `inferred_signals` differs from what `signal_env` holds, record the new
+   value and iterate again. Stop on the first iteration that changes nothing.
 
-3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
-   `def` bindings as immutable for cross-form immutability checking.
+4. **Analyze the body** (or, for a file-letrec, the remaining expression
+   entries) only after the loop has converged, so calls into the cycle read
+   settled signals.
 
-4. **Fixpoint iteration** (in `run_fixpoint()`, max 10 iterations):
-   - Clear `analysis_results`
-   - For each form, create a fresh `Analyzer` seeded with:
-     - `def_signals` from previous iteration (or pre-scan)
-     - `def_arities` from pre-scan + previous forms
-     - `immutable_defs` from pre-scan + previous forms
-   - Analyze the form, collect actual inferred signals via
-     `analyzer.take_defined_signals()`
-   - After all forms: compare `new_def_signals` with `def_signals`
-   - If equal → converged, break
-   - If different → update `def_signals`, re-analyze all forms
+5. **Combine** the aggregate signal from the post-fixpoint binding and body
+   HIR, not from the values step 2 produced.
 
-5. **Post-analysis callback** (parameterized by `post_analyze` closure):
-   - `compile_file` passes `|a| mark_tail_calls(&mut a.hir)` to mark tail calls
-   - `analyze_file` passes `|_| {}` (no-op, returns HIR as-is)
-
-6. **Lower and emit** (only in `compile_file`, after convergence).
+Re-analysis is safe to repeat: its side effects on bindings (`mark_captured`,
+`mark_mutated`) only ever add flags, so an extra iteration can make the result
+more conservative but never wrong. Errors raised inside lambda bodies are
+collected from the final iteration only, so a body that fails to analyze does
+not report the same error once per iteration.
 
 ### Convergence
 
-The algorithm converges because signals form a lattice: `Silent` < `Yields` <
-`Polymorphic`. Each iteration can only move signals upward (from the optimistic
-`Silent` seed toward the true signal). Once no signal changes, the fixpoint is
-reached. The max of 10 iterations is a safety bound — in practice, convergence
-happens in 1–3 iterations.
+Signals form a lattice and the seed is the bottom element, so each iteration
+can only move a signal upward. A signal that stops moving is at its least
+fixed point. Termination is therefore guaranteed by the lattice height; the
+10-iteration bound is a safety net against a lattice bug, not part of the
+argument. In practice convergence takes 1–3 iterations.
 
-### Deduplication
+Because the seed is optimistic, a loop that stops early reports signals that
+are too *low* — it under-approximates. That is the dangerous direction: a
+function that can raise `:error` but is inferred silent will pass a
+compile-time `(silence)` check and fail at runtime instead. The runtime
+enforcement in `attune`/`silence` is the backstop, not the guarantee.
 
-The fixpoint loop lives in `run_fixpoint()` (in `src/pipeline/fixpoint.rs`),
-parameterized by a `post_analyze` closure. Both `compile_file` and
-`analyze_file` call through it.
+### Scope
 
-## Pre-scanning functions (in `src/pipeline/scan.rs`)
+Convergence is per-file. Mutual recursion across a file boundary does not
+converge, because each import is a separate compilation — see
+[signals/inference.md](signals/inference.md) § Mutual Recursion Across Files
+for why that is a design choice and what `squelch` does about it.
 
-### `prescan_forms()`
-
-```rust
-pub(super) fn prescan_forms(
-    forms: &[Syntax],
-    symbols: &mut SymbolTable,
-) -> (HashMap<SymbolId, Signal>, HashMap<SymbolId, Arity>, HashSet<SymbolId>)
-```
-
-Unified pre-scan that processes all forms in a single pass, calling both
-`scan_define_lambda` and `scan_const_binding` for each form. Returns:
-- `def_signals`: `(def name (fn ...))` patterns seeded with `Signal::silent()`
-- `def_arities`: syntactic arities from lambda parameter lists
-- `immutable_defs`: all `(def name ...)` patterns
-
-### `scan_define_lambda()`
-
-```rust
-pub(super) fn scan_define_lambda(
-    syntax: &Syntax,
-    symbols: &mut SymbolTable,
-) -> Option<(SymbolId, Option<Arity>)>
-```
-
-Matches expanded syntax of the form `(var/def name (fn ...))`. Returns the
-interned `SymbolId` and the syntactic arity (number of parameters, if the
-parameter list is a simple list). Used to seed the fixpoint loop with
-optimistic `Signal::silent()` and known arities before analysis begins.
-
-This operates on **expanded** syntax — `defn` has already been desugared to
-`(def name (fn ...))` by the Expander.
-
-### `scan_const_binding()`
-
-```rust
-pub(super) fn scan_const_binding(
-    syntax: &Syntax,
-    symbols: &mut SymbolTable,
-) -> Option<SymbolId>
-```
-
-Matches `(def name ...)` patterns (not `var`). Returns the `SymbolId`. Used to
-populate `immutable_defs` so the analyzer can reject `(assign name ...)` on
-`def`-bound names across form boundaries.
 
 ## Compilation phases (single-form)
 
@@ -240,30 +203,35 @@ Every compilation path follows the same five phases:
 
 `analyze` and `analyze_file` stop after phase 3 (no lowering or emission).
 
-## Compilation cache (in `src/pipeline/cache.rs`)
+## Compile context (in `src/pipeline/cache.rs`)
 
-The module uses a thread-local `CompilationCache` to avoid per-call costs of
-VM creation, primitive registration, and prelude loading.
+`CompileCtx` is the per-instance compile-time state: a macro-expansion VM
+(primitives registered), the core.lisp/prelude `Expander`, the
+`PrimitiveMeta`, and the file→signal projection cache. It is built once when
+the instance's `RuntimeCore` is constructed and threaded explicitly through
+every pipeline call — two embedded Elle instances on one thread each own their
+own, so neither sees the other's exports or REPL definitions.
 
-### `get_compilation_cache()`
+### `with_macro_expansion()`
 
-Returns `(*mut VM, Expander, PrimitiveMeta)` from the thread-local cache.
-The VM's fiber is always reset before use. The Expander is cloned so each
-pipeline call gets independent expansion state. Used by `compile` and
-`compile_file`.
+Runs a closure with the macro-expansion VM (fiber reset), a clone of the
+`Expander` (independent expansion state), and a clone of the compile `meta`.
+The clones decouple it from `self`'s borrow so a nested compile does not alias.
+Used by `compile` and `compile_file`.
 
-### `get_cached_expander_and_meta()`
+### `expander_and_meta()`
 
-Returns `(Expander, PrimitiveMeta)` from the thread-local cache without
-borrowing the cached VM. Used by `eval`, `analyze`, and `analyze_file` which
-have their own VM.
+Returns a cloned `(Expander, PrimitiveMeta)` without borrowing the macro VM.
+Used by `eval`, `analyze`, and `analyze_file`, which run expansion on their
+own VM.
 
 ### Invariants
 
 - Prelude must be 100% defmacro (no runtime definitions)
-- Primitives must be registered before any pipeline function call
+- Primitives must be registered in the context's macro VM at construction
 - Pipeline functions are not re-entrant (no nested compile/compile_file)
-- Primitive registration order is deterministic (ALL_TABLES)
+- Primitive registration order is deterministic (ALL_TABLES), so the baked
+  `SymbolId`s match any table that interned the primitives in the same order
 
 ## Known issues
 

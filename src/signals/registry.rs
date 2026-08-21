@@ -25,6 +25,7 @@ pub struct SignalEntry {
 ///
 /// User-defined signals are allocated starting at bit 32 and proceeding upward.
 /// The registry can support up to 32 user-defined signals (bits 32-63).
+#[derive(Clone)]
 pub struct SignalRegistry {
     entries: Vec<SignalEntry>,
     next_user_bit: u32,
@@ -106,6 +107,24 @@ impl SignalRegistry {
         });
         self.next_user_bit += 1;
         Ok(bit_position)
+    }
+
+    /// Register a user signal, or return its existing bit if already registered.
+    ///
+    /// Idempotent for USER signals (bits 32-63): re-declaring one across separate
+    /// compilations reuses its bit instead of erroring. Built-in/reserved signals
+    /// (bits 0-31) still error on re-declaration — a program cannot redefine
+    /// `:error`, `:yield`, etc. Intra-compilation duplicate detection is the
+    /// caller's job (see `Analyzer::declare_signal`); this only dedups across
+    /// compiles that share the process-global registry.
+    pub fn register_or_get(&mut self, name: &str) -> Result<u32, String> {
+        if let Some(entry) = self.entries.iter().find(|e| e.name == name) {
+            if entry.bit_position < 32 {
+                return Err(format!("Signal '{}' already registered", name));
+            }
+            return Ok(entry.bit_position);
+        }
+        self.register(name)
     }
 
     /// Look up the bit position for an signal keyword.
@@ -202,113 +221,23 @@ where
     f(&guard)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_builtin_registration() {
-        let registry = SignalRegistry::with_builtins();
-        assert_eq!(registry.lookup("error"), Some(SIG_ERROR.trailing_zeros()));
-        assert_eq!(registry.lookup("yield"), Some(SIG_YIELD.trailing_zeros()));
-        assert_eq!(registry.lookup("debug"), Some(SIG_DEBUG.trailing_zeros()));
-        assert_eq!(registry.lookup("ffi"), Some(SIG_FFI.trailing_zeros()));
-        assert_eq!(registry.lookup("halt"), Some(SIG_HALT.trailing_zeros()));
-        assert_eq!(registry.lookup("io"), Some(SIG_IO.trailing_zeros()));
-        assert_eq!(registry.lookup("fuel"), Some(SIG_FUEL.trailing_zeros()));
-    }
-
-    #[test]
-    fn test_user_registration() {
-        let mut registry = SignalRegistry::with_builtins();
-        let bit = registry.register("heartbeat").unwrap();
-        assert_eq!(bit, 32);
-        assert_eq!(registry.lookup("heartbeat"), Some(32));
-    }
-
-    #[test]
-    fn test_user_registration_sequential() {
-        let mut registry = SignalRegistry::with_builtins();
-        let bit1 = registry.register("signal1").unwrap();
-        let bit2 = registry.register("signal2").unwrap();
-        assert_eq!(bit1, 32);
-        assert_eq!(bit2, 33);
-    }
-
-    #[test]
-    fn test_duplicate_registration_error() {
-        let mut registry = SignalRegistry::with_builtins();
-        let _ = registry.register("heartbeat").unwrap();
-        let result = registry.register("heartbeat");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already registered"));
-    }
-
-    #[test]
-    fn test_builtin_not_shadowed() {
-        let mut registry = SignalRegistry::with_builtins();
-        let result = registry.register("error");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_overflow() {
-        let mut registry = SignalRegistry::with_builtins();
-        // Register 32 user signals (bits 32-63)
-        for i in 0..32 {
-            let name = format!("user_{}", i);
-            let result = registry.register(&name);
-            assert!(result.is_ok(), "Failed to register user signal {}", i);
-        }
-        // 33rd should fail
-        let result = registry.register("user_32");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("exhausted"));
-    }
-
-    #[test]
-    fn test_lookup_unknown() {
-        let registry = SignalRegistry::with_builtins();
-        assert_eq!(registry.lookup("nonexistent"), None);
-    }
-
-    #[test]
-    fn test_to_signal_bits() {
-        let registry = SignalRegistry::with_builtins();
-        let bits = registry.to_signal_bits("error").unwrap();
-        assert_eq!(bits, crate::value::fiber::SignalBits::from_bit(0));
-    }
-
-    #[test]
-    fn test_format_signal_bits_single() {
-        let registry = SignalRegistry::with_builtins();
-        let bits = crate::value::fiber::SignalBits::from_bit(0); // error bit
-        let formatted = registry.format_signal_bits(bits);
-        assert!(formatted.contains(":error"));
-    }
-
-    #[test]
-    fn test_format_signal_bits_multiple() {
-        let registry = SignalRegistry::with_builtins();
-        let bits = crate::value::fiber::SignalBits::from_bit(0)
-            .union(crate::value::fiber::SignalBits::from_bit(1)); // error and yield
-        let formatted = registry.format_signal_bits(bits);
-        assert!(formatted.contains(":error"));
-        assert!(formatted.contains(":yield"));
-    }
-
-    #[test]
-    fn test_format_signal_bits_empty() {
-        let registry = SignalRegistry::with_builtins();
-        let bits = crate::value::fiber::SignalBits::EMPTY;
-        let formatted = registry.format_signal_bits(bits);
-        assert_eq!(formatted, "{}");
-    }
-
-    #[test]
-    fn test_global_registry_returns_same_instance() {
-        let reg1 = global_registry();
-        let reg2 = global_registry();
-        assert_eq!(reg1 as *const _, reg2 as *const _);
-    }
+/// Clone the current global registry state.
+///
+/// Paired with [`restore_registry`] to bracket a *diagnostic* compile that must
+/// not leave observable global side effects — e.g. `compile/dumps` / `render_all`
+/// renders a module's `--dump` artifacts by compiling it, and a `(signal :kw)`
+/// declaration in that module would otherwise permanently register the signal,
+/// colliding with a later compile of the same source. See `src/dump.rs`.
+pub fn snapshot_registry() -> SignalRegistry {
+    with_registry(|r| r.clone())
 }
+
+/// Restore the global registry to a previously captured [`snapshot_registry`]
+/// state. Poison-tolerant, like [`with_registry`].
+pub fn restore_registry(snapshot: SignalRegistry) {
+    let mut guard = global_registry().lock().unwrap_or_else(|e| e.into_inner());
+    *guard = snapshot;
+}
+
+#[cfg(test)]
+mod tests;

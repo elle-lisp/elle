@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/http2-session-futex.lisp
 ##
 ## Regression: the HTTP/2 session SETTINGS-ACK latch must use a
@@ -45,6 +45,7 @@
 (assert (not (nil? sA:settings-ack-latch)) "sA minted a settings-ack latch")
 (assert (not (nil? sB:settings-ack-latch)) "sB minted a settings-ack latch")
 (assert (not (= sA:settings-ack-latch:key sB:settings-ack-latch:key))
-        "two independently-imported session instances must mint distinct SETTINGS-ACK latch keys (process-globally unique)")
+        (string "two independently-imported session instances must mint "
+                "distinct SETTINGS-ACK latch keys (process-globally unique)"))
 
 (println "tests/elle/http2-session-futex.lisp: all tests passed")

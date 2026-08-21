@@ -1,7 +1,8 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum,
 //! syntax-pair?, syntax-list?, syntax-symbol?, syntax-keyword?, syntax-nil?,
 //! syntax->list, syntax-first, syntax-rest, syntax-e, squelch, meta/origin)
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::ctx::NativeCtx;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::signals::SIG_GPU;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -9,8 +10,11 @@ use crate::value::closure::Closure;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+mod syntaxops;
+pub(crate) use syntaxops::*;
 
 static GENSYM_COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -24,7 +28,10 @@ static GENSYM_COUNTER: AtomicU32 = AtomicU32::new(0);
 ///   (let ((tmp (gensym "tmp")))
 ///     `(let ((,tmp 42)) ,body)))
 /// ```
-pub(crate) fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_gensym(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let prefix = if args.is_empty() {
         "G".to_string()
     } else if let Some(s) = args[0].with_string(|s| s.to_string()) {
@@ -38,19 +45,17 @@ pub(crate) fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
     let counter = GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst);
     let sym_name = format!("{}{}", prefix, counter);
 
-    // Intern the symbol name so we return a proper symbol value.
-    // This requires the symbol table to be set via set_symbol_table().
-    unsafe {
-        if let Some(symbols_ptr) = crate::context::get_symbol_table() {
-            let id = (*symbols_ptr).intern(&sym_name);
-            (SIG_OK, Value::symbol(id.0))
-        } else {
-            (
-                SIG_ERROR,
-                error_val("internal-error", "gensym: symbol table not available"),
-            )
-        }
+    // Intern the symbol name so we return a proper symbol value, into this
+    // instance's table reached through the driving VM.
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("internal-error", "gensym: symbol table not available"),
+        );
     }
+    let id = unsafe { (*symbols_ptr).intern(&sym_name) };
+    (SIG_OK, Value::symbol(id.0))
 }
 
 /// Create a syntax object with the lexical context of another syntax object.
@@ -70,7 +75,10 @@ pub(crate) fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
 ///   `(let ((,(datum->syntax test 'it) ,test))
 ///      (if ,(datum->syntax test 'it) ,then ,else)))
 /// ```
-pub(crate) fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_datum_to_syntax(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let context = &args[0];
     let datum = &args[1];
 
@@ -83,35 +91,40 @@ pub(crate) fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
         Some(stx) => (stx.scopes.clone(), stx.span.clone()),
         None => (Vec::new(), crate::syntax::Span::synthetic()),
     };
-
-    let symbols = unsafe {
-        match crate::context::get_symbol_table() {
-            Some(ptr) => &*ptr,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "internal-error",
-                        "datum->syntax: symbol table not available",
-                    ),
-                )
-            }
-        }
+    // The context's scopes at transformer time include the expansion's
+    // pre-stamped intro scope (hygiene flip protocol). Strip it: the
+    // result is scope_exempt — it dodges the post-expansion flip — so it
+    // must carry the context's TRUE use-site scope set, not the stamp.
+    let scopes: Vec<crate::syntax::ScopeId> = match crate::syntax::current_macro_intro() {
+        Some(intro) => scopes.into_iter().filter(|s| *s != intro).collect(),
+        None => scopes,
     };
+
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "internal-error",
+                "datum->syntax: symbol table not available",
+            ),
+        );
+    }
+    let symbols = unsafe { &*symbols_ptr };
 
     let mut syntax = match Syntax::from_value(datum, symbols, span) {
         Ok(s) => s,
         Err(e) => {
             return (
                 SIG_ERROR,
-                error_val("type-error", format!("datum->syntax: {}", e)),
+                ctx.error("type-error", format!("datum->syntax: {}", e)),
             )
         }
     };
 
     syntax.set_scopes_recursive(&scopes);
 
-    (SIG_OK, Value::syntax(syntax))
+    (SIG_OK, ctx.syntax(syntax))
 }
 
 /// Strip scope information from a syntax object, returning the plain value.
@@ -119,7 +132,10 @@ pub(crate) fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
 /// `(syntax->datum stx)` → value
 ///
 /// If the argument is not a syntax object, it is returned unchanged.
-pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_to_datum(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let stx = &args[0];
 
     let syntax_rc = match stx.as_syntax() {
@@ -127,32 +143,35 @@ pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
         None => return (SIG_OK, *stx),
     };
 
-    let symbols = unsafe {
-        match crate::context::get_symbol_table() {
-            Some(ptr) => &mut *ptr,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "internal-error",
-                        "syntax->datum: symbol table not available",
-                    ),
-                )
-            }
-        }
-    };
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "internal-error",
+                "syntax->datum: symbol table not available",
+            ),
+        );
+    }
+    // Raw deref (not `ctx.vm().symbols()`): `to_value` takes BOTH the table and
+    // `ctx`, so the table borrow must be independent of the `ctx` borrow.
+    let symbols = unsafe { &mut *symbols_ptr };
 
-    (SIG_OK, syntax_rc.to_value(symbols))
+    (SIG_OK, syntax_rc.to_value(symbols, ctx))
 }
 
 /// Extract a syntax object from args\[0\], or return a type-error.
 /// `prim_name` is the function name for the error message.
-fn require_syntax(args: &[Value], prim_name: &'static str) -> Result<Syntax, (SignalBits, Value)> {
+fn require_syntax(
+    args: &[Value],
+    prim_name: &'static str,
+    ctx: &mut NativeCtx,
+) -> Result<Syntax, (SignalBits, Value)> {
     match args[0].as_syntax() {
         Some(stx) => Ok(stx.clone()),
         None => Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: expected syntax object, got {}",
@@ -164,7 +183,10 @@ fn require_syntax(args: &[Value], prim_name: &'static str) -> Result<Syntax, (Si
     }
 }
 
-pub(crate) fn prim_syntax_pair(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_pair(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     match args[0].as_syntax() {
         Some(stx) => {
             let result = matches!(&stx.kind, SyntaxKind::List(items) if !items.is_empty());
@@ -174,7 +196,10 @@ pub(crate) fn prim_syntax_pair(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) fn prim_syntax_list(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_list(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     match args[0].as_syntax() {
         Some(stx) => (
             SIG_OK,
@@ -184,7 +209,10 @@ pub(crate) fn prim_syntax_list(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) fn prim_syntax_symbol(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_symbol(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     match args[0].as_syntax() {
         Some(stx) => (
             SIG_OK,
@@ -194,7 +222,10 @@ pub(crate) fn prim_syntax_symbol(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) fn prim_syntax_keyword(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_keyword(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     match args[0].as_syntax() {
         Some(stx) => (
             SIG_OK,
@@ -204,348 +235,18 @@ pub(crate) fn prim_syntax_keyword(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) fn prim_syntax_nil(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_syntax_nil(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     match args[0].as_syntax() {
         Some(stx) => (SIG_OK, Value::bool(matches!(&stx.kind, SyntaxKind::Nil))),
         None => (SIG_OK, Value::FALSE),
     }
 }
 
-pub(crate) fn prim_syntax_to_list(args: &[Value]) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax->list") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    match &stx.kind {
-        SyntaxKind::List(items) => {
-            let elems: Vec<Value> = items
-                .iter()
-                .map(|item| Value::syntax(item.clone()))
-                .collect();
-            (SIG_OK, Value::array(elems))
-        }
-        _ => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "syntax->list: expected syntax list, got {}",
-                    stx.kind_label()
-                ),
-            ),
-        ),
-    }
-}
-
-pub(crate) fn prim_syntax_first(args: &[Value]) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax-first") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    match &stx.kind {
-        SyntaxKind::List(items) if !items.is_empty() => (SIG_OK, Value::syntax(items[0].clone())),
-        SyntaxKind::List(_) => (
-            SIG_ERROR,
-            error_val("type-error", "syntax-first: expected non-empty syntax list"),
-        ),
-        _ => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "syntax-first: expected syntax list, got {}",
-                    stx.kind_label()
-                ),
-            ),
-        ),
-    }
-}
-
-pub(crate) fn prim_syntax_rest(args: &[Value]) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax-rest") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    match &stx.kind {
-        SyntaxKind::List(items) if !items.is_empty() => {
-            let rest = Syntax::new(SyntaxKind::List(items[1..].to_vec()), stx.span.clone());
-            (SIG_OK, Value::syntax(rest))
-        }
-        SyntaxKind::List(_) => (
-            SIG_ERROR,
-            error_val("type-error", "syntax-rest: expected non-empty syntax list"),
-        ),
-        _ => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "syntax-rest: expected syntax list, got {}",
-                    stx.kind_label()
-                ),
-            ),
-        ),
-    }
-}
-
-pub(crate) fn prim_syntax_e(args: &[Value]) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax-e") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    match &stx.kind {
-        SyntaxKind::Nil => (SIG_OK, Value::NIL),
-        SyntaxKind::Bool(b) => (SIG_OK, Value::bool(*b)),
-        SyntaxKind::Int(n) => (SIG_OK, Value::int(*n)),
-        SyntaxKind::Float(f) => (SIG_OK, Value::float(*f)),
-        SyntaxKind::String(s) => (SIG_OK, Value::string(s.clone())),
-        SyntaxKind::Keyword(k) => (SIG_OK, Value::keyword(k)),
-        SyntaxKind::Symbol(name) => {
-            // Symbols must be interned via the thread-local symbol table.
-            // This mirrors the pattern in prim_gensym.
-            unsafe {
-                if let Some(symbols_ptr) = crate::context::get_symbol_table() {
-                    let id = (*symbols_ptr).intern(name);
-                    (SIG_OK, Value::symbol(id.0))
-                } else {
-                    (
-                        SIG_ERROR,
-                        error_val("internal-error", "syntax-e: symbol table not available"),
-                    )
-                }
-            }
-        }
-        // Compounds: return the syntax object unchanged.
-        _ => (SIG_OK, args[0]),
-    }
-}
-
-/// Transform a closure by applying a squelch mask.
-///
-/// `(squelch closure signals)` returns a new closure that, when called,
-/// intercepts signals matching the specification and converts them to `:error`.
-/// The second argument is resolved via `resolve_signal_bits` — it can be a
-/// keyword, set, array, list, or integer.
-/// The new closure shares the same bytecode and environment (Rc clones — cheap).
-///
-/// Error cases:
-/// - Wrong arity: arity-error
-/// - First arg not a closure: type-error
-/// - Invalid signal spec: type-error or signal-error
-pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
-    // Validate first argument is a closure.
-    let closure_rc = match args[0].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "squelch: first argument must be a closure, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
-
-    // Resolve signal bits from second argument (keyword, set, array, list, or integer).
-    let new_bits = match crate::primitives::fibers::resolve_signal_bits(&args[1], "squelch") {
-        Ok(bits) => bits,
-        Err(err) => return err,
-    };
-
-    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap,
-    // InlineSlice copy is a (ptr, len) pair).
-    let new_closure = Closure {
-        template: closure_rc.template.clone(),
-        env: closure_rc.env,
-        squelch_mask: closure_rc.squelch_mask.union(new_bits),
-    };
-
-    (SIG_OK, Value::closure(new_closure))
-}
-
-/// Transform a closure by applying a permit mask (inverse of squelch).
-///
-/// `(attune |:yield :error| closure)` returns a new closure that permits ONLY
-/// the specified signals — everything else is intercepted and converted to
-/// `:error`. This is the positive dual of `squelch`: squelch says "block
-/// these", attune says "allow only these."
-///
-/// Argument order is mask-first: the signal spec declares intent, the closure
-/// follows. This reads as "attune to yield+error: this function."
-pub(crate) fn prim_attune(args: &[Value]) -> (SignalBits, Value) {
-    // First argument: signal spec (keyword, set, array, list, or integer)
-    let permitted_bits = match crate::primitives::fibers::resolve_signal_bits(&args[0], "attune") {
-        Ok(bits) => bits,
-        Err(err) => return err,
-    };
-
-    // Second argument: closure to wrap
-    let closure_rc = match args[1].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "attune: second argument must be a closure, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
-    };
-
-    // Suppress everything the user DIDN'T permit (within the user-producible set).
-    let suppress_bits = crate::signals::CAP_MASK.subtract(permitted_bits);
-
-    let new_closure = Closure {
-        template: closure_rc.template.clone(),
-        env: closure_rc.env,
-        squelch_mask: closure_rc.squelch_mask.union(suppress_bits),
-    };
-
-    (SIG_OK, Value::closure(new_closure))
-}
-
-/// Return the source location of a closure as `{:file :line :col}`, or `nil`.
-///
-/// `(meta/origin f)` extracts the span from the closure's stored syntax node.
-/// Returns `nil` if `f` is not a closure, the closure has no syntax, or the
-/// syntax span has no file.
-pub(crate) fn prim_meta_origin(args: &[Value]) -> (SignalBits, Value) {
-    let val = args[0];
-    let closure_rc = match val.as_closure() {
-        Some(c) => c,
-        None => return (SIG_OK, Value::NIL),
-    };
-    let syntax = match closure_rc.template.syntax.as_ref() {
-        Some(s) => s,
-        None => return (SIG_OK, Value::NIL),
-    };
-    let file = match syntax.span.file.as_ref() {
-        Some(f) => f.clone(),
-        None => return (SIG_OK, Value::NIL),
-    };
-    let mut fields = std::collections::BTreeMap::new();
-    fields.insert(TableKey::Keyword("file".to_string()), Value::string(&*file));
-    fields.insert(
-        TableKey::Keyword("line".to_string()),
-        Value::int(syntax.span.line as i64),
-    );
-    fields.insert(
-        TableKey::Keyword("col".to_string()),
-        Value::int(syntax.span.col as i64),
-    );
-    (SIG_OK, Value::struct_from(fields))
-}
-
-/// Eagerly compile SPIR-V, cache on template, return the closure.
-///
-/// `(git f)` compiles the closure to SPIR-V and caches the bytes on the
-/// closure template's `spirv` OnceCell. Returns `f` (the template is now
-/// GIT'd — all closures sharing this template see the cached SPIR-V).
-///
-/// Optional second argument is workgroup size (default 256).
-pub(crate) fn prim_git(args: &[Value]) -> (SignalBits, Value) {
-    #[cfg(not(feature = "mlir"))]
-    {
-        let _ = args;
-        (
-            SIG_ERROR,
-            error_val("mlir-error", "git: requires --features mlir"),
-        )
-    }
-    #[cfg(feature = "mlir")]
-    {
-        let closure = match args[0].as_closure() {
-            Some(c) => c,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("git: expected closure, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
-        // Fast path: already cached
-        if closure.template.spirv.get().is_some() {
-            return (SIG_OK, args[0]);
-        }
-        // Check GPU eligibility upfront
-        if !closure.template.is_gpu_candidate() {
-            return (
-                SIG_ERROR,
-                error_val("mlir-error", "git: closure is not GPU-eligible"),
-            );
-        }
-        if closure.template.lir_function.is_none() {
-            return (
-                SIG_ERROR,
-                error_val("mlir-error", "git: closure has no LIR"),
-            );
-        }
-        let wg_size = if args.len() == 2 {
-            args[1].as_int().unwrap_or(256)
-        } else {
-            256
-        };
-        // Delegate to VM via SIG_QUERY for MlirCache access.
-        (
-            SIG_QUERY,
-            Value::pair(
-                Value::keyword("git"),
-                Value::pair(args[0], Value::int(wg_size)),
-            ),
-        )
-    }
-}
-
-/// `(fn/git? f)` — true if the closure has cached SPIR-V bytes.
-pub(crate) fn prim_fn_git(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.template.spirv.get().is_some()))
-    } else {
-        (SIG_OK, Value::FALSE)
-    }
-}
-
-/// `(disgit f)` — return cached SPIR-V bytes from a GIT'd closure.
-///
-/// Errors if `f` is not a closure or has not been GIT'd.
-pub(crate) fn prim_disgit(args: &[Value]) -> (SignalBits, Value) {
-    let closure = match args[0].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("disgit: expected closure, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-    match closure.template.spirv.get() {
-        Some(bytes) => (SIG_OK, Value::bytes(bytes.clone())),
-        None => (
-            SIG_ERROR,
-            error_val("mlir-error", "disgit: closure has not been GIT'd"),
-        ),
-    }
-}
-
-/// Declarative primitive definitions for meta-programming operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "meta/gensym",
-        func: prim_gensym,
+primitive! {
+    "meta/gensym" => prim_gensym {
         signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Generate a unique symbol with optional prefix",
@@ -553,10 +254,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/gensym \"tmp\")",
         aliases: &["gensym"],
-    },
-    PrimitiveDef {
-        name: "meta/datum->syntax",
-        func: prim_datum_to_syntax,
+        effect: RegionEffect::Immediate,
+    }
+    "meta/datum->syntax" => prim_datum_to_syntax {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create a syntax object with lexical context from another syntax object",
@@ -564,10 +264,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/datum->syntax stx 'x)",
         aliases: &["datum->syntax"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax->datum",
-        func: prim_syntax_to_datum,
+        effect: RegionEffect::Fresh,
+    }
+    "meta/syntax->datum" => prim_syntax_to_datum {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Strip scope information from a syntax object, returning the plain value",
@@ -575,65 +274,54 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax->datum stx)",
         aliases: &["syntax->datum"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-pair?",
-        func: prim_syntax_pair,
-        signal: Signal::silent(),
+        effect: RegionEffect::Funnel,
+    }
+    "meta/syntax-pair?" => prim_syntax_pair {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a non-empty list",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-pair? stx)",
         aliases: &["syntax-pair?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-list?",
-        func: prim_syntax_list,
-        signal: Signal::silent(),
+        effect: RegionEffect::Immediate,
+    }
+    "meta/syntax-list?" => prim_syntax_list {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a list (including empty)",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-list? stx)",
         aliases: &["syntax-list?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-symbol?",
-        func: prim_syntax_symbol,
-        signal: Signal::silent(),
+        effect: RegionEffect::Immediate,
+    }
+    "meta/syntax-symbol?" => prim_syntax_symbol {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a symbol",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-symbol? stx)",
         aliases: &["syntax-symbol?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-keyword?",
-        func: prim_syntax_keyword,
-        signal: Signal::silent(),
+        effect: RegionEffect::Immediate,
+    }
+    "meta/syntax-keyword?" => prim_syntax_keyword {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a keyword",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-keyword? stx)",
         aliases: &["syntax-keyword?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-nil?",
-        func: prim_syntax_nil,
-        signal: Signal::silent(),
+        effect: RegionEffect::Immediate,
+    }
+    "meta/syntax-nil?" => prim_syntax_nil {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping nil",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-nil? stx)",
         aliases: &["syntax-nil?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax->list",
-        func: prim_syntax_to_list,
+        effect: RegionEffect::Immediate,
+    }
+    "meta/syntax->list" => prim_syntax_to_list {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a syntax list to an immutable array of syntax objects",
@@ -641,10 +329,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax->list stx)",
         aliases: &["syntax->list"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-first",
-        func: prim_syntax_first,
+        effect: RegionEffect::Fresh,
+    }
+    "meta/syntax-first" => prim_syntax_first {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the first element of a syntax list as a syntax object",
@@ -652,10 +339,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-first stx)",
         aliases: &["syntax-first"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-rest",
-        func: prim_syntax_rest,
+        effect: RegionEffect::Fresh,
+    }
+    "meta/syntax-rest" => prim_syntax_rest {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return a syntax list of all but the first element",
@@ -663,10 +349,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-rest stx)",
         aliases: &["syntax-rest"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-e",
-        func: prim_syntax_e,
+        effect: RegionEffect::Fresh,
+    }
+    "meta/syntax-e" => prim_syntax_e {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Shallow-unwrap a syntax object: returns atoms as plain values, compounds unchanged",
@@ -674,10 +359,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-e stx)",
         aliases: &["syntax-e"],
-    },
-    PrimitiveDef {
-        name: "squelch",
-        func: prim_squelch,
+        effect: RegionEffect::Funnel,
+    }
+    "squelch" => prim_squelch {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return a new closure that intercepts and converts the specified signals to :error at runtime. \
@@ -685,11 +369,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["closure", "signals"],
         category: "fn",
         example: "(squelch (fn () (yield 1)) |:yield|)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "attune",
-        func: prim_attune,
+        effect: RegionEffect::Fresh,
+    }
+    "attune" => prim_attune {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return a new closure that permits ONLY the specified signals — all others are \
@@ -698,23 +380,18 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["signals", "closure"],
         category: "fn",
         example: "(attune |:yield :error| (fn () (yield 1)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "meta/origin",
-        func: prim_meta_origin,
-        signal: Signal::silent(),
+        effect: RegionEffect::Fresh,
+    }
+    "meta/origin" => prim_meta_origin {
         arity: Arity::Exact(1),
         doc: "Return the source location of a closure as {:file :line :col}, or nil if unavailable.",
         params: &["f"],
         category: "meta",
         example: r#"(defn foo () 42) (meta/origin foo)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "git",
-        func: prim_git,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR).union(SIG_GPU), propagates: 0 },
+        effect: RegionEffect::Fresh,
+    }
+    "git" => prim_git {
+        signal: Signal::of(SIG_QUERY.union(SIG_ERROR).union(SIG_GPU)),
         arity: Arity::Range(1, 2),
         doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache on its template. \
               Returns the closure. All closures sharing the same template see the cached SPIR-V. \
@@ -722,22 +399,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["f", "workgroup-size"],
         category: "fn",
         example: "(git (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/git?",
-        func: prim_fn_git,
-        signal: Signal::silent(),
+        effect: RegionEffect::Mixed,
+    }
+    "fn/git?" => prim_fn_git {
         arity: Arity::Exact(1),
         doc: "Returns true if the closure has cached SPIR-V bytes (has been GIT'd).",
         params: &["f"],
         category: "fn",
         example: "(fn/git? (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "disgit",
-        func: prim_disgit,
+        effect: RegionEffect::Immediate,
+    }
+    "disgit" => prim_disgit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the cached SPIR-V bytes from a GIT'd closure. \
@@ -746,115 +418,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(disgit (git (fn [a b] (+ a b))))",
         aliases: &["fn/disgit"],
-    },
-];
+        effect: RegionEffect::Fresh,
+    }
+}
 
 // Behavioral tests for the primitives in this module are in
 // tests/elle/syntax-predicates.lisp and tests/elle/macros.lisp.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::LocationMap;
-    use crate::hir::VarargKind;
-    use crate::signals::Signal;
-    use crate::syntax::{Span, Syntax, SyntaxKind};
-    use crate::value::closure::{Closure, ClosureTemplate};
-    use crate::value::sorted_struct_get;
-    use crate::value::types::Arity;
-    use std::collections::HashMap;
-    use std::rc::Rc;
-
-    fn make_closure_with_syntax(syntax: Option<Rc<Syntax>>) -> Value {
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax,
-            vararg_kind: VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        Value::closure(Closure {
-            template,
-            env: crate::value::inline_slice::InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        })
-    }
-
-    #[test]
-    fn meta_origin_closure_returns_struct() {
-        let span = Span::new(0, 10, 3, 5).with_file("/tmp/foo.lisp");
-        let syntax = Rc::new(Syntax::new(SyntaxKind::Nil, span));
-        let closure = make_closure_with_syntax(Some(syntax));
-
-        let (sig, result) = prim_meta_origin(&[closure]);
-        assert_eq!(sig, SIG_OK);
-
-        let fields = result.as_struct().expect("expected struct");
-        let file_val = sorted_struct_get(fields, &TableKey::Keyword("file".to_string()))
-            .expect(":file key missing");
-        let line_val = sorted_struct_get(fields, &TableKey::Keyword("line".to_string()))
-            .expect(":line key missing");
-        let col_val = sorted_struct_get(fields, &TableKey::Keyword("col".to_string()))
-            .expect(":col key missing");
-
-        assert!(
-            file_val
-                .with_string(|s| s.contains("foo.lisp"))
-                .unwrap_or(false),
-            "expected :file to contain 'foo.lisp'"
-        );
-        assert_eq!(line_val.as_int(), Some(3));
-        assert_eq!(col_val.as_int(), Some(5));
-    }
-
-    #[test]
-    fn meta_origin_non_closure_returns_nil() {
-        let (sig, result) = prim_meta_origin(&[Value::int(42)]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-
-    #[test]
-    fn meta_origin_nil_returns_nil() {
-        let (sig, result) = prim_meta_origin(&[Value::NIL]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-
-    #[test]
-    fn meta_origin_closure_without_syntax_returns_nil() {
-        let closure = make_closure_with_syntax(None);
-        let (sig, result) = prim_meta_origin(&[closure]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-
-    #[test]
-    fn meta_origin_closure_with_synthetic_span_returns_nil() {
-        // Span with no file should return nil.
-        let span = Span::new(0, 5, 1, 0); // no file set
-        let syntax = Rc::new(Syntax::new(SyntaxKind::Nil, span));
-        let closure = make_closure_with_syntax(Some(syntax));
-
-        let (sig, result) = prim_meta_origin(&[closure]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-}
+// Tests migrated to tests/elle/prim-meta.lisp

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/dns.lisp — Pure Elle DNS client (RFC 1035)
 ##
 ## Loaded via: (def dns ((import "std/dns")))

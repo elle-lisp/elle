@@ -131,4 +131,4 @@ All non-immediate values are heap-allocated via `Rc`. Mutable heap objects use `
 - [`repr/`](repr/) — tagged-union implementation
 - [`heap.rs`](heap.rs) — heap-allocated object types
 - [`closure.rs`](closure.rs) — closure representation
-- [`fiber.rs`](fiber.rs) — fiber (coroutine) implementation
+- [`fiber.rs`](fiber.rs) — fiber implementation

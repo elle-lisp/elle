@@ -3,9 +3,9 @@
 //! Fulfills `IoRequest`s from in-memory state. No OS resources needed.
 //! Completions resolve after a configurable latency (zero by default).
 
-use crate::io::request::{IoOp, IoRequest};
-use crate::io::Completion;
-use crate::value::{error_val, Value};
+use crate::io::request::{IoOp, IoRequest, PortOp};
+use crate::io::{Completion, SubmissionId};
+use crate::value::Value;
 
 use std::cell::RefCell;
 use std::collections::BinaryHeap;
@@ -56,6 +56,15 @@ impl PartialOrd for Pending {
     }
 }
 
+impl MockInner {
+    /// Mint the next unique, monotonically increasing submission id.
+    fn mint_id(&mut self) -> SubmissionId {
+        let id = SubmissionId::from_raw(self.next_id);
+        self.next_id += 1;
+        id
+    }
+}
+
 impl MockBackend {
     pub(crate) fn new() -> Self {
         MockBackend {
@@ -99,23 +108,26 @@ impl MockBackend {
 }
 
 impl crate::io::IoBackend for MockBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String> {
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<SubmissionId, String> {
         let mut inner = self.inner.borrow_mut();
-        let id = inner.next_id;
-        inner.next_id += 1;
+        let id = inner.mint_id();
 
         let op_name = match &request.op {
-            IoOp::ReadLine => "read-line",
-            IoOp::Read { .. } => "read",
-            IoOp::ReadExact { .. } => "read-exact",
-            IoOp::ReadAll => "read-all",
-            IoOp::Write { .. } => "write",
-            IoOp::Flush => "flush",
-            IoOp::Accept { .. } => "accept",
+            IoOp::Port(PortOp::ReadLine { .. }) => "read-line",
+            IoOp::Port(PortOp::Read { .. }) => "read",
+            IoOp::Port(PortOp::ReadExact { .. }) => "read-exact",
+            IoOp::Port(PortOp::ReadAll) => "read-all",
+            IoOp::Port(PortOp::Write { .. }) => "write",
+            IoOp::Port(PortOp::Flush) => "flush",
+            IoOp::Port(PortOp::Accept { .. }) => "accept",
+            IoOp::Port(PortOp::SendTo { .. }) => "send-to",
+            IoOp::Port(PortOp::RecvFrom { .. }) => "recv-from",
+            IoOp::Port(PortOp::Shutdown { .. }) => "shutdown",
             IoOp::Connect { .. } => "connect",
-            IoOp::SendTo { .. } => "send-to",
-            IoOp::RecvFrom { .. } => "recv-from",
-            IoOp::Shutdown { .. } => "shutdown",
             IoOp::Sleep { .. } => "sleep",
             IoOp::Spawn(_) => "spawn",
             IoOp::ProcessWait => "process-wait",
@@ -136,83 +148,164 @@ impl crate::io::IoBackend for MockBackend {
         let result = if inner.error_cursor < inner.error_queue.len() {
             let errno = inner.error_queue[inner.error_cursor];
             inner.error_cursor += 1;
-            Err(error_val(
+            Err(crate::io::io_error(
                 "io-error",
                 format!("mock error: errno {}", errno),
+                origin_heap,
             ))
         } else {
             match &request.op {
-                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll => {
-                    if inner.read_cursor < inner.read_data.len() {
-                        let data = inner.read_data[inner.read_cursor].clone();
-                        inner.read_cursor += 1;
-                        if data.is_empty() {
-                            Ok(Value::NIL) // EOF
+                IoOp::Port(op) => match op {
+                    PortOp::ReadLine { .. }
+                    | PortOp::Read { .. }
+                    | PortOp::ReadExact { .. }
+                    | PortOp::ReadAll => {
+                        if inner.read_cursor < inner.read_data.len() {
+                            let data = inner.read_data[inner.read_cursor].clone();
+                            inner.read_cursor += 1;
+                            if data.is_empty() {
+                                Ok(Value::NIL) // EOF
+                            } else {
+                                let heap =
+                                    unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+                                let ctx = crate::primitives::ctx::Alloc::new(heap);
+                                Ok(ctx.string(String::from_utf8_lossy(&data).as_ref()))
+                            }
                         } else {
-                            Ok(Value::string(String::from_utf8_lossy(&data).as_ref()))
+                            Ok(Value::NIL) // EOF — no data seeded
                         }
-                    } else {
-                        Ok(Value::NIL) // EOF — no data seeded
                     }
-                }
-                IoOp::Write { data } => {
-                    let len = data
-                        .with_string(|s| s.len())
-                        .or_else(|| data.as_bytes().map(|b| b.len()))
-                        .unwrap_or(0);
-                    Ok(Value::int(len as i64))
-                }
-                IoOp::Flush | IoOp::Shutdown { .. } => Ok(Value::NIL),
+                    PortOp::Write { data } => {
+                        let len = data
+                            .with_string(|s| s.len())
+                            .or_else(|| data.as_bytes().map(|b| b.len()))
+                            .unwrap_or(0);
+                        Ok(Value::int(len as i64))
+                    }
+                    PortOp::Flush | PortOp::Shutdown { .. } => Ok(Value::NIL),
+                    PortOp::Accept { .. } => Err(crate::io::io_error(
+                        "io-error",
+                        "mock: accept not supported",
+                        origin_heap,
+                    )),
+                    PortOp::SendTo { data, .. } => {
+                        let len = data
+                            .with_string(|s| s.len())
+                            .or_else(|| data.as_bytes().map(|b| b.len()))
+                            .unwrap_or(0);
+                        Ok(Value::int(len as i64))
+                    }
+                    PortOp::RecvFrom { result, .. } => {
+                        if inner.read_cursor < inner.read_data.len() {
+                            let payload = inner.read_data[inner.read_cursor].clone();
+                            inner.read_cursor += 1;
+                            // Fill the pre-allocated result struct (born on the
+                            // requesting fiber's heap) in place — same discipline as
+                            // the real backends, no fresh allocation here.
+                            use crate::io::request::{
+                                bytes_to_string_in_place, set_struct_field_in_place,
+                                truncate_buffer, writeable_buffer_ptr,
+                            };
+                            use crate::value::heap::TableKey;
+                            let struct_ref =
+                                result.as_struct().expect("recv result must be a struct");
+                            let data_buf = crate::value::sorted_struct_get(
+                                struct_ref,
+                                &TableKey::Keyword("data".into()),
+                            )
+                            .copied()
+                            .expect("recv result must have :data");
+                            let addr_buf = crate::value::sorted_struct_get(
+                                struct_ref,
+                                &TableKey::Keyword("addr".into()),
+                            )
+                            .copied()
+                            .expect("recv result must have :addr");
+                            unsafe {
+                                let (dst, cap) = writeable_buffer_ptr(&data_buf);
+                                let n = payload.len().min(cap);
+                                std::ptr::copy_nonoverlapping(payload.as_ptr(), dst, n);
+                                truncate_buffer(&data_buf, n);
+
+                                let abytes = b"127.0.0.1";
+                                let (dst, cap) = writeable_buffer_ptr(&addr_buf);
+                                let n2 = abytes.len().min(cap);
+                                std::ptr::copy_nonoverlapping(abytes.as_ptr(), dst, n2);
+                                truncate_buffer(&addr_buf, n2);
+                                let addr_val = bytes_to_string_in_place(addr_buf, origin_heap)
+                                    .unwrap_or(addr_buf);
+                                set_struct_field_in_place(
+                                    result,
+                                    &TableKey::Keyword("addr".into()),
+                                    addr_val,
+                                );
+                                // :port stays 0 (mock).
+                            }
+                            Ok(*result)
+                        } else {
+                            Ok(Value::NIL)
+                        }
+                    }
+                },
                 IoOp::Sleep { duration } => {
                     // Sleep honors its own duration as latency override
                     let deadline = Instant::now() + *duration;
                     inner.pending.push(Pending {
                         deadline,
-                        completion: Completion {
-                            id,
-                            result: Ok(Value::NIL),
-                        },
+                        completion: Completion::ok(id, Value::NIL),
                     });
                     return Ok(id);
                 }
-                IoOp::Accept { .. } => Err(error_val("io-error", "mock: accept not supported")),
-                IoOp::Connect { .. } => Err(error_val("io-error", "mock: connect not supported")),
-                IoOp::SendTo { data, .. } => {
-                    let len = data
-                        .with_string(|s| s.len())
-                        .or_else(|| data.as_bytes().map(|b| b.len()))
-                        .unwrap_or(0);
-                    Ok(Value::int(len as i64))
-                }
-                IoOp::RecvFrom { .. } => {
-                    if inner.read_cursor < inner.read_data.len() {
-                        let data = inner.read_data[inner.read_cursor].clone();
-                        inner.read_cursor += 1;
-                        use crate::value::heap::TableKey;
-                        let mut fields = std::collections::BTreeMap::new();
-                        fields.insert(TableKey::Keyword("data".into()), Value::bytes(data));
-                        fields.insert(TableKey::Keyword("addr".into()), Value::string("127.0.0.1"));
-                        fields.insert(TableKey::Keyword("port".into()), Value::int(0));
-                        Ok(Value::struct_from(fields))
-                    } else {
-                        Ok(Value::NIL)
-                    }
-                }
-                IoOp::Spawn(_) | IoOp::ProcessWait => {
-                    Err(error_val("io-error", "mock: subprocess ops not supported"))
-                }
-                IoOp::Open { .. } => Err(error_val("io-error", "mock: open not supported")),
-                IoOp::Seek { .. } | IoOp::Tell => {
-                    Err(error_val("io-error", "mock: seek/tell not supported"))
-                }
-                IoOp::Task(_) => Err(error_val("io-error", "mock: task not supported")),
-                IoOp::Resolve { .. } => Err(error_val("io-error", "mock: resolve not supported")),
-                IoOp::WatchNext => Err(error_val("io-error", "mock: watch not supported")),
-                IoOp::SigNext => Err(error_val("io-error", "mock: sig-next not supported")),
-                IoOp::PollFd { .. } => Err(error_val("io-error", "mock: poll-fd not supported")),
-                IoOp::ChanSelectPark(_) => {
-                    Err(error_val("io-error", "mock: chan/wait-ready not supported"))
-                }
+                IoOp::Connect { .. } => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: connect not supported",
+                    origin_heap,
+                )),
+                IoOp::Spawn(_) | IoOp::ProcessWait => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: subprocess ops not supported",
+                    origin_heap,
+                )),
+                IoOp::Open { .. } => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: open not supported",
+                    origin_heap,
+                )),
+                IoOp::Seek { .. } | IoOp::Tell => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: seek/tell not supported",
+                    origin_heap,
+                )),
+                IoOp::Task(_) => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: task not supported",
+                    origin_heap,
+                )),
+                IoOp::Resolve { .. } => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: resolve not supported",
+                    origin_heap,
+                )),
+                IoOp::WatchNext => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: watch not supported",
+                    origin_heap,
+                )),
+                IoOp::SigNext => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: sig-next not supported",
+                    origin_heap,
+                )),
+                IoOp::PollFd { .. } => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: poll-fd not supported",
+                    origin_heap,
+                )),
+                IoOp::ChanSelectPark(_) => Err(crate::io::io_error(
+                    "io-error",
+                    "mock: chan/wait-ready not supported",
+                    origin_heap,
+                )),
                 // Close completes synchronously in submit
                 IoOp::Close => Ok(Value::NIL),
             }
@@ -221,7 +314,7 @@ impl crate::io::IoBackend for MockBackend {
         let deadline = Instant::now() + inner.latency;
         inner.pending.push(Pending {
             deadline,
-            completion: Completion { id, result },
+            completion: Completion::new(id, result),
         });
         Ok(id)
     }
@@ -270,7 +363,7 @@ impl crate::io::IoBackend for MockBackend {
         Ok(self.poll())
     }
 
-    fn cancel(&self, id: u64) -> Result<(), String> {
+    fn cancel(&self, id: SubmissionId) -> Result<(), String> {
         let mut inner = self.inner.borrow_mut();
         // Remove the pending completion with this ID
         let old: Vec<Pending> = inner.pending.drain().collect();
@@ -284,208 +377,4 @@ impl crate::io::IoBackend for MockBackend {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::io::IoBackend;
-
-    #[test]
-    fn test_mock_read() {
-        let mock = MockBackend::new();
-        mock.seed_read(b"hello world".to_vec());
-
-        let req = IoRequest {
-            op: IoOp::ReadAll,
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = mock.submit(&req).unwrap();
-        assert_eq!(id, 1);
-
-        let completions = mock.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, 1);
-        assert!(completions[0].result.is_ok());
-    }
-
-    #[test]
-    fn test_mock_write() {
-        let mock = MockBackend::new();
-        let req = IoRequest {
-            op: IoOp::Write {
-                data: Value::string("test data"),
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = mock.submit(&req).unwrap();
-        let completions = mock.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        let val = completions[0].result.as_ref().unwrap();
-        assert_eq!(val.as_int(), Some(9));
-    }
-
-    #[test]
-    fn test_mock_error_injection() {
-        let mock = MockBackend::new();
-        mock.inject_error(5); // EIO
-
-        let req = IoRequest {
-            op: IoOp::ReadAll,
-            port: Value::NIL,
-            timeout: None,
-        };
-        mock.submit(&req).unwrap();
-
-        let completions = mock.poll();
-        assert_eq!(completions.len(), 1);
-        assert!(completions[0].result.is_err());
-    }
-
-    #[test]
-    fn test_mock_call_log() {
-        let mock = MockBackend::new();
-        mock.seed_read(b"data".to_vec());
-
-        let _ = mock.submit(&IoRequest {
-            op: IoOp::ReadAll,
-            port: Value::NIL,
-            timeout: None,
-        });
-        let _ = mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        });
-
-        let log = mock.take_log();
-        assert_eq!(log, vec!["read-all", "flush"]);
-    }
-
-    #[test]
-    fn test_mock_eof_no_data() {
-        let mock = MockBackend::new();
-        let req = IoRequest {
-            op: IoOp::ReadLine,
-            port: Value::NIL,
-            timeout: None,
-        };
-        mock.submit(&req).unwrap();
-        let completions = mock.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(*completions[0].result.as_ref().unwrap(), Value::NIL);
-    }
-
-    #[test]
-    fn test_mock_monotonic_ids() {
-        let mock = MockBackend::new();
-        let id1 = mock
-            .submit(&IoRequest {
-                op: IoOp::Flush,
-                port: Value::NIL,
-                timeout: None,
-            })
-            .unwrap();
-        let id2 = mock
-            .submit(&IoRequest {
-                op: IoOp::Flush,
-                port: Value::NIL,
-                timeout: None,
-            })
-            .unwrap();
-        assert!(id2 > id1);
-    }
-
-    #[test]
-    fn test_mock_latency_poll_before_deadline() {
-        let mock = MockBackend::new();
-        mock.set_latency(Duration::from_millis(100));
-
-        mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        })
-        .unwrap();
-
-        // Poll immediately — should be empty (latency not elapsed)
-        let completions = mock.poll();
-        assert!(completions.is_empty());
-    }
-
-    #[test]
-    fn test_mock_latency_wait() {
-        let mock = MockBackend::new();
-        mock.set_latency(Duration::from_millis(10));
-
-        mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        })
-        .unwrap();
-
-        // Wait should sleep until deadline and return the completion
-        let completions = mock.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-    }
-
-    #[test]
-    fn test_mock_latency_wait_timeout() {
-        let mock = MockBackend::new();
-        mock.set_latency(Duration::from_secs(10)); // very long
-
-        mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        })
-        .unwrap();
-
-        // Wait with short timeout — should return empty
-        let completions = mock.wait(5).unwrap();
-        assert!(completions.is_empty());
-    }
-
-    #[test]
-    fn test_mock_cancel() {
-        let mock = MockBackend::new();
-        mock.set_latency(Duration::from_secs(10));
-
-        let id = mock
-            .submit(&IoRequest {
-                op: IoOp::Flush,
-                port: Value::NIL,
-                timeout: None,
-            })
-            .unwrap();
-
-        mock.cancel(id).unwrap();
-
-        // Nothing should be pending
-        let completions = mock.wait(0).unwrap();
-        assert!(completions.is_empty());
-    }
-
-    #[test]
-    fn test_mock_sleep_uses_duration() {
-        let mock = MockBackend::new();
-        // Default latency is zero, but Sleep should use its own duration
-        let req = IoRequest {
-            op: IoOp::Sleep {
-                duration: Duration::from_millis(10),
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        mock.submit(&req).unwrap();
-
-        // Poll immediately — Sleep's 10ms hasn't elapsed
-        let completions = mock.poll();
-        assert!(completions.is_empty());
-
-        // Wait should return after the sleep duration
-        let completions = mock.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-    }
-}
+mod tests;

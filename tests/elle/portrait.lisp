@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # ── portrait library tests ──────────────────────────────────────────────
 
 (def portrait ((import "std/portrait")))
@@ -109,5 +109,63 @@
 (assert (get comp :timeout-safe) "stateless I/O is timeout-safe")
 (assert (get comp :stateless) "no captures means stateless")
 (assert (not (get comp :memoizable)) "I/O function is not memoizable")
+
+# ── False-mutable advisory (mutable binding never reassigned) ────────────
+
+# `n` is declared mutable (var) but only read — the linter flags it and the
+# module portrait reflects that advisory.
+(def src4 "
+(defn counter []
+  (var n 0)
+  n)
+")
+(def a4 (compile/analyze src4))
+(def mp4 (portrait:module a4))
+(def fm (get mp4 :false-mutable))
+(assert (array? fm) "module portrait has a false-mutable list")
+(assert (not (empty? fm)) "var n (never assigned) is flagged false-mutable")
+(assert (contains? (get (first fm) :message) "'n'")
+        "advisory names the binding n")
+
+# Reflects compile/diagnostics — portrait and the linter agree.
+(def has-fm-diag
+  (not (empty? (filter (fn [d]
+                         (= (get d :rule) "mutable-binding-never-assigned"))
+                       (compile/diagnostics a4)))))
+(assert has-fm-diag "linter emits the false-mutable diagnostic")
+
+# The render surfaces the advisory text.
+(def mod-text4 (portrait:render-module mp4))
+(assert (contains? mod-text4 "never reassigned")
+        "module render shows the false-mutable section")
+
+# Per-function: counter's own portrait observes the false-mutable n.
+(def p-counter (portrait:function a4 :counter))
+(def has-fm-obs
+  (not (empty? (filter (fn [o] (= (get o :kind) :false-mutable))
+                       (get p-counter :observations)))))
+(assert has-fm-obs "counter's portrait observes its false-mutable binding")
+
+# Attribution is exact: a function WITHOUT a false-mutable does not inherit
+# another function's advisory.
+(def a6
+  (compile/analyze "
+(defn pure-fn [a b] (+ a b))
+(defn leaky [] (var m 0) m)
+"))
+(def clean-obs (get (portrait:function a6 :pure-fn) :observations))
+(assert (empty? (filter (fn [o] (= (get o :kind) :false-mutable)) clean-obs))
+        "pure-fn does not inherit leaky's false-mutable advisory")
+
+# Negative: an immutable binding holding a MUTABLE VALUE is not flagged.
+# `buf` never changes as a binding; only its (mutable string) value would.
+(def src5 "
+(defn build []
+  (let [buf @\"\"]
+    buf))
+")
+(def a5 (compile/analyze src5))
+(assert (empty? (get (portrait:module a5) :false-mutable))
+        "immutable binding of a mutable value is not a false-mutable")
 
 (println "all portrait tests passed")

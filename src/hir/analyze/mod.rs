@@ -18,7 +18,9 @@ mod binding;
 mod call;
 mod destructure;
 mod fileletrec;
-mod forms;
+mod letrec;
+pub use fileletrec::classify_form;
+pub(crate) mod forms;
 mod lambda;
 mod special;
 
@@ -118,15 +120,35 @@ struct Scope {
     bindings: HashMap<String, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
+    /// Is this a definition-environment frame — the global frame or a file's
+    /// top-level letrec frame? These hold the bindings a macro template's
+    /// free variables resolve to, so they are exempt from the referential-
+    /// transparency rule in `lookup()` (an intro-scoped reference skips
+    /// use-site locals but must still see top-level definitions).
+    definition_env: bool,
+    /// Expansion provenance: the intro scopes carried by the form that
+    /// opened this frame (snapshot of `Analyzer::current_form_intros` at
+    /// push time). A template-origin binding form carries its expansion's
+    /// intro scope, so references from the same expansion may resolve into
+    /// its frame even when the binder itself lacks the scope (the
+    /// datum->syntax deliberate-capture case); a user-written form has no
+    /// intro scopes, so its frame is invisible to template references.
+    intro_provenance: Vec<ScopeId>,
     /// Next local index for this scope (used only for tracking local count)
     next_local: u16,
 }
 
 impl Scope {
-    fn with_start_index(is_function: bool, start_index: u16) -> Self {
+    fn with_start_index(
+        is_function: bool,
+        start_index: u16,
+        intro_provenance: Vec<ScopeId>,
+    ) -> Self {
         Scope {
             bindings: HashMap::new(),
             is_function,
+            definition_env: false,
+            intro_provenance,
             next_local: start_index,
         }
     }
@@ -141,6 +163,29 @@ pub struct Analyzer<'a> {
     current_captures: Vec<CaptureInfo>,
     /// Captures from the parent function (for nested closures)
     parent_captures: Vec<CaptureInfo>,
+    /// The intro scopes of the form currently being analyzed (set by
+    /// `analyze_expr`, save/restore bracketed). `push_scope` snapshots it
+    /// into the new frame's `intro_provenance`.
+    current_form_intros: Vec<ScopeId>,
+    /// The binding whose initializer is currently being analyzed — the analyzer
+    /// analogue of the lowerer's `current_function_binding` (lir/lower/binding.rs).
+    /// When a lookup inside this initializer's lambda resolves back to this same
+    /// binding (a self-edge across the lambda boundary), the capture is classified
+    /// `CaptureKind::Recursive` rather than a sibling `Local` (scopes.rs::lookup).
+    /// Saved/restored around each initializer by `analyze_initializer`, so it names
+    /// the nearest enclosing `letrec`/`def` binding. Paired with
+    /// `current_init_binding_depth`: a reference is a self-edge only when it resolves
+    /// to this binding from *directly* inside its initializer lambda, one function
+    /// level deeper — a reference from a further-nested lambda is a sibling capture of
+    /// that inner lambda, not this binding's self-edge (scopes.rs::lookup).
+    current_init_binding: Option<Binding>,
+    /// The `fn_depth` at the point `analyze_initializer` set `current_init_binding`
+    /// (the depth of the enclosing `letrec`/`def`, one level *outside* the initializer
+    /// lambda). A self-edge fires only at `current_init_binding_depth + 1` — the
+    /// initializer lambda's own body — so a reference from a deeper nested lambda,
+    /// which sits at a greater depth, classifies as that inner lambda's sibling
+    /// capture rather than this binding's self-edge.
+    current_init_binding_depth: u32,
     /// Maps Binding -> known signal of the bound value (if it's a callable)
     /// This enables interprocedural signal tracking: when we call a function,
     /// we can look up its signal and propagate it to the call site.
@@ -159,10 +204,6 @@ pub struct Analyzer<'a> {
     /// access (`module:field`) uses the projected signal instead of the
     /// conservative `Polymorphic` fallback.
     projection_env: HashMap<Binding, HashMap<String, Signal>>,
-    /// Escape projection env: maps bindings from import-and-call patterns
-    /// to their field→safe properties from the imported module's lowering.
-    pub(crate) escape_projection_env:
-        HashMap<Binding, HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Compile-time squelch result signal. Set during call analysis when
     /// the analyzer detects `(squelch f mask)` and computes the resulting
     /// closure's signal statically. Consumed by binding analysis to seed
@@ -172,9 +213,6 @@ pub struct Analyzer<'a> {
     /// analyzer sees `((import "literal"))` and the target file has a
     /// projection. Consumed by binding analysis to populate projection_env.
     last_import_projection: Option<HashMap<String, Signal>>,
-    /// Escape projection from the most recently compiled import.
-    last_import_escape_projection:
-        Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Tracks signal sources within the current lambda body for polymorphic inference
     current_signal_sources: SignalSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
@@ -222,7 +260,28 @@ pub struct Analyzer<'a> {
     /// When true, bindings without `@` prefix are immutable.
     /// Gated on epoch >= 8; epoch <= 7 files are mutable-by-default.
     immutable_by_default: bool,
+    /// The Unicode generation this program is locked to. `(unicode! …)`
+    /// declarations are checked against it and the 0-arg query folds to
+    /// its version. Wired from the CompileCtx by the pipeline; analyzers
+    /// with no VM behind them (LSP, lint) keep the process default.
+    unicode_generation: crate::segment::Generation,
+    /// User signals declared in THIS compilation (`(signal :kw)`). Used to
+    /// reject duplicate declarations within one compile while allowing the same
+    /// signal to be re-declared by a SEPARATE compile — the process-global signal
+    /// registry persists across compiles, so the test runner recompiling a file
+    /// once per tier would otherwise collide ("already registered").
+    signals_declared: HashSet<String>,
+    /// The owning instance's compile context, for resolving `(import "literal")`
+    /// signal projections during analysis (`get_or_compile_projection`). Set by
+    /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
+    /// frontend owns the `CompileCtx`, outlives this analyzer, and never touches
+    /// it while analysis runs, so the reborrow is sound. `None` in pure-analysis
+    /// contexts (lint/LSP/tests), where imports fall back to the conservative
+    /// `Polymorphic` projection.
+    import_ctx: Option<*mut crate::pipeline::CompileCtx>,
 }
+
+mod scopes;
 
 impl<'a> Analyzer<'a> {
     /// Create a new analyzer without primitive signals or arities
@@ -253,15 +312,16 @@ impl<'a> Analyzer<'a> {
             scopes: Vec::new(),
             current_captures: Vec::new(),
             parent_captures: Vec::new(),
+            current_form_intros: Vec::new(),
+            current_init_binding: None,
+            current_init_binding_depth: 0,
             signal_env: HashMap::new(),
             primitive_signals,
             arity_env: HashMap::new(),
 
             projection_env: HashMap::new(),
-            escape_projection_env: HashMap::new(),
             last_squelch_signal: None,
             last_import_projection: None,
-            last_import_escape_projection: None,
             current_signal_sources: SignalSources::default(),
             current_lambda_params: Vec::new(),
             block_contexts: Vec::new(),
@@ -278,10 +338,41 @@ impl<'a> Analyzer<'a> {
             last_signal_projection: None,
             current_immutability_asserts: HashSet::new(),
             immutable_by_default: true,
+            unicode_generation: crate::config::get().unicode_generation(),
+            signals_declared: HashSet::new(),
+            import_ctx: None,
         };
         // Initialize with a global scope so top-level bindings can be registered
-        analyzer.push_scope(false);
+        analyzer.push_definition_scope();
         analyzer
+    }
+
+    /// Provide the owning instance's compile context so that `(import
+    /// "literal")` forms resolve their signal projection during analysis. Called
+    /// by the file frontend, which owns the `CompileCtx` for the analyzer's
+    /// whole lifetime. See the `import_ctx` field.
+    pub fn set_compile_ctx(&mut self, cctx: &mut crate::pipeline::CompileCtx) {
+        self.import_ctx = Some(cctx as *mut _);
+    }
+
+    /// Declare a user signal `(signal :kw)`. Rejects a duplicate declaration
+    /// WITHIN this compilation, but re-declaring a user signal across SEPARATE
+    /// compilations reuses its registry bit (idempotent) — re-declaring a builtin
+    /// still errors. `span` prefixes the error message.
+    pub(crate) fn declare_signal(
+        &mut self,
+        keyword: &str,
+        span: &crate::syntax::Span,
+    ) -> Result<(), String> {
+        if !self.signals_declared.insert(keyword.to_string()) {
+            return Err(format!("{}: Signal '{}' already registered", span, keyword));
+        }
+        let mut reg = crate::signals::registry::global_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        reg.register_or_get(keyword)
+            .map(|_| ())
+            .map_err(|e| format!("{}: {}", span, e))
     }
 
     /// Analyze a syntax tree into HIR
@@ -289,6 +380,31 @@ impl<'a> Analyzer<'a> {
         let hir = self.analyze_expr(syntax)?;
         let errors = std::mem::take(&mut self.errors);
         Ok(AnalysisResult { hir, errors })
+    }
+
+    /// Analyze a binding's initializer with `current_init_binding` set to `binding`
+    /// and `current_init_binding_depth` to the current `fn_depth`, so a self-reference
+    /// resolving back to `binding` from *directly* inside the initializer's lambda
+    /// (one function level deeper, `scopes.rs::lookup`) classifies
+    /// `CaptureKind::Recursive` rather than a sibling `Local`. The depth guard is what
+    /// keeps a reference from a further-nested lambda a sibling capture of that inner
+    /// lambda, not this binding's self-edge — `analyze_lambda` leaves the field
+    /// untouched, so without the depth check the context would leak into every nested
+    /// lambda and mis-materialize their self-references. Saved/restored so a nested
+    /// initializer (an inner `letrec`/`def`) names its own binding at its own depth and
+    /// the outer one is restored after.
+    pub(crate) fn analyze_initializer(
+        &mut self,
+        binding: Binding,
+        value: &Syntax,
+    ) -> Result<Hir, String> {
+        let saved = self.current_init_binding.replace(binding);
+        let saved_depth = self.current_init_binding_depth;
+        self.current_init_binding_depth = self.fn_depth;
+        let result = self.analyze_expr(value);
+        self.current_init_binding = saved;
+        self.current_init_binding_depth = saved_depth;
+        result
     }
 
     /// Accumulate a non-fatal error and return a poison node.
@@ -312,6 +428,11 @@ impl<'a> Analyzer<'a> {
     /// Epoch >= 8 enables this; epoch <= 7 disables it.
     pub fn set_immutable_by_default(&mut self, v: bool) {
         self.immutable_by_default = v;
+    }
+
+    /// Set the Unicode generation `(unicode! …)` declarations check against.
+    pub fn set_unicode_generation(&mut self, gen: crate::segment::Generation) {
+        self.unicode_generation = gen;
     }
 
     /// Levenshtein edit distance between two strings.
@@ -396,524 +517,33 @@ impl<'a> Analyzer<'a> {
     /// for these bindings (same mechanism as primitive functions).
     ///
     /// `env`: map from name string to Value, from `Expander.compile_time_env`.
+    ///
+    /// `is_primitive`: mark each binding as a primitive. This is for the
+    /// **core.lisp export env** (`fold`/`reduce`/`concat`/`append`/`reverse`/…),
+    /// whose bindings here are the *canonical* definitions user code calls — they
+    /// deliberately override any earlier `meta` entry (e.g. `reverse` was once a
+    /// native, now core.lisp), so this binding must win *and* be recognizable to
+    /// passes that key on `is_primitive` (loop fusion, dispatch monomorphization),
+    /// exactly as stdlib exports are. Without the flag a core HOF is invisible to
+    /// those passes even though it is as canonical as `map`/`filter`. Passed false
+    /// for genuine compile-time / REPL envs, where a binding is a user value that
+    /// must *not* be treated as a canonical primitive.
     pub fn bind_compile_time_env(
         &mut self,
         env: &std::collections::HashMap<String, crate::value::Value>,
+        is_primitive: bool,
     ) {
         for (name, value) in env {
             let sym = self.symbols.intern(name);
             let binding = self.bind_by_sym(sym, BindingScope::Local);
             self.arena.get_mut(binding).is_immutable = true;
+            self.arena.get_mut(binding).is_primitive = is_primitive;
             self.primitive_values.insert(binding, *value);
         }
     }
 
     // === Scope Management ===
-
-    fn push_scope(&mut self, is_function: bool) {
-        let start_index = if is_function {
-            0
-        } else {
-            self.scopes.last().map(|s| s.next_local).unwrap_or(0)
-        };
-        self.scopes
-            .push(Scope::with_start_index(is_function, start_index));
-    }
-
-    fn pop_scope(&mut self) -> Option<Scope> {
-        self.scopes.pop()
-    }
-
-    fn bind(&mut self, name: &str, scopes: &[ScopeId], scope: BindingScope) -> Binding {
-        let sym = self.symbols.intern(name);
-        let binding = self.arena.alloc(sym, scope);
-
-        if let Some(scope_frame) = self.scopes.last_mut() {
-            scope_frame
-                .bindings
-                .entry(name.to_string())
-                .or_default()
-                .push(ScopedBinding {
-                    scopes: scopes.to_vec(),
-                    binding,
-                });
-            if matches!(scope, BindingScope::Local) {
-                scope_frame.next_local += 1;
-            }
-        }
-
-        binding
-    }
-
-    /// Register an already-created binding in the current scope without
-    /// creating a new one. Used by `analyze_file_letrec` Pass 2 to add
-    /// deferred duplicate-name bindings at the correct sequential point.
-    fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
-        if let Some(scope_frame) = self.scopes.last_mut() {
-            scope_frame
-                .bindings
-                .entry(name.to_string())
-                .or_default()
-                .push(ScopedBinding {
-                    scopes: scopes.to_vec(),
-                    binding,
-                });
-            if matches!(self.arena.get(binding).scope, BindingScope::Local) {
-                scope_frame.next_local += 1;
-            }
-        }
-    }
-
-    /// Bind a symbol by its already-interned SymbolId.
-    ///
-    /// Used by `bind_primitives` where we already have SymbolIds from
-    /// PrimitiveMeta and need to resolve the name for scope registration.
-    fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
-        let name = self
-            .symbols
-            .name(sym)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("sym#{}", sym.0));
-        let binding = self.arena.alloc(sym, scope);
-
-        if let Some(scope_frame) = self.scopes.last_mut() {
-            scope_frame
-                .bindings
-                .entry(name)
-                .or_default()
-                .push(ScopedBinding {
-                    scopes: Vec::new(), // primitives have empty scopes (visible everywhere)
-                    binding,
-                });
-            if matches!(scope, BindingScope::Local) {
-                scope_frame.next_local += 1;
-            }
-        }
-
-        binding
-    }
-
-    fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
-        let mut found_in_scope = None;
-        let mut crossed_function_boundary = false;
-
-        // Walk scopes from innermost to outermost
-        for (depth, scope) in self.scopes.iter().enumerate().rev() {
-            if let Some(candidates) = scope.bindings.get(name) {
-                // Find the best candidate: binding's scopes must be a subset of
-                // the reference's scopes, and the largest scope set wins.
-                // When multiple candidates share the largest scope-set size,
-                // max_by_key returns the last one (the most recently bound),
-                // which gives correct file-level redefinition semantics.
-                let best = candidates
-                    .iter()
-                    .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
-                    .max_by_key(|c| c.scopes.len());
-                if let Some(winner) = best {
-                    found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
-                    break;
-                }
-            }
-            if scope.is_function {
-                crossed_function_boundary = true;
-            }
-        }
-
-        if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
-            if needs_capture {
-                // Primitives are immutable locals with known constant values.
-                // They don't need capturing — the lowerer emits LoadConst
-                // for them directly from immutable_values.
-                if self.primitive_values.contains_key(&binding) {
-                    return Some(binding);
-                }
-
-                // Mark as captured
-                self.arena.get_mut(binding).is_captured = true;
-
-                // Determine capture kind
-                let capture_kind = CaptureKind::Local;
-
-                // Add to current captures if not already present
-                if !self.current_captures.iter().any(|c| c.binding == binding) {
-                    self.current_captures.push(CaptureInfo {
-                        binding,
-                        kind: capture_kind,
-                    });
-                }
-            }
-            return Some(binding);
-        }
-
-        // If not found in scopes, check if it's in parent captures (for nested lambdas)
-        if !self.parent_captures.is_empty() {
-            for (capture_index, parent_cap) in self.parent_captures.iter().enumerate() {
-                if self.arena.get(parent_cap.binding).name.0 == self.symbols.intern(name).0 {
-                    // Found in parent captures - create a transitive capture
-                    let binding = parent_cap.binding;
-
-                    // Mark as captured
-                    self.arena.get_mut(binding).is_captured = true;
-
-                    // Create a Capture kind that references the parent's capture index
-                    let capture_kind = CaptureKind::Capture {
-                        index: capture_index as u16,
-                    };
-
-                    // Add to current captures if not already present
-                    if !self.current_captures.iter().any(|c| c.binding == binding) {
-                        self.current_captures.push(CaptureInfo {
-                            binding,
-                            kind: capture_kind,
-                        });
-                    }
-
-                    return Some(binding);
-                }
-            }
-        }
-
-        None
-    }
-
-    fn current_local_count(&self) -> u16 {
-        self.scopes.last().map(|s| s.next_local).unwrap_or(0)
-    }
-
-    /// Check if a binding is accessible in the current scope stack without crossing a function boundary
-    fn is_binding_in_current_scope(&self, binding: Binding) -> bool {
-        // Walk scopes from innermost to outermost, stopping at function boundaries
-        for scope in self.scopes.iter().rev() {
-            if scope
-                .bindings
-                .values()
-                .flat_map(|v| v.iter())
-                .any(|sb| sb.binding == binding)
-            {
-                return true;
-            }
-            if scope.is_function {
-                // Stop at function boundary - anything beyond requires capturing
-                break;
-            }
-        }
-        false
-    }
-
-    /// Look up a binding in only the current (innermost) scope, not walking up the scope chain
-    fn lookup_in_current_scope(&self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
-        self.scopes.last().and_then(|scope| {
-            scope.bindings.get(name).and_then(|candidates| {
-                candidates
-                    .iter()
-                    .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
-                    .max_by_key(|c| c.scopes.len())
-                    .map(|c| c.binding)
-            })
-        })
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syntax::{Span, Syntax, SyntaxKind};
-
-    fn make_span() -> Span {
-        Span::new(0, 0, 1, 1)
-    }
-
-    fn make_int(n: i64) -> Syntax {
-        Syntax::new(SyntaxKind::Int(n), make_span())
-    }
-
-    fn make_symbol(name: &str) -> Syntax {
-        Syntax::new(SyntaxKind::Symbol(name.to_string()), make_span())
-    }
-
-    fn make_list(items: Vec<Syntax>) -> Syntax {
-        Syntax::new(SyntaxKind::List(items), make_span())
-    }
-
-    #[test]
-    fn test_analyze_literal() {
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-
-        let syntax = make_int(42);
-        let result = analyzer.analyze(&syntax).unwrap();
-
-        match result.hir.kind {
-            HirKind::Int(n) => assert_eq!(n, 42),
-            _ => panic!("Expected Int"),
-        }
-    }
-
-    #[test]
-    fn test_analyze_if() {
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-
-        let syntax = make_list(vec![
-            make_symbol("if"),
-            Syntax::new(SyntaxKind::Bool(true), make_span()),
-            make_int(1),
-            make_int(2),
-        ]);
-
-        let result = analyzer.analyze(&syntax).unwrap();
-        assert!(matches!(result.hir.kind, HirKind::If { .. }));
-    }
-
-    #[test]
-    fn test_analyze_let() {
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-
-        // Flat bindings: (let [x 10] x)
-        let syntax = make_list(vec![
-            make_symbol("let"),
-            Syntax::new(
-                SyntaxKind::Array(vec![make_symbol("x"), make_int(10)]),
-                make_span(),
-            ),
-            make_symbol("x"),
-        ]);
-
-        let result = analyzer.analyze(&syntax).unwrap();
-        assert!(matches!(result.hir.kind, HirKind::Let { .. }));
-    }
-
-    #[test]
-    fn test_analyze_lambda() {
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-
-        let syntax = make_list(vec![
-            make_symbol("fn"),
-            make_list(vec![make_symbol("x")]),
-            make_symbol("x"),
-        ]);
-
-        let result = analyzer.analyze(&syntax).unwrap();
-        assert!(matches!(result.hir.kind, HirKind::Lambda { .. }));
-    }
-
-    #[test]
-    fn test_analyze_call() {
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        // Pre-bind "+" so it resolves during analysis
-        analyzer.bind("+", &[], BindingScope::Local);
-
-        let syntax = make_list(vec![make_symbol("+"), make_int(1), make_int(2)]);
-
-        let result = analyzer.analyze(&syntax).unwrap();
-        assert!(matches!(result.hir.kind, HirKind::Call { .. }));
-    }
-
-    #[test]
-    fn test_binding_info() {
-        use crate::hir::arena::{BindingArena, BindingScope};
-        let sym = SymbolId(1);
-        let mut arena = BindingArena::new();
-        let binding = arena.alloc(sym, BindingScope::Local);
-        assert!(!arena.get(binding).is_mutated);
-        assert!(!arena.get(binding).is_captured);
-        assert!(!arena.get(binding).needs_capture());
-
-        arena.get_mut(binding).is_mutated = true;
-        assert!(arena.get(binding).is_mutated);
-        assert!(!arena.get(binding).needs_capture());
-
-        arena.get_mut(binding).is_captured = true;
-        assert!(arena.get(binding).is_captured);
-        assert!(arena.get(binding).needs_capture());
-    }
-
-    #[test]
-    fn test_immutable_captured_local_no_cell() {
-        // An immutable local (let-bound) that is captured should NOT need a cell.
-        // Immutable captures are captured by value directly.
-        use crate::hir::arena::{BindingArena, BindingScope};
-        let mut arena = BindingArena::new();
-        let binding = arena.alloc(SymbolId(2), BindingScope::Local);
-        arena.get_mut(binding).is_immutable = true;
-        arena.get_mut(binding).is_captured = true;
-        assert!(arena.get(binding).is_immutable);
-        assert!(arena.get(binding).is_captured);
-        assert!(!arena.get(binding).is_prebound);
-        assert!(!arena.get(binding).needs_capture());
-    }
-
-    #[test]
-    fn test_immutable_prebound_captured_local_needs_capture() {
-        // An immutable local that is prebound (def in begin, letrec) AND
-        // captured DOES need a cell — the capture may happen before the
-        // binding is initialized (self-recursion, forward references).
-        use crate::hir::arena::{BindingArena, BindingScope};
-        let mut arena = BindingArena::new();
-        let binding = arena.alloc(SymbolId(2), BindingScope::Local);
-        arena.get_mut(binding).is_prebound = true;
-        arena.get_mut(binding).is_immutable = true;
-        arena.get_mut(binding).is_captured = true;
-        assert!(arena.get(binding).is_immutable);
-        assert!(arena.get(binding).is_captured);
-        assert!(arena.get(binding).is_prebound);
-        assert!(arena.get(binding).needs_capture());
-    }
-
-    #[test]
-    fn test_mutable_captured_local_needs_capture() {
-        // A mutable local (var) that is captured DOES need a cell.
-        use crate::hir::arena::{BindingArena, BindingScope};
-        let mut arena = BindingArena::new();
-        let binding = arena.alloc(SymbolId(3), BindingScope::Local);
-        arena.get_mut(binding).is_captured = true;
-        assert!(!arena.get(binding).is_immutable);
-        assert!(arena.get(binding).is_captured);
-        assert!(arena.get(binding).needs_capture());
-    }
-
-    #[test]
-    fn test_immutable_uncaptured_local_no_cell() {
-        // An immutable local that is NOT captured should not need a cell.
-        use crate::hir::arena::{BindingArena, BindingScope};
-        let mut arena = BindingArena::new();
-        let binding = arena.alloc(SymbolId(4), BindingScope::Local);
-        arena.get_mut(binding).is_immutable = true;
-        assert!(!arena.get(binding).needs_capture());
-    }
-
-    #[test]
-    fn test_immutable_mutated_captured_local_needs_capture() {
-        // Edge case: a binding marked immutable but also mutated and captured.
-        // Immutable wins — no cell needed. (In practice, the analyzer would
-        // reject set on an immutable binding, so this shouldn't happen.)
-        use crate::hir::arena::{BindingArena, BindingScope};
-        let mut arena = BindingArena::new();
-        let binding = arena.alloc(SymbolId(5), BindingScope::Local);
-        arena.get_mut(binding).is_immutable = true;
-        arena.get_mut(binding).is_mutated = true;
-        arena.get_mut(binding).is_captured = true;
-        assert!(!arena.get(binding).needs_capture());
-    }
-
-    // === Scope-aware binding resolution tests ===
-
-    use crate::syntax::ScopeId;
-
-    #[test]
-    fn test_is_scope_subset_empty_is_subset_of_everything() {
-        assert!(is_scope_subset(&[], &[]));
-        assert!(is_scope_subset(&[], &[ScopeId(1)]));
-        assert!(is_scope_subset(&[], &[ScopeId(1), ScopeId(2)]));
-    }
-
-    #[test]
-    fn test_is_scope_subset_nonempty_not_subset_of_empty() {
-        assert!(!is_scope_subset(&[ScopeId(1)], &[]));
-    }
-
-    #[test]
-    fn test_is_scope_subset_identical_sets() {
-        assert!(is_scope_subset(
-            &[ScopeId(1), ScopeId(2)],
-            &[ScopeId(1), ScopeId(2)]
-        ));
-    }
-
-    #[test]
-    fn test_is_scope_subset_proper_subset() {
-        assert!(is_scope_subset(&[ScopeId(1)], &[ScopeId(1), ScopeId(2)]));
-    }
-
-    #[test]
-    fn test_is_scope_subset_not_subset() {
-        assert!(!is_scope_subset(
-            &[ScopeId(1), ScopeId(3)],
-            &[ScopeId(1), ScopeId(2)]
-        ));
-    }
-
-    #[test]
-    fn test_bind_and_lookup_with_empty_scopes() {
-        // Pre-expansion code: empty scopes work identically to before
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.push_scope(false);
-        let binding = analyzer.bind("x", &[], BindingScope::Local);
-        assert_eq!(analyzer.lookup("x", &[]), Some(binding));
-    }
-
-    #[test]
-    fn test_lookup_scope_filtering() {
-        // Binding with scope {S1} is invisible to reference with empty scopes
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.push_scope(false);
-        analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
-        // Reference with empty scopes cannot see binding with {S1}
-        assert_eq!(analyzer.lookup("tmp", &[]), None);
-    }
-
-    #[test]
-    fn test_lookup_scope_subset_match() {
-        // Binding with scope {S1} is visible to reference with {S1}
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.push_scope(false);
-        let binding = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
-        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(binding));
-    }
-
-    #[test]
-    fn test_lookup_largest_scope_wins() {
-        // Two bindings for "tmp": one with {} and one with {S1}
-        // Reference with {S1} should see the {S1} binding (more specific)
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.push_scope(false);
-        let _outer = analyzer.bind("tmp", &[], BindingScope::Local);
-        let inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
-        assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(inner));
-    }
-
-    #[test]
-    fn test_lookup_empty_scopes_sees_empty_binding() {
-        // Two bindings for "tmp": one with {} and one with {S1}
-        // Reference with {} should see only the {} binding
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.push_scope(false);
-        let outer = analyzer.bind("tmp", &[], BindingScope::Local);
-        let _inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
-        assert_eq!(analyzer.lookup("tmp", &[]), Some(outer));
-    }
-
-    #[test]
-    fn test_lookup_in_current_scope_with_scopes() {
-        let mut symbols = SymbolTable::new();
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.push_scope(false);
-        let binding = analyzer.bind("x", &[ScopeId(1)], BindingScope::Local);
-        // Visible with matching scopes
-        assert_eq!(
-            analyzer.lookup_in_current_scope("x", &[ScopeId(1)]),
-            Some(binding)
-        );
-        // Invisible with empty scopes
-        assert_eq!(analyzer.lookup_in_current_scope("x", &[]), None);
-    }
-}
+mod tests;

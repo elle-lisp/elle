@@ -1,136 +1,73 @@
 //! Code completion support for LSP
 
 use crate::primitives::def::Doc;
-use crate::symbol::SymbolTable;
 use crate::symbols::{SymbolIndex, SymbolKind};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-/// Get completion items at the given position
+/// Default documentation string when a symbol carries none of its own.
+fn default_doc(kind: SymbolKind) -> &'static str {
+    match kind {
+        SymbolKind::Function => "User-defined function",
+        SymbolKind::Variable => "Variable",
+        SymbolKind::Macro => "Macro",
+        SymbolKind::Module => "Module",
+        SymbolKind::Builtin => "Built-in",
+    }
+}
+
+/// Get completion items at the given position.
+///
+/// Two sources, in priority order: the document's own definitions (from the
+/// symbol index) and the runtime's globally-bound callables (`builtin_names` —
+/// primitives + core + stdlib, including operators like `+` that are stdlib
+/// closures absent from `docs`). `docs` supplies documentation text where a
+/// builtin has it. Both are authoritative runtime state, so the completion set
+/// never drifts from a hand-maintained list.
 pub(crate) fn get_completions(
     _line: u32,
     _character: u32,
     prefix: &str,
     symbol_index: &SymbolIndex,
-    _symbol_table: &SymbolTable,
+    builtin_names: &[&str],
     docs: &HashMap<String, Doc>,
 ) -> Vec<Value> {
     let mut items = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
 
-    // Add user-defined symbols
-    for (name, sym_id, kind) in &symbol_index.available_symbols {
-        if name.starts_with(prefix) {
-            let label = name.clone();
-            let doc = match *kind {
-                SymbolKind::Function => symbol_index
-                    .definitions
-                    .get(sym_id)
-                    .and_then(|d| d.documentation.as_deref())
-                    .map(|d| d.to_string())
-                    .unwrap_or_else(|| "User-defined function".to_string()),
-                SymbolKind::Variable => symbol_index
-                    .definitions
-                    .get(sym_id)
-                    .and_then(|d| d.documentation.as_deref())
-                    .map(|d| d.to_string())
-                    .unwrap_or_else(|| "Variable".to_string()),
-                _ => symbol_index
-                    .definitions
-                    .get(sym_id)
-                    .and_then(|d| d.documentation.as_deref())
-                    .map(|d| d.to_string())
-                    .unwrap_or_else(|| "Symbol".to_string()),
-            };
-
-            let kind_num = match *kind {
-                SymbolKind::Function => 12, // LSP CompletionItemKind.Function
-                SymbolKind::Variable => 6,  // LSP CompletionItemKind.Variable
-                SymbolKind::Builtin => 2,   // LSP CompletionItemKind.Module
-                SymbolKind::Macro => 24,    // LSP CompletionItemKind.Keyword
-                SymbolKind::Module => 9,    // LSP CompletionItemKind.Module
-            };
-
-            items.push(json!({
-                "label": label,
-                "kind": kind_num,
-                "documentation": doc,
-            }));
+    // User-defined symbols from the index.
+    for (name, id, kind) in &symbol_index.available_symbols {
+        if !name.starts_with(prefix) {
+            continue;
         }
+        let doc = symbol_index
+            .definitions
+            .get(id)
+            .and_then(|d| d.documentation.clone())
+            .unwrap_or_else(|| default_doc(*kind).to_string());
+        items.push(json!({
+            "label": name,
+            "kind": kind.lsp_completion_kind(),
+            "documentation": doc,
+        }));
+        seen.insert(name.as_str());
     }
 
-    // Add built-in primitives that match the prefix
-    let builtins = vec![
-        // Arithmetic
-        ("+", SymbolKind::Builtin, "Add numbers"),
-        ("-", SymbolKind::Builtin, "Subtract numbers"),
-        ("*", SymbolKind::Builtin, "Multiply numbers"),
-        ("/", SymbolKind::Builtin, "Divide numbers"),
-        ("mod", SymbolKind::Builtin, "Modulo operation"),
-        // Comparison
-        ("=", SymbolKind::Builtin, "Test equality"),
-        ("<", SymbolKind::Builtin, "Less than"),
-        (">", SymbolKind::Builtin, "Greater than"),
-        ("<=", SymbolKind::Builtin, "Less than or equal"),
-        (">=", SymbolKind::Builtin, "Greater than or equal"),
-        // List operations
-        ("pair", SymbolKind::Builtin, "Construct list"),
-        ("first", SymbolKind::Builtin, "Get first element"),
-        ("rest", SymbolKind::Builtin, "Get rest of list"),
-        ("length", SymbolKind::Builtin, "Get list length"),
-        ("append", SymbolKind::Builtin, "Append lists"),
-        // Control flow
-        ("if", SymbolKind::Builtin, "Conditional expression"),
-        ("def", SymbolKind::Builtin, "Immutable binding"),
-        ("var", SymbolKind::Builtin, "Mutable binding"),
-        ("fn", SymbolKind::Builtin, "Create function"),
-        ("let", SymbolKind::Builtin, "Local binding"),
-        ("begin", SymbolKind::Builtin, "Sequential execution"),
-        // Type checking
-        ("type", SymbolKind::Builtin, "Get type of value"),
-        // String operations
-        ("append", SymbolKind::Builtin, "Append collections"),
-        (
-            "concat",
-            SymbolKind::Builtin,
-            "Concatenate collections (non-mutating)",
-        ),
-        ("rebox", SymbolKind::Builtin, "Set box value"),
-        ("push", SymbolKind::Builtin, "Push element onto array"),
-        ("pop", SymbolKind::Builtin, "Pop element from array"),
-    ];
-
-    for (name, kind, doc) in builtins {
-        if name.starts_with(prefix) {
-            let kind_num = match kind {
-                SymbolKind::Builtin => 2,
-                _ => 12,
-            };
-
-            // Only add if not already in user symbols
-            if !items.iter().any(|item| {
-                item.get("label")
-                    .and_then(|l| l.as_str())
-                    .map(|l| l == name)
-                    .unwrap_or(false)
-            }) {
-                if let Some(full_doc) = docs.get(name).map(|d| d.format()) {
-                    items.push(json!({
-                        "label": name,
-                        "kind": kind_num,
-                        "documentation": full_doc,
-                    }));
-                } else {
-                    items.push(json!({
-                        "label": name,
-                        "kind": kind_num,
-                        "documentation": doc,
-                    }));
-                }
-            }
+    // Builtins from the runtime's callable globals (deduplicated against user
+    // symbols), with documentation pulled from the docs map when present.
+    for name in builtin_names {
+        if !name.starts_with(prefix) || seen.contains(name) {
+            continue;
         }
+        seen.insert(name);
+        items.push(json!({
+            "label": name,
+            "kind": SymbolKind::Builtin.lsp_completion_kind(),
+            "documentation": docs.get(*name).map(|d| d.format()).unwrap_or_default(),
+        }));
     }
 
-    // Sort by label for consistent ordering
+    // Stable ordering by label.
     items.sort_by(|a, b| {
         let a_label = a.get("label").and_then(|l| l.as_str()).unwrap_or("");
         let b_label = b.get("label").and_then(|l| l.as_str()).unwrap_or("");
@@ -141,44 +78,4 @@ pub(crate) fn get_completions(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_completion_empty() {
-        let index = SymbolIndex::new();
-        let symbol_table = crate::SymbolTable::new();
-        let docs = HashMap::new();
-
-        let completions = get_completions(0, 0, "", &index, &symbol_table, &docs);
-        // Should at least have built-in symbols
-        assert!(!completions.is_empty());
-    }
-
-    #[test]
-    fn test_completion_with_prefix() {
-        let index = SymbolIndex::new();
-        let symbol_table = crate::SymbolTable::new();
-        let docs = HashMap::new();
-
-        let completions = get_completions(0, 0, "pair", &index, &symbol_table, &docs);
-        assert!(!completions.is_empty());
-        // Should include "pair"
-        assert!(completions.iter().any(|item| {
-            item.get("label")
-                .and_then(|l| l.as_str())
-                .map(|l| l.starts_with("pair"))
-                .unwrap_or(false)
-        }));
-    }
-
-    #[test]
-    fn test_completion_no_match() {
-        let index = SymbolIndex::new();
-        let symbol_table = crate::SymbolTable::new();
-        let docs = HashMap::new();
-
-        let completions = get_completions(0, 0, "xyz123", &index, &symbol_table, &docs);
-        assert!(completions.is_empty());
-    }
-}
+mod tests;

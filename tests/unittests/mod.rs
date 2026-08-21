@@ -14,6 +14,9 @@ mod closures_and_lambdas {
 mod bytecode_debug {
     include!("bytecode_debug.rs");
 }
+mod bytecode_safety {
+    include!("bytecode_safety.rs");
+}
 mod hir_debug {
     include!("hir_debug.rs");
 }

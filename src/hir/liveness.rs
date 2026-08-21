@@ -8,6 +8,9 @@ use super::expr::{Hir, HirId, HirKind};
 
 use std::collections::HashMap;
 
+mod lastuse;
+pub use lastuse::*;
+
 /// Dense bitvector keyed by binding index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BitSet {
@@ -86,6 +89,8 @@ pub(crate) struct LivenessAnalyzer {
     num_bindings: usize,
 }
 
+mod analyze;
+
 impl LivenessAnalyzer {
     pub fn new(binding_index: HashMap<Binding, usize>, num_bindings: usize) -> Self {
         LivenessAnalyzer {
@@ -97,239 +102,6 @@ impl LivenessAnalyzer {
 
     pub(crate) fn empty_set(&self) -> BitSet {
         BitSet::new(self.num_bindings)
-    }
-
-    /// Compute liveness for a HIR node. `live_after` is the set of bindings
-    /// live after this node. Returns the set of bindings live before this node.
-    pub fn analyze(&mut self, hir: &Hir, live_after: &BitSet) -> BitSet {
-        self.live_out.insert(hir.id, live_after.clone());
-
-        match &hir.kind {
-            // Leaves
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => live_after.clone(),
-
-            HirKind::Var(b) => {
-                let mut live = live_after.clone();
-                if let Some(&idx) = self.binding_index.get(b) {
-                    live.set(idx);
-                }
-                live
-            }
-
-            HirKind::Begin(exprs) => self.analyze_sequence(exprs, live_after),
-
-            HirKind::Block { body, .. } => self.analyze_sequence(body, live_after),
-
-            HirKind::Let { bindings, body } => {
-                let live_body = self.analyze(body, live_after);
-                let mut live = live_body;
-                // Process bindings right-to-left: init's live_out is the
-                // live set needed after it (including the bound variable,
-                // since it will be used in the body). Then remove the bound
-                // variable to get live_in at the Let level.
-                for (b, init) in bindings.iter().rev() {
-                    // live currently has whatever the body/later bindings need.
-                    // The init's live_out IS live (which may include b if used in body).
-                    live = self.analyze(init, &live);
-                    // After processing init, remove b — it's defined by this Let,
-                    // so it's not live before the Let.
-                    if let Some(&idx) = self.binding_index.get(b) {
-                        live.clear(idx);
-                    }
-                }
-                live
-            }
-
-            HirKind::Letrec { bindings, body } => {
-                let mut live = self.analyze(body, live_after);
-                // Remove all bound names first (mutually recursive)
-                for (b, _) in bindings {
-                    if let Some(&idx) = self.binding_index.get(b) {
-                        live.clear(idx);
-                    }
-                }
-                // Walk inits
-                for (_, init) in bindings.iter().rev() {
-                    live = self.analyze(init, &live);
-                }
-                live
-            }
-
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                let live_then = self.analyze(then_branch, live_after);
-                let live_else = self.analyze(else_branch, live_after);
-                let mut live_cond_after = live_then;
-                live_cond_after.union_with(&live_else);
-                self.analyze(cond, &live_cond_after)
-            }
-
-            HirKind::Lambda { captures, body, .. } => {
-                // Lambda body is a separate liveness scope
-                let body_live_after = self.empty_set();
-                self.analyze(body, &body_live_after);
-
-                // The lambda node generates uses for its captures
-                let mut live = live_after.clone();
-                for cap in captures {
-                    if let Some(&idx) = self.binding_index.get(&cap.binding) {
-                        live.set(idx);
-                    }
-                }
-                live
-            }
-
-            HirKind::Call { func, args, .. } => {
-                let mut live = live_after.clone();
-                // Process args right-to-left
-                for a in args.iter().rev() {
-                    live = self.analyze(&a.expr, &live);
-                }
-                self.analyze(func, &live)
-            }
-
-            HirKind::Define { binding, value } => {
-                let mut live = live_after.clone();
-                if let Some(&idx) = self.binding_index.get(binding) {
-                    live.clear(idx);
-                }
-                self.analyze(value, &live)
-            }
-
-            HirKind::Assign { target, value } => {
-                let mut live = live_after.clone();
-                if let Some(&idx) = self.binding_index.get(target) {
-                    live.clear(idx);
-                }
-                self.analyze(value, &live)
-            }
-
-            HirKind::Loop { bindings, body } => self.analyze_loop(bindings, body, live_after),
-
-            HirKind::Recur { args } => {
-                // Recur generates uses of its args — they flow to loop bindings.
-                // The actual binding happens at the loop node. Here we just
-                // ensure the args are live.
-                let mut live = live_after.clone();
-                for a in args.iter().rev() {
-                    live = self.analyze(a, &live);
-                }
-                live
-            }
-
-            HirKind::Break { value, .. } => {
-                // Break exits the block — value needs to be live
-                self.analyze(value, live_after)
-            }
-
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                // Short-circuit: any expr could be the last one evaluated.
-                // Conservative: union of live-in from each suffix.
-                let mut live = live_after.clone();
-                for e in exprs.iter().rev() {
-                    let live_e = self.analyze(e, &live);
-                    live.union_with(&live_e);
-                    live = live_e;
-                }
-                live
-            }
-
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                let mut live = if let Some(eb) = else_branch {
-                    self.analyze(eb, live_after)
-                } else {
-                    live_after.clone()
-                };
-                for (c, b) in clauses.iter().rev() {
-                    let live_body = self.analyze(b, live_after);
-                    live.union_with(&live_body);
-                    live = self.analyze(c, &live);
-                }
-                live
-            }
-
-            HirKind::Match { value, arms } => {
-                let mut live_after_scrutinee = self.empty_set();
-                for (pat, guard, body) in arms {
-                    let mut live_arm = self.analyze(body, live_after);
-                    if let Some(g) = guard {
-                        live_arm = self.analyze(g, &live_arm);
-                    }
-                    // Remove pattern bindings
-                    for b in pat.bindings().bindings {
-                        if let Some(&idx) = self.binding_index.get(&b) {
-                            live_arm.clear(idx);
-                        }
-                    }
-                    live_after_scrutinee.union_with(&live_arm);
-                }
-                self.analyze(value, &live_after_scrutinee)
-            }
-
-            HirKind::Emit { value, .. } => self.analyze(value, live_after),
-
-            HirKind::MakeCell { value } => self.analyze(value, live_after),
-
-            HirKind::DerefCell { cell } => self.analyze(cell, live_after),
-
-            HirKind::SetCell { cell, value } => {
-                let live = self.analyze(value, live_after);
-                self.analyze(cell, &live)
-            }
-
-            HirKind::Destructure { pattern, value, .. } => {
-                let mut live = live_after.clone();
-                for b in pattern.bindings().bindings {
-                    if let Some(&idx) = self.binding_index.get(&b) {
-                        live.clear(idx);
-                    }
-                }
-                self.analyze(value, &live)
-            }
-
-            HirKind::Eval { expr, env } => {
-                let live = self.analyze(env, live_after);
-                self.analyze(expr, &live)
-            }
-
-            HirKind::Parameterize { bindings, body } => {
-                let mut live = self.analyze(body, live_after);
-                for (k, v) in bindings.iter().rev() {
-                    live = self.analyze(v, &live);
-                    live = self.analyze(k, &live);
-                }
-                live
-            }
-
-            HirKind::While { cond, body } => {
-                let live_body = self.analyze(body, live_after);
-                let mut live = live_after.clone();
-                live.union_with(&live_body);
-                self.analyze(cond, &live)
-            }
-
-            HirKind::Intrinsic { args, .. } => {
-                let mut live = live_after.clone();
-                for a in args.iter().rev() {
-                    live = self.analyze(a, &live);
-                }
-                live
-            }
-        }
     }
 
     fn analyze_sequence(&mut self, exprs: &[Hir], live_after: &BitSet) -> BitSet {
@@ -397,150 +169,90 @@ pub(crate) fn build_binding_index(
     (binding_index, index_binding)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::hir::dataflow::{analyze_dataflow, DataflowInfo};
-    use crate::hir::functionalize::functionalize;
-    use crate::hir::tailcall::mark_tail_calls;
-    use crate::hir::{Analyzer, BindingArena};
-    use crate::primitives::register_primitives;
-    use crate::reader::read_syntax;
-    use crate::symbol::SymbolTable;
-    use crate::syntax::Expander;
-    use crate::vm::VM;
-
-    fn analyze(source: &str) -> (BindingArena, SymbolTable, DataflowInfo) {
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let meta = register_primitives(&mut vm, &mut symbols);
-
-        let wrapped = format!(
-            "(letrec [cond_var (fn () nil) f (fn (& args) nil) g (fn (& args) nil)] {})",
-            source
-        );
-        let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-        let mut expander = Expander::new();
-        let expanded = expander
-            .expand(syntax, &mut symbols, &mut vm)
-            .expect("expand failed");
-        let mut arena = BindingArena::new();
-        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
-        analyzer.bind_primitives(&meta);
-        let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
-        mark_tail_calls(&mut analysis.hir);
-        functionalize(&mut analysis.hir, &mut arena);
-
-        let info = analyze_dataflow(&analysis.hir);
-        (arena, symbols, info)
+/// Compute per-HirId last-use: for each value-producing HirId, the HirId
+/// at which its value is last referenced.
+///
+/// For an allocation `A`:
+/// - If `A` is bound to some binding `b` (i.e., `A` is a binding's init),
+///   `last_use[A]` is the maximum "effective HirId" over all `Var(b)`
+///   references. The effective HirId of a `Var(b)` is the immediate
+///   parent expression's HirId when the parent *consumes* the value
+///   (Call, Emit, Define, Assign, SetCell, MakeCell, Intrinsic, etc.);
+///   otherwise it is the `Var(b)` HirId itself.
+/// - If `A` has no binding (inline allocation passed as an argument or
+///   value child of a consumer), `last_use[A]` is the consumer's HirId.
+/// - If `A` is bound but the binding has no uses anywhere,
+///   `last_use[A] = A` (decref immediately after the alloc).
+///
+/// The plan's region-inference invariant requires every region to have
+/// exactly one `decref_point` HirId; this function produces that mapping for
+/// allocation HirIds.
+/// Assign every HIR node an explicit structural execution-order index.
+///
+/// `HirId` is an *identity* — a global allocation counter — not an
+/// order. Earlier code leaned on the accident that HIR construction
+/// happened to assign ids "outer-after-inner" (a post-order: a node's
+/// id greater than all its descendants', a later sibling's greater than
+/// an earlier's) and compared `HirId` magnitudes to answer both
+/// ordering ("which use is last?") and scope-containment ("is this
+/// binding inside the loop?") questions. The ANF lift
+/// (`src/hir/anf.rs`) breaks that accident: it appends synthetic `let`
+/// bindings with fresh ids drawn from the end of the counter, so a
+/// binding bound *inside* a loop body can carry an id *larger* than the
+/// loop. Comparing magnitudes then misclassifies it as bound outside —
+/// the closure-in-loop phantom-region trap.
+///
+/// This recomputes a real post-order index over the *current*
+/// (post-ANF) tree, so `order[ancestor] > order[descendant]` and
+/// `order[later_sibling] > order[earlier_sibling]` hold by construction
+/// regardless of how the HirIds were assigned. All ordering and
+/// containment logic in liveness and region inference compares these
+/// indices; `HirId` stays pure identity (it does not even implement
+/// `Ord`). Built on `Hir::for_each_child` so the child enumeration is
+/// identical to every other analysis walk.
+pub fn compute_order(hir: &Hir) -> HashMap<HirId, u32> {
+    fn visit(h: &Hir, order: &mut HashMap<HirId, u32>, next: &mut u32) {
+        h.for_each_child(|c| visit(c, order, next));
+        order.insert(h.id, *next);
+        *next += 1;
     }
-
-    fn find_binding(
-        info: &DataflowInfo,
-        arena: &BindingArena,
-        symbols: &SymbolTable,
-        name: &str,
-    ) -> Option<Binding> {
-        info.def_site
-            .keys()
-            .find(|&&b| symbols.name(arena.get(b).name) == Some(name))
-            .copied()
-    }
-
-    fn is_live_anywhere(info: &DataflowInfo, b: Binding) -> bool {
-        info.binding_index
-            .get(&b)
-            .is_some_and(|&idx| info.live_out.values().any(|live| live.contains(idx)))
-    }
-
-    #[test]
-    fn test_dead_binding() {
-        let (arena, symbols, info) = analyze("(let [x 1] 42)");
-        if let Some(x) = find_binding(&info, &arena, &symbols, "x") {
-            assert!(
-                !is_live_anywhere(&info, x),
-                "dead binding x should not be live"
-            );
-        }
-    }
-
-    #[test]
-    fn test_live_binding() {
-        let (arena, symbols, info) = analyze("(let [x 1] x)");
-        let x = find_binding(&info, &arena, &symbols, "x").expect("x not found");
-        assert!(
-            is_live_anywhere(&info, x),
-            "x should be live between def and use"
-        );
-    }
-
-    #[test]
-    fn test_if_branch_liveness() {
-        let (arena, symbols, info) = analyze("(let [x 1] (if (cond_var) x 2))");
-        let x = find_binding(&info, &arena, &symbols, "x").expect("x not found");
-        assert!(is_live_anywhere(&info, x), "x should be live before if");
-    }
-
-    #[test]
-    fn test_loop_liveness() {
-        let (arena, symbols, info) = analyze("(begin (def @i 0) (while (< i 10) (set i (+ i 1))))");
-        let i_bindings: Vec<Binding> = info
-            .def_site
-            .keys()
-            .filter(|&&b| symbols.name(arena.get(b).name) == Some("i"))
-            .copied()
-            .collect();
-        assert!(!i_bindings.is_empty());
-        assert!(
-            i_bindings.iter().any(|&b| is_live_anywhere(&info, b)),
-            "loop param i should be live across iterations"
-        );
-    }
-
-    #[test]
-    fn test_lambda_capture_liveness() {
-        let (arena, symbols, info) = analyze("(let [x 1] (let [ff (fn () x)] (ff)))");
-        let x = find_binding(&info, &arena, &symbols, "x").expect("x not found");
-        assert!(
-            is_live_anywhere(&info, x),
-            "captured x should be live at lambda"
-        );
-    }
-
-    #[test]
-    fn test_bitset_basic() {
-        let mut bs = BitSet::new(128);
-        assert!(!bs.contains(0));
-        bs.set(0);
-        assert!(bs.contains(0));
-        bs.set(65);
-        assert!(bs.contains(65));
-        bs.clear(0);
-        assert!(!bs.contains(0));
-        assert!(bs.contains(65));
-    }
-
-    #[test]
-    fn test_bitset_union() {
-        let mut a = BitSet::new(128);
-        let mut b = BitSet::new(128);
-        a.set(0);
-        b.set(1);
-        let changed = a.union_with(&b);
-        assert!(changed);
-        assert!(a.contains(0));
-        assert!(a.contains(1));
-        let changed2 = a.union_with(&b);
-        assert!(!changed2);
-    }
-
-    #[test]
-    fn test_bitset_iter() {
-        let mut bs = BitSet::new(128);
-        bs.set(3);
-        bs.set(67);
-        bs.set(100);
-        let bits: Vec<usize> = bs.iter().collect();
-        assert_eq!(bits, vec![3, 67, 100]);
-    }
+    let mut order = HashMap::new();
+    let mut next = 0;
+    visit(hir, &mut order, &mut next);
+    order
 }
+
+/// Subtree low-watermark: for each node, the minimum `compute_order`
+/// index over the node and all its descendants. With `order` (the node's
+/// own index, the maximum in its subtree by post-order construction),
+/// this gives each node the contiguous post-order interval
+/// `[low[N], order[N]]` covering exactly its subtree. Containment is then
+/// a range test: node `X` is inside `N`'s subtree iff
+/// `low[N] <= order[X] <= order[N]`.
+///
+/// This is what distinguishes a *descendant* of a loop (its scope node is
+/// inside the loop body) from a *preceding sibling* of a loop (a `def`
+/// bound earlier in the same body): both have `order < order[loop]`, but
+/// only the descendant has `order >= low[loop]`. The plain `order`
+/// comparison cannot tell them apart, which is why a `def`-bound closure
+/// referenced inside a loop was misclassified as bound-inside and freed
+/// per iteration (`loop-def-closure-uaf.lisp`).
+pub fn compute_subtree_low(hir: &Hir, order: &HashMap<HirId, u32>) -> HashMap<HirId, u32> {
+    fn visit(h: &Hir, order: &HashMap<HirId, u32>, low: &mut HashMap<HirId, u32>) -> u32 {
+        let mut m = order.get(&h.id).copied().unwrap_or(u32::MAX);
+        h.for_each_child(|c| {
+            let cl = visit(c, order, low);
+            if cl < m {
+                m = cl;
+            }
+        });
+        low.insert(h.id, m);
+        m
+    }
+    let mut low = HashMap::new();
+    visit(hir, order, &mut low);
+    low
+}
+
+#[cfg(test)]
+mod tests;

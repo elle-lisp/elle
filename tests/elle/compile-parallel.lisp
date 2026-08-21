@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # ── compile/parallelize tests ─────────────────────────────────────────
 
 # ── Safe: independent functions ──────────────────────────────────────

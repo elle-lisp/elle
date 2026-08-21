@@ -1,9 +1,8 @@
 //! Analysis pipeline: source -> HIR (no bytecode generation).
 
-use super::cache;
-use super::compile::classify_form;
 use super::AnalyzeResult;
-use crate::hir::{Analyzer, BindingArena};
+use super::CompileCtx;
+use crate::hir::{classify_form, Analyzer, BindingArena};
 use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
@@ -16,11 +15,12 @@ pub fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(source, source_name)?;
 
-    let (mut expander, meta) = cache::get_cached_expander_and_meta();
+    let (mut expander, meta) = cctx.expander_and_meta();
 
     let expanded = expander.expand(syntax, symbols, vm)?;
     let mut arena = BindingArena::new();
@@ -30,6 +30,7 @@ pub fn analyze(
         meta.signals.clone(),
         meta.arities.clone(),
     );
+    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
@@ -49,13 +50,14 @@ pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     intern_primitive_names(symbols);
 
     let syntaxes = read_syntax_all(source, source_name)?;
 
-    let (mut expander, meta) = cache::get_cached_expander_and_meta();
+    let (mut expander, meta) = cctx.expander_and_meta();
 
     // Expand all forms
     let mut expanded_forms = Vec::new();
@@ -84,6 +86,7 @@ pub fn analyze_file(
         meta.signals.clone(),
         meta.arities.clone(),
     );
+    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let hir = analyzer.analyze_file_letrec(forms, span)?;
     let errors = analyzer.take_errors();

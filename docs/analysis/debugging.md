@@ -126,7 +126,7 @@ Implementation (in `src/primitives/time_def.rs`):
 (first (rest result))   # => elapsed seconds
 ```
 
-For hot-path timing where coroutine overhead matters, subtract two
+For hot-path timing where fiber overhead matters, subtract two
 `clock/monotonic` readings directly.
 
 ### 2.3 Why floats, not opaque types

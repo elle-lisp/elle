@@ -1,0 +1,50 @@
+[needs_capture]
+  b0(churn) local mutated=false immutable=true needs_capture=false
+  b1(__file_expr_#0) local mutated=false immutable=false needs_capture=false
+  b2(n) param mutated=false immutable=true needs_capture=false
+  b3(before) local mutated=false immutable=true needs_capture=false
+  b4(i) local mutated=true immutable=false needs_capture=false
+  b5(i) local mutated=false immutable=true needs_capture=false
+  b6(~) local mutated=false immutable=true needs_capture=false
+  b7(~) local mutated=false immutable=true needs_capture=false
+  b8(d#0) local mutated=false immutable=true needs_capture=false
+  b9(d#1) local mutated=false immutable=true needs_capture=false
+  b10(G#0) local mutated=false immutable=true needs_capture=false
+  b11(~) local mutated=false immutable=true needs_capture=false
+  b12(~) local mutated=false immutable=true needs_capture=false
+  b13(G#1) local mutated=false immutable=true needs_capture=false
+  b14(~) local mutated=false immutable=true needs_capture=false
+  b15(~) local mutated=false immutable=true needs_capture=false
+[lambda_captures]
+  #1 params=[b2(n)] captures=[]
+[return_frontier]
+  [r13]
+[suppressed_decref_regions]
+  []
+[region_instrs]
+  ; entry <anon>
+    block0: DecrefRegion s0
+    block2: DecrefValueRegion v29
+    block2: DecrefRegion s1
+    block2: DecrefValueRegion v38
+    block2: DecrefRegion s2
+    block4: IncrefValueRegion v41
+    block4: DecrefValueRegion v42
+    block4: DecrefValueRegion v44
+    block6: DecrefValueRegion v61
+    block6: DecrefRegion s3
+    block6: DecrefValueRegion v70
+    block6: DecrefRegion s4
+    block8: DecrefValueRegion v74
+    block7: IncrefValueRegion v76
+  ; closure[0] <anon>
+    block4: DecrefRegion s5
+    block4: DecrefRegion s6
+    block4: DecrefValueRegion v22
+    block4: IncrefValueRegion v26
+    block4: DecrefValueRegion v27
+    block3: DecrefValueRegion v32
+    block3: DecrefValueRegion v34
+    block1: DecrefValueRegion v42
+    block1: DecrefValueRegion v44
+    block1: IncrefValueRegion v41

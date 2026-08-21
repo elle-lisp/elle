@@ -7,13 +7,30 @@ mod stack;
 
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::value::fiber::SignalBits;
-use crate::value::{Closure, Value};
+use crate::value::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Per-closure compilation result: bytecode, yield points, call sites.
 type ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>);
+
+/// This function's value-route release slots, ascending — the table an error exit
+/// walks (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+/// still owes"). Ascending so the walk's release order is the slot order the body
+/// allocated them in, identical across compiles: the releases commute (each is a
+/// decref) but their cascades must not depend on a hash order.
+fn sorted_release_slots(func: &LirFunction) -> Vec<u16> {
+    let mut slots = func.frame_release_slots.clone();
+    slots.sort_unstable();
+    slots
+}
+
+/// The `DecrefRegion` half of the same table, ascending for the same reason.
+fn sorted_release_regions(func: &LirFunction) -> Vec<u32> {
+    let mut regions: Vec<u32> = func.frame_release_regions.iter().map(|r| r.get()).collect();
+    regions.sort_unstable();
+    regions
+}
 
 /// Emits bytecode from LIR
 pub struct Emitter {
@@ -33,6 +50,11 @@ pub struct Emitter {
     /// When a block ends with Terminator::Yield, the stack state is saved here
     /// so the resume block can start with the correct simulation state.
     yield_stack_state: HashMap<Label, (Vec<Reg>, HashMap<Reg, usize>)>,
+    /// Operand depth each already-emitted block started at, keyed by label.
+    /// `yield_stack_state` answers the same question for a block still ahead of
+    /// the cursor, but `emit_block` consumes that entry — so this is what a back
+    /// edge into a loop header has left to trim against (`edge_depth`).
+    block_entry_depth: HashMap<Label, usize>,
     /// Yield point metadata collected during emission.
     yield_points: Vec<YieldPointInfo>,
     /// Call site metadata collected during emission.
@@ -51,6 +73,8 @@ pub struct Emitter {
     closure_lir_funcs: Option<Rc<[LirFunction]>>,
 }
 
+mod instr;
+
 impl Emitter {
     pub fn new() -> Self {
         Emitter {
@@ -61,6 +85,7 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             symbol_names: HashMap::new(),
             yield_stack_state: HashMap::new(),
+            block_entry_depth: HashMap::new(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             current_func_may_suspend: false,
@@ -80,6 +105,7 @@ impl Emitter {
             reg_to_stack: HashMap::new(),
             symbol_names,
             yield_stack_state: HashMap::new(),
+            block_entry_depth: HashMap::new(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             current_func_may_suspend: false,
@@ -175,6 +201,7 @@ impl Emitter {
         self.stack.clear();
         self.reg_to_stack.clear();
         self.yield_stack_state.clear();
+        self.block_entry_depth.clear();
         self.yield_points.clear();
         self.call_sites.clear();
         self.current_func_may_suspend = func.signal.may_suspend();
@@ -214,6 +241,17 @@ impl Emitter {
             }
         }
 
+        // Carry this function's builder-idiom merge metadata into the bytecode so
+        // the entry-function path (`Bytecode → Code`) mint-or-reuses merged slots —
+        // the lambda path already carries it via `ClosureTemplate.merged_slots` (the
+        // `MakeClosure` template build). Empty unless a merge fired.
+        self.bytecode.merged_slots =
+            std::rc::Rc::new(func.merged_slots.iter().map(|s| s.get()).collect());
+        // Likewise the value-route release table, so the entry function's error
+        // exit walks the releases its abandoned frame still owed.
+        self.bytecode.frame_release_slots = std::rc::Rc::new(sorted_release_slots(func));
+        self.bytecode.frame_release_regions = std::rc::Rc::new(sorted_release_regions(func));
+
         (
             std::mem::take(&mut self.bytecode),
             std::mem::take(&mut self.yield_points),
@@ -232,6 +270,11 @@ impl Emitter {
             self.stack.clear();
             self.reg_to_stack.clear();
         }
+
+        // This block's operand depth is now fixed. Record it before the
+        // instructions run: once the cursor is past a block, a back edge into it
+        // has nothing else to trim against (`edge_depth`).
+        self.block_entry_depth.insert(block.label, self.stack.len());
 
         // Pre-allocate local slots at the start of the entry block.
         //
@@ -267,884 +310,20 @@ impl Emitter {
         self.emit_terminator(&block.terminator.terminator);
     }
 
-    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction) {
-        match instr {
-            LirInstr::Const { dst, value } => {
-                self.emit_const(value, func);
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ValueConst { dst, value } => {
-                let const_idx = self.bytecode.add_constant(*value);
-                self.bytecode.emit(Instruction::LoadConst);
-                self.bytecode.emit_u16(const_idx);
-                self.push_reg(*dst);
-            }
-
-            LirInstr::LoadLocal { dst, slot } => {
-                self.bytecode.emit(Instruction::LoadLocal);
-                self.bytecode.emit_u16(*slot);
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StoreLocal { slot, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::StoreLocal);
-                self.bytecode.emit_u16(*slot);
-                // StoreLocal pops the value, stores it, and pushes it back.
-                // Auto-pop: consume the pushed-back value so stores are pure
-                // side effects from the LIR's perspective.
-                self.bytecode.emit(Instruction::Pop);
-                self.pop();
-            }
-
-            LirInstr::LoadCapture { dst, index } => {
-                if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
-                    // Non-cell locally-defined variable: use stack
-                    self.bytecode.emit(Instruction::LoadLocal);
-                    self.bytecode.emit_u16(stack_slot);
-                } else {
-                    self.bytecode.emit(Instruction::LoadUpvalue);
-                    self.bytecode.emit_byte(0); // depth (currently unused)
-                    self.bytecode.emit_u16(*index);
-                }
-                self.push_reg(*dst);
-            }
-
-            LirInstr::LoadCaptureRaw { dst, index } => {
-                // Load without unwrapping cells - used for forwarding captures
-                self.bytecode.emit(Instruction::LoadUpvalueRaw);
-                self.bytecode.emit_byte(0); // depth (currently unused)
-                self.bytecode.emit_u16(*index);
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StoreCapture { index, src } => {
-                self.ensure_on_top(*src);
-                if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
-                    // Non-cell locally-defined variable: use stack
-                    self.bytecode.emit(Instruction::StoreLocal);
-                    self.bytecode.emit_u16(stack_slot);
-                } else {
-                    self.bytecode.emit(Instruction::StoreUpvalue);
-                    self.bytecode.emit_byte(0); // depth (currently unused)
-                    self.bytecode.emit_u16(*index);
-                }
-                // Both StoreLocal and StoreUpvalue pop-then-push-back.
-                // Auto-pop: consume the pushed-back value.
-                self.bytecode.emit(Instruction::Pop);
-                self.pop();
-            }
-
-            LirInstr::MakeClosure {
-                dst,
-                closure_id,
-                captures,
-            } => {
-                // Check if captures are already in order on top of stack
-                let stack_len = self.stack.len();
-                let mut all_in_place = stack_len >= captures.len();
-                if all_in_place {
-                    let base = stack_len - captures.len();
-                    for (i, cap) in captures.iter().enumerate() {
-                        if self.reg_to_stack.get(cap) != Some(&(base + i)) {
-                            all_in_place = false;
-                            break;
-                        }
-                    }
-                }
-
-                if !all_in_place {
-                    // Captures not in place - need to arrange them
-                    for cap in captures {
-                        self.ensure_on_top(*cap);
-                    }
-                }
-
-                // Look up the pre-compiled closure by ClosureId.
-                // In emit_module mode, closures are pre-compiled.
-                // In standalone emit mode (tests), this panics — callers
-                // must use emit_module for code with MakeClosure.
-                let compiled = self
-                    .compiled_closures
-                    .as_ref()
-                    .expect("MakeClosure without compiled_closures context")
-                    .get(closure_id.0 as usize)
-                    .expect("MakeClosure: invalid ClosureId");
-                let (nested_bytecode, nested_yield_points, nested_call_sites) = compiled.clone();
-
-                // Look up the LirFunction from the module for metadata.
-                // We need the LirFunction for the ClosureTemplate (arity,
-                // signal, lbox masks, etc). The compiled_closures Vec is
-                // parallel to the module's closures Vec.
-                let func = &self
-                    .closure_lir_funcs
-                    .as_ref()
-                    .expect("MakeClosure without closure_lir_funcs context")
-                    [closure_id.0 as usize];
-
-                let mut nested_lir = func.clone();
-                nested_lir.yield_points = nested_yield_points;
-                nested_lir.call_sites = nested_call_sites;
-
-                // Create closure template
-                let template = crate::value::ClosureTemplate {
-                    bytecode: Rc::new(nested_bytecode.instructions),
-                    arity: func.arity,
-                    num_locals: func.num_locals as usize,
-                    num_captures: captures.len(),
-                    num_params: func.num_params,
-                    constants: Rc::new(nested_bytecode.constants),
-                    signal: func.signal,
-                    capture_params_mask: func.capture_params_mask,
-                    capture_locals_mask: func.capture_locals_mask,
-                    symbol_names: Rc::new(nested_bytecode.symbol_names),
-                    location_map: Rc::new(nested_bytecode.location_map),
-                    lir_function: Some(Rc::new(nested_lir)),
-                    doc: func.doc,
-                    syntax: func.syntax.clone(),
-                    vararg_kind: func.vararg_kind.clone(),
-                    name: func.name.clone().map(|s| Rc::from(s.as_str())),
-                    result_is_immediate: func.result_is_immediate,
-                    has_outward_heap_set: func.has_outward_heap_set,
-                    wasm_func_idx: None,
-                    spirv: std::cell::OnceCell::new(),
-
-                    rotation_safe: func.rotation_safe,
-                };
-                let closure = Closure {
-                    template: Rc::new(template),
-                    env: crate::value::inline_slice::InlineSlice::empty(),
-                    squelch_mask: SignalBits::EMPTY,
-                };
-
-                // Add closure template to constants
-                let const_idx = self.bytecode.add_constant(Value::closure(closure));
-
-                // Emit MakeClosure instruction
-                self.bytecode.emit(Instruction::MakeClosure);
-                self.bytecode.emit_u16(const_idx);
-                self.bytecode.emit_u16(captures.len() as u16);
-
-                // Pop captures, push closure
-                for _ in captures {
-                    self.pop();
-                }
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Call {
-                dst,
-                func,
-                args,
-                arity_checked,
-            }
-            | LirInstr::SuspendingCall {
-                dst,
-                func,
-                args,
-                arity_checked,
-            } => {
-                // Call expects: [arg1, arg2, ..., argN, func] on stack
-                // Check if values are already in the correct positions at the top of the stack
-                let total_values = args.len() + 1; // args + func
-                let stack_len = self.stack.len();
-
-                // Check if all values are already in place
-                let mut all_in_place = stack_len >= total_values;
-                if all_in_place {
-                    let base = stack_len - total_values;
-                    for (i, arg) in args.iter().enumerate() {
-                        if self.reg_to_stack.get(arg) != Some(&(base + i)) {
-                            all_in_place = false;
-                            break;
-                        }
-                    }
-                    if all_in_place && self.reg_to_stack.get(func) != Some(&(base + args.len())) {
-                        all_in_place = false;
-                    }
-                }
-
-                if !all_in_place {
-                    // Values are not in place, need to duplicate them to the top
-                    for arg in args {
-                        self.ensure_on_top(*arg);
-                    }
-                    self.ensure_on_top(*func);
-                }
-
-                if *arity_checked {
-                    self.bytecode.emit(Instruction::CallChecked);
-                } else {
-                    self.bytecode.emit(Instruction::Call);
-                }
-                self.bytecode.emit_u16(args.len() as u16);
-                let call_resume_ip = self.bytecode.current_pos();
-
-                // Pop func and args from simulated stack
-                self.pop(); // func
-                for _ in args {
-                    self.pop();
-                }
-
-                // Record call site metadata AFTER popping func/args, BEFORE
-                // pushing result. This matches the interpreter's stack state
-                // when yield propagates through a call: the Call instruction
-                // has consumed its operands, the callee yielded, and the
-                // interpreter saves the remaining stack.
-                if self.current_func_may_suspend {
-                    self.call_sites.push(CallSiteInfo {
-                        resume_ip: call_resume_ip,
-                        stack_regs: self.stack.clone(),
-                        num_locals: self.current_func_num_locals,
-                    });
-                }
-
-                self.push_reg(*dst);
-            }
-
-            LirInstr::TailCall {
-                func,
-                args,
-                arity_checked,
-            } => {
-                // Check if values are already in the correct positions at the top of the stack
-                let total_values = args.len() + 1; // args + func
-                let stack_len = self.stack.len();
-
-                let mut all_in_place = stack_len >= total_values;
-                if all_in_place {
-                    let base = stack_len - total_values;
-                    for (i, arg) in args.iter().enumerate() {
-                        if self.reg_to_stack.get(arg) != Some(&(base + i)) {
-                            all_in_place = false;
-                            break;
-                        }
-                    }
-                    if all_in_place && self.reg_to_stack.get(func) != Some(&(base + args.len())) {
-                        all_in_place = false;
-                    }
-                }
-
-                if !all_in_place {
-                    for arg in args {
-                        self.ensure_on_top(*arg);
-                    }
-                    self.ensure_on_top(*func);
-                }
-                if *arity_checked {
-                    self.bytecode.emit(Instruction::TailCallChecked);
-                } else {
-                    self.bytecode.emit(Instruction::TailCall);
-                }
-                self.bytecode.emit_u16(args.len() as u16);
-            }
-
-            LirInstr::List { dst, head, tail } => {
-                // VM pops rest (top) then first (below), calls pair(first, rest).
-                // Push head first (it becomes below = first), then tail (top = rest).
-                self.ensure_on_top(*head);
-                self.ensure_on_top(*tail);
-                self.bytecode.emit(Instruction::Pair);
-                self.pop();
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::MakeArrayMut { dst, elements } => {
-                for elem in elements {
-                    self.ensure_on_top(*elem);
-                }
-                self.bytecode.emit(Instruction::MakeArrayMut);
-                self.bytecode.emit_byte(elements.len() as u8);
-                for _ in elements {
-                    self.pop();
-                }
-                self.push_reg(*dst);
-            }
-
-            LirInstr::First { dst, pair } => {
-                self.ensure_on_top(*pair);
-                self.bytecode.emit(Instruction::First);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Rest { dst, pair } => {
-                self.ensure_on_top(*pair);
-                self.bytecode.emit(Instruction::Rest);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::FirstDestructure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::FirstDestructure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::RestDestructure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::RestDestructure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefDestructure);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutSliceFrom);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StructGetOrNil { dst, src, key } => {
-                self.ensure_on_top(*src);
-                let key_value = match key {
-                    LirConst::Keyword(name) => Value::keyword(name),
-                    LirConst::String(s) => Value::string(s.clone()),
-                    LirConst::Int(n) => Value::int(*n),
-                    LirConst::Symbol(sym) => Value::symbol(sym.0),
-                    LirConst::Bool(b) => Value::bool(*b),
-                    LirConst::Nil => Value::NIL,
-                    _ => panic!("StructGetOrNil: unsupported key type"),
-                };
-                let const_idx = self.bytecode.add_constant(key_value);
-                self.bytecode.emit(Instruction::StructGetOrNil);
-                self.bytecode.emit_u16(const_idx);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StructGetDestructure { dst, src, key } => {
-                self.ensure_on_top(*src);
-                let key_value = match key {
-                    LirConst::Keyword(name) => Value::keyword(name),
-                    LirConst::String(s) => Value::string(s.clone()),
-                    LirConst::Int(n) => Value::int(*n),
-                    LirConst::Symbol(sym) => Value::symbol(sym.0),
-                    LirConst::Bool(b) => Value::bool(*b),
-                    LirConst::Nil => Value::NIL,
-                    _ => panic!("StructGetDestructure: unsupported key type"),
-                };
-                let const_idx = self.bytecode.add_constant(key_value);
-                self.bytecode.emit(Instruction::StructGetDestructure);
-                self.bytecode.emit_u16(const_idx);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StructRest {
-                dst,
-                src,
-                exclude_keys,
-            } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::StructRest);
-                self.bytecode.emit_u16(exclude_keys.len() as u16);
-                for key in exclude_keys {
-                    let key_value = match key {
-                        LirConst::Keyword(name) => Value::keyword(name),
-                        LirConst::Symbol(sid) => Value::symbol(sid.0),
-                        _ => panic!("StructRest: unsupported key type {:?}", key),
-                    };
-                    let const_idx = self.bytecode.add_constant(key_value);
-                    self.bytecode.emit_u16(const_idx);
-                }
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // Silent destructuring (parameter context: absent optional params → nil)
-            LirInstr::FirstOrNil { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::FirstOrNil);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::RestOrNil { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::RestOrNil);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::BinOp { dst, op, lhs, rhs } => {
-                // Check if lhs and rhs are already the top two stack elements
-                // (lhs at top-1, rhs at top). This is the common case from the
-                // lowerer and avoids DupN which would leave orphaned values.
-                self.ensure_binary_on_top(*lhs, *rhs);
-                let instr = match op {
-                    BinOp::Add => Instruction::Add,
-                    BinOp::Sub => Instruction::Sub,
-                    BinOp::Mul => Instruction::Mul,
-                    BinOp::Div => Instruction::Div,
-                    BinOp::Rem => Instruction::Rem,
-                    BinOp::BitAnd => Instruction::BitAnd,
-                    BinOp::BitOr => Instruction::BitOr,
-                    BinOp::BitXor => Instruction::BitXor,
-                    BinOp::Shl => Instruction::Shl,
-                    BinOp::Shr => Instruction::Shr,
-                };
-                self.bytecode.emit(instr);
-                self.pop();
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Compare { dst, op, lhs, rhs } => {
-                // Check if lhs and rhs are already the top two stack elements
-                self.ensure_binary_on_top(*lhs, *rhs);
-                let instr = match op {
-                    CmpOp::Eq => Instruction::Eq,
-                    CmpOp::Lt => Instruction::Lt,
-                    CmpOp::Gt => Instruction::Gt,
-                    CmpOp::Le => Instruction::Le,
-                    CmpOp::Ge => Instruction::Ge,
-                    CmpOp::Ne => Instruction::Eq, // Will need Not after
-                };
-                self.bytecode.emit(instr);
-                if matches!(op, CmpOp::Ne) {
-                    self.bytecode.emit(Instruction::Not);
-                }
-                self.pop();
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::UnaryOp { dst, op, src } => {
-                self.ensure_on_top(*src);
-                match op {
-                    UnaryOp::Not => self.bytecode.emit(Instruction::Not),
-                    UnaryOp::Neg => {
-                        // Negate by multiplying by -1.
-                        // Stack has src on top; push -1, then Mul.
-                        let neg1_idx = self.bytecode.add_constant(Value::int(-1));
-                        self.bytecode.emit(Instruction::LoadConst);
-                        self.bytecode.emit_u16(neg1_idx);
-                        self.bytecode.emit(Instruction::Mul);
-                    }
-                    UnaryOp::BitNot => {
-                        self.bytecode.emit(Instruction::BitNot);
-                    }
-                }
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Convert { dst, op, src } => {
-                self.ensure_on_top(*src);
-                match op {
-                    ConvOp::IntToFloat => self.bytecode.emit(Instruction::IntToFloat),
-                    ConvOp::FloatToInt => self.bytecode.emit(Instruction::FloatToInt),
-                }
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsNil { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsNil);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsPair { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsPair);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsArray { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsArray);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsArrayMut { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsArrayMut);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsStruct { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsStruct);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsStructMut { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsStructMut);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsSet { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSet);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::IsSetMut { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSetMut);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutLen { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutLen);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::MakeCaptureCell { dst, value } => {
-                self.ensure_on_top(*value);
-                self.bytecode.emit(Instruction::MakeCapture);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::LoadCaptureCell { dst, cell } => {
-                self.ensure_on_top(*cell);
-                self.bytecode.emit(Instruction::UnwrapCapture);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            LirInstr::StoreCaptureCell { cell, value } => {
-                self.ensure_on_top(*cell);
-                self.ensure_on_top(*value);
-                self.bytecode.emit(Instruction::UpdateCapture);
-                // UpdateCapture pops value, pops cell, pushes value back.
-                // Unlike other stores, UpdateCapture pushes the value back.
-                // We do NOT auto-pop here because lower_set needs the value.
-                self.pop(); // value (consumed by UpdateCapture, re-pushed)
-                self.pop(); // cell (consumed by UpdateCapture)
-                            // Value is now on the stack (pushed back by UpdateCapture).
-                self.push_reg(*value);
-            }
-
-            LirInstr::LoadResumeValue { dst } => {
-                // The resume value is already on the operand stack
-                // (pushed by the VM's resume_continuation).
-                // The stack simulation already has the pre-yield state.
-                // Just register the resume value.
-                self.push_reg(*dst);
-            }
-
-            LirInstr::Eval { dst, expr, env } => {
-                // Stack order: env on bottom, expr on top
-                // (VM pops expr first, then env)
-                self.ensure_on_top(*env);
-                self.ensure_on_top(*expr);
-                self.bytecode.emit(Instruction::Eval);
-                // Eval pops 2 values and pushes 1 result
-                self.pop(); // expr
-                self.pop(); // env
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutExtend { dst, array, source } => {
-                // Stack: [array, source] → [extended_array]
-                self.ensure_binary_on_top(*array, *source);
-                self.bytecode.emit(Instruction::ArrayMutExtend);
-                self.pop(); // source
-                self.pop(); // array
-                self.push_reg(*dst);
-            }
-
-            LirInstr::ArrayMutPush { dst, array, value } => {
-                // Stack: [array, value] → [extended_array]
-                self.ensure_binary_on_top(*array, *value);
-                self.bytecode.emit(Instruction::ArrayMutPush);
-                self.pop(); // value
-                self.pop(); // array
-                self.push_reg(*dst);
-            }
-
-            LirInstr::CallArrayMut { dst, func, args } => {
-                // Stack: [func, args_array] → [result]
-                self.ensure_binary_on_top(*func, *args);
-                self.bytecode.emit(Instruction::CallArrayMut);
-                let call_resume_ip = self.bytecode.current_pos();
-                self.pop(); // args
-                self.pop(); // func
-
-                if self.current_func_may_suspend {
-                    self.call_sites.push(CallSiteInfo {
-                        resume_ip: call_resume_ip,
-                        stack_regs: self.stack.clone(),
-                        num_locals: self.current_func_num_locals,
-                    });
-                }
-
-                self.push_reg(*dst);
-            }
-
-            LirInstr::TailCallArrayMut { func, args } => {
-                // Stack: [func, args_array] → (tail call, no push)
-                self.ensure_binary_on_top(*func, *args);
-                self.bytecode.emit(Instruction::TailCallArrayMut);
-                self.pop(); // args
-                self.pop(); // func
-            }
-
-            LirInstr::RegionEnter => {
-                self.bytecode.emit(Instruction::RegionEnter);
-                // No stack effect
-            }
-
-            LirInstr::RegionExit => {
-                self.bytecode.emit(Instruction::RegionExit);
-                // No stack effect
-            }
-
-            LirInstr::RegionExitCall => {
-                self.bytecode.emit(Instruction::RegionExitCall);
-                // No stack effect
-            }
-
-            LirInstr::RegionRotate => {
-                self.bytecode.emit(Instruction::RegionRotate);
-            }
-            LirInstr::RegionRotateDealloc => {
-                self.bytecode.emit(Instruction::RegionRotateDealloc);
-            }
-            LirInstr::RegionRotateRefcounted => {
-                self.bytecode.emit(Instruction::RegionRotateRefcounted);
-            }
-            LirInstr::RegionExitRefcounted => {
-                self.bytecode.emit(Instruction::RegionExitRefcounted);
-            }
-
-            LirInstr::OutboxEnter => {
-                self.bytecode.emit(Instruction::OutboxEnter);
-                // No stack effect
-            }
-
-            LirInstr::OutboxExit => {
-                self.bytecode.emit(Instruction::OutboxExit);
-                // No stack effect
-            }
-
-            LirInstr::FlipEnter => {
-                self.bytecode.emit(Instruction::FlipEnter);
-            }
-            LirInstr::FlipSwap => {
-                self.bytecode.emit(Instruction::FlipSwap);
-            }
-            LirInstr::FlipExit => {
-                self.bytecode.emit(Instruction::FlipExit);
-            }
-
-            LirInstr::PushParamFrame { pairs } => {
-                // Push all param/value pairs onto the stack
-                for (param, value) in pairs {
-                    self.ensure_on_top(*param);
-                    self.ensure_on_top(*value);
-                }
-                self.bytecode.emit(Instruction::PushParamFrame);
-                self.bytecode.emit_byte(pairs.len() as u8);
-                // All pairs consumed from stack
-                for _ in pairs {
-                    self.pop(); // value
-                    self.pop(); // param
-                }
-            }
-
-            LirInstr::PopParamFrame => {
-                self.bytecode.emit(Instruction::PopParamFrame);
-                // No stack effect
-            }
-
-            // === New type predicates ===
-            LirInstr::IsEmpty { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsEmptyList);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsBool { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBool);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsInt { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsInt);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsFloat { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsFloat);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsString { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsString);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsKeyword { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsKeyword);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsSymbolCheck { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSymbol);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsBytes { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBytes);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsBox { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBox);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsClosure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsClosure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsFiber { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsFiber);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::TypeOf { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::TypeOf);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // === Data access ===
-            LirInstr::Length { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::Length);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::Get { dst, obj, key } => {
-                self.ensure_binary_on_top(*obj, *key);
-                self.bytecode.emit(Instruction::IntrGet);
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::Put { dst, obj, key, val } => {
-                self.ensure_on_top(*obj);
-                self.ensure_on_top(*key);
-                self.ensure_on_top(*val);
-                self.bytecode.emit(Instruction::IntrPut);
-                self.pop(); // val
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::Del { dst, obj, key } => {
-                self.ensure_binary_on_top(*obj, *key);
-                self.bytecode.emit(Instruction::IntrDel);
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::Has { dst, obj, key } => {
-                self.ensure_binary_on_top(*obj, *key);
-                self.bytecode.emit(Instruction::IntrHas);
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::IntrPush { dst, array, value } => {
-                self.ensure_binary_on_top(*array, *value);
-                self.bytecode.emit(Instruction::IntrPush);
-                self.pop(); // value
-                self.pop(); // array
-                self.push_reg(*dst);
-            }
-            LirInstr::Pop { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrPop);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // === Mutability ===
-            LirInstr::Freeze { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrFreeze);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::Thaw { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrThaw);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // === Identity ===
-            LirInstr::Identical { dst, lhs, rhs } => {
-                self.ensure_binary_on_top(*lhs, *rhs);
-                self.bytecode.emit(Instruction::Identical);
-                self.pop(); // rhs
-                self.pop(); // lhs
-                self.push_reg(*dst);
-            }
-
-            LirInstr::CheckSignalBound { src, allowed_bits } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CheckSignalBound);
-                // Emit SignalBits raw value as four u16s (least-significant first)
-                let raw = allowed_bits.raw();
-                self.bytecode.emit_u16(raw as u16);
-                self.bytecode.emit_u16((raw >> 16) as u16);
-                self.bytecode.emit_u16((raw >> 32) as u16);
-                self.bytecode.emit_u16((raw >> 48) as u16);
-                // Value consumed by the check
-                self.pop();
-            }
-        }
+    /// The operand depth `label` is already fixed at, or `None` when this edge
+    /// is the first to reach it and so gets to fix it.
+    ///
+    /// A block's depth is decided by whichever predecessor is emitted first —
+    /// the simulation keeps that predecessor's stack and discards every later
+    /// one (see `Terminator::Jump`'s `or_insert_with`). The record lives in
+    /// `yield_stack_state` while the block is still ahead of the cursor, and
+    /// moves to `block_entry_depth` when `emit_block` consumes it, so a back
+    /// edge into an already-emitted loop header is answered too.
+    fn edge_depth(&self, label: Label) -> Option<usize> {
+        self.yield_stack_state
+            .get(&label)
+            .map(|(stack, _)| stack.len())
+            .or_else(|| self.block_entry_depth.get(&label).copied())
     }
 
     fn emit_terminator(&mut self, term: &Terminator) {
@@ -1161,7 +340,16 @@ impl Emitter {
                 // path for `apply`).  Without this, branches that create
                 // orphans leave a deeper stack than branches that don't,
                 // causing wrong DupN offsets in the merge block.
-                self.pop_trailing_orphans();
+                //
+                // Bounded by the depth the target is already fixed at: a
+                // `Terminator::Branch` edge into the same merge pops nothing, so
+                // trimming past that depth would leave the two edges at
+                // different depths — and the merge's successors, which inherited
+                // the branch's simulation, would pop the orphan again on the
+                // path that already dropped it (src/lir/AGENTS.md § "Merge
+                // operand depth").
+                let floor = self.edge_depth(*label).unwrap_or(0);
+                self.pop_trailing_orphans_to(floor);
 
                 // Save stack state for the target block if this is the first
                 // predecessor to jump there. Multiple blocks may jump to the
@@ -1273,13 +461,15 @@ impl Emitter {
         let locals_start = func.num_captures + func.num_params as u16;
         if index >= locals_start {
             let local_offset = index - locals_start;
-            // Beyond bit 63, the mask can't represent the local — be conservative
-            // and treat it as a cell local (use env/StoreUpvalue).
-            if local_offset < 64 && (func.capture_locals_mask & (1 << local_offset)) == 0 {
+            // The mask names every local precisely, at any index: an unset slot
+            // is a non-cell stack local; a set slot is a cell local reached via
+            // the env. No >=64 conservatism (which forced — and leaked — cells
+            // for uncaptured high locals).
+            if !func.capture_locals_mask.is_set(local_offset as usize) {
                 // Non-cell local: use stack slot
                 Some(index - func.num_captures)
             } else {
-                None // cell local (or beyond mask range): use env
+                None // cell local: use env
             }
         } else {
             None // Capture or parameter: use env
@@ -1310,10 +500,14 @@ impl Emitter {
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
-            LirConst::String(s) => {
-                let idx = self.bytecode.add_constant(Value::string(s.clone()));
-                self.bytecode.emit(Instruction::LoadConst);
-                self.bytecode.emit_u16(idx);
+            LirConst::String(_) => {
+                // No producer emits `Const{LirConst::String}`. A string is a heap
+                // value: in value position it lowers to a reclaimable
+                // `MaterializeConst` (HirKind::String), and in a pattern it is
+                // materialized-compared-freed (lir/lower/pattern.rs). The bytecode
+                // constant pool has no region, so a string here would have nowhere
+                // reclaimable to live. Hence: unreachable, loudly.
+                unreachable!("string literals lower to MaterializeConst, not Const")
             }
             LirConst::Symbol(sym) => {
                 let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
@@ -1330,6 +524,9 @@ impl Emitter {
                 panic!(
                     "bug: ClosureRef in emitter — should have been patched during reconstruction"
                 )
+            }
+            LirConst::ValueRef(_) => {
+                panic!("bug: ValueRef in emitter — should have been patched during reconstruction")
             }
         }
     }

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Test: JIT yield with mutable captured parameter
 ## A parameter captured by a nested closure AND mutated needs LBox wrapping.
 
@@ -12,9 +12,7 @@
 (def @i 0)
 (while (< i 20)
   (let [result (test-mutable-param 0)]
-    (when (not (= result 1))
-      (eprintln "FAIL: expected 1, got" result)
-      (sys/exit 1)))
+    (assert (= result 1) (string "expected 1, got " result)))
   (assign i (+ i 1)))
 
 (eprintln "PASS")

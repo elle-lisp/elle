@@ -139,21 +139,6 @@ Property test files follow a consistent structure:
 2. Any local helper functions (e.g., `infer_signal()` in `signals.rs`, `syntax_eq()` in `reader.rs`)
 3. `proptest!` blocks grouped by invariant category, separated by section headers (`// =========================================================================`)
 4. Non-property `#[test]` functions at the bottom for constant/edge cases that don't need generation
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~23 | Module declarations and includes |
-| `strategies.rs` | ~195 | Shared proptest strategies |
-| `fibers.rs` | ~100-200 | Fiber property tests |
-| `nanboxing.rs` | ~100-200 | Value encoding property tests |
-| `reader.rs` | ~100-200 | Reader property tests |
-| `signals.rs` | ~100-200 | Signal inference property tests |
-| `strings.rs` | ~100-200 | String property tests |
-| `ffi.rs` | ~100-200 | FFI property tests |
-| `path.rs` | ~100-200 | Path property tests |
-
 ## Invariants
 
 1. **Tests are deterministic.** Same input always produces same output. No randomness or timing dependencies.

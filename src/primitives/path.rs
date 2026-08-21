@@ -2,24 +2,27 @@
 //!
 //! Thin wrappers around `crate::path`. No camino imports here.
 
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::ctx::NativeCtx;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, error_val_extra, Value};
+use crate::value::Value;
 
-/// Call `f` with the string content of `val`, or return a type error
-/// tagged with `prim_name`.
-fn with_str_arg<F>(val: &Value, prim_name: &str, f: F) -> (SignalBits, Value)
+/// Call `f` with the string content of `val` (and the allocation ctx), or
+/// return a type error tagged with `prim_name`. `f` receives `ctx` as a
+/// parameter rather than capturing it, so the exclusive `&mut NativeCtx` borrow
+/// passes cleanly through `with_string`'s closure instead of being aliased.
+fn with_str_arg<F>(val: &Value, prim_name: &str, ctx: &mut NativeCtx, f: F) -> (SignalBits, Value)
 where
-    F: FnOnce(&str) -> (SignalBits, Value),
+    F: FnOnce(&str, &mut NativeCtx) -> (SignalBits, Value),
 {
-    if let Some(result) = val.with_string(|s| f(s)) {
+    if let Some(result) = val.with_string(|s| f(s, ctx)) {
         result
     } else {
         (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!("{}: expected string, got {}", prim_name, val.type_name()),
             ),
@@ -27,377 +30,360 @@ where
     }
 }
 
-fn prim_path_join(args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_join(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let mut parts = Vec::with_capacity(args.len());
     for arg in args {
         if let Some(s) = arg.with_string(|s| s.to_string()) {
             parts.push(s);
         } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("path/join: expected string, got {}", arg.type_name()),
-                ),
-            );
+            return type_error!(ctx, arg, "path/join", "string");
         }
     }
     let refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
-    (SIG_OK, Value::string(crate::path::join(&refs)))
+    (SIG_OK, ctx.string(crate::path::join(&refs)))
 }
 
-fn prim_path_parent(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/parent", |s| match crate::path::parent(s) {
-        Some(p) if !p.is_empty() => (SIG_OK, Value::string(p)),
-        Some(_) => (SIG_OK, Value::NIL), // empty parent (e.g., parent("foo") is "")
-        None => (SIG_OK, Value::NIL),
-    })
-}
-
-fn prim_path_filename(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/filename", |s| {
-        match crate::path::filename(s) {
-            Some(f) => (SIG_OK, Value::string(f)),
+fn prim_path_parent(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(
+        &args[0],
+        "path/parent",
+        ctx,
+        |s, ctx| match crate::path::parent(s) {
+            Some(p) if !p.is_empty() => (SIG_OK, ctx.string(p)),
+            Some(_) => (SIG_OK, Value::NIL), // empty parent (e.g., parent("foo") is "")
             None => (SIG_OK, Value::NIL),
-        }
-    })
+        },
+    )
 }
 
-fn prim_path_stem(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/stem", |s| match crate::path::stem(s) {
-        Some(st) => (SIG_OK, Value::string(st)),
-        None => (SIG_OK, Value::NIL),
-    })
+fn prim_path_filename(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(
+        &args[0],
+        "path/filename",
+        ctx,
+        |s, ctx| match crate::path::filename(s) {
+            Some(f) => (SIG_OK, ctx.string(f)),
+            None => (SIG_OK, Value::NIL),
+        },
+    )
 }
 
-fn prim_path_extension(args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_stem(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(
+        &args[0],
+        "path/stem",
+        ctx,
+        |s, ctx| match crate::path::stem(s) {
+            Some(st) => (SIG_OK, ctx.string(st)),
+            None => (SIG_OK, Value::NIL),
+        },
+    )
+}
+
+fn prim_path_extension(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
         "path/extension",
-        |s| match crate::path::extension(s) {
-            Some(e) => (SIG_OK, Value::string(e)),
+        ctx,
+        |s, ctx| match crate::path::extension(s) {
+            Some(e) => (SIG_OK, ctx.string(e)),
             None => (SIG_OK, Value::NIL),
         },
     )
 }
 
-fn prim_path_with_extension(args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_with_extension(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let path_str = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "path/with-extension: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[0], "path/with-extension", "string"),
     };
     let ext_str = match args[1].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "path/with-extension: expected string, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "path/with-extension", "string"),
     };
     (
         SIG_OK,
-        Value::string(crate::path::with_extension(&path_str, &ext_str)),
+        ctx.string(crate::path::with_extension(&path_str, &ext_str)),
     )
 }
 
-fn prim_path_normalize(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/normalize", |s| {
-        (SIG_OK, Value::string(crate::path::normalize(s)))
+fn prim_path_normalize(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/normalize", ctx, |s, ctx| {
+        (SIG_OK, ctx.string(crate::path::normalize(s)))
     })
 }
 
-fn prim_path_absolute(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/absolute", |s| {
-        match crate::path::absolute(s) {
-            Ok(abs) => (SIG_OK, Value::string(abs)),
-            Err(e) => (
-                SIG_ERROR,
-                error_val_extra(
-                    "io-error",
-                    format!("path/absolute: {}", e),
-                    &[("path", Value::string(s))],
-                ),
-            ),
-        }
-    })
-}
-
-fn prim_path_canonicalize(args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_absolute(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
-        "path/canonicalize",
-        |s| match crate::path::canonicalize(s) {
-            Ok(c) => (SIG_OK, Value::string(c)),
-            Err(e) => (
-                SIG_ERROR,
-                error_val_extra(
-                    "io-error",
-                    format!("path/canonicalize: {}", e),
-                    &[("path", Value::string(s))],
-                ),
+        "path/absolute",
+        ctx,
+        |s, ctx| match crate::path::absolute(s) {
+            Ok(abs) => (SIG_OK, ctx.string(abs)),
+            Err(e) => crate::rich_error!(
+                ctx,
+                "io-error",
+                format!("path/absolute: {}", e),
+                path = ctx.string(s),
             ),
         },
     )
 }
 
-fn prim_path_relative(args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_canonicalize(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(
+        &args[0],
+        "path/canonicalize",
+        ctx,
+        |s, ctx| match crate::path::canonicalize(s) {
+            Ok(c) => (SIG_OK, ctx.string(c)),
+            Err(e) => crate::rich_error!(
+                ctx,
+                "io-error",
+                format!("path/canonicalize: {}", e),
+                path = ctx.string(s),
+            ),
+        },
+    )
+}
+
+fn prim_path_relative(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let path_str = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "path/relative: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[0], "path/relative", "string"),
     };
     let base_str = match args[1].with_string(|s| s.to_string()) {
         Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "path/relative: expected string, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
+        None => return type_error!(ctx, args[1], "path/relative", "string"),
     };
     match crate::path::relative(&path_str, &base_str) {
-        Some(rel) => (SIG_OK, Value::string(rel)),
+        Some(rel) => (SIG_OK, ctx.string(rel)),
         None => (SIG_OK, Value::NIL),
     }
 }
 
-fn prim_path_components(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/components", |s| {
+fn prim_path_components(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/components", ctx, |s, ctx| {
         let parts = crate::path::components(s);
-        let values: Vec<Value> = parts.into_iter().map(Value::string).collect();
-        (SIG_OK, crate::value::list(values))
+        let values: Vec<Value> = parts.into_iter().map(|s| ctx.string(s)).collect();
+        (SIG_OK, ctx.list(values))
     })
 }
 
-fn prim_path_is_absolute(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/absolute?", |s| {
+fn prim_path_is_absolute(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/absolute?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::is_absolute(s)))
     })
 }
 
-fn prim_path_is_relative(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/relative?", |s| {
+fn prim_path_is_relative(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/relative?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::is_relative(s)))
     })
 }
 
-fn prim_path_cwd(_args: &[Value]) -> (SignalBits, Value) {
+fn prim_path_cwd(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     match crate::path::cwd() {
-        Ok(c) => (SIG_OK, Value::string(c)),
-        Err(e) => (SIG_ERROR, error_val("io-error", format!("path/cwd: {}", e))),
+        Ok(c) => (SIG_OK, ctx.string(c)),
+        Err(e) => (SIG_ERROR, ctx.error("io-error", format!("path/cwd: {}", e))),
     }
 }
 
-fn prim_path_exists(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/exists?", |s| {
+fn prim_path_exists(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/exists?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::exists(s)))
     })
 }
 
-fn prim_path_is_file(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/file?", |s| {
+fn prim_path_is_file(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/file?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::is_file(s)))
     })
 }
 
-fn prim_path_is_dir(args: &[Value]) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/dir?", |s| {
+fn prim_path_is_dir(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    with_str_arg(&args[0], "path/dir?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::is_dir(s)))
     })
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "path/join",
-        func: prim_path_join,
+primitive! {
+    "path/join" => prim_path_join {
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Join path components",
         params: &["components"],
         category: "path",
         example: "(path/join \"a\" \"b\" \"c\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/parent",
-        func: prim_path_parent,
+        effect: RegionEffect::Fresh,
+    }
+    "path/parent" => prim_path_parent {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get parent directory (nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/parent \"/home/user/data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/filename",
-        func: prim_path_filename,
+        effect: RegionEffect::Fresh,
+    }
+    "path/filename" => prim_path_filename {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file name (last component, nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/filename \"/home/user/data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/stem",
-        func: prim_path_stem,
+        effect: RegionEffect::Fresh,
+    }
+    "path/stem" => prim_path_stem {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file stem (filename without extension, nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/stem \"archive.tar.gz\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/extension",
-        func: prim_path_extension,
+        effect: RegionEffect::Fresh,
+    }
+    "path/extension" => prim_path_extension {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file extension without dot (nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/extension \"data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/with-extension",
-        func: prim_path_with_extension,
+        effect: RegionEffect::Fresh,
+    }
+    "path/with-extension" => prim_path_with_extension {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Replace file extension (empty string removes it)",
         params: &["path", "ext"],
         category: "path",
         example: "(path/with-extension \"foo.txt\" \"rs\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/normalize",
-        func: prim_path_normalize,
+        effect: RegionEffect::Fresh,
+    }
+    "path/normalize" => prim_path_normalize {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Lexical path normalization (resolve . and ..)",
         params: &["path"],
         category: "path",
         example: "(path/normalize \"./a/../b\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/absolute",
-        func: prim_path_absolute,
+        effect: RegionEffect::Fresh,
+    }
+    "path/absolute" => prim_path_absolute {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Compute absolute path (does not require path to exist)",
         params: &["path"],
         category: "path",
         example: "(path/absolute \"src\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/canonicalize",
-        func: prim_path_canonicalize,
+        effect: RegionEffect::Fresh,
+    }
+    "path/canonicalize" => prim_path_canonicalize {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Resolve path through filesystem (symlinks resolved, must exist)",
         params: &["path"],
         category: "path",
         example: "(path/canonicalize \".\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/relative",
-        func: prim_path_relative,
+        effect: RegionEffect::Fresh,
+    }
+    "path/relative" => prim_path_relative {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute relative path from base to target (nil if impossible)",
         params: &["target", "base"],
         category: "path",
         example: "(path/relative \"/foo/bar/baz\" \"/foo/bar\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/components",
-        func: prim_path_components,
+        effect: RegionEffect::Fresh,
+    }
+    "path/components" => prim_path_components {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Split path into list of components",
         params: &["path"],
         category: "path",
         example: "(path/components \"/a/b/c\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/absolute?",
-        func: prim_path_is_absolute,
+        effect: RegionEffect::Fresh,
+    }
+    "path/absolute?" => prim_path_is_absolute {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "True if path is absolute",
         params: &["path"],
         category: "path",
         example: "(path/absolute? \"/foo\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/relative?",
-        func: prim_path_is_relative,
+        effect: RegionEffect::Immediate,
+    }
+    "path/relative?" => prim_path_is_relative {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "True if path is relative",
         params: &["path"],
         category: "path",
         example: "(path/relative? \"foo\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/cwd",
-        func: prim_path_cwd,
+        effect: RegionEffect::Immediate,
+    }
+    "path/cwd" => prim_path_cwd {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Get current working directory",
-        params: &[],
         category: "path",
         example: "(path/cwd)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/exists?",
-        func: prim_path_exists,
+        effect: RegionEffect::Fresh,
+    }
+    "path/exists?" => prim_path_exists {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if path exists",
@@ -405,10 +391,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "path",
         example: "(path/exists? \"data.txt\")",
         aliases: &["file-exists?", "file/exists?"],
-    },
-    PrimitiveDef {
-        name: "path/file?",
-        func: prim_path_is_file,
+        effect: RegionEffect::Immediate,
+    }
+    "path/file?" => prim_path_is_file {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a regular file",
@@ -416,10 +401,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "path",
         example: "(path/file? \"data.txt\")",
         aliases: &["file?", "file/file?"],
-    },
-    PrimitiveDef {
-        name: "path/dir?",
-        func: prim_path_is_dir,
+        effect: RegionEffect::Immediate,
+    }
+    "path/dir?" => prim_path_is_dir {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a directory",
@@ -427,5 +411,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "path",
         example: "(path/dir? \"/home\")",
         aliases: &["directory?", "file/directory?"],
-    },
-];
+        effect: RegionEffect::Immediate,
+    }
+}

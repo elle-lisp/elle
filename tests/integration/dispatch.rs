@@ -120,6 +120,56 @@ fn test_help_mentions_lint_and_lsp() {
 }
 
 #[test]
+fn test_toplevel_unmet_gate_exits_zero_with_skip() {
+    // A loud (gate! …) whose condition is unmet emits an uncaught :gated signal
+    // at the top level. Run directly (not under the test runner), this must be a
+    // clean SKIP — exit 0 with the reason on stderr — so gate! is a universal
+    // skip mechanism. (Replaces the dangerous (sys/exit 0) idiom in service/FFI
+    // tests.) Counter-factual: before the runtime handles :gated specially, an
+    // uncaught :gated exited non-zero like any other error.
+    let output = Command::new(get_elle_binary())
+        .arg("tests/fixtures/gated-toplevel.lisp")
+        .output()
+        .expect("Failed to run elle");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code().unwrap_or(-1),
+        0,
+        "a top-level unmet gate! must exit 0 (skip), stderr: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("SKIP") && stderr.contains("dependency absent"),
+        "must report the gate reason as a skip on stderr, stderr: {}",
+        stderr
+    );
+    assert!(
+        !stdout.contains("must print"),
+        "gated body and the following form must not run, stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_toplevel_ordinary_error_still_exits_nonzero() {
+    // Guard: ONLY :gated is a clean skip. An ordinary uncaught error must still
+    // fail, or we'd mask real failures as skips.
+    let output = Command::new(get_elle_binary())
+        .args(["-e", "(error \"boom\")"])
+        .output()
+        .expect("Failed to run elle");
+
+    assert_ne!(
+        output.status.code().unwrap_or(-1),
+        0,
+        "an ordinary uncaught error must still exit non-zero, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn test_rewrite_help() {
     let output = Command::new(get_elle_binary())
         .args(["rewrite", "--help"])

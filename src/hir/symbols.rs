@@ -37,8 +37,16 @@ impl<'a> HirSymbolExtractor<'a> {
         }
     }
 
+    /// Translate a span to a source location, preserving the originating file
+    /// when the span carries one. The file must be carried through: a location
+    /// without it collapses to `<unknown>`, so the LSP emits `file://<unknown>`
+    /// URIs and rename filters out every edit (the URI never matches the
+    /// document).
     fn span_to_loc(span: &crate::syntax::Span) -> SourceLoc {
-        SourceLoc::from_line_col(span.line as usize, span.col as usize)
+        match &span.file {
+            Some(file) => SourceLoc::new(file.clone(), span.line as usize, span.col as usize),
+            None => SourceLoc::from_line_col(span.line as usize, span.col as usize),
+        }
     }
 
     fn record_definition(
@@ -49,6 +57,12 @@ impl<'a> HirSymbolExtractor<'a> {
         index: &mut SymbolIndex,
         symbols: &SymbolTable,
     ) {
+        // Synthetic bindings (file-letrec statement wrappers, signal/destructure
+        // gensyms) have no source-level identity the user wrote — keep them out
+        // of the index entirely so they never surface as fake symbols.
+        if self.arena.get(binding).is_synthetic {
+            return;
+        }
         if self.seen.contains(&binding) {
             return;
         }
@@ -58,8 +72,10 @@ impl<'a> HirSymbolExtractor<'a> {
         if let Some(name_str) = symbols.name(sym) {
             let loc = Self::span_to_loc(span);
             let def = SymbolDef::new(sym, name_str.to_string(), kind).with_location(loc.clone());
-            index.definitions.insert(sym, def);
-            index.symbol_locations.insert(sym, loc);
+            // Overwrites any placeholder entry a forward-referencing usage may
+            // have inserted (see `record_usage`).
+            index.definitions.insert(binding.def_id(), def);
+            index.symbol_locations.insert(binding.def_id(), loc);
         }
     }
 
@@ -68,13 +84,28 @@ impl<'a> HirSymbolExtractor<'a> {
         binding: Binding,
         span: &crate::syntax::Span,
         index: &mut SymbolIndex,
+        symbols: &SymbolTable,
     ) {
+        if self.arena.get(binding).is_synthetic {
+            return;
+        }
+        let id = binding.def_id();
+        // Ensure a name is always resolvable for this binding, even when it is
+        // only ever *used* and never defined in this file (primitives, globals).
+        // Such placeholder entries carry no location and kind `Builtin`; a real
+        // definition later overwrites them via `record_definition`.
+        if let std::collections::hash_map::Entry::Vacant(entry) = index.definitions.entry(id) {
+            let sym = self.arena.get(binding).name;
+            if let Some(name_str) = symbols.name(sym) {
+                entry.insert(SymbolDef::new(
+                    sym,
+                    name_str.to_string(),
+                    SymbolKind::Builtin,
+                ));
+            }
+        }
         let loc = Self::span_to_loc(span);
-        index
-            .symbol_usages
-            .entry(self.arena.get(binding).name)
-            .or_default()
-            .push(loc);
+        index.symbol_usages.entry(id).or_default().push(loc);
     }
 
     fn walk(&mut self, hir: &Hir, index: &mut SymbolIndex, symbols: &SymbolTable) {
@@ -86,10 +117,11 @@ impl<'a> HirSymbolExtractor<'a> {
             | HirKind::Float(_)
             | HirKind::String(_)
             | HirKind::Keyword(_)
-            | HirKind::Quote(_) => {}
+            | HirKind::Quote(_)
+            | HirKind::QuoteConst(_) => {}
 
             HirKind::Var(binding) => {
-                self.record_usage(*binding, &hir.span, index);
+                self.record_usage(*binding, &hir.span, index, symbols);
             }
 
             HirKind::Define { binding, value } => {
@@ -102,14 +134,13 @@ impl<'a> HirSymbolExtractor<'a> {
                     doc: Some(doc_val), ..
                 } = &value.kind
                 {
-                    doc_val.with_string(|s| s.to_string())
+                    Some(doc_val.to_string())
                 } else {
                     None
                 };
                 self.record_definition(*binding, kind, &hir.span, index, symbols);
                 if let Some(doc_str) = doc_string {
-                    let sym = self.arena.get(*binding).name;
-                    if let Some(def) = index.definitions.get_mut(&sym) {
+                    if let Some(def) = index.definitions.get_mut(&binding.def_id()) {
                         def.documentation = Some(doc_str);
                     }
                 }
@@ -156,11 +187,8 @@ impl<'a> HirSymbolExtractor<'a> {
                         doc: Some(doc_val), ..
                     } = &init.kind
                     {
-                        if let Some(doc_str) = doc_val.with_string(|s| s.to_string()) {
-                            let sym = self.arena.get(*binding_id).name;
-                            if let Some(def) = index.definitions.get_mut(&sym) {
-                                def.documentation = Some(doc_str);
-                            }
+                        if let Some(def) = index.definitions.get_mut(&binding_id.def_id()) {
+                            def.documentation = Some(doc_val.to_string());
                         }
                     }
                     self.walk(init, index, symbols);
@@ -222,7 +250,7 @@ impl<'a> HirSymbolExtractor<'a> {
             }
 
             HirKind::Assign { target, value } => {
-                self.record_usage(*target, &hir.span, index);
+                self.record_usage(*target, &hir.span, index, symbols);
                 self.walk(value, index, symbols);
             }
 
@@ -256,6 +284,10 @@ impl<'a> HirSymbolExtractor<'a> {
 
             HirKind::Emit { value: e, .. } => {
                 self.walk(e, index, symbols);
+            }
+
+            HirKind::Return { value } => {
+                self.walk(value, index, symbols);
             }
 
             HirKind::Eval { expr, env } => {
@@ -293,196 +325,20 @@ impl<'a> HirSymbolExtractor<'a> {
     }
 
     fn collect_available(&self, _symbols: &SymbolTable, index: &mut SymbolIndex) {
-        for def in index.definitions.values() {
-            index
-                .available_symbols
-                .push((def.name.clone(), def.id, def.kind));
-        }
+        // Only real in-file definitions are completion candidates. Usage-only
+        // placeholder entries (primitives) carry no location and are excluded;
+        // completion sources those from the VM's docs map instead.
+        let mut avail: Vec<(String, crate::symbols::DefId, SymbolKind)> = index
+            .definitions
+            .iter()
+            .filter(|(_, def)| def.location.is_some())
+            .map(|(id, def)| (def.name.clone(), *id, def.kind))
+            .collect();
         // Sort for consistent ordering
-        index.available_symbols.sort_by(|a, b| a.0.cmp(&b.0));
+        avail.sort_by(|a, b| a.0.cmp(&b.0));
+        index.available_symbols = avail;
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::pipeline::analyze;
-    use crate::primitives::register_primitives;
-    use crate::vm::VM;
-
-    fn setup() -> (SymbolTable, VM) {
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbols);
-        (symbols, vm)
-    }
-
-    #[test]
-    fn test_extract_define_variable() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze("(var x 42)", &mut symbols, &mut vm, "<test>");
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
-
-        // Should have one definition
-        assert!(!index.definitions.is_empty());
-        // Find the 'x' definition
-        let x_def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "x")
-            .expect("Should have definition for x");
-        assert_eq!(x_def.kind, SymbolKind::Variable);
-    }
-
-    #[test]
-    fn test_extract_define_function() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            "(def add-one (fn (x) (+ x 1)))",
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        );
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
-
-        // Find the 'add-one' definition
-        let add_one_def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "add-one")
-            .expect("Should have definition for add-one");
-        assert_eq!(add_one_def.kind, SymbolKind::Function);
-    }
-
-    #[test]
-    fn test_extract_let_bindings() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze("(let [a 1 b 2] (+ a b))", &mut symbols, &mut vm, "<test>");
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
-
-        // Should have definitions for a and b
-        let has_a = index.definitions.values().any(|d| d.name == "a");
-        let has_b = index.definitions.values().any(|d| d.name == "b");
-        assert!(has_a, "Should have definition for a");
-        assert!(has_b, "Should have definition for b");
-    }
-
-    #[test]
-    fn test_extract_lambda_params() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze("(fn (x y) (+ x y))", &mut symbols, &mut vm, "<test>");
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
-
-        // Should have definitions for x and y parameters
-        let has_x = index.definitions.values().any(|d| d.name == "x");
-        let has_y = index.definitions.values().any(|d| d.name == "y");
-        assert!(has_x, "Should have definition for x");
-        assert!(has_y, "Should have definition for y");
-    }
-
-    #[test]
-    fn test_extract_usages() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze("(let [x 1] (+ x x))", &mut symbols, &mut vm, "<test>");
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
-
-        // Should have usages for x (used twice in the body)
-        let x_sym = symbols.intern("x");
-        let usages = index.symbol_usages.get(&x_sym);
-        assert!(usages.is_some(), "Should have usages for x");
-        // Note: the exact count depends on how the analyzer handles references
-    }
-
-    #[test]
-    fn test_available_symbols() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            "(begin (var a 1) (var b 2))",
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        );
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
-
-        // available_symbols should be sorted
-        let names: Vec<_> = index.available_symbols.iter().map(|(n, _, _)| n).collect();
-        let mut sorted_names = names.clone();
-        sorted_names.sort();
-        assert_eq!(names, sorted_names, "available_symbols should be sorted");
-    }
-
-    #[test]
-    fn test_symbol_def_has_documentation() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            r#"(def my-fn (fn (x) "Adds one to x" (+ x 1)))"#,
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        )
-        .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
-        let def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "my-fn")
-            .expect("Should have definition for my-fn");
-        assert_eq!(def.documentation.as_deref(), Some("Adds one to x"));
-    }
-
-    #[test]
-    fn test_symbol_def_no_documentation_without_docstring() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            r#"(def my-fn (fn (x) (+ x 1)))"#,
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        )
-        .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
-        let def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "my-fn")
-            .expect("Should have definition for my-fn");
-        assert_eq!(def.documentation, None);
-    }
-
-    #[test]
-    fn test_defn_docstring_populates_symbol_def() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            r#"(defn greet (name) "Greets someone by name" (string/append "Hello, " name))"#,
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        )
-        .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
-        let def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "greet")
-            .expect("Should have definition for greet");
-        assert_eq!(def.documentation.as_deref(), Some("Greets someone by name"));
-    }
-}
+mod tests;

@@ -44,7 +44,7 @@ mod platform {
     use super::{WatchEvent, WatchEventKind};
     use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::os::unix::io::RawFd;
+    use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
     use std::path::{Path, PathBuf};
 
     pub(crate) struct FsWatcher {
@@ -52,27 +52,27 @@ mod platform {
     }
 
     struct FsWatcherInner {
-        fd: RawFd,
+        /// The inotify fd. `None` once the watcher is closed; the `OwnedFd`
+        /// closes the descriptor on drop, so there is no manual `close`
+        /// call and no risk of a double-close. (`wd_*` hold inotify *watch
+        /// descriptors*, not file descriptors — removed via `inotify_rm_watch`.)
+        fd: Option<OwnedFd>,
         wd_to_path: HashMap<i32, PathBuf>,
         path_to_wd: HashMap<PathBuf, i32>,
-        closed: bool,
     }
 
     impl FsWatcher {
         pub fn new() -> Result<Self, String> {
             let fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC) };
             if fd < 0 {
-                return Err(format!(
-                    "inotify_init1 failed: {}",
-                    std::io::Error::last_os_error()
-                ));
+                return Err(crate::io::os_error("inotify_init1 failed"));
             }
             Ok(FsWatcher {
                 inner: RefCell::new(FsWatcherInner {
-                    fd,
+                    // SAFETY: fresh inotify fd we own.
+                    fd: Some(unsafe { OwnedFd::from_raw_fd(fd) }),
                     wd_to_path: HashMap::new(),
                     path_to_wd: HashMap::new(),
-                    closed: false,
                 }),
             })
         }
@@ -90,9 +90,10 @@ mod platform {
 
         fn add_single(&self, path: &Path) -> Result<(), String> {
             let mut inner = self.inner.borrow_mut();
-            if inner.closed {
-                return Err("watch-add: watcher is closed".into());
-            }
+            let watch_fd = match &inner.fd {
+                Some(fd) => fd.as_raw_fd(),
+                None => return Err("watch-add: watcher is closed".into()),
+            };
             let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
                 .map_err(|_| "watch-add: path contains null byte".to_string())?;
             let mask = libc::IN_MODIFY
@@ -100,13 +101,12 @@ mod platform {
                 | libc::IN_DELETE
                 | libc::IN_MOVED_FROM
                 | libc::IN_MOVED_TO;
-            let wd = unsafe { libc::inotify_add_watch(inner.fd, c_path.as_ptr(), mask) };
+            let wd = unsafe { libc::inotify_add_watch(watch_fd, c_path.as_ptr(), mask) };
             if wd < 0 {
-                return Err(format!(
-                    "watch-add: failed for \"{}\": {}",
-                    path.display(),
-                    std::io::Error::last_os_error()
-                ));
+                return Err(crate::io::os_error(&format!(
+                    "watch-add: failed for \"{}\"",
+                    path.display()
+                )));
             }
             inner.wd_to_path.insert(wd, path.to_path_buf());
             inner.path_to_wd.insert(path.to_path_buf(), wd);
@@ -131,31 +131,31 @@ mod platform {
                 .canonicalize()
                 .map_err(|e| format!("watch-remove: cannot resolve \"{}\": {}", path, e))?;
             let mut inner = self.inner.borrow_mut();
-            if inner.closed {
-                return Err("watch-remove: watcher is closed".into());
-            }
+            let watch_fd = match &inner.fd {
+                Some(fd) => fd.as_raw_fd(),
+                None => return Err("watch-remove: watcher is closed".into()),
+            };
             let wd = inner
                 .path_to_wd
                 .remove(&path)
                 .ok_or_else(|| format!("watch-remove: not watched: \"{}\"", path.display()))?;
             inner.wd_to_path.remove(&wd);
-            unsafe { libc::inotify_rm_watch(inner.fd, wd as _) };
+            unsafe { libc::inotify_rm_watch(watch_fd, wd as _) };
             Ok(())
         }
 
         pub fn raw_fd(&self) -> Result<RawFd, String> {
             let inner = self.inner.borrow();
-            if inner.closed {
-                return Err("watcher is closed".into());
+            match &inner.fd {
+                Some(fd) => Ok(fd.as_raw_fd()),
+                None => Err("watcher is closed".into()),
             }
-            Ok(inner.fd)
         }
 
         pub fn close(&self) {
             let mut inner = self.inner.borrow_mut();
-            if !inner.closed {
-                unsafe { libc::close(inner.fd) };
-                inner.closed = true;
+            // Dropping the OwnedFd closes the inotify descriptor.
+            if inner.fd.take().is_some() {
                 inner.wd_to_path.clear();
                 inner.path_to_wd.clear();
             }
@@ -209,26 +209,46 @@ mod platform {
         }
     }
 
-    impl Drop for FsWatcher {
-        fn drop(&mut self) {
-            let inner = self.inner.get_mut();
-            if !inner.closed {
-                unsafe { libc::close(inner.fd) };
-                inner.closed = true;
-            }
-        }
-    }
+    // No explicit Drop: the `Option<OwnedFd>` field closes the inotify
+    // descriptor when the FsWatcher is dropped.
 
     impl std::fmt::Debug for FsWatcher {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let inner = self.inner.borrow();
             write!(
                 f,
-                "FsWatcher(fd={}, paths={}, closed={})",
-                inner.fd,
+                "FsWatcher(fd={:?}, paths={}, closed={})",
+                inner.fd.as_ref().map(|fd| fd.as_raw_fd()),
                 inner.path_to_wd.len(),
-                inner.closed
+                inner.fd.is_none()
             )
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::FsWatcher;
+
+        /// The inotify fd is live until `close`, gone after, and `close`
+        /// is idempotent — the `Option<OwnedFd>` must never double-close.
+        #[test]
+        fn fd_lifecycle_across_close_is_safe() {
+            let w = FsWatcher::new().expect("inotify_init1");
+            assert!(w.raw_fd().expect("open watcher has an fd") >= 0);
+
+            // Exercise the watch-descriptor maps with a real path.
+            let dir = std::env::temp_dir();
+            let dir = dir.to_str().unwrap();
+            w.add(dir, false).expect("watch temp dir");
+            w.remove(dir).expect("unwatch temp dir");
+
+            // close drops the OwnedFd → raw_fd now reports closed.
+            w.close();
+            assert!(w.raw_fd().is_err(), "closed watcher exposes no fd");
+            // Idempotent: a second close must not double-close / panic.
+            w.close();
+            // Operations after close are rejected, not UB on a stale fd.
+            assert!(w.add(dir, false).is_err());
         }
     }
 }
@@ -240,7 +260,7 @@ mod platform {
     use super::{WatchEvent, WatchEventKind};
     use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::os::unix::io::RawFd;
+    use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
     use std::path::{Path, PathBuf};
 
     pub(crate) struct FsWatcher {
@@ -248,30 +268,32 @@ mod platform {
     }
 
     struct FsWatcherInner {
-        kq: RawFd,
-        /// fd → watched path (we open each watched path to get an fd for kqueue)
+        /// The kqueue. `None` once the watcher is closed; the `OwnedFd`
+        /// closes the descriptor on drop.
+        kq: Option<OwnedFd>,
+        /// raw fd → watched path. The fds are *owned* by `path_to_fd`; this
+        /// map keeps the raw value for reverse lookup in `parse_events`.
         fd_to_path: HashMap<RawFd, PathBuf>,
-        path_to_fd: HashMap<PathBuf, RawFd>,
-        closed: bool,
+        /// watched path → the owned fd opened for it. Dropping an entry
+        /// closes the fd, which also removes it from the kqueue.
+        path_to_fd: HashMap<PathBuf, OwnedFd>,
     }
 
     impl FsWatcher {
         pub fn new() -> Result<Self, String> {
             let kq = unsafe { libc::kqueue() };
             if kq < 0 {
-                return Err(format!(
-                    "kqueue failed: {}",
-                    std::io::Error::last_os_error()
-                ));
+                return Err(crate::io::os_error("kqueue failed"));
             }
+            // SAFETY: fresh kqueue fd we own.
+            let kq = unsafe { OwnedFd::from_raw_fd(kq) };
             // Set close-on-exec
-            unsafe { libc::fcntl(kq, libc::F_SETFD, libc::FD_CLOEXEC) };
+            unsafe { libc::fcntl(kq.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
             Ok(FsWatcher {
                 inner: RefCell::new(FsWatcherInner {
-                    kq,
+                    kq: Some(kq),
                     fd_to_path: HashMap::new(),
                     path_to_fd: HashMap::new(),
-                    closed: false,
                 }),
             })
         }
@@ -289,20 +311,23 @@ mod platform {
 
         fn add_single(&self, path: &Path) -> Result<(), String> {
             let mut inner = self.inner.borrow_mut();
-            if inner.closed {
-                return Err("watch-add: watcher is closed".into());
-            }
+            let kq_raw = match &inner.kq {
+                Some(kq) => kq.as_raw_fd(),
+                None => return Err("watch-add: watcher is closed".into()),
+            };
             let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
                 .map_err(|_| "watch-add: path contains null byte".to_string())?;
             // Open the path to get an fd for kqueue EVFILT_VNODE
             let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_EVTONLY | libc::O_CLOEXEC) };
             if fd < 0 {
-                return Err(format!(
-                    "watch-add: open failed for \"{}\": {}",
-                    path.display(),
-                    std::io::Error::last_os_error()
-                ));
+                return Err(crate::io::os_error(&format!(
+                    "watch-add: open failed for \"{}\"",
+                    path.display()
+                )));
             }
+            // SAFETY: fresh fd we own; the OwnedFd closes it on the kevent
+            // failure path below and when the entry leaves `path_to_fd`.
+            let fd = unsafe { OwnedFd::from_raw_fd(fd) };
             // Register the fd with kqueue
             let fflags = libc::NOTE_WRITE
                 | libc::NOTE_DELETE
@@ -310,7 +335,7 @@ mod platform {
                 | libc::NOTE_EXTEND
                 | libc::NOTE_ATTRIB;
             let changelist = [libc::kevent {
-                ident: fd as libc::uintptr_t,
+                ident: fd.as_raw_fd() as libc::uintptr_t,
                 filter: libc::EVFILT_VNODE,
                 flags: libc::EV_ADD | libc::EV_CLEAR,
                 fflags,
@@ -319,7 +344,7 @@ mod platform {
             }];
             let ret = unsafe {
                 libc::kevent(
-                    inner.kq,
+                    kq_raw,
                     changelist.as_ptr(),
                     1,
                     std::ptr::null_mut(),
@@ -328,14 +353,13 @@ mod platform {
                 )
             };
             if ret < 0 {
-                unsafe { libc::close(fd) };
-                return Err(format!(
-                    "watch-add: kevent failed for \"{}\": {}",
-                    path.display(),
-                    std::io::Error::last_os_error()
-                ));
+                // `fd` drops here, closing it.
+                return Err(crate::io::os_error(&format!(
+                    "watch-add: kevent failed for \"{}\"",
+                    path.display()
+                )));
             }
-            inner.fd_to_path.insert(fd, path.to_path_buf());
+            inner.fd_to_path.insert(fd.as_raw_fd(), path.to_path_buf());
             inner.path_to_fd.insert(path.to_path_buf(), fd);
             Ok(())
         }
@@ -358,40 +382,34 @@ mod platform {
                 .canonicalize()
                 .map_err(|e| format!("watch-remove: cannot resolve \"{}\": {}", path, e))?;
             let mut inner = self.inner.borrow_mut();
-            if inner.closed {
+            if inner.kq.is_none() {
                 return Err("watch-remove: watcher is closed".into());
             }
             let fd = inner
                 .path_to_fd
                 .remove(&path)
                 .ok_or_else(|| format!("watch-remove: not watched: \"{}\"", path.display()))?;
-            inner.fd_to_path.remove(&fd);
-            // EV_DELETE removes it from the kqueue; closing the fd also does it
-            unsafe { libc::close(fd) };
+            inner.fd_to_path.remove(&fd.as_raw_fd());
+            // Dropping the OwnedFd closes the fd, which also removes the
+            // EVFILT_VNODE registration from the kqueue.
             Ok(())
         }
 
         /// Get the kqueue fd for thread-pool blocking kevent() call.
         pub fn raw_fd(&self) -> Result<RawFd, String> {
             let inner = self.inner.borrow();
-            if inner.closed {
-                return Err("watcher is closed".into());
+            match &inner.kq {
+                Some(kq) => Ok(kq.as_raw_fd()),
+                None => Err("watcher is closed".into()),
             }
-            Ok(inner.kq)
         }
 
         pub fn close(&self) {
             let mut inner = self.inner.borrow_mut();
-            if !inner.closed {
-                // Close all watched fds
-                for &fd in inner.fd_to_path.keys() {
-                    unsafe { libc::close(fd) };
-                }
-                unsafe { libc::close(inner.kq) };
-                inner.closed = true;
-                inner.fd_to_path.clear();
-                inner.path_to_fd.clear();
-            }
+            // Dropping the OwnedFds closes every watched fd and the kqueue.
+            inner.path_to_fd.clear();
+            inner.fd_to_path.clear();
+            inner.kq = None;
         }
 
         /// Parse raw kevent results into WatchEvents.
@@ -410,9 +428,9 @@ mod platform {
 
                 let path = inner.fd_to_path.get(&fd).cloned().unwrap_or_default();
 
-                let kind = if fflags & libc::NOTE_DELETE as u32 != 0 {
+                let kind = if fflags & libc::NOTE_DELETE != 0 {
                     WatchEventKind::Remove
-                } else if fflags & libc::NOTE_RENAME as u32 != 0 {
+                } else if fflags & libc::NOTE_RENAME != 0 {
                     WatchEventKind::Rename
                 } else {
                     // NOTE_WRITE, NOTE_EXTEND, NOTE_ATTRIB → Modify
@@ -425,28 +443,18 @@ mod platform {
         }
     }
 
-    impl Drop for FsWatcher {
-        fn drop(&mut self) {
-            let inner = self.inner.get_mut();
-            if !inner.closed {
-                for &fd in inner.fd_to_path.keys() {
-                    unsafe { libc::close(fd) };
-                }
-                unsafe { libc::close(inner.kq) };
-                inner.closed = true;
-            }
-        }
-    }
+    // No explicit Drop: the `Option<OwnedFd>` kq and the owned fds in
+    // `path_to_fd` all close when the FsWatcher is dropped.
 
     impl std::fmt::Debug for FsWatcher {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let inner = self.inner.borrow();
             write!(
                 f,
-                "FsWatcher(kq={}, paths={}, closed={})",
-                inner.kq,
+                "FsWatcher(kq={:?}, paths={}, closed={})",
+                inner.kq.as_ref().map(|kq| kq.as_raw_fd()),
                 inner.path_to_fd.len(),
-                inner.closed
+                inner.kq.is_none()
             )
         }
     }

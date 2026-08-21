@@ -36,13 +36,20 @@ docstring as the first body form.
 
 ## Variadic functions
 
-`&` collects remaining arguments into a list.
+`&` collects remaining arguments into a list. `&rest` is a synonym for
+`&` — here and everywhere a rest collector is accepted (destructuring
+patterns, `match` patterns, `defmacro` parameter lists).
 
 ```lisp
 (defn sum [& nums]
   (fold + 0 nums))
 
 (sum 1 2 3 4)              # => 10
+
+(defn product [&rest nums]
+  (fold * 1 nums))
+
+(product 1 2 3 4)          # => 24
 ```
 
 ## Closures

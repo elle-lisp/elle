@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/cli.lisp — CLI argument parsing (pure Elle)
 ##
 ## Declarative argument parsing from a spec struct + argv list.

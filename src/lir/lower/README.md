@@ -37,12 +37,14 @@ The lowerer:
 | File | Purpose |
 |--------|---------|
 | [`mod.rs`](mod.rs) | `Lowerer` struct, context, entry point |
-| [`expr.rs`](expr.rs) | Expression lowering: literals, operators, calls |
+| [`emitops.rs`](emitops.rs) | Register/slot allocation, instruction emission, block management |
+| [`expr.rs`](expr.rs) | Expression lowering: literals, operators, `if`, `begin`, calls |
 | [`binding.rs`](binding.rs) | Binding forms: `let`, `def`, `var`, `fn` |
 | [`lambda.rs`](lambda.rs) | fn lowering, closure capture, lbox wrapping |
-| [`control.rs`](control.rs) | Control flow: `if`, `begin`, `match` |
+| [`control.rs`](control.rs) | Control flow: `and`, `or`, `eval`, `emit`, `match`; tail-arg ownership |
+| [`control/call.rs`](control/call.rs) | Call/tail-call lowering; `tail_callee_defers_release` |
 | [`pattern.rs`](pattern.rs) | Pattern matching lowering |
-| [`escape.rs`](escape.rs) | Escape analysis for scope allocation |
+| [`regionemit.rs`](regionemit.rs) | Region RC instruction emission from the solver's `RegionInfo` |
 
 ## See Also
 

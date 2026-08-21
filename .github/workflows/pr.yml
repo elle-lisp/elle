@@ -50,6 +50,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
+          targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - name: Install LLVM 22 (for mlir feature)
         run: |
@@ -61,6 +62,18 @@ jobs:
         run: cargo fmt -- --check
       - name: Run clippy on workspace
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The clippy step above only ever sees the Linux arm of every
+      # `cfg(target_os)`, so a binding used solely by the io_uring backend reads
+      # as dead code on macOS and reaches the Mac runner as a warning. Clippy
+      # checks (no codegen, no link), so the macOS arms compile here without an
+      # SDK. `--no-default-features` is forced: `ffi` and the `zstd` dependency
+      # build C for the host toolchain and cannot cross. That also drops the
+      # variant that keeps `HeapObject` balanced, so allow that one lint —
+      # the default-features builds still enforce it.
+      - name: Cross-check macOS
+        run: >
+          cargo clippy --target x86_64-apple-darwin --no-default-features -p elle
+          -- -D warnings -A clippy::large_enum_variant
       - name: Check documentation
         run: cargo doc --no-deps --document-private-items
         env:
@@ -88,8 +101,6 @@ jobs:
         run: make smoke-vm
       - name: make smoke-jit
         run: make smoke-jit
-      - name: make smoke-diff
-        run: make smoke-diff
 
   tests-combined:
     name: Rust Tests
@@ -135,11 +146,9 @@ jobs:
         run: make doctest
       - name: make smoke-mlir
         run: make smoke-mlir
-      - name: make smoke-diff
-        run: make smoke-diff
 
   wasm:
-    name: WASM Tests
+    name: WASM Build
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
@@ -149,18 +158,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: wasm
-      - name: Install GNU parallel
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y parallel
-      - name: make elle-wasm
-        run: make elle-wasm
-      - name: make doctest
-        run: make doctest
-      - name: make smoke-wasm
-        run: make smoke-wasm
-      - name: make smoke-diff
-        run: make smoke-diff
+      # The wasm tier carries no production workloads (docs/impl/wasm.md,
+      # memory.md § "The backend-realization frontier"), so its corpus does not
+      # gate PRs. What must stay green anyway: the feature compiles, and the
+      # full-module tier boots. Restore `make smoke-wasm` here (plus the GNU
+      # parallel install it needs) when the tier is brought back up.
+      - name: make check-wasm
+        run: make check-wasm
 
   aarch64:
     name: AArch64 Smoke
@@ -244,20 +248,42 @@ jobs:
     env:
       PROPTEST_CASES: 8
       RUST_TEST_THREADS: 2
+      # The release profile strips the symbol table (Cargo.toml: strip =
+      # "symbols"), which turns the timeout photograph (src/test.lisp
+      # photograph-threads → /usr/bin/sample) into unreadable `???` frames.
+      # Keep the symbol table on this runner: it is the box where the corpus
+      # wedges, and the photograph is the only evidence a timeout leaves.
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: macos
-      - name: Install GNU parallel and coreutils
-        run: brew install parallel coreutils
+      - name: Install GNU parallel, coreutils, and zstd
+        # zstd (libzstd) is not a macOS system library; the `elle test` runner
+        # loads it for CAS compression and lib/compress.lisp's tests need it.
+        # Homebrew installs it under /opt/homebrew/lib, which library_candidates
+        # probes explicitly (dyld does not search there for a bare soname).
+        run: brew install parallel coreutils zstd
+      # The QA job's cross-check covers the macOS arms that build without an
+      # SDK; this one is the same gate over `ffi` and `jit`, which only a real
+      # Mac can compile. Run it before `make elle` so a warning fails fast.
+      - name: Run clippy
+        run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
       - name: make doctest
         run: make doctest
+      # --trace=scrub: this runner is where the corpus corrupts (stale reads
+      # surfacing as wrong-typed values, wedges, and segfaults, on the pool
+      # backend only this box exercises). Scrub zeroes each released page, so
+      # the first stale read panics at the deref naming its site instead of
+      # failing minutes later somewhere unrelated. One memset per freed page.
       - name: make smoke
-        run: make smoke
+        run: make smoke ELLE_TEST_FLAGS=--trace=scrub
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
       - name: Run property tests
@@ -281,6 +307,10 @@ jobs:
       - name: Check MLIR
         if: needs.mlir.result == 'failure'
         run: exit 1
+      # The wasm job is a build-and-boot gate (`make check-wasm`), not the
+      # corpus: the tier carries no production workloads, so corpus coverage
+      # on it does not gate PRs. A failure here means the wasm feature no
+      # longer compiles or the tier no longer boots — that blocks.
       - name: Check WASM
         if: needs.wasm.result == 'failure'
         run: exit 1

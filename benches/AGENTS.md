@@ -9,6 +9,7 @@ Criterion and IAI benchmarks for the Elle compiler and VM.
 | `benchmarks.rs` | Criterion | Wall-clock benchmarks: parsing, symbol interning, compilation, VM execution, end-to-end eval, macro expansion |
 | `iai_benchmarks.rs` | IAI Callgrind | Instruction-count benchmarks: parsing, compilation, execution (deterministic, requires Valgrind) |
 | `memory.rs` | Criterion | Heap allocation benchmarks: arena growth, collection construction |
+| `regionrc.rs` | reporting | Compile-time RC-coalescing win: value→slot mint reduction (transform 1) and merge-induced self-edges eliminated (transform 2), over the stdlib load and the `tests/elle` corpus |
 
 ## Benchmark groups in `benchmarks.rs`
 
@@ -40,6 +41,25 @@ cost a user would pay for a fresh compilation unit.
   transformer closure is cached after the first.
 - **`defn_50`**: 50 `(defn fN (x) ...)` definitions. `defn` desugars
   to `(def name (fn ...))` via the prelude macro.
+
+## `regionrc` bench — the RC-coalescing measured win
+
+`regionrc.rs` reports how many region-mints the lowerer resolves to a static slot
+(transform 1's value→slot reduction) versus leaves value-resolved at the dynamic
+boundary, plus the merge-induced self-edges transform 2 eliminates
+(docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)" /
+"Self-edge elimination"). It is a *reporting* bench (prints counts, asserts
+nothing — "the win is measured, not asserted") driven by the thread-local
+instrument in `elle::lir::lower::rcstats`, which the lowerer bumps at each
+coalescing-candidate site. It measures three things: the stdlib load, a sweep of
+every `tests/elle/*.lisp` (compile-only, failures skipped), and a deterministic
+builder-idiom witness. `%pair` lowers as the inline intrinsic, so the builder
+merge — hence transform 2 — fires wherever a builder idiom seeds it
+(region/merging.md § Merging).
+
+```bash
+cargo bench --bench regionrc
+```
 
 ## Running
 

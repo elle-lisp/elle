@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Stream combinators — sinks, transforms, port-to-stream converters
 
 
@@ -160,66 +160,74 @@
 
 # === Port-to-stream converters ===
 # User code runs inside the async scheduler, so I/O works directly.
+# All scratch files live in a fresh temp dir, removed at the end.
+
+(def scratch (file/mktempdir))
 
 # port/lines: multi-line file
-(spit "/tmp/elle-test-streams-lines-478" "alpha\nbeta\ngamma")
-(assert (= (stream/collect (port/lines (port/open "/tmp/elle-test-streams-lines-478"
-                                       :read))) (list "alpha" "beta" "gamma"))
+(def f-lines (path/join scratch "lines"))
+(spit f-lines "alpha\nbeta\ngamma")
+(assert (= (stream/collect (port/lines (port/open f-lines :read)))
+           (list "alpha" "beta" "gamma"))
         "port/lines: yields all lines from multi-line file")
 
 # port/lines: empty file yields empty list
-(spit "/tmp/elle-test-streams-empty-478" "")
-(assert (= (stream/collect (port/lines (port/open "/tmp/elle-test-streams-empty-478"
-                                       :read))) ())
+(def f-empty (path/join scratch "empty"))
+(spit f-empty "")
+(assert (= (stream/collect (port/lines (port/open f-empty :read))) ())
         "port/lines: empty file yields empty list")
 
 # port/lines: file without trailing newline
-(spit "/tmp/elle-test-streams-nonl-478" "no-newline")
-(assert (= (stream/collect (port/lines (port/open "/tmp/elle-test-streams-nonl-478"
-                                       :read))) (list "no-newline"))
+(def f-nonl (path/join scratch "nonl"))
+(spit f-nonl "no-newline")
+(assert (= (stream/collect (port/lines (port/open f-nonl :read)))
+           (list "no-newline"))
         "port/lines: file without trailing newline yields last line")
 
 # port/lines: port is closed after collect exhausts the stream
-(spit "/tmp/elle-test-streams-close-478" "one\ntwo")
-(let [p (port/open "/tmp/elle-test-streams-close-478" :read)]
+(def f-close (path/join scratch "close"))
+(spit f-close "one\ntwo")
+(let [p (port/open f-close :read)]
   (stream/collect (port/lines p))
   (assert (not (port/open? p))
           "port/lines: port is closed after stream is exhausted"))
 
 # port/chunks: basic chunking, 4-byte chunks of 12-byte file
-(spit "/tmp/elle-test-streams-chunks-478" "abcdefghijkl")
-(assert (= (stream/collect (port/chunks (port/open "/tmp/elle-test-streams-chunks-478"
-                                        :read) 4)) (list "abcd" "efgh" "ijkl"))
+(def f-chunks (path/join scratch "chunks"))
+(spit f-chunks "abcdefghijkl")
+(assert (= (stream/collect (port/chunks (port/open f-chunks :read) 4))
+           (list "abcd" "efgh" "ijkl"))
         "port/chunks: 12-byte file in 4-byte chunks")
 
 # port/chunks: remainder chunk — 10-byte file with 4-byte chunks yields [4, 4, 2]
-(spit "/tmp/elle-test-streams-chunks2-478" "abcdefghij")
-(let [result (stream/collect (port/chunks (port/open "/tmp/elle-test-streams-chunks2-478"
-                             :read) 4))]
+(def f-chunks2 (path/join scratch "chunks2"))
+(spit f-chunks2 "abcdefghij")
+(let [result (stream/collect (port/chunks (port/open f-chunks2 :read) 4))]
   (assert (= (length result) 3) "port/chunks: remainder — 3 chunks")
   (assert (= (get result 0) "abcd") "port/chunks: remainder — first chunk")
   (assert (= (get result 1) "efgh") "port/chunks: remainder — second chunk")
   (assert (= (get result 2) "ij") "port/chunks: remainder — final short chunk"))
 
 # port/chunks: port is closed after stream is exhausted
-(spit "/tmp/elle-test-streams-chunkclose-478" "hello")
-(let [p (port/open "/tmp/elle-test-streams-chunkclose-478" :read)]
+(def f-chunkclose (path/join scratch "chunkclose"))
+(spit f-chunkclose "hello")
+(let [p (port/open f-chunkclose :read)]
   (stream/collect (port/chunks p 3))
   (assert (not (port/open? p))
           "port/chunks: port is closed after stream is exhausted"))
 
 # port/writer: write values and read back
-(let* [p (port/open "/tmp/elle-test-streams-writer-478" :write)
+(def f-writer (path/join scratch "writer"))
+(let* [p (port/open f-writer :write)
        w (port/writer p)]
   (fiber/resume w)  # start: advance to first yield nil
   (fiber/resume w "hello ")  # write "hello "
   (fiber/resume w "world")  # write "world"
   (fiber/resume w nil))  # nil signals close
-(assert (= (slurp "/tmp/elle-test-streams-writer-478") "hello world")
-        "port/writer: writes values to port")
+(assert (= (slurp f-writer) "hello world") "port/writer: writes values to port")
 
 # port/writer: port is closed after nil resume
-(let* [p (port/open "/tmp/elle-test-streams-writerclose-478" :write)
+(let* [p (port/open (path/join scratch "writerclose") :write)
        w (port/writer p)]
   (fiber/resume w)  # start
   (fiber/resume w "data")  # write
@@ -227,18 +235,18 @@
 # close
 
 # Composition: port/lines -> stream/map -> stream/take -> stream/collect
-(spit "/tmp/elle-test-streams-compose-478" "1\n2\n3\n4\n5")
+(def f-compose (path/join scratch "compose"))
+(spit f-compose "1\n2\n3\n4\n5")
 (assert (= (stream/collect (stream/take 3
                                         (stream/map (fn [x] (+ (parse-int x) 10))
-                                        (port/lines (port/open "/tmp/elle-test-streams-compose-478"
-                                        :read))))) (list 11 12 13))
-        "composition: port/lines -> map -> take -> collect")
+                                        (port/lines (port/open f-compose :read)))))
+           (list 11 12 13)) "composition: port/lines -> map -> take -> collect")
 
 # === Integration tests ===
 
 # Full pipeline: file -> lines -> drop header -> map parse -> filter -> take -> collect
-(spit "/tmp/elle-test-streams-pipeline-478"
-      "id,value\n1,100\n2,200\n3,300\n4,400\n5,500")
+(def f-pipeline (path/join scratch "pipeline"))
+(spit f-pipeline "id,value\n1,100\n2,200\n3,300\n4,400\n5,500")
 (assert (= (stream/collect (stream/take 3
                                         (stream/filter (fn [row]
                                           (> (get row :value) 150))
@@ -247,8 +255,7 @@
                                             {:id (parse-int (get parts 0))
                                             :value (parse-int (get parts 1))}))
                                         (stream/drop 1
-                                        (port/lines (port/open "/tmp/elle-test-streams-pipeline-478"
-                                        :read)))))))
+                                        (port/lines (port/open f-pipeline :read)))))))
            (list {:id 2 :value 200} {:id 3 :value 300} {:id 4 :value 400}))
         "integration: CSV pipeline drop-header map-parse filter take collect")
 
@@ -287,12 +294,14 @@
   (assert (not ok?) "stream/map: transform error propagates through collect"))
 
 # Closed port: port/lines yields the io-error as a value (not signaled)
-(spit "/tmp/elle-test-streams-closederror-478" "some data")
+(def f-closederror (path/join scratch "closederror"))
+(spit f-closederror "some data")
 (let [[ok? val] (protect ((fn []
-                            (let [p (port/open "/tmp/elle-test-streams-closederror-478"
-                                  :read)]
+                            (let [p (port/open f-closederror :read)]
                               (port/close p)
                               (stream/collect (port/lines p))))))]
   (assert ok? "closed port: stream/collect succeeds (error yielded as value)")
   (assert (= (get (first val) :error) :io-error)
           "closed port: collected element is io-error"))
+
+(file/delete-dir-all scratch)

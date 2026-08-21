@@ -52,7 +52,7 @@ use std::fmt;
 //   Bits 17-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 
-pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
+pub const SIG_OK: SignalBits = SignalBits::EMPTY; // no bits set = normal return
 pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
 pub const SIG_YIELD: SignalBits = SignalBits::new(1 << 1); // cooperative suspension
 pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
@@ -80,6 +80,40 @@ const VM_INTERNAL: SignalBits = SIG_RESUME
     .union(SIG_FUEL)
     .union(SIG_SWITCH)
     .union(SIG_WAIT);
+
+/// Pause bits: suspensions the VM injects at its own charge sites, under
+/// whatever code happens to be running there. `:fuel` is the metering pause —
+/// the interpreter raises it when a fiber's instruction budget runs out, and
+/// the metering parent (`lib/process.lisp` preemption, a stepping debugger)
+/// owns the resume.
+///
+/// A pause is the VM's action, not the paused code's behavior, so it is
+/// exempt from squelch/attune enforcement — see [`squelched_bits`].
+pub const SIG_PAUSE: SignalBits = SIG_FUEL;
+
+/// The bits a `squelch`/`attune` boundary converts into a `signal-violation`
+/// when a closure carrying `mask` produces `bits`. An empty result means the
+/// signal crosses the boundary untouched.
+///
+/// This is the one predicate behind every enforcement site — the interpreter's
+/// `VM::enforce_squelch` and the JIT's call, tail-call, and sentinel paths —
+/// so the exemptions cannot drift apart between tiers.
+///
+/// Three classes never violate a boundary:
+///
+/// - `:error` and `:halt` are the escapes every boundary lets out, so a signal
+///   carrying either passes whole.
+/// - `:switch`, matched exactly, is the VM's fiber-switch trampoline. The exact
+///   match keeps a user signal that merely rides alongside enforceable.
+/// - The pause bits pass by subtraction rather than exempting the whole signal,
+///   so a compound `|:fuel :log|` still violates a squelch of `:log`.
+#[inline]
+pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
+    if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) || bits == SIG_SWITCH {
+        return SignalBits::EMPTY;
+    }
+    bits.intersection(mask).subtract(SIG_PAUSE)
+}
 
 /// Capability mask: all signals that user code can produce.
 ///
@@ -169,6 +203,58 @@ impl Signal {
     pub const fn ffi_errors() -> Self {
         Signal {
             bits: SIG_FFI.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Performs asynchronous I/O: suspends on the request and may error
+    /// (SIG_IO | SIG_YIELD | SIG_ERROR).
+    ///
+    /// The signal of every port, socket, and file primitive that reaches the
+    /// scheduler. `SIG_YIELD` belongs with `SIG_IO` because the request
+    /// suspends the calling fiber until the backend completes it.
+    pub const fn io_yields_errors() -> Self {
+        Signal {
+            bits: SIG_IO.union(SIG_YIELD).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Runs a subprocess: asynchronous I/O under the exec capability
+    /// (SIG_EXEC | SIG_IO | SIG_YIELD | SIG_ERROR).
+    ///
+    /// Both `SIG_EXEC` and `SIG_IO` are emitted, and they do different jobs.
+    /// `SIG_IO` is the dispatch bit that routes the request through the I/O
+    /// scheduler; `SIG_EXEC` is the capability bit a fiber mask tests to
+    /// permit or deny spawning at all.
+    pub const fn subprocess() -> Self {
+        Signal {
+            bits: SIG_EXEC.union(SIG_IO).union(SIG_YIELD).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Asks the VM about the current fiber and may error
+    /// (SIG_QUERY | SIG_ERROR).
+    ///
+    /// A query cannot read what it needs from its arguments — the answer is
+    /// the running fiber's own state — so it returns `SIG_QUERY` and the VM
+    /// answers it.
+    pub const fn query_errors() -> Self {
+        Signal {
+            bits: SIG_QUERY.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// An arbitrary set of emitted bits, propagating no parameter.
+    ///
+    /// For the signals with no name of their own. Prefer a named constructor
+    /// where one fits: the name says what the primitive does, where a bit set
+    /// only says which bits it sets.
+    pub const fn of(bits: SignalBits) -> Self {
+        Signal {
+            bits,
             propagates: 0,
         }
     }
@@ -308,7 +394,7 @@ impl fmt::Display for Signal {
         if self.propagates != 0 {
             let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
             write!(f, "polymorphic({})", indices.join(","))?;
-        } else if self.bits.contains(SIG_YIELD) {
+        } else if self.bits.intersects(SIG_YIELD) {
             write!(f, "yields")?;
         } else {
             write!(f, "silent")?;
@@ -316,16 +402,16 @@ impl fmt::Display for Signal {
 
         // Append capability flags
         let mut flags = Vec::new();
-        if self.bits.contains(SIG_ERROR) {
+        if self.bits.intersects(SIG_ERROR) {
             flags.push("errors");
         }
-        if self.bits.contains(SIG_HALT) {
+        if self.bits.intersects(SIG_HALT) {
             flags.push("halts");
         }
-        if self.bits.contains(SIG_FFI) {
+        if self.bits.intersects(SIG_FFI) {
             flags.push("ffi");
         }
-        if self.bits.contains(SIG_DEBUG) {
+        if self.bits.intersects(SIG_DEBUG) {
             flags.push("debug");
         }
         if !flags.is_empty() {
@@ -336,262 +422,4 @@ impl fmt::Display for Signal {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_signal_combine_silent() {
-        assert_eq!(Signal::silent().combine(Signal::silent()), Signal::silent());
-    }
-
-    #[test]
-    fn test_signal_combine_yields() {
-        assert_eq!(Signal::silent().combine(Signal::yields()), Signal::yields());
-        assert_eq!(Signal::yields().combine(Signal::silent()), Signal::yields());
-        assert_eq!(Signal::yields().combine(Signal::yields()), Signal::yields());
-    }
-
-    #[test]
-    fn test_signal_combine_polymorphic() {
-        assert_eq!(
-            Signal::silent().combine(Signal::polymorphic(0)),
-            Signal::polymorphic(0)
-        );
-        assert_eq!(
-            Signal::polymorphic(1).combine(Signal::silent()),
-            Signal::polymorphic(1)
-        );
-        // Polymorphic + Yields = both
-        let combined = Signal::polymorphic(0).combine(Signal::yields());
-        assert!(combined.may_yield());
-        assert!(combined.is_polymorphic());
-    }
-
-    #[test]
-    fn test_signal_combine_polymorphic_multiple() {
-        let combined = Signal::polymorphic(0).combine(Signal::polymorphic(1));
-        assert_eq!(
-            combined,
-            Signal {
-                bits: SignalBits::new(0),
-                propagates: 0b11,
-            }
-        );
-
-        let combined2 = Signal::polymorphic(0).combine(Signal::polymorphic(0));
-        assert_eq!(combined2, Signal::polymorphic(0));
-    }
-
-    #[test]
-    fn test_signal_combine_all() {
-        assert_eq!(
-            Signal::combine_all([Signal::silent(), Signal::silent(), Signal::silent()]),
-            Signal::silent()
-        );
-        assert_eq!(
-            Signal::combine_all([Signal::silent(), Signal::yields(), Signal::silent()]),
-            Signal::yields()
-        );
-    }
-
-    #[test]
-    fn test_may_suspend() {
-        assert!(!Signal::silent().may_suspend());
-        assert!(Signal::errors().may_suspend()); // error is a fiber transfer
-        assert!(Signal::yields().may_suspend());
-        assert!(Signal::polymorphic(0).may_suspend());
-        assert!(Signal {
-            bits: SIG_DEBUG,
-            propagates: 0,
-        }
-        .may_suspend());
-    }
-
-    #[test]
-    fn test_may_yield() {
-        assert!(!Signal::silent().may_yield());
-        assert!(Signal::yields().may_yield());
-        assert!(!Signal::errors().may_yield());
-    }
-
-    #[test]
-    fn test_may_error() {
-        assert!(!Signal::silent().may_error());
-        assert!(Signal::errors().may_error());
-        assert!(!Signal::yields().may_error());
-        assert!(Signal::yields_errors().may_error());
-
-        // Combining errors
-        let combined = Signal::silent().combine(Signal::errors());
-        assert!(combined.may_error());
-        assert!(combined.may_suspend()); // error is a suspension
-    }
-
-    #[test]
-    fn test_may_ffi() {
-        assert!(!Signal::silent().may_ffi());
-        assert!(Signal::ffi().may_ffi());
-        assert!(Signal::ffi_errors().may_ffi());
-    }
-
-    #[test]
-    fn test_ffi_errors() {
-        let e = Signal::ffi_errors();
-        assert!(e.may_ffi());
-        assert!(e.may_error());
-        assert!(!e.may_yield());
-        assert!(e.may_suspend()); // FFI+error = has signal bits = may suspend
-        assert!(!e.is_polymorphic());
-    }
-
-    #[test]
-    fn test_is_polymorphic() {
-        assert!(!Signal::silent().is_polymorphic());
-        assert!(Signal::polymorphic(0).is_polymorphic());
-    }
-
-    #[test]
-    fn test_signal_display() {
-        assert_eq!(format!("{}", Signal::silent()), "silent");
-        assert_eq!(format!("{}", Signal::yields()), "yields");
-        assert_eq!(format!("{}", Signal::errors()), "silent+errors");
-        assert_eq!(format!("{}", Signal::yields_errors()), "yields+errors");
-        assert_eq!(format!("{}", Signal::polymorphic(0)), "polymorphic(0)");
-        assert_eq!(
-            format!("{}", Signal::polymorphic_errors(0)),
-            "polymorphic(0)+errors"
-        );
-        assert_eq!(format!("{}", Signal::ffi()), "silent+ffi");
-        assert_eq!(format!("{}", Signal::ffi_errors()), "silent+errors+ffi");
-    }
-
-    #[test]
-    fn test_propagated_params() {
-        let e = Signal {
-            bits: SignalBits::new(0),
-            propagates: 0b101, // params 0 and 2
-        };
-        let params: Vec<_> = e.propagated_params().collect();
-        assert_eq!(params, vec![0, 2]);
-    }
-
-    #[test]
-    fn test_signal_is_copy() {
-        let e = Signal::yields();
-        let e2 = e; // Copy
-        assert_eq!(e, e2);
-    }
-
-    #[test]
-    fn test_constants() {
-        assert_eq!(Signal::SILENT, Signal::silent());
-        assert_eq!(Signal::YIELDS, Signal::yields());
-    }
-
-    #[test]
-    fn test_sig_exec_bit_is_distinct() {
-        // SIG_EXEC must be a unique bit (bit 11).
-        assert_eq!(SIG_EXEC, SignalBits::from_bit(11));
-        // Must not overlap with any other defined signal bits.
-        assert!(!SIG_EXEC.intersects(SIG_IO));
-        assert!(!SIG_EXEC.intersects(SIG_YIELD));
-        assert!(!SIG_EXEC.intersects(SIG_TERMINAL));
-    }
-
-    #[test]
-    fn test_exec_keyword_registered() {
-        use crate::signals::registry::global_registry;
-        // The :exec keyword must be registered and map to SIG_EXEC.
-        let reg = global_registry().lock().unwrap();
-        let bit_pos = reg.lookup("exec").expect(":exec must be registered");
-        // lookup returns the bit position (11), not the bitmask; verify both.
-        assert_eq!(bit_pos, 11);
-        assert_eq!(SignalBits::from_bit(bit_pos), SIG_EXEC);
-    }
-
-    #[test]
-    fn test_fuel_bit_is_distinct() {
-        // SIG_FUEL must be a unique bit (bit 12).
-        assert_eq!(SIG_FUEL, SignalBits::from_bit(12));
-        // Must not overlap with any other defined signal bits.
-        assert!(!SIG_FUEL.intersects(SIG_EXEC));
-        assert!(!SIG_FUEL.intersects(SIG_IO));
-        assert!(!SIG_FUEL.intersects(SIG_TERMINAL));
-    }
-
-    #[test]
-    fn test_fuel_keyword_registered() {
-        use crate::signals::registry::global_registry;
-        let reg = global_registry().lock().unwrap();
-        let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
-        assert_eq!(bit_pos, 12);
-        assert_eq!(SignalBits::from_bit(bit_pos), SIG_FUEL);
-    }
-
-    #[test]
-    fn test_squelch_noop_when_mask_irrelevant() {
-        // Squelching :yield on a silent function changes nothing.
-        let sig = Signal::errors();
-        let result = sig.squelch(SIG_YIELD);
-        assert_eq!(result, sig);
-    }
-
-    #[test]
-    fn test_squelch_clears_bits_adds_error() {
-        // Squelching :yield on a yields function clears yield, adds error.
-        let sig = Signal::yields();
-        let result = sig.squelch(SIG_YIELD);
-        assert!(!result.may_yield());
-        assert!(result.may_error());
-        assert!(result.may_suspend()); // squelch adds SIG_ERROR = suspension
-    }
-
-    #[test]
-    fn test_squelch_preserves_propagates() {
-        // Squelch preserves the propagates mask.
-        let sig = Signal {
-            bits: SIG_YIELD.union(SIG_ERROR),
-            propagates: 0b101,
-        };
-        let result = sig.squelch(SIG_YIELD);
-        assert_eq!(result.propagates, 0b101);
-        assert!(!result.bits.intersects(SIG_YIELD));
-        assert!(result.bits.intersects(SIG_ERROR));
-    }
-
-    #[test]
-    fn test_squelch_multiple_bits() {
-        // Squelch a set of signals.
-        let sig = Signal {
-            bits: SIG_YIELD.union(SIG_IO).union(SIG_ERROR),
-            propagates: 0,
-        };
-        let mask = SIG_YIELD.union(SIG_IO);
-        let result = sig.squelch(mask);
-        assert!(!result.bits.intersects(SIG_YIELD));
-        assert!(!result.bits.intersects(SIG_IO));
-        assert!(result.bits.intersects(SIG_ERROR));
-    }
-
-    #[test]
-    fn test_squelch_yields_errors_becomes_silent_errors() {
-        // Squelching :yield on yields+errors → errors only.
-        let sig = Signal::yields_errors();
-        let result = sig.squelch(SIG_YIELD);
-        assert!(!result.may_yield());
-        assert!(result.may_error());
-        assert!(result.may_suspend()); // error remains = still suspending
-    }
-
-    #[test]
-    fn test_squelch_all_bits_leaves_error() {
-        // Squelching everything still leaves error (from squelch itself).
-        let sig = Signal {
-            bits: SIG_YIELD.union(SIG_IO),
-            propagates: 0,
-        };
-        let mask = SIG_YIELD.union(SIG_IO);
-        let result = sig.squelch(mask);
-        assert_eq!(result.bits, SIG_ERROR);
-    }
-}
+mod tests;

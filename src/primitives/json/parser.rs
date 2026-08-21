@@ -1,27 +1,38 @@
-use crate::value::{list, TableKey, Value};
+use crate::primitives::ctx::NativeCtx;
+use crate::value::{TableKey, Value};
 use std::collections::BTreeMap;
 
-/// JSON parser using recursive descent
-pub struct JsonParser {
+/// JSON parser using recursive descent. Holds the `NativeCtx` capability so
+/// every freshly-parsed heap value is born in the call's region (Rule 3).
+///
+/// The value it builds is immutable at every depth: a JSON array becomes an
+/// immutable Elle array and a JSON object an immutable struct. Callers can
+/// therefore share one parsed document without copying it, and `put`/`del`
+/// on any part of it yield a new value instead of editing the document.
+pub struct JsonParser<'a, 'h> {
     input: Vec<char>,
     pos: usize,
     use_keyword_keys: bool,
+    /// The allocation capability freshly-parsed values are born through (Rule 3).
+    ctx: &'a mut NativeCtx<'h>,
 }
 
-impl JsonParser {
-    pub fn new(input: &str) -> Self {
+impl<'a, 'h> JsonParser<'a, 'h> {
+    pub fn new(input: &str, ctx: &'a mut NativeCtx<'h>) -> Self {
         JsonParser {
             input: input.chars().collect(),
             pos: 0,
             use_keyword_keys: false,
+            ctx,
         }
     }
 
-    pub fn new_with_opts(input: &str, use_keyword_keys: bool) -> Self {
+    pub fn new_with_opts(input: &str, use_keyword_keys: bool, ctx: &'a mut NativeCtx<'h>) -> Self {
         JsonParser {
             input: input.chars().collect(),
             pos: 0,
             use_keyword_keys,
+            ctx,
         }
     }
 
@@ -102,7 +113,7 @@ impl JsonParser {
             match self.input[self.pos] {
                 '"' => {
                     self.pos += 1;
-                    return Ok(Value::string(result));
+                    return Ok(self.ctx.string(result));
                 }
                 '\\' => {
                     self.pos += 1;
@@ -311,7 +322,7 @@ impl JsonParser {
 
         if self.pos < self.input.len() && self.input[self.pos] == ']' {
             self.pos += 1;
-            return Ok(list(elements));
+            return Ok(self.ctx.array(elements));
         }
 
         loop {
@@ -329,7 +340,7 @@ impl JsonParser {
                 }
                 ']' => {
                     self.pos += 1;
-                    return Ok(list(elements));
+                    return Ok(self.ctx.array(elements));
                 }
                 c => {
                     return Err(format!(
@@ -356,7 +367,7 @@ impl JsonParser {
 
         if self.pos < self.input.len() && self.input[self.pos] == '}' {
             self.pos += 1;
-            return Ok(Value::struct_mut_from(map));
+            return Ok(self.ctx.struct_from(map));
         }
 
         loop {
@@ -411,7 +422,7 @@ impl JsonParser {
                 }
                 '}' => {
                     self.pos += 1;
-                    return Ok(Value::struct_mut_from(map));
+                    return Ok(self.ctx.struct_from(map));
                 }
                 c => {
                     return Err(format!(

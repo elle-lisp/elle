@@ -1,12 +1,20 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Trace output tests
 #
 # Tests vm/config-set :trace behavior from Elle code.
 # CLI --trace flag testing is done via the Makefile smoke targets.
 
-# ── Trace set starts empty ────────────────────────────────────────────
+# ── Trace baseline ────────────────────────────────────────────────────
+# The harness may start this process with trace flags of its own
+# (ELLE_TEST_FLAGS=--trace=...), so the initial set is a baseline to
+# restore at the end, never asserted empty. What the test owns is the
+# keywords it sets itself: none of them may be pre-set, or the
+# contains? assertions below would pass vacuously.
 
-(assert (empty? (vm/config :trace)) "trace set initially empty")
+(def baseline (vm/config :trace))
+(assert (not (contains? baseline :call)) "test keyword :call not pre-set")
+(assert (not (contains? baseline :signal)) "test keyword :signal not pre-set")
+(assert (not (contains? baseline :fiber)) "test keyword :fiber not pre-set")
 
 # ── Setting and clearing trace keywords ───────────────────────────────
 
@@ -50,4 +58,9 @@
                        :bytecode|)
 (let [t (vm/config :trace)]
   (assert (>= (length t) 17) "all 17 known keywords accepted"))
-(vm/config-set :trace ||)
+
+# ── Restore the baseline ──────────────────────────────────────────────
+# vm/config-set :trace replaces the whole set, so every set above
+# dropped the harness's own flags; hand them back.
+
+(vm/config-set :trace baseline)

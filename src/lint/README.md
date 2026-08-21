@@ -12,6 +12,14 @@ The linter checks for:
 - **Arity errors**: Calling functions with wrong number of arguments
 - **Dead code**: Unreachable expressions
 - **Performance issues**: Inefficient patterns (e.g., repeated list traversal)
+- **Mutable bindings never reassigned** (`mutable-binding-never-assigned`, W003):
+  A binding declared mutable (`var`, or an `@`-prefixed `def`/`let` name) that is
+  never the target of an `assign`. Such a binding is a *false-mutable*: its value
+  may still be mutated in place (e.g. `(let [buf @""] (push buf x))`), but the
+  binding itself never changes, so it can be a plain immutable `def`/`let`. This
+  distinguishes a mutable **binding** (the slot is reassignable) from a mutable
+  **value** (the data is mutated in place) — only the former warrants `var`/`@`.
+  Throwaway (`_`-prefixed), synthetic, and primitive bindings are exempt.
 
 ## Running the Linter
 

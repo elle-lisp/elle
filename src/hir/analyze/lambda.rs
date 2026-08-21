@@ -4,7 +4,6 @@ use super::*;
 use crate::hir::expr::ParamBound;
 use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
-use crate::value::Value;
 use std::rc::Rc;
 
 impl<'a> Analyzer<'a> {
@@ -216,7 +215,10 @@ impl<'a> Analyzer<'a> {
         let body_items = &items[2..];
         let (doc, body_start) = if body_items.len() > 1 {
             if let SyntaxKind::String(s) = &body_items[0].kind {
-                (Some(Value::string(s.clone())), &body_items[1..])
+                // A docstring is compile-time string DATA, not a heap value:
+                // carry it as `Rc<str>` on the template. `(doc f)` materializes
+                // a fresh ordinary (reclaimable) string from it on demand.
+                (Some(std::rc::Rc::from(s.as_str())), &body_items[1..])
             } else {
                 (None, body_items)
             }
@@ -281,8 +283,18 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Read numeric! assertion flag (will be placed on HIR Lambda)
+        // Read numeric! assertion flag (will be placed on HIR Lambda, which the
+        // lowerer holds to GPU-eligibility). Its TYPE half — every parameter is
+        // floored at Number, which is what discharges a `%`-intrinsic's operand
+        // contract in the body — is recorded on the parameter BINDINGS, so it
+        // survives a rewrite that dissolves the lambda but keeps its parameter
+        // (`typeinfer/fuse.rs`; see `BindingInner::declared_numeric`).
         let assert_numeric = self.current_numeric_assert;
+        if assert_numeric {
+            for p in &params {
+                self.arena.get_mut(*p).declared_numeric = true;
+            }
+        }
 
         // Read bound accumulators (populated by analyze_silence during body analysis)
         let param_bounds: Vec<ParamBound> = self

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 
 # Type inference rewriting correctness test.
 # Verifies that stdlib arithmetic/comparison calls are rewritten to

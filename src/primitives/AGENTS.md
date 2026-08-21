@@ -29,9 +29,13 @@ Does NOT:
 
 ## Function type
 
-**NativeFn**: `&'static PrimitiveDef` (the bare function pointer type is `PrimFn`: `fn(&[Value]) -> (SignalBits, Value)`)
+**NativeFn**: `&'static PrimitiveDef` (the bare function pointer type is `PrimFn`: `fn(&mut NativeCtx, &[Value]) -> (SignalBits, Value)`)
 
-All primitives use a single unified type. No primitive has VM access.
+All primitives use a single unified type. Every primitive receives a
+`&mut NativeCtx` and reaches the driving VM via `ctx.vm()`, its symbols via
+`ctx.vm().symbols()`, and the heap via `ctx.heap_mut()`; values are allocated
+through the ctx (`ctx.string(..)`, `ctx.pair(..)`, …) so each is born in the
+call's own region.
 Return values:
 - `(SIG_OK, value)` — success
 - `(SIG_ERROR, error_val(kind, msg))` — error
@@ -43,11 +47,30 @@ Return values:
 1. Create function in appropriate module
 2. Register in that module's `register_*` function
 3. That function is called by `registration.rs`
+4. Declare its `effect: RegionEffect::…` (def.rs; spec in docs/impl/region/effects.md
+   § "Native region effects"). Every shipped table is fully declared —
+   do not leave a new primitive at the `Unknown` default. The claim is
+   checked forever by the declaration oracle (`dispatch_native_call`,
+   debug builds): Immediate = non-heap result; Fresh = heap result in
+   this call's own region; PassThrough = never fresh, no stores;
+   Stores{args} = uncounted store into a structure (containment), fresh
+   result; Sends{args} = the args cross a fiber boundary (`chan/send`'s
+   message), seam-counted at the send (`EscapeSite::ChanSend`) so no edges,
+   plus a fiber-frontier Shared seed
+   for the ownership forest; Funnel = every store rides the runtime-counted
+   mutable-store funnel; Delivers{args} = the args are installed in another
+   fiber's signal slot, counted by that seam; Opaque = stores nothing but the
+   result lives neither in this call's region nor in an argument's; Mixed =
+   examined, and the native (or the VM handler for the signal it returns)
+   stores an argument uncounted. The last two are the pair most often
+   confused: the arg clique and the store-facet escape seed are keyed on the
+   STORE, so a native that stores nothing declares Opaque however unbounded
+   its result.
 
 ```rust
 // In arithmetic.rs
-pub fn prim_add(args: &[Value]) -> (SignalBits, Value) {
-    // Implementation — return (SIG_ERROR, error_val("type-error", "msg")) for errors
+pub fn prim_add(ctx: &mut NativeCtx, args: &[Value]) -> (SignalBits, Value) {
+    // Implementation — return (SIG_ERROR, ctx.error("type-error", "msg")) for errors
 }
 
 pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) {
@@ -70,16 +93,15 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 2. **All primitives return `(SignalBits, Value)`.** No exceptions. Errors are
     signaled via SIG_ERROR with an error struct `{:error :keyword :message "message"}`.
 
-3. **Most primitives have no VM access.** Operations that need the VM (fiber
-   execution) return SIG_RESUME and let the VM dispatch loop handle it.
-   Exceptions: primitives that read ambient VM state (`sys/args`, `ffi/native`,
-   `import-file`, etc.) use `get_vm_context()` to access the VM as a
-   read-only context. Do not use VM context for I/O or execution.
+3. **Primitives reach the VM through `ctx`.** Operations that drive fiber
+   execution return SIG_RESUME and let the VM dispatch loop handle it.
+   Primitives that read VM state (`sys/args`, `ffi/native`, `import-file`, etc.)
+   reach it via `ctx.vm()`. Do not use `ctx.vm()` for I/O or interpreter
+   re-entry that the dispatch loop owns.
 
-4. **Symbol table pointers are set before use.** The `length` primitive needs
-   symbol table access to resolve symbol names. Call `set_length_symbol_table`
-   before use, `clear_length_symbol_table` after. Keywords no longer need this
-   — they carry their name directly via interned strings.
+4. **Symbol names resolve through the driving VM.** The `length` primitive
+   resolves symbol names via `ctx.vm().symbols()`. Keywords need no table —
+   they carry their name directly via interned strings.
 
 ## Modules
 
@@ -99,7 +121,7 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 | `fileio.rs` | `file/read` (`slurp`), `file/write` (`spit`), `file/append`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/mkdir`, `file/mkdir-all`, `file/mktempdir`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
 | `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
 | `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/path`, `port/seek`, `port/tell` |
-| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from` |
+| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
 | `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
 | `posix.rs` | `os/sig-send`, `os/sig-raise`, `os/sig-watch`, `os/sig-next`, `os/sig-close`, `os/sig-pending`, `os/sig-mask`, `os/sig-watching` — POSIX signal send/receive. Send/raise gated on `:os-signal` capability (`SIG_OS_SIGNAL`); receive primitives are async (yield `:io`). See `docs/posix-signals.md`. |
 | `kwarg.rs` | `extract_keyword_timeout` helper function |
@@ -257,8 +279,8 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 - `sys/args` — Returns user-provided command-line arguments as an immutable
   list of strings. Arguments are those that follow the source file (or `-` for
   stdin) in the process argv. Returns an empty list `()` if no args follow the
-  source file, or if running in REPL mode. Reads from `vm.user_args` via
-  `get_vm_context()`. Signal: `Signal::silent()`. Arity: `Exact(0)`.
+  source file, or if running in REPL mode. Reads `ctx.vm().user_args`.
+  Signal: `Signal::silent()`. Arity: `Exact(0)`.
   - Example: `elle script.lisp foo bar` → `sys/args` returns `("foo" "bar")`
   - Flags after source: `elle script.lisp -v foo` → `sys/args` returns `("-v" "foo")`
   - No trailing args: `elle script.lisp` → `sys/args` returns `()`
@@ -306,7 +328,7 @@ This allows both `(subprocess/wait proc)` (where `proc` is the result of `subpro
 **TCP primitives:**
 - `tcp/listen addr port` — synchronous, returns listener port. Binds to address:port with `SO_REUSEADDR`, listens with backlog 128.
 - `tcp/accept listener` or `tcp/accept listener :timeout ms` — yields `SIG_IO`, accepts incoming connection, returns stream port.
-- `tcp/connect addr port` or `tcp/connect addr port :timeout ms` — yields `SIG_IO`, connects to address:port, returns stream port.
+- `tcp/connect-ip ip port` or `tcp/connect-ip ip port :timeout ms` — yields `SIG_IO`, connects to a **parsed IP literal**:port, returns stream port. A hostname is rejected synchronously. `tcp/connect` (the hostname-accepting public API) is a stdlib wrapper that resolves via `sys/resolve` then calls this per address.
 - `tcp/shutdown port how` — yields `SIG_IO`, gracefully shuts down stream. `how` is keyword `:read`, `:write`, or `:read-write`.
 
 **UDP primitives:**
@@ -533,28 +555,3 @@ All 5 stream primitives now accept optional `:timeout ms` keyword argument:
 - `port/flush port` or `port/flush port :timeout ms`
 
 Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is extracted via `extract_keyword_timeout` and passed to `IoRequest::with_timeout()`.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~60 | Re-exports |
-| `registration.rs` | ~190 | `register_primitives`, `build_primitive_meta`, `cached_primitive_meta` |
-| `module_init.rs` | ~170 | `init_stdlib`, module initialization |
-| `introspection.rs` | ~384 | Function introspection predicates and metadata queries (`closure?`, `jit?`, `silent?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword`) |
-| `disassembly.rs` | ~416 | Bytecode/JIT disassembly and CFG extraction |
-| `arena.rs` | ~577 | Heap arena management primitives |
-| `debug.rs` | ~221 | Debug print, trace, memory usage |
-| `ffi.rs` | ~340 | FFI type resolution helpers and tests |
-| `loading.rs` | ~330 | FFI library loading, symbol lookup, signatures, callbacks |
-| `calling.rs` | ~95 | FFI function call dispatch |
-| `memory.rs` | ~530 | FFI memory management, typed access, type construction |
-| `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` |
-| `format.rs` | ~525 | `string/format` entry point, template parsing, value formatting, mode dispatch |
-| `formatspec.rs` | ~202 | `FormatSpec` type, `Align`, `FormatType`, `parse_format_spec`, `spec_type_char` |
-| `net.rs` | ~683 | TCP and UDP primitives, shared helpers, PRIMITIVES array, tests |
-| `unix.rs` | ~160 | Unix domain socket primitives |
-| `access.rs` | ~634 | Polymorphic `get`/`put` for all collection types |
-| `fiber_introspect.rs` | ~357 | Fiber introspection and management primitives, PRIMITIVES array |
-| `kwarg.rs` | ~100 | `extract_keyword_timeout` helper, tests |
-| (others) | varies | Individual primitive implementations |

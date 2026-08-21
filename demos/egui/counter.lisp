@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## examples/egui-counter.lisp — minimal egui counter app
 
 (def egui-plugin (import "plugin/egui"))

@@ -21,6 +21,7 @@
 //! variant; `from_value()` recursively validates sub-elements but always stores
 //! the original value, not a reconstructed copy.
 
+use crate::primitives::ctx::NativeCtx;
 use crate::value::heap::HeapTag;
 use crate::value::Value;
 use std::fmt;
@@ -185,20 +186,51 @@ impl TableKey {
         }
     }
 
-    /// Convert a TableKey back to a Value.
-    ///
-    /// This is the inverse of `from_value()`.
-    pub fn to_value(&self) -> Value {
+    /// Convert a TableKey back to a Value, born in the call's region
+    /// (`ctx`). This is the inverse of `from_value()`. String and array keys
+    /// allocate (through `ctx`); scalar/keyword/heap keys are immediates or
+    /// pass-throughs and need no region.
+    pub fn to_value(&self, ctx: &mut NativeCtx) -> Value {
         match self {
             TableKey::Nil => Value::NIL,
             TableKey::Bool(b) => Value::bool(*b),
             TableKey::Int(i) => Value::int(*i),
             TableKey::Symbol(sid) => Value::symbol(sid.0),
-            TableKey::String(s) => Value::string(s.as_str()),
+            TableKey::String(s) => ctx.string(s.as_str()),
             TableKey::Keyword(s) => Value::keyword(s.as_str()),
             TableKey::EmptyList => Value::EMPTY_LIST,
-            TableKey::Array(keys) => Value::array(keys.iter().map(|k| k.to_value()).collect()),
+            TableKey::Array(keys) => {
+                let items: Vec<Value> = keys.iter().map(|k| k.to_value(ctx)).collect();
+                ctx.array(items)
+            }
             TableKey::Heap(v) => *v,
+        }
+    }
+
+    /// Visit every heap `Value` this key holds — the cross-region references a
+    /// struct key contributes to its owning struct's region.
+    ///
+    /// A `Heap` key stores a `Value` pointing into the region the key value was
+    /// born in; an `Array` key can nest `Heap` keys among its elements. Scalar
+    /// keys (nil/bool/int/symbol/string/keyword/empty-list) carry no region
+    /// reference. The region scan (`find_object_cross_refs`) walks these so a
+    /// struct increfs and records the edge to each heap key's region at alloc,
+    /// balanced by the free-time cascade — the same accounting struct VALUES get.
+    pub fn for_each_heap_value(&self, f: &mut impl FnMut(&Value)) {
+        match self {
+            TableKey::Heap(v) => f(v),
+            TableKey::Array(keys) => {
+                for k in keys {
+                    k.for_each_heap_value(f);
+                }
+            }
+            TableKey::Nil
+            | TableKey::Bool(_)
+            | TableKey::Int(_)
+            | TableKey::Symbol(_)
+            | TableKey::String(_)
+            | TableKey::Keyword(_)
+            | TableKey::EmptyList => {}
         }
     }
 
@@ -243,11 +275,11 @@ impl std::hash::Hash for TableKey {
             TableKey::Keyword(s) => s.hash(state),
             TableKey::Array(keys) => keys.hash(state),
             // Delegate to Value's Hash. For Fiber/ThreadHandle/External
-            // that encodes a stable Rc/Arc-backed identity rather than
-            // the slot pointer, so outbox relocation on fiber yield
-            // doesn't turn the same fiber into a different map key.
-            // For cons/set/struct/bytes/empty-list, gives structural
-            // hashing based on the value's content.
+            // that hashes the backing Rc/Arc rather than the slot pointer,
+            // so a `with-traits` wrapper is the same map key as the value
+            // it wraps (see `repr/eq.rs`, "Wrapper variants take their
+            // identity from the handle"). For cons/set/struct/bytes/
+            // empty-list, gives structural hashing based on the content.
             TableKey::Heap(v) => v.hash(state),
         }
     }
@@ -309,64 +341,64 @@ impl Ord for TableKey {
     }
 }
 
+/// Render a `TableKey`, optionally resolving a symbol key's name through
+/// `symbols` — the shared body for `Display` (`debug == false`) and `Debug`
+/// (`debug == true`), and the entry `Value`'s struct rendering threads its table
+/// through (docs/impl/region/ctx.md § "Symbols through the ctx"). The two modes
+/// diverge only in the symbol arm (Display prints the raw `SymbolId`; Debug
+/// resolves a name, falling back to `'#<sym:id>` with no table) and in the nested
+/// recursion of array/heap keys (which follows the outer mode).
+pub(crate) fn fmt_table_key(
+    key: &TableKey,
+    symbols: Option<&crate::symbol::SymbolTable>,
+    debug: bool,
+    f: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    match key {
+        TableKey::Nil => write!(f, "nil"),
+        TableKey::Bool(b) => write!(f, "{}", b),
+        TableKey::Int(i) => write!(f, "{}", i),
+        TableKey::Symbol(id) => {
+            if debug {
+                match symbols.and_then(|s| s.name(*id)) {
+                    Some(name) => write!(f, "'{}", name),
+                    None => write!(f, "'#<sym:{}>", id.0),
+                }
+            } else {
+                write!(f, "{:?}", id)
+            }
+        }
+        TableKey::String(s) => write!(f, "\"{}\"", s),
+        TableKey::Keyword(s) => write!(f, ":{}", s),
+        TableKey::EmptyList => write!(f, "()"),
+        TableKey::Array(keys) => {
+            write!(f, "[")?;
+            for (i, k) in keys.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ")?;
+                }
+                fmt_table_key(k, symbols, debug, f)?;
+            }
+            write!(f, "]")
+        }
+        TableKey::Heap(v) => crate::value::display::fmt_value(v, symbols, debug, f),
+    }
+}
+
 impl fmt::Display for TableKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TableKey::Nil => write!(f, "nil"),
-            TableKey::Bool(b) => write!(f, "{}", b),
-            TableKey::Int(i) => write!(f, "{}", i),
-            TableKey::Symbol(id) => write!(f, "{:?}", id),
-            TableKey::String(s) => write!(f, "\"{}\"", s),
-            TableKey::Keyword(s) => write!(f, ":{}", s),
-            TableKey::EmptyList => write!(f, "()"),
-            TableKey::Array(keys) => {
-                write!(f, "[")?;
-                for (i, k) in keys.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", k)?;
-                }
-                write!(f, "]")
-            }
-            TableKey::Heap(v) => write!(f, "{}", v),
-        }
+        fmt_table_key(self, None, false, f)
     }
 }
 
 impl fmt::Debug for TableKey {
     /// Machine-readable representation of table keys.
-    /// Symbols: 'name (with opening quote only)
+    /// Symbols: 'name (with opening quote only); `'#<sym:id>` with no table.
     /// Strings: "value" (with quotes)
     /// Keywords: :name
     /// Others: same as Display
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TableKey::Nil => write!(f, "nil"),
-            TableKey::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
-            TableKey::Int(i) => write!(f, "{}", i),
-            TableKey::Symbol(id) => {
-                if let Some(name) = crate::context::resolve_symbol_name(id.0) {
-                    write!(f, "'{}", name)
-                } else {
-                    write!(f, "'#<sym:{}>", id.0)
-                }
-            }
-            TableKey::String(s) => write!(f, "\"{}\"", s),
-            TableKey::Keyword(s) => write!(f, ":{}", s),
-            TableKey::EmptyList => write!(f, "()"),
-            TableKey::Array(keys) => {
-                write!(f, "[")?;
-                for (i, k) in keys.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{:?}", k)?;
-                }
-                write!(f, "]")
-            }
-            TableKey::Heap(v) => write!(f, "{:?}", v),
-        }
+        fmt_table_key(self, None, true, f)
     }
 }
 
@@ -425,44 +457,22 @@ pub fn sorted_struct_remove(
 /// - (SIG_YIELD, value) → store in fiber.signal, suspend
 /// - (SIG_RESUME, fiber_value) → VM does fiber swap
 ///
-/// No primitive has VM access. Operations that formerly needed the VM
-/// now emit signals that the VM dispatch loop handles.
-pub type PrimFn = fn(&[Value]) -> (crate::value::fiber::SignalBits, Value);
+/// Primitives reach the VM through `ctx.vm()` on their `&mut NativeCtx`.
+/// Operations that the primitive cannot perform directly (fiber swaps,
+/// resumption) are requested by emitting a signal that the VM dispatch loop
+/// handles.
+///
+/// The leading `&mut NativeCtx` is the allocation capability — the call's
+/// own fresh result region plus heap access (docs/impl/region/ctx.md). A
+/// primitive cannot allocate without it, and only into its own call's region.
+pub type PrimFn = fn(
+    &mut crate::primitives::ctx::NativeCtx<'_>,
+    &[Value],
+) -> (crate::value::fiber::SignalBits, Value);
 
 /// A reference to a static primitive definition. Stored in HeapObject::NativeFn
 /// so the VM can access signal metadata at call time for capability enforcement.
 pub type NativeFn = &'static crate::primitives::def::PrimitiveDef;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_arity_matches() {
-        assert!(Arity::Exact(2).matches(2));
-        assert!(!Arity::Exact(2).matches(1));
-        assert!(!Arity::Exact(2).matches(3));
-
-        assert!(Arity::AtLeast(2).matches(2));
-        assert!(Arity::AtLeast(2).matches(3));
-        assert!(!Arity::AtLeast(2).matches(1));
-
-        assert!(Arity::Range(1, 3).matches(1));
-        assert!(Arity::Range(1, 3).matches(2));
-        assert!(Arity::Range(1, 3).matches(3));
-        assert!(!Arity::Range(1, 3).matches(0));
-        assert!(!Arity::Range(1, 3).matches(4));
-    }
-
-    #[test]
-    fn test_arity_display() {
-        assert_eq!(format!("{}", Arity::Exact(2)), "2");
-        assert_eq!(format!("{}", Arity::AtLeast(1)), "1+");
-        assert_eq!(format!("{}", Arity::Range(1, 3)), "1-3");
-    }
-
-    #[test]
-    fn test_symbol_id_display() {
-        assert_eq!(format!("{}", SymbolId(42)), "Symbol(42)");
-    }
-}
+mod tests;

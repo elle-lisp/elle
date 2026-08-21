@@ -32,6 +32,53 @@ Does NOT:
 | `Lowerer` | HIR → LIR |
 | `ScopeStats` | Compile-time scope allocation statistics |
 | `Emitter` | LIR → (Bytecode, yield_points, call_sites) |
+| `for_each_def` / `for_each_use` / `for_each_terminator_use` | The registers an instruction or terminator writes and reads |
+| `testkit::LirFixture` | Builds a `LirFunction` by hand, for tests (`#[cfg(test)]`) |
+
+## Register defs and uses
+
+`for_each_def`, `for_each_use` and `for_each_terminator_use` (`types/regs.rs`)
+report the registers an instruction writes and reads. They are the single
+answer to that question for the whole crate: the WASM register allocator and
+its liveness analysis both walk them, and so does the test fixture below when
+it infers a register count. A new `LirInstr` variant must be added to all
+three — the matches are exhaustive, so the compiler names the omission.
+
+## Building LIR in tests
+
+`testkit::LirFixture` (`src/lir/testkit.rs`, `#[cfg(test)]`) assembles a
+`LirFunction` directly, for the unit tests of every consumer of LIR: the
+emitter, the JIT, the WASM backend, the MLIR and SPIR-V tiers, and the
+cross-thread send path. It mirrors `hir::testkit` (`src/hir/testkit.rs`),
+which does the same job for the front-end passes.
+
+```rust
+let func = LirFixture::new(Arity::Exact(1))
+    .name("abs")
+    .signal(Signal::errors())
+    .block(0, vec![LirInstr::LoadCaptureRaw { dst: Reg(0), index: 0 }],
+           Terminator::Return(Reg(0)))
+    .build();
+```
+
+The rules the fixture holds:
+
+1. **`block` appends.** Blocks land in call order, and the first one added
+   sets `entry`.
+2. **Every span is synthetic.** The fixture wraps each `LirInstr` in a
+   `SpannedInstr` and the terminator in a `SpannedTerminator`, both with
+   `Span::synthetic()`. A test that needs real spans builds its blocks itself.
+3. **`build` infers `num_regs`**: one past the highest register id the blocks
+   mention — a def, a use, a terminator use, or a `TailCall`'s result register.
+   The count is therefore a fact about the instructions rather than a constant
+   to maintain by hand.
+4. **`num_regs` overrides the inference**, for a test that wants a count the
+   instructions do not justify.
+
+The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
+`num_params`, `closure_id`, `yield_points` — write the like-named field.
+Fields with no setter are public on the built `LirFunction`: set them on the
+result, as the JIT's arity and `vararg_kind` tests do.
 
 ## Data flow
 
@@ -42,7 +89,8 @@ HIR + spans
 Lowerer (&BindingArena)
     ├─► seed immutable_values for constant bindings (emit ValueConst instead of LoadLocal)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
-    ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture())
+    ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture();
+    │   top level, plus compiled-cell letrec bindings in-lambda — invariant 6)
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     └─► propagate HIR spans to SpannedInstr
@@ -110,14 +158,23 @@ stored in `Closure.location_map` and used by the VM for error reporting.
      parameter i needs lbox wrapping at call time. With immutable-by-default
      params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
-6. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means
+6. **`capture_locals_mask` is set for locals that need lboxes.** Slot i set means
      locally-defined variable i (0-indexed from the first local after params)
      needs lbox wrapping because it's captured by a nested closure or mutated
      via `assign`. With immutable-by-default let bindings, only `@`-prefixed
-     bindings can be mutated, so this mask is typically sparser. The JIT uses
-     this to skip `CaptureCell` heap allocation for non-captured, non-mutated
-     `let` bindings. The VM interpreter does not use this mask (it lbox-wraps
-     all locals unconditionally). Both masks are limited to 64 entries (`u64`).
+     bindings can be mutated, so this mask is typically sparse. The VM env
+     builder, the JIT prologue, and the WASM env builders all consult it to skip
+     `CaptureCell` allocation for non-captured locals. It is a `CaptureMask`
+     (`src/value/capturemask.rs`), **unbounded in width**: a local at any index
+     is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL
+     env slot, never a dead, leaked cell. (`capture_params_mask` stays a `u64`;
+     its path has no `>=64` fallback and functions never approach 64 params.)
+     One captured shape is deliberately NOT mask-set: a `letrec` binding whose
+     forward cell is COMPILED (`BindingInner::letrec_compiled_cell` — immutable,
+     never mutated, lambda-initialized, in every position including inside a
+     lambda). Its `MakeCaptureCell` value lives in a plain stack slot
+     (`allocate_slot_routed`), giving the cell a static region slot the
+     closure-cycle merge can collapse; the env must not mint a shadow cell.
 
 7. **Emit is a block terminator, not an instruction.** `Terminator::Emit { signal: SignalBits, value: Reg, resume_label: Label }`
     splits the block: the current block ends with emit, and a new resume block
@@ -139,6 +196,43 @@ stored in `Closure.location_map` and used by the VM for error reporting.
      `Emitter.current_func_may_suspend` gates call site recording. For
      non-suspending functions, `call_sites` is empty. This avoids overhead
      for silent functions that can never yield.
+
+11. **A block's first emitted predecessor fixes its operand depth.** Every
+     other edge into that block must arrive at the same depth. See "Merge
+     operand depth" below.
+
+## Merge operand depth
+
+The VM addresses local `n` as `frame_base + n` on the operand stack, so the
+entry block reserves `num_locals` positions and operands stack above them
+(`Emitter::emit_block`). A path that pops one operand too many falls through
+that floor and destroys a live local; the damage shows up much later, as a
+`LoadLocal` of a high slot indexing past the end of the stack.
+
+The emitter simulates the operand stack per block. A block inherits its
+starting simulation from the first predecessor that reaches it
+(`yield_stack_state`, first writer wins), because the simulation cannot
+reconcile two different incoming shapes. That makes one rule mandatory:
+
+> **The first predecessor emitted fixes the merge block's operand depth, and
+> every later edge into that block must leave exactly that depth.**
+
+`pop_trailing_orphans_to` is the only tool the emitter has for meeting the rule.
+An orphan is a stack cell that no register's canonical position names — the
+residue `ensure_on_top` leaves when it copies a value up with `DupN` and the
+copy is then consumed. Orphans are dead, so popping them is free; popping
+them is also what keeps a loop body from growing the stack by one cell per
+iteration.
+
+But the pops are per-edge, and only `Terminator::Jump` performs them, so they
+must be **bounded by the target's already-fixed depth**. Popping past it
+splits the paths: the branch edge into the merge leaves the orphan, the jump
+edge removes it, and the merge's successors — which inherited the branch's
+simulation — pop it a second time on the path that already did. Two pops, one
+value, and the second one lands in the reserved local region. This is why
+`Terminator::Jump` trims only down to the target's recorded depth
+(`yield_stack_state`, or `block_entry_depth` for a back edge into a block
+already emitted) rather than to the first live value.
 
 ## Key instructions
 
@@ -165,8 +259,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
-| `RegionEnter` | (none) | Push scope mark on FiberHeap (effective for all fibers including root) |
-| `RegionExit` | (none) | Pop scope mark and release scoped objects (effective for all fibers including root) |
+| `IncrefRegion` | (none) | Increment a region's reference count (cross-region reference taken) |
+| `DecrefRegion` | (none) | Decrement a region's reference count; free pages when RC hits 0 (sole region-demise opcode) |
 
 ## Emit and Call Site Metadata
 
@@ -190,61 +284,29 @@ This matches the interpreter's stack state when yield propagates through a call.
 
 ## Allocation regions
 
-`RegionEnter` and `RegionExit` are no-register, no-stack-effect instructions
-that push/pop scope marks on the current FiberHeap. In the VM, they call
-`region_enter()`/`region_exit()`, which are effective for all fibers including
-root (after issue-525, the root fiber always has a FiberHeap installed).
+`IncrefRegion` and `DecrefRegion` are the only region-lifecycle
+bytecodes. The lowerer emits them based on output from the region
+solver (`src/hir/region/infer.rs`), not a local escape analysis pass.
+`DecrefRegion` is the sole region-demise opcode — there is no
+`FreeRegion`.
 
-The lowerer emits these instructions when escape analysis (in `lower/escape.rs`)
-determines the scope's allocations are safe to release at scope exit.
-Function bodies never get region instructions.
+The solver produces `RegionInfo` containing `alloc_region` (which
+region each allocation site is born into) and, per region,
+`RegionData { free_at: HirId, ... }` — the program point at which the
+compiler emits the region's `DecrefRegion`. Plus `cross_region_refs`
+for the cross-region edges that drive `IncrefRegion` emission.
 
-**Escape analysis conditions (all must hold):**
-1. No binding is captured by a nested lambda
-2. Body cannot suspend (`may_suspend()`)
-3. Body result is provably a immediate (`result_is_safe`)
-4. Body contains no dangerous `set` to bindings outside the scope
-   (`body_contains_dangerous_outward_set`) — Tier 8: an outward set is
-   dangerous only if the assigned value is not provably immediate.
-   This check covers both `Assign` and `SetCell` (the functionalization
-   pass converts mutable outward bindings to cell operations).
-5. Body contains no escaping `break` (`body_contains_escaping_break`) —
-   Tier 7: breaks targeting blocks inside the scope are safe (they don't
-   exit the scope's region); only breaks targeting outer blocks are dangerous
+At lowering time the lowerer reverse-indexes `region_data` to ask
+"which regions demise at this HirId?" and emits one `DecrefRegion(rid)`
+per region in that set after lowering the HIR node. Region demise is
+keyed per-`HirId` by the solver's `free_at` point, not by lexical
+scope.
 
-For `let`/`letrec`: all six conditions. `letrec` delegates to `let`.
-For `block`: conditions 1-4 plus all break values targeting this block are
-safe immediates (Tier 6) and no escaping breaks (Tier 7).
-
-`result_is_safe` takes `scope_bindings: &[(Binding, &Hir)]` — the
-bindings introduced by the let/letrec being analyzed. It returns
-`true` for: literals, `Var` referencing an outer binding (not in
-scope set), `Var` referencing a scope binding whose init is provably
-immediate (Tier 3), `if`/`begin`/`cond`/`and`/`or` where all result
-positions are recursively safe, calls to intrinsics (`BinOp`, `CmpOp`,
-`UnaryOp`) with correct arity (including unary `-` as `Neg`, Tier 2),
-calls to whitelisted immediate-returning primitives (Tier 1),
-nested `Let`/`Letrec`/`Block` where the inner result is recursively
-safe (Tier 4), `Match` where all arm bodies are recursively safe
-(Tier 5), and `While` which always returns nil (Tier 6). For nested
-let/letrec, scope_bindings is extended with the inner let's bindings
-before recursing (inner bindings are allocated within the outer
-scope's region). For blocks, `scope_bindings` is unchanged (blocks
-introduce no bindings).
-
-**Tier 1 primitive whitelist** (in `intrinsics.rs`): `length`, `empty?`,
-`abs`, `floor`, `ceil`, `round`, `type`, `type-of`, and all type
-predicates (`nil?`, `pair?`, `string?`, `number?`, `array?`, etc.).
-These are primitives that always return int, float, bool, or keyword
-on success. Full list in `IMMEDIATE_PRIMITIVES` const.
-
-**Known limitation (E5/E6):** If the body passes a scope-allocated
-value to a function that stores it externally, the analysis cannot
-detect this. Requires interprocedural analysis. Accepted for Tier 0.
-
-`break` emits compensating `RegionExit` instructions for each region entered
-between the break site and the target block. The lowerer tracks `region_depth`
-and each `BlockLowerContext` records `region_depth_at_entry`.
+`break` emits compensating `DecrefRegion` instructions for each
+region whose `free_at` lies between the break site and the target
+block. The `BlockLowerContext` records the relevant `free_at` set at
+entry so the break path can fire the same decrefs that a fall-through
+exit would have.
 
 **Compile-time scope stats** (`ScopeStats`): The lowerer counts how many
 scopes were analyzed, how many qualified for scope allocation, and the
@@ -261,6 +323,14 @@ suspends execution and resumes in a new block. The lowerer:
 1. Emits `Terminator::Emit` to end the current block
 2. Creates a new block at `resume_label`
 3. Emits `LoadResumeValue` as the first instruction of the resume block
+
+A suspending emit whose payload the body releases nowhere
+(`RegionInfo::borrowed_emit_payloads`) wraps that with the park's borrow mint: an
+`IncrefValueRegion` before the terminator and a `DecrefValueRegion` first in the
+resume block, with a copy parked in a local slot of its own since the value
+register is consumed by the `Emit`. That gives a fiber body one reference of every
+value it yields, which is what a discarded fiber's discharge releases
+(docs/impl/region/owner.md § "Park/unpark symmetry").
 
 The emitter preserves stack state across the emit boundary via
 `yield_stack_state`. This ensures intermediate values computed before emit
@@ -289,25 +359,6 @@ registers and calls the yield runtime helper.
 3. Start unreachable dead-code block
 
 No new bytecode instructions — break compiles to existing Move + Jump.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | 20 | Re-exports |
-| `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
-| `intrinsics.rs` | ~120 | `IntrinsicOp` enum, intrinsics map, `IMMEDIATE_PRIMITIVES` whitelist, `build_immediate_primitives()` |
-| `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
-| `lower/escape.rs` | ~710 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set` (handles `Assign` and `SetCell`), `body_contains_escaping_break`, `all_break_values_safe`, `all_breaks_have_safe_values` |
-| `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
-| `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
-| `lower/lambda.rs` | ~250 | fn lowering, closure capture, lbox wrapping |
-| `lower/control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
-| `lower/pattern.rs` | ~1135 | Pattern matching lowering: decision tree walking, constructor tests |
-| `lower/access.rs` | ~85 | Access path loading: navigate cons/array/struct to extract matched values |
-| `emit/mod.rs` | ~820 | `Emitter`, LIR→Bytecode instruction encoding |
-| `emit/stack.rs` | ~85 | Stack simulation helpers: `push_reg`, `pop`, `ensure_on_top`, `ensure_binary_on_top` |
-
 ## Constants
 
 `LirConst` represents compile-time constants. Note: `LirConst::Nil` and

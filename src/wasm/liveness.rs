@@ -5,28 +5,35 @@
 //! reduces code size from O(total_regs * suspend_points) to
 //! O(live_regs * suspend_points).
 
+use crate::lir::{for_each_def, for_each_terminator_use, for_each_use};
 use crate::lir::{Label, LirFunction, LirInstr, Reg, Terminator};
-use crate::wasm::regalloc::{for_each_def, for_each_terminator_use, for_each_use};
 use std::collections::{HashMap, HashSet};
 
 /// Per-suspend-point live set, keyed by `(block_idx, instr_idx)`.
-/// Contains the set of physical register slots that are live at that point.
-/// A special key `(block_idx, usize::MAX)` is used for Emit terminators.
+/// Contains the set of live slots at that point, in a **combined slot space**:
+/// register slots are `[0, num_phys_slots)`, stack-local slots are stored as
+/// `num_phys_slots + local_slot`. A special key `(block_idx, usize::MAX)` is
+/// used for Emit terminators.
 pub type SpillLiveMap = HashMap<(usize, usize), HashSet<u32>>;
 
-/// Compute the live physical slots at each suspend point in a function.
+/// Compute the live slots at each suspend point in a function.
 ///
 /// Works on the post-split, post-regalloc function. The `reg_to_slot` map
-/// translates virtual LIR registers to physical WASM local slots.
+/// translates virtual LIR registers to physical WASM register slots.
 ///
-/// Stack locals (addressed by StoreLocal/LoadLocal) are always considered
-/// live at every suspend point, since they represent mutable bindings that
-/// may be read after resume. Only register slots benefit from the analysis.
+/// Both register slots and stack-local slots (addressed by
+/// LoadLocal/StoreLocal/StoreLocalRefcounted) are analyzed. Locals are encoded
+/// in the returned sets as `num_phys_slots + local_slot` so a single set
+/// describes everything that must be spilled at a suspend point. A local that
+/// holds no value needed after the suspend (dead) is not spilled — the emitter
+/// spills exactly the live set, keeping spill/restore code linear in the live
+/// state rather than in `suspend_points × total_slots`.
 pub fn compute_spill_liveness(
     func: &LirFunction,
     label_to_idx: &HashMap<Label, usize>,
     reg_to_slot: &HashMap<Reg, u32>,
     num_phys_slots: u32,
+    num_stack_locals: u32,
 ) -> SpillLiveMap {
     let n = func.blocks.len();
     if n == 0 {
@@ -99,6 +106,35 @@ pub fn compute_spill_liveness(
                     }
                 }
             });
+        }
+
+        // Stack-local gen/kill: a forward pass, because a local can be read and
+        // then reassigned within the same block (`(assign v (f v))`), which the
+        // register reverse pass can't express (registers are SSA, locals are
+        // not). Combined-slot encoding: local `slot` → `num_phys_slots + slot`.
+        // LoadLocal reads; StoreLocal overwrites; StoreLocalRefcounted reads the
+        // old value (to decref it) *then* overwrites — so it both uses and defs.
+        let mut local_defined = std::collections::HashSet::new();
+        for si in block.instructions.iter() {
+            let (use_slot, def_slot) = match &si.instr {
+                LirInstr::LoadLocal { slot, .. } => (Some(*slot), None),
+                LirInstr::StoreLocal { slot, .. } => (None, Some(*slot)),
+                LirInstr::StoreLocalRefcounted { slot, .. } => (Some(*slot), Some(*slot)),
+                _ => (None, None),
+            };
+            if let Some(slot) = use_slot {
+                let s = num_phys_slots + slot as u32;
+                if (slot as u32) < num_stack_locals && !local_defined.contains(&s) {
+                    block_gen.insert(s);
+                }
+            }
+            if let Some(slot) = def_slot {
+                let s = num_phys_slots + slot as u32;
+                if (slot as u32) < num_stack_locals {
+                    local_defined.insert(s);
+                    block_kill.insert(s);
+                }
+            }
         }
 
         gen[bi] = block_gen;

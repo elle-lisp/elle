@@ -15,7 +15,15 @@ impl fmt::Display for SyntaxKind {
             SyntaxKind::Nil => write!(f, "nil"),
             SyntaxKind::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             SyntaxKind::Int(n) => write!(f, "{}", n),
-            SyntaxKind::Float(n) => write!(f, "{}", n),
+            // Debug (`{:?}`), not Display (`{}`): this text is re-read by the
+            // reader (`splice_includes` round-trips each user form through this
+            // impl), and the reader only produces a `Float` when the token
+            // carries a '.' or exponent. `{}` on an integral f64 drops the
+            // fraction (`7.0` → "7"), which re-reads as `Int(7)` — silently
+            // retyping the literal. `{:?}` emits the shortest round-trippable
+            // form ("7.0", "1.5", "1e21"), all of which the reader lexes as
+            // floats. Pinned by `test_display_float_integral_round_trips`.
+            SyntaxKind::Float(n) => write!(f, "{:?}", n),
             SyntaxKind::Symbol(s) => write!(f, "{}", s),
             SyntaxKind::Keyword(s) => write!(f, ":{}", s),
             SyntaxKind::String(s) => write!(f, "\"{}\"", s.escape_default()),

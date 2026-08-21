@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/compress.lisp — Gzip, zlib, deflate, and zstd via FFI
 ##
 ## Usage:

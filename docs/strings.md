@@ -94,6 +94,46 @@ produce empty strings in the result. The delimiter cannot be empty.
 (string :foo)                      # => "foo" (no colon)
 ```
 
+## Unicode version
+
+Grapheme cluster boundaries come from UAX #29. The Unicode Consortium
+revises those rules between Unicode versions. Each elle build vendors one
+or more table *generations*; every VM selects one generation at
+construction and keeps it for its whole life. Mid-run switching does not
+exist: text ports buffer bytes split at cluster boundaries, and changing
+tables mid-stream would corrupt that framing.
+
+`unicode!` is the compile-time surface. With no arguments, it is a query
+that folds to the selected generation's version. With arguments, it is a
+declaration checked by the compiler; like the other `!` forms, it emits
+no runtime code and evaluates to `nil`.
+
+```lisp
+(unicode!)                         # => [17 0 0]
+(unicode! 17)                      # accepts any 17.x.x, evaluates to nil
+(unicode! 17 0)                    # accepts any 17.0.x
+(vm/config :unicode)               # => [17 0 0] (runtime introspection)
+```
+
+Put the declaration at the top of a file whose logic depends on exact
+cluster boundaries: emoji ZWJ sequences, Indic conjuncts, or line framing
+over text ports.
+
+The generation is selected before the VM exists, by three agreeing
+surfaces: the `(unicode! …)` declaration in the main file, the
+`--unicode=MAJ[.MIN[.PATCH]]` CLI flag, and the embedding constructor
+`Runtime::with_unicode`. Absent all three, the newest vendored generation
+is used. The surfaces must agree; a conflict is a startup error. After
+selection, every `(unicode! …)` anywhere in the program — imports, `eval`,
+the REPL — is an assertion against the locked generation, so a program
+cannot mix cluster semantics.
+
+Requesting a generation the build does not vendor is a compile error that
+lists the vendored versions. Declaring a vendored generation actually
+selects it: under `--unicode=16.0` (or a `(unicode! 16)` main file),
+`length`, `get`, and `slice` follow the Unicode 16.0 tables, so source
+keeps its cluster semantics when newer builds change the default.
+
 ---
 
 ## See also

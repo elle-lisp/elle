@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/process.lisp — Erlang-inspired process module
 ##
 ## Loaded via: (def process ((import "std/process")))
@@ -101,10 +101,7 @@
         join-waiting @{}  # target-fiber → @[pid ...] — who's joining
         select-sets @{}
         futex-parked @{}  # futex-key → @[{:fiber f :pid pid :val cell :expected E} ...]
-        @fuel-preempted @[]]  # PIDs that yielded SIG_FUEL this tick
-    # Shared spawn function: sub-fibers created by ev/spawn inside any
-    # process or sub-fiber register with this scheduler, not the outer one.
-    # The :pid is set to 0 initially; updated per-process when needed.
+        @fuel-preempted @[]]
     (def @current-spawn-pid @[0])
     (def @sched-spawn-fn
       (fn [fiber]
@@ -343,25 +340,44 @@
             (del join-waiting fiber)
             (let [pair [(= status :ok) (fiber/value fiber)]]
               (each w in waiters
-                (if (and (not (integer? w)) (get w :is-sub))
-                  # Sub-fiber waiter: resume the fiber directly
+                (if (and (not (integer? w)) (get w :is-sub))  # Sub-fiber waiter: resume the fiber directly
                   (when (= (fiber/status w:fiber) :paused)
                     (fiber/resume w:fiber pair)
-                    (handle-sub-fiber-after-resume w:fiber w:pid))
-                  # Process waiter: schedule the process
+                    (handle-sub-fiber-after-resume w:fiber w:pid))  # Process waiter: schedule the process
                   (when (alive? w)
                     (put (proc-get w) :resume pair)
                     (push ready w)))))))
 
-        # Wake select waiters
-        (each [pid entry] in (pairs select-sets)
+        # Wake select waiters. Process entries are keyed by pid; sub-fiber
+        # entries (:is-sub) by the waiting fiber, which is resumed directly.
+        (each [key entry] in (pairs select-sets)
           (when (not (get entry :woken))
             (when (not (nil? (find (fn [f] (= f fiber)) (get entry :candidates))))
               (put entry :woken true)
-              (del select-sets pid)
-              (when (alive? pid)
-                (put (proc-get pid) :resume fiber)
-                (push ready pid)))))))
+              (del select-sets key)
+              (if (get entry :is-sub)
+                (when (= (fiber/status entry:fiber) :paused)
+                  (fiber/resume entry:fiber fiber)
+                  (handle-sub-fiber-after-resume entry:fiber entry:pid))
+                (when (alive? key)
+                  (put (proc-get key) :resume fiber)
+                  (push ready key))))))))
+
+    # Queue a join/select target so it gets a first run. Only a :new fiber
+    # needs this — one built by hand and never spawned, which no queue holds.
+    # A :paused fiber is parked on I/O, a futex, or a wait the scheduler
+    # already tracks, and resuming it out of turn hands its park a nil
+    # result: a timer parked in ev/sleep would complete instantly, and every
+    # ev/timeout in a process would report its deadline at once
+    # (tests/elle/process-select.lisp). A fiber already queued would be
+    # resumed a second time the same way.
+    (def @pump-target
+      (fn [target pid]
+        (when (= (fiber/status target) :new)
+          (def @queued false)
+          (each e in (->list sub-runnable)
+            (when (= (get e :fiber) target) (assign queued true)))
+          (unless queued (push sub-runnable @{:fiber target :pid pid})))))
 
     (def @handle-sub-fiber-after-resume nil)
     (assign
@@ -434,6 +450,7 @@
                             (if (> (length keep) 0)
                               (put futex-parked key keep)
                               (del futex-parked key))))
+
                         ## Resume the notifying sub-fiber (if still alive)
                         (when (= (fiber/status fiber) :paused)
                           (fiber/resume fiber woken)
@@ -464,8 +481,7 @@
                                         w))]
                                   # Store sub-fiber join entry — use negative PID to distinguish
                                   (push ws @{:fiber fiber :pid pid :is-sub true})
-                                  (when (nil? (get sub-completed target))
-                                    (push sub-runnable @{:fiber target :pid pid}))))))))
+                                  (pump-target target pid)))))))
                     :abort
                       (let [target (get request :fiber)]
                         (let [comp (get sub-completed target)]
@@ -473,8 +489,7 @@
                             (when (= (fiber/status fiber) :paused)
                               (fiber/resume fiber nil)
                               (handle-sub-fiber-after-resume fiber pid))
-                            (begin
-                              # Cancel any pending I/O for the target sub-fiber
+                            (begin  # Cancel any pending I/O for the target sub-fiber
                               (def @to-cancel @[])
                               (each [id entry] in (pairs io-pending)
                                 (when (and (get entry :fiber)
@@ -488,8 +503,39 @@
                               (when (= (fiber/status fiber) :paused)
                                 (fiber/resume fiber nil)
                                 (handle-sub-fiber-after-resume fiber pid))))))
-                    ## Unknown wait op — re-queue
-                    (push sub-runnable @{:fiber fiber :pid pid})))
+                    :select
+                      (let [candidates (get request :fibers)
+                            done (find (fn [cf]
+                                         (or (not (nil? (get sub-completed cf)))
+                                         (= (fiber/status cf) :dead)
+                                         (= (fiber/status cf) :error)))
+                                       candidates)]
+                        (if (not (nil? done))
+                          (when (= (fiber/status fiber) :paused)
+                            (fiber/resume fiber done)
+                            (handle-sub-fiber-after-resume fiber pid))
+                          (begin
+                            ## Keyed by the waiting fiber; handle-wait's
+                            ## process entries are keyed by pid. The wake
+                            ## in complete-sub-fiber branches on :is-sub.
+                            (put select-sets fiber
+                                 @{:candidates candidates
+                                   :woken false
+                                   :is-sub true
+                                   :fiber fiber
+                                   :pid pid})
+                            (each cf in candidates
+                              (pump-target cf pid)))))
+                    ## Unknown wait op — abort loudly. A silent re-queue
+                    ## resumes the emitting fiber with nil, which it reads
+                    ## as its wait's result; the corruption then surfaces
+                    ## far from this dispatch, if it surfaces at all.
+                    (begin
+                      (protect (fiber/abort fiber
+                               {:error :protocol-error
+                                :message (concat "unknown :wait op from sub-fiber: "
+                                (string op))}))
+                      (handle-sub-fiber-after-resume fiber pid))))
                 (push sub-runnable @{:fiber fiber :pid pid}))))))
 
     # Drain sub-fiber runnable queue
@@ -536,9 +582,8 @@
                                    (let [w @[]]
                                      (put join-waiting target w)
                                      w))]
-                        (push ws pid)  # Ensure the target fiber gets pumped
-                        (when (nil? (get sub-completed target))
-                          (push sub-runnable @{:fiber target :pid pid}))))))))
+                        (push ws pid)  # Give a hand-built :new target its first run
+                        (pump-target target pid)))))))
           :select
             (let [candidates (get request :fibers)]
               (let [done (find (fn [f]
@@ -550,10 +595,9 @@
                     (put (proc-get pid) :resume done)
                     (push ready pid))
                   (begin
-                    (put select-sets pid @{:candidates candidates :woken false})  # Ensure all candidates get pumped
+                    (put select-sets pid @{:candidates candidates :woken false})  # Give hand-built :new candidates their first run
                     (each f in candidates
-                      (when (nil? (get sub-completed f))
-                        (push sub-runnable @{:fiber f :pid pid})))))))
+                      (pump-target f pid))))))
           :abort
             (let [target (get request :fiber)]
               (let [comp (get sub-completed target)]
@@ -561,8 +605,7 @@
                   (begin
                     (put (proc-get pid) :resume nil)
                     (push ready pid))
-                  (begin
-                    # Cancel any pending I/O for the target sub-fiber
+                  (begin  # Cancel any pending I/O for the target sub-fiber
                     (def @to-cancel-abort @[])
                     (each [id entry] in (pairs io-pending)
                       (when (and (get entry :fiber)
@@ -967,7 +1010,9 @@
           (push vs @{:fiber target :pid 0})
           (each w in (->list waiters)
             (when (and (not (integer? w)) (get w :fiber)) (push vs w))))
-        (each [_pid e] in (pairs select-sets)
+        (each [_key e] in (pairs select-sets)
+          (when (get e :is-sub)
+            (push vs @{:fiber (get e :fiber) :pid (get e :pid)}))
           (each f in (get e :candidates)
             (push vs @{:fiber f :pid 0})))
         vs))
@@ -1009,9 +1054,8 @@
         (clear-sub-state)))
 
     (def @sched-run
-      (fn [init]
-        # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
-        # registers fibers with THIS scheduler. Spawn the init process inside
+      (fn [init]  # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
+      # registers fibers with THIS scheduler. Spawn the init process inside
         # the parameterize too — fibers capture their parameter environment at
         # creation time, so sched-spawn (which creates the init fiber) must
         # run with the rebound *spawn*.
@@ -1078,17 +1122,26 @@
               (each pid in batch
                 (run-one pid)))
 
-            # Yield to root scheduler when I/O is pending but only
-            # spinning (fuel-preempted) processes are ready. Without this,
-            # a spinning process keeps ready non-empty and the idle handler
-            # never parks, starving the root scheduler from delivering
-            # I/O completions.
+            # Give the root scheduler a turn when forwarded I/O is pending
+            # and every ready process is merely refueling. The root can only
+            # deliver a completion while this scheduler is suspended, and a
+            # process that computes without pause keeps `ready` non-empty
+            # forever, so the idle handler above never runs.
+            #
+            # The turn is a zero-length sleep, not a park on the completion
+            # futex: these processes are ready, and a forwarded completion
+            # can DEPEND on one of them running. An h2 client sub-fiber
+            # parked in `read` waits for the request its own process has
+            # not finished sending, so a park here waits on work only the
+            # parked scheduler can do (tests/elle/process-io-park.lisp,
+            # tests/elle/h2-headers-in-process.lisp). The sleep suspends
+            # long enough for the root to pump, then returns whether a
+            # completion arrived or not.
             (when (and (> (length io-pending) 0) (= (length io-completions) 0)
                        (not (empty? ready))
                        (= (length ready) (length fuel-preempted)))
-              (let [expected (unbox io-wakeup-box)]
-                (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
-                (reap-io))))
+              (ev/sleep 0)
+              (reap-io)))
 
           # Propagate PID 0 errors to caller
           (let [err (get (proc-get 0) :exit-reason)]

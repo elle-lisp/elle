@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Elle Documentation Generator
 ## Renders docs/*.md as HTML pages + auto-generated API reference
 ## with signal profiles from compile/analyze and portrait system.
@@ -134,7 +134,6 @@
     (= cat "file") "File I/O"
     (= cat "ffi") "FFI (Foreign Function Interface)"
     (= cat "fiber") "Fibers"
-    (= cat "coro") "Coroutines"
     (= cat "array") "Arrays"
     (= cat "struct") "Structs"
     (= cat "json") "JSON"
@@ -150,8 +149,8 @@
     true cat))
 
 (def @category-order
-  ["" "math" "string" "array" "struct" "json" "file" "fn" "fiber" "coro" "clock"
-   "time" "meta" "debug" "bit" "os" "pkg" "module" "ffi"])
+  ["" "math" "string" "array" "struct" "json" "file" "fn" "fiber" "clock" "time"
+   "meta" "debug" "bit" "os" "pkg" "module" "ffi"])
 
 (defn generate-primitives-html []
   "Generate HTML for the primitives API page."

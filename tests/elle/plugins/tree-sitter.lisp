@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tree-sitter plugin integration tests
 
 ## Try to load the plugin. If it fails, exit cleanly.

@@ -7,28 +7,32 @@ use crate::common::eval_source;
 
 #[test]
 fn test_buffer_display() {
-    let result = eval_source(r#"@"hello""#).unwrap();
-    let display = format!("{}", result);
-    assert_eq!(display, r#"@"hello""#);
+    // The @string is heap-backed; `Display` derefs its pages, so render inside
+    // the scope where the runtime (heap) is still alive.
+    eval_source(r#"@"hello""#, |r| {
+        assert_eq!(format!("{}", r.unwrap()), r#"@"hello""#);
+    });
 }
 
 #[test]
 fn test_buffer_display_empty() {
-    let result = eval_source(r#"@"""#).unwrap();
-    let display = format!("{}", result);
-    assert_eq!(display, r#"@"""#);
+    eval_source(r#"@"""#, |r| {
+        assert_eq!(format!("{}", r.unwrap()), r#"@"""#);
+    });
 }
 
 #[test]
 fn test_buffer_get_unicode() {
     // @string with UTF-8 multi-byte character
-    let result = eval_source(r#"(get @"café" 3)"#).unwrap();
-    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "é");
+    eval_source(r#"(get @"café" 3)"#, |r| {
+        assert_eq!(r.unwrap().with_string(|s| s.to_string()).unwrap(), "é");
+    });
 }
 
 #[test]
 fn test_buffer_get_unicode_index() {
     // Character indexing, not byte indexing
-    let result = eval_source(r#"(get @"café" 0)"#).unwrap();
-    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "c");
+    eval_source(r#"(get @"café" 0)"#, |r| {
+        assert_eq!(r.unwrap().with_string(|s| s.to_string()).unwrap(), "c");
+    });
 }

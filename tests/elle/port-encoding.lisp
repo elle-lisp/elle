@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/port-encoding.lisp — `port/encoding` accessor + the
 # `:encoding text|binary` keyword on tcp/connect / tcp/accept /
 # unix/connect / unix/accept.
@@ -107,8 +107,7 @@
 (def redis ((import-file "lib/redis.lisp")))
 
 (let [[ok? _] (protect (redis:with "127.0.0.1" 6379 (fn [] (redis:ping))))]
-  (when ok?
-    # Build a text-mode TCP connection and prove redis:require-binary-port
+  (when ok?  # Build a text-mode TCP connection and prove redis:require-binary-port
     # rejects it — this catches "I opened the port the wrong way" before
     # any wire byte is parsed under grapheme semantics.
     (let [bogus-listener (tcp/listen "127.0.0.1" 0)

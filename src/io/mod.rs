@@ -7,6 +7,10 @@
 
 pub mod aio;
 pub(crate) mod completion;
+/// Bridge eventfd helpers — Linux only (the eventfd POLL_ADD that wakes the
+/// io_uring wait from an off-ring worker). Also backs `chan`'s Linux wake fd.
+#[cfg(target_os = "linux")]
+pub(crate) mod eventfd;
 pub(crate) mod mock;
 pub(crate) mod pending;
 pub(crate) mod pool;
@@ -36,6 +40,14 @@ use crate::value::heap::TableKey;
 use crate::value::Value;
 use std::collections::BTreeMap;
 
+/// Build an error string of the form `"{context}: {os-error}"` from the
+/// current `errno` (via `std::io::Error::last_os_error`). Centralises the
+/// `format!("...: {}", std::io::Error::last_os_error())` boilerplate that
+/// recurs across the backends.
+pub(crate) fn os_error(context: &str) -> String {
+    format!("{}: {}", context, std::io::Error::last_os_error())
+}
+
 /// Byte offset where the Nth grapheme cluster ends in `buf` (treated
 /// as UTF-8).  Used by text-port `ReadExact` to count progress in
 /// graphemes — the unit Elle strings are measured in — instead of
@@ -53,8 +65,7 @@ use std::collections::BTreeMap;
 ///   bytes.  Mid-buffer invalid UTF-8 is conservatively treated the
 ///   same way (stop at the last valid prefix); in practice this never
 ///   fires for well-formed text.
-pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8]) -> usize {
-    use unicode_segmentation::UnicodeSegmentation;
+pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8], gen: crate::segment::Generation) -> usize {
     let valid = match std::str::from_utf8(buf) {
         Ok(s) => s,
         Err(e) => {
@@ -62,11 +73,14 @@ pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8]) -> usize {
             unsafe { std::str::from_utf8_unchecked(&buf[..upto]) }
         }
     };
-    valid.graphemes(true).count()
+    crate::segment::grapheme_count(valid, gen)
 }
 
-pub(crate) fn nth_grapheme_byte_end(buf: &[u8], n: usize) -> Option<usize> {
-    use unicode_segmentation::UnicodeSegmentation;
+pub(crate) fn nth_grapheme_byte_end(
+    buf: &[u8],
+    n: usize,
+    gen: crate::segment::Generation,
+) -> Option<usize> {
     if n == 0 {
         return Some(0);
     }
@@ -81,7 +95,7 @@ pub(crate) fn nth_grapheme_byte_end(buf: &[u8], n: usize) -> Option<usize> {
     };
     let mut pos = 0usize;
     let mut count = 0usize;
-    for g in valid.graphemes(true) {
+    for g in crate::segment::graphemes(valid, gen) {
         pos += g.len();
         count += 1;
         if count == n {
@@ -91,17 +105,112 @@ pub(crate) fn nth_grapheme_byte_end(buf: &[u8], n: usize) -> Option<usize> {
     None
 }
 
+/// Identifies an in-flight async I/O submission.
+///
+/// Minted by a backend's [`IoBackend::submit`] and echoed back on the
+/// matching [`Completion`]. Internally a monotonically increasing `u64`;
+/// the raw value only escapes at the kernel ABI (io_uring `user_data`),
+/// the worker-thread transport, and the Lisp boundary (as an integer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct SubmissionId(u64);
+
+impl SubmissionId {
+    /// Wrap a raw counter / `user_data` value as a submission id.
+    pub(crate) const fn from_raw(raw: u64) -> Self {
+        SubmissionId(raw)
+    }
+
+    /// The underlying `u64`, for the kernel ABI, worker transport, or
+    /// Lisp boundary.
+    pub(crate) const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for SubmissionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// The heap an io completion value (result or error) is built on: the requesting
+/// instance's own heap, threaded from [`IoBackend::submit`] as `origin_heap` and
+/// stored on the backend so every completion built by the scheduler-thread harvest
+/// names it explicitly. Every submit path carries a real heap (`io/submit` passes
+/// `ctx.heap_mut()`, the WASM host passes its instance heap), so this is the
+/// identity that documents the requirement; a null here is a backend that failed
+/// to thread its requester's heap.
+pub(crate) fn completion_heap_ptr(
+    origin_heap: *mut crate::value::fiberheap::FiberHeap,
+) -> *mut crate::value::fiberheap::FiberHeap {
+    debug_assert!(
+        !origin_heap.is_null(),
+        "io completion built with a null origin_heap — every backend must carry \
+         the requesting instance's heap"
+    );
+    origin_heap
+}
+
+/// An io-completion error value `{:error :kind :message msg}`, born in a fresh
+/// region on `origin_heap` (the requesting instance's heap, see
+/// [`completion_heap_ptr`]). The io backends build completion errors through a
+/// `NativeCtx` over that heap, and the value escapes to the requesting fiber,
+/// freed value-based by its `DecrefValueRegion`.
+pub(crate) fn io_error(
+    kind: &str,
+    msg: impl Into<String>,
+    origin_heap: *mut crate::value::fiberheap::FiberHeap,
+) -> Value {
+    let heap = unsafe { &mut *completion_heap_ptr(origin_heap) };
+    let ctx = crate::primitives::ctx::Alloc::new(heap);
+    ctx.error(kind, msg)
+}
+
 /// Completion from an async I/O operation.
 pub(crate) struct Completion {
-    pub(crate) id: u64,
+    pub(crate) id: SubmissionId,
     pub(crate) result: Result<Value, Value>,
 }
 
 impl Completion {
-    /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}
-    pub(crate) fn to_value(&self) -> Value {
+    pub(crate) fn new(id: SubmissionId, result: Result<Value, Value>) -> Self {
+        Completion { id, result }
+    }
+
+    /// A successful completion carrying `value`.
+    pub(crate) fn ok(id: SubmissionId, value: Value) -> Self {
+        Completion {
+            id,
+            result: Ok(value),
+        }
+    }
+
+    /// A failed completion carrying the Elle error value `error`.
+    pub(crate) fn err(id: SubmissionId, error: Value) -> Self {
+        Completion {
+            id,
+            result: Err(error),
+        }
+    }
+
+    /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}.
+    ///
+    /// Built through the REAPING CALL's own capability — `io/wait` / `io/reap`
+    /// collect these structs into the array they return, and both declare
+    /// `RegionEffect::Fresh`, so one region carries the whole result and the
+    /// caller's single `DecrefValueRegion` reclaims it (docs/impl/region/ctx.md
+    /// § "A helper reached from inside a call allocates through THAT call's
+    /// ctx"). The `:value`/`:error` payloads are the exception the edge
+    /// accounting exists for: the backend built them off this call, on the
+    /// requesting instance's heap (see [`completion_heap_ptr`]), so the struct
+    /// records a counted edge to each and the resumed fiber's own reference
+    /// carries it past this array's demise.
+    pub(crate) fn to_value(&self, ctx: &crate::primitives::ctx::Alloc<'_>) -> Value {
         let mut fields = BTreeMap::new();
-        fields.insert(TableKey::Keyword("id".into()), Value::int(self.id as i64));
+        fields.insert(
+            TableKey::Keyword("id".into()),
+            Value::int(self.id.as_u64() as i64),
+        );
         match &self.result {
             Ok(v) => {
                 fields.insert(TableKey::Keyword("value".into()), *v);
@@ -112,7 +221,7 @@ impl Completion {
                 fields.insert(TableKey::Keyword("error".into()), *e);
             }
         }
-        Value::struct_from(fields)
+        ctx.struct_from(fields)
     }
 }
 
@@ -121,10 +230,36 @@ impl Completion {
 /// Implemented by `AsyncBackend` (real I/O via io_uring or thread pool)
 /// and `MockBackend` (in-memory, deterministic).
 pub(crate) trait IoBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String>;
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<SubmissionId, String>;
     fn poll(&self) -> Vec<Completion>;
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
-    fn cancel(&self, id: u64) -> Result<(), String>;
+    fn cancel(&self, id: SubmissionId) -> Result<(), String>;
+    /// Cancel and drain every in-flight kernel op so no kernel-owned buffer and
+    /// no submitted-but-unreaped completion outlives the backend. Idempotent and
+    /// a no-op once nothing is pending. The backend's own `Drop` also runs this,
+    /// but a caller tearing down a heap that STRANDS the backend (the full-module
+    /// WASM tier reclaims no region during execution — see docs/impl/wasm.md § the
+    /// posix gap) must call it BEFORE the region free-sweep: the drain's semantic
+    /// completion dereferences the op's `Port`/`ProcessHandle` heap values, which
+    /// the id-ordered sweep may already have freed. Default no-op for a backend
+    /// with no kernel state (the mock). Canonical reference:
+    /// `tests/elle/posix.lisp` under `--wasm=full`.
+    ///
+    /// Only the full-module WASM tier (which strands its backend to teardown)
+    /// calls this; other builds compile it but never invoke it.
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+    fn quiesce(&self) {}
+
+    /// Background worker operations submitted but not yet reaped — the OS
+    /// threads this backend has out. A backend that runs its operations in the
+    /// kernel (io_uring) or inline (the mock) has none.
+    fn workers(&self) -> usize {
+        0
+    }
 }
 
 /// Type-erased async I/O backend, stored as `Value::external("io-backend", ...)`.
@@ -132,3 +267,6 @@ pub(crate) trait IoBackend {
 /// The primitives downcast to this type. The trait dispatch handles
 /// routing to AsyncBackend, MockBackend, or any future backend.
 pub(crate) struct AnyBackend(pub(crate) Box<dyn IoBackend>);
+
+#[cfg(test)]
+mod tests;

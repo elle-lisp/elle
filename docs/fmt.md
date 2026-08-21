@@ -25,6 +25,11 @@ elle fmt < input.lisp            Format stdin to stdout
 - **Error at column 80**: opening delimiter past column 80 means too
   much nesting; `--check` exits 1.
 
+The check counts CODE delimiters only. A `(`, `[`, or `{` inside a string
+literal or a comment is text, not nesting, so it is skipped — the formatter
+places those characters itself and must not then report its own output.
+Escapes count: the `"` in `"a \" b"` does not close the string.
+
 ## Rule set
 
 ### General principles

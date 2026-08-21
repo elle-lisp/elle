@@ -60,15 +60,6 @@ Everything. Key consumers:
 
 4. **Builders exist for all common cases.** Don't construct `LError::new()`
    directly; use `LError::type_mismatch()` etc. from `builders.rs`.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~275 | Re-exports + comprehensive tests |
-| `types.rs` | ~444 | `LError`, `ErrorKind`, `LResult`, Display impl, builder methods |
-| `formatting.rs` | ~100 | Rich error formatting |
-
 ## Anti-patterns
 
 - `LError::generic("...")` when a specific `ErrorKind` exists

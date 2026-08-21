@@ -1,0 +1,462 @@
+use super::*;
+
+#[test]
+fn int_roundtrip_min() {
+    let v = Value::int(i64::MIN);
+    assert_eq!(v.as_int(), Some(i64::MIN));
+}
+
+#[test]
+fn int_roundtrip_max() {
+    let v = Value::int(i64::MAX);
+    assert_eq!(v.as_int(), Some(i64::MAX));
+}
+
+#[test]
+fn int_roundtrip_zero() {
+    let v = Value::int(0);
+    assert_eq!(v.as_int(), Some(0));
+}
+
+#[test]
+fn int_roundtrip_one() {
+    let v = Value::int(1);
+    assert_eq!(v.as_int(), Some(1));
+}
+
+#[test]
+fn int_roundtrip_neg_one() {
+    let v = Value::int(-1);
+    assert_eq!(v.as_int(), Some(-1));
+}
+
+#[test]
+fn int_is_int_type() {
+    let v = Value::int(42);
+    assert!(v.is_int());
+    assert!(!v.is_float());
+    assert!(!v.is_nil());
+    assert!(!v.is_bool());
+    assert!(!v.is_symbol());
+    assert!(!v.is_keyword());
+    assert!(!v.is_heap());
+    assert!(!v.is_empty_list());
+}
+
+// =========================================================================
+// Float roundtrip
+// =========================================================================
+
+#[test]
+fn float_roundtrip_zero() {
+    let v = Value::float(0.0);
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some(0.0f64.to_bits()));
+}
+
+#[test]
+fn float_roundtrip_neg_zero() {
+    let v = Value::float(-0.0);
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some((-0.0f64).to_bits()));
+}
+
+#[test]
+fn float_roundtrip_positive() {
+    let v = Value::float(1.5);
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some(1.5f64.to_bits()));
+}
+
+#[test]
+fn float_roundtrip_negative() {
+    let v = Value::float(-1.5);
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some((-1.5f64).to_bits()));
+}
+
+#[test]
+fn float_roundtrip_infinity() {
+    let v = Value::float(f64::INFINITY);
+    assert_eq!(
+        v.as_float().map(|f| f.to_bits()),
+        Some(f64::INFINITY.to_bits())
+    );
+}
+
+#[test]
+fn float_roundtrip_neg_infinity() {
+    let v = Value::float(f64::NEG_INFINITY);
+    assert_eq!(
+        v.as_float().map(|f| f.to_bits()),
+        Some(f64::NEG_INFINITY.to_bits())
+    );
+}
+
+#[test]
+fn float_roundtrip_nan() {
+    let v = Value::float(f64::NAN);
+    assert!(v.as_float().unwrap().is_nan());
+}
+
+#[test]
+fn float_roundtrip_min() {
+    let v = Value::float(f64::MIN);
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some(f64::MIN.to_bits()));
+}
+
+#[test]
+fn float_roundtrip_max() {
+    let v = Value::float(f64::MAX);
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some(f64::MAX.to_bits()));
+}
+
+#[test]
+fn float_roundtrip_min_positive() {
+    let v = Value::float(f64::MIN_POSITIVE);
+    assert_eq!(
+        v.as_float().map(|f| f.to_bits()),
+        Some(f64::MIN_POSITIVE.to_bits())
+    );
+}
+
+#[test]
+fn float_roundtrip_epsilon() {
+    let v = Value::float(f64::EPSILON);
+    assert_eq!(
+        v.as_float().map(|f| f.to_bits()),
+        Some(f64::EPSILON.to_bits())
+    );
+}
+
+#[test]
+fn float_is_float_type() {
+    let v = Value::float(1.5);
+    assert!(v.is_float());
+    assert!(!v.is_int());
+    assert!(!v.is_nil());
+    assert!(!v.is_bool());
+    assert!(!v.is_symbol());
+    assert!(!v.is_heap());
+}
+
+// =========================================================================
+// Symbol roundtrip
+// =========================================================================
+
+#[test]
+fn symbol_roundtrip_zero() {
+    let v = Value::symbol(0);
+    assert_eq!(v.as_symbol(), Some(0));
+}
+
+#[test]
+fn symbol_roundtrip_one() {
+    let v = Value::symbol(1);
+    assert_eq!(v.as_symbol(), Some(1));
+}
+
+#[test]
+fn symbol_roundtrip_large() {
+    let v = Value::symbol(99999);
+    assert_eq!(v.as_symbol(), Some(99999));
+}
+
+#[test]
+fn symbol_is_symbol_type() {
+    let v = Value::symbol(42);
+    assert!(v.is_symbol());
+    assert!(!v.is_int());
+    assert!(!v.is_float());
+    assert!(!v.is_nil());
+    assert!(!v.is_bool());
+    assert!(!v.is_keyword());
+    assert!(!v.is_heap());
+}
+
+// =========================================================================
+// Boolean roundtrip
+// =========================================================================
+
+#[test]
+fn bool_roundtrip_true() {
+    let v = Value::bool(true);
+    assert_eq!(v.as_bool(), Some(true));
+}
+
+#[test]
+fn bool_roundtrip_false() {
+    let v = Value::bool(false);
+    assert_eq!(v.as_bool(), Some(false));
+}
+
+// =========================================================================
+// Type discrimination: exactly one type predicate is true
+// =========================================================================
+
+#[test]
+fn exactly_one_type_for_int_min() {
+    let v = Value::int(i64::MIN);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn exactly_one_type_for_int_max() {
+    let v = Value::int(i64::MAX);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn exactly_one_type_for_int_zero() {
+    let v = Value::int(0);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn exactly_one_type_for_float_normal() {
+    let v = Value::float(1.5);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn exactly_one_type_for_float_zero() {
+    let v = Value::float(0.0);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn exactly_one_type_for_symbol_zero() {
+    let v = Value::symbol(0);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn exactly_one_type_for_symbol_large() {
+    let v = Value::symbol(99999);
+    let count = v.is_nil() as u8
+        + v.is_empty_list() as u8
+        + v.is_bool() as u8
+        + v.is_int() as u8
+        + v.is_float() as u8
+        + v.is_symbol() as u8
+        + v.is_keyword() as u8
+        + v.is_heap() as u8;
+    assert_eq!(count, 1);
+}
+
+// =========================================================================
+// Truthiness
+// =========================================================================
+
+#[test]
+fn int_is_truthy_positive() {
+    assert!(Value::int(1).is_truthy());
+}
+
+#[test]
+fn int_is_truthy_negative() {
+    assert!(Value::int(-1).is_truthy());
+}
+
+#[test]
+fn int_is_truthy_zero() {
+    assert!(Value::int(0).is_truthy());
+}
+
+#[test]
+fn float_is_truthy_positive() {
+    assert!(Value::float(1.5).is_truthy());
+}
+
+#[test]
+fn float_is_truthy_negative() {
+    assert!(Value::float(-1.5).is_truthy());
+}
+
+#[test]
+fn float_is_truthy_zero() {
+    assert!(Value::float(0.0).is_truthy());
+}
+
+#[test]
+fn symbol_is_truthy() {
+    assert!(Value::symbol(42).is_truthy());
+}
+
+#[test]
+fn string_is_truthy() {
+    let h = elle::primitives::ctx::TestHeap::new();
+    assert!(h.ctx().string("hello").is_truthy());
+}
+
+#[test]
+fn string_empty_is_truthy() {
+    let h = elle::primitives::ctx::TestHeap::new();
+    assert!(h.ctx().string("").is_truthy());
+}
+
+// =========================================================================
+// Equality: reflexivity
+// =========================================================================
+
+#[test]
+fn int_eq_reflexive_min() {
+    let v = Value::int(i64::MIN);
+    assert_eq!(v, v);
+}
+
+#[test]
+fn int_eq_reflexive_max() {
+    let v = Value::int(i64::MAX);
+    assert_eq!(v, v);
+}
+
+#[test]
+fn int_eq_reflexive_zero() {
+    let v = Value::int(0);
+    assert_eq!(v, v);
+}
+
+#[test]
+fn float_eq_reflexive_positive() {
+    let v = Value::float(1.5);
+    assert_eq!(v, v);
+}
+
+#[test]
+fn float_eq_reflexive_negative() {
+    let v = Value::float(-1.5);
+    assert_eq!(v, v);
+}
+
+#[test]
+fn float_eq_reflexive_zero() {
+    let v = Value::float(0.0);
+    assert_eq!(v, v);
+}
+
+#[test]
+fn symbol_eq_reflexive() {
+    let v = Value::symbol(42);
+    assert_eq!(v, v);
+}
+
+// =========================================================================
+// Equality: same value, same result
+// =========================================================================
+
+#[test]
+fn int_eq_same_value_zero() {
+    assert_eq!(Value::int(0), Value::int(0));
+}
+
+#[test]
+fn int_eq_same_value_positive() {
+    assert_eq!(Value::int(42), Value::int(42));
+}
+
+#[test]
+fn int_eq_same_value_negative() {
+    assert_eq!(Value::int(-42), Value::int(-42));
+}
+
+#[test]
+fn int_neq_different_value() {
+    assert_ne!(Value::int(0), Value::int(1));
+}
+
+#[test]
+fn int_neq_different_value_negative() {
+    assert_ne!(Value::int(-1), Value::int(1));
+}
+
+#[test]
+fn int_neq_different_value_large() {
+    assert_ne!(Value::int(i64::MIN), Value::int(i64::MAX));
+}
+
+#[test]
+fn bool_eq_same_value_true() {
+    assert_eq!(Value::bool(true), Value::bool(true));
+}
+
+#[test]
+fn bool_eq_same_value_false() {
+    assert_eq!(Value::bool(false), Value::bool(false));
+}
+
+// =========================================================================
+// Cross-type inequality
+// =========================================================================
+
+#[test]
+fn int_not_eq_float_zero() {
+    // Integers and floats are distinct types; same numeric value means different Values.
+    let int_val = Value::int(0);
+    let float_val = Value::float(0.0);
+    assert!(int_val.is_int() && !int_val.is_float());
+    assert!(float_val.is_float() && !float_val.is_int());
+    assert_ne!(int_val, float_val);
+}
+
+#[test]
+fn int_not_eq_float_positive() {
+    let int_val = Value::int(1);
+    let float_val = Value::float(1.0);
+    assert!(int_val.is_int() && !int_val.is_float());
+    assert!(float_val.is_float() && !float_val.is_int());
+    assert_ne!(int_val, float_val);
+}
+
+#[test]
+fn int_not_eq_float_negative() {
+    let int_val = Value::int(-1);
+    let float_val = Value::float(-1.0);
+    assert!(int_val.is_int() && !int_val.is_float());
+    assert!(float_val.is_float() && !float_val.is_int());
+    assert_ne!(int_val, float_val);
+}

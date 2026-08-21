@@ -4,21 +4,24 @@
 //! Provides opaque `ElleCtx` wrapping VM + SymbolTable. Host programs link
 //! against libelle_embed.so and drive the lifecycle through exported functions.
 
-use elle::context::{set_symbol_table, set_vm_context};
-use elle::pipeline::register_repl_binding;
 use elle::plugin_api::{PluginPrimFn, PrimResult, PLUGIN_SENTINEL};
 use elle::primitives::def::PrimitiveDef;
+use elle::runtime::Runtime;
 use elle::signals::Signal;
 use elle::value::types::Arity;
-use elle::{compile_file, init_stdlib, register_primitives, SymbolTable, Value, VM};
+use elle::{compile_file, Value};
 
 use std::ffi::c_void;
 
 // ── Opaque context ──────────────────────────────────────────────────
 
+/// A `Runtime` owns the heap, VM, symbol table, and compile context as one
+/// per-instance bundle, points the VM at its own symbol table and `CompileCtx`,
+/// and runs the RC teardown sweep on drop. The compile context is threaded
+/// explicitly into every compile/execute call (see `elle_eval`); nothing is read
+/// from a shared slot, so two `ElleCtx`s coexist in one process.
 struct ElleCtx {
-    vm: VM,
-    symbols: SymbolTable,
+    runtime: Runtime,
     last_result: Option<Value>,
 }
 
@@ -27,16 +30,11 @@ struct ElleCtx {
 /// Create an Elle runtime context. Returns an opaque pointer.
 #[no_mangle]
 pub extern "C" fn elle_init() -> *mut c_void {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    set_vm_context(&mut vm as *mut VM);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols);
-
+    // `Runtime::new()` registers primitives, loads the stdlib, and points the VM
+    // at this instance's own symbol table and compile context — the whole
+    // embedding lifecycle in one call.
     let ctx = Box::new(ElleCtx {
-        vm,
-        symbols,
+        runtime: Runtime::new(),
         last_result: None,
     });
     Box::into_raw(ctx) as *mut c_void
@@ -51,11 +49,12 @@ pub unsafe extern "C" fn elle_destroy(ctx: *mut c_void) {
     if ctx.is_null() {
         return;
     }
+    // Dropping the `Runtime` runs the RC teardown sweep; the VM's symbol-table
+    // and compile-context pointers drop with the instance, so no manual teardown
+    // is needed.
     unsafe {
         drop(Box::from_raw(ctx as *mut ElleCtx));
     }
-    set_vm_context(std::ptr::null_mut());
-    set_symbol_table(std::ptr::null_mut());
 }
 
 // ── Eval ────────────────────────────────────────────────────────────
@@ -73,11 +72,13 @@ pub unsafe extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize)
     let ctx = unsafe { &mut *(ctx as *mut ElleCtx) };
     let source = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(src, len)) };
 
-    set_vm_context(&mut ctx.vm as *mut VM);
-    set_symbol_table(&mut ctx.symbols as *mut SymbolTable);
-
-    match compile_file(source, &mut ctx.symbols, "<embed>") {
-        Ok(compiled) => match ctx.vm.execute_scheduled(&compiled.bytecode, &ctx.symbols) {
+    // The pipeline needs the three disjoint borrows at once: the VM (execution),
+    // the symbol table (interning/resolution), and the compile context (macro
+    // expansion + meta). Compile against this instance's context, then run the
+    // bytecode under the async scheduler.
+    let (vm, symbols, cctx) = ctx.runtime.parts();
+    match compile_file(source, symbols, cctx, "<embed>") {
+        Ok(compiled) => match vm.execute_scheduled(&compiled.bytecode, symbols, cctx) {
             Ok(value) => {
                 ctx.last_result = Some(value);
                 0
@@ -115,7 +116,10 @@ pub unsafe extern "C" fn elle_result_int(ctx: *mut c_void, out: *mut i64) -> boo
 // ── Custom primitive registration ───────────────────────────────────
 
 /// Register a host primitive. The func pointer uses the same ABI as plugins:
-/// `unsafe extern "C" fn(args: *const Value, nargs: usize) -> PrimResult`.
+/// `unsafe extern "C" fn(ctx: *mut CallCtx, args: *const Value, nargs: usize) ->
+/// PrimResult`. The leading `ctx` is the opaque per-call allocation capability
+/// (region + heap); a host primitive that constructs heap values must thread it
+/// into the elle constructors, exactly as a `.so` plugin does.
 ///
 /// # Safety
 /// `name` must point to `name_len` bytes of valid UTF-8 that outlive the
@@ -144,15 +148,18 @@ pub unsafe extern "C" fn elle_register_prim(
         doc: "",
         params: &[],
         category: "host",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     }));
 
     elle::plugin_api::register_plugin_fn(def, func);
 
-    let sym_id = ctx.symbols.intern(static_name);
+    let sym_id = ctx.runtime.symbols().intern(static_name);
     let native = Value::native_fn(def);
-    register_repl_binding(
+    // The binding's region is rooted through this instance's own heap; the
+    // compile context and heap are taken as disjoint borrows of the runtime.
+    let (cctx, heap) = ctx.runtime.compile_and_heap();
+    cctx.register_repl_binding(
+        heap,
         sym_id,
         native,
         Signal::silent(),
@@ -178,5 +185,53 @@ pub extern "C" fn elle_prim_result(signal: u32, value: [u64; 2]) -> PrimResult {
     PrimResult {
         signal,
         value: unsafe { std::mem::transmute::<[u64; 2], Value>(value) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use elle::plugin_api::CallCtx;
+
+    // End-to-end pin for the v3 plugin ABI: a host primitive is dispatched through
+    // the *real* path (VM sentinel → `call_plugin` → the registered fn) and must
+    // receive the opaque per-call `ctx` as arg0 and the argument vector after it.
+    //
+    // This is the coverage the constructor-seam test cannot give: it exercises the
+    // C-ABI argument *order* agreed between `call_plugin` (host) and the primitive
+    // (plugin). `first` returns `args[0]`; if `call_plugin` failed to pass `ctx`
+    // first (the pre-fix calling convention), `args` would land on `nargs` and the
+    // deref would read garbage rather than 42 — so the arg threading is pinned.
+    unsafe extern "C" fn first(_ctx: *mut CallCtx, args: *const Value, nargs: usize) -> PrimResult {
+        assert!(nargs >= 1, "first/2 dispatched with too few args");
+        PrimResult {
+            signal: 0, // SIG_OK
+            value: unsafe { *args },
+        }
+    }
+
+    #[test]
+    fn v3_abi_threads_ctx_then_args_end_to_end() {
+        let ctx = elle_init();
+        assert!(!ctx.is_null());
+
+        let name = "first";
+        unsafe { elle_register_prim(ctx, name.as_ptr(), name.len(), first, 2) };
+
+        let src = "(first 42 99)";
+        let rc = unsafe { elle_eval(ctx, src.as_ptr(), src.len()) };
+        assert_eq!(rc, 0, "eval of a call to the host primitive must succeed");
+
+        let mut out = 0i64;
+        assert!(
+            unsafe { elle_result_int(ctx, &mut out) },
+            "result must be an int",
+        );
+        assert_eq!(
+            out, 42,
+            "the host primitive must see its arguments *after* the ctx and return args[0]",
+        );
+
+        unsafe { elle_destroy(ctx) };
     }
 }

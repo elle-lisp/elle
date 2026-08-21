@@ -84,12 +84,11 @@ pub struct MacroDef {
     pub name: String,
     pub params: Vec<String>,
     pub template: Syntax,
-    pub definition_scope: ScopeId,
 }
 ```
 
-A macro is a name, positional parameter names, a Syntax template, and a
-scope ID. No pattern matching, no ellipsis, no multiple clauses.
+A macro is a name, positional parameter names, and a Syntax template.
+No pattern matching, no ellipsis, no multiple clauses.
 
 ### Expansion algorithm (VM-based)
 
@@ -101,9 +100,11 @@ scope ID. No pattern matching, no ellipsis, no multiple clauses.
    pipeline (expand → analyze → lower → emit → execute) runs on the
    let-expression, using the same Expander (so nested macros work)
 5. Convert the result `Value` back to `Syntax` via `from_value()`
-6. Stamp a fresh `ScopeId` onto every node in the result via
-   `add_scope_recursive()`. **Note:** this stamps ALL nodes, including
-   argument-derived nodes. See hygiene plan for the fix.
+6. Mint a fresh intro `ScopeId`, pre-stamp it on the arguments, and
+   **flip** it on the transformer's result via `flip_scope_recursive()`:
+   template-origin nodes gain the scope, argument-origin nodes lose it
+   (recovering their use-site scope sets). See "Sets-of-Scopes Hygiene"
+   below.
 7. Recursively expand the result (handles macro-generated macro calls)
 
 ### Expander precedence
@@ -158,6 +159,13 @@ Macro hygiene means two things:
 
 2. **Referential transparency.** Free variables in a macro template
    resolve in the macro's definition environment, not the call site.
+   Elle delivers this through the intro scope: a template-origin
+   reference carries its expansion's intro scope, and a use-site *local*
+   binding that lacks that scope is invisible to it — resolution falls
+   through to the definition environment (the file's top-level bindings
+   and primitives, whose frames are exempt from the rule). Pinned by
+   tests/elle/hygiene.lisp ("referential transparency") and
+   `hir::analyze` unit tests.
 
 Without hygiene, macro authors must manually avoid name collisions. The
 standard workaround is `gensym` — generating unique names that can't
@@ -203,6 +211,30 @@ for the common case.
 - `Value::syntax(Syntax)` preserves scope sets through the Value round-trip
 - `SyntaxKind::SyntaxLiteral(Value)` injects syntax objects into the pipeline
 - `from_value()` unwraps syntax objects, preserving scopes
+- each expansion mints a fresh **intro scope**, pre-stamps it on the macro
+  arguments, and **flips** it on the transformer's result
+  (`flip_scope_recursive`): template-origin identifiers — which never saw
+  the scope — gain it, argument-origin identifiers lose it, recovering
+  their use-site scope sets exactly. A template binder therefore carries
+  the intro scope and cannot capture inbound identifiers.
+- `datum->syntax` results are exempt from the flip; they copy their
+  context's scopes with the intro scope stripped, which is what makes
+  deliberate capture (anaphoric macros) work.
+- intro scopes are a distinct id class (`ScopeId::is_intro`, a reserved
+  bit), so the Analyzer can recognize a template-origin reference without
+  threading expander state. `lookup()` applies the **referential
+  transparency rule**: in a non-definition-environment frame (anything
+  but the global frame and the file's top-level letrec frame), a binding
+  is visible to a reference only if every intro scope the reference
+  carries is on the binding or in the frame's expansion provenance (the
+  intro scopes of the form that opened the frame — the Analyzer's
+  stand-in for Racket's binding-form rib scope). A call-site `let`
+  shadow (user form, no intro anywhere) therefore cannot capture a
+  template's free variable — the reference resolves at top level
+  instead — while a template binder (same intro scope), a
+  `datum->syntax` binder inside a template-origin form (frame
+  provenance carries the intro), and `datum->syntax` references (no
+  intro scope, still see call-site bindings) all keep working.
 
 **How it works:**
 
@@ -313,8 +345,9 @@ is returned unchanged.
 
 ### Implementation
 
-Both are runtime primitives in `src/primitives/meta.rs`. They access
-the symbol table via the thread-local `get_symbol_table()` pattern.
+Both are runtime primitives in `src/primitives/meta.rs`. They reach the
+symbol table through their `NativeCtx` — `ctx.vm().symbols()` — which
+resolves in the running instance's own table.
 
 The `scope_exempt: bool` field on `Syntax` is the mechanism that
 prevents intro scope stamping. `add_scope_recursive` checks this flag

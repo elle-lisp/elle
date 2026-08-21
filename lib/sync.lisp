@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/sync.lisp — Concurrency primitives built on futex (park/notify)
 ##
 ## Loaded via: (def sync ((import "std/sync")))

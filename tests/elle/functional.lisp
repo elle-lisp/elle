@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 
 ## ── sort ────────────────────────────────────────────────────────────
 (assert (= (sort (list 3 1 2)) (list 1 2 3)) "sort: list")
@@ -349,17 +349,17 @@
 ## ── sort-by / sort-with on large lists ────────────────────────────────
 # These used to crash the VM with SIGABRT (stack overflow) because the
 # merge step in merge sort recursed O(N) deep.  The merge is now
-# tail-recursive with an accumulator + reverse.
-(assert (= (length (sort-by identity (reverse (range 5000)))) 5000)
-        "sort-by: 5000 elements reversed")
-(assert (= (first (sort-by identity (reverse (range 5000)))) 0)
-        "sort-by: first element is 0")
-(assert (= (last (sort-by identity (reverse (range 5000)))) 4999)
-        "sort-by: last element is 4999")
-(assert (= (length (sort-with (fn (a b) (- a b)) (reverse (range 5000)))) 5000)
-        "sort-with: 5000 elements reversed")
-(assert (= (first (sort-with (fn (a b) (- a b)) (reverse (range 5000)))) 0)
-        "sort-with: first element is 0")
+# tail-recursive with an accumulator + reverse.  1000 elements puts the
+# final merge far past the 200 call-depth limit, so a regression to
+# non-tail recursion faults; each sort runs once (a debug-build sort at
+# this size is seconds, and the runner budgets the whole file).
+(let [sorted (sort-by identity (reverse (range 1000)))]
+  (assert (= (length sorted) 1000) "sort-by: 1000 elements reversed")
+  (assert (= (first sorted) 0) "sort-by: first element is 0")
+  (assert (= (last sorted) 999) "sort-by: last element is 999"))
+(let [sorted (sort-with (fn (a b) (- a b)) (reverse (range 1000)))]
+  (assert (= (length sorted) 1000) "sort-with: 1000 elements reversed")
+  (assert (= (first sorted) 0) "sort-with: first element is 0"))
 
 ## ── Tail-recursive stdlib functions on large lists ───────────────────
 # These functions were converted from O(N)-deep recursion to tail-recursive

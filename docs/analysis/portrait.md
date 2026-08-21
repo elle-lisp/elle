@@ -51,6 +51,26 @@ structured reports.
 (println (portrait:render (portrait:module a)))
 ```
 
+## Advisories
+
+A portrait reflects the compiler's lint diagnostics as advisories — it does not
+re-derive them. The relevant rule here is `mutable-binding-never-assigned`: a
+binding declared mutable (`var`/`@`) yet never reassigned via `assign`. This
+surfaces the common conflation of a mutable **binding** with a mutable
+**value**: `(let [buf @""] (push buf x))` mutates the *value* but the *binding*
+never changes, so `buf` should stay immutable. Because the advisory is read from
+`compile/diagnostics`, portrait and `elle lint` always agree.
+
+The advisory appears at two granularities:
+
+- **Module** — `(get (portrait:module a) :false-mutable)` lists every flagged
+  binding across the module (including top-level ones).
+- **Function** — `(portrait:function a :f)` includes a `:false-mutable`
+  observation for each flag *inside* `f`. Per-function attribution is exact, not
+  by line range: the linter tags each diagnostic with its nearest enclosing
+  named function (the `:function` field on a diagnostic), and the observation
+  filters on it. A flag in a nested closure is attributed to the inner function.
+
 ## Phases
 
 1. **Analyze** — `compile/analyze` parses and type-checks without executing

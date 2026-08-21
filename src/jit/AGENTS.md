@@ -23,9 +23,12 @@ default 10), its LIR is cloned, stripped of non-Send fields (`syntax`,
 `doc`), and sent to the worker via `crossbeam_channel`. The interpreter
 continues running the function while Cranelift compiles it.
 
-The worker thread has a persistent `FiberHeap` (installed once, never
-freed) so `translate_const` can allocate String/Keyword/Symbol Values
-for constants embedded in native code.
+The worker thread allocates no Elle values: string constants arrive
+pre-resolved as `ValueConst`, and symbols/keywords are immediates, so
+`translate_const` builds only Cranelift immediates and needs no heap. The
+runtime data helpers (`elle_jit_pair`/`_make_array`/`_make_capture`) that *do*
+allocate run later on the calling thread and reach the driving instance's heap
+through the VM pointer threaded into each call.
 
 On every call to `try_jit_call`, the VM polls for completed
 compilations via non-blocking `try_recv()`. Compiled code is inserted
@@ -76,18 +79,11 @@ native loops.
 - Tail call: `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64)
 - Yield: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the yield helper
 
-## JIT Phases
+## Supported Instructions
 
-The JIT was built incrementally:
-
-| Phase | Scope |
-|-------|-------|
-| Phase 1 | Constants, arithmetic, comparison, variables, terminators. Capture-free functions only. |
-| Phase 2 | Closures with captures: `LoadCapture`, `LoadCaptureRaw`, `StoreCapture`. |
-| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`), function calls (`Call`, `TailCall`). VM pointer parameter added for call dispatch. |
-| Phase 4 | Self-tail-call optimization, JIT-to-JIT calling, batch compilation, `ValueConst`. |
-
-## Phase 4 Scope (Current)
+The JIT supports closures with captures, data structures, lboxes, function
+calls, self-tail-call optimization, JIT-to-JIT calling, batch compilation, and
+`ValueConst`.
 
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
@@ -107,26 +103,6 @@ Unsupported (returns JitError::UnsupportedInstruction):
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
 - `Yield` — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~90 | Public API, `JitError` type |
-| `compiler.rs` | ~1046 | `JitCompiler`, compilation entry point (`new`, `compile`, `compile_batch`, `translate_function`) |
-| `vtable.rs` | ~412 | `RuntimeHelpers` struct + `register_symbols` + `declare_helpers` — the JIT vtable |
-| `translate.rs` | ~1155 | `FunctionTranslator`, LIR instruction translation |
-| `runtime.rs` | ~460 | Arithmetic, comparison, type-checking helpers |
-| `dispatch.rs` | ~285 | Re-exports from `calls`, `data`, `suspend`; array push/extend, param frame, struct helpers, signal bound check |
-| `calls.rs` | ~758 | Sentinels, `YieldPointMeta`/`CallSiteMeta`, `elle_jit_call`, `elle_jit_tail_call`, call-related helpers, env building |
-| `data.rs` | ~422 | Data structure ops: cons/car/cdr, array, lbox, captures |
-| `suspend.rs` | ~511 | Yield side-exit helpers: `elle_jit_yield`, `elle_jit_yield_through_call`, `elle_jit_has_signal` |
-| `code.rs` | ~163 | `JitCode` wrapper type |
-| `fastpath.rs` | ~250 | Inline integer fast paths for arithmetic/comparison |
-| `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
-| `helpers.rs` | ~368 | Helper methods on `FunctionTranslator` (call emission, exception checks) |
-| `worker.rs` | ~130 | Background JIT worker thread: `JitWorker`, `JitTask`, `JitResult` |
-
 ## Runtime Helpers
 
 All operations go through `extern "C"` runtime helpers for safety.
@@ -475,30 +451,18 @@ metadata) gives the split point. The first `num_locals` spilled values are
 appended to `closure.env` to form the full env; the remaining values form
 the operand stack.
 
-## Future Phases
+## Roadmap
 
-- Phase 5:
-   - Inline type checks for arithmetic fast paths
-   - JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
-   - Benchmarks and profiling
+- Inline type checks for arithmetic fast paths
+- JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
+- Benchmarks and profiling
 
-### Open task: Flip* bytecodes
+### Reclamation
 
-The JIT currently skips all Flip* bytecodes (`FlipEnter`, `FlipSwap`,
-`FlipExit`). These are emitted for `while`/`loop` forms where the body
-passes `can_flip_while_loop()` (no dangerous outward set, all break
-values safe). In the interpreter, they implement rotation-based
-reclamation. In JIT code, they are no-ops — the JIT side-exit path
-doesn't need rotation because yielding functions fall back to the
-interpreter.
+Regions reclaim: a region frees at `FreeRegion(ρ)` when its RC reaches 0.
+The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /
+`DecrefCellRegion` accounting the interpreter does, so a loop body or a
+self-tail-call boundary needs no separate release step.
 
-To enable rotation in JIT-compiled silent loops, `translate.rs` needs
-implementations for:
-- `FlipEnter` — push flip frame
-- `FlipSwap` — rotate pools (call `rotate_pools` helper)
-- `FlipExit` — pop flip frame and release
-
-The helpers exist in `fiberheap/routing.rs` and `fiberheap/mod.rs`.
-The JIT just needs to emit calls to them at the right points, mirroring
-`RegionEnter`/`RegionExit` handling in `dispatch.rs`. This is blocked on
-Phase 2A (rotation slot deallocation) being enabled first.
+`elle_jit_rotate_pools` survives as an exported no-op that nothing calls —
+its vtable `FuncId` carries `#[allow(dead_code)]`. See `jit/calls/callops.rs`.

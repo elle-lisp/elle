@@ -1,24 +1,25 @@
 //! Function introspection primitives
 
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
-
-/// (closure? value) — true if value is a bytecode closure
-pub(crate) fn prim_is_closure(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].as_closure().is_some()))
-}
+use crate::value::Value;
 
 /// (jit? value) — true if closure has JIT-compiled code
-pub(crate) fn prim_is_jit(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_is_jit(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     // SIG_QUERY to the VM, which checks jit_cache by bytecode pointer.
-    (SIG_QUERY, Value::pair(Value::keyword("jit?"), args[0]))
+    (SIG_QUERY, ctx.pair(Value::keyword("jit?"), args[0]))
 }
 
 /// (silent? value) — true if closure is silent (does not suspend: no yield/debug/polymorphic)
-pub(crate) fn prim_is_silent(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_is_silent(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::bool(!closure.signal().may_suspend()))
     } else {
@@ -27,7 +28,10 @@ pub(crate) fn prim_is_silent(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (mutates-params? value) — true if closure mutates any parameters
-pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_mutates_params(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         (
             SIG_OK,
@@ -39,7 +43,10 @@ pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (fn/gpu-eligible? value) — true if closure is eligible for GPU compilation
-pub(crate) fn prim_gpu_eligible(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_gpu_eligible(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         let eligible = match &closure.template.lir_function {
             Some(lir) => lir.is_gpu_eligible(),
@@ -52,7 +59,10 @@ pub(crate) fn prim_gpu_eligible(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (fn/errors? value) — true if closure may error
-pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_errors(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::bool(closure.template.signal.may_error()))
     } else {
@@ -60,20 +70,26 @@ pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (coroutine? val) / (coro? val) → bool
+/// (fiber? val) → bool
 ///
-/// Returns true if the value is a fiber (coroutines are fibers).
-pub(crate) fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
+/// Returns true if the value is a fiber.
+pub(crate) fn prim_is_fiber(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_fiber()))
 }
 
 /// (arity value) — closure arity as int, pair, or nil
-pub(crate) fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_arity(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         let result = match closure.template.arity {
             Arity::Exact(n) => Value::int(n as i64),
-            Arity::AtLeast(n) => Value::pair(Value::int(n as i64), Value::NIL),
-            Arity::Range(min, max) => Value::pair(Value::int(min as i64), Value::int(max as i64)),
+            Arity::AtLeast(n) => ctx.pair(Value::int(n as i64), Value::NIL),
+            Arity::Range(min, max) => ctx.pair(Value::int(min as i64), Value::int(max as i64)),
         };
         (SIG_OK, result)
     } else {
@@ -82,7 +98,10 @@ pub(crate) fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (captures value) — number of captured variables, or nil
-pub(crate) fn prim_captures(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_captures(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::int(closure.env.len() as i64))
     } else {
@@ -91,7 +110,10 @@ pub(crate) fn prim_captures(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (bytecode-size value) — size of bytecode in bytes, or nil
-pub(crate) fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytecode_size(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::int(closure.template.bytecode.len() as i64))
     } else {
@@ -112,21 +134,27 @@ pub(crate) fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
 /// `(doc name)` appropriately: closures are passed through as values; native
 /// primitives and special forms are rewritten to `(doc "name")` string lookup.
 /// Passing an explicit string `(doc "stdlib-fn")` will NOT find stdlib docs.
-pub(crate) fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_doc(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     // Closure: extract docstring directly — no VM query needed.
     if let Some(closure) = args[0].as_closure() {
-        return if let Some(doc) = closure.template.doc {
-            (SIG_OK, doc)
+        return if let Some(doc) = closure.template.doc.as_deref() {
+            // The docstring is plain `Rc<str>` template data — materialize a
+            // FRESH ordinary string in the active region, as any native-fn
+            // result does.
+            (SIG_OK, ctx.string(doc))
         } else {
             let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
             (
                 SIG_OK,
-                Value::string(format!("No documentation found for '{}'", name)),
+                ctx.string(format!("No documentation found for '{}'", name)),
             )
         };
     }
     // String or keyword: look up builtin docs via SIG_QUERY.
-    (SIG_QUERY, Value::pair(Value::keyword("doc"), args[0]))
+    (SIG_QUERY, ctx.pair(Value::keyword("doc"), args[0]))
 }
 
 /// (vm/query op arg) — query VM state
@@ -140,11 +168,14 @@ pub(crate) fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
 /// - "doc" name → string
 /// - "global?" symbol → bool
 /// - "fiber/self" _ → fiber or nil
-pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_vm_query(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if !args[0].is_string() && args[0].as_keyword_name().is_none() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "vm/query: operation must be a string or keyword, got {}",
@@ -153,34 +184,34 @@ pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_QUERY, Value::pair(args[0], args[1]))
+    (SIG_QUERY, ctx.pair(args[0], args[1]))
 }
 
 /// (signals) — return the signal registry as a struct mapping keywords to bit positions
-pub(crate) fn prim_signals(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_signals(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     let reg = crate::signals::registry::global_registry().lock().unwrap();
     let mut map = std::collections::BTreeMap::new();
     for entry in reg.entries() {
         let key = crate::value::TableKey::from_value(&Value::keyword(&entry.name)).unwrap();
         map.insert(key, Value::int(entry.bit_position as i64));
     }
-    (SIG_OK, Value::struct_from(map))
+    (SIG_OK, ctx.struct_from(map))
 }
 
 /// (keyword str) — convert a string to a keyword
 ///
 /// Creates a content-addressed keyword from the string name.
-pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_keyword(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if let Some(kw) = args[0].with_string(Value::keyword) {
         (SIG_OK, kw)
     } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("keyword: expected string, got {}", args[0].type_name()),
-            ),
-        )
+        type_error!(ctx, args[0], "keyword", "string")
     }
 }
 
@@ -191,7 +222,10 @@ pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
 /// Used by regression tests to assert the ClosureRef LIR-transfer fix
 /// is actually firing on real spawn patterns. See
 /// `src/lir/types.rs::convert_value_consts_for_send`.
-pub(crate) fn prim_closure_value_const_count(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_closure_value_const_count(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     (
         SIG_OK,
         Value::int(crate::lir::closure_value_const_count() as i64),
@@ -202,20 +236,26 @@ pub(crate) fn prim_closure_value_const_count(_args: &[Value]) -> (SignalBits, Va
 ///
 /// Returns a list of structs, each with :name, :reason, and :calls keys.
 /// Sorted by call count ascending (coldest first).
-pub(crate) fn prim_jit_rejections(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_jit_rejections(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     (
         SIG_QUERY,
-        Value::pair(Value::keyword("jit/rejections"), Value::NIL),
+        ctx.pair(Value::keyword("jit/rejections"), Value::NIL),
     )
 }
 
 /// (mlir/compile-spirv closure [workgroup-size]) — compile closure to SPIR-V bytes
 #[cfg(feature = "mlir")]
-pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_compile_spirv(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "arity-error",
                 format!(
                     "mlir/compile-spirv: expected 1-2 arguments, got {}",
@@ -224,27 +264,13 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let closure = match args[0].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "mlir/compile-spirv: expected closure, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
+    let closure = prim_arg!(ctx, args, 0, as_closure, "mlir/compile-spirv", "closure");
     let lir = match &closure.template.lir_function {
         Some(lir) => lir,
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "mlir-error",
                     "mlir/compile-spirv: closure has no LIR".to_string(),
                 ),
@@ -254,7 +280,7 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
     if !lir.is_gpu_eligible() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "mlir-error",
                 "mlir/compile-spirv: closure is not GPU-eligible".to_string(),
             ),
@@ -267,64 +293,42 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
     };
     // Use SIG_QUERY to access the VM's MlirCache for shared context
     // and SPIR-V caching. The VM handles the query in dispatch_query.
+    let payload = ctx.pair(args[0], Value::int(workgroup_size as i64));
     (
         SIG_QUERY,
-        Value::pair(
-            Value::keyword("mlir/compile-spirv"),
-            Value::pair(args[0], Value::int(workgroup_size as i64)),
-        ),
+        ctx.pair(Value::keyword("mlir/compile-spirv"), payload),
     )
 }
 
-/// Declarative primitive definitions for introspection operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "closure?",
-        func: prim_is_closure,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Returns true if value is a bytecode closure",
-        params: &["value"],
-        category: "predicate",
-        example: "(closure? (fn (x) x))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "jit?",
-        func: prim_is_jit,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+// Declarative primitive definitions for introspection operations.
+primitive! {
+    "jit?" => prim_is_jit {
+        signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
         params: &["value"],
         category: "predicate",
         example: "(jit? (fn (x) x))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "silent?",
-        func: prim_is_silent,
+        effect: RegionEffect::Immediate,
+    }
+    "silent?" => prim_is_silent {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure is silent (does not suspend: no yield, debug, or polymorphic signal). False for non-closures.",
         params: &["value"],
         category: "predicate",
         example: "(silent? (fn (x) x))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "coroutine?",
-        func: prim_is_coroutine,
-        signal: Signal::silent(),
+        effect: RegionEffect::Immediate,
+    }
+    "fiber?" => prim_is_fiber {
         arity: Arity::Exact(1),
-        doc: "Returns true if value is a fiber (coroutines are fibers)",
+        doc: "Returns true if value is a fiber",
         params: &["value"],
         category: "predicate",
-        example: "(coroutine? (fiber/new (fn () 42) |:yield|))",
-        aliases: &["coro?"],
-    },
-    PrimitiveDef {
-        name: "fn/mutates-params?",
-        func: prim_mutates_params,
+        example: "(fiber? (fiber/new (fn () 42) |:yield|))",
+        effect: RegionEffect::Immediate,
+    }
+    "fn/mutates-params?" => prim_mutates_params {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure mutates any parameters",
@@ -332,32 +336,27 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/mutates-params? (fn (x) (assign x 1)))",
         aliases: &["mutates-params?"],
-    },
-    PrimitiveDef {
-        name: "fn/gpu-eligible?",
-        func: prim_gpu_eligible,
+        effect: RegionEffect::Immediate,
+    }
+    "fn/gpu-eligible?" => prim_gpu_eligible {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure passes signal and structural checks for GPU compilation",
         params: &["value"],
         category: "fn",
         example: "(fn/gpu-eligible? (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/errors?",
-        func: prim_errors,
+        effect: RegionEffect::Immediate,
+    }
+    "fn/errors?" => prim_errors {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure may error",
         params: &["value"],
         category: "fn",
         example: "(fn/errors? (fn (x) (/ 1 x)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/arity",
-        func: prim_arity,
+        effect: RegionEffect::Immediate,
+    }
+    "fn/arity" => prim_arity {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns closure arity as int, pair, or nil",
@@ -365,10 +364,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/arity (fn (x y) x))",
         aliases: &["arity"],
-    },
-    PrimitiveDef {
-        name: "fn/captures",
-        func: prim_captures,
+        effect: RegionEffect::Fresh,
+    }
+    "fn/captures" => prim_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns number of captured variables, or nil",
@@ -376,10 +374,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/captures (let [x 1] (fn () x)))",
         aliases: &["captures"],
-    },
-    PrimitiveDef {
-        name: "fn/bytecode-size",
-        func: prim_bytecode_size,
+        effect: RegionEffect::Immediate,
+    }
+    "fn/bytecode-size" => prim_bytecode_size {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns size of bytecode in bytes, or nil",
@@ -387,11 +384,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/bytecode-size (fn (x) x))",
         aliases: &["bytecode-size"],
-    },
-    PrimitiveDef {
-        name: "doc",
-        func: prim_doc,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        effect: RegionEffect::Immediate,
+    }
+    "doc" => prim_doc {
+        signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Look up documentation for a value or builtin. \
               Pass a closure (user-defined or stdlib) to extract its docstring. \
@@ -401,55 +397,47 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["target"],
         category: "meta",
         example: "(doc inc)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "vm/query",
-        func: prim_vm_query,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        effect: RegionEffect::Fresh,
+    }
+    "vm/query" => prim_vm_query {
+        signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Query VM state (call-count, doc, global?, fiber/self)",
         params: &["op", "arg"],
         category: "meta",
         example: "(vm/query \"call-count\" some-fn)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "signals",
-        func: prim_signals,
+        // The gateway picks its operation by a runtime string, so the RESULT is
+        // unbounded — minted by whatever `VM::dispatch_query` reached. The store
+        // side is not: every operation there reads its argument or copies it out,
+        // and the Elle code some of them re-enter stores only through the
+        // runtime-counted funnel. Unbounded result + no store is `Opaque` — no arg
+        // clique (docs/impl/region/effects.md § Opaque;
+        // tests/elle/region-query-clique-leak.lisp). The obligation rides
+        // `dispatch_query`: an operation that RETAINS its argument past the call
+        // moves this declaration back to `Mixed`.
+        effect: RegionEffect::Opaque,
+    }
+    "signals" => prim_signals {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Return the signal registry as a struct mapping keywords to bit positions.",
-        params: &[],
         category: "meta",
         example: "(signals)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "jit/rejections",
-        func: prim_jit_rejections,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
-        arity: Arity::Exact(0),
+        effect: RegionEffect::Fresh,
+    }
+    "jit/rejections" => prim_jit_rejections {
+        signal: Signal::query_errors(),
         doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls} structs sorted by call count ascending.",
-        params: &[],
         category: "meta",
         example: "(jit/rejections)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "lir/closure-value-const-count",
-        func: prim_closure_value_const_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+        effect: RegionEffect::Fresh,
+    }
+    "lir/closure-value-const-count" => prim_closure_value_const_count {
         doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. Used by regression tests to assert the ClosureRef LIR-transfer fix fires.",
-        params: &[],
         category: "meta",
         example: "(lir/closure-value-const-count)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "keyword",
-        func: prim_keyword,
+        effect: RegionEffect::Immediate,
+    }
+    "keyword" => prim_keyword {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a string to a keyword.",
@@ -457,17 +445,20 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(keyword \"foo\")",
         aliases: &["string->keyword"],
-    },
-    #[cfg(feature = "mlir")]
-    PrimitiveDef {
-        name: "mlir/compile-spirv",
-        func: prim_compile_spirv,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
-        arity: Arity::Range(1, 2),
-        doc: "Compile a GPU-eligible closure to SPIR-V bytes. Optional second arg is workgroup size (default 256).",
-        params: &["closure", "workgroup-size"],
-        category: "mlir",
-        example: "(mlir/compile-spirv (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Immediate,
+    }
+}
+
+#[cfg(feature = "mlir")]
+primitive!(
+    pub(crate) const MLIR_PRIMITIVES =
+        "mlir/compile-spirv" => prim_compile_spirv {
+            signal: Signal::query_errors(),
+            arity: Arity::Range(1, 2),
+            doc: "Compile a GPU-eligible closure to SPIR-V bytes.",
+            params: &["closure", "workgroup-size"],
+            category: "mlir",
+            example: "(mlir/compile-spirv (fn [a b] (+ a b)))",
+            effect: RegionEffect::Fresh,
+        }
+);

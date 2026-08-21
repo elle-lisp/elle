@@ -6,14 +6,15 @@
 //! complete immediately. Accept/connect/send/recv/shutdown yield SIG_IO
 //! for scheduler dispatch.
 
-use crate::io::request::{ConnectAddr, IoOp, IoRequest};
-use crate::port::{Port, PortKind};
-use crate::primitives::def::PrimitiveDef;
+use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
+use crate::port::{Direction, Port, PortKind};
+use crate::primitives::ctx::NativeCtx;
+use crate::primitives::def::RegionEffect;
 use crate::primitives::kwarg::{extract_connect_kwargs, extract_keyword_timeout};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 use std::os::unix::io::{FromRawFd, OwnedFd};
 
@@ -25,11 +26,12 @@ pub(crate) fn extract_port_of_kind(
     value: &Value,
     expected: PortKind,
     prim_name: &str,
+    ctx: &mut NativeCtx,
 ) -> Result<Value, (SignalBits, Value)> {
     let port = value.as_external::<Port>().ok_or_else(|| {
         (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!("{}: expected port, got {}", prim_name, value.type_name()),
             ),
@@ -38,7 +40,7 @@ pub(crate) fn extract_port_of_kind(
     if port.kind() != expected {
         return Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: expected {:?} port, got {:?}",
@@ -56,11 +58,12 @@ pub(crate) fn extract_string(
     value: &Value,
     param: &str,
     prim_name: &str,
+    ctx: &mut NativeCtx,
 ) -> Result<String, (SignalBits, Value)> {
     value.with_string(|s| s.to_string()).ok_or_else(|| {
         (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: expected string for {}, got {}",
@@ -73,19 +76,23 @@ pub(crate) fn extract_string(
     })
 }
 
-fn extract_port_num(value: &Value, prim_name: &str) -> Result<u16, (SignalBits, Value)> {
+fn extract_port_num(
+    value: &Value,
+    prim_name: &str,
+    ctx: &mut NativeCtx,
+) -> Result<u16, (SignalBits, Value)> {
     match value.as_int() {
         Some(n) if (0..=65535).contains(&n) => Ok(n as u16),
         Some(n) => Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "value-error",
                 format!("{}: port must be 0-65535, got {}", prim_name, n),
             ),
         )),
         None => Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: expected integer for port, got {}",
@@ -100,6 +107,7 @@ fn extract_port_num(value: &Value, prim_name: &str) -> Result<u16, (SignalBits, 
 pub(crate) fn parse_shutdown_how(
     value: &Value,
     prim_name: &str,
+    ctx: &mut NativeCtx,
 ) -> Result<i32, (SignalBits, Value)> {
     match value.as_keyword_name().as_deref() {
         Some("read") => Ok(libc::SHUT_RD),
@@ -107,7 +115,7 @@ pub(crate) fn parse_shutdown_how(
         Some("read-write") => Ok(libc::SHUT_RDWR),
         Some(other) => Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "value-error",
                 format!(
                     "{}: expected :read, :write, or :read-write, got :{}",
@@ -117,7 +125,7 @@ pub(crate) fn parse_shutdown_how(
         )),
         None => Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: expected keyword for how, got {}",
@@ -137,6 +145,7 @@ fn bind_socket(
     sock_type: libc::c_int,
     listen: bool,
     prim_name: &str,
+    ctx: &mut NativeCtx,
 ) -> Result<(OwnedFd, String), (SignalBits, Value)> {
     use std::net::ToSocketAddrs;
 
@@ -146,14 +155,14 @@ fn bind_socket(
         .map_err(|e| {
             (
                 SIG_ERROR,
-                error_val("io-error", format!("{}: {}", prim_name, e)),
+                ctx.error("io-error", format!("{}: {}", prim_name, e)),
             )
         })?
         .next()
         .ok_or_else(|| {
             (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "io-error",
                     format!("{}: could not resolve {}", prim_name, addr_str),
                 ),
@@ -169,7 +178,7 @@ fn bind_socket(
     if fd < 0 {
         return Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "io-error",
                 format!("{}: socket: {}", prim_name, std::io::Error::last_os_error()),
             ),
@@ -196,7 +205,7 @@ fn bind_socket(
         unsafe { libc::close(fd) };
         return Err((
             SIG_ERROR,
-            error_val("io-error", format!("{}: bind: {}", prim_name, err)),
+            ctx.error("io-error", format!("{}: bind: {}", prim_name, err)),
         ));
     }
 
@@ -207,7 +216,7 @@ fn bind_socket(
             unsafe { libc::close(fd) };
             return Err((
                 SIG_ERROR,
-                error_val("io-error", format!("{}: listen: {}", prim_name, err)),
+                ctx.error("io-error", format!("{}: listen: {}", prim_name, err)),
             ));
         }
     }
@@ -220,467 +229,115 @@ fn bind_socket(
     Ok((owned_fd, bound_addr))
 }
 
-// ---------------------------------------------------------------------------
-// TCP primitives
-// ---------------------------------------------------------------------------
+mod tcp;
+mod udp;
+use tcp::*;
+use udp::*;
 
-/// (tcp/listen addr port) → listener-port
-fn prim_tcp_listen(args: &[Value]) -> (SignalBits, Value) {
-    let addr = match extract_string(&args[0], "addr", "tcp/listen") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    let port = match extract_port_num(&args[1], "tcp/listen") {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-
-    match bind_socket(&addr, port, libc::SOCK_STREAM, true, "tcp/listen") {
-        Ok((fd, bound_addr)) => {
-            let p = Port::new_tcp_listener(fd, bound_addr);
-            (SIG_OK, Value::external("port", p))
-        }
-        Err(e) => e,
-    }
-}
-
-/// (tcp/accept listener [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool]
-///                       [:encoding :text|:binary] [:timeout ms]) → stream-port
-///
-/// `:encoding` controls the resulting stream port's mode.  Default is
-/// `:binary` (POSIX-style: a TCP connection is a byte stream).  Pass
-/// `:text` for line-oriented text protocols (SMTP, IRC, plain HTTP/1.x)
-/// — then `port/read` and `port/read-exact` return strings and treat
-/// `n` as graphemes (the unit Elle strings are measured in).
-fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
-    let port_val = match extract_port_of_kind(&args[0], PortKind::TcpListener, "tcp/accept") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let kwargs = match extract_connect_kwargs(args, 1, "tcp/accept") {
-        Ok(k) => k,
-        Err(e) => return e,
-    };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(
-            IoOp::Accept {
-                options: kwargs.options,
-                encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
-            },
-            port_val,
-            kwargs.timeout,
-        ),
-    )
-}
-
-/// (tcp/connect addr port [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool]
-///                         [:encoding :text|:binary] [:timeout ms]) → stream-port
-///
-/// `:encoding` controls the resulting stream port's mode.  Default is
-/// `:binary` (POSIX-style: a TCP connection is a byte stream).  Pass
-/// `:text` for line-oriented text protocols (SMTP, IRC, plain HTTP/1.x).
-fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
-    let addr = match extract_string(&args[0], "addr", "tcp/connect") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    let port = match extract_port_num(&args[1], "tcp/connect") {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-    let kwargs = match extract_connect_kwargs(args, 2, "tcp/connect") {
-        Ok(k) => k,
-        Err(e) => return e,
-    };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(
-            IoOp::Connect {
-                addr: ConnectAddr::Tcp {
-                    addr,
-                    port,
-                    options: kwargs.options,
-                    encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
-                },
-            },
-            Value::NIL,
-            kwargs.timeout,
-        ),
-    )
-}
-
-/// (tcp/shutdown port how) → nil
-fn prim_tcp_shutdown(args: &[Value]) -> (SignalBits, Value) {
-    let port_val = match extract_port_of_kind(&args[0], PortKind::TcpStream, "tcp/shutdown") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let how = match parse_shutdown_how(&args[1], "tcp/shutdown") {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::new(IoOp::Shutdown { how }, port_val),
-    )
-}
-
-// ---------------------------------------------------------------------------
-// UDP primitives
-// ---------------------------------------------------------------------------
-
-/// (udp/bind addr port) → udp-port
-fn prim_udp_bind(args: &[Value]) -> (SignalBits, Value) {
-    let addr = match extract_string(&args[0], "addr", "udp/bind") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    let port = match extract_port_num(&args[1], "udp/bind") {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-
-    match bind_socket(&addr, port, libc::SOCK_DGRAM, false, "udp/bind") {
-        Ok((fd, bound_addr)) => {
-            let p = Port::new_udp_socket(fd, bound_addr);
-            (SIG_OK, Value::external("port", p))
-        }
-        Err(e) => e,
-    }
-}
-
-/// (udp/send-to socket data addr port [:timeout ms]) → bytes-sent
-fn prim_udp_send_to(args: &[Value]) -> (SignalBits, Value) {
-    let socket_val = match extract_port_of_kind(&args[0], PortKind::UdpSocket, "udp/send-to") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let data = args[1];
-    let addr = match extract_string(&args[2], "addr", "udp/send-to") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    let port_num = match extract_port_num(&args[3], "udp/send-to") {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-    let timeout = match extract_keyword_timeout(args, 4, "udp/send-to") {
-        Ok(t) => t,
-        Err(e) => return e,
-    };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(
-            IoOp::SendTo {
-                addr,
-                port_num,
-                data,
-            },
-            socket_val,
-            timeout,
-        ),
-    )
-}
-
-/// (udp/recv-from socket count [:timeout ms]) → {:data bytes :addr string :port int}
-fn prim_udp_recv_from(args: &[Value]) -> (SignalBits, Value) {
-    let socket_val = match extract_port_of_kind(&args[0], PortKind::UdpSocket, "udp/recv-from") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let count = match args[1].as_int() {
-        Some(n) if n > 0 => n as usize,
-        Some(n) => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "value-error",
-                    format!("udp/recv-from: count must be positive, got {}", n),
-                ),
-            )
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "udp/recv-from: expected integer for count, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
-    let timeout = match extract_keyword_timeout(args, 2, "udp/recv-from") {
-        Ok(t) => t,
-        Err(e) => return e,
-    };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::RecvFrom { count }, socket_val, timeout),
-    )
-}
-
-// ---------------------------------------------------------------------------
-// PRIMITIVES table
-// ---------------------------------------------------------------------------
-
-/// (sys/resolve hostname) → array of IP address strings
-fn prim_sys_resolve(args: &[Value]) -> (SignalBits, Value) {
-    let hostname = match extract_string(&args[0], "hostname", "sys/resolve") {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::portless(IoOp::Resolve { hostname }),
-    )
-}
-
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    // TCP
-    PrimitiveDef {
-        name: "tcp/listen",
-        func: prim_tcp_listen,
-        arity: Arity::Exact(2),
+primitive! {
+    "tcp/listen" => prim_tcp_listen {
         signal: Signal::errors(),
+        arity: Arity::Exact(2),
         doc: "Bind and listen on a TCP address. Returns a listener port.",
         params: &["addr", "port"],
         category: "tcp",
         example: "(tcp/listen \"127.0.0.1\" 8080)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/accept",
-        func: prim_tcp_accept,
+        effect: RegionEffect::Fresh,
+    }
+    "tcp/accept" => prim_tcp_accept {
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
         params: &["listener"],
         category: "tcp",
         example: "(tcp/accept listener)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/connect",
-        func: prim_tcp_connect,
+        // Fresh: the stream port is pre-minted in this call's ctx region
+        // (`accept_port = ctx.external(..)`); the completion sets its fd in place
+        // and returns the same `*accept_port`. Yields → oracle-exempt.
+        effect: RegionEffect::Fresh,
+    }
+    "tcp/connect-ip" => prim_tcp_connect_ip {
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
-        doc: "Connect to a TCP address. Returns a stream port.",
-        params: &["addr", "port"],
+        doc: "Connect to a TCP endpoint by IP literal (IPv4 or IPv6). Hostnames are rejected — the stdlib tcp/connect wrapper resolves names and calls this per address. Returns a stream port.",
+        params: &["ip", "port"],
         category: "tcp",
-        example: "(tcp/connect \"127.0.0.1\" 8080)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/shutdown",
-        func: prim_tcp_shutdown,
+        example: "(tcp/connect-ip \"127.0.0.1\" 8080)",
+        // Fresh: the stream port is pre-minted in this call's ctx region
+        // (`port_val = ctx.external(..)`); the completion sets its fd in place.
+        effect: RegionEffect::Fresh,
+    }
+    "tcp/shutdown" => prim_tcp_shutdown {
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(2),
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "tcp",
         example: "(tcp/shutdown conn :write)",
-        aliases: &[],
-    },
-    // UDP
-    PrimitiveDef {
-        name: "udp/bind",
-        func: prim_udp_bind,
-        arity: Arity::Exact(2),
+        // Immediate: the completion returns Value::NIL. Yields → oracle-exempt.
+        effect: RegionEffect::Immediate,
+    }
+    "udp/bind" => prim_udp_bind {
         signal: Signal::errors(),
+        arity: Arity::Exact(2),
         doc: "Bind a UDP socket. Returns a UDP port.",
         params: &["addr", "port"],
         category: "udp",
         example: "(udp/bind \"0.0.0.0\" 9000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "udp/send-to",
-        func: prim_udp_send_to,
+        effect: RegionEffect::Fresh,
+    }
+    "udp/send-to" => prim_udp_send_to {
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(4),
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
         params: &["socket", "data", "addr", "port"],
         category: "udp",
         example: "(udp/send-to sock \"hello\" \"127.0.0.1\" 9000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "udp/recv-from",
-        func: prim_udp_recv_from,
+        // The io completion returns `Value::int(result_code)` (bytes sent), so
+        // the result is always an immediate. `Immediate` records no may-store
+        // edges — `udp/send-to` takes THREE heap args (socket + data + addr
+        // string) but stores none into another (the `data` it ships rides into
+        // the kernel; `addr` is copied out to a Rust String), so the `Mixed`
+        // clique only leaked. The `data` value is held in the IoRequest across
+        // the yield, but it stays pinned by the suspended caller frame (whose
+        // `DecrefValueRegion` is suspended too), so dropping the clique cannot
+        // free it early. Pinned by `udp_send_to_declares_immediate_no_arg_clique`
+        // (no clique) and region-udp-send-effect.lisp (resumed int). The
+        // result side is oracle-exempt (always yields).
+        effect: RegionEffect::Immediate,
+    }
+    "udp/recv-from" => prim_udp_recv_from {
+        signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
         params: &["socket", "count"],
         category: "udp",
         example: "(udp/recv-from sock 1024)",
-        aliases: &[],
-    },
-    // DNS resolution
-    PrimitiveDef {
-        name: "sys/resolve",
-        func: prim_sys_resolve,
+        // Fresh: the `{:data :addr :port}` struct and its buffers are pre-minted
+        // in this call's ctx region; the completion fills them in place and
+        // returns the same `*result` — nothing is born on the scheduler heap.
+        effect: RegionEffect::Fresh,
+    }
+    "sys/resolve" => prim_sys_resolve {
+        signal: Signal::io_yields_errors(),
         arity: Arity::Exact(1),
-        signal: Signal {
-            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
-            propagates: 0,
-        },
         doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",
         params: &["hostname"],
         category: "sys",
         example: "(sys/resolve \"localhost\")",
-        aliases: &[],
-    },
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::value::fiber::{SIG_IO, SIG_YIELD};
-
-    #[test]
-    fn test_tcp_listen_returns_ok() {
-        let (bits, val) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(0)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        assert_eq!(port.kind(), PortKind::TcpListener);
-        port.close();
+        // Opaque: stores nothing (hostname copied to a Rust String), but the IP
+        // array is minted at completion on the origin heap (portless Resolve),
+        // neither this call's region nor an arg's. No clique, non-fresh result.
+        effect: RegionEffect::Opaque,
     }
-
-    #[test]
-    fn test_tcp_listen_port_zero() {
-        let (bits, val) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(0)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        // Verify OS assigned a real port (path contains it)
-        let path = port.path().unwrap();
-        assert!(path.contains(':'), "expected addr:port, got {}", path);
-        let port_str = path.split(':').next_back().unwrap();
-        let port_num: u16 = port_str.parse().unwrap();
-        assert!(port_num > 0, "expected non-zero port, got {}", port_num);
-        port.close();
-    }
-
-    #[test]
-    fn test_tcp_listen_bad_addr_errors() {
-        let (bits, _) = prim_tcp_listen(&[Value::string("not-a-valid-addr"), Value::int(0)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_listen_bad_port_errors() {
-        let (bits, _) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(99999)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_listen_non_string_addr_errors() {
-        let (bits, _) = prim_tcp_listen(&[Value::int(42), Value::int(0)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_accept_returns_sig_io() {
-        let (_, listener) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(0)]);
-        let (bits, val) = prim_tcp_accept(&[listener]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-        // Clean up
-        listener.as_external::<Port>().unwrap().close();
-    }
-
-    #[test]
-    fn test_tcp_accept_non_listener_errors() {
-        // Create a TcpStream port (not a listener)
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_tcp_stream(fd, "x".into()));
-        let (bits, _) = prim_tcp_accept(&[stream_port]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_accept_non_port_errors() {
-        let (bits, _) = prim_tcp_accept(&[Value::int(42)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_connect_returns_sig_io() {
-        let (bits, val) = prim_tcp_connect(&[Value::string("127.0.0.1"), Value::int(8080)]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_tcp_connect_bad_port_errors() {
-        let (bits, _) = prim_tcp_connect(&[Value::string("127.0.0.1"), Value::int(99999)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_shutdown_returns_sig_io() {
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_tcp_stream(fd, "x".into()));
-        let (bits, _) = prim_tcp_shutdown(&[stream_port, Value::keyword("write")]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-    }
-
-    #[test]
-    fn test_tcp_shutdown_bad_how_errors() {
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_tcp_stream(fd, "x".into()));
-        let (bits, _) = prim_tcp_shutdown(&[stream_port, Value::keyword("foo")]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_udp_bind_returns_ok() {
-        let (bits, val) = prim_udp_bind(&[Value::string("127.0.0.1"), Value::int(0)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        assert_eq!(port.kind(), PortKind::UdpSocket);
-        port.close();
-    }
-
-    #[test]
-    fn test_udp_send_to_returns_sig_io() {
-        let (_, socket) = prim_udp_bind(&[Value::string("127.0.0.1"), Value::int(0)]);
-        let (bits, _) = prim_udp_send_to(&[
-            socket,
-            Value::string("hello"),
-            Value::string("127.0.0.1"),
-            Value::int(9999),
-        ]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        socket.as_external::<Port>().unwrap().close();
-    }
-
-    #[test]
-    fn test_udp_recv_from_returns_sig_io() {
-        let (_, socket) = prim_udp_bind(&[Value::string("127.0.0.1"), Value::int(0)]);
-        let (bits, _) = prim_udp_recv_from(&[socket, Value::int(1024)]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        socket.as_external::<Port>().unwrap().close();
+    "sys/ip?" => prim_sys_ip_p {
+        arity: Arity::Exact(1),
+        doc: "True if the argument is a string holding an IPv4 or IPv6 address literal (e.g. \"127.0.0.1\", \"::1\"). Hostnames, bracketed or port-suffixed addresses, and non-strings are false. Synchronous — does no resolution; tcp/connect uses it to skip sys/resolve for IP literals.",
+        params: &["value"],
+        category: "predicate",
+        example: "(sys/ip? \"127.0.0.1\") #=> true",
+        effect: RegionEffect::Immediate,
     }
 }
+
+// Tests migrated to tests/elle/prim-net.lisp

@@ -19,17 +19,23 @@
 
 use crate::error::{LError, LResult};
 use crate::ffi::types::TypeDesc;
+use crate::primitives::ctx::Alloc;
 use crate::value::Value;
 use std::ffi::c_void;
 
-/// Read a C value from a buffer at the given pointer, returning an Elle Value.
+/// Read a C value from a buffer at the given pointer, returning an Elle Value
+/// born in the `ctx`'s region.
 ///
 /// For struct/array types, returns an Elle array of field/element values.
 ///
 /// # Safety
 /// `ptr` must point to a readable region of at least `desc.size()` bytes
 /// with appropriate alignment and valid data for the described type.
-pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult<Value> {
+pub(crate) fn read_value_from_buffer(
+    ptr: *const u8,
+    desc: &TypeDesc,
+    ctx: &mut Alloc,
+) -> LResult<Value> {
     match desc {
         TypeDesc::Void => Ok(Value::NIL),
 
@@ -95,10 +101,10 @@ pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult
             let mut values = Vec::with_capacity(sd.fields.len());
             for (field_desc, &field_offset) in sd.fields.iter().zip(offsets.iter()) {
                 let field_val =
-                    read_value_from_buffer(unsafe { ptr.add(field_offset) }, field_desc)?;
+                    read_value_from_buffer(unsafe { ptr.add(field_offset) }, field_desc, ctx)?;
                 values.push(field_val);
             }
-            Ok(Value::array(values))
+            Ok(ctx.array(values))
         }
 
         TypeDesc::Array(elem_desc, count) => {
@@ -113,16 +119,16 @@ pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult
             ) {
                 let mut data = vec![0u8; *count];
                 unsafe { std::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), *count) };
-                return Ok(Value::bytes(data));
+                return Ok(ctx.bytes(data));
             }
 
             let mut values = Vec::with_capacity(*count);
             for i in 0..*count {
                 let elem_val =
-                    read_value_from_buffer(unsafe { ptr.add(i * elem_size) }, elem_desc)?;
+                    read_value_from_buffer(unsafe { ptr.add(i * elem_size) }, elem_desc, ctx)?;
                 values.push(elem_val);
             }
-            Ok(Value::array(values))
+            Ok(ctx.array(values))
         }
     }
 }

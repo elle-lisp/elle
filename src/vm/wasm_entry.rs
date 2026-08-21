@@ -17,6 +17,7 @@ impl VM {
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
+        self_val: Value,
     ) -> Option<Option<SignalBits>> {
         let wasm_tier = self.wasm_tier.as_ref()?;
         let bytecode_ptr = closure.template.bytecode.as_ptr();
@@ -28,7 +29,7 @@ impl VM {
 
         // Check if already compiled
         if wasm_tier.is_compiled(bytecode_ptr) {
-            return Some(self.run_wasm(bytecode_ptr, closure, args));
+            return Some(self.run_wasm(bytecode_ptr, closure, args, self_val));
         }
 
         // Check if hot enough to compile
@@ -43,15 +44,13 @@ impl VM {
         }
 
         // Need LIR to compile
-        let lir_func = match &closure.template.lir_function {
-            Some(f) => f.clone(),
-            None => return None,
-        };
+        let lir_func = closure.template.lir_function.as_ref()?.clone();
 
         // Try to compile
+        let heap_ptr = self.heap_ptr;
         let wasm_tier = self.wasm_tier.as_mut().unwrap();
-        if wasm_tier.compile(bytecode_ptr, &lir_func) {
-            return Some(self.run_wasm(bytecode_ptr, closure, args));
+        if wasm_tier.compile(bytecode_ptr, &lir_func, heap_ptr) {
+            return Some(self.run_wasm(bytecode_ptr, closure, args, self_val));
         }
 
         // Compilation rejected — record so we don't try again
@@ -65,14 +64,15 @@ impl VM {
         bytecode_ptr: *const u8,
         closure: &crate::value::Closure,
         args: &[Value],
+        self_val: Value,
     ) -> Option<SignalBits> {
         let closure_rc = std::rc::Rc::new(closure.clone());
         let vm_ptr = self as *mut VM;
 
         let wasm_tier = self.wasm_tier.as_ref().unwrap();
-        match wasm_tier.call(vm_ptr, bytecode_ptr, &closure_rc, args) {
+        match wasm_tier.call(vm_ptr, bytecode_ptr, &closure_rc, args, self_val) {
             Ok((value, signal)) => {
-                if signal.is_ok() {
+                if signal.is_empty() {
                     self.fiber.stack.push(value);
                     None
                 } else if signal == SIG_HALT {
@@ -84,7 +84,7 @@ impl VM {
                     self.fiber.signal = Some((signal, value));
                     self.fiber.stack.push(Value::NIL);
                     None
-                } else if signal.contains(SIG_ERROR) {
+                } else if signal.intersects(SIG_ERROR) {
                     // Error — set signal on fiber
                     self.fiber.signal = Some((signal, value));
                     self.fiber.stack.push(Value::NIL);
@@ -96,7 +96,7 @@ impl VM {
             }
             Err(e) => {
                 // WASM execution error — convert to Elle error
-                let err = crate::value::error_val("internal-error", format!("wasm: {}", e));
+                let err = self.escaping_error("internal-error", format!("wasm: {}", e));
                 self.fiber.signal = Some((SIG_ERROR, err));
                 self.fiber.stack.push(Value::NIL);
                 None

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/wayland.lisp — Wayland compositor interaction for Elle
 ##
 ## Wraps the elle-wayland plugin primitives with idiomatic Elle APIs.

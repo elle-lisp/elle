@@ -41,7 +41,8 @@ first truthy one. For structural dispatch on data shape, see
 
 `cond` evaluates arbitrary test expressions. When you need to dispatch on
 the *structure* or *literal value* of a single expression, `match` is more
-concise and guarantees exhaustiveness.
+concise: it rejects unreachable arms at compile time and raises a
+`:match-error` at runtime when no arm matches.
 
 ## case
 

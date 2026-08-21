@@ -1,141 +1,17 @@
-use elle::context::{SymbolTableGuard, VmContextGuard};
-use elle::pipeline::compile_file;
+use elle::pipeline::{compile_file, CompileCtx};
 use elle::repl::Repl;
-use elle::{init_stdlib, register_primitives, SymbolTable, VM};
+use elle::runtime::Runtime;
+use elle::{SymbolTable, VM};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
 
-fn print_help() {
-    println!("Elle v1.0.0\n");
-    println!("Usage: elle [file...] [-- args...]       Run files or start REPL");
-    println!("       elle fmt [options] <file...>       Format source files");
-    println!("       elle lint [options] <file|dir>... Static analysis");
-    println!("       elle lsp                          Start language server");
-    println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
-    println!("Options:");
-    println!("  -h, --help            Show this help");
-    println!("  -e, --eval EXPR       Evaluate expression");
-    println!("  -                     Read from stdin");
-    println!("  --dump=KW[,KW,...]    Dump compiler artifacts and exit. Keywords:");
-    println!("                          ast  — parsed syntax forms");
-    println!("                          hir  — resolved HIR");
-    println!("                          fhir — functionalized HIR (s-expression)");
-    println!("                          lir  — lowered LIR (SSA)");
-    println!("                          jit  — JIT eligibility per function");
-    println!("                          cfg  — per-function control-flow graph");
-    println!("                          dfa  — dataflow / signal inference results");
-    println!("                          defuse — HIR def-use chains, value origin, liveness");
-    println!("                          regions — Tofte-Talpin region inference results");
-    println!("                          git  — (reserved for SPIR-V output)");
-    println!("  --dump=all            Dump every stage");
-    println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
-    println!("  --mlir=POLICY         MLIR policy: off, eager, adaptive (default), or integer N");
-    println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
-    println!("  --flip=on|off         Insert FlipEnter/FlipSwap/FlipExit instructions");
-    println!("                          (escape-analysis-gated rotation; default on)");
-    println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
-    println!("                          call, signal, compile, fiber, hir, lir,");
-    println!("                          emit, jit, io, gc, import, macro, wasm,");
-    println!("                          capture, arena, escape, bytecode, posix,");
-    println!("                          chan");
-    println!("  --trace=all           Trace everything");
-    println!("  --checked-intrinsics  Route %-intrinsics through type-checked NativeFn");
-    println!("                          (implies --jit=off --mlir=off)");
-    println!("  --stats               Print compilation stats on exit");
-    println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
-    println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
-    println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
-    println!("  --json                JSON output on stderr\n");
-    println!("Syntax:");
-    println!("  .lisp             S-expression syntax (default)");
-    println!("  .py               Python syntax");
-    println!("  .js               JavaScript syntax");
-    println!("  .lua              Lua syntax");
-    println!("  .md               Literate markdown (```lisp blocks)");
-}
+mod help;
+use help::print_help;
+mod errors;
+use errors::{format_error_json, format_runtime_error, parse_compilation_error};
 
-/// Format a runtime error with symbol resolution
-fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
-    // Check for SymbolId pattern and resolve it
-    if let Some(start) = error.find("SymbolId(") {
-        if let Some(end) = error[start..].find(')') {
-            let id_str = &error[start + 9..start + end];
-            if let Ok(id) = id_str.parse::<u32>() {
-                let name = symbols
-                    .name(elle::value::SymbolId(id))
-                    .unwrap_or("<unknown>");
-                let before = &error[..start];
-                let after = &error[start + end + 1..];
-                return format!("{}'{}'{}", before, name, after);
-            }
-        }
-    }
-    error.to_string()
-}
-
-/// Parse a compilation error string into an LError for structured display.
-/// When the error has "file:line:col: message" format, extracts location.
-/// Uses Generic kind so `description()` returns just the message without
-/// an extra "Compile error:" prefix (the caller provides context).
-fn parse_compilation_error(error: &str) -> elle::error::LError {
-    if let Some((file, line, col, message)) = elle::error::parse_located_error(error) {
-        elle::error::LError::new(elle::error::ErrorKind::CompileError {
-            message: message.to_string(),
-        })
-        .with_location(elle::error::SourceLoc::new(file, line, col))
-    } else {
-        elle::error::LError::compile_error(error)
-    }
-}
-
-/// Format a compilation error as JSON for --json mode
-fn format_error_json(error: &elle::error::LError) -> String {
-    let (file, line, col) = match &error.location {
-        Some(loc) => (loc.file.as_str(), loc.line, loc.col),
-        None => ("<unknown>", 0, 0),
-    };
-    let (kind, message) = match &error.kind {
-        elle::error::ErrorKind::UndefinedVariable {
-            name, suggestions, ..
-        } => {
-            let msg = if suggestions.is_empty() {
-                format!("undefined variable: {}", name)
-            } else {
-                format!(
-                    "undefined variable: {} (did you mean: {}?)",
-                    name,
-                    suggestions.join(", ")
-                )
-            };
-            ("undefined-variable", msg)
-        }
-        elle::error::ErrorKind::SignalMismatch {
-            function,
-            required_mask,
-            actual_mask,
-        } => (
-            "signal-mismatch",
-            format!(
-                "function {} restricted to {} but body may emit {}",
-                function, required_mask, actual_mask
-            ),
-        ),
-        elle::error::ErrorKind::CompileError { message } => ("compile-error", message.clone()),
-        elle::error::ErrorKind::SyntaxError { message, .. } => ("syntax-error", message.clone()),
-        _ => ("error", error.description()),
-    };
-    format!(
-        r#"{{"error":"compile-error","kind":"{}","file":"{}","line":{},"col":{},"message":"{}"}}"#,
-        kind,
-        file.replace('\\', "\\\\").replace('"', "\\\""),
-        line,
-        col,
-        message.replace('\\', "\\\\").replace('"', "\\\""),
-    )
-}
-
-fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
+fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> Result<(), String> {
     let mut contents = String::new();
     io::stdin().read_to_string(&mut contents).map_err(|e| {
         let msg = format!("Failed to read stdin: {}", e);
@@ -143,10 +19,15 @@ fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
         msg
     })?;
 
-    run_source(&contents, "<stdin>", vm, symbols)
+    run_source(&contents, "<stdin>", vm, symbols, cctx)
 }
 
-fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
+fn run_file(
+    filename: &str,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+) -> Result<(), String> {
     let mut contents = fs::read_to_string(filename).map_err(|e| {
         let msg = format!("{}: {}", filename, e);
         eprintln!("✗ {}", msg);
@@ -158,14 +39,19 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
         contents = contents.lines().skip(1).collect::<Vec<_>>().join("\n");
     }
 
-    run_source(&contents, filename, vm, symbols)
+    run_source(&contents, filename, vm, symbols, cctx)
 }
 
 /// Implementation of `--dump=...`. Each requested stage prints a banner
 /// followed by the artifact. Stages run in pipeline order (git, ast, hir,
 /// lir, cfg, dfa, jit), so asking for multiple stages gives a coherent
 /// top-to-bottom dump of the compiler.
-fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Result<(), String> {
+fn run_dump(
+    contents: &str,
+    source_name: &str,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+) -> Result<(), String> {
     use elle::config::dump_bits;
     let cfg = elle::config::get();
 
@@ -173,13 +59,11 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
     let needs_ast = cfg.dump.contains("ast");
     if needs_ast {
         println!(";; ── ast ────────────────────────────────────────────────────");
-        let forms = elle::reader::read_syntax_all_for(contents, source_name).map_err(|e| {
+        let ast = elle::dump::render_ast(contents, source_name).map_err(|e| {
             eprintln!("{}", e);
             e
         })?;
-        for form in &forms {
-            println!("{}", form);
-        }
+        print!("{}", ast);
     }
 
     // HIR / LIR / CFG / DFA / JIT / git (SPIR-V) all flow off
@@ -189,20 +73,24 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
     if cfg.dump.contains("fhir") {
         println!(";; ── fhir (functionalized HIR) ──────────────────────────────");
         let (hir, arena, names) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, source_name).map_err(|e| {
-                eprintln!("{}", e);
-                e
-            })?;
+            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+                |e| {
+                    eprintln!("{}", e);
+                    e
+                },
+            )?;
         println!("{}", elle::hir::display::display_hir(&hir, &arena, &names));
     }
 
     if cfg.dump.contains("defuse") {
         println!(";; ── defuse (HIR dataflow) ──────────────────────────────────");
         let (hir, arena, names) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, source_name).map_err(|e| {
-                eprintln!("{}", e);
-                e
-            })?;
+            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+                |e| {
+                    eprintln!("{}", e);
+                    e
+                },
+            )?;
         let info = elle::hir::analyze_dataflow(&hir);
         print!("{}", elle::hir::format_dataflow(&info, &arena, &names));
     }
@@ -210,10 +98,12 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
     if cfg.dump.contains("regions") {
         println!(";; ── regions (Tofte-Talpin region inference) ─────────────────");
         let (hir, arena, names) =
-            elle::pipeline::compile_file_to_fhir(contents, symbols, source_name).map_err(|e| {
-                eprintln!("{}", e);
-                e
-            })?;
+            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+                |e| {
+                    eprintln!("{}", e);
+                    e
+                },
+            )?;
         let info = elle::hir::analyze_regions(&hir, &arena);
         print!("{}", elle::hir::format_regions(&info, &arena, &names));
     }
@@ -228,67 +118,62 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
         return Ok(());
     }
 
-    let module =
-        elle::pipeline::compile_file_to_lir(contents, symbols, source_name, 0).map_err(|e| {
+    let module = elle::pipeline::compile_file_to_lir(contents, symbols, cctx, source_name, 0)
+        .map_err(|e| {
             eprintln!("{}", e);
             e
         })?;
 
-    if cfg.dump.contains("escape") {
-        println!(";; ── escape analysis ────────────────────────────────────────");
-        if let Some(ref dump) = module.escape_dump {
-            print!("{}", dump);
-        }
-    }
-
     if cfg.dump.contains("hir") {
         println!(";; ── hir ────────────────────────────────────────────────────");
-        // No dedicated pretty-printer — use Debug. The per-function
-        // `syntax` Rc on each LirFunction carries the pre-expansion form
-        // for reference; we print that for a compact overview.
-        for (i, f) in std::iter::once(&module.entry)
-            .chain(module.closures.iter())
-            .enumerate()
-        {
-            let tag = if i == 0 {
-                "entry".to_string()
-            } else {
-                format!("closure[{}]", i - 1)
-            };
-            let name = f.name.as_deref().unwrap_or("<anon>");
-            println!(
-                "; {} {} (arity={}, signal={:?})",
-                tag, name, f.arity, f.signal
-            );
-            if let Some(syn) = &f.syntax {
-                println!("{}", syn);
-            }
-        }
+        print!("{}", elle::dump::hir_module(&module));
     }
 
     if cfg.dump.contains("lir") {
         println!(";; ── lir ────────────────────────────────────────────────────");
-        print_lir_module(&module);
+        print!("{}", elle::dump::lir_module(&module));
     }
 
     if cfg.dump.contains("cfg") {
         println!(";; ── cfg ────────────────────────────────────────────────────");
-        print_cfg_module(&module);
+        print!("{}", elle::dump::cfg_module(&module));
     }
 
     if cfg.dump.contains("dfa") {
         println!(";; ── dfa ────────────────────────────────────────────────────");
-        print_dfa_module(&module);
+        print!("{}", elle::dump::dfa_module(&module));
     }
 
     if cfg.dump.contains("jit") {
         println!(";; ── jit ────────────────────────────────────────────────────");
-        print_jit_candidates(&module);
+        print!("{}", elle::dump::jit_module(&module));
     }
 
     if cfg.dump.contains("git") {
         println!(";; ── git ────────────────────────────────────────────────────");
         print_spirv_module(&module);
+    }
+
+    if cfg.dump.contains("escape") {
+        println!(";; ── escape (normalized escape snapshot) ─────────────────────");
+        // Re-derive the front-end artifacts (run_dump compiles per kind) plus the
+        // classification-aware region info — same inputs `render_all` feeds
+        // `escape_module`, so the CLI and `compile/dumps :escape` agree.
+        let (hir, arena, names) =
+            elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
+                |e| {
+                    eprintln!("{}", e);
+                    e
+                },
+            )?;
+        let pc =
+            elle::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
+        let rinfo = elle::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+        let escape = elle::hir::analyze_escape(&hir, &arena, &pc.call_classification);
+        print!(
+            "{}",
+            elle::dump::escape_module(&hir, &arena, &names, &escape, &rinfo, &module)
+        );
     }
 
     let _ = dump_bits::ALL; // keep import used even if a stage is added lazily
@@ -320,8 +205,10 @@ fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
             println!(";   SPIR-V ({} bytes):", bytes.len());
             // Words are 32-bit in SPIR-V. Print as hex, 8 words per line.
             let words: Vec<u32> = bytes
-                .chunks_exact(4)
-                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_le_bytes(*c))
                 .collect();
             for (i, chunk) in words.chunks(8).enumerate() {
                 print!("  {:04x}:", i * 8);
@@ -348,121 +235,72 @@ fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
     let _ = f;
 }
 
-fn print_lir_module(module: &elle::lir::LirModule) {
-    print_lir_function("entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        print_lir_function(&format!("closure[{}]", i), f);
-    }
-}
-
-fn print_lir_function(tag: &str, f: &elle::lir::LirFunction) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
-    println!(
-        "; {} {} (arity={}, signal={:?}, regs={}, locals={})",
-        tag, name, f.arity, f.signal, f.num_regs, f.num_locals
-    );
-    for block in &f.blocks {
-        println!("  {}:", block.label);
-        for si in &block.instructions {
-            println!("    {}", si.instr);
-        }
-        println!("    -> {:?}", block.terminator.terminator);
-    }
-    println!();
-}
-
-fn print_cfg_module(module: &elle::lir::LirModule) {
-    print_cfg_function("entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        print_cfg_function(&format!("closure[{}]", i), f);
-    }
-}
-
-fn print_cfg_function(tag: &str, f: &elle::lir::LirFunction) {
-    use elle::lir::Terminator;
-    let name = f.name.as_deref().unwrap_or("<anon>");
-    println!("; {} {}", tag, name);
-    println!("  entry: {}", f.entry);
-    for block in &f.blocks {
-        let succs: Vec<String> = match &block.terminator.terminator {
-            Terminator::Jump(l) => vec![l.to_string()],
-            Terminator::Branch {
-                then_label,
-                else_label,
-                ..
-            } => vec![then_label.to_string(), else_label.to_string()],
-            Terminator::Emit { resume_label, .. } => vec![resume_label.to_string()],
-            Terminator::Return(_) | Terminator::Unreachable => vec![],
-        };
-        println!("  {} → [{}]", block.label, succs.join(", "));
-    }
-    println!();
-}
-
-fn print_dfa_module(module: &elle::lir::LirModule) {
-    print_dfa_function("entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        print_dfa_function(&format!("closure[{}]", i), f);
-    }
-}
-
-fn print_dfa_function(tag: &str, f: &elle::lir::LirFunction) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
-    println!(
-        "; {} {}: signal={:?} rotation_safe={} result_immediate={} outward_heap_set={} \
-         capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
-        tag,
-        name,
-        f.signal,
-        f.rotation_safe,
-        f.result_is_immediate,
-        f.has_outward_heap_set,
-        f.capture_params_mask,
-        f.capture_locals_mask,
-    );
-}
-
-fn print_jit_candidates(module: &elle::lir::LirModule) {
-    // JIT rejects polymorphic closures (those whose signal's `propagates`
-    // bits are set — signal depends on a caller-supplied function). Silent
-    // and statically-yielding functions are eligible. Callable mutability
-    // (captures) is handled separately by the JIT.
-    let report = |tag: &str, f: &elle::lir::LirFunction| {
-        let eligible = f.signal.propagates == 0;
-        println!(
-            "; {} {}: signal={{bits={:?}, propagates=0b{:b}}} eligible={}",
-            tag,
-            f.name.as_deref().unwrap_or("<anon>"),
-            f.signal.bits,
-            f.signal.propagates,
-            eligible,
-        );
-    };
-    report("entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        report(&format!("closure[{}]", i), f);
-    }
-}
+// The `lir`/`cfg`/`dfa`/`jit` artifact bodies are rendered by `elle::dump`
+// (the single source of truth shared with the in-process `compile/dumps`
+// primitive); `run_dump` prints each banner and then that body.
 
 /// Run Elle source code from a string.
 /// Only prints non-nil results.
+/// The agent-first test runner, embedded at build time. See docs/test-runner.md.
+const TEST_RUNNER_SRC: &str = include_str!("test.lisp");
+
+/// `elle test ...` — set up a full VM and run the embedded runner with the
+/// post-`test` arguments exposed to it as the program argv (via `(sys/argv)`).
+/// The runner calls `(os/exit ...)` itself with the gate code; the Ok/Err
+/// mapping here is the fallback if it returns without exiting.
+fn run_test_subcommand(sub_args: Vec<String>) -> i32 {
+    // Split off the global config flags (`--trace=...`, `--stats`,
+    // `--no-uring`) so the embedded runner's VM (and the off-VM free-log /
+    // page-claim histogram) honour them; the rest become the runner's argv. The
+    // runner itself does not interpret these, so without this they would be
+    // slurped as corpus file paths. (Runner-owned `--summary`/`--query`/… stay
+    // in `sub_args`.) `--no-uring` lets a Linux box run the corpus on the
+    // thread-pool backend — the only backend a Mac has — so a pool-only wedge
+    // can be chased without a Mac.
+    let (config_flags, sub_args): (Vec<String>, Vec<String>) = sub_args
+        .into_iter()
+        .partition(|a| a.starts_with("--trace=") || a == "--stats" || a == "--no-uring");
+    let (config, _rest) = elle::config::Config::parse(&config_flags).unwrap_or_else(|e| {
+        eprintln!("elle test: {}", e);
+        std::process::exit(1);
+    });
+    elle::config::init(config);
+    elle::io::init_process_signals();
+
+    // One runtime, one teardown — the same lifecycle every entry path uses.
+    let mut rt = Runtime::new();
+    rt.vm().source_arg = "<test>".to_string();
+    rt.vm().user_args = sub_args;
+
+    let code = {
+        let (vm, symbols, cctx) = rt.parts();
+        match run_source(TEST_RUNNER_SRC, "src/test.lisp", vm, symbols, cctx) {
+            Ok(_) => 0,
+            Err(_) => 1,
+        }
+    };
+    // The runner usually calls `(os/exit …)` itself (skipping Drop); on a
+    // graceful return `rt`'s Drop runs the principled teardown sweep.
+    code
+}
+
 fn run_source(
     contents: &str,
     source_name: &str,
     vm: &mut VM,
     symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
 ) -> Result<(), String> {
     // --dump=...: run the compiler up to each requested stage, print the
     // artifact, and exit without executing.
     if !elle::config::get().dump.is_empty() {
-        return run_dump(contents, source_name, symbols);
+        return run_dump(contents, source_name, symbols, cctx);
     }
 
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
     #[cfg(feature = "wasm")]
     if elle::config::get().wasm_full() {
-        let no_stdlib = elle::config::get().wasm_no_stdlib;
-        let eval_fn = if no_stdlib {
+        let eval_fn = if elle::config::get().no_stdlib {
             elle::wasm::eval_wasm
         } else {
             elle::wasm::eval_wasm_with_stdlib
@@ -477,7 +315,7 @@ fn run_source(
     }
 
     // Compile file as a single letrec
-    let result = match compile_file(contents, symbols, source_name) {
+    let result = match compile_file(contents, symbols, cctx, source_name) {
         Ok(r) => r,
         Err(e) => {
             let lerr = parse_compilation_error(&e);
@@ -490,40 +328,41 @@ fn run_source(
         }
     };
 
-    // Print scope stats if --stats is set
-    if elle::config::get().stats && result.scope_stats.scopes_analyzed > 0 {
-        eprint!("{}", result.scope_stats);
-    }
-
     // Debug: print bytecode if --debug is set
     if elle::config::get().has_trace("bytecode") {
         eprintln!(
             "{}",
-            elle::compiler::format_bytecode_with_constants(
-                &result.bytecode.instructions,
-                &result.bytecode.constants
-            )
+            elle::compiler::format_bytecode_with_protos(&result.bytecode)
         );
     }
 
-    match vm.execute_scheduled(&result.bytecode, symbols) {
+    match vm.execute_scheduled(&result.bytecode, symbols, cctx) {
         Ok(_) => {
             // Script mode is silent except for explicit output (display, etc.)
             Ok(())
         }
         Err(e) => {
+            // A loud (gate! …) whose condition is unmet propagates an uncaught
+            // :gated signal. That is an intentional SKIP, not a failure — report
+            // the reason and exit 0, so gate! is a universal skip mechanism (the
+            // same intent the test runner records as status=skip). Any other
+            // uncaught error still fails.
+            if let Some(reason) = vm.take_gated_exit_reason() {
+                eprintln!("SKIP (gated): {}", reason);
+                return Ok(());
+            }
             eprintln!("{}", format_runtime_error(&e, symbols));
             Err("Errors encountered during execution".to_string())
         }
     }
 }
 
-fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
+fn run_repl(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bool {
     match Repl::new() {
-        Ok(mut repl) => repl.run(vm, symbols),
+        Ok(mut repl) => repl.run(vm, symbols, cctx),
         Err(e) => {
             eprintln!("✗ Failed to initialize readline: {}", e);
-            Repl::run_fallback(vm, symbols)
+            Repl::run_fallback(vm, symbols, cctx)
         }
     }
 }
@@ -553,22 +392,11 @@ fn print_jit_stats(vm: &mut VM) {
 }
 
 fn main() {
-    // DISABLED (2026-04-18): static TLS re-exec hack for dlopen'd plugins.
-    //
-    // Was: set GLIBC_TUNABLES=glibc.rtld.optional_static_tls=65536 and
-    // re-exec the process so the dynamic linker sees it before main().
-    // This reserved 64KB of optional static TLS for C++ plugins loaded
-    // via dlopen (e.g. oxigraph).
-    //
-    // Removed because:
-    //   - Linux/glibc only; no-op on musl, Bionic (Android), macOS
-    //   - The re-exec changes PID, breaking strace/gdb workflows
-    //   - current_exe() can fail in chroots/containers
-    //   - MCP server and all plugins load fine without it on glibc 2.39+
-    //
-    // If plugin loading fails with "cannot allocate memory in static TLS
-    // block", restore the block from git (commit 9ed7b880) or set
-    // GLIBC_TUNABLES manually before launching elle.
+    // dlopen'd C++ plugins (e.g. oxigraph) allocate from glibc's static TLS
+    // block at load time. glibc 2.39+ grows that reservation on demand, so no
+    // up-front reservation is needed here. If plugin loading ever fails with
+    // "cannot allocate memory in static TLS block", set
+    // GLIBC_TUNABLES=glibc.rtld.optional_static_tls=65536 before launching elle.
 
     let args: Vec<String> = env::args().collect();
 
@@ -593,6 +421,14 @@ fn main() {
             let exit_code = elle::rewrite::run::run(&sub_args);
             std::process::exit(exit_code);
         }
+        Some("test") => {
+            // The runner is an Elle program (src/test.lisp). Unlike fmt/lint it
+            // needs a full VM (sqlite FFI, stdlib, threads), so run the embedded
+            // source with the post-`test` args handed to it as the program argv.
+            let sub_args: Vec<String> = args[2..].to_vec();
+            let exit_code = run_test_subcommand(sub_args);
+            std::process::exit(exit_code);
+        }
         _ => {}
     }
 
@@ -604,11 +440,11 @@ fn main() {
         return;
     }
 
-    let (config, remaining_args) = elle::config::Config::parse(&args[1..]).unwrap_or_else(|e| {
-        eprintln!("elle: {}", e);
-        std::process::exit(1);
-    });
-    elle::config::init(config);
+    let (mut config, remaining_args) =
+        elle::config::Config::parse(&args[1..]).unwrap_or_else(|e| {
+            eprintln!("elle: {}", e);
+            std::process::exit(1);
+        });
 
     // Trap POSIX signals at startup, before any thread spawn. This
     // installs sigaction handlers for TERM/INT/QUIT/HUP (clean exit),
@@ -624,80 +460,136 @@ fn main() {
     // are belt-and-suspenders but are not the primary defence.
     elle::io::init_process_signals();
 
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-
-    let _signals = register_primitives(&mut vm, &mut symbols);
-
-    let _sym_guard = SymbolTableGuard::new(&mut symbols);
-
-    init_stdlib(&mut vm, &mut symbols);
-
-    let _vm_guard = VmContextGuard::new(&mut vm);
-
     let mut had_errors = false;
     let mut files: Vec<String> = Vec::new();
     let mut eval_exprs: Vec<String> = Vec::new();
     let mut read_stdin = false;
+    let mut source_arg = String::new();
+    let mut user_args: Vec<String> = Vec::new();
 
     // remaining_args from Config::parse: file args, eval expressions (--eval:...), and user args after --.
-    // Separate eval expressions from file args.
+    // Separate eval expressions from file args. This runs BEFORE Runtime
+    // construction so the main source can select the Unicode generation.
     for (i, arg) in remaining_args.iter().enumerate() {
         if let Some(expr) = arg.strip_prefix("--eval:") {
             eval_exprs.push(expr.to_string());
         } else if arg == "-" && files.is_empty() && eval_exprs.is_empty() {
             read_stdin = true;
-            vm.source_arg = "-".to_string();
-            vm.user_args = remaining_args[i + 1..].to_vec();
+            source_arg = "-".to_string();
+            user_args = remaining_args[i + 1..].to_vec();
             break;
         } else if arg == "--" {
-            vm.user_args = remaining_args[i + 1..].to_vec();
+            user_args = remaining_args[i + 1..].to_vec();
             break;
         } else if files.is_empty() && eval_exprs.is_empty() {
-            vm.source_arg = arg.clone();
+            source_arg = arg.clone();
             files.push(arg.clone());
             // Everything after the first file arg goes to user_args
-            vm.user_args = remaining_args[i + 1..].to_vec();
+            user_args = remaining_args[i + 1..].to_vec();
             break;
         }
     }
-    if eval_exprs.is_empty() && files.is_empty() && !read_stdin {
-        // REPL mode: vm.source_arg stays "" and vm.user_args stays empty.
-    } else if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
-        vm.source_arg = "<eval>".to_string();
+    if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
+        source_arg = "<eval>".to_string();
     }
 
+    // Resolve the Unicode generation before any VM exists: the main file
+    // (or the -e expressions) may declare it, and the CLI flag may select
+    // it; the surfaces must agree. Stdin and the REPL select via the flag
+    // only. A source that fails to parse here is ignored — the compiler
+    // reports the parse error properly later. Literate .md sources are
+    // not scanned (their code lives inside markdown).
+    let scanned_source = if let Some(f) = files.first() {
+        if f.ends_with(".md") {
+            None
+        } else {
+            std::fs::read_to_string(f).ok().map(|src| (src, f.clone()))
+        }
+    } else if !eval_exprs.is_empty() {
+        Some((eval_exprs.join("\n"), "<eval>".to_string()))
+    } else {
+        None
+    };
+    if let Some((src, name)) = scanned_source {
+        if let Ok(Some(request)) = elle::segment::scan_unicode_request(&src, &name) {
+            let declared = elle::segment::Generation::from_request(&request).unwrap_or_else(|e| {
+                eprintln!("elle: {}: {}", name, e);
+                std::process::exit(1);
+            });
+            match config.unicode {
+                Some(flagged) if flagged != declared => {
+                    eprintln!(
+                        "elle: --unicode={} conflicts with the {} declaration in {}",
+                        flagged.version_string(),
+                        declared.version_string(),
+                        name
+                    );
+                    std::process::exit(1);
+                }
+                _ => config.unicode = Some(declared),
+            }
+        }
+    }
+    elle::config::init(config);
+
+    // One runtime drives every entry path (file / eval / stdin / REPL); its
+    // Drop (or the explicit `teardown` below) runs the principled, RC-driven
+    // teardown sweep (docs/impl/region/rules.md § "Teardown — every region frees").
+    // The VM reads the resolved Unicode generation from the global config.
+    let mut rt = if elle::config::get().no_stdlib {
+        Runtime::without_stdlib()
+    } else {
+        Runtime::new()
+    };
+    rt.vm().source_arg = source_arg;
+    rt.vm().user_args = user_args;
+
     if read_stdin {
-        if run_stdin(&mut vm, &mut symbols).is_err() {
+        let (vm, symbols, cctx) = rt.parts();
+        if run_stdin(vm, symbols, cctx).is_err() {
             had_errors = true;
         }
     } else if !eval_exprs.is_empty() {
         for expr in &eval_exprs {
-            if run_source(expr, "<eval>", &mut vm, &mut symbols).is_err() {
+            let (vm, symbols, cctx) = rt.parts();
+            if run_source(expr, "<eval>", vm, symbols, cctx).is_err() {
                 had_errors = true;
             }
         }
     } else if !files.is_empty() {
         for filename in &files {
-            if run_file(filename, &mut vm, &mut symbols).is_err() {
+            let (vm, symbols, cctx) = rt.parts();
+            if run_file(filename, vm, symbols, cctx).is_err() {
                 had_errors = true;
             }
         }
-    } else if run_repl(&mut vm, &mut symbols) {
-        had_errors = true;
+    } else {
+        let (vm, symbols, cctx) = rt.parts();
+        if run_repl(vm, symbols, cctx) {
+            had_errors = true;
+        }
     }
 
-    // VM and symbol table guards drop here (or at function exit),
-    // clearing the TLS pointers automatically.
-    drop(_vm_guard);
-
-    if elle::config::get().stats {
+    let stats = elle::config::get().stats;
+    if stats {
         #[cfg(feature = "jit")]
-        print_jit_stats(&mut vm);
+        print_jit_stats(rt.vm());
         let cvc = elle::lir::closure_value_const_count();
         if cvc > 0 {
             eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);
         }
+    }
+
+    // Graceful exit on every path: run the principled teardown sweep explicitly
+    // (so it happens before any `process::exit`, which would skip `rt`'s Drop)
+    // and surface its observable result under `--stats`.
+    let report = rt.teardown();
+    if stats {
+        eprintln!(
+            "[stats] live regions after teardown: {} \
+             (0 = clean; residue names open leaks)",
+            report.live_regions
+        );
     }
 
     if !read_stdin && files.is_empty() && eval_exprs.is_empty() {

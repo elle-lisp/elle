@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## autograd.lisp — Scalar autograd engine
 ##
 ## Each Value node is a mutable @struct with:

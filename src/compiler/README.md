@@ -43,7 +43,7 @@ resolution, capture analysis, and source location tracking.
 The `Signal` type (in `src/signals/`) tracks static signals:
 
 - `Silent` - no signals emitted, can be optimized
-- `Yields` - may yield (for coroutines)
+- `Yields` - may yield (for fibers)
 - `Polymorphic` - signal depends on arguments
 
 Signals are inferred during HIR analysis and propagate upward. A function

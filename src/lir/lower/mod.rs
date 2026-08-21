@@ -3,222 +3,182 @@
 mod access;
 mod binding;
 mod control;
-pub(crate) mod decision;
-mod escape;
+mod emitops;
 mod expr;
 mod lambda;
 mod pattern;
+pub mod rcstats;
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
-use crate::hir::region::{RegionInfo, RegionKind};
-use crate::hir::{Binding, BlockId, CallArg, Hir, HirId, HirKind, HirPattern};
+use crate::hir::region::{RegionInfo, StaticRegion};
+use crate::hir::{analyze_escape, Binding, BlockId, EscapeInfo, Hir, HirId, HirKind, HirPattern};
+
+/// Global region ID counter. IDs 0 (invalid) and 1 are reserved; minting starts at 2.
+/// Used by the lowerer for solver-assigned regions and by the compilation
+/// pipeline for transient compile-time regions.
+static NEXT_STATIC_REGION: AtomicU32 = AtomicU32::new(2);
+
+/// Short, stable name for an allocating `LirInstr` variant — used only
+/// in the `--trace=rc:emit` lines to disambiguate which kind of alloc
+/// was stamped on a phantom region's HirId.
+fn instr_kind_name(instr: &LirInstr) -> &'static str {
+    match instr {
+        LirInstr::MakeClosure { .. } => "MakeClosure",
+        LirInstr::MakeCaptureCell { .. } => "MakeCaptureCell",
+        LirInstr::MakeArrayMut { .. } => "MakeArrayMut",
+        LirInstr::List { .. } => "List",
+        LirInstr::Call { .. } => "Call",
+        LirInstr::SuspendingCall { .. } => "SuspendingCall",
+        LirInstr::TailCall { .. } => "TailCall",
+        LirInstr::CallArrayMut { .. } => "CallArrayMut",
+        LirInstr::TailCallArrayMut { .. } => "TailCallArrayMut",
+        LirInstr::Freeze { .. } => "Freeze",
+        LirInstr::Thaw { .. } => "Thaw",
+        _ => "other",
+    }
+}
+
+/// Mint a fresh **static** region id — a compile-time, globally-unique slot
+/// number baked into bytecode. A static id is a per-function slot, NOT a live
+/// region: each activation remaps it to a freshly-minted `new_runtime_region`
+/// via its `activation_region_map`. Never index a static id into the
+/// `RegionStore` (see docs/impl/region/model.md § id-spaces).
+pub fn new_static_region() -> StaticRegion {
+    let id = NEXT_STATIC_REGION.fetch_add(1, Ordering::Relaxed);
+    assert!(
+        id >= 2,
+        "static region id counter wrapped or hit reserved range"
+    );
+    StaticRegion::new(id).expect("static region id counter is >= 2, hence nonzero")
+}
 use crate::syntax::Span;
-use crate::value::fiber::SignalBits;
 use crate::value::{Arity, SymbolId, Value};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
-use std::fmt;
-
-/// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
-/// before every tail call. Used by Phase 4b auto-insertion
-/// (gated by `config::flip_enabled()`).
-///
-/// The resulting LIR is semantically equivalent under the runtime's
-/// existing rotation mechanism — `FlipSwap` tears down the previous
-/// iteration's allocations at each tail-call boundary the same way
-/// the trampoline does, and `FlipExit` tears down the trailing
-/// generation when the function returns.
-fn inject_flip(func: &mut LirFunction) {
-    // Locate the entry block: prepend FlipEnter at the top.
-    if let Some(entry_block) = func.blocks.iter_mut().find(|b| b.label == func.entry) {
-        entry_block
-            .instructions
-            .insert(0, SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
-    }
-
-    for block in &mut func.blocks {
-        // Insert FlipSwap immediately before every tail call.
-        let mut i = 0;
-        while i < block.instructions.len() {
-            if matches!(
-                block.instructions[i].instr,
-                LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. }
-            ) {
-                block
-                    .instructions
-                    .insert(i, SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
-                i += 2;
-            } else {
-                i += 1;
-            }
-        }
-
-        // Insert FlipExit before every Return terminator. (TailCalls
-        // leave the frame without a Return, so their exit is subsumed
-        // by the next frame's FlipExit on its own return.)
-        if matches!(block.terminator.terminator, Terminator::Return(_)) {
-            block
-                .instructions
-                .push(SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
-        }
-    }
-
-    // While-loop flip frames: detect back-edges from the CFG and inject
-    // FlipEnter/FlipSwap/FlipExit around each loop so per-iteration
-    // allocations are reclaimed.
-    //
-    // Pattern: entry→Jump(cond), cond→Branch{body,done}, back_edge→Jump(cond).
-    // Detect Branch blocks with exactly two Jump predecessors (forward entry +
-    // backward back-edge), distinguished by block order.
-    inject_flip_while_loops(func);
-}
-
-/// Inject per-loop FlipEnter/FlipSwap/FlipExit using the
-/// `while_loops` metadata recorded during lowering. Each triple
-/// `(entry, back_edge, done)` has already passed escape analysis.
-fn inject_flip_while_loops(func: &mut LirFunction) {
-    for &(entry_label, back_edge_label, done_label) in &func.while_loops.clone() {
-        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == entry_label) {
-            block
-                .instructions
-                .push(SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
-        }
-        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == back_edge_label) {
-            block
-                .instructions
-                .push(SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
-        }
-        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == done_label) {
-            block
-                .instructions
-                .insert(0, SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
-        }
-    }
-}
-
-/// Compile-time scope allocation statistics.
-///
-/// Tracks how many let/letrec/block scopes were analyzed for scope
-/// allocation, how many qualified, and why the rest were rejected.
-/// The rejection reason is the *first* failing condition (conditions
-/// are checked in order and short-circuit).
-#[derive(Debug, Clone, Default)]
-pub struct ScopeStats {
-    /// Total scopes evaluated for scope allocation
-    pub scopes_analyzed: usize,
-    /// Scopes that passed all conditions (RegionEnter/RegionExit emitted)
-    pub scopes_qualified: usize,
-    /// Scopes rejected because a binding is captured (condition 1)
-    pub rejected_captured: usize,
-    /// Scopes rejected because body may suspend (condition 2)
-    pub rejected_suspends: usize,
-    /// Scopes rejected because result is not provably immediate (condition 3)
-    pub rejected_unsafe_result: usize,
-    /// Scopes rejected because body contains set to outer binding (condition 4)
-    pub rejected_outward_set: usize,
-    /// Scopes rejected because body contains break (condition 5)
-    pub rejected_break: usize,
-    /// Non-tail calls wrapped in RegionEnter/RegionExitCall
-    pub calls_scoped: usize,
-    /// Functions analyzed for rotation safety
-    pub rotation_analyzed: usize,
-    /// Functions that qualified as rotation-safe
-    pub rotation_safe: usize,
-}
-
-impl ScopeStats {
-    /// Total rejected scopes (analyzed - qualified).
-    pub fn scopes_rejected(&self) -> usize {
-        self.scopes_analyzed - self.scopes_qualified
-    }
-
-    /// Merge another ScopeStats into this one (for aggregating across lowerer invocations).
-    pub fn merge(&mut self, other: &ScopeStats) {
-        self.scopes_analyzed += other.scopes_analyzed;
-        self.scopes_qualified += other.scopes_qualified;
-        self.rejected_captured += other.rejected_captured;
-        self.rejected_suspends += other.rejected_suspends;
-        self.rejected_unsafe_result += other.rejected_unsafe_result;
-        self.rejected_outward_set += other.rejected_outward_set;
-        self.rejected_break += other.rejected_break;
-        self.calls_scoped += other.calls_scoped;
-        self.rotation_analyzed += other.rotation_analyzed;
-        self.rotation_safe += other.rotation_safe;
-    }
-}
-
-impl fmt::Display for ScopeStats {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "scope allocation stats:")?;
-        writeln!(
-            f,
-            "  analyzed: {}  qualified: {}  rejected: {}",
-            self.scopes_analyzed,
-            self.scopes_qualified,
-            self.scopes_rejected()
-        )?;
-        if self.scopes_rejected() > 0 {
-            writeln!(f, "  rejection reasons:")?;
-            if self.rejected_captured > 0 {
-                writeln!(f, "    captured:      {}", self.rejected_captured)?;
-            }
-            if self.rejected_suspends > 0 {
-                writeln!(f, "    suspends:      {}", self.rejected_suspends)?;
-            }
-            if self.rejected_unsafe_result > 0 {
-                writeln!(f, "    unsafe-result: {}", self.rejected_unsafe_result)?;
-            }
-            if self.rejected_outward_set > 0 {
-                writeln!(f, "    outward-set:   {}", self.rejected_outward_set)?;
-            }
-            if self.rejected_break > 0 {
-                writeln!(f, "    break:         {}", self.rejected_break)?;
-            }
-        }
-        if self.calls_scoped > 0 {
-            writeln!(f, "  call-scoped:   {}", self.calls_scoped)?;
-        }
-        if self.rotation_analyzed > 0 {
-            writeln!(
-                f,
-                "  rotation:      {}/{} safe",
-                self.rotation_safe, self.rotation_analyzed
-            )?;
-        }
-        Ok(())
-    }
-}
 
 /// Tracks an active Loop during lowering so `Recur` can find its
 /// entry label and binding slots.
 struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
-    scope_eligible: bool,
-    /// Whether RegionRotate should also dealloc slab slots.
-    dealloc_eligible: bool,
-    /// Whether to use refcount-aware rotate/exit instead of standard.
-    refcount_eligible: bool,
+    /// Region slot whose `DecrefRegion` fires at the recur back-edge. None if not scoped.
+    region_id: Option<StaticRegion>,
 }
 
 /// Tracks an active block during lowering so `break` can find its
-/// result register and exit label.
+/// result register and exit label. A `break` emits no region instruction of its
+/// own: both the value it carries and every release its jump passes over are
+/// anchored on the BLOCK by the solver, which the lowerer emits after the exit
+/// label (docs/impl/region/mechanism.md § "`break` transfers its value" and
+/// § "A release the break jumps over is not a release").
 struct BlockLowerContext {
     block_id: BlockId,
     #[allow(dead_code)]
     result_reg: Reg,
     result_slot: u16,
     exit_label: Label,
-    /// The `region_depth` at the time this block was entered.
-    /// `break` emits `(current_region_depth - region_depth_at_entry)`
-    /// compensating `RegionExit` instructions before jumping to the exit.
-    region_depth_at_entry: u32,
-    /// The `flip_depth` at the time this block was entered.
-    /// `break` emits compensating `FlipExit` instructions for each
-    /// flip frame entered since the block was opened.
-    flip_depth_at_entry: u32,
+}
+
+/// The relocation point a frame-replacing tail call opens in its own block
+/// (docs/impl/region/mechanism.md § "A release past a frame-replacing tail call
+/// is not a release").
+///
+/// Everything the lowerer emits after a `TailCall` runs only on the NATIVE
+/// fall-through — a native pushes no bytecode frame, so the dispatch loop
+/// continues into that block, while a closure callee replaces the frame and
+/// never arrives. A release landing there is therefore emitted where control may
+/// never reach, and the frame's own reference is stranded once per call. Moving
+/// that one release to just before the `TailCall` costs no count argument (it is
+/// the same single release, relocated), and is legal for every region the call
+/// itself cannot reach.
+///
+/// A branch merge inherits the points of the arms that reach it, so a point also
+/// outlives its own block (§ "The relocation point outlives the block"). There
+/// the release is emitted at the merge *and* replicated at each point, which is
+/// sound only for a self-cancelling run — one that nil-stamps the slot it read,
+/// so the copy a path reaches second no-ops.
+struct TailExitHoist {
+    /// Index of the `TailCall` in its block's instruction list. A hoisted
+    /// release is spliced in here, ahead of the frame replacement, and the index
+    /// advances so successive hoists keep their emission order.
+    at: usize,
+    /// The block the `TailCall` sits in.
+    block: HoistBlock,
+    /// The local slots and capture indices the call's operands were loaded from.
+    /// A release that reloads one of these reloads the very value now sitting on
+    /// the operand stack, so it IS the ownership move however ANF spelled the
+    /// argument — the reading `exempt` cannot give, since ANF is free to rewrite
+    /// an operand into a synthetic binding whose region the syntax walk does not
+    /// connect back to the call.
+    operand_locals: rustc_hash::FxHashSet<u16>,
+    operand_captures: rustc_hash::FxHashSet<u16>,
+    /// Regions the callee or an argument subtree names, canonicalized through
+    /// the merge forest. These releases must STAY in the dead block: an
+    /// argument's is the ownership move the calling convention rests on, and the
+    /// callee's belongs to the activation that takes it over.
+    exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
+}
+
+/// Where a relocation point lives, and with it which of the two placements
+/// applies: a MOVE within the block still being filled, or a REPLICA spliced
+/// into an arm that has already closed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HoistBlock {
+    /// The block the lowerer is filling. Its label validates the point — a
+    /// stale one names an instruction list this block no longer is.
+    Current(Label),
+    /// A branch arm already pushed onto `LirFunction::blocks`, by index. Blocks
+    /// are only ever appended, so the index stays valid for the function's life.
+    Finished(usize),
+}
+
+/// Where a value-route release reads the value whose region it means.
+///
+/// `allocate_slot_routed` mints binding slots from two disjoint address spaces,
+/// both indexed by `u16`: an in-lambda captured binding gets an ENV index (the
+/// index `LoadCapture`/`StoreCapture` address, backed by the `populate_env`
+/// cell), and every other binding gets a STACK index (`LoadLocal`/`StoreLocal`).
+/// Nothing about the number says which, so a bare `u16` in `region_to_slot` lets
+/// an env index be read back as a stack slot — naming whichever local happens to
+/// sit at that index and releasing it under its holder
+/// (`tests/elle/region-def-in-lambda-capture.lisp`). Carrying the space with the
+/// index makes that unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum ValueSlot {
+    /// A stack-frame local. `LoadLocal { slot }` yields the value itself.
+    Local(u16),
+    /// An env-cell index. `LoadCapture { index }` UNWRAPS the cell and yields
+    /// its content — the value whose region a release means. (The cell's own
+    /// region is a separate concern, released through `LoadCaptureRaw` +
+    /// `DecrefCellRegion` for a `cell_release_regions` member.)
+    Env(u16),
+}
+
+impl ValueSlot {
+    /// The raw index, for the sites that only need to dedupe or report it.
+    pub(super) fn index(self) -> u16 {
+        match self {
+            ValueSlot::Local(i) | ValueSlot::Env(i) => i,
+        }
+    }
+
+    /// The stack slot, or `None` for an env index. Use at sites whose emission
+    /// is stack-only (`AdoptRegion`, `FreeRegionGroup`, the branch-arm
+    /// compensations' value route): skipping an env-celled region there leaves it
+    /// independently reference-counted, which is each of those cuts' documented
+    /// always-legal fallback. A `cell_release_regions` member is the one env-indexed
+    /// release those compensations do emit, and it reads [`Self::index`] instead —
+    /// it names the cell BOX, which `LoadCaptureRaw` reaches by index alone.
+    pub(super) fn local(self) -> Option<u16> {
+        match self {
+            ValueSlot::Local(i) => Some(i),
+            ValueSlot::Env(_) => None,
+        }
+    }
 }
 
 /// Lowers HIR to LIR
@@ -249,71 +209,10 @@ pub struct Lowerer<'a> {
     /// Intrinsic operations for operator specialization.
     /// Maps global SymbolId to specialized LIR instruction.
     intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
-    /// Primitives known to return immediates.
-    /// Used by escape analysis (`result_is_safe`) to accept calls to
-    /// these primitives in scope-allocated let bodies.
-    immediate_primitives: FxHashSet<SymbolId>,
-    mutating_primitives: FxHashSet<SymbolId>,
-    /// Primitives that insert args into collections (push, put).
-    arg_escaping_primitives: FxHashSet<SymbolId>,
-    /// Primitives that return pre-existing values without allocating.
-    non_allocating_accessors: FxHashSet<SymbolId>,
-    /// Stdlib functions known to not escape heap values.
-    non_escaping_stdlib: FxHashSet<SymbolId>,
-    /// Binding → rotation_safe for lowered lambdas. Populated during
-    /// lowering so that `body_escapes_heap_values` can check callees
-    /// transitively: a call to a rotation-safe function doesn't escape.
-    callee_rotation_safe: HashMap<Binding, bool>,
-    /// Binding → param_safe for function definitions.
-    /// A function is param-safe if its body never stores a parameter-derived
-    /// value into external mutable state (Assign, SetCell, push/put, emit).
-    /// Used at non-tail call sites: a call to a param-safe function cannot
-    /// cause the caller's scope-allocated values to escape.
-    callee_param_safe: HashMap<Binding, bool>,
-    /// Binding → return_safe for function definitions.
-    /// A function is return-safe if its body never returns a freshly
-    /// heap-allocated value (returns immediates, Vars, or results of
-    /// other return-safe calls). Precomputed via fixpoint iteration.
-    /// Used by `tail_arg_is_safe_extended` and `result_is_safe_extended`
-    /// to see through call boundaries that `call_result_is_safe` rejects
-    /// (e.g. letrec-bound functions).
-    callee_return_safe: HashMap<Binding, bool>,
-    /// Binding → returns_rotation_safe for function definitions.
-    /// A function returns-rotation-safe if all closures it returns are
-    /// rotation-safe (their bodies don't escape heap values).
-    callee_returns_rotation_safe: HashMap<Binding, bool>,
-    /// Binding → returns_param_safe for function definitions.
-    /// A function returns-param-safe if all closures it returns are
-    /// param-safe (their bodies don't store params externally).
-    callee_returns_param_safe: HashMap<Binding, bool>,
-    /// Binding → outward_safe for function definitions. A function is
-    /// outward-safe if its body never stores heap values into external
-    /// mutable state. Unlike rotation-safe, it does NOT care about
-    /// return value heap content. Used by `walk_for_outward_set`.
-    callee_outward_safe: HashMap<Binding, bool>,
-    /// Binding → struct-fields-rotation-safe. True when a binding holds
-    /// a struct where all closure-typed values are rotation-safe.
-    /// Used by `callee_is_rotation_safe` to handle `(get struct :field)` callees.
-    callee_struct_fields_rotation_safe: HashMap<Binding, bool>,
-    /// Binding → struct-fields-param-safe. Same for param-safety.
-    callee_struct_fields_param_safe: HashMap<Binding, bool>,
-    /// Binding → struct-fields-outward-safe. Same for outward-safety.
-    callee_struct_fields_outward_safe: HashMap<Binding, bool>,
-    /// Binding → result_is_immediate for function definitions.
-    /// Precomputed via fixpoint iteration so that `call_result_is_safe`
-    /// can identify user functions that always return immediates.
-    callee_result_immediate: HashMap<Binding, bool>,
-    /// Binding → bitmask of parameter indices that may flow to return.
-    /// Precomputed via fixpoint iteration. Bit i set means param i
-    /// might be returned identity-unchanged by the function.
-    callee_return_params: HashMap<Binding, u64>,
-    /// Binding → `Some(rest_index)` for variadic user functions (those
-    /// with `&opt`/`&named`/`&keys`/`&args`). When set, call-site
-    /// args at position >= rest_index all collapse into the rest param.
-    /// `can_scope_allocate_call` needs this to account for the
-    /// many-to-one arg-to-param mapping when deciding whether heap
-    /// args might flow into the callee's return.
-    callee_rest_index: HashMap<Binding, usize>,
+    /// Declared native `RegionEffect`s + intrinsic-op set, from the
+    /// `PrimitiveClassification`. Read by `analyze_escape` (the store facet's
+    /// native-call seeding); empty until `with_primitive_classification`.
+    call_classification: crate::hir::CallClassification,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active loop contexts for `Recur` lowering
@@ -321,22 +220,8 @@ pub struct Lowerer<'a> {
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
     /// Current nesting depth of active allocation regions.
-    /// Incremented on `RegionEnter`, decremented on `RegionExit`.
-    /// Used by `lower_break` to emit compensating `RegionExit`s.
-    region_depth: u32,
-    /// Stack tracking whether each nested region is refcounted.
-    /// Pushed on `emit_region_enter`, popped on `emit_region_exit`/
-    /// `emit_region_exit_refcounted`. Used by `lower_break` to emit
-    /// the correct exit type for each compensating exit.
-    region_refcounted_stack: Vec<bool>,
-    /// Current nesting depth of while-loop flip frames.
-    /// Incremented when entering a flip-eligible while loop,
-    /// decremented when leaving. Used by `lower_break` to emit
-    /// compensating `FlipExit` instructions.
-    flip_depth: u32,
-    pending_region_exits: u32,
-    /// Compile-time scope allocation statistics.
-    scope_stats: ScopeStats,
+    /// Pending `DecrefRegion` region slots to emit before tail calls.
+    pending_free_regions: Vec<StaticRegion>,
     /// Scratch slot for discarding unused intermediate values.
     /// Lazily allocated on first use. Reused across all discards
     /// within the same function, so only one extra local slot.
@@ -347,20 +232,199 @@ pub struct Lowerer<'a> {
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
     closures: Vec<LirFunction>,
-    /// Escape projection: maps struct field names to escape analysis info.
-    /// Computed during lowering for module-pattern files. Consumed by the
-    /// compile pipeline and stored on Bytecode for cross-module propagation.
-    escape_projection: Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Binding of the current function being analyzed (for self-tail-call
     /// detection in escape analysis and drop insertion).
     current_function_binding: Option<Binding>,
+    /// The self-recursive binding of the lambda body currently being lowered:
+    /// the binding this lambda captures as `CaptureKind::Recursive` (a same-binding
+    /// self-edge). A reference to it in **value** position resolves to the executing
+    /// closure via `LoadSelf`; in **call** position it re-enters the current code+env
+    /// (a self-call re-dispatch) — never a cell load, since the self-edge is cell-free.
+    /// Read only from THIS lambda's own captures — a nested lambda that captures
+    /// the same binding does so as a sibling `Capture`/`Local`, not `Recursive`,
+    /// so it never sets this — and saved/restored across lambda boundaries like
+    /// `current_function_binding` (`lower_lambda_body`). `None` outside a
+    /// self-recursive lambda body.
+    current_self_binding: Option<Binding>,
+    /// Bindings whose initializer lambda references them across the lambda boundary
+    /// (a `CaptureKind::Recursive` self-edge) — i.e. self-recursive local functions.
+    /// A self-recursive closure is cell-free (the self-edge does not mark it captured),
+    /// but it is still a per-call allocation: its region lives through the whole
+    /// recursion (the self-reference borrows the executing closure), so its scope-end
+    /// release is stranded as dead code past the frame-replacing recursive `TailCall`.
+    /// It is consumed by `lower_letrec`/`lower_define` to derive
+    /// `stranded_self_bindings`. Recorded when the closure is built
+    /// (`lower_lambda_expr`).
+    self_recursive_bindings: rustc_hash::FxHashSet<Binding>,
+    /// The subset of `self_recursive_bindings` whose defining body is a **tail call**,
+    /// so the closure's scope-end `DecrefRegion` is emitted as dead code past that
+    /// frame-replacing `TailCall` and never runs — the per-call closure region would
+    /// otherwise leak. `tail_callee_defers_release` routes a tail call to such a binding
+    /// through the runtime's `deferred_releases` release (`vm/execute.rs`), which frees
+    /// the region exactly once at the recursion's normal completion. Gating on the
+    /// tail-call body is what keeps the deferral from double-freeing a self-recursive
+    /// closure whose `DecrefRegion` instead fires live (a non-tail body) — the
+    /// use-after-free that gate prevents.
+    stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
+    /// Letrec bindings of a closure-cycle merge whose MERGED arena the enclosing
+    /// letrec's body TAIL-CALLS. The frame-replacing `TailCall` strands the
+    /// arena's single binding-scope `DecrefRegion` as dead code, so a tail call
+    /// to one of these defers the merged region's release (`tail_callee_defers_release`
+    /// → `TailCallInfo::deferred`), run exactly once at the recursion's
+    /// normal completion — the same channel `stranded_self_bindings` rides.
+    /// Marked by `lower_letrec` from the letrec BODY's tail callees only (after
+    /// the inits are lowered, so interior sibling rotations never defer), and
+    /// honoured only through a non-upvalue reference (a nested closure that
+    /// captures the binding must not free the arena out from under a later use
+    /// in the enclosing activation).
+    stranded_cycle_bindings: rustc_hash::FxHashSet<Binding>,
+    /// Letrec bindings the enclosing letrec's BODY tail-calls whose OWN closure
+    /// region the solver releases at that letrec's scope end — the release the
+    /// frame-replacing `TailCall` strands, and the one the relocation must leave
+    /// where it is because the callee is about to enter that closure
+    /// (docs/impl/region/mechanism.md § "What the exemption keeps, a channel must
+    /// still run"). A member captured by a sibling has uses spanning the whole
+    /// letrec, so its demise lands at the scope end rather than at the call node
+    /// and `tail_callee_defers_release`'s dies-here reading never sees it. Marked
+    /// by `lower_letrec` after the inits are lowered, and honoured only through a
+    /// non-upvalue reference, for the reasons `stranded_cycle_bindings` is; a
+    /// suppressed release (owned by the store or capture-adopt path) and a
+    /// closure-cycle member (released by the merge's own channel) are excluded at
+    /// the marking, so the three channels never name one region twice.
+    stranded_member_bindings: rustc_hash::FxHashSet<Binding>,
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
     current_function_params: Option<Vec<Binding>>,
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
+    /// Authoritative escape facts (`src/hir/escape.rs`), computed once at the
+    /// top of `lower`. Read by `control/call.rs::tail_callee_defers_release` for the
+    /// escape half of the deferral decision (region-locality stays a region fact).
+    /// NOT read by `tail_arg_is_borrowed` (a structural ownership-location test —
+    /// escape over-marks owned tail-args and double-frees across fiber resume; see
+    /// `control.rs`) nor by the `lower_return` mint (unconditional since the move
+    /// convention was removed).
+    escape_info: EscapeInfo,
+    /// `cross_region_refs` indexed by their site HirId — the `(source, target)`
+    /// region pairs to `IncrefRegion` at that node. Built once in
+    /// `with_region_info` so `emit_increfs_for` is an O(1) lookup rather than a
+    /// linear scan of every cross-region ref per HIR node (an O(n²) over stdlib).
+    /// The `target` rides alongside the `source` (the lone region the incref
+    /// actually names) so `emit_increfs_for` can classify a post-merge
+    /// intra-region self-edge — `is_merge_self_edge(source, target)` — and DROP it
+    /// (transform 2: a merged `source→target` store edge is intra-region, so its
+    /// incref is unbalanced by the self-skipping cascade; region/mechanism.md
+    /// § "Self-edge elimination").
+    increfs_by_site: HashMap<HirId, Vec<(crate::hir::region::Region, crate::hir::region::Region)>>,
+    /// `region_data` indexed by `decref_point` HirId — regions whose demise
+    /// lands at that node. Built once in `with_region_info` so
+    /// `emit_decrefs_for` is an O(1) lookup (then a small per-call
+    /// tail-region filter) rather than scanning all regions per node.
+    decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>>,
+    /// `RegionInfo::cell_containers` indexed by demise node — the fn-local
+    /// 1-slot containers whose current content is dropped when that scope
+    /// exits (docs/impl/region/bindings.md § "Reassigned mutable bindings are
+    /// 1-slot containers"). Empty when the unit has no such cell.
+    cell_drops_by_demise: HashMap<HirId, Vec<Binding>>,
+    /// Current HIR node being lowered. Set at the top of `lower_expr`.
+    /// Used by `alloc_region_id()` to look up the region for allocations.
+    current_hir_id: Option<HirId>,
+    /// Maps Region(u32) from region inference to u16 index in the
+    /// function's region_table. Lazily populated by `alloc_region_id()`.
+    region_to_table: HashMap<crate::hir::region::Region, StaticRegion>,
+    /// For each allocating HIR node's region, the slot of the
+    /// binding that names its result. See [`ValueSlot`] for why the
+    /// address space travels with the index. Populated by `lower_let`,
+    /// `lower_letrec`, `lower_define`, and other binding sites by
+    /// reading `region_info.alloc_region.get(&init.id)` after the
+    /// slot is allocated. Saved/restored across lambda boundaries
+    /// (see `lower_lambda_body`).
+    ///
+    /// `emit_decrefs_for` consults this map for `call_result_regions`:
+    /// it emits `LoadLocal slot` + `DecrefValueRegion` so the
+    /// release uses the *runtime* region of the actual returned value,
+    /// not the compile-time placeholder. The expected region id gates
+    /// the decref so passthrough calls (whose result lives in a
+    /// different region) skip.
+    ///
+    /// After the ANF lift (`src/hir/anf.rs`) every allocating
+    /// expression in a consumer position is bound to a synthetic
+    /// `Let`, so the binding-slot path covers the Call result directly —
+    /// no separate stash-and-reload slot at the Call site.
+    region_to_slot: HashMap<crate::hir::region::Region, ValueSlot>,
+    /// Stack slots (this function's local index space) owned by a fn-local
+    /// reassigned mutable binding (`RegionInfo::reassigned_local_bindings`).
+    /// Populated in `allocate_slot_routed`, reset per function like
+    /// `region_to_slot`. `emit_decrefs_for` refuses a value-route decref +
+    /// nil-stamp whose slot is in this set: `allocate_slot` never reuses a slot,
+    /// so such a slot holds the reassigned binding's own live value for the
+    /// binding's whole scope — nil-stamping it mid-scope would zero a live value
+    /// (the reassigned-loop-counter clobber; region-capture-cell-loop-uaf.lisp).
+    reassigned_local_slots: rustc_hash::FxHashSet<u16>,
+    /// Static region slots the lowerer has stamped onto at least one
+    /// instruction via `emit_in_region` (i.e., regions the runtime
+    /// will actually have a slot for after `alloc_in_region`).
+    /// Used by `emit_decref_region` to suppress phantom DecrefRegion
+    /// emissions — the analysis may yield a `decref_point` for a region
+    /// whose alloc never landed in the bytecode (legitimately, for
+    /// `call_result_regions` going through `DecrefValueRegion`
+    /// instead; less legitimately, when the regions walk assigned a
+    /// region to a node the lowerer is transparent for). Emitting
+    /// `DecrefRegion(r)` for an unstamped r would decrement an RC
+    /// the runtime never raised.
+    emitted_alloc_regions: rustc_hash::FxHashSet<StaticRegion>,
+    /// HirIds whose trailing `emit_decrefs_for` (in `lower_expr`) is
+    /// suppressed because the caller will emit it itself at a better
+    /// point. `lower_let` uses this for a binding's init: the init's
+    /// region `decref_point` is the init's own HirId when the binding is
+    /// unused, but `lower_expr`'s automatic decref fires *before*
+    /// `lower_let` stores the init value into the slot it reloads — so the
+    /// decref would hit the slot's stamped `nil` and the real value would
+    /// leak. `lower_let` defers it, stores, then emits the decref against
+    /// the now-populated slot.
+    deferred_decref_points: rustc_hash::FxHashSet<HirId>,
+    /// Tail-call HirIds whose result a `Return` mint already covers, so
+    /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
+    /// return mint is emitted exactly once per returned value
+    /// (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
+    ///
+    /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
+    /// position — `(let [t (f …)] (return t))`, built for a tail call nested in a
+    /// `begin`/`if`/`cond`/`match` arm. There the frame HOLDS the result (the
+    /// synthetic binding) and its `decref_point` balances `lower_return`'s mint,
+    /// so the fall-through retain would be a second, unbalanced reference. A tail
+    /// call ANF leaves unnamed (a `let`/lambda body) has no binding and no
+    /// `Return`, so its fall-through retain IS the mint and is absent here.
+    /// Recorded by `lower_let`, the only lowering site that sees the wrap.
+    return_minted_calls: rustc_hash::FxHashSet<HirId>,
+    /// The relocation points covering every path that reaches the current
+    /// emission position (see [`TailExitHoist`]). Either a single
+    /// [`HoistBlock::Current`] entry — a frame-replacing tail call emitted into
+    /// this very block, which dominates everything after it — or the
+    /// [`HoistBlock::Finished`] points a branch merge inherited from its arms.
+    /// Set by `lower_call`'s tail arm and by the branch lowerings, cleared at
+    /// every other block boundary, and saved/restored across lambda boundaries
+    /// like every other per-function slot map.
+    tail_exit_hoist: Vec<TailExitHoist>,
+    /// Points sealed from the arms of the branch currently being lowered, which
+    /// `open_branch_merge` hands to its merge block. Saved and restored around
+    /// each branch (and each lambda), so a nested branch's arms never leak into
+    /// the enclosing one's collection.
+    arm_exit_hoists: Vec<TailExitHoist>,
+    /// Set while `with_tail_exit_hoist` emits a release it is about to REPLICATE
+    /// ahead of a branch arm's `TailCall`. Such a release must name a VALUE, so
+    /// that the copy a path reaches second loads the `nil` the first stamped and
+    /// no-ops; `emit_decref_for_region` reads this to take the value route for a
+    /// region it would otherwise release by id (docs/impl/region/mechanism.md §
+    /// "Self-cancelling is a property of the ROUTE, not of the region's class").
+    /// False everywhere else, where one point covers every path and one
+    /// instruction does.
+    replicating_release: bool,
 }
+
+mod regiondecref;
+mod regionemit;
 
 impl<'a> Lowerer<'a> {
     pub fn new(arena: &'a BindingArena) -> Self {
@@ -377,71 +441,38 @@ impl<'a> Lowerer<'a> {
             upvalue_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
-            immediate_primitives: FxHashSet::default(),
-            mutating_primitives: FxHashSet::default(),
-            arg_escaping_primitives: FxHashSet::default(),
-            non_allocating_accessors: FxHashSet::default(),
-            non_escaping_stdlib: FxHashSet::default(),
-            callee_rotation_safe: HashMap::new(),
-            callee_param_safe: HashMap::new(),
-            callee_outward_safe: HashMap::new(),
-            callee_return_safe: HashMap::new(),
-            callee_returns_rotation_safe: HashMap::new(),
-            callee_returns_param_safe: HashMap::new(),
-            callee_struct_fields_rotation_safe: HashMap::new(),
-            callee_struct_fields_param_safe: HashMap::new(),
-            callee_struct_fields_outward_safe: HashMap::new(),
-            callee_result_immediate: HashMap::new(),
-            callee_return_params: HashMap::new(),
-            callee_rest_index: HashMap::new(),
+            call_classification: crate::hir::CallClassification::default(),
             immutable_values: HashMap::new(),
             loop_lower_contexts: Vec::new(),
             block_lower_contexts: Vec::new(),
-            region_depth: 0,
-            region_refcounted_stack: Vec::new(),
-            flip_depth: 0,
-            pending_region_exits: 0,
-            scope_stats: ScopeStats::default(),
+            pending_free_regions: Vec::new(),
             discard_slot: None,
             symbol_names: HashMap::new(),
             closures: Vec::new(),
-            escape_projection: None,
             current_function_binding: None,
+            current_self_binding: None,
             current_function_params: None,
+            self_recursive_bindings: rustc_hash::FxHashSet::default(),
+            stranded_self_bindings: rustc_hash::FxHashSet::default(),
+            stranded_cycle_bindings: rustc_hash::FxHashSet::default(),
+            stranded_member_bindings: rustc_hash::FxHashSet::default(),
             region_info: RegionInfo::empty(),
+            escape_info: EscapeInfo::empty(),
+            increfs_by_site: HashMap::new(),
+            decrefs_by_decref_point: HashMap::new(),
+            cell_drops_by_demise: HashMap::new(),
+            current_hir_id: None,
+            region_to_table: HashMap::new(),
+
+            region_to_slot: HashMap::new(),
+            reassigned_local_slots: rustc_hash::FxHashSet::default(),
+            emitted_alloc_regions: rustc_hash::FxHashSet::default(),
+            deferred_decref_points: rustc_hash::FxHashSet::default(),
+            return_minted_calls: rustc_hash::FxHashSet::default(),
+            tail_exit_hoist: Vec::new(),
+            arm_exit_hoists: Vec::new(),
+            replicating_release: false,
         }
-    }
-
-    /// Set intrinsic operations for operator specialization
-    pub(crate) fn with_intrinsics(mut self, intrinsics: FxHashMap<SymbolId, IntrinsicOp>) -> Self {
-        self.intrinsics = intrinsics;
-        self
-    }
-
-    /// Set the whitelist of primitives known to return immediates
-    pub fn with_immediate_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
-        self.immediate_primitives = set;
-        self
-    }
-
-    pub fn with_mutating_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
-        self.mutating_primitives = set;
-        self
-    }
-
-    pub fn with_arg_escaping_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
-        self.arg_escaping_primitives = set;
-        self
-    }
-
-    pub fn with_non_allocating_accessors(mut self, set: FxHashSet<SymbolId>) -> Self {
-        self.non_allocating_accessors = set;
-        self
-    }
-
-    pub fn with_non_escaping_stdlib(mut self, set: FxHashSet<SymbolId>) -> Self {
-        self.non_escaping_stdlib = set;
-        self
     }
 
     /// Set all primitive property sets from a PrimitiveClassification.
@@ -450,11 +481,7 @@ impl<'a> Lowerer<'a> {
         pc: crate::lir::intrinsics::PrimitiveClassification,
     ) -> Self {
         self.intrinsics = pc.intrinsics;
-        self.immediate_primitives = pc.immediate_primitives;
-        self.mutating_primitives = pc.mutating_primitives;
-        self.arg_escaping_primitives = pc.arg_escaping_primitives;
-        self.non_allocating_accessors = pc.non_allocating_accessors;
-        self.non_escaping_stdlib = pc.non_escaping_stdlib;
+        self.call_classification = pc.call_classification;
         self
     }
 
@@ -477,150 +504,241 @@ impl<'a> Lowerer<'a> {
 
     /// Set Tofte-Talpin region inference results.
     pub fn with_region_info(mut self, info: RegionInfo) -> Self {
+        // Pre-index the two collections that `emit_increfs_for` /
+        // `emit_decrefs_for` consult per HIR node, so each lookup is O(1)
+        // instead of a linear scan (which made lowering O(n²) over a
+        // large compilation unit like the stdlib).
+        let mut increfs_by_site: HashMap<
+            HirId,
+            Vec<(crate::hir::region::Region, crate::hir::region::Region)>,
+        > = HashMap::new();
+        for &(site, src, dst) in &info.cross_region_refs {
+            increfs_by_site.entry(site).or_default().push((src, dst));
+        }
+        let mut decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>> =
+            HashMap::new();
+        for (&r, d) in &info.region_data {
+            decrefs_by_decref_point
+                .entry(d.decref_point)
+                .or_default()
+                .push(r);
+        }
+        // The **release order** at each shared `decref_point` (docs/impl/region/rules.md
+        // Rule 4): the `(earlier, later)` edges of every region that HOLDS another's pages
+        // live, so the holder's release is emitted first. Two sources:
+        //
+        // - **Adoption.** An adopted member keeps its OWN `DecrefRegion`, a structural
+        //   no-op only while the member is still `Owned` — once its owner's subtree drop
+        //   reclaims it, that decref faults. So a member releases before its owner. The
+        //   adopt maps hold exactly those edges: `owned_adopt_edges` (store-adopted, each
+        //   store site → `(member, owner)`) and `capture_adopt_edges` (capture-adopted,
+        //   each closure site → `(captured, closure)`), disjoint per member — a member is
+        //   adopted by its single owner through exactly one map (region/info.rs).
+        // - **Value aliasing.** A region that may be — or live inside — another is
+        //   released `DecrefValueRegion`-style, resolving its runtime region by READING
+        //   the value's own page, which the other's release can tear. Where the two land
+        //   on one point (a discarded read, whose alias dies exactly where its container
+        //   does), the alias must be ordered ahead. The same three relations the ownership
+        //   cut's alias obligation closes over supply these edges, oriented
+        //   `alias → source` throughout (region/adopt.md § "The lifetime obligation the
+        //   root carries"): a native read's result and the container it read from
+        //   (`counted_read_aliases`), an opaque call's result and its arguments
+        //   (`opaque_result_aliases`), and a `Funnel`'s result and its container
+        //   (`funnel_result_containers`). They compose transitively through the sort, so a
+        //   read out of a CALL's result — whose recorded container is the call's
+        //   placeholder, not the container the call handed back — is still ordered ahead
+        //   of the container that frees the page. An opcode read mints no region of its
+        //   own and contributes no edge; its borrow is covered by the container's extended
+        //   lifetime instead (region/rules.md Rule 4).
+        //
+        // `order_releases` topologically sorts the result (holder before holdee, nested
+        // subtrees innermost-first); a single flat priority class cannot express a
+        // transitive member ⊂ mid ⊂ root chain, nor a region that both is adopted and
+        // reads out of another. The two sets stay SEPARATE because only the first is a
+        // forest: a binding whose `binding_regions` name several alternatives (a
+        // re-`def`ined or branch-union binding) makes two reads each other's container, so
+        // the read edges can carry a may-alias cycle no order satisfies — which the sort
+        // resolves by tie-break rather than treating as the impossible state an adopt-edge
+        // cycle would be.
+        // Both sets are indexed by their `earlier` endpoint once here, so the per-bucket
+        // sort below costs the bucket's own size rather than a scan of every edge in the
+        // unit (the O(n²)-over-the-stdlib trap the two indices above exist to avoid).
+        let mut adopt_owner: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
+            HashMap::new();
+        for &(member, owner) in info
+            .owned_adopt_edges
+            .values()
+            .flatten()
+            .chain(info.capture_adopt_edges.values().flatten())
+        {
+            adopt_owner.entry(member).or_default().push(owner);
+        }
+        let mut value_alias: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
+            HashMap::new();
+        for &(_site, alias, source) in info
+            .counted_read_aliases
+            .iter()
+            .chain(info.opaque_result_aliases.iter())
+            .chain(info.funnel_result_containers.iter())
+        {
+            value_alias.entry(alias).or_default().push(source);
+        }
+        for regions in decrefs_by_decref_point.values_mut() {
+            Self::order_releases(regions, &adopt_owner, &value_alias, &info);
+        }
+        // The fn-local 1-slot containers whose content drop lands at each scope
+        // node, indexed the same way and for the same reason as the two above.
+        let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();
+        for (&b, c) in &info.cell_containers {
+            // A cell that forwards its final content into the next link of a
+            // loop chain has no content drop of its own: that link took the one
+            // reference over and releases it (`CellContainer::forwards_content`).
+            if c.forwards_content {
+                continue;
+            }
+            cell_drops_by_demise.entry(c.demise).or_default().push(b);
+        }
+        // Deterministic emission order across runs (the map's iteration is not).
+        for bindings in cell_drops_by_demise.values_mut() {
+            bindings.sort_unstable_by_key(|b| b.0);
+        }
+        self.increfs_by_site = increfs_by_site;
+        self.decrefs_by_decref_point = decrefs_by_decref_point;
+        self.cell_drops_by_demise = cell_drops_by_demise;
         self.region_info = info;
         self
     }
 
-    /// Check region inference for a scope node.
-    fn region_scope_check(&self, hir_id: HirId) -> bool {
-        matches!(
-            self.region_info.scope_kind.get(&hir_id),
-            Some(RegionKind::Scope)
-        )
-    }
-
-    /// Check region inference for a loop node.
-    #[allow(dead_code)]
-    fn region_loop_check(&self, hir_id: HirId) -> bool {
-        matches!(
-            self.region_info.scope_kind.get(&hir_id),
-            Some(RegionKind::Loop | RegionKind::Scope)
-        )
-    }
-
-    /// Return compile-time scope allocation statistics.
-    pub fn scope_stats(&self) -> &ScopeStats {
-        &self.scope_stats
-    }
-
-    /// Format escape analysis maps for `--dump=escape`.
-    pub fn format_escape_analysis(&self) -> String {
-        use std::fmt::Write;
-        let mut out = String::new();
-        let name = |b: &Binding| -> String {
-            let bi = self.arena.get(*b);
-            self.symbol_names
-                .get(&bi.name.0)
-                .cloned()
-                .unwrap_or_else(|| format!("?#{}", b.0))
-        };
-        writeln!(
-            out,
-            ";; rotation_safe ({} entries):",
-            self.callee_rotation_safe.len()
-        )
-        .unwrap();
-        let mut entries: Vec<_> = self.callee_rotation_safe.iter().collect();
-        entries.sort_by_key(|(b, _)| b.0);
-        for (b, safe) in &entries {
-            writeln!(out, "  {:30} rotation_safe={}", name(b), safe).unwrap();
-        }
-        writeln!(
-            out,
-            ";; param_safe ({} entries):",
-            self.callee_param_safe.len()
-        )
-        .unwrap();
-        let mut entries: Vec<_> = self.callee_param_safe.iter().collect();
-        entries.sort_by_key(|(b, _)| b.0);
-        for (b, safe) in &entries {
-            writeln!(out, "  {:30} param_safe={}", name(b), safe).unwrap();
-        }
-        writeln!(
-            out,
-            ";; struct_fields_rotation_safe ({} entries):",
-            self.callee_struct_fields_rotation_safe.len()
-        )
-        .unwrap();
-        let mut entries: Vec<_> = self.callee_struct_fields_rotation_safe.iter().collect();
-        entries.sort_by_key(|(b, _)| b.0);
-        for (b, safe) in &entries {
-            writeln!(out, "  {:30} struct_fields_rotation_safe={}", name(b), safe).unwrap();
-        }
-        writeln!(
-            out,
-            ";; struct_fields_param_safe ({} entries):",
-            self.callee_struct_fields_param_safe.len()
-        )
-        .unwrap();
-        let mut entries: Vec<_> = self.callee_struct_fields_param_safe.iter().collect();
-        entries.sort_by_key(|(b, _)| b.0);
-        for (b, safe) in &entries {
-            writeln!(out, "  {:30} struct_fields_param_safe={}", name(b), safe).unwrap();
-        }
-        writeln!(
-            out,
-            ";; outward_safe ({} entries):",
-            self.callee_outward_safe.len()
-        )
-        .unwrap();
-        let mut entries: Vec<_> = self.callee_outward_safe.iter().collect();
-        entries.sort_by_key(|(b, _)| b.0);
-        for (b, safe) in &entries {
-            writeln!(out, "  {:30} outward_safe={}", name(b), safe).unwrap();
-        }
-        writeln!(
-            out,
-            ";; struct_fields_outward_safe ({} entries):",
-            self.callee_struct_fields_outward_safe.len()
-        )
-        .unwrap();
-        let mut entries: Vec<_> = self.callee_struct_fields_outward_safe.iter().collect();
-        entries.sort_by_key(|(b, _)| b.0);
-        for (b, safe) in &entries {
-            writeln!(out, "  {:30} struct_fields_outward_safe={}", name(b), safe).unwrap();
-        }
-        if let Some(ref proj) = self.escape_projection {
-            writeln!(out, ";; escape_projection ({} fields):", proj.len()).unwrap();
-            let mut entries: Vec<_> = proj.iter().collect();
-            entries.sort_by_key(|(k, _)| (*k).clone());
-            for (k, info) in &entries {
-                writeln!(
-                    out,
-                    "  :{:29} rotation_safe={} outward_safe={}",
-                    k, info.rotation_safe, info.outward_safe
-                )
-                .unwrap();
-            }
-        } else {
-            writeln!(out, ";; escape_projection: none").unwrap();
-        }
-        out
-    }
-
-    /// Take the computed escape projection (if any).
-    /// Called by the compile pipeline after lowering.
-    pub fn take_escape_projection(
-        &mut self,
-    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
-        self.escape_projection.take()
-    }
-
-    /// Seed `callee_struct_fields_*` for a binding from an imported module's
-    /// escape projection. `rotation_safe` controls rotation and param maps;
-    /// `outward_safe` controls the outward-safe map.
-    pub fn seed_import_escape_projection(
-        &mut self,
-        binding: Binding,
-        rotation_safe: bool,
-        outward_safe: bool,
+    /// Order the releases sharing one `decref_point` (docs/impl/region/rules.md Rule 4).
+    ///
+    /// A topological sort of the **holder-before-holdee** edges — `adopt_owner`
+    /// (`member → owner`, the single-owner Owned-subtree forest) and `value_alias`
+    /// (`alias → source`, every region that may be or live inside another: a borrowing
+    /// read's result, an opaque call's result, a funnel's pass-through result) — so every
+    /// store/capture-adopted member's own `DecrefRegion` — a no-op only while the member
+    /// is still `Owned` — and every alias's page-reading `DecrefValueRegion` are emitted
+    /// before the release that frees (or subtree-drops) what they name (region/adopt.md
+    /// § "The lifetime obligation the root carries"). Both nested subtrees and chained
+    /// aliases resolve innermost-first by construction — a single flat priority class
+    /// cannot express a transitive member-before-owner chain, nor a read whose container
+    /// is a call's placeholder for the region that actually frees the page.
+    ///
+    /// Regions no such edge relates are tie-broken by page-read depth: a value-gated
+    /// `DecrefValueRegion` that unwraps a cell to the inner value reads deepest and sorts
+    /// first (class 0), then a `DecrefCellRegion` that reads the cell header and frees the
+    /// cell (class 1), then a plain `DecrefRegion` that frees and reads nothing (class 2);
+    /// region id breaks the final tie, so the order never depends on `HashMap` iteration
+    /// (the flaky capture-cell UAF, region-capture-cell-noreassign-uaf.lisp).
+    ///
+    /// **The two edge sets differ in what a cycle means.** Adoption is a forest — each
+    /// member has exactly one owner (the two adopt maps are disjoint per member;
+    /// region/info.rs) — so a cycle there is an impossible state a debug assert flags. A
+    /// read edge is only a MAY-alias: a binding whose `binding_regions` name several
+    /// alternatives (a re-`def`ined or branch-union binding) makes each alternative the
+    /// other's container, so two reads through it can point at each other though no
+    /// single runtime container does. Such a cycle is broken by re-sorting the stalled
+    /// residue on the adopt edges alone, then by tie-break — deterministic, never a
+    /// release-build panic on a legal program.
+    fn order_releases(
+        regions: &mut Vec<crate::hir::region::Region>,
+        adopt_owner: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
+        value_alias: &HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>>,
+        info: &RegionInfo,
     ) {
-        self.callee_struct_fields_rotation_safe
-            .insert(binding, rotation_safe);
-        self.callee_struct_fields_param_safe
-            .insert(binding, rotation_safe);
-        self.callee_struct_fields_outward_safe
-            .insert(binding, outward_safe);
+        use crate::hir::region::Region;
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
+        // Page-read depth: lower sorts earlier. `cell_release_regions ⊆
+        // call_result_regions`, so test the cell membership first.
+        let class = |r: Region| -> u8 {
+            if info.cell_release_regions.contains(&r) {
+                1 // DecrefCellRegion: reads the cell page header, frees the cell
+            } else if info.call_result_regions.contains(&r) {
+                0 // DecrefValueRegion: unwraps the cell to the inner value (deepest read)
+            } else {
+                2 // plain DecrefRegion: frees, reads nothing
+            }
+        };
+        // Kahn's algorithm over the edges restricted to `bucket`. A `later` region waits
+        // on every in-bucket `earlier` region that holds it; `waiters` lists the waiters of
+        // each earlier region (a member has one owner, but a region can be an adopted
+        // member AND a read alias, so the successor set is a list). The edge sets arrive
+        // PRE-INDEXED by their `earlier` endpoint, so a bucket costs its own size, not a
+        // scan of every edge in the unit — the same O(n²)-over-the-stdlib trap the
+        // decref/incref indices above exist to avoid. Returns the ordered prefix and the
+        // residue the edges never unblocked (a cycle).
+        let kahn = |bucket: &[Region],
+                    edges: &[&HashMap<Region, Vec<Region>>]|
+         -> (Vec<Region>, Vec<Region>) {
+            let present: rustc_hash::FxHashSet<Region> = bucket.iter().copied().collect();
+            let mut indeg: HashMap<Region, u32> = bucket.iter().map(|&r| (r, 0)).collect();
+            let mut succ: HashMap<Region, Vec<Region>> = HashMap::new();
+            for &earlier in bucket {
+                for &later in edges
+                    .iter()
+                    .filter_map(|e| e.get(&earlier))
+                    .flatten()
+                    .filter(|l| present.contains(l))
+                {
+                    *indeg.get_mut(&later).expect("later is in this bucket") += 1;
+                    succ.entry(earlier).or_default().push(later);
+                }
+            }
+            // Min-heap by (class, region id): the deterministic tie-break among the
+            // currently-unblocked regions. `Region` has no `Ord`, so key on the id and
+            // reconstruct — the id is unique within a bucket (`region_data` keys regions).
+            let mut ready: BinaryHeap<Reverse<(u8, u32)>> = BinaryHeap::new();
+            for &r in bucket {
+                if indeg[&r] == 0 {
+                    ready.push(Reverse((class(r), r.0)));
+                }
+            }
+            let mut out: Vec<Region> = Vec::with_capacity(bucket.len());
+            while let Some(Reverse((_, id))) = ready.pop() {
+                let r = Region(id);
+                out.push(r);
+                for &waiter in succ.get(&r).into_iter().flatten() {
+                    let d = indeg.get_mut(&waiter).expect("waiter tracked in indeg");
+                    *d -= 1;
+                    if *d == 0 {
+                        ready.push(Reverse((class(waiter), waiter.0)));
+                    }
+                }
+            }
+            let residue: Vec<Region> = bucket
+                .iter()
+                .copied()
+                .filter(|r| !out.contains(r))
+                .collect();
+            (out, residue)
+        };
+
+        let (mut out, residue) = kahn(regions, &[adopt_owner, value_alias]);
+        if !residue.is_empty() {
+            // A may-alias read cycle: drop the read edges over the stalled residue and
+            // order it on the adopt forest alone.
+            let (rest, cyclic) = kahn(&residue, &[adopt_owner]);
+            out.extend(rest);
+            debug_assert!(
+                cyclic.is_empty(),
+                "release-order ADOPT edges cycled at a shared decref_point: {cyclic:?}"
+            );
+            let mut cyclic = cyclic;
+            cyclic.sort_by_key(|r| (class(*r), r.0));
+            out.extend(cyclic);
+        }
+        *regions = out;
+    }
+
+    /// Check if a scope has local allocations (reclaimable).
+    fn region_scope_check(&self, hir_id: HirId) -> bool {
+        self.region_info.scope_has_local_allocs(hir_id)
+    }
+
+    /// Check if a loop has local allocations (rotation-eligible).
+    fn region_loop_check(&self, hir_id: HirId) -> bool {
+        self.region_info.scope_has_local_allocs(hir_id)
     }
 
     /// Lower a HIR expression to an LIR module.
@@ -629,6 +747,12 @@ impl<'a> Lowerer<'a> {
     /// closure bodies. Each closure is an independent compilation unit
     /// referenced by `ClosureId`.
     pub fn lower(&mut self, hir: &Hir) -> Result<LirModule, String> {
+        // Escape analysis is whole-module, like region inference — compute it
+        // once over the full canonical HIR before lowering recurses into
+        // closures. Computing it here keeps the pass on every real lowering path
+        // through a single chokepoint; `tail_callee_defers_release` reads it.
+        self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
+
         self.current_func = LirFunction::new(Arity::Exact(0));
         self.current_block = BasicBlock::new(Label(0));
         self.next_reg = 0;
@@ -636,25 +760,6 @@ impl<'a> Lowerer<'a> {
         self.binding_to_slot.clear();
         self.discard_slot = None;
         self.closures.clear();
-
-        // Precompute callee properties for scope allocation decisions.
-        // These scan the HIR for lambda defs and record per-binding
-        // properties (result_is_immediate, return_params, return_safe,
-        // rotation_safe). Order matters: return_safe depends on nothing;
-        // rotation_safety depends on return_safe (via tail_arg_is_safe_extended).
-        self.precompute_result_immediate(hir);
-        self.precompute_return_params(hir);
-        self.precompute_rest_index(hir);
-        self.precompute_return_safe(hir);
-        self.precompute_param_safety(hir);
-        self.precompute_rotation_safety(hir);
-        self.precompute_outward_safety(hir);
-        self.precompute_returns_rotation_safe(hir);
-        self.precompute_returns_param_safe(hir);
-        self.widen_rotation_safety(hir);
-        self.widen_param_safety(hir);
-        self.precompute_struct_fields_safety(hir);
-        self.widen_struct_fields_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
         self.terminate(Terminator::Return(result_reg));
@@ -665,1853 +770,27 @@ impl<'a> Lowerer<'a> {
         // Propagate signal from HIR to top-level LIR function
         self.current_func.signal = hir.signal;
 
-        // Compute escape analysis flags for fiber shared-alloc decisions.
-        // Covers closures created from top-level `defn` forms passed to
-        // `fiber/new` as variables.
-        self.current_func.result_is_immediate = self.result_is_safe(hir, &[]);
-        self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
-        self.current_func.rotation_safe = !self.body_escapes_heap_values(hir);
-
-        // Compute escape projection for module-pattern files.
-        self.escape_projection = self.compute_escape_projection(hir);
-
-        let mut entry =
-            std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
-        let mut closures = std::mem::take(&mut self.closures);
-
-        // Phase 4b: optional FlipEnter/FlipSwap/FlipExit injection. The
-        // pass is a no-op unless `--flip=on` or the vm/config equivalent
-        // is set. It runs after lowering so it doesn't perturb any
-        // scope/rotation analysis upstream.
-        if crate::config::flip_enabled() {
-            inject_flip(&mut entry);
-            for f in &mut closures {
-                inject_flip(f);
-            }
-        }
-
-        let escape_dump = Some(self.format_escape_analysis());
-        Ok(LirModule {
-            entry,
-            closures,
-            escape_dump,
-        })
-    }
-
-    // === Helper Methods ===
-
-    fn fresh_reg(&mut self) -> Reg {
-        let r = Reg::new(self.next_reg);
-        self.next_reg += 1;
-        r
-    }
-
-    fn allocate_slot(&mut self, binding: Binding) -> u16 {
-        // Inside a lambda, two address spaces coexist:
-        //   - Env (captures + params + LBox locals): LoadCapture/StoreCapture
-        //   - Stack/register locals (non-LBox let-bound): LoadLocal/StoreLocal
-        //
-        // Environment layout: [captures..., params..., lbox_locals..., nil_placeholders...]
-        // Stack frame layout:  [params..., all_locally_defined...]
-        //
-        // LBox locals get ENV-relative slots (num_captures + num_locals).
-        // Non-LBox locals get STACK-relative slots (num_locals).
-        // Both increment num_locals to keep env placeholder slots aligned.
-        let needs_capture = self.arena.get(binding).needs_capture();
-        let slot = if self.in_lambda {
-            // local_index is relative to locally-defined vars (after param locals)
-            let local_index = self.current_func.num_locals - self.num_local_params;
-            if needs_capture && local_index < 64 {
-                self.current_func.capture_locals_mask |= 1 << local_index;
-            }
-            if needs_capture {
-                // Env-relative: for LoadCapture/StoreCapture
-                self.num_captures + self.current_func.num_locals
-            } else {
-                // Stack-relative: for LoadLocal/StoreLocal
-                self.current_func.num_locals
-            }
-        } else {
-            self.current_func.num_locals
-        };
-        self.current_func.num_locals += 1;
-        self.binding_to_slot.insert(binding, slot);
-        slot
-    }
-
-    /// Extract a compile-time constant value from an HIR node.
-    /// Returns `Some(value)` for literals and references to already-known
-    /// constants. Used to seed `immutable_values` so reads of immutable
-    /// bindings emit `LoadConst` instead of `LoadLocal`.
-    fn hir_const_value(&self, hir: &Hir) -> Option<Value> {
-        match &hir.kind {
-            HirKind::Int(n) => Some(Value::int(*n)),
-            HirKind::Float(f) => Some(Value::float(*f)),
-            HirKind::Bool(b) => Some(Value::bool(*b)),
-            HirKind::Nil => Some(Value::NIL),
-            HirKind::Keyword(k) => Some(Value::keyword(k)),
-            HirKind::Quote(v) => Some(*v),
-            // Propagate through references to known constants
-            HirKind::Var(b) => self.immutable_values.get(b).copied(),
-            _ => None,
-        }
-    }
-
-    /// If `binding` is immutable and `init` is a compile-time constant,
-    /// record it in `immutable_values` so that subsequent reads of this
-    /// binding emit `LoadConst` instead of slot loads.
-    fn try_seed_immutable(&mut self, binding: Binding, init: &Hir) {
-        if self.arena.get(binding).is_immutable {
-            if let Some(val) = self.hir_const_value(init) {
-                self.immutable_values.insert(binding, val);
-            }
-        }
-    }
-
-    fn emit(&mut self, instr: LirInstr) {
-        self.current_block
-            .instructions
-            .push(SpannedInstr::new(instr, self.current_span.clone()));
-    }
-
-    fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {
-        let dst = self.fresh_reg();
-        self.emit(LirInstr::Const { dst, value: c });
-        Ok(dst)
-    }
-
-    fn emit_value_const(&mut self, value: Value) -> Result<Reg, String> {
-        let dst = self.fresh_reg();
-        self.emit(LirInstr::ValueConst { dst, value });
-        Ok(dst)
-    }
-
-    fn terminate(&mut self, term: Terminator) {
-        self.current_block.terminator = SpannedTerminator::new(term, self.current_span.clone());
-    }
-
-    fn finish_block(&mut self) {
-        let block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
-        self.current_func.blocks.push(block);
-    }
-
-    /// Allocate a new basic block label.
-    fn fresh_label(&mut self) -> Label {
-        let label = Label(self.next_label);
-        self.next_label += 1;
-        label
-    }
-
-    /// Finish the current block and start a new one with the given label.
-    fn start_new_block(&mut self, label: Label) {
-        self.finish_block();
-        self.current_block = BasicBlock::new(label);
-    }
-
-    /// Emit `RegionEnter` and increment the region depth counter.
-    fn emit_region_enter(&mut self) {
-        self.emit(LirInstr::RegionEnter);
-        self.region_depth += 1;
-        self.region_refcounted_stack.push(false);
-    }
-
-    /// Emit `RegionEnter` for a refcounted region.
-    fn emit_region_enter_refcounted(&mut self) {
-        self.emit(LirInstr::RegionEnter);
-        self.region_depth += 1;
-        self.region_refcounted_stack.push(true);
-    }
-
-    /// Emit `RegionExit` and decrement the region depth counter.
-    fn emit_region_exit(&mut self) {
-        self.emit(LirInstr::RegionExit);
-        self.region_depth -= 1;
-        self.region_refcounted_stack.pop();
-    }
-
-    /// Emit `RegionRotate` for double-buffered loop scope rotation.
-    /// Does not change region_depth — the mark count stays the same
-    /// (pop prev + push new = net zero change from the 2-mark state).
-    fn emit_region_rotate(&mut self) {
-        self.emit(LirInstr::RegionRotate);
-    }
-
-    fn emit_region_rotate_dealloc(&mut self) {
-        self.emit(LirInstr::RegionRotateDealloc);
-    }
-
-    fn emit_region_rotate_refcounted(&mut self) {
-        self.emit(LirInstr::RegionRotateRefcounted);
-    }
-
-    fn emit_region_exit_refcounted(&mut self) {
-        self.emit(LirInstr::RegionExitRefcounted);
-        self.region_depth -= 1;
-        self.region_refcounted_stack.pop();
-    }
-
-    /// Discard an unused value by storing it to a scratch slot.
-    /// The emitter's auto-pop after StoreLocal cleans up the value
-    /// from the operand stack. The scratch slot is lazily allocated
-    /// on first use and reused for all discards in the function.
-    fn discard(&mut self, src: Reg) {
-        let slot = match self.discard_slot {
-            Some(s) => s,
-            None => {
-                let s = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.discard_slot = Some(s);
-                s
-            }
-        };
-        self.emit(LirInstr::StoreLocal { slot, src });
-    }
-
-    // ── Escape analysis ────────────────────────────────────────────
-    //
-    // See `escape.rs` for helper functions (`result_is_safe`,
-    // `body_contains_dangerous_outward_set`, `body_contains_escaping_break`,
-    // `all_break_values_safe`, `all_breaks_have_safe_values`).
-
-    /// Determine if a `let` scope's allocations can be safely released
-    /// at scope exit via `RegionEnter`/`RegionExit`.
-    ///
-    /// Performs escape analysis on the let body to check if all bindings
-    /// and intermediate values allocated within the scope can be freed
-    /// when the scope exits. This enables the lowerer to emit `RegionEnter`
-    /// and `RegionExit` instructions for automatic cleanup.
-    ///
-    /// Returns `true` when ALL six conditions hold:
-    /// 1. No binding is captured by a nested lambda (captured values escape)
-    /// 2. Body cannot suspend (yield/debug/polymorphic signals prevent cleanup)
-    /// 3. Body result is provably an immediate (not heap-allocated)
-    /// 4. Body contains no dangerous outward `set` (set to outer binding
-    ///    with a value that could be heap-allocated inside the scope)
-    /// 5. All breaks in body carry safe immediate values
-    /// 6. Body contains no `break` targeting outer blocks (break carries
-    ///    a value past RegionExit, causing use-after-free)
-    ///
-    /// Increments `scope_stats.scopes_analyzed` and updates rejection counters
-    /// for each failed condition (short-circuits on first failure).
-    #[allow(dead_code)]
-    fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
-        self.scope_stats.scopes_analyzed += 1;
-        // Condition 1: no captures
-        if bindings.iter().any(|(b, _)| self.arena.get(*b).is_captured) {
-            self.scope_stats.rejected_captured += 1;
-            return false;
-        }
-
-        // Condition 2: no suspension in body or binding inits.
-        // Binding init expressions are evaluated inside the region, so
-        // allocations made by callees during a binding init are freed by
-        // RegionExit. If a binding init suspends, the caller's body may
-        // later create heap objects that escape via side effects (e.g. put
-        // to an external mutable struct), and RegionExit would free them
-        // while they're still referenced externally.
-        //
-        // Exception: when the body is a PURE tail call (no preceding
-        // expressions that could suspend), the tail call's signal doesn't
-        // matter — RegionExit fires before the tail call executes.
-        // But if the body has non-tail sub-expressions that may suspend
-        // (e.g. `(begin (port/write p x) (tail-call))`), those expressions
-        // run within the scope and suspension is still dangerous.
-        let body_suspends = if Self::body_is_tail_call(body) {
-            Self::non_tail_subexprs_may_suspend(body)
-        } else {
-            body.signal.may_suspend()
-        };
-        if body_suspends || bindings.iter().any(|(_, init)| init.signal.may_suspend()) {
-            self.scope_stats.rejected_suspends += 1;
-            return false;
-        }
-
-        // Build scope binding refs once — used by conditions 3 and 4
-        let scope_binding_refs: Vec<(Binding, &Hir)> =
-            bindings.iter().map(|(b, init)| (*b, init)).collect();
-
-        // Condition 3: result is immediate
-        if !self.result_is_safe(body, &scope_binding_refs) {
-            self.scope_stats.rejected_unsafe_result += 1;
-            return false;
-        }
-
-        // Condition 3b: tail call callee must not be scope-bound.
-        // RegionExit fires before tail calls, so if the callee is a
-        // closure allocated inside the scope, its slot is freed before
-        // the tail call reads it.
-        if Self::tail_call_callee_is_scope_bound(body, &scope_binding_refs) {
-            self.scope_stats.rejected_unsafe_result += 1;
-            return false;
-        }
-
-        // Condition 4: no dangerous outward mutation
-        if self.body_contains_dangerous_outward_set(body, &scope_binding_refs) {
-            self.scope_stats.rejected_outward_set += 1;
-            return false;
-        }
-
-        // Condition 5: all breaks carry safe immediate values.
-        if !self.all_breaks_have_safe_values(body) {
-            self.scope_stats.rejected_break += 1;
-            return false;
-        }
-
-        // Condition 6: no escaping break.
-        if Self::hir_contains_escaping_break(body) {
-            self.scope_stats.rejected_break += 1;
-            return false;
-        }
-
-        self.scope_stats.scopes_qualified += 1;
-        true
-    }
-
-    /// Determine if a `letrec` scope's allocations can be safely released.
-    /// Identical analysis to `let` — letrec's mutual recursion and two-phase
-    /// initialization don't change the escape conditions.
-    #[allow(dead_code)]
-    fn can_scope_allocate_letrec(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
-        self.can_scope_allocate_let(bindings, body)
-    }
-
-    /// Determine if a `block` scope's allocations can be safely released.
-    ///
-    /// Blocks don't introduce bindings but bracket a scope of allocations.
-    /// Conditions:
-    /// 1. No expression in body can suspend
-    /// 2. Body result is provably immediate
-    /// 3. All break values targeting this block are safe immediates
-    /// 4. No `set!` to non-local bindings (blocks have no own bindings)
-    #[allow(dead_code)]
-    fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
-        self.scope_stats.scopes_analyzed += 1;
-        // Condition 1: no suspension
-        if body.iter().any(|e| e.signal.may_suspend()) {
-            self.scope_stats.rejected_suspends += 1;
-            return false;
-        }
-
-        // Collect Define bindings from the block body. Although blocks
-        // don't introduce let-style bindings, they can contain def/var
-        // statements that create bindings whose values are heap-allocated
-        // inside the scope. These must be tracked so result_is_safe
-        // doesn't treat them as pre-scope outer bindings.
-        let scope_bindings: Vec<(Binding, &Hir)> = body
-            .iter()
-            .filter_map(|e| match &e.kind {
-                HirKind::Define { binding, value } => Some((*binding, value.as_ref())),
-                _ => None,
-            })
-            .collect();
-
-        // B2: result is immediate (empty body → nil → safe)
-        if let Some(last) = body.last() {
-            if !self.result_is_safe(last, &scope_bindings) {
-                self.scope_stats.rejected_unsafe_result += 1;
-                return false;
-            }
-        }
-
-        // Condition 3: all break values targeting this block are safe immediates.
-        if !self.all_break_values_safe(body, *block_id, &scope_bindings) {
-            self.scope_stats.rejected_break += 1;
-            return false;
-        }
-
-        // Condition 4: no dangerous outward mutation
-        if body
-            .iter()
-            .any(|e| self.body_contains_dangerous_outward_set(e, &scope_bindings))
-        {
-            self.scope_stats.rejected_outward_set += 1;
-            return false;
-        }
-
-        self.scope_stats.scopes_qualified += 1;
-        true
-    }
-
-    /// Determine if a non-tail call's temporaries can be freed after the
-    /// call returns via `RegionEnter`/`RegionExit` around the call.
-    ///
-    /// Safe when ALL conditions hold:
-    /// 1. Callee is a known function that returns an immediate
-    /// 2. Callee is rotation-safe (doesn't escape heap values)
-    /// 3. Call doesn't suspend (conservative: no yielding anywhere)
-    /// 4. At least one argument may heap-allocate (otherwise no benefit)
-    /// 5. No spliced arguments (splice path builds an array; more complex)
-    fn can_scope_allocate_call(
-        &self,
-        func: &Hir,
-        args: &[CallArg],
-        _call_signals: SignalBits,
-    ) -> bool {
-        // Must be a variable reference to a known function
-        let HirKind::Var(binding) = &func.kind else {
-            return false;
-        };
-
-        // Condition 1: no spliced args
-        if args.iter().any(|a| a.spliced) {
-            return false;
-        }
-
-        // Condition 2: callee's return value won't alias a freed arg.
-        let callee_rp = self
-            .callee_return_params
-            .get(binding)
-            .copied()
-            .unwrap_or(!0);
-        let rest_index = self.callee_rest_index.get(binding).copied();
-        for (i, arg) in args.iter().enumerate() {
-            let param_slot = match rest_index {
-                Some(r) if i >= r => r,
-                _ => i,
-            };
-            if param_slot < 64
-                && (callee_rp & (1u64 << param_slot)) != 0
-                && !self.result_is_safe(&arg.expr, &[])
-            {
-                return false;
-            }
-        }
-
-        // Condition 3: callee doesn't escape heap values.
-        let rotation_safe = self
-            .callee_rotation_safe
-            .get(binding)
-            .copied()
-            .unwrap_or(false);
-        if !rotation_safe {
-            return false;
-        }
-
-        // Condition 4: argument evaluation must not suspend.
-        if args.iter().any(|a| a.expr.signal.may_suspend()) {
-            return false;
-        }
-
-        // Condition 5: at least one arg may heap-allocate
-        // (if all args are immediates, the region has nothing to reclaim)
-        args.iter().any(|a| !self.result_is_safe(&a.expr, &[]))
-    }
-
-    /// Precompute `callee_result_immediate` for all function definitions.
-    ///
-    /// Fixpoint iteration: seed all functions as "returns immediate",
-    /// then iterate `result_is_safe(body, &[])` until stable. A function
-    /// whose body calls another function that returns a non-immediate
-    /// will converge to non-immediate.
-    fn precompute_result_immediate(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically return immediates.
-        for &(binding, _) in &defs {
-            self.callee_result_immediate.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                let is_imm = self.body_result_is_immediate(body);
-                let was_imm = self.callee_result_immediate[&binding];
-                if was_imm && !is_imm {
-                    self.callee_result_immediate.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Precompute `callee_return_safe` for all function definitions.
-    ///
-    /// A function is return-safe if its body's result is provably non-heap-
-    /// allocated, considering calls to other return-safe functions as safe.
-    /// Uses `result_is_safe_extended` (which trusts `callee_return_safe`)
-    /// in a fixpoint iteration: seed all functions as return-safe, then
-    /// iterate until stable. Only transitions safe→unsafe (monotone).
-    ///
-    /// This enables `tail_arg_is_safe_extended` to see through call
-    /// boundaries that `call_result_is_safe` conservatively rejects
-    /// (e.g. letrec-bound functions like nqueens' `search`).
-    fn precompute_return_safe(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically return-safe.
-        for &(binding, _) in &defs {
-            self.callee_return_safe.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                let is_safe = self.result_is_safe_extended(body, &[]);
-                let was_safe = self.callee_return_safe[&binding];
-                if was_safe && !is_safe {
-                    self.callee_return_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Precompute `callee_rest_index` for all user functions. The rest
-    /// param index is `params.len() - 1` when `rest_param` is `Some`
-    /// (the rest-collecting binding is the last entry in `params`).
-    fn precompute_rest_index(&mut self, hir: &Hir) {
-        Self::collect_rest_indices(hir, &mut self.callee_rest_index);
-    }
-
-    fn collect_rest_indices(hir: &Hir, out: &mut HashMap<Binding, usize>) {
-        match &hir.kind {
-            HirKind::Define { binding, value } => {
-                if let HirKind::Lambda {
-                    params, rest_param, ..
-                } = &value.kind
-                {
-                    if rest_param.is_some() && !params.is_empty() {
-                        out.insert(*binding, params.len() - 1);
-                    }
-                }
-                Self::collect_rest_indices(value, out);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    Self::collect_rest_indices(e, out);
-                }
-            }
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (binding, init) in bindings {
-                    if let HirKind::Lambda {
-                        params, rest_param, ..
-                    } = &init.kind
-                    {
-                        if rest_param.is_some() && !params.is_empty() {
-                            out.insert(*binding, params.len() - 1);
-                        }
-                    }
-                    Self::collect_rest_indices(init, out);
-                }
-                Self::collect_rest_indices(body, out);
-            }
-            HirKind::Lambda { body, .. } => {
-                Self::collect_rest_indices(body, out);
-            }
-            // Recurse into all structural nodes to find nested lambda defs
-            HirKind::While { cond, body } => {
-                Self::collect_rest_indices(cond, out);
-                Self::collect_rest_indices(body, out);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (_, init) in bindings {
-                    Self::collect_rest_indices(init, out);
-                }
-                Self::collect_rest_indices(body, out);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    Self::collect_rest_indices(a, out);
-                }
-            }
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                Self::collect_rest_indices(cond, out);
-                Self::collect_rest_indices(then_branch, out);
-                Self::collect_rest_indices(else_branch, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    Self::collect_rest_indices(c, out);
-                    Self::collect_rest_indices(b, out);
-                }
-                if let Some(e) = else_branch {
-                    Self::collect_rest_indices(e, out);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    Self::collect_rest_indices(e, out);
-                }
-            }
-            HirKind::Break { value, .. } => Self::collect_rest_indices(value, out),
-            HirKind::Match { value, arms } => {
-                Self::collect_rest_indices(value, out);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        Self::collect_rest_indices(g, out);
-                    }
-                    Self::collect_rest_indices(body, out);
-                }
-            }
-            HirKind::Call { func, args, .. } => {
-                Self::collect_rest_indices(func, out);
-                for a in args {
-                    Self::collect_rest_indices(&a.expr, out);
-                }
-            }
-            HirKind::Assign { value, .. } => Self::collect_rest_indices(value, out),
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    Self::collect_rest_indices(e, out);
-                }
-            }
-            HirKind::Emit { value, .. } => Self::collect_rest_indices(value, out),
-            HirKind::Destructure { value, .. } => Self::collect_rest_indices(value, out),
-            HirKind::Eval { expr, env } => {
-                Self::collect_rest_indices(expr, out);
-                Self::collect_rest_indices(env, out);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (k, v) in bindings {
-                    Self::collect_rest_indices(k, out);
-                    Self::collect_rest_indices(v, out);
-                }
-                Self::collect_rest_indices(body, out);
-            }
-            HirKind::MakeCell { value } => Self::collect_rest_indices(value, out),
-            HirKind::DerefCell { cell } => Self::collect_rest_indices(cell, out),
-            HirKind::SetCell { cell, value } => {
-                Self::collect_rest_indices(cell, out);
-                Self::collect_rest_indices(value, out);
-            }
-            HirKind::Intrinsic { args, .. } => {
-                for a in args {
-                    Self::collect_rest_indices(a, out);
-                }
-            }
-            // Leaves: Var, literals, Quote, Error
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-        }
-    }
-
-    /// Precompute `callee_return_params` for all function definitions.
-    ///
-    /// For each function, compute a bitmask of parameter indices that may
-    /// flow to the return position. Fixpoint iteration: seed all functions
-    /// with empty bitmask (optimistic — no params returned), then widen
-    /// until stable.
-    fn precompute_return_params(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
-        Self::collect_lambda_defs_with_params(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: no params flow to return.
-        for &(binding, _, _) in &defs {
-            self.callee_return_params.insert(binding, 0);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, ref params, body) in &defs {
-                let mask = self.compute_return_params(body, params);
-                let old = self.callee_return_params[&binding];
-                if mask != old {
-                    self.callee_return_params.insert(binding, mask | old);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Compute return-params bitmask for a HIR expression.
-    ///
-    /// Returns a u64 bitmask where bit i is set if parameter i (from
-    /// `params`) may flow to the return position of this expression.
-    fn compute_return_params(&self, hir: &Hir, params: &[Binding]) -> u64 {
-        match &hir.kind {
-            // A variable reference: if it's one of our params, set its bit
-            HirKind::Var(binding) => {
-                if let Some(idx) = params.iter().position(|p| p == binding) {
-                    if idx < 64 {
-                        1u64 << idx
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                }
-            }
-
-            // Literals never return a parameter
-            HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::Bool(_)
-            | HirKind::Nil
-            | HirKind::Keyword(_)
-            | HirKind::EmptyList
-            | HirKind::String(_)
-            | HirKind::Lambda { .. }
-            | HirKind::Quote(_) => 0,
-
-            // Control flow: union of all result positions
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                self.compute_return_params(then_branch, params)
-                    | self.compute_return_params(else_branch, params)
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                let mut mask = 0u64;
-                for (_, body) in clauses {
-                    mask |= self.compute_return_params(body, params);
-                }
-                if let Some(b) = else_branch {
-                    mask |= self.compute_return_params(b, params);
-                }
-                mask
-            }
-            HirKind::Begin(exprs) => exprs
-                .last()
-                .map(|e| self.compute_return_params(e, params))
-                .unwrap_or(0),
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                let mut mask = 0u64;
-                for e in exprs {
-                    mask |= self.compute_return_params(e, params);
-                }
-                mask
-            }
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
-                self.compute_return_params(body, params)
-            }
-            HirKind::Block { body, .. } => body
-                .last()
-                .map(|e| self.compute_return_params(e, params))
-                .unwrap_or(0),
-            HirKind::Match { arms, .. } => {
-                let mut mask = 0u64;
-                for (_, _, body) in arms {
-                    mask |= self.compute_return_params(body, params);
-                }
-                mask
-            }
-            HirKind::While { .. } | HirKind::Loop { .. } => 0, // returns nil
-            HirKind::Recur { .. } => 0,                        // jumps, never returns a value
-
-            // Call: map callee's return_params through our args.
-            //
-            // This applies to both tail and non-tail calls: a non-tail
-            // call in return position of this function (e.g. `(defn f [y]
-            // (array :first y))` where `(array ...)` is the whole body)
-            // still forwards its args into the result. The flag only
-            // affects the trampoline, not the data-flow.
-            //
-            // Default for unknown callees is `!0` (assume every arg can
-            // flow into the return), matching `can_scope_allocate_call`.
-            // User-defined functions are seeded in `callee_return_params`
-            // and refined by fixpoint iteration. Primitives aren't in
-            // the map — `unwrap_or(!0)` treats them conservatively: a
-            // container-like primitive (`array`, `struct`, `cons`) DOES
-            // embed its args in the result; an intrinsic like `+` does
-            // not. Both cases are safe under `!0`: the caller's scope
-            // analysis may reject some scope-allocations that would
-            // actually be fine, but it won't drop a value the callee
-            // handed back inside its return.
-            HirKind::Call { func, args, .. } => {
-                let callee_rp = if let HirKind::Var(b) = &func.kind {
-                    self.callee_return_params.get(b).copied().unwrap_or(!0)
-                } else {
-                    // Non-Var callee (e.g. `((get sched :pump))`):
-                    // we can't identify it, so assume every arg flows
-                    // to the return.
-                    !0
-                };
-                let mut mask = 0u64;
-                for (j, arg) in args.iter().enumerate() {
-                    if j < 64 && (callee_rp & (1u64 << j)) != 0 {
-                        if let HirKind::Var(b) = &arg.expr.kind {
-                            if let Some(k) = params.iter().position(|p| p == b) {
-                                if k < 64 {
-                                    mask |= 1u64 << k;
-                                }
-                            }
-                        }
-                        // Non-Var arg (like (search ...)) doesn't map
-                        // to any of our params — no bits set.
-                    }
-                }
-                mask
-            }
-
-            // Parameterize: result is body's result
-            HirKind::Parameterize { body, .. } => self.compute_return_params(body, params),
-
-            // Cell ops, Assign, Define, Eval, Break, Emit, Destructure
-            // — not return positions or covered by other analysis.
-            HirKind::MakeCell { .. }
-            | HirKind::DerefCell { .. }
-            | HirKind::SetCell { .. }
-            | HirKind::Assign { .. }
-            | HirKind::Define { .. }
-            | HirKind::Emit { .. }
-            | HirKind::Destructure { .. }
-            | HirKind::Eval { .. }
-            | HirKind::Break { .. }
-            | HirKind::Error => 0,
-
-            // Intrinsics: result is not one of our params
-            HirKind::Intrinsic { .. } => 0,
-        }
-    }
-
-    /// Collect top-level function definitions with their parameter bindings.
-    fn collect_lambda_defs_with_params<'b>(
-        hir: &'b Hir,
-        out: &mut Vec<(Binding, Vec<Binding>, &'b Hir)>,
-    ) {
-        match &hir.kind {
-            HirKind::Define { binding, value } => {
-                if let HirKind::Lambda { params, body, .. } = &value.kind {
-                    out.push((*binding, params.clone(), body));
-                }
-                Self::collect_lambda_defs_with_params(value, out);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    Self::collect_lambda_defs_with_params(e, out);
-                }
-            }
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (binding, init) in bindings {
-                    if let HirKind::Lambda {
-                        params,
-                        body: lbody,
-                        ..
-                    } = &init.kind
-                    {
-                        out.push((*binding, params.clone(), lbody));
-                    }
-                    Self::collect_lambda_defs_with_params(init, out);
-                }
-                Self::collect_lambda_defs_with_params(body, out);
-            }
-            // Recurse into lambda bodies to find nested defs (e.g. closures
-            // inside function bodies). Don't push the Lambda itself — that's
-            // handled by Define/Let when the Lambda is bound to a name.
-            HirKind::Lambda { body, .. } => {
-                Self::collect_lambda_defs_with_params(body, out);
-            }
-            // Recurse into all structural nodes to find nested lambda defs
-            HirKind::While { cond, body } => {
-                Self::collect_lambda_defs_with_params(cond, out);
-                Self::collect_lambda_defs_with_params(body, out);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (binding, init) in bindings {
-                    if let HirKind::Lambda {
-                        params,
-                        body: lbody,
-                        ..
-                    } = &init.kind
-                    {
-                        out.push((*binding, params.clone(), lbody));
-                    }
-                    Self::collect_lambda_defs_with_params(init, out);
-                }
-                Self::collect_lambda_defs_with_params(body, out);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    Self::collect_lambda_defs_with_params(a, out);
-                }
-            }
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                Self::collect_lambda_defs_with_params(cond, out);
-                Self::collect_lambda_defs_with_params(then_branch, out);
-                Self::collect_lambda_defs_with_params(else_branch, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    Self::collect_lambda_defs_with_params(c, out);
-                    Self::collect_lambda_defs_with_params(b, out);
-                }
-                if let Some(e) = else_branch {
-                    Self::collect_lambda_defs_with_params(e, out);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    Self::collect_lambda_defs_with_params(e, out);
-                }
-            }
-            HirKind::Break { value, .. } => Self::collect_lambda_defs_with_params(value, out),
-            HirKind::Match { value, arms } => {
-                Self::collect_lambda_defs_with_params(value, out);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        Self::collect_lambda_defs_with_params(g, out);
-                    }
-                    Self::collect_lambda_defs_with_params(body, out);
-                }
-            }
-            HirKind::Call { func, args, .. } => {
-                Self::collect_lambda_defs_with_params(func, out);
-                for a in args {
-                    Self::collect_lambda_defs_with_params(&a.expr, out);
-                }
-            }
-            HirKind::Assign { value, .. } => Self::collect_lambda_defs_with_params(value, out),
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    Self::collect_lambda_defs_with_params(e, out);
-                }
-            }
-            HirKind::Emit { value, .. } => Self::collect_lambda_defs_with_params(value, out),
-            HirKind::Destructure { value, .. } => Self::collect_lambda_defs_with_params(value, out),
-            HirKind::Eval { expr, env } => {
-                Self::collect_lambda_defs_with_params(expr, out);
-                Self::collect_lambda_defs_with_params(env, out);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (k, v) in bindings {
-                    Self::collect_lambda_defs_with_params(k, out);
-                    Self::collect_lambda_defs_with_params(v, out);
-                }
-                Self::collect_lambda_defs_with_params(body, out);
-            }
-            HirKind::MakeCell { value } => Self::collect_lambda_defs_with_params(value, out),
-            HirKind::DerefCell { cell } => Self::collect_lambda_defs_with_params(cell, out),
-            HirKind::SetCell { cell, value } => {
-                Self::collect_lambda_defs_with_params(cell, out);
-                Self::collect_lambda_defs_with_params(value, out);
-            }
-            HirKind::Intrinsic { args, .. } => {
-                for a in args {
-                    Self::collect_lambda_defs_with_params(a, out);
-                }
-            }
-            // Leaves: Var, literals, Quote, Error
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-        }
-    }
-
-    /// Check if a function body always returns an immediate value.
-    ///
-    /// Unlike `result_is_safe` (which checks if a value is safe to
-    /// return from a scope-allocated let), this checks the actual
-    /// return type. For tail calls, it checks whether the CALLEE
-    /// returns an immediate (via `call_result_is_safe`), not just
-    /// whether the args avoid scope bindings.
-    fn body_result_is_immediate(&self, hir: &Hir) -> bool {
-        match &hir.kind {
-            // Literals: all immediates
-            HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::Bool(_)
-            | HirKind::Nil
-            | HirKind::Keyword(_)
-            | HirKind::EmptyList => true,
-
-            // Var: a parameter or captured variable — could be anything.
-            // We cannot know the caller's argument types, so conservatively
-            // return false. Only constant-like values (literals) are safe.
-            HirKind::Var(_) => false,
-
-            // Control flow: recurse into all result positions
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                self.body_result_is_immediate(then_branch)
-                    && self.body_result_is_immediate(else_branch)
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                clauses
-                    .iter()
-                    .all(|(_, body)| self.body_result_is_immediate(body))
-                    && else_branch
-                        .as_ref()
-                        .is_none_or(|b| self.body_result_is_immediate(b))
-            }
-            HirKind::Begin(exprs) => exprs
-                .last()
-                .is_some_and(|e| self.body_result_is_immediate(e)),
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                exprs.iter().all(|e| self.body_result_is_immediate(e))
-            }
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
-                self.body_result_is_immediate(body)
-            }
-            HirKind::Block { body, .. } => body
-                .last()
-                .is_some_and(|e| self.body_result_is_immediate(e)),
-            HirKind::Match { arms, .. } => arms
-                .iter()
-                .all(|(_, _, body)| self.body_result_is_immediate(body)),
-            HirKind::While { .. } | HirKind::Recur { .. } => true, // returns nil
-            HirKind::Loop { body, .. } => self.body_result_is_immediate(body),
-
-            // ALL calls (tail or not): check if callee returns immediate.
-            // Look through DerefCell (functionalize wraps letrec bindings).
-            HirKind::Call { func, args, .. } => {
-                if self.call_result_is_safe(func, args) {
-                    return true;
-                }
-                let binding = match &func.kind {
-                    HirKind::Var(b) => Some(b),
-                    HirKind::DerefCell { cell } => match &cell.kind {
-                        HirKind::Var(b) => Some(b),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if let Some(binding) = binding {
-                    return self
-                        .callee_result_immediate
-                        .get(binding)
-                        .copied()
-                        .unwrap_or(false);
-                }
-                false
-            }
-
-            // Cell ops: MakeCell creates a heap cell, DerefCell/SetCell
-            // may return heap values — conservatively not immediate.
-            HirKind::MakeCell { .. } | HirKind::DerefCell { .. } | HirKind::SetCell { .. } => false,
-
-            // Heap-allocating or unknown: Lambda, String, Quote, etc.
-            HirKind::Lambda { .. }
-            | HirKind::String(_)
-            | HirKind::Quote(_)
-            | HirKind::Assign { .. }
-            | HirKind::Define { .. }
-            | HirKind::Destructure { .. }
-            | HirKind::Emit { .. }
-            | HirKind::Eval { .. }
-            | HirKind::Break { .. }
-            | HirKind::Parameterize { .. }
-            | HirKind::Intrinsic { .. }
-            | HirKind::Error => false,
-        }
-    }
-
-    /// Precompute `callee_param_safe` for all function definitions.
-    ///
-    /// A function is param-safe if its body never stores a parameter-derived
-    /// value into external mutable state. Fixpoint: seed all safe, iterate
-    /// `body_stores_params_externally` until stable.
-    fn precompute_param_safety(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
-        Self::collect_lambda_defs_with_params(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically param-safe.
-        for &(binding, _, _) in &defs {
-            self.callee_param_safe.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, ref params, body) in &defs {
-                if !self.callee_param_safe[&binding] {
-                    continue; // already unsafe, skip
-                }
-                if self.body_stores_params_externally(body, params) {
-                    self.callee_param_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Precompute `callee_rotation_safe` for all function definitions.
-    ///
-    /// Walks the HIR to find all `Define` bindings with lambda values,
-    /// then iterates `body_escapes_heap_values` until the map stabilizes.
-    /// This handles mutual recursion: initially all functions are assumed
-    /// safe, and each pass may flip some to unsafe. Converges because
-    /// the only transition is safe→unsafe (monotone).
-    fn precompute_rotation_safety(&mut self, hir: &Hir) {
-        // Collect all (binding, params, lambda_body) pairs from the HIR.
-        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
-        Self::collect_lambda_defs_with_params(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically safe.
-        for &(binding, _, _) in &defs {
-            self.callee_rotation_safe.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, ref params, body) in &defs {
-                // Set context so body_escapes_heap_values can detect
-                // self-tail-calls and apply per-parameter analysis.
-                self.current_function_binding = Some(binding);
-                self.current_function_params = Some(params.clone());
-                let escapes = self.body_escapes_heap_values(body);
-                let was_safe = self.callee_rotation_safe[&binding];
-                if was_safe && escapes {
-                    self.callee_rotation_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Clear context
-        self.current_function_binding = None;
-        self.current_function_params = None;
-
-        // Record stats
-        self.scope_stats.rotation_analyzed = defs.len();
-        self.scope_stats.rotation_safe = self.callee_rotation_safe.values().filter(|&&v| v).count();
-    }
-
-    /// Precompute `callee_outward_safe` for all function definitions.
-    ///
-    /// A function is outward-safe if its body never stores heap values into
-    /// external mutable state. Unlike rotation-safe, it does NOT care about
-    /// heap content in tail-call return values. Fixpoint: seed all safe,
-    /// iterate `body_has_outward_side_effects` until stable.
-    fn precompute_outward_safety(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
-        Self::collect_lambda_defs_with_params(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically outward-safe.
-        for &(binding, _, _) in &defs {
-            self.callee_outward_safe.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, _, body) in &defs {
-                if !self.callee_outward_safe[&binding] {
-                    continue; // already unsafe, skip
-                }
-                if self.body_has_outward_side_effects(body) {
-                    self.callee_outward_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Precompute `callee_returns_rotation_safe` for all function definitions.
-    ///
-    /// A function returns-rotation-safe if every closure it returns (in all
-    /// return positions) is itself rotation-safe. This enables the widen pass
-    /// to resolve `(def proc (factory))` — if `factory` returns-rotation-safe,
-    /// then `proc` is rotation-safe.
-    fn precompute_returns_rotation_safe(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically return rotation-safe closures.
-        for &(binding, _) in &defs {
-            self.callee_returns_rotation_safe.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                if !self.callee_returns_rotation_safe[&binding] {
-                    continue;
-                }
-                if !self.body_returns_rotation_safe_closures(body) {
-                    self.callee_returns_rotation_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Precompute `callee_returns_param_safe` for all function definitions.
-    fn precompute_returns_param_safe(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically return param-safe closures.
-        for &(binding, _) in &defs {
-            self.callee_returns_param_safe.insert(binding, true);
-        }
-
-        // Iterate until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                if !self.callee_returns_param_safe[&binding] {
-                    continue;
-                }
-                if !self.body_returns_param_safe_closures(body) {
-                    self.callee_returns_param_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Widen `callee_rotation_safe` to cover non-Lambda bindings.
-    ///
-    /// After the Lambda-only fixpoints and returns_* fixpoints have run,
-    /// this pass iterates over ALL bindings (including those with Call,
-    /// Var, If, etc. inits) and resolves their rotation-safety using
-    /// value-flow analysis.
-    fn widen_rotation_safety(&mut self, hir: &Hir) {
-        let mut all_bindings: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_all_bindings(hir, &mut all_bindings);
-
-        loop {
-            let mut changed = false;
-            for &(binding, init) in &all_bindings {
-                if self.callee_rotation_safe.contains_key(&binding) {
-                    continue; // already resolved
-                }
-                if let Some(safe) = self.resolve_value_rotation_safe(init) {
-                    self.callee_rotation_safe.insert(binding, safe);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Widen `callee_param_safe` to cover non-Lambda bindings.
-    fn widen_param_safety(&mut self, hir: &Hir) {
-        let mut all_bindings: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_all_bindings(hir, &mut all_bindings);
-
-        loop {
-            let mut changed = false;
-            for &(binding, init) in &all_bindings {
-                if self.callee_param_safe.contains_key(&binding) {
-                    continue; // already resolved
-                }
-                if let Some(safe) = self.resolve_value_param_safe(init) {
-                    self.callee_param_safe.insert(binding, safe);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Precompute `callee_struct_fields_rotation_safe`,
-    /// `callee_struct_fields_param_safe`, and `callee_struct_fields_outward_safe`
-    /// for all Lambda-bound functions.
-    ///
-    /// A function has struct-fields-rotation-safe if its body returns
-    /// a struct where all closure-valued fields are rotation-safe.
-    fn precompute_struct_fields_safety(&mut self, hir: &Hir) {
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
-        if defs.is_empty() {
-            return;
-        }
-
-        // Seed: all functions optimistically safe.
-        for &(binding, _) in &defs {
-            self.callee_struct_fields_rotation_safe
-                .insert(binding, true);
-            self.callee_struct_fields_param_safe.insert(binding, true);
-            self.callee_struct_fields_outward_safe.insert(binding, true);
-        }
-
-        // Iterate rotation-safe until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                if !self.callee_struct_fields_rotation_safe[&binding] {
-                    continue;
-                }
-                if !self.body_returns_struct_fields_rotation_safe(body) {
-                    self.callee_struct_fields_rotation_safe
-                        .insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Iterate param-safe until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                if !self.callee_struct_fields_param_safe[&binding] {
-                    continue;
-                }
-                if !self.body_returns_struct_fields_param_safe(body) {
-                    self.callee_struct_fields_param_safe.insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Iterate outward-safe until stable.
-        loop {
-            let mut changed = false;
-            for &(binding, body) in &defs {
-                if !self.callee_struct_fields_outward_safe[&binding] {
-                    continue;
-                }
-                if !self.body_returns_struct_fields_outward_safe(body) {
-                    self.callee_struct_fields_outward_safe
-                        .insert(binding, false);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Widen `callee_struct_fields_*` to non-Lambda bindings.
-    /// When a binding is initialized from a Call to a function with
-    /// struct-fields-safe, the binding itself is struct-fields-safe.
-    fn widen_struct_fields_safety(&mut self, hir: &Hir) {
-        let mut all_bindings: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_all_bindings(hir, &mut all_bindings);
-
-        loop {
-            let mut changed = false;
-            for &(binding, init) in &all_bindings {
-                if self
-                    .callee_struct_fields_rotation_safe
-                    .contains_key(&binding)
-                {
-                    continue;
-                }
-                // For Call inits, check if callee returns struct-fields-safe
-                if let HirKind::Call { func, .. } = &init.kind {
-                    let callee = self.extract_callee_binding(func);
-                    if let Some(b) = callee {
-                        if let Some(&safe) = self.callee_struct_fields_rotation_safe.get(b) {
-                            self.callee_struct_fields_rotation_safe
-                                .insert(binding, safe);
-                            changed = true;
-                        }
-                    }
-                }
-                // For Var inits (aliases), propagate
-                if let HirKind::Var(b) = &init.kind {
-                    if let Some(&safe) = self.callee_struct_fields_rotation_safe.get(b) {
-                        self.callee_struct_fields_rotation_safe
-                            .insert(binding, safe);
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Same for param-safe
-        loop {
-            let mut changed = false;
-            for &(binding, init) in &all_bindings {
-                if self.callee_struct_fields_param_safe.contains_key(&binding) {
-                    continue;
-                }
-                if let HirKind::Call { func, .. } = &init.kind {
-                    let callee = self.extract_callee_binding(func);
-                    if let Some(b) = callee {
-                        if let Some(&safe) = self.callee_struct_fields_param_safe.get(b) {
-                            self.callee_struct_fields_param_safe.insert(binding, safe);
-                            changed = true;
-                        }
-                    }
-                }
-                if let HirKind::Var(b) = &init.kind {
-                    if let Some(&safe) = self.callee_struct_fields_param_safe.get(b) {
-                        self.callee_struct_fields_param_safe.insert(binding, safe);
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
-        // Same for outward-safe
-        loop {
-            let mut changed = false;
-            for &(binding, init) in &all_bindings {
-                if self
-                    .callee_struct_fields_outward_safe
-                    .contains_key(&binding)
-                {
-                    continue;
-                }
-                if let HirKind::Call { func, .. } = &init.kind {
-                    let callee = self.extract_callee_binding(func);
-                    if let Some(b) = callee {
-                        if let Some(&safe) = self.callee_struct_fields_outward_safe.get(b) {
-                            self.callee_struct_fields_outward_safe.insert(binding, safe);
-                            changed = true;
-                        }
-                    }
-                }
-                if let HirKind::Var(b) = &init.kind {
-                    if let Some(&safe) = self.callee_struct_fields_outward_safe.get(b) {
-                        self.callee_struct_fields_outward_safe.insert(binding, safe);
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Compute escape projection for module-pattern files.
-    ///
-    /// Walks the HIR's return position (through Letrec/Begin/Lambda) to find
-    /// a struct literal. For each field, checks rotation-safe, param-safe,
-    /// and outward-safe properties.
-    fn compute_escape_projection(
-        &self,
-        hir: &Hir,
-    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
-        self.extract_escape_struct(hir)
-    }
-
-    fn extract_escape_struct(
-        &self,
-        hir: &Hir,
-    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
-        match &hir.kind {
-            HirKind::Call { func, args, .. } => {
-                // Check if this is a struct construction call
-                if !self.callee_is_primitive(func) {
-                    return None;
-                }
-                let binding = match &func.kind {
-                    HirKind::Var(b) => b,
-                    _ => return None,
-                };
-                let bi = self.arena.get(*binding);
-                let name = self.symbol_names.get(&bi.name.0)?;
-                if name != "struct" {
-                    return None;
-                }
-                let mut projection = HashMap::new();
-                let mut i = 0;
-                while i + 1 < args.len() {
-                    if let HirKind::Keyword(key) = &args[i].expr.kind {
-                        let val = &args[i + 1].expr;
-                        let rotation_safe = self.value_is_rotation_safe_closure_or_non_closure(val)
-                            && self.value_is_param_safe_closure_or_non_closure(val);
-                        let outward_safe = self.value_is_outward_safe_closure_or_non_closure(val);
-                        projection.insert(
-                            key.clone(),
-                            crate::compiler::bytecode::FieldEscapeInfo {
-                                rotation_safe,
-                                outward_safe,
-                            },
-                        );
-                    }
-                    i += 2;
-                }
-                if projection.is_empty() {
-                    None
-                } else {
-                    Some(projection)
-                }
-            }
-            HirKind::Lambda { body, .. } => self.extract_escape_struct(body),
-            HirKind::Begin(exprs) => exprs.last().and_then(|e| self.extract_escape_struct(e)),
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                // If body is a Var referencing a binding, recurse into its init
-                if let HirKind::Var(b) = &body.kind {
-                    if let Some((_, init)) = bindings.iter().find(|(bind, _)| bind == b) {
-                        return self.extract_escape_struct(init);
-                    }
-                }
-                self.extract_escape_struct(body)
-            }
-            HirKind::Define { value, .. } => self.extract_escape_struct(value),
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                // Both branches must return structs; AND the safety values
-                let a = self.extract_escape_struct(then_branch)?;
-                let b = self.extract_escape_struct(else_branch)?;
-                let mut merged = a;
-                for (k, v) in b {
-                    let entry =
-                        merged
-                            .entry(k)
-                            .or_insert(crate::compiler::bytecode::FieldEscapeInfo {
-                                rotation_safe: true,
-                                outward_safe: true,
-                            });
-                    entry.rotation_safe = entry.rotation_safe && v.rotation_safe;
-                    entry.outward_safe = entry.outward_safe && v.outward_safe;
-                }
-                Some(merged)
-            }
-            _ => None,
-        }
-    }
-
-    /// Collect ALL `(binding, init_expr)` pairs from Define/Let/Letrec,
-    /// regardless of whether the init is a Lambda. Used by widen passes.
-    fn collect_all_bindings<'b>(hir: &'b Hir, out: &mut Vec<(Binding, &'b Hir)>) {
-        match &hir.kind {
-            HirKind::Define { binding, value } => {
-                out.push((*binding, value));
-                Self::collect_all_bindings(value, out);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    Self::collect_all_bindings(e, out);
-                }
-            }
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (binding, init) in bindings {
-                    out.push((*binding, init));
-                    Self::collect_all_bindings(init, out);
-                }
-                Self::collect_all_bindings(body, out);
-            }
-            HirKind::Lambda { body, .. } => {
-                Self::collect_all_bindings(body, out);
-            }
-            HirKind::While { cond, body } => {
-                Self::collect_all_bindings(cond, out);
-                Self::collect_all_bindings(body, out);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (binding, init) in bindings {
-                    out.push((*binding, init));
-                    Self::collect_all_bindings(init, out);
-                }
-                Self::collect_all_bindings(body, out);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    Self::collect_all_bindings(a, out);
-                }
-            }
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                Self::collect_all_bindings(cond, out);
-                Self::collect_all_bindings(then_branch, out);
-                Self::collect_all_bindings(else_branch, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    Self::collect_all_bindings(c, out);
-                    Self::collect_all_bindings(b, out);
-                }
-                if let Some(e) = else_branch {
-                    Self::collect_all_bindings(e, out);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    Self::collect_all_bindings(e, out);
-                }
-            }
-            HirKind::Break { value, .. } => Self::collect_all_bindings(value, out),
-            HirKind::Match { value, arms } => {
-                Self::collect_all_bindings(value, out);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        Self::collect_all_bindings(g, out);
-                    }
-                    Self::collect_all_bindings(body, out);
-                }
-            }
-            HirKind::Call { func, args, .. } => {
-                Self::collect_all_bindings(func, out);
-                for a in args {
-                    Self::collect_all_bindings(&a.expr, out);
-                }
-            }
-            HirKind::Assign { value, .. } => Self::collect_all_bindings(value, out),
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    Self::collect_all_bindings(e, out);
-                }
-            }
-            HirKind::Emit { value, .. } => Self::collect_all_bindings(value, out),
-            HirKind::Destructure { value, .. } => Self::collect_all_bindings(value, out),
-            HirKind::Eval { expr, env } => {
-                Self::collect_all_bindings(expr, out);
-                Self::collect_all_bindings(env, out);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (k, v) in bindings {
-                    Self::collect_all_bindings(k, out);
-                    Self::collect_all_bindings(v, out);
-                }
-                Self::collect_all_bindings(body, out);
-            }
-            HirKind::MakeCell { value } => Self::collect_all_bindings(value, out),
-            HirKind::DerefCell { cell } => Self::collect_all_bindings(cell, out),
-            HirKind::SetCell { cell, value } => {
-                Self::collect_all_bindings(cell, out);
-                Self::collect_all_bindings(value, out);
-            }
-            HirKind::Intrinsic { args, .. } => {
-                for a in args {
-                    Self::collect_all_bindings(a, out);
-                }
-            }
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-        }
-    }
-
-    /// Collect all `(binding, lambda_body)` pairs from Define nodes.
-    fn collect_lambda_defs<'b>(hir: &'b Hir, out: &mut Vec<(Binding, &'b Hir)>) {
-        match &hir.kind {
-            HirKind::Define { binding, value } => {
-                if let HirKind::Lambda { body, .. } = &value.kind {
-                    out.push((*binding, body));
-                }
-                Self::collect_lambda_defs(value, out);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    Self::collect_lambda_defs(e, out);
-                }
-            }
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (binding, init) in bindings {
-                    if let HirKind::Lambda { body: lbody, .. } = &init.kind {
-                        out.push((*binding, lbody));
-                    }
-                    Self::collect_lambda_defs(init, out);
-                }
-                Self::collect_lambda_defs(body, out);
-            }
-            HirKind::Lambda { body, .. } => {
-                Self::collect_lambda_defs(body, out);
-            }
-            // Recurse into all structural nodes to find nested lambda defs
-            HirKind::While { cond, body } => {
-                Self::collect_lambda_defs(cond, out);
-                Self::collect_lambda_defs(body, out);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (binding, init) in bindings {
-                    if let HirKind::Lambda { body: lbody, .. } = &init.kind {
-                        out.push((*binding, lbody));
-                    }
-                    Self::collect_lambda_defs(init, out);
-                }
-                Self::collect_lambda_defs(body, out);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    Self::collect_lambda_defs(a, out);
-                }
-            }
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                Self::collect_lambda_defs(cond, out);
-                Self::collect_lambda_defs(then_branch, out);
-                Self::collect_lambda_defs(else_branch, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    Self::collect_lambda_defs(c, out);
-                    Self::collect_lambda_defs(b, out);
-                }
-                if let Some(e) = else_branch {
-                    Self::collect_lambda_defs(e, out);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    Self::collect_lambda_defs(e, out);
-                }
-            }
-            HirKind::Break { value, .. } => Self::collect_lambda_defs(value, out),
-            HirKind::Match { value, arms } => {
-                Self::collect_lambda_defs(value, out);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        Self::collect_lambda_defs(g, out);
-                    }
-                    Self::collect_lambda_defs(body, out);
-                }
-            }
-            HirKind::Call { func, args, .. } => {
-                Self::collect_lambda_defs(func, out);
-                for a in args {
-                    Self::collect_lambda_defs(&a.expr, out);
-                }
-            }
-            HirKind::Assign { value, .. } => Self::collect_lambda_defs(value, out),
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    Self::collect_lambda_defs(e, out);
-                }
-            }
-            HirKind::Emit { value, .. } => Self::collect_lambda_defs(value, out),
-            HirKind::Destructure { value, .. } => Self::collect_lambda_defs(value, out),
-            HirKind::Eval { expr, env } => {
-                Self::collect_lambda_defs(expr, out);
-                Self::collect_lambda_defs(env, out);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (k, v) in bindings {
-                    Self::collect_lambda_defs(k, out);
-                    Self::collect_lambda_defs(v, out);
-                }
-                Self::collect_lambda_defs(body, out);
-            }
-            HirKind::MakeCell { value } => Self::collect_lambda_defs(value, out),
-            HirKind::DerefCell { cell } => Self::collect_lambda_defs(cell, out),
-            HirKind::SetCell { cell, value } => {
-                Self::collect_lambda_defs(cell, out);
-                Self::collect_lambda_defs(value, out);
-            }
-            HirKind::Intrinsic { args, .. } => {
-                for a in args {
-                    Self::collect_lambda_defs(a, out);
-                }
-            }
-            // Leaves: Var, literals, Quote, Error
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-        }
+        // Record the entry function's merged slots — the root slots a builder-idiom
+        // merge shares, for runtime mint-or-reuse (see `record_merged_slots`). Empty
+        // unless a merge fired.
+        self.record_merged_slots();
+
+        let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
+        let closures = std::mem::take(&mut self.closures);
+
+        Ok(LirModule { entry, closures })
     }
 
     /// Check if a HIR body is a tail call (or control flow where all result
     /// positions are tail calls). Used to relax the suspension check: a
     /// tail call replaces the frame, so its signal doesn't affect the
     /// enclosing scope's lifetime.
+    ///
+    /// After the ANF lift, a tail call previously of the form `(f x)`
+    /// becomes `(let [t (f x)] t)`. Recognise this single-binding shape
+    /// where the body is `Var(b)` and check the init for tail-callness
+    /// — `mark_tail_calls` runs before ANF, so `is_tail` is preserved
+    /// on the wrapped Call.
     fn body_is_tail_call(hir: &Hir) -> bool {
         match &hir.kind {
             HirKind::Call { is_tail: true, .. } => true,
@@ -2532,7 +811,17 @@ impl<'a> Lowerer<'a> {
                         .is_some_and(|b| Self::body_is_tail_call(b))
             }
             HirKind::Begin(exprs) => exprs.last().is_some_and(Self::body_is_tail_call),
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                // ANF wrap shape: `(let [b e] (var b))` is tail-equivalent
+                // to `e`.
+                if bindings.len() == 1 {
+                    let (b, init) = (&bindings[0].0, &bindings[0].1);
+                    if matches!(&body.kind, HirKind::Var(v) if v == b)
+                        && Self::body_is_tail_call(init)
+                    {
+                        return true;
+                    }
+                }
                 Self::body_is_tail_call(body)
             }
             HirKind::Match { arms, .. } => arms
@@ -2541,174 +830,7 @@ impl<'a> Lowerer<'a> {
             _ => false,
         }
     }
-
-    /// Check if the body's tail call callee is a scope-bound binding.
-    /// If so, RegionExit before the tail call would free the callee's slot.
-    fn tail_call_callee_is_scope_bound(hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
-        match &hir.kind {
-            HirKind::Call {
-                is_tail: true,
-                func,
-                ..
-            } => {
-                if let HirKind::Var(b) = &func.kind {
-                    scope_bindings.iter().any(|(sb, _)| sb == b)
-                } else if let HirKind::DerefCell { cell } = &func.kind {
-                    if let HirKind::Var(b) = &cell.kind {
-                        scope_bindings.iter().any(|(sb, _)| sb == b)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                Self::tail_call_callee_is_scope_bound(then_branch, scope_bindings)
-                    || Self::tail_call_callee_is_scope_bound(else_branch, scope_bindings)
-            }
-            HirKind::Begin(exprs) => exprs
-                .last()
-                .is_some_and(|e| Self::tail_call_callee_is_scope_bound(e, scope_bindings)),
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
-                Self::tail_call_callee_is_scope_bound(body, scope_bindings)
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                clauses
-                    .iter()
-                    .any(|(_, body)| Self::tail_call_callee_is_scope_bound(body, scope_bindings))
-                    || else_branch
-                        .as_ref()
-                        .is_some_and(|b| Self::tail_call_callee_is_scope_bound(b, scope_bindings))
-            }
-            HirKind::Match { arms, .. } => arms
-                .iter()
-                .any(|(_, _, body)| Self::tail_call_callee_is_scope_bound(body, scope_bindings)),
-            _ => false,
-        }
-    }
-
-    /// Check if non-tail sub-expressions within a tail-call body may suspend.
-    ///
-    /// When `body_is_tail_call` returns true, the tail call's own signal
-    /// is irrelevant (RegionExit fires before it). But preceding expressions
-    /// in the body (e.g. side effects before the tail call in a `begin`)
-    /// still execute within the scope and their suspension is dangerous.
-    ///
-    /// Returns true if any non-tail sub-expression may suspend.
-    #[allow(dead_code)]
-    fn non_tail_subexprs_may_suspend(hir: &Hir) -> bool {
-        match &hir.kind {
-            // A bare tail call has no preceding expressions.
-            HirKind::Call { is_tail: true, .. } => false,
-            // If/Cond: the condition runs before branches.
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                cond.signal.may_suspend()
-                    || Self::non_tail_subexprs_may_suspend(then_branch)
-                    || Self::non_tail_subexprs_may_suspend(else_branch)
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                clauses
-                    .iter()
-                    .any(|(c, b)| c.signal.may_suspend() || Self::non_tail_subexprs_may_suspend(b))
-                    || else_branch
-                        .as_ref()
-                        .is_some_and(|b| Self::non_tail_subexprs_may_suspend(b))
-            }
-            // Begin: all expressions except the last are non-tail.
-            HirKind::Begin(exprs) => {
-                let non_tail = &exprs[..exprs.len().saturating_sub(1)];
-                non_tail.iter().any(|e| e.signal.may_suspend())
-                    || exprs
-                        .last()
-                        .is_some_and(Self::non_tail_subexprs_may_suspend)
-            }
-            // Let/Letrec: init expressions are non-tail; recurse into body.
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                bindings.iter().any(|(_, init)| init.signal.may_suspend())
-                    || Self::non_tail_subexprs_may_suspend(body)
-            }
-            // Match: the scrutinee is non-tail; recurse into arm bodies.
-            HirKind::Match { value, arms } => {
-                value.signal.may_suspend()
-                    || arms
-                        .iter()
-                        .any(|(_, _, body)| Self::non_tail_subexprs_may_suspend(body))
-            }
-            // Anything else that body_is_tail_call returned true for:
-            // conservatively say it may suspend.
-            _ => true,
-        }
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syntax::Span;
-
-    fn make_span() -> Span {
-        Span::new(0, 0, 1, 1)
-    }
-
-    #[test]
-    fn test_lower_int() {
-        let arena = crate::hir::BindingArena::new();
-        let mut lowerer = Lowerer::new(&arena);
-        let hir = Hir::silent(HirKind::Int(42), make_span());
-        let func = lowerer.lower(&hir).unwrap();
-        assert!(!func.entry.blocks.is_empty());
-    }
-
-    #[test]
-    fn test_lower_if() {
-        let arena = crate::hir::BindingArena::new();
-        let mut lowerer = Lowerer::new(&arena);
-        let hir = Hir::silent(
-            HirKind::If {
-                cond: Box::new(Hir::silent(HirKind::Bool(true), make_span())),
-                then_branch: Box::new(Hir::silent(HirKind::Int(1), make_span())),
-                else_branch: Box::new(Hir::silent(HirKind::Int(2), make_span())),
-            },
-            make_span(),
-        );
-        let func = lowerer.lower(&hir).unwrap();
-        // If now creates multiple blocks: entry, then, else, merge
-        assert_eq!(func.entry.blocks.len(), 4);
-        // Entry block should have a Branch terminator
-        assert!(matches!(
-            func.entry.blocks[0].terminator.terminator,
-            Terminator::Branch { .. }
-        ));
-    }
-
-    #[test]
-    fn test_lower_begin() {
-        let arena = crate::hir::BindingArena::new();
-        let mut lowerer = Lowerer::new(&arena);
-        let hir = Hir::silent(
-            HirKind::Begin(vec![
-                Hir::silent(HirKind::Int(1), make_span()),
-                Hir::silent(HirKind::Int(2), make_span()),
-            ]),
-            make_span(),
-        );
-        let func = lowerer.lower(&hir).unwrap();
-        assert!(!func.entry.blocks.is_empty());
-    }
-}
+mod tests;

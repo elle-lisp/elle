@@ -86,7 +86,7 @@ closure that produces a struct:
 The caller imports, calls the closure, and binds the result:
 
 ```lisp
-# (let ([g ((import "greet.lisp"))])
+# (let [g ((import "greet.lisp"))]
 #   (g:greet "world"))       # => "Hello, world!"
 ```
 
@@ -125,7 +125,7 @@ time:
 ```
 
 ```lisp
-# (let ([fmt ((import "formatter.lisp") :prefix "[" :suffix "]" :separator " | ")])
+# (let [fmt ((import "formatter.lisp") :prefix "[" :suffix "]" :separator " | ")]
 #   (fmt:wrap "hello")          # => "[hello]"
 #   (fmt:join [1 2 3]))         # => "1 | 2 | 3"
 ```
@@ -134,8 +134,8 @@ Each call to the closure captures its own configuration. Two imports with
 different arguments produce independent instances:
 
 ```lisp
-# (let ([parens  ((import "formatter.lisp") :prefix "(" :suffix ")")]
-#       [angles  ((import "formatter.lisp") :prefix "<" :suffix ">")])
+# (let [parens  ((import "formatter.lisp") :prefix "(" :suffix ")")
+#       angles  ((import "formatter.lisp") :prefix "<" :suffix ">")]
 #   (parens:wrap "x")           # => "(x)"
 #   (angles:wrap "x"))          # => "<x>"
 ```
@@ -224,7 +224,7 @@ primitives into the compilation cache (available to all subsequent compilations)
 The return value is also a struct, so the qualified pattern works:
 
 ```lisp
-# (let ([rng (import "plugin/random")])
+# (let [rng (import "plugin/random")]
 #   (rng:int 1 100))
 ```
 
@@ -392,7 +392,7 @@ reasoning patterns.
 | `src/hir/analyze/forms.rs` | Qualified symbol desugaring (`a:b` → `(get a :b)`), projection lookup for cross-file signal inference |
 | `src/hir/analyze/call.rs` | Import pattern detection, compile-time squelch inference |
 | `src/hir/analyze/fileletrec.rs` | `compute_signal_projection`: extracts keyword→signal mapping from struct-returning files |
-| `src/pipeline/cache.rs` | Signal projection cache (`PROJECTION_CACHE`), `get_or_compile_projection` |
+| `src/pipeline/cache.rs` | Per-instance signal projection cache (`CompileCtx.projections`), `get_or_compile_projection` |
 | `src/reader/lexer.rs` | Qualified symbol lexing (`a:b` as single token) |
 | `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
 | `tests/integration/projection.rs` | Signal projection and compile-time squelch tests |

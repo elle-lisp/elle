@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 10;
+pub const CURRENT_EPOCH: u64 = 12;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -245,6 +245,76 @@ static MIGRATIONS: &[Migration] = &[
             MigrationRule::Rename { old: "cdr", new: "rest" },
         ],
     },
+    Migration {
+        epoch: 11,
+        summary: "sys/spawn→sys/spawn-vm, os/spawn→os/spawn-vm (sys/spawn is now the \
+                  heavy, stdlib-backed worker; the old light worker is sys/spawn-vm)",
+        // Pre-epoch code spawned a primitives-only worker. `sys/spawn`/`os/spawn`
+        // now load the standard library (so eval/read resolve stdlib in the
+        // worker) and are correspondingly heavier; the cheap primitives-only
+        // worker is `sys/spawn-vm`/`os/spawn-vm`. Renaming the old qualified
+        // names to their `-vm` form preserves the original (light) behavior of
+        // existing code, here and in the wild. New code (this epoch) gets the
+        // heavy default via `sys/spawn`.
+        //
+        // We deliberately do NOT rename the bare `spawn` symbol: `Rename`
+        // rewrites every matching symbol (it isn't binding-aware), and `spawn`
+        // is also used as a local — the `(ev/scope (fn [spawn] …))` nursery
+        // param — so a global rename would clobber it. Only the qualified
+        // `sys/spawn`/`os/spawn` (unambiguously the primitive) are renamed.
+        // (Bare `spawn` is no longer registered as a primitive alias at all —
+        // an ambiguous global was an accident waiting to happen — so it is
+        // purely a local now; top-level code must use sys/spawn[-vm].)
+        rules: &[
+            MigrationRule::Rename { old: "sys/spawn", new: "sys/spawn-vm" },
+            MigrationRule::Rename { old: "os/spawn", new: "os/spawn-vm" },
+        ],
+    },
+    Migration {
+        epoch: 12,
+        summary: "remove coroutine API — use fibers directly",
+        rules: &[
+            // coro/new and make-coroutine → (fiber/new fn |:yield|)
+            MigrationRule::Replace {
+                symbol: "coro/new",
+                arity: 1,
+                template: "(fiber/new $1 |:yield|)",
+            },
+            MigrationRule::Replace {
+                symbol: "make-coroutine",
+                arity: 1,
+                template: "(fiber/new $1 |:yield|)",
+            },
+            // coro/* → fiber/* renames
+            MigrationRule::Rename { old: "coro/resume", new: "fiber/resume" },
+            MigrationRule::Rename { old: "coro/status", new: "fiber/status" },
+            MigrationRule::Rename { old: "coro/done?", new: "fiber/done?" },
+            MigrationRule::Rename { old: "coro/value", new: "fiber/value" },
+            // gen-1 long-form renames
+            MigrationRule::Rename { old: "coroutine-resume", new: "fiber/resume" },
+            MigrationRule::Rename { old: "coroutine-status", new: "fiber/status" },
+            MigrationRule::Rename { old: "coroutine-done?", new: "fiber/done?" },
+            MigrationRule::Rename { old: "coroutine-value", new: "fiber/value" },
+            // predicates
+            MigrationRule::Rename { old: "coroutine?", new: "fiber?" },
+            MigrationRule::Rename { old: "coro?", new: "fiber?" },
+            // delegation
+            MigrationRule::Rename { old: "yield-from", new: "yield*" },
+            // removals — fibers are natively iterable
+            MigrationRule::Remove {
+                symbol: "coro/>iterator",
+                message: "fibers are natively iterable; remove the coro/>iterator call",
+            },
+            MigrationRule::Remove {
+                symbol: "coroutine->iterator",
+                message: "fibers are natively iterable; remove the coroutine->iterator call",
+            },
+            MigrationRule::Remove {
+                symbol: "coroutine-next",
+                message: "use (fiber/resume f) instead of (coroutine-next f)",
+            },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -358,89 +428,4 @@ pub fn removals_in_range(from: u64, to: u64) -> HashMap<&'static str, &'static s
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_empty_range() {
-        let renames = collapsed_renames(0, 0);
-        assert!(renames.is_empty());
-    }
-
-    #[test]
-    fn test_renames_through_current() {
-        let renames = collapsed_renames(0, CURRENT_EPOCH);
-        // epoch 2: print→println, newline→println
-        // epoch 3: display→print
-        // epoch 4: stream/{read,read-line,read-all,write,flush} → port/...
-        assert_eq!(renames.get("print"), Some(&"println"));
-        assert_eq!(renames.get("newline"), Some(&"println"));
-        assert_eq!(renames.get("display"), Some(&"print"));
-        assert_eq!(renames.get("stream/read-line"), Some(&"port/read-line"));
-        assert_eq!(renames.get("stream/read"), Some(&"port/read"));
-        assert_eq!(renames.get("stream/read-all"), Some(&"port/read-all"));
-        assert_eq!(renames.get("stream/write"), Some(&"port/write"));
-        assert_eq!(renames.get("stream/flush"), Some(&"port/flush"));
-        // epoch 5: string-contains?→has?, string/contains?→has?
-        assert_eq!(renames.get("string-contains?"), Some(&"has?"));
-        assert_eq!(renames.get("string/contains?"), Some(&"has?"));
-        // epoch 10: cons→pair, car→first, cdr→rest
-        assert_eq!(renames.get("cons"), Some(&"pair"));
-        assert_eq!(renames.get("car"), Some(&"first"));
-        assert_eq!(renames.get("cdr"), Some(&"rest"));
-        assert_eq!(renames.len(), 13);
-    }
-
-    #[test]
-    fn test_replace_rules_empty_range() {
-        let replaces = replace_rules_in_range(0, 0);
-        assert!(replaces.is_empty());
-    }
-
-    #[test]
-    fn test_replace_rules_epoch_1() {
-        let replaces = replace_rules_in_range(0, 1);
-        assert_eq!(replaces.len(), 9);
-        // First rule should be assert-true
-        assert_eq!(replaces[0].0, "assert-true");
-    }
-
-    #[test]
-    fn test_removals_epoch_2() {
-        let removals = removals_in_range(0, CURRENT_EPOCH);
-        assert!(removals.contains_key("write"));
-        assert_eq!(removals.len(), 1);
-    }
-
-    #[test]
-    fn test_flatten_rules_epoch_7() {
-        let flattens = flatten_rules_in_range(0, CURRENT_EPOCH);
-        assert!(flattens.contains(&"let"));
-        assert!(flattens.contains(&"letrec"));
-        assert!(flattens.contains(&"let*"));
-        assert!(flattens.contains(&"if-let"));
-        assert!(flattens.contains(&"when-let"));
-        assert!(flattens.contains(&"when-ok"));
-        assert_eq!(flattens.len(), 6);
-    }
-
-    #[test]
-    fn test_rename_chaining() {
-        // Simulate chained renames manually
-        let mut table: HashMap<&str, &str> = HashMap::new();
-
-        // Epoch 1: A → B
-        table.insert("A", "B");
-
-        // Epoch 2: B → C — should update A → C
-        let original = table.iter().find(|(_, v)| **v == "B").map(|(k, _)| *k);
-        if let Some(original) = original {
-            table.insert(original, "C");
-        } else {
-            table.insert("B", "C");
-        }
-
-        assert_eq!(table.get("A"), Some(&"C"));
-        assert!(!table.contains_key("B"));
-    }
-}
+mod tests;

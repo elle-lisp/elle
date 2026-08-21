@@ -1,12 +1,15 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # file/stat and file/lstat — error cases and symlink behavior
 
+# Scratch dir: hosts the symlink fixture and the never-created "nonexistent"
+# paths; removed at the bottom of the file.
+(def scratch (file/mktempdir))
 
 # ── file/stat error cases ────────────────────────────────────────────────────
 
 # not-found → io-error
 (let [[ok? err] (protect ((fn []
-                            (file/stat "/tmp/elle-nonexistent-path-stat-test"))))]
+                            (file/stat (path/join scratch "nonexistent-stat")))))]
   (assert (not ok?) "file/stat not-found gives io-error")
   (assert (= (get err :error) :io-error) "file/stat not-found gives io-error"))
 
@@ -26,7 +29,7 @@
 
 # not-found → io-error
 (let [[ok? err] (protect ((fn []
-                            (file/lstat "/tmp/elle-nonexistent-path-lstat-test"))))]
+                            (file/lstat (path/join scratch "nonexistent-lstat")))))]
   (assert (not ok?) "file/lstat not-found gives io-error")
   (assert (= (get err :error) :io-error) "file/lstat not-found gives io-error"))
 
@@ -44,7 +47,7 @@
 
 # ── symlink behavior ─────────────────────────────────────────────────────────
 
-(def sym-dir "/tmp/elle-test-stat-symlink")
+(def sym-dir (path/join scratch "symlink"))
 (file/mkdir-all sym-dir)
 (def target-path (path/join sym-dir "target.txt"))
 (def link-path (path/join sym-dir "link.txt"))
@@ -74,3 +77,4 @@
 (file/delete link-path)
 (file/delete target-path)
 (file/delete-dir sym-dir)
+(file/delete-dir-all scratch)

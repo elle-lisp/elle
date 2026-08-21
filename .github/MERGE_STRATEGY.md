@@ -122,7 +122,12 @@ Only project maintainers merge to main. Process:
    git checkout -b release/v1.0.0
    ```
 
-2. **Update version numbers** and CHANGELOG
+2. **Update the version** — edit `version` in the root `Cargo.toml` only,
+   then `cargo build` to refresh `Cargo.lock`. Everything else (REPL banner,
+   `--help` header, LSP `serverInfo`, the `(elle/version)` primitive, tests)
+   derives from it via `elle::VERSION` / `elle::BANNER`, which read
+   `CARGO_PKG_VERSION`. The `elle-plugin` crate is versioned independently;
+   its compatibility contract is the plugin ABI number in `src/plugin_api.rs`.
 
 3. **Create PR to main branch**
 
@@ -346,12 +351,11 @@ Elle uses Semantic Versioning: `MAJOR.MINOR.PATCH`
 ### Release Process
 
 1. Update version in `Cargo.toml`
-2. Update `CHANGELOG.md`
-3. Create `release/vX.Y.Z` branch
-4. Create PR to `main`
-5. After merge, tag: `git tag -a vX.Y.Z`
-6. Push tag: `git push origin vX.Y.Z`
-7. Publish to crates.io: `cargo publish`
+2. Create `release/vX.Y.Z` branch
+3. Create PR to `main`
+4. After merge, tag: `git tag -a vX.Y.Z`
+5. Push tag: `git push origin vX.Y.Z`
+6. Publish to crates.io: `cargo publish`
 
 ---
 

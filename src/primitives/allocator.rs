@@ -16,16 +16,15 @@
 //! (use-after-free). **These primitives must only be used via the
 //! `with-allocator` macro.**
 
+use crate::primitives::def::RegionEffect;
 use std::rc::Rc;
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::allocator::AllocatorBox;
 use crate::value::fiber::SignalBits;
 use crate::value::fiber::{SIG_ERROR, SIG_OK};
-use crate::value::fiberheap::with_current_heap_mut;
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 /// (allocator/install allocator-value)
 ///
@@ -36,7 +35,10 @@ use crate::value::{error_val, Value};
 /// # Safety
 ///
 /// Must only be called via the `with-allocator` macro. See module doc.
-fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
+fn prim_install_allocator(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     // Extract Rc<AllocatorBox> from the ExternalObject.
     // The ExternalObject.data is Rc<dyn Any>. We need to get Rc<AllocatorBox>.
     // value.as_external::<AllocatorBox>() gives &AllocatorBox (a ref into the Rc).
@@ -47,32 +49,18 @@ fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
     let alloc_box: Rc<AllocatorBox> = match extract_allocator_rc(args[0]) {
         Some(rc) => rc,
         None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "allocator/install: expected an allocator (ExternalObject \
-                         wrapping AllocatorBox), got {}",
-                        args[0].type_name()
-                    ),
-                ),
+            return type_error!(
+                ctx,
+                args[0],
+                "allocator/install",
+                "an allocator (ExternalObject \
+                         wrapping AllocatorBox)"
             );
         }
     };
 
-    match with_current_heap_mut(|heap| {
-        heap.push_custom_allocator(alloc_box);
-    }) {
-        Some(()) => (SIG_OK, Value::NIL),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "state-error",
-                "allocator/install: no fiber heap installed (root fiber?)".to_string(),
-            ),
-        ),
-    }
+    ctx.heap_mut().push_custom_allocator(alloc_box);
+    (SIG_OK, Value::NIL)
 }
 
 /// (allocator/uninstall)
@@ -84,23 +72,20 @@ fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
 /// # Safety
 ///
 /// Must only be called via the `with-allocator` macro. See module doc.
-fn prim_uninstall_allocator(_args: &[Value]) -> (SignalBits, Value) {
-    match with_current_heap_mut(|heap| heap.pop_custom_allocator()) {
-        Some(true) => (SIG_OK, Value::NIL),
-        Some(false) => (
+fn prim_uninstall_allocator(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    if ctx.heap_mut().pop_custom_allocator() {
+        (SIG_OK, Value::NIL)
+    } else {
+        (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "state-error",
                 "allocator/uninstall: no custom allocator installed".to_string(),
             ),
-        ),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "state-error",
-                "allocator/uninstall: no fiber heap installed (root fiber?)".to_string(),
-            ),
-        ),
+        )
     }
 }
 
@@ -126,29 +111,21 @@ fn extract_allocator_rc(value: Value) -> Option<Rc<AllocatorBox>> {
     }
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "allocator/install",
-        func: prim_install_allocator,
+primitive! {
+    "allocator/install" => prim_install_allocator {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Install a custom allocator on the current fiber's heap. \
                INTERNAL: use via with-allocator macro only.",
         params: &["allocator"],
         category: "allocator",
-        example: "",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "allocator/uninstall",
-        func: prim_uninstall_allocator,
+        effect: RegionEffect::Immediate,
+    }
+    "allocator/uninstall" => prim_uninstall_allocator {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Uninstall the current custom allocator, freeing remaining \
                custom objects. INTERNAL: use via with-allocator macro only.",
-        params: &[],
         category: "allocator",
-        example: "",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Immediate,
+    }
+}

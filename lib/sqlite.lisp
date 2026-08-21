@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:
@@ -44,6 +44,18 @@
   (def c-col-blob (cfn "sqlite3_column_blob" :ptr @[:ptr :int]))
   (def c-col-bytes (cfn "sqlite3_column_bytes" :int @[:ptr :int]))
   (def c-changes (cfn "sqlite3_changes" :int @[:ptr]))
+  (def c-busy-timeout (cfn "sqlite3_busy_timeout" :int @[:ptr :int]))
+
+  ## How long a writer waits for a busy database before raising, in
+  ## milliseconds. `open` reads it, so `parameterize` around the open chooses
+  ## the bound for that connection:
+  ##
+  ##   (parameterize ((db:*busy-ms* 500)) (db:open path))
+  ##
+  ## The default covers a concurrent test-runner pass over the shared session DB
+  ## (docs/test-runner.md § Concurrent runs wait); past it the holder is wedged
+  ## rather than slow, and failing is the honest answer.
+  (def *busy-ms* (make-parameter 30000))
 
   ## ── Bytes helpers ──────────────────────────────────────────────────
 
@@ -92,6 +104,14 @@
                 (ffi/free ptr))))
         :boolean
           (check db (c-bind-int stmt i (if p 1 0)) "bind")
+
+        ## A keyword binds as its bare name text (`(string :pass)` → "pass"),
+        ## so
+        ## enum-valued columns (result.status, result.tier) can be keyword-typed
+        ## in callers while the column stays plain TEXT and SQL like
+        ## `WHERE status = 'pass'` is unchanged.
+        :keyword
+          (check db (c-bind-text stmt i (string p) -1 SQLITE_TRANSIENT) "bind")
         t
           (error {:error :sqlite-error
                   :message (string "bind: unsupported type " t)}))
@@ -116,7 +136,13 @@
   ## ── Public API ───────────────────────────────────────────────────
 
   (defn open [path]
-    "Open a SQLite database. Use \":memory:\" for in-memory."
+    "Open a SQLite database. Use \":memory:\" for in-memory.
+
+   Every connection waits on a busy database rather than raising at once, and
+   an on-disk one uses WAL journaling so a reader and a writer can share the
+   file. Two processes writing one database is the normal case here — the test
+   runner's session DB is a single path per user — so they must queue
+   (docs/test-runner.md § Concurrent runs wait)."
     (let* [pp (ffi/malloc 8)
            rc (c-open path pp)
            db (ffi/read pp :ptr)]
@@ -124,6 +150,16 @@
       (unless (= rc SQLITE_OK)
         (error {:error :sqlite-error
                 :message (string "open: " (ffi/string (c-errmsg db)))}))
+      (c-busy-timeout db (*busy-ms*))
+      ## WAL is a property of the FILE, so `:memory:` answers `memory` and the
+      ## request is a no-op there. A read-only directory can refuse the change;
+      ## the connection still works journaled the old way, so do not fail the
+      ## open over it. Driven through the raw statement calls rather than
+      ## `exec`, which is defined below.
+      (let [[ok? stmt] (protect (prepare db "PRAGMA journal_mode = WAL"))]
+        (when ok?
+          (c-step stmt)
+          (c-finalize stmt)))
       db))
 
   (defn close [db]
@@ -131,18 +167,32 @@
     (c-close db)
     nil)
 
+  (defn step-error [db stmt ctx]
+    "Finalize stmt and raise the current sqlite error."
+    (let [msg (ffi/string (c-errmsg db))]
+      (c-finalize stmt)
+      (error {:error :sqlite-error :message (string ctx ": " msg)})))
+
   (defn exec [db sql & opts]
-    "Execute SQL (no result rows). Optional params array. Returns rows affected."
+    "Execute SQL (no result rows). Optional params array. Returns rows
+   affected.  Raises :sqlite-error when the statement fails — including
+   constraint violations and busy/locked errors.  (sqlite3_step's
+   return code was once discarded here, silently swallowing failed
+   writes.)"
     (let* [params (if (> (length opts) 0) (first opts) [])
            stmt (prepare db sql)]
       (bind-params db stmt params)
-      (c-step stmt)
+      (let [rc (c-step stmt)]
+        (unless (or (= rc SQLITE_DONE) (= rc SQLITE_ROW))
+          (step-error db stmt "step")))
       (let [n (c-changes db)]
         (c-finalize stmt)
         n)))
 
   (defn query [db sql & opts]
-    "Execute a query. Returns list of structs with keyword keys."
+    "Execute a query. Returns list of structs with keyword keys.
+   Raises :sqlite-error when a step fails mid-iteration — a failed
+   step once ended the loop silently, returning truncated results."
     (let* [params (if (> (length opts) 0) (first opts) [])
            stmt (prepare db sql)]
       (bind-params db stmt params)
@@ -150,9 +200,12 @@
              col-names (->array (map (fn [i] (ffi/string (c-col-name stmt i)))
                                      (->list (range ncols))))
              rows @[]]
-        (while (= (c-step stmt) SQLITE_ROW)
-          (push rows (read-row stmt ncols col-names)))
+        (def @rc (c-step stmt))
+        (while (= rc SQLITE_ROW)
+          (push rows (read-row stmt ncols col-names))
+          (assign rc (c-step stmt)))
+        (unless (= rc SQLITE_DONE) (step-error db stmt "step"))
         (c-finalize stmt)
         (->list rows))))
 
-  {:open open :close close :exec exec :query query})
+  {:open open :close close :exec exec :query query :*busy-ms* *busy-ms*})

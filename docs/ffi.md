@@ -7,6 +7,7 @@ explicit marshalling. The backend uses the `libffi` crate (middle-level API)
 ## Contents
 
 - [Quick Start](#quick-start)
+- [Library Lifetime](#library-lifetime)
 - [Type Descriptors](#type-descriptors)
 - [Compound Types](#compound-types)
 - [Signatures](#signatures)
@@ -46,36 +47,44 @@ This document describes the implemented system.
 ```
 
 
-## Loading Libraries
+## Library Lifetime
 
-`ffi/native` loads a shared library and returns a handle for `ffi/lookup`.
-Pass `nil` to load the current process (`dlopen(NULL)`), which exposes libc
-and anything statically linked into the binary.
+A library loaded by `ffi/native` is held in a **process-global registry**
+(`src/ffi/registry.rs`), deduplicated by canonical path, and its mapping is owned for
+the **process lifetime — never `dlclose`d** (the same discipline plugins use). The
+per-VM handle `ffi/native` returns is only a small id into this registry; symbol
+lookup (`ffi/lookup`) resolves through it.
 
-Library names are written **Linux-style** (`libfoo.so`, `libfoo.so.2`) and
-resolved to the host's native form at load time, so a single call is portable:
+This makes FFI safe across `os/spawn` worker threads. Many C libraries (libgit2 via
+OpenSSL, …) register thread-local destructors with `pthread_key_create`; if such a
+library were unmapped when a worker that used it exited, glibc's thread-exit
+destructor walk would jump into unmapped code and crash the process. Because the
+mapping is never unmapped, that destructor always runs against mapped code — **no
+per-worker teardown is required**.
 
-| Spec written in Elle | Linux           | macOS                | Windows   |
-|----------------------|-----------------|----------------------|-----------|
-| `"libz.so"`          | `libz.so`       | `libz.dylib`         | `z.dll`   |
-| `"libcairo.so.2"`    | `libcairo.so.2` | `libcairo.2.dylib`   | `cairo.dll` |
-
-Note that the soname version moves: Linux appends it after `.so`
-(`libz.so.1`), macOS embeds it before the extension (`libz.1.dylib`). The
-loader tries the host-native name first and falls back through the
-unversioned form to the original spec, so existing `.so` names keep working
-on Linux while the same code loads `.dylib`/`.dll` elsewhere. The name
-rewriting lives in `library_candidates` (`src/ffi/loader.rs`); if you already
-hold a host-native name (a full path to a `.dylib`, say), pass it directly and
-it is used unchanged.
+Teardown is **optional and explicit**. A program may declare a library's ordered
+teardown — a zero-arg C symbol to call (e.g. `git_libgit2_shutdown`) — and run all
+declared teardowns when *it* decides it is safe (its worker threads have quiesced).
+`ffi/on-unload` resolves the symbol immediately, so a typo errors at declaration
+rather than silently at shutdown; `ffi/run-teardowns` calls every declared symbol
+in reverse load order:
 
 ```lisp
-(def self (ffi/native nil))         # current process, all platforms
-
-# "libz.so" resolves to libz.dylib on macOS and z.dll on Windows. Guarded
-# with protect here because libz may not be installed in every environment.
-(protect (ffi/native "libz.so"))
+# Guarded because libgit2 may not be installed; when it is, this loads it,
+# declares its shutdown hook, and runs it for real.
+(def [have-git? git-lib] (protect (ffi/native "libgit2.so")))
+(if (not have-git?)
+  (println "SKIP: libgit2 not installed")
+  (do
+    (ffi/on-unload git-lib "git_libgit2_shutdown")  # declare the teardown destructor
+    (ffi/run-teardowns)))                           # run them (reverse load order)
 ```
+
+The runtime never runs teardowns automatically (a teardown like
+`git_libgit2_shutdown` deletes the pthread key it created, which would race a
+detached worker still exiting), and teardown **never unmaps** the library — it stays
+for the process lifetime regardless, which is what keeps a late worker's destructor
+safe. Skipping teardown entirely is always safe.
 
 
 ## Type Descriptors
@@ -307,7 +316,7 @@ functions to be passed to C APIs that expect function pointer arguments
    the trampoline can reference them with `'static` lifetime
 3. When C code calls the function pointer, `trampoline_callback` fires:
    - Reads C arguments into Elle values via `read_value_from_buffer`
-   - Gets the VM from thread-local storage (`get_vm_context`)
+   - Uses the VM captured in `CallbackData` at `create_callback`
    - Builds a closure environment and executes the bytecode
    - Writes the return value back to the libffi result buffer
 4. The `ActiveCallback` is stored in `FFISubsystem::callbacks` (keyed by
@@ -321,13 +330,13 @@ argument count. Exact arity must match# `AtLeast(n)` requires
 
 ### Limitations
 
-- **Single-threaded**: Callbacks can only be invoked on the thread that
-  created them (same VM context). The trampoline reads the VM from
-  thread-local storage.
+- **Single-threaded**: Callbacks can only be invoked under the VM that
+  created them. The trampoline uses the VM captured in `CallbackData`.
 - **Error handling**: If the Elle closure signals an error, the trampoline
-  writes zeros to the result buffer and sets a thread-local error flag.
-  `ffi/call` checks `take_callback_error()` after the C function returns
-  and propagates the error to the Elle caller.
+  writes zeros to the result buffer and stashes the error on that VM's FFI
+  subsystem (`set_callback_error`). `ffi/call` drains it with
+  `take_callback_error()` after the C function returns and propagates the
+  error to the Elle caller.
 - **No variadic callbacks**: `create_callback` rejects signatures with
   `fixed_args` set. libffi closures don't support variadic calling
   conventions.
@@ -426,7 +435,7 @@ All FFI primitives return `(SignalBits, Value)`. Errors are signaled via
 | `ffi-error` | `ffi/read` | Cannot read void# null pointer |
 | `ffi-error` | `ffi/write` | Cannot write void# null pointer |
 | `ffi-error` | `ffi/string` | Not valid UTF-8 |
-| `ffi-error` | `ffi/callback` | Variadic signature# no VM context |
+| `ffi-error` | `ffi/callback` | Variadic signature |
 | `ffi-error` | `ffi/callback-free` | No callback at address |
 | `argument-error` | `ffi/malloc` | Size not positive |
 | `argument-error` | `ffi/struct` | Empty struct# void field |
@@ -486,8 +495,8 @@ that's kept alive alongside the buffer.
    inside `MarshalledArg`. Dropping the `MarshalledArg` before the call
    completes is undefined behavior.
 
-2. **Callbacks are single-threaded.** The trampoline accesses the VM via
-   thread-local storage. Cross-thread callback invocation will fail.
+2. **Callbacks are single-threaded.** The trampoline uses the VM captured
+   in `CallbackData` at creation. Cross-thread callback invocation will fail.
 
 3. **CIF caching is per-value, not per-type.** Two `ffi/signature` calls
    with identical types produce two independent signature values with

@@ -1,7 +1,9 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/readline-long.lisp — Verify port/read-line handles lines > 4096 bytes
 ##
 ## This tests the fix for the 4096-byte-per-read limit in the async backend.
+
+(def scratch (file/mktempdir))
 
 # Build a string that exceeds 4096 bytes by repeated concatenation
 (defn make-long-string [n]
@@ -16,10 +18,11 @@
 (assert (= (string/size-of long-line) 8192) "setup: long-line is 8192 bytes")
 
 # Write it to a temp file as a single line (with trailing newline)
-(spit "/tmp/elle-readline-long-test" (string/join [long-line "\n"] ""))
+(def long-file (path/join scratch "readline-long"))
+(spit long-file (string/join [long-line "\n"] ""))
 
 # Read it back with port/read-line
-(let [p (port/open "/tmp/elle-readline-long-test" :read)]
+(let [p (port/open long-file :read)]
   (defer
     (port/close p)
     (let [line (port/read-line p)]
@@ -29,8 +32,9 @@
       (assert (= line long-line) "read-line content mismatch"))))
 
 # Also test a line well under the limit still works
-(spit "/tmp/elle-readline-short-test" "hello\nworld\n")
-(let [p (port/open "/tmp/elle-readline-short-test" :read)]
+(def short-file (path/join scratch "readline-short"))
+(spit short-file "hello\nworld\n")
+(let [p (port/open short-file :read)]
   (defer
     (port/close p)
     (let [line1 (port/read-line p)
@@ -42,9 +46,9 @@
 
 # Test multiple long lines in sequence
 (def medium-line (make-long-string 5000))
-(spit "/tmp/elle-readline-multi-test"
-      (string/join [long-line "\n" medium-line "\n" "short\n"] ""))
-(let [p (port/open "/tmp/elle-readline-multi-test" :read)]
+(def multi-file (path/join scratch "readline-multi"))
+(spit multi-file (string/join [long-line "\n" medium-line "\n" "short\n"] ""))
+(let [p (port/open multi-file :read)]
   (defer
     (port/close p)
     (let [l1 (port/read-line p)
@@ -53,5 +57,7 @@
       (assert (= (string/size-of l1) 8192) "multi: line 1 length")
       (assert (= (string/size-of l2) 5000) "multi: line 2 length")
       (assert (= l3 "short") "multi: line 3 content"))))
+
+(file/delete-dir-all scratch)
 
 (println "readline-long: all tests passed")

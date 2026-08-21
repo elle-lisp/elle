@@ -8,7 +8,7 @@ resolver = "2"
 
 [package]
 name = "elle"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 description = "A Lisp with static signal inference, hygienic macros, and colorless concurrency via fibers"
 license = "MIT"
@@ -25,7 +25,13 @@ rustyline = "14"
 libc = "0.2"
 serde_json = "1.0"
 tempfile = "3"
-unicode-segmentation = "1"
+# Grapheme segmentation tables define string semantics (length, get,
+# slice count clusters). This exact pin is generation G17 in
+# src/segment.rs; G16 is a frozen vendored copy at src/segment/g16/.
+# Bumping the pin rolls the newest generation: update Generation, the
+# tests in src/segment.rs, tests/elle/{grapheme,unicode}.lisp, and
+# docs/strings.md together.
+unicode-segmentation = "=1.13.2"
 crossbeam-channel = "0.5"
 
 # Path manipulation (UTF-8 paths, lexical normalization, relative paths)
@@ -60,6 +66,9 @@ jit = ["cranelift-codegen", "cranelift-frontend", "cranelift-module", "cranelift
 wasm = ["wasmtime", "wasm-encoder"]
 mlir = ["melior"]
 
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
@@ -80,6 +89,10 @@ harness = false
 
 [[bench]]
 name = "memory"
+harness = false
+
+[[bench]]
+name = "regionrc"
 harness = false
 
 [target.'cfg(target_os = "linux")'.dependencies]

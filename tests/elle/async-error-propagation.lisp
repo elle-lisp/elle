@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Async error propagation tests
 #
 # These tests document the expected behavior of error propagation through
@@ -6,6 +6,9 @@
 # regression tests for a multi-session debugging effort.
 
 # === Helpers ===
+
+# Scratch dir for the port-backed tests; removed at the bottom of the file.
+(def scratch (file/mktempdir))
 
 (defn make-range [n]
   (fiber/new (fn []
@@ -41,19 +44,19 @@
 
 # === 3. Basic async I/O with ev/join (no error) ===
 
-(spit "/tmp/elle-async-err-test-3" "line1\nline2\nline3\n")
+(def path-3 (path/join scratch "err-3"))
+(spit path-3 "line1\nline2\nline3\n")
 (let [result (ev/join (ev/spawn (fn []
-                                  (let [p (port/open "/tmp/elle-async-err-test-3"
-                                        :read)]
+                                  (let [p (port/open path-3 :read)]
                                     (stream/collect (port/lines p))))))]
   (assert (= (length result) 3) "3: ev/join + port/lines collects 3 lines"))
 
 # === 4. Closed port: port/lines yields the io-error as a value ===
 
-(spit "/tmp/elle-async-err-test-4" "some data")
+(def path-4 (path/join scratch "err-4"))
+(spit path-4 "some data")
 (let [[ok? val] (ev/join-protected (ev/spawn (fn []
-                                     (let [p (port/open "/tmp/elle-async-err-test-4"
-                                       :read)]
+                                     (let [p (port/open path-4 :read)]
                                        (port/close p)
                                        (stream/collect (port/lines p))))))]
   (assert ok?
@@ -64,10 +67,11 @@
 
 # === 5. Multiple fibers, one errors — ev/join-protected catches ===
 
-(spit "/tmp/elle-async-err-test-5" "data")
+(def path-5 (path/join scratch "err-5"))
+(spit path-5 "data")
 (let [f1 (ev/spawn (fn [] 42))
       f2 (ev/spawn (fn []
-                     (let [p (port/open "/tmp/elle-async-err-test-5" :read)]
+                     (let [p (port/open path-5 :read)]
                        (port/close p)
                        (stream/collect (port/lines p)))))]
   (let [[ok1? v1] (ev/join-protected f1)
@@ -77,4 +81,5 @@
     (assert ok2? "5c: second fiber succeeds (io-error yielded as value)")
     (assert (= (get (first v2) :error) :io-error) "5d: collected io-error")))
 
+(file/delete-dir-all scratch)
 (println "all async error propagation tests passed")

@@ -5,10 +5,24 @@
 //! for execution.
 
 use crate::port::{Direction, Encoding, Port};
-use crate::value::{error_val, Value};
+use crate::value::Value;
 use std::cell::RefCell;
-use std::process::Child;
 use std::time::Duration;
+
+mod buffer;
+mod process;
+mod socket;
+mod spawn;
+
+pub use socket::*;
+pub use spawn::*;
+// In-place buffer fill helpers and the process handle keep their original
+// crate-internal visibility; re-export so `crate::io::request::<Item>` paths
+// resolve unchanged.
+pub(crate) use buffer::{
+    bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer, writeable_buffer_ptr,
+};
+pub(crate) use process::{ProcessHandle, ProcessState};
 
 /// Boxed closure type for `IoOp::Task`.
 pub type TaskClosure = Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>;
@@ -48,163 +62,95 @@ impl std::fmt::Debug for TaskFn {
     }
 }
 
-/// How to configure a subprocess stdio stream.
-#[derive(Debug, Clone, Copy)]
-pub enum StdioDisposition {
-    /// Create a pipe; return it as a port.
-    Pipe,
-    /// Inherit the parent process fd.
-    Inherit,
-    /// Redirect to /dev/null.
-    Null,
-}
-
-/// Subprocess configuration, shared between IoOp::Spawn and the backend helpers.
-#[derive(Debug)]
-pub struct SpawnRequest {
-    pub program: String,
-    pub args: Vec<String>,
-    pub env: Option<Vec<(String, String)>>,
-    pub cwd: Option<String>,
-    pub stdin: StdioDisposition,
-    pub stdout: StdioDisposition,
-    pub stderr: StdioDisposition,
-}
-
-impl StdioDisposition {
-    fn to_std(self) -> std::process::Stdio {
-        match self {
-            StdioDisposition::Pipe => std::process::Stdio::piped(),
-            StdioDisposition::Inherit => std::process::Stdio::inherit(),
-            StdioDisposition::Null => std::process::Stdio::null(),
-        }
-    }
-}
-
-impl SpawnRequest {
-    /// Build a `std::process::Command` from this request.
-    pub(crate) fn build_command(&self) -> std::process::Command {
-        let mut cmd = std::process::Command::new(&self.program);
-        cmd.args(&self.args);
-        if let Some(ref env_pairs) = self.env {
-            cmd.env_clear();
-            for (k, v) in env_pairs {
-                cmd.env(k, v);
-            }
-        }
-        if let Some(ref dir) = self.cwd {
-            cmd.current_dir(dir);
-        }
-        cmd.stdin(self.stdin.to_std());
-        cmd.stdout(self.stdout.to_std());
-        cmd.stderr(self.stderr.to_std());
-        cmd
-    }
-
-    /// Spawn the subprocess and convert it to an Elle struct value.
-    ///
-    /// Returns `Ok(struct)` with `:pid`, `:stdin`, `:stdout`, `:stderr`,
-    /// `:process` fields, or `Err(error_val)` on failure.
-    pub(crate) fn spawn_to_struct(&self) -> Result<Value, Value> {
-        use crate::value::heap::TableKey;
-
-        let mut child = self.build_command().spawn().map_err(|e| {
-            error_val(
-                "exec-error",
-                format!("subprocess/exec: {}: {e}", self.program),
-            )
-        })?;
-
-        let pid = child.id();
-        let stdin_val = child
-            .stdin
-            .take()
-            .map(|s| pipe_to_port(s, Direction::Write, Encoding::Binary, pid, "stdin"))
-            .unwrap_or(Value::NIL);
-        let stdout_val = child
-            .stdout
-            .take()
-            .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stdout"))
-            .unwrap_or(Value::NIL);
-        let stderr_val = child
-            .stderr
-            .take()
-            .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stderr"))
-            .unwrap_or(Value::NIL);
-
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
-
-        let mut fields = std::collections::BTreeMap::new();
-        fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
-        fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
-        fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
-        fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
-        fields.insert(TableKey::Keyword("process".into()), handle_val);
-        Ok(Value::struct_from(fields))
-    }
-}
-
-/// Convert a subprocess pipe (stdin/stdout/stderr) to a Port value.
-fn pipe_to_port<T: Into<std::os::unix::io::OwnedFd>>(
-    pipe: T,
-    direction: Direction,
-    encoding: Encoding,
-    pid: u32,
-    name: &str,
-) -> Value {
-    let fd: std::os::unix::io::OwnedFd = pipe.into();
-    let label = format!("pid:{}:{}", pid, name);
-    Value::external("port", Port::new_pipe(fd, direction, encoding, label))
-}
-
-/// I/O operation descriptor.
-#[derive(Debug)]
-pub enum IoOp {
-    /// Read one line (up to `\n`). Returns string or nil (EOF).
-    ReadLine,
-    /// Read up to `count` bytes. Returns bytes/string or nil (EOF).
-    Read { count: usize },
-    /// Read exactly `count` bytes, looping over short reads.  Returns
+/// An operation on an already-open port that a backend runs asynchronously, so
+/// it outlives its submission as a `PendingOp::Port` entry until a completion
+/// arrives.
+///
+/// Every field is clonable, which is what lets the submit path copy a request's
+/// op into that entry. The whole enum is the set the completion path can see:
+/// a variant here is one the backend must be able to finish.
+///
+/// `Close`, `Seek` and `Tell` also address a port but finish inside
+/// `AsyncBackend::submit` without reaching a backend, so they stay on [`IoOp`].
+#[derive(Debug, Clone)]
+pub enum PortOp {
+    /// Read one line (up to `\n`). Returns bytes or nil (EOF).
+    /// The buffer is pre-allocated on the fiber's heap.
+    ReadLine {
+        /// Pre-allocated LBytes buffer on the fiber's heap (64KB).
+        buffer: Value,
+    },
+    /// Read up to `count` bytes. Returns bytes or nil (EOF).
+    /// The buffer is pre-allocated on the fiber's heap.
+    Read {
+        count: usize,
+        /// Pre-allocated LBytes buffer on the fiber's heap.
+        buffer: Value,
+    },
+    /// Read exactly `count` bytes, looping over short reads. Returns
     /// bytes/string of length `count`, or nil if the stream ended
-    /// before `count` bytes arrived.  Unlike `Read`, this resubmits
+    /// before `count` bytes arrived. Unlike `Read`, this resubmits
     /// short reads on stream sockets too — `Read` follows POSIX "up
     /// to N" semantics on streams; this is the "no, really, exactly
     /// N" variant for length-prefixed framing.
-    ReadExact { count: usize },
-    /// Read everything remaining. Returns string or bytes.
+    /// The buffer is pre-allocated on the fiber's heap.
+    ReadExact {
+        count: usize,
+        /// Pre-allocated LBytes buffer on the fiber's heap (`count` bytes).
+        buffer: Value,
+    },
+    /// Read everything remaining. Returns bytes.
+    /// No pre-allocated buffer — unbounded, uses fd_states.buffer accumulation.
     ReadAll,
     /// Write data to port. Returns bytes written (int).
     Write { data: Value },
     /// Flush port's write buffer. Returns nil.
     Flush,
-    /// Seek to a position in a file. Returns new absolute byte offset.
-    /// `whence`: libc::SEEK_SET (0), libc::SEEK_CUR (1), libc::SEEK_END (2).
-    Seek { offset: i64, whence: i32 },
-    /// Query current logical file position (kernel offset minus buffer len).
-    /// Returns the logical byte offset as int.
-    Tell,
     /// Accept a connection on a listener. Returns new stream port.
     /// Socket options are applied to the accepted fd after accept(2).
     /// `encoding` controls the resulting port's text/binary mode —
     /// callers default to Binary (POSIX sockets are byte streams);
     /// pass Text for line-oriented protocols (SMTP, IRC, etc.).
+    /// `accept_port` is pre-allocated at the call site (solver's region).
     Accept {
         options: SocketOptions,
         encoding: crate::port::Encoding,
+        accept_port: Value,
     },
-    /// Connect to a remote address. Returns connected stream port.
-    Connect { addr: ConnectAddr },
     /// Send data to a remote address via UDP. Returns bytes sent.
     SendTo {
         addr: String,
         port_num: u16,
         data: Value,
     },
-    /// Receive data from a UDP socket. Returns (data, remote_addr).
-    RecvFrom { count: usize },
+    /// Receive data from a UDP socket. Returns a struct `{:data :addr :port}`.
+    ///
+    /// `result` is a pre-allocated immutable `{:data <LBytes(count)> :addr
+    /// <LBytes(INET6_ADDRSTRLEN)> :port 0}` struct born on the **requesting
+    /// fiber's heap** (like `Read`'s `buffer`). The kernel writes the datagram
+    /// payload directly into `:data` (zero-copy via the iovec), and the
+    /// completion fills `:data`/`:addr`/`:port` in place and returns `result`
+    /// unchanged. Nothing is instantiated on the scheduler's heap, so the
+    /// resumed fiber holds no cross-heap reference.
+    RecvFrom { count: usize, result: Value },
     /// Shutdown a socket connection. Returns nil.
     Shutdown { how: i32 },
+}
+
+/// I/O operation descriptor.
+#[derive(Debug)]
+pub enum IoOp {
+    /// An asynchronous operation on an already-open port. These are the only
+    /// ops that become an in-flight `PendingOp::Port` entry.
+    Port(PortOp),
+    /// Seek to a position in a file. Returns new absolute byte offset.
+    /// `whence`: libc::SEEK_SET (0), libc::SEEK_CUR (1), libc::SEEK_END (2).
+    Seek { offset: i64, whence: i32 },
+    /// Query current logical file position (kernel offset minus buffer len).
+    /// Returns the logical byte offset as int.
+    Tell,
+    /// Connect to a remote address. Returns connected stream port.
+    Connect { addr: ConnectAddr },
     /// Async sleep. No port — just a timer. Returns nil after duration elapses.
     Sleep { duration: Duration },
     /// Spawn a subprocess. Returns a struct:
@@ -260,88 +206,9 @@ pub enum IoOp {
     ChanSelectPark(crate::primitives::chan::ChanSelectGuardCell),
 }
 
-/// Socket options for connect operations.
-#[derive(Debug, Default, Clone)]
-pub struct SocketOptions {
-    pub sndbuf: Option<i32>,
-    pub rcvbuf: Option<i32>,
-    pub nodelay: Option<bool>,
-    pub keepalive: Option<bool>,
-}
-
-/// Apply socket options (SO_SNDBUF, SO_RCVBUF, TCP_NODELAY, SO_KEEPALIVE) to a socket fd.
-pub(crate) fn apply_socket_options(fd: std::os::unix::io::RawFd, opts: &SocketOptions) {
-    unsafe {
-        if let Some(val) = opts.sndbuf {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_SNDBUF,
-                &val as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-        if let Some(val) = opts.rcvbuf {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_RCVBUF,
-                &val as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-        if let Some(val) = opts.nodelay {
-            let opt: i32 = val as i32;
-            libc::setsockopt(
-                fd,
-                libc::IPPROTO_TCP,
-                libc::TCP_NODELAY,
-                &opt as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-        if let Some(val) = opts.keepalive {
-            let opt: i32 = val as i32;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_KEEPALIVE,
-                &opt as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-    }
-}
-
-/// Address for connect operations.
-#[derive(Debug)]
-pub enum ConnectAddr {
-    Tcp {
-        addr: String,
-        port: u16,
-        options: SocketOptions,
-        encoding: crate::port::Encoding,
-    },
-    Unix {
-        path: String,
-        options: SocketOptions,
-        encoding: crate::port::Encoding,
-    },
-}
-
-impl ConnectAddr {
-    pub fn options(&self) -> &SocketOptions {
-        match self {
-            ConnectAddr::Tcp { options, .. } => options,
-            ConnectAddr::Unix { options, .. } => options,
-        }
-    }
-
-    pub fn encoding(&self) -> crate::port::Encoding {
-        match self {
-            ConnectAddr::Tcp { encoding, .. } => *encoding,
-            ConnectAddr::Unix { encoding, .. } => *encoding,
-        }
+impl From<PortOp> for IoOp {
+    fn from(op: PortOp) -> Self {
+        IoOp::Port(op)
     }
 }
 
@@ -358,10 +225,13 @@ pub struct IoRequest {
 }
 
 impl IoRequest {
-    /// Create an IoRequest Value (ExternalObject with type_name "io-request").
+    /// Create an IoRequest Value (ExternalObject "io-request"), born in `ctx`'s
+    /// region — the requesting native call's own region on its instance heap. It
+    /// escapes to the io backend as the primitive's yielded result, freed
+    /// value-based.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(op: IoOp, port: Value) -> Value {
-        Value::external(
+    pub fn new(ctx: &crate::primitives::ctx::Alloc, op: IoOp, port: Value) -> Value {
+        ctx.external(
             "io-request",
             IoRequest {
                 op,
@@ -371,16 +241,21 @@ impl IoRequest {
         )
     }
 
-    /// Create an IoRequest with a timeout.
+    /// Create an IoRequest with a timeout, born in `ctx`'s region.
     #[allow(clippy::new_ret_no_self)]
-    pub fn with_timeout(op: IoOp, port: Value, timeout: Option<Duration>) -> Value {
-        Value::external("io-request", IoRequest { op, port, timeout })
+    pub fn with_timeout(
+        ctx: &crate::primitives::ctx::Alloc,
+        op: IoOp,
+        port: Value,
+        timeout: Option<Duration>,
+    ) -> Value {
+        ctx.external("io-request", IoRequest { op, port, timeout })
     }
 
-    /// Create a portless IoRequest (e.g., Sleep).
+    /// Create a portless IoRequest (e.g., Sleep), born in `ctx`'s region.
     #[allow(clippy::new_ret_no_self)]
-    pub fn portless(op: IoOp) -> Value {
-        Value::external(
+    pub fn portless(ctx: &crate::primitives::ctx::Alloc, op: IoOp) -> Value {
+        ctx.external(
             "io-request",
             IoRequest {
                 op,
@@ -399,8 +274,11 @@ impl IoRequest {
     /// Async backend: closure runs on the thread pool, fiber yields until done.
     /// Sync backend: closure runs inline (blocking).
     #[allow(clippy::new_ret_no_self, dead_code)]
-    pub fn task(f: impl FnOnce() -> (i32, Vec<u8>) + Send + 'static) -> Value {
-        Self::portless(IoOp::Task(TaskFn::new(Box::new(f))))
+    pub fn task(
+        ctx: &crate::primitives::ctx::Alloc,
+        f: impl FnOnce() -> (i32, Vec<u8>) + Send + 'static,
+    ) -> Value {
+        Self::portless(ctx, IoOp::Task(TaskFn::new(Box::new(f))))
     }
 
     /// Poll a raw fd for readiness. Portless.
@@ -408,18 +286,23 @@ impl IoRequest {
     /// Async backend: uses `IORING_OP_POLL_ADD` or `libc::poll()` on thread pool.
     /// Returns revents mask as int on completion.
     #[allow(clippy::new_ret_no_self)]
-    pub fn poll_fd(fd: std::os::unix::io::RawFd, events: u32) -> Value {
-        Self::portless(IoOp::PollFd { fd, events })
+    pub fn poll_fd(
+        ctx: &crate::primitives::ctx::Alloc,
+        fd: std::os::unix::io::RawFd,
+        events: u32,
+    ) -> Value {
+        Self::portless(ctx, IoOp::PollFd { fd, events })
     }
 
-    /// Poll a raw fd with a timeout.
+    /// Poll a raw fd with a timeout, born in `ctx`'s region.
     #[allow(clippy::new_ret_no_self)]
     pub fn poll_fd_with_timeout(
+        ctx: &crate::primitives::ctx::Alloc,
         fd: std::os::unix::io::RawFd,
         events: u32,
         timeout: Duration,
     ) -> Value {
-        Value::external(
+        ctx.external(
             "io-request",
             IoRequest {
                 op: IoOp::PollFd { fd, events },
@@ -430,117 +313,5 @@ impl IoRequest {
     }
 }
 
-/// Handle to a running subprocess. Stored as ExternalObject with type_name "process".
-#[derive(Debug)]
-pub(crate) struct ProcessHandle {
-    pid: u32,
-    pub(crate) inner: RefCell<ProcessState>,
-}
-
-/// Lifecycle state of a subprocess.
-#[derive(Debug)]
-pub(crate) enum ProcessState {
-    Running(Child),
-    Exited(i32), // cached exit code
-}
-
-impl ProcessHandle {
-    pub fn new(pid: u32, child: Child) -> Self {
-        ProcessHandle {
-            pid,
-            inner: RefCell::new(ProcessState::Running(child)),
-        }
-    }
-
-    pub fn pid(&self) -> u32 {
-        self.pid
-    }
-}
-
-/// Reap the subprocess on drop to prevent zombie accumulation.
-/// `try_wait` is non-blocking; if the process hasn't exited yet,
-/// it stays in the OS process table until it does.
-impl Drop for ProcessHandle {
-    fn drop(&mut self) {
-        if let ProcessState::Running(ref mut child) = *self.inner.borrow_mut() {
-            let _ = child.try_wait();
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use libc;
-
-    #[test]
-    fn test_io_request_type_name() {
-        let req = IoRequest::new(IoOp::ReadLine, Value::NIL);
-        assert_eq!(req.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_io_request_not_port() {
-        let req = IoRequest::new(IoOp::Flush, Value::NIL);
-        assert_ne!(req.external_type_name(), Some("port"));
-    }
-
-    #[test]
-    fn test_io_request_with_timeout() {
-        let timeout = Some(Duration::from_millis(5000));
-        let req = IoRequest::with_timeout(IoOp::ReadLine, Value::NIL, timeout);
-        let extracted = req.as_external::<IoRequest>().unwrap();
-        assert_eq!(extracted.timeout, timeout);
-    }
-
-    #[test]
-    fn test_stdio_disposition_derives() {
-        // Smoke test that StdioDisposition is Copy + Clone + Debug
-        let d = StdioDisposition::Pipe;
-        let _ = d; // Copy
-        let _ = format!("{:?}", d); // Debug
-    }
-
-    #[test]
-    fn test_process_handle_pid() {
-        // Spawn /bin/true, verify pid() returns a nonzero value.
-        // This test requires /bin/true to exist.
-        use std::process::Command;
-        let child = Command::new("/bin/true").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        assert_eq!(handle.pid(), pid);
-        assert!(handle.pid() > 0);
-    }
-
-    #[test]
-    fn test_process_handle_drop_does_not_panic() {
-        // Drop with a running child should not panic.
-        use std::process::Command;
-        let child = Command::new("/bin/true").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        drop(handle); // should not panic
-    }
-
-    #[test]
-    fn test_ioop_seek_variant_carries_offset_and_whence() {
-        let op = IoOp::Seek {
-            offset: 42,
-            whence: libc::SEEK_END,
-        };
-        match op {
-            IoOp::Seek { offset, whence } => {
-                assert_eq!(offset, 42);
-                assert_eq!(whence, libc::SEEK_END);
-            }
-            _ => panic!("expected Seek variant"),
-        }
-    }
-
-    #[test]
-    fn test_ioop_tell_variant_is_unit() {
-        let op = IoOp::Tell;
-        assert!(matches!(op, IoOp::Tell));
-    }
-}
+mod tests;

@@ -1,500 +1,80 @@
-//! Thread-local trait registry: default traitsets stamped at allocation.
+//! Per-instance trait registry: default traitsets stamped at allocation.
 //!
-//! Each collection/sequence HeapTag has a shared @struct traitset.
-//! Constructors read the registry entry and stamp it into the new
-//! object's `traits` field. All instances of a type share the same
-//! @struct pointer by default.
+//! Each collection/sequence HeapTag has a default @struct traitset. The tables
+//! are **instance state** living on the `FiberHeap` (tls.md: nothing
+//! correctness-bearing is thread-centric), so two embedded instances on one
+//! thread each carry their own and never cross-reference. The trait-method
+//! natives themselves are static `&'static PrimitiveDef` immediates — process-
+//! global and correctly shared, like every other primitive. Constructors read
+//! the heap's registry entry and stamp it into the new object's `traits` field.
 
-use std::cell::Cell;
 use std::collections::BTreeMap;
 
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapTag;
 use crate::value::types::TableKey;
 use crate::value::Value;
 
+mod methods;
+use methods::*;
+
 /// Number of HeapTag variants (max index is CaptureCell = 28).
 const NUM_TAGS: usize = 29;
 
-thread_local! {
-    static DEFAULT_TRAITS: Cell<*const [Value; NUM_TAGS]> =
-        const { Cell::new(std::ptr::null()) };
-}
-
-/// Return the default traitset for a given HeapTag.
-/// Returns `Value::NIL` if the registry is not initialized or the tag
-/// has no default traitset.
+/// Return the default traitset for a given HeapTag on `heap`. Returns
+/// `Value::NIL` if `heap`'s tables are not built or the tag has no default.
 #[inline]
-pub fn default_traits_for(tag: HeapTag) -> Value {
-    DEFAULT_TRAITS.with(|cell| {
-        let ptr = cell.get();
-        if ptr.is_null() {
-            Value::NIL
-        } else {
-            unsafe { (*ptr)[tag as usize] }
-        }
-    })
+pub fn default_traits_for(heap: &FiberHeap, tag: HeapTag) -> Value {
+    heap.default_traits_for(tag)
 }
 
-/// Initialize the thread-local default traits registry.
-///
-/// Leaks a `Box<[Value; NUM_TAGS]>` — same pattern as the root heap.
-/// Called from VM initialization before any allocations happen.
-pub fn init_default_traits() {
-    DEFAULT_TRAITS.with(|cell| {
-        if !cell.get().is_null() {
-            return; // already initialized
-        }
-        let mut table = [Value::NIL; NUM_TAGS];
+/// Build `heap`'s default trait tables into its root region, idempotently.
+/// Called from VM initialization before any collection allocation. The trait
+/// structs are `alloc_root`'d into the heap's pinned root region (released by
+/// the teardown sweep), and the per-tag table is stored on the heap itself.
+pub fn init_default_traits(heap: &mut FiberHeap) {
+    if heap.default_traits_built() {
+        return; // already built for this instance
+    }
+    let mut table = vec![Value::NIL; NUM_TAGS];
 
-        // Build method structs for :Sequence and :Collection protocols,
-        // then assemble @struct traitsets for each collection type.
+    // Build method structs for :Sequence and :Collection protocols, then
+    // assemble @struct traitsets for each collection type — all into this
+    // heap's root region.
+    let seq_methods = build_sequence_methods(heap);
+    let coll_methods = build_collection_methods(heap);
 
-        // ── :Sequence methods (immutable struct) ────────────────────
-        let seq_methods = build_sequence_methods();
+    // Sequence + Collection types: array, @array, list, string, @string,
+    // bytes, @bytes
+    let seq_coll = make_traitset(heap, Some(seq_methods), Some(coll_methods));
+    // Collection-only types: set, @set, struct, @struct
+    let coll_only = make_traitset(heap, None, Some(coll_methods));
 
-        // ── :Collection methods (immutable struct) ──────────────────
-        let coll_methods = build_collection_methods();
+    table[HeapTag::LArray as usize] = seq_coll;
+    table[HeapTag::LArrayMut as usize] = seq_coll;
+    table[HeapTag::Pair as usize] = seq_coll;
+    table[HeapTag::LString as usize] = seq_coll;
+    table[HeapTag::LStringMut as usize] = seq_coll;
+    table[HeapTag::LBytes as usize] = seq_coll;
+    table[HeapTag::LBytesMut as usize] = seq_coll;
+    table[HeapTag::LSet as usize] = coll_only;
+    table[HeapTag::LSetMut as usize] = coll_only;
+    table[HeapTag::LStruct as usize] = coll_only;
+    table[HeapTag::LStructMut as usize] = coll_only;
 
-        // ── Build traitsets ─────────────────────────────────────────
-
-        // Sequence + Collection types: array, @array, list, string,
-        // @string, bytes, @bytes
-        let seq_coll = make_traitset(Some(seq_methods), Some(coll_methods));
-
-        // Collection-only types: set, @set, struct, @struct
-        let coll_only = make_traitset(None, Some(coll_methods));
-
-        // Stamp entries
-        table[HeapTag::LArray as usize] = seq_coll;
-        table[HeapTag::LArrayMut as usize] = seq_coll;
-        table[HeapTag::Pair as usize] = seq_coll;
-        table[HeapTag::LString as usize] = seq_coll;
-        table[HeapTag::LStringMut as usize] = seq_coll;
-        table[HeapTag::LBytes as usize] = seq_coll;
-        table[HeapTag::LBytesMut as usize] = seq_coll;
-        table[HeapTag::LSet as usize] = coll_only;
-        table[HeapTag::LSetMut as usize] = coll_only;
-        table[HeapTag::LStruct as usize] = coll_only;
-        table[HeapTag::LStructMut as usize] = coll_only;
-
-        let leaked = Box::leak(Box::new(table));
-        cell.set(leaked as *const [Value; NUM_TAGS]);
-    });
+    heap.set_default_traits(table);
 }
 
-/// Build the :Sequence method struct (immutable).
-fn build_sequence_methods() -> Value {
-    use crate::primitives::def::PrimitiveDef;
-    use crate::signals::Signal;
-    use crate::value::types::Arity;
-
-    // Native function definitions for sequence methods.
-    // These are leaked static refs, same pattern as permanent NativeFns.
-    static SEQ_FIRST: PrimitiveDef = PrimitiveDef {
-        name: "trait:Sequence:first",
-        func: trait_seq_first,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Sequence trait: first element",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static SEQ_REST: PrimitiveDef = PrimitiveDef {
-        name: "trait:Sequence:rest",
-        func: trait_seq_rest,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Sequence trait: rest of sequence",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static SEQ_LAST: PrimitiveDef = PrimitiveDef {
-        name: "trait:Sequence:last",
-        func: trait_seq_last,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Sequence trait: last element",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static SEQ_NTH: PrimitiveDef = PrimitiveDef {
-        name: "trait:Sequence:nth",
-        func: trait_seq_nth,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Sequence trait: nth element",
-        params: &["self", "n"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static SEQ_ITER: PrimitiveDef = PrimitiveDef {
-        name: "trait:Sequence:iter",
-        func: trait_seq_iter,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Sequence trait: fiber iterator",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-
-    let mut entries = BTreeMap::new();
-    entries.insert(
-        TableKey::Keyword("first".into()),
-        Value::native_fn(&SEQ_FIRST),
-    );
-    entries.insert(
-        TableKey::Keyword("rest".into()),
-        Value::native_fn(&SEQ_REST),
-    );
-    entries.insert(
-        TableKey::Keyword("last".into()),
-        Value::native_fn(&SEQ_LAST),
-    );
-    entries.insert(TableKey::Keyword("nth".into()), Value::native_fn(&SEQ_NTH));
-    entries.insert(
-        TableKey::Keyword("iter".into()),
-        Value::native_fn(&SEQ_ITER),
-    );
-    alloc_permanent_struct(entries)
+/// Clear `heap`'s default-traits table during the teardown sweep. The trait
+/// tables are `alloc_root`'d into the heap's root region, which the sweep
+/// releases by RC; clearing the table drops the now-dangling `Value`s so a
+/// post-teardown read returns `NIL` rather than a freed pointer. (With the
+/// tables instance-owned there is no cross-instance cache to invalidate — the
+/// next instance builds its own.)
+pub fn reset_default_traits(heap: &mut FiberHeap) {
+    heap.set_default_traits(Vec::new());
 }
-
-/// Build the :Collection method struct (immutable).
-///
-/// All collection types currently share the same native implementations
-/// (coll_len, coll_empty, coll_has dispatch internally on type). If
-/// collection types ever need divergent method sets, split this back
-/// into per-category builders.
-fn build_collection_methods() -> Value {
-    use crate::primitives::def::PrimitiveDef;
-    use crate::signals::Signal;
-    use crate::value::types::Arity;
-
-    static COLL_LENGTH: PrimitiveDef = PrimitiveDef {
-        name: "trait:Collection:length",
-        func: trait_coll_length,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Collection trait: element count",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static COLL_EMPTY: PrimitiveDef = PrimitiveDef {
-        name: "trait:Collection:empty?",
-        func: trait_coll_empty,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Collection trait: is empty?",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static COLL_HAS: PrimitiveDef = PrimitiveDef {
-        name: "trait:Collection:has?",
-        func: trait_coll_has,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Collection trait: membership test",
-        params: &["self", "needle"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static COLL_CONJ: PrimitiveDef = PrimitiveDef {
-        name: "trait:Collection:conj",
-        func: trait_coll_conj,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Collection trait: add element",
-        params: &["self", "item"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-    static COLL_EMPTY_NEW: PrimitiveDef = PrimitiveDef {
-        name: "trait:Collection:empty",
-        func: trait_coll_empty_new,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Collection trait: empty container of same type",
-        params: &["self"],
-        category: "trait",
-        example: "",
-        aliases: &[],
-    };
-
-    let mut entries = BTreeMap::new();
-    entries.insert(
-        TableKey::Keyword("length".into()),
-        Value::native_fn(&COLL_LENGTH),
-    );
-    entries.insert(
-        TableKey::Keyword("empty?".into()),
-        Value::native_fn(&COLL_EMPTY),
-    );
-    entries.insert(
-        TableKey::Keyword("has?".into()),
-        Value::native_fn(&COLL_HAS),
-    );
-    entries.insert(
-        TableKey::Keyword("conj".into()),
-        Value::native_fn(&COLL_CONJ),
-    );
-    entries.insert(
-        TableKey::Keyword("empty".into()),
-        Value::native_fn(&COLL_EMPTY_NEW),
-    );
-    alloc_permanent_struct(entries)
-}
-
-/// Allocate an immutable struct as a permanent (Rc-backed) allocation.
-/// Permanent allocations are never reclaimed by arena scope operations,
-/// so they are safe to reference from any scope.
-fn alloc_permanent_struct(entries: BTreeMap<TableKey, Value>) -> Value {
-    use crate::value::heap::{alloc_permanent, HeapObject};
-    let sorted: Vec<(TableKey, Value)> = entries.into_iter().collect();
-    alloc_permanent(HeapObject::LStruct {
-        data: sorted,
-        traits: Value::NIL,
-    })
-}
-
-/// Allocate a mutable struct as a permanent (Rc-backed) allocation.
-fn alloc_permanent_struct_mut(entries: BTreeMap<TableKey, Value>) -> Value {
-    use crate::value::heap::{alloc_permanent, HeapObject};
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    alloc_permanent(HeapObject::LStructMut {
-        data: Rc::new(RefCell::new(entries)),
-        traits: Value::NIL,
-    })
-}
-
-/// Build a traitset @struct from optional protocol method structs.
-fn make_traitset(sequence: Option<Value>, collection: Option<Value>) -> Value {
-    let mut entries = BTreeMap::new();
-    if let Some(seq) = sequence {
-        entries.insert(TableKey::Keyword("Sequence".into()), seq);
-    }
-    if let Some(coll) = collection {
-        entries.insert(TableKey::Keyword("Collection".into()), coll);
-    }
-    alloc_permanent_struct_mut(entries)
-}
-
-// ── Trait method implementations ────────────────────────────────────
-
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
-
-fn trait_seq_first(args: &[Value]) -> (SignalBits, Value) {
-    match super::seq::seq_first(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_seq_rest(args: &[Value]) -> (SignalBits, Value) {
-    match super::seq::seq_rest(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_seq_last(args: &[Value]) -> (SignalBits, Value) {
-    match super::seq::seq_last(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_seq_nth(args: &[Value]) -> (SignalBits, Value) {
-    let n = match args[1].as_int() {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                crate::value::error_val(
-                    "type-error",
-                    format!("nth: expected integer index, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-    match super::seq::seq_nth(&args[0], n) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_seq_iter(args: &[Value]) -> (SignalBits, Value) {
-    use crate::value::fiber::Fiber;
-
-    let val = args[0];
-
-    // Collect all elements, then create a native iterator fiber
-    // that yields them one by one on each resume.
-    let elements = match super::collection::coll_to_vec(&val) {
-        Ok(v) => v,
-        Err(e) => return (SIG_ERROR, e),
-    };
-
-    let mask = crate::signals::SIG_YIELD;
-    let fiber = Fiber::native_iter(elements, mask);
-    (SIG_OK, Value::fiber(fiber))
-}
-
-fn trait_coll_length(args: &[Value]) -> (SignalBits, Value) {
-    match super::collection::coll_len(&args[0]) {
-        Ok(n) => (SIG_OK, Value::int(n as i64)),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_coll_empty(args: &[Value]) -> (SignalBits, Value) {
-    match super::collection::coll_empty(&args[0]) {
-        Ok(empty) => (SIG_OK, Value::bool(empty)),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_coll_has(args: &[Value]) -> (SignalBits, Value) {
-    match super::collection::coll_has(&args[0], &args[1]) {
-        Ok(found) => (SIG_OK, Value::bool(found)),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn trait_coll_conj(args: &[Value]) -> (SignalBits, Value) {
-    let coll = &args[0];
-    let item = args[1];
-
-    // Array: append
-    if let Some(elems) = coll.as_array() {
-        let mut new = elems.to_vec();
-        new.push(item);
-        return (SIG_OK, Value::array(new));
-    }
-    if let Some(arr) = coll.as_array_mut() {
-        arr.borrow_mut().push(item);
-        return (SIG_OK, *coll);
-    }
-
-    // List: prepend (cons)
-    if coll.is_pair() || coll.is_empty_list() {
-        return (SIG_OK, Value::pair(item, *coll));
-    }
-
-    // Set: add
-    if let Some(s) = coll.as_set() {
-        let frozen = super::sets::freeze_value(item);
-        let mut new: std::collections::BTreeSet<Value> = s.iter().copied().collect();
-        new.insert(frozen);
-        return (SIG_OK, Value::set(new));
-    }
-    if let Some(s) = coll.as_set_mut() {
-        let frozen = super::sets::freeze_value(item);
-        s.borrow_mut().insert(frozen);
-        return (SIG_OK, *coll);
-    }
-
-    // String: append string
-    if coll.is_string() {
-        let s = item.with_string(|s| s.to_string()).unwrap_or_default();
-        return coll
-            .with_string(|base| {
-                let mut new = base.to_string();
-                new.push_str(&s);
-                (SIG_OK, Value::string(new))
-            })
-            .unwrap_or_else(|| {
-                (
-                    SIG_ERROR,
-                    crate::value::error_val("type-error", "conj: unreachable string case"),
-                )
-            });
-    }
-
-    // Bytes: append byte
-    if let Some(b) = coll.as_bytes() {
-        if let Some(n) = item.as_int() {
-            if (0..=255).contains(&n) {
-                let mut new = b.to_vec();
-                new.push(n as u8);
-                return (SIG_OK, Value::bytes(new));
-            }
-        }
-    }
-
-    (
-        SIG_ERROR,
-        crate::value::error_val(
-            "type-error",
-            format!("conj: unsupported collection type {}", coll.type_name()),
-        ),
-    )
-}
-
-fn trait_coll_empty_new(args: &[Value]) -> (SignalBits, Value) {
-    let coll = &args[0];
-
-    if coll.as_array().is_some() {
-        return (SIG_OK, Value::array(vec![]));
-    }
-    if coll.as_array_mut().is_some() {
-        return (SIG_OK, Value::array_mut(vec![]));
-    }
-    if coll.is_pair() || coll.is_empty_list() {
-        return (SIG_OK, Value::EMPTY_LIST);
-    }
-    if coll.as_set().is_some() {
-        return (SIG_OK, Value::set(std::collections::BTreeSet::new()));
-    }
-    if coll.as_set_mut().is_some() {
-        return (SIG_OK, Value::set_mut(std::collections::BTreeSet::new()));
-    }
-    if coll.as_struct().is_some() {
-        return (
-            SIG_OK,
-            Value::struct_from(std::collections::BTreeMap::new()),
-        );
-    }
-    if coll.as_struct_mut().is_some() {
-        return (SIG_OK, Value::struct_mut());
-    }
-    if coll.is_string() {
-        return (SIG_OK, Value::string(""));
-    }
-    if coll.as_string_mut().is_some() {
-        return (SIG_OK, Value::string_mut(vec![]));
-    }
-    if coll.as_bytes().is_some() {
-        return (SIG_OK, Value::bytes(vec![]));
-    }
-    if coll.as_bytes_mut().is_some() {
-        return (SIG_OK, Value::bytes_mut(vec![]));
-    }
-
-    (
-        SIG_ERROR,
-        crate::value::error_val(
-            "type-error",
-            format!("empty: unsupported collection type {}", coll.type_name()),
-        ),
-    )
-}
-
-// ── Dispatch helper ─────────────────────────────────────────────────
 
 /// Read the traits field from a value.
 ///
@@ -504,31 +84,7 @@ pub fn get_traitset(val: &Value) -> Value {
     if !val.is_heap() {
         return Value::NIL;
     }
-    unsafe {
-        match crate::value::heap::deref(*val) {
-            crate::value::heap::HeapObject::LString { traits, .. }
-            | crate::value::heap::HeapObject::LArray { traits, .. }
-            | crate::value::heap::HeapObject::LArrayMut { traits, .. }
-            | crate::value::heap::HeapObject::LStruct { traits, .. }
-            | crate::value::heap::HeapObject::LStructMut { traits, .. }
-            | crate::value::heap::HeapObject::LStringMut { traits, .. }
-            | crate::value::heap::HeapObject::LBytes { traits, .. }
-            | crate::value::heap::HeapObject::LBytesMut { traits, .. }
-            | crate::value::heap::HeapObject::LSet { traits, .. }
-            | crate::value::heap::HeapObject::LSetMut { traits, .. }
-            | crate::value::heap::HeapObject::Closure { traits, .. }
-            | crate::value::heap::HeapObject::LBox { traits, .. }
-            | crate::value::heap::HeapObject::CaptureCell { traits, .. }
-            | crate::value::heap::HeapObject::Fiber { traits, .. }
-            | crate::value::heap::HeapObject::Syntax { traits, .. }
-            | crate::value::heap::HeapObject::ManagedPointer { traits, .. }
-            | crate::value::heap::HeapObject::External { traits, .. }
-            | crate::value::heap::HeapObject::Parameter { traits, .. }
-            | crate::value::heap::HeapObject::ThreadHandle { traits, .. } => *traits,
-            crate::value::heap::HeapObject::Pair(pair) => pair.traits,
-            _ => Value::NIL,
-        }
-    }
+    unsafe { crate::value::heap::deref(*val).traits() }
 }
 
 /// Look up a trait method on a value and call it.
@@ -543,14 +99,13 @@ pub fn dispatch_trait_method(
     protocol: &str,
     method: &str,
     args: &[Value],
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
 ) -> (SignalBits, Value) {
-    use crate::value::error_val;
-
     let traits_val = get_traitset(val);
     if traits_val.is_nil() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!("{}: no trait table on {} value", method, val.type_name()),
             ),
@@ -564,7 +119,7 @@ pub fn dispatch_trait_method(
     // traitset from the registry (user traits may override only some protocols)
     if protocol_val.is_nil() && val.is_heap() {
         let tag = unsafe { crate::value::heap::deref(*val) }.tag();
-        let default = default_traits_for(tag);
+        let default = default_traits_for(ctx.heap_mut(), tag);
         if !default.is_nil() {
             protocol_val = lookup_keyword(&default, protocol);
         }
@@ -573,7 +128,7 @@ pub fn dispatch_trait_method(
     if protocol_val.is_nil() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: no :{} protocol on {} value",
@@ -589,7 +144,7 @@ pub fn dispatch_trait_method(
     if method_fn.is_nil() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "{}: no :{} method in :{} protocol",
@@ -599,40 +154,46 @@ pub fn dispatch_trait_method(
         );
     }
 
-    call_method_fn(&method_fn, protocol, method, args)
+    call_method_fn(&method_fn, protocol, method, args, ctx)
 }
 
-/// Call a resolved trait method (NativeFn or Closure).
+/// Call a resolved trait method (NativeFn or Closure). `ctx` is the calling
+/// native's capability — its `alloc_region` is the outer call's result slot, so
+/// the native-fn branch runs the method against it (a fresh result then lands in
+/// the region `dispatch_native_call` reclaims); the closure branch re-enters the
+/// driving VM through it.
 fn call_method_fn(
     method_fn: &Value,
     protocol: &str,
     method: &str,
     args: &[Value],
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
 ) -> (SignalBits, Value) {
-    // NativeFn — call directly
+    // NativeFn — call directly, against the OUTER call's own `ctx`. A trait
+    // method resolved here is the body of an outer native (`first`/`rest`/`nth`,
+    // `length`, …) that already holds a compiler-assigned result slot; running
+    // the method against that same `ctx` lands its fresh result in the outer
+    // call's `alloc_region`, so `dispatch_native_call` recognises it as fresh and
+    // the consumer's `DecrefValueRegion` reclaims it. Minting a SEPARATE
+    // `boundary` region here instead stranded a genuinely-fresh result — the
+    // tail-copy slice of `(rest [array])` — in a region distinct from
+    // `alloc_region`, which `dispatch_native_call` then mis-read as a pass-through
+    // and over-retained, leaking that region (pinned bounded by
+    // `runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`).
+    // A borrowed-element method (`first`/`nth`) allocates nothing, so its result
+    // still lives in the arg's region and is correctly pass-through-retained.
     if let Some(prim_fn) = method_fn.as_native_fn() {
-        return prim_fn(args);
+        return prim_fn(ctx, args);
     }
 
-    // Closure — call via VM context
-    if let Some(closure) = method_fn.as_closure() {
-        let vm_ptr = match crate::context::get_vm_context() {
-            Some(ptr) => ptr,
-            None => {
-                return (
-                    SIG_ERROR,
-                    crate::value::error_val(
-                        "internal-error",
-                        "trait dispatch: no VM context for closure call",
-                    ),
-                );
-            }
-        };
-        let vm = unsafe { &mut *vm_ptr };
-        match vm.call_closure(closure, args) {
+    // Closure — call on the driving VM reached through the ctx. Passed as the
+    // Value so the entry hands the body its executing-closure register (a
+    // self-recursive trait method resolves its self-reference to it).
+    if method_fn.as_closure().is_some() {
+        match ctx.vm().call_closure(*method_fn, args) {
             Ok(v) => return (SIG_OK, v),
             Err(msg) => {
-                return (SIG_ERROR, crate::value::error_val("trait-error", msg));
+                return (SIG_ERROR, ctx.error("trait-error", msg));
             }
         }
     }
@@ -640,7 +201,7 @@ fn call_method_fn(
     // Not callable
     (
         SIG_ERROR,
-        crate::value::error_val(
+        ctx.error(
             "type-error",
             format!(
                 "{}:{}: trait method is not callable ({})",

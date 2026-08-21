@@ -1,12 +1,11 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Filesystem watch tests — event-driven via inotify/kqueue
 
-(def dir "/tmp/elle-watch-test")
-
 # ── Setup ───────────────────────────────────────────────────────────────
-(protect (each f in (list-directory dir)
-           (delete-file (string dir "/" f))))
-(protect (delete-directory dir))
+# Watch a fresh subdir of a scratch temp dir — no stale state to clear,
+# and the whole tree is removed at the end.
+(def scratch (file/mktempdir))
+(def dir (path/join scratch "watched"))
 (create-directory dir)
 
 # ── Basic: create file, receive event ───────────────────────────────────
@@ -47,6 +46,4 @@
 
 # ── Close and cleanup ──────────────────────────────────────────────────
 (watch-close w)
-(delete-file (string dir "/a.txt"))
-(delete-file (string dir "/b.txt"))
-(delete-directory dir)
+(file/delete-dir-all scratch)

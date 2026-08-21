@@ -61,8 +61,8 @@ don't resume. No special syntax or VM support is needed.
 (defn compute []
   (let [f (fiber/new (fn [] (safe-divide 10 0)) |:error|)]
     (fiber/resume f nil)
-    (if (= (fiber/status f) :suspended)
-      # Child is suspended — we can resume it with a recovery choice
+    (if (= (fiber/status f) :paused)
+      # Child is paused — we can resume it with a recovery choice
       (fiber/resume f {:option :use-value :value 1})
       (fiber/value f))))
 ```

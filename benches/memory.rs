@@ -16,22 +16,18 @@ static INSTRUMENTED: StatsAlloc<std::alloc::System> = StatsAlloc::new(std::alloc
 static GLOBAL: &StatsAlloc<std::alloc::System> = &INSTRUMENTED;
 
 use elle::pipeline::eval;
-use elle::primitives::register_primitives;
-use elle::{SymbolTable, VM};
+use elle::runtime::RuntimeCore;
 
-fn setup() -> (VM, SymbolTable) {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    (vm, symbols)
-}
-
-/// Run an Elle program and return allocation stats for the execution phase only.
-/// Setup (VM creation, primitive registration, compilation) is excluded.
+/// Run an Elle program and return allocation stats for the eval phase only.
+/// Instance construction (VM, primitives, compile context) is excluded — only
+/// the `eval` (compile + execute) runs inside the measured region.
 fn measure_eval(source: &str) -> stats_alloc::Stats {
-    let (mut vm, mut symbols) = setup();
+    // A bare instance (primitives + a fresh `CompileCtx`, no stdlib); the
+    // compile context is threaded explicitly into `eval`.
+    let mut core = RuntimeCore::bare();
+    let (vm, symbols, cctx) = core.parts();
     let reg = Region::new(GLOBAL);
-    let _ = eval(source, &mut symbols, &mut vm, "<benchmark>").expect("program should succeed");
+    let _ = eval(source, symbols, vm, cctx, "<benchmark>").expect("program should succeed");
     reg.change()
 }
 

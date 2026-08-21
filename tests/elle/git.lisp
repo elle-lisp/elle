@@ -1,10 +1,15 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Git module tests (FFI to libgit2)
 
-(def [ok? _] (protect ((fn [] (ffi/native "libgit2.so")))))
-(unless ok?
-  (println "SKIP: libgit2.so not available")
-  (exit 0))
+# Gate the whole file on libgit2: if it can't load, re-raise as a loud :gated so
+# `elle test` records a file-level SKIP with a reason (docs § Gating). Eager
+# (def …), so it gates during barrier-module setup, before any test thunk.
+# Never (exit 0): under the runner that would kill the process mid-run.
+(def _libgit2
+  (let [r (protect (ffi/native "libgit2.so"))]
+    (if (get r 0)
+      true
+      (error (struct :error :gated :reason "libgit2.so not installed")))))
 
 (def git ((import "std/git")))
 
@@ -59,8 +64,10 @@
 (assert (string? (git:workdir repo)) "workdir is string")
 
 ## Init a temp repo, branch, tag, commit
-(def tmp-path "/tmp/elle-git-test")
-(subprocess/system "rm" ["-rf" tmp-path])
+## (scratch is defined after the libgit2 gate above, so a gated run never
+## creates — and thus never leaks — a temp dir; removed at the bottom.)
+(def scratch (file/mktempdir))
+(def tmp-path (path/join scratch "repo"))
 (def tmp (git:init tmp-path))
 (git:config-set tmp "user.name" "Test")
 (git:config-set tmp "user.email" "test@test.com")
@@ -86,7 +93,14 @@
 (git:tag-delete tmp "v1.0")
 
 (git:close tmp)
-(subprocess/system "rm" ["-rf" tmp-path])
+(file/delete-dir-all scratch)
 
 (git:close repo)
+
+# Optional graceful teardown of libgit2's global state. No longer REQUIRED for
+# safety: the library mapping is process-global and never `dlclose`d, so this file —
+# which under `elle test` runs as a whole-file thunk in an os/spawn worker — exits
+# cleanly regardless of any thread-local destructor libgit2 registered. See
+# lib/git.lisp § shutdown.
+(git:shutdown)
 (println "git: all tests passed")

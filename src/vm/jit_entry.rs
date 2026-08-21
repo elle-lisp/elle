@@ -44,8 +44,17 @@ impl VM {
             return Some(self.run_jit(&jit_code, closure, args, func));
         }
 
-        // If hot and not already pending, submit background compilation
-        if is_hot && !self.jit_pending.contains(&(bytecode_ptr as usize)) {
+        // If hot, not already pending, and not already rejected, submit
+        // background compilation. The rejection check is the negative cache
+        // (docs/impl/jit.md "Rejection tracking"): a function whose LIR the
+        // JIT has rejected can only ever reproduce the identical rejection, so
+        // re-submitting is pure wasted work. Under eager JIT (threshold 0,
+        // every call "hot") the absence of this check re-submits un-jit'able
+        // hot functions on every call and saturates the background worker.
+        if is_hot
+            && !self.jit_pending.contains(&(bytecode_ptr as usize))
+            && !self.jit_rejections.contains_key(&bytecode_ptr)
+        {
             if let Some(ref lir_func) = closure.template.lir_function {
                 self.submit_jit_task(lir_func, closure, bytecode_ptr);
             }
@@ -106,11 +115,13 @@ impl VM {
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
     ) {
+        let label = closure.template.display_label();
         let task = crate::jit::worker::prepare_task(
             lir_func,
             None,
             (*closure.template.symbol_names).clone(),
             bytecode_ptr as usize,
+            Some(&label),
         );
 
         // Lazily spawn the worker thread on first use
@@ -120,14 +131,16 @@ impl VM {
 
         if worker.submit(task) {
             self.jit_pending.insert(bytecode_ptr as usize);
+            *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             if self
                 .runtime_config
                 .has_trace_bit(crate::config::trace_bits::JIT)
             {
                 eprintln!(
-                    "[jit] submitted background compilation: name={} bc_ptr={:#x}",
-                    closure.template.name.as_deref().unwrap_or("<anon>"),
+                    "[jit] submitted background compilation: label={} bc_ptr={:#x} bclen={}",
+                    closure.template.display_label(),
                     bytecode_ptr as usize,
+                    closure.template.bytecode.len(),
                 );
             }
         }
@@ -184,7 +197,7 @@ impl VM {
             .fiber
             .signal
             .as_ref()
-            .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
+            .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT))
         {
             self.fiber.stack.push(Value::NIL);
             return None;
@@ -207,17 +220,16 @@ impl VM {
             return Some(sig);
         }
 
-        // Check for pending tail call (JIT function did a TailCall)
+        // Check for pending tail call (JIT function did a TailCall). The
+        // resolved body is the tail callee's — hand it its executing-closure
+        // register via the one-shot, as `trampoline_loop` does on a frame
+        // replacement, so a self-reference in it resolves to the callee.
         if result == TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
-                let exec_result = self.execute_bytecode_saving_stack(
-                    &tail.bytecode,
-                    &tail.constants,
-                    &tail.env,
-                    &tail.location_map,
-                );
+                self.pending_entry_closure = tail.closure;
+                let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
                 let eb = exec_result.bits;
-                if eb.is_ok() {
+                if eb.is_empty() {
                     let (_, val) = self.fiber.signal.take().unwrap();
                     self.fiber.stack.push(val);
                     return None;
@@ -237,12 +249,20 @@ impl VM {
                     // Non-NIL halt: leave signal in place, dispatch loop will see it.
                     self.fiber.stack.push(Value::NIL);
                     return None;
-                } else if eb.contains(SIG_ERROR) {
+                } else if eb.intersects(SIG_ERROR) {
                     // SIG_ERROR — signal already set on fiber
                     self.fiber.stack.push(Value::NIL);
                     return None;
                 } else {
-                    // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
+                    // Suspending signal (SIG_FUEL, SIG_YIELD, SIG_SWITCH, user-defined).
+                    // A non-yield suspend (fuel) leaves the tail callee's inner
+                    // frame in exec_result.stack, not fiber.suspended; park it so
+                    // resume re-enters the callee — a tail-recursive interpreter
+                    // callee (e.g. `fold`) otherwise loses its accumulator across
+                    // preemption (tests/elle/fuel-jit-preempt.lisp).
+                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
+                    self.park_suspended_callee_frame(&mut frames, eb, exec_result);
+                    self.fiber.suspended = Some(frames);
                     if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask) {
                         self.fiber.stack.push(Value::NIL);
                         return None;
@@ -279,13 +299,19 @@ impl VM {
             closure.env.as_ptr()
         };
 
-        // Save/restore rotation base so nested self-tail-call loops
-        // don't corrupt the caller's rotation state.
-        let saved_rotation_base =
-            crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
-                .flatten();
+        // Debug builds: detonate here, with attribution, if the env backing's
+        // region was freed — compiled code would read it unchecked.
+        crate::jit::dispatch::debug_check_env_backing(unsafe { &*self.heap_ptr }, closure);
 
-        let result = unsafe {
+        // Interpreter→JIT non-tail entry: hand the compiled callee one
+        // `CallArgument` owning reference per non-captured fixed param, exactly
+        // as the interpreter's `build_closure_env` (own_params=true) does for an
+        // interpreter callee and `elle_jit_call` does for the JIT-to-JIT path.
+        // The callee releases each owned param via `DecrefValueRegion`; without
+        // this incref a heap arg held by the caller is over-released (UAF).
+        crate::jit::dispatch::incref_owned_call_args(unsafe { &mut *self.heap_ptr }, closure, args);
+
+        unsafe {
             jit_code.call(
                 env_ptr,
                 args.as_ptr(),
@@ -294,12 +320,6 @@ impl VM {
                 func_value.tag,
                 func_value.payload,
             )
-        };
-
-        crate::value::fiberheap::with_current_heap_mut(|h| {
-            h.restore_jit_rotation_base(saved_rotation_base.clone());
-        });
-
-        result
+        }
     }
 }

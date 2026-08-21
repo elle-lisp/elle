@@ -230,7 +230,7 @@ or computed value, projection falls back to conservative (Polymorphic).
 1. `compile_file` analyzes the file and calls `compute_signal_projection`
    on the last binding's value expression
 2. The projection is stored on `Bytecode.signal_projection` and cached
-   in a thread-local `PROJECTION_CACHE` by resolved file path
+   per-instance on `CompileCtx.projections` (keyed by resolved file path)
 3. When the importing file's analyzer sees `((import "std/math"))` — a
    call wrapping a call to `import` with a literal string — it looks up
    the target file's cached projection
@@ -445,6 +445,15 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 - If the check fails (squelched signal detected), the VM converts to `:error` with kind `"signal-violation"`
 - Non-squelched signals pass through normally; errors are never affected by squelch
 
+Every enforcement site — the interpreter's `enforce_squelch` and the
+JIT's call paths — asks one predicate, `signals::squelched_bits`, which
+exempts `:error`, `:halt`, the `:switch` trampoline, and the pause bits
+(`:fuel`). The pause bits are subtracted from the squelched set rather
+than exempting the whole signal, so a compound signal carrying a pause
+and a squelched user bit still violates the boundary. See
+[protocol.md](protocol.md) for why a pause is the metering parent's
+business and not the closure's behavior.
+
 **Example:**
 ```text
 # Squelch a yielding closure — signal-violation at boundary
@@ -473,7 +482,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 # (emit bits value) => suspends
 
 # === Introspection ===
-# (fiber/status fiber) => :new :alive :suspended :dead :error
+# (fiber/status fiber) => :new :alive :paused :dead :error
 # (fiber/value fiber) => value
 # (fiber/bits fiber) => int
 # (fiber/mask fiber) => int
@@ -492,7 +501,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 # yield is sugar for (emit :yield value)
 # error is sugar for (emit 1 value)
 
-# fiber generator pattern (coroutine usage)
+# fiber generator pattern
 # (fiber/new fn |:yield|)  — create a yielding fiber
 # (fiber/resume f val)     — resume, delivering val
 # (fiber/status f)         — :new :alive :paused :dead

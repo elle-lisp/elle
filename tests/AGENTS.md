@@ -38,8 +38,13 @@ In addition to the `tests/` directory:
 
 - **`tests/elle/`**: Elle test scripts that verify language behavior by running
   Elle code directly. Each `.lisp` file is a self-contained test that uses
-  the built-in `(assert)` primitive and exits non-zero on failure. Run via the
-  `integration::elle_scripts` harness. See `docs/testing.md` for the decision
+  the built-in `(assert)` primitive and exits non-zero on failure. Run by the
+  agent-first runner (`elle test`, via `make smoke`/`smoke-elle`), which compiles
+  and runs every file once per JIT policy (`:off`→`vm`, `:eager`→`jit`) plus
+  per-tier divergence for single-form files. `integration::elle_scripts` is *not*
+  the driver: it retains only the handful of files that need a process-global
+  runtime mode the harness cannot vary per file (`--trace=guardfree`,
+  `--no-uring`, `--mlir=off`+adaptive). See `docs/testing.md` for the decision
   tree on what goes here vs in Rust tests.
 
 ## When to use each category
@@ -81,7 +86,7 @@ VM) and check the result. They cover:
 
 - Core language features (arithmetic, conditionals, lists, functions)
 - Advanced features (closures, recursion, higher-order functions, match)
-- Concurrency (fibers, coroutines, thread transfer)
+- Concurrency (fibers, thread transfer)
 - Signal enforcement (interprocedural signal tracking)
 - Error reporting (error messages include correct source locations)
 - Destructuring, blocks, splice, booleans, dispatch
@@ -117,7 +122,7 @@ the code they test and have access to private items. 58 modules have inline
 tests covering: lexer, parser, syntax conversion, expander, analyzer, lowerer,
 emitter, VM core, VM arithmetic, value representation,
 closures, fibers, signals, FFI (marshal, callback, loader, types, call),
-primitives (fibers, coroutines, FFI, process, JSON), JIT (compiler, dispatch,
+primitives (fibers, FFI, process, JSON), JIT (compiler, dispatch,
 group, runtime), LSP (completion, definition, hover, references, rename,
 formatting, state), lint (rules, diagnostics, CLI), formatter, pipeline,
 symbols, symbol table, error formatting, REPL, and arithmetic dispatch.
@@ -130,14 +135,18 @@ Inline tests answer: "Does this private implementation detail work correctly?"
 
 Functions for evaluating Elle source in tests:
 
-**`eval_source(input: &str) -> Result<Value, String>`** — Evaluate Elle source
-through the full pipeline. Creates a fresh VM with primitives and stdlib on
-every call. Use this when you need a guaranteed-fresh VM (rare — prefer
+**`eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R`**
+— Evaluate Elle source through the full pipeline and hand the result to `f` while
+the `Runtime` (and its heap) is still alive, tearing down only after `f` returns.
+A heap-valued result is a tagged pointer into that heap, so it must be inspected
+*inside* `f` — return only OWNED data (scalars, `String`, counts), never the
+`Value` itself. Creates a fresh `Runtime` with primitives and stdlib on every
+call; use this when you need a guaranteed-fresh instance (rare — prefer
 `eval_reuse` for property tests).
 
-**`eval_source_bare(input: &str) -> Result<Value, String>`** — Same as
-`eval_source` but without stdlib. Creates a fresh VM on every call. Prefer
-`eval_reuse_bare` for property tests.
+**`eval_source_bare<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R`**
+— Same as `eval_source` but without stdlib. Creates a fresh `Runtime` on every
+call. Prefer `eval_reuse_bare` for property tests.
 
 **`eval_reuse(input: &str) -> Result<Value, String>`** — Evaluate Elle source
 with a cached VM (primitives + stdlib). The VM is created once per thread and
@@ -195,6 +204,22 @@ Some property test files define local strategies for their domain (e.g.,
 `reader.rs` defines `arb_source()` for generating valid Elle source code,
 `strings.rs` defines `arb_unicode_string()`).
 
+## Scratch files
+
+Tests that need the filesystem must derive their paths from the platform temp
+root and must delete everything they create — including on the failure path
+where practical. Never hardcode `/tmp` (shared, size-limited, and not where
+`TMPDIR` points); never reuse a fixed filename (concurrent runs collide).
+`integration::scratch::no_hardcoded_tmp_paths` enforces the no-`/tmp` half of
+this policy over every `.rs` and `.lisp` file in the tree.
+
+- **Elle scripts**: wrap the test in `(with-temp-dir dir ...)` — it binds a
+  fresh directory from `file/mktempdir` and removes the whole tree afterwards,
+  even when the body errors. Build paths with `(path/join dir "name")`.
+- **Rust tests**: build paths from `std::env::temp_dir()`, made unique with
+  `std::process::id()`, and remove them before the test returns (a
+  `defer`-style guard or explicit `remove_file`/`remove_dir_all` at the end).
+
 ## How to add a new test
 
 ### Adding an integration test
@@ -213,7 +238,7 @@ Some property test files define local strategies for their domain (e.g.,
 
    #[test]
    fn test_my_feature() {
-       assert_eq!(eval_source("(my-feature 42)").unwrap(), Value::int(42));
+       eval_source("(my-feature 42)", |r| assert_eq!(r.unwrap(), Value::int(42)));
    }
    ```
 

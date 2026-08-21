@@ -1,7 +1,7 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/hash.lisp — streaming hash convenience functions
 ##
-## Provides high-level helpers for hashing ports, coroutine streams,
+## Provides high-level helpers for hashing ports, fiber streams,
 ## and files using the elle-hash plugin's incremental API.
 ##
 ## Dependencies:
@@ -14,16 +14,16 @@
 ##
 ##   (bytes->hex (h:file :sha256 "bigfile.bin"))
 ##   (bytes->hex (h:digest :blake3 port))
-##   (bytes->hex (h:stream :md5 my-coroutine-source))
+##   (bytes->hex (h:stream :md5 my-fiber-source))
 
 (fn [plugin]
 
   ## ── Core ────────────────────────────────────────────────────────────
 
   (defn hash/stream [algorithm source]
-    "Fold a coroutine source through a hasher and return the digest.
+    "Fold a fiber source through a hasher and return the digest.
      algorithm: keyword (:sha256, :blake3, :md5, etc.).
-     source: coroutine that yields string, bytes, or @bytes chunks."
+     source: fiber that yields string, bytes, or @bytes chunks."
     (plugin:finalize (stream/fold plugin:update (plugin:new algorithm) source)))
 
   ## ── Convenience ─────────────────────────────────────────────────────

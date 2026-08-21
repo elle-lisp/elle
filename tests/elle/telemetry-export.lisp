@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 12)
 
 # tests/elle/telemetry-export.lisp — OTLP export integration tests
 #

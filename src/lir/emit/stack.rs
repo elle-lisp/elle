@@ -53,13 +53,8 @@ impl super::Emitter {
         }
     }
 
-    /// Ensure two registers are the top two stack elements (lhs below rhs).
-    ///
-    /// Binary operations (BinOp, Compare) consume both operands. Unlike
-    /// `ensure_on_top` which duplicates via DupN (leaving originals as
-    /// orphans), this checks whether the operands are already in position
-    /// and only falls back to DupN when they aren't.
-    /// Pop trailing orphan values from the operand stack.
+    /// Pop trailing orphan values from the operand stack, but never below
+    /// `floor` entries.
     ///
     /// An orphan is a stack entry whose register's canonical position
     /// (in `reg_to_stack`) differs from its actual stack position.  These
@@ -75,11 +70,22 @@ impl super::Emitter {
     /// producing incorrect results (e.g. a struct value in a hash-key
     /// slot → "struct keys must be immutable (got struct)").
     ///
-    /// Call this before saving stack state to `yield_stack_state` in
-    /// terminators so that all predecessors of a merge block agree on
-    /// the operand-stack depth.
-    pub(super) fn pop_trailing_orphans(&mut self) {
-        while let Some(&top_reg) = self.stack.last() {
+    /// `floor` is the operand depth the target block has already been
+    /// fixed at by an earlier predecessor (`Emitter::edge_depth`), and
+    /// trimming past it is what turns this cleanup into a miscompilation:
+    /// only `Terminator::Jump` pops, so an orphan a jump edge removed is
+    /// still named by the simulation a sibling `Terminator::Branch` edge
+    /// recorded for the same merge — and the merge's own successors then
+    /// pop it a second time, on a path where it is already gone.  The
+    /// stack falls one slot into the frame's reserved local region and the
+    /// topmost local stops existing (src/lir/AGENTS.md § "Merge operand
+    /// depth").  Pass `0` only when the target's depth is not fixed yet:
+    /// this edge is then the one that fixes it.
+    pub(super) fn pop_trailing_orphans_to(&mut self, floor: usize) {
+        while self.stack.len() > floor {
+            let Some(&top_reg) = self.stack.last() else {
+                break;
+            };
             if self.reg_to_stack.get(&top_reg) == Some(&(self.stack.len() - 1)) {
                 break; // top element is live — stop
             }
@@ -93,6 +99,12 @@ impl super::Emitter {
         }
     }
 
+    /// Ensure two registers are the top two stack elements (lhs below rhs).
+    ///
+    /// Binary operations (BinOp, Compare) consume both operands. Unlike
+    /// `ensure_on_top` which duplicates via DupN (leaving originals as
+    /// orphans), this checks whether the operands are already in position
+    /// and only falls back to DupN when they aren't.
     pub(super) fn ensure_binary_on_top(&mut self, lhs: Reg, rhs: Reg) {
         let stack_len = self.stack.len();
         if stack_len >= 2 {

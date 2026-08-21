@@ -66,15 +66,13 @@ fn cfg_prints_block_edges() {
 }
 
 #[test]
-fn dfa_reports_signal_and_rotation_safety() {
+fn dfa_reports_signal_and_capture_mask() {
     let (out, _, status) = dump("dfa", "(defn f [x] x)");
     assert!(status.success());
     assert!(out.contains("── dfa"), "missing dfa banner:\n{}", out);
-    assert!(
-        out.contains("rotation_safe="),
-        "missing rotation_safe flag:\n{}",
-        out
-    );
+    // The DFA per-function summary reports the inferred signal and the capture
+    // masks (see `dump::dfa_function` / `main::print_dfa_function`).
+    assert!(out.contains("signal="), "missing signal field:\n{}", out);
     assert!(
         out.contains("capture_params_mask="),
         "missing capture mask:\n{}",

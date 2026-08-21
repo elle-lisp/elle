@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## demos/egui/smoke.lisp — headless smoke test for egui plugin
 
 (def egui-plugin (import "plugin/egui"))
