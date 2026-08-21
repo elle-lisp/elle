@@ -159,6 +159,9 @@ mod subprocess_sigmask {
 mod unicode_generation {
     include!("unicode_generation.rs");
 }
+mod paths {
+    include!("paths.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
