@@ -205,8 +205,10 @@ fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
             println!(";   SPIR-V ({} bytes):", bytes.len());
             // Words are 32-bit in SPIR-V. Print as hex, 8 words per line.
             let words: Vec<u32> = bytes
-                .chunks_exact(4)
-                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_le_bytes(*c))
                 .collect();
             for (i, chunk) in words.chunks(8).enumerate() {
                 print!("  {:04x}:", i * 8);

@@ -57,7 +57,7 @@ pub(super) fn complete_port_op(
                 if let PortOp::ReadLine { ref buffer } = op {
                     // Check fd_state buffer first (leftover from previous calls)
                     if !state.buffer.is_empty() {
-                        let remainder: Vec<u8> = state.buffer.drain(..).collect();
+                        let remainder: Vec<u8> = std::mem::take(&mut state.buffer);
                         unsafe {
                             let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
                             let copy_len = remainder.len().min(dst_cap);
@@ -105,7 +105,7 @@ pub(super) fn complete_port_op(
                 if let PortOp::Read { ref buffer, .. } = op {
                     // Check fd_state buffer first
                     if !state.buffer.is_empty() {
-                        let partial: Vec<u8> = state.buffer.drain(..).collect();
+                        let partial: Vec<u8> = std::mem::take(&mut state.buffer);
                         unsafe {
                             let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
                             let copy_len = partial.len().min(dst_cap);
@@ -163,7 +163,7 @@ pub(super) fn complete_port_op(
                 // For ReadAll: return accumulated buffer on EOF
                 // (empty bytes for empty files, not nil).
                 if matches!(op, PortOp::ReadAll) {
-                    let all: Vec<u8> = state.buffer.drain(..).collect();
+                    let all: Vec<u8> = std::mem::take(&mut state.buffer);
                     let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
                     let ctx = crate::primitives::ctx::Alloc::new(heap);
                     let val = ctx.bytes(all);
@@ -348,7 +348,7 @@ pub(super) fn complete_port_op(
                     // Accumulated in fd_states.buffer by re-submission loop.
                     let state = crate::io::types::fd_state_mut(fd_states, port_key);
                     state.buffer.extend_from_slice(&data);
-                    let all: Vec<u8> = state.buffer.drain(..).collect();
+                    let all: Vec<u8> = std::mem::take(&mut state.buffer);
                     let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
                     let ctx = crate::primitives::ctx::Alloc::new(heap);
                     let val = ctx.bytes(all);
