@@ -29,6 +29,6 @@ mod errors {
 mod closures {
     include!("thread_transfer/closures.rs");
 }
-mod heap {
-    include!("thread_transfer/heap.rs");
-}
+// The worker-heap slope lives in tests/worker_heap.rs, its own binary, because
+// it reads a process-wide page counter (docs/analysis/testing.md
+// § "Process-global state needs its own binary").
