@@ -118,6 +118,12 @@ fn spawn_closure_impl(
     // The worker inherits the spawning VM's Unicode generation: a program is
     // one set of string semantics, whichever VM computes a length.
     let unicode_generation = ctx.unicode_generation();
+    // Capabilities flow down across a thread, as they do across a fiber
+    // (docs/signals/capabilities.md § Transitivity). The worker runs in a fresh
+    // VM whose root fiber is what the capability gate reads, so without this the
+    // spawned closure runs with an empty withheld set — and a sandboxed fiber
+    // escapes every denial by spawning a thread.
+    let withheld = ctx.vm().fiber.withheld;
 
     // Size the worker's stack to the main thread's (see `worker_stack_size`):
     // the worker compiles arbitrary Elle, and the frontend recurses deep — the
@@ -298,6 +304,14 @@ fn spawn_closure_impl(
                 // self-recursive spawned closure resolves its self-reference to
                 // the reconstructed value.
                 vm.pending_entry_closure = closure_val;
+                // Install the inherited denial for the spawned closure only. The
+                // runtime setup above — primitive registration, `init_stdlib`,
+                // reconstructing the bundle — is the VM standing itself up, not
+                // the sandboxed body, and a worker whose `:error` is withheld
+                // could not stand up at all. The worker has no parent to suspend
+                // into, so a denial here ends the thread and `sys/join` reports
+                // it rather than offering the mediation a fiber gets.
+                vm.fiber.withheld = withheld;
                 let result = vm.execute_code(closure.template.code(), Some(&env_rc));
 
                 let send_result = match result {

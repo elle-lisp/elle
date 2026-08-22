@@ -18,6 +18,11 @@ open ports) will error at spawn time. The thread's result comes back the
 same way: it is serialized into a shared slot and reconstructed in the
 joining thread's heap.
 
+A worker does inherit one thing: the spawning fiber's withheld
+capabilities. A thread cannot reach what the fiber that spawned it could
+not — see [capabilities](signals/capabilities.md) for what a denial in a
+worker does, since a worker has no parent to mediate it.
+
 ### Two worker environments: `sys/spawn` vs `sys/spawn-vm`
 
 Both run a deep-copied closure on a fresh OS thread with its own VM; they
