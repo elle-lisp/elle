@@ -261,6 +261,26 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
+### A stale cache entry is a miss, not a failure
+
+The disk cache keys a pre-compiled module on a hash of its WASM bytes alone, so an
+entry outlives the wasmtime build that wrote it. `Module::deserialize` rejects what
+another build produced — `Module was compiled with incompatible version 'N'` — which
+makes every entry in the directory unreadable the moment the toolchain moves.
+
+So a read that fails to deserialize is treated as a cache MISS: the module is
+recompiled and the stale entry overwritten. The cache heals itself on the next run
+rather than failing every run until someone clears the directory by hand. This covers
+a truncated or corrupt file by the same route, and it is why the `unsafe` deserialize
+is safe to attempt — wasmtime rejects a foreign entry instead of mis-parsing it.
+
+The directory is shared by every checkout inheriting the same `TMPDIR`, so two
+checkouts built against different wasmtime versions land on the same keys. With the
+fallback they overwrite each other's entries — each run recompiles, which costs the
+cache's benefit but stays correct. Without it, whichever version wrote last breaks the
+other outright. wasmtime exports no version constant to fold into the key, so the
+fallback is what makes the shared directory safe.
+
 ### Debug builds optimize dependencies
 
 The `830ms cold` figure is a release build. A **debug** build applies

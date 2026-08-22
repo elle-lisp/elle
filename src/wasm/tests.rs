@@ -851,3 +851,59 @@ fn wasm_full_non_allocating_calls_strand_nothing() {
          mint is materializing region entries"
     );
 }
+
+#[test]
+fn a_cache_entry_another_wasmtime_wrote_is_a_miss_not_a_failure() {
+    // The trap: the cache keys a pre-compiled module on a hash of its WASM
+    // bytes alone, so an entry outlives the wasmtime build that wrote it.
+    // `Module::deserialize` then rejects it with "Module was compiled with
+    // incompatible version 'N'". Propagating that error makes EVERY wasm run
+    // fail until the directory is cleared by hand — and the directory is shared
+    // by every checkout inheriting the same TMPDIR, so one toolchain bump
+    // breaks them all at once.
+    //
+    // The counter-factual: an assertion that only checked "the module loads"
+    // would pass against the propagating version too, because a fresh cache has
+    // no stale entry to trip over. This writes the poisoned entry first.
+    let dir = std::env::temp_dir().join(format!(
+        "elle-wasm-cache-test-{}-{:p}",
+        std::process::id(),
+        &0u8 as *const u8
+    ));
+    std::fs::create_dir_all(&dir).expect("temp cache dir");
+    let cache = dir.to_str().expect("utf-8 temp path").to_string();
+
+    let engine = wasmtime::Engine::default();
+    // The 8-byte empty module: magic + version. Enough to compile and
+    // serialize, and it keeps this test off the `wat` crate.
+    let wasm: &[u8] = b"\0asm\x01\x00\x00\x00";
+
+    // Poison the entry this call will look for.
+    let first = super::compile_or_cache_module(&engine, wasm, Some(&cache))
+        .expect("cold compile populates the cache");
+    drop(first);
+    let entry = std::fs::read_dir(&dir)
+        .expect("cache dir readable")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "bin"))
+        .expect("the cold compile wrote a cache entry");
+    std::fs::write(&entry, b"not a serialized wasmtime module").expect("poison the entry");
+
+    let reloaded = super::compile_or_cache_module(&engine, wasm, Some(&cache));
+    assert!(
+        reloaded.is_ok(),
+        "a cache entry that fails to deserialize must be a MISS, not an error: {:?}",
+        reloaded.err()
+    );
+
+    // And the stale entry is overwritten, so the cache heals rather than
+    // recompiling forever.
+    let healed = std::fs::read(&entry).expect("entry still present");
+    assert_ne!(
+        healed, b"not a serialized wasmtime module",
+        "the recompile must overwrite the stale entry"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

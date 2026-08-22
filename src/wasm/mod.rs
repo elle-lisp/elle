@@ -185,38 +185,63 @@ pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<String, 
     eval_wasm_raw(source, source_name, true)
 }
 
-/// Compile a WASM module, checking the disk cache first.
+/// Load a pre-compiled module from the disk cache, or compile and cache it.
 ///
-/// Returns a compiled Module. On cache miss, compiles from bytes,
-/// serializes, and caches atomically.
-fn compile_or_cache_module(
+/// `prefix` names the entry family (`closure` / `module`); `compile` builds the
+/// module on a miss. `cache_dir` is threaded in rather than read from the global
+/// config so a test can point it at a scratch directory instead of the shared one.
+///
+/// An entry that fails to deserialize is a MISS, not an error. The key is a hash of
+/// the wasm bytes alone, so an entry outlives the wasmtime build that wrote it, and
+/// `Module::deserialize` rejects a foreign one ("Module was compiled with incompatible
+/// version"). Recompiling overwrites it, so the directory heals on the next run
+/// instead of failing every run until someone clears it by hand — which matters
+/// because every checkout inheriting the same `TMPDIR` shares it
+/// (docs/impl/wasm.md § "A stale cache entry is a miss, not a failure").
+fn cached_module(
     engine: &wasmtime::Engine,
+    prefix: &str,
     wasm_bytes: &[u8],
+    cache_dir: Option<&str>,
+    compile: impl FnOnce() -> Result<wasmtime::Module, String>,
 ) -> Result<wasmtime::Module, String> {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    if let Some(cache_dir) = &crate::config::get().cache {
-        let mut hasher = DefaultHasher::new();
-        wasm_bytes.hash(&mut hasher);
-        let hash = hasher.finish();
-        let cache_path =
-            std::path::PathBuf::from(cache_dir).join(format!("closure_{:016x}.bin", hash));
+    let Some(cache_dir) = cache_dir else {
+        return compile();
+    };
+    let mut hasher = DefaultHasher::new();
+    wasm_bytes.hash(&mut hasher);
+    let cache_path =
+        std::path::PathBuf::from(cache_dir).join(format!("{prefix}_{:016x}.bin", hasher.finish()));
 
-        if let Ok(bytes) = std::fs::read(&cache_path) {
-            return unsafe { wasmtime::Module::deserialize(engine, &bytes) }
-                .map_err(|e| e.to_string());
+    if let Ok(bytes) = std::fs::read(&cache_path) {
+        // SAFETY: the bytes came from `Module::serialize` below. An entry another
+        // wasmtime build wrote is REJECTED by `deserialize` rather than mis-parsed,
+        // which is what makes falling through to a recompile sound.
+        if let Ok(module) = unsafe { wasmtime::Module::deserialize(engine, &bytes) } {
+            return Ok(module);
         }
-
-        let module = wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())?;
-        if let Ok(serialized) = module.serialize() {
-            std::fs::create_dir_all(cache_dir).ok();
-            store::atomic_write(&cache_path, &serialized);
-        }
-        Ok(module)
-    } else {
-        wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())
     }
+
+    let module = compile()?;
+    if let Ok(serialized) = module.serialize() {
+        std::fs::create_dir_all(cache_dir).ok();
+        store::atomic_write(&cache_path, &serialized);
+    }
+    Ok(module)
+}
+
+/// Compile a single closure's WASM module, checking the disk cache first.
+fn compile_or_cache_module(
+    engine: &wasmtime::Engine,
+    wasm_bytes: &[u8],
+    cache_dir: Option<&str>,
+) -> Result<wasmtime::Module, String> {
+    cached_module(engine, "closure", wasm_bytes, cache_dir, || {
+        wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())
+    })
 }
 
 /// Build the source the full-module WASM path actually compiles: the stdlib
@@ -394,7 +419,11 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
             if let Some(standalone) =
                 emit::emit_single_closure(closure_func, Some(&lir_module), vm.heap_ptr, sym_ptr)
             {
-                if let Ok(module) = compile_or_cache_module(&engine, &standalone.wasm_bytes) {
+                if let Ok(module) = compile_or_cache_module(
+                    &engine,
+                    &standalone.wasm_bytes,
+                    crate::config::get().cache.as_deref(),
+                ) {
                     precached[i] = Some(host::PrecachedClosure {
                         module,
                         const_pool: standalone.const_pool,
@@ -444,31 +473,13 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let t3 = std::time::Instant::now();
 
     // Module cache: hash the WASM bytes, check for a cached pre-compiled module.
-    let module = if let Some(cache_dir) = &crate::config::get().cache {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        result.wasm_bytes.hash(&mut hasher);
-        let hash = hasher.finish();
-        let cache_path =
-            std::path::PathBuf::from(&cache_dir).join(format!("module_{:016x}.bin", hash));
-
-        if let Ok(bytes) = std::fs::read(&cache_path) {
-            // SAFETY: we trust our own cache files.
-            unsafe { wasmtime::Module::deserialize(&engine, &bytes) }
-                .map_err(|e: wasmtime::Error| e.to_string())?
-        } else {
-            let module =
-                store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
-            if let Ok(serialized) = module.serialize() {
-                std::fs::create_dir_all(cache_dir).ok();
-                store::atomic_write(&cache_path, &serialized);
-            }
-            module
-        }
-    } else {
-        store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?
-    };
+    let module = cached_module(
+        &engine,
+        "module",
+        &result.wasm_bytes,
+        crate::config::get().cache.as_deref(),
+        || store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string()),
+    )?;
     let t4 = std::time::Instant::now();
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
     let t5 = std::time::Instant::now();
