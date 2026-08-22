@@ -659,6 +659,36 @@ which no `assign` repoints (mechanism.md § "A mutated holder poisons its value
 route, not its cell box"). So the env cell of a *reassigned* capture relocates
 exactly as an unreassigned one does; refusing it strands one box per activation.
 
+**A cell's release lands at or after every release routed through that cell.** A
+captured binding whose init allocates owes two releases, and for an env-celled
+binding both are addressed by the same env index. The init value's
+`DecrefValueRegion` loads the cell RAW and lets `result_region_of` unwrap it to
+the content, so it READS the cell's page; the box's `DecrefCellRegion` frees that
+page. The value release therefore has to be emitted first.
+
+Where the two land on one `decref_point` the release order already says so: a
+`DecrefValueRegion` that unwraps a cell reads deepest and sorts ahead of the
+`DecrefCellRegion` that frees the page ([rules.md](rules.md) Rule 4). Across two
+points nothing does, and the two points genuinely diverge. Both regions ride the
+binding's uses through the binding-chain extension, so they start together; the
+value region then takes a second, later bound from its **allocation site's** last
+use, which follows the `def` form's own value out to whatever consumes it. The
+cell region is a phantom placeholder with no allocation site, so it keeps the
+binding-use bound alone. The box is then freed at the capture while the value
+release still has the enclosing statement to reach, and that release unwraps a
+reclaimed page — a stray release of whatever region id the recycled page spells.
+
+The rule is a clamp, run after every other `decref_point` pass: a cell-release
+region's release lands at or after the release of the region a value route reads
+through that cell. That is the region the binding's own binder ALLOCATED — the
+one entry `record_region_slot` makes against the binder's slot, which for an
+env-celled binding is the env index. A region the binding merely NAMES records no
+slot and is released by id, reading no page: `(def @c n)` names its parameter's
+phantom region and allocates nothing, so its box owes that region's release
+nothing. The clamp is a maximum like every other pin, so it only moves the box
+release later, and the point it produces is taken out of any enclosing loop by
+the once-per-activation hoist above.
+
 Named, tolerated edge (not specific to binding cells — true of every mutable
 container): a read consumed *within the same expression* that also removes or
 overwrites the value (`(list x (begin (assign x nil) 1))`) can observe the

@@ -30,6 +30,7 @@ pub(super) fn populate_decref_points(
     break_sites: &[(HirId, Vec<Region>)],
     break_skip_blocks: &[(HirId, Vec<HirId>)],
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
+    binder_init_sites: &HashMap<Binding, Option<HirId>>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let porder = ProgramOrder::new(order);
@@ -66,6 +67,22 @@ pub(super) fn populate_decref_points(
     // inference's binding_regions[b].
     let binding_uses = &du.uses;
 
+    // Every iterative scope with its post-order subtree interval `[low, order]`,
+    // so containment of a HirId is an interval test. Computed once for the three
+    // cell passes that read it — the fn-local container's demise hoist, the env
+    // cell's once-per-activation hoist, and the clamp that follows the value
+    // releases routed through an env cell — and skipped entirely when the unit
+    // has no cell of either kind.
+    let iter_scopes: Vec<(HirId, u32, u32)> =
+        if info.cell_containers.is_empty() && info.cell_release_regions.is_empty() {
+            Vec::new()
+        } else {
+            let low = compute_subtree_low(hir, order);
+            let mut scopes = Vec::new();
+            collect_iter_scopes(hir, order, &low, &mut scopes);
+            scopes
+        };
+
     // ── The fn-local 1-slot container's content drop ──────────────────────
     // The cell's own reference to its current content dies at its last access —
     // the latest of its reads and its writes — with one hoist: a cell CARRIED
@@ -79,10 +96,8 @@ pub(super) fn populate_decref_points(
     // loop (the `(while … (assign acc …)) acc` idiom), which is why the hoist
     // is a max and not a move.
     if !info.cell_containers.is_empty() {
-        let low = compute_subtree_low(hir, order);
-        let mut loops: Vec<(HirId, u32, u32)> = Vec::new();
-        collect_iter_scopes(hir, order, &low, &mut loops);
-        let loop_ids: rustc_hash::FxHashSet<HirId> = loops.iter().map(|&(id, _, _)| id).collect();
+        let loop_ids: rustc_hash::FxHashSet<HirId> =
+            iter_scopes.iter().map(|&(id, _, _)| id).collect();
         // Each scope node by the region it introduces, so a binding's scope node
         // is one lookup through `binding_region`.
         let scope_of_region: HashMap<Region, HirId> =
@@ -251,32 +266,15 @@ pub(super) fn populate_decref_points(
     // release must stay per-iteration, but an env cell's allocation is
     // loop-independent. See docs/impl/region/bindings.md "Env cells in loops:
     // release once per activation, not per iteration".
-    if !info.cell_release_regions.is_empty() {
-        let low = compute_subtree_low(hir, order);
-        let mut iter_scopes: Vec<(HirId, u32, u32)> = Vec::new();
-        collect_iter_scopes(hir, order, &low, &mut iter_scopes);
-        if !iter_scopes.is_empty() {
-            // Snapshot the cell regions first — the loop mutates `region_data`.
-            let cell_regions: Vec<Region> = info.cell_release_regions.iter().copied().collect();
-            for r in cell_regions {
-                let Some(dp) = info.region_data.get(&r).map(|d| d.decref_point) else {
-                    continue;
-                };
-                let dord = ord(dp);
-                // Outermost enclosing loop = the iter-scope whose post-order
-                // subtree interval `[low, order]` contains `dp` with the largest
-                // `order` (an ancestor has the largest post-order index). `None`
-                // if `dp` is in no loop — no hoist needed.
-                let outermost = iter_scopes
-                    .iter()
-                    .filter(|&&(_, lo, hi)| lo <= dord && dord <= hi)
-                    .max_by_key(|&&(_, _, hi)| hi)
-                    .map(|&(id, _, _)| id);
-                if let Some(loop_id) = outermost {
-                    if ord(loop_id) > dord {
-                        info.region_data.get_mut(&r).unwrap().decref_point = loop_id;
-                    }
-                }
+    if !info.cell_release_regions.is_empty() && !iter_scopes.is_empty() {
+        // Snapshot the cell regions first — the loop mutates `region_data`.
+        let cell_regions: Vec<Region> = info.cell_release_regions.iter().copied().collect();
+        for r in cell_regions {
+            let Some(dp) = info.region_data.get(&r).map(|d| d.decref_point) else {
+                continue;
+            };
+            if let Some(loop_id) = post_loop_placement(dp, &iter_scopes, order) {
+                info.region_data.get_mut(&r).unwrap().decref_point = loop_id;
             }
         }
     }
@@ -430,9 +428,120 @@ pub(super) fn populate_decref_points(
         frame_replacing_tail_calls,
     );
 
-    // Runs LAST: it reads each region's FINAL `decref_point` to decide whether
-    // the break jumps over it, so every extension above must already have landed.
+    // Reads each region's FINAL `decref_point` to decide whether the break jumps
+    // over it, so every extension above must already have landed.
     pin_break_skipped_releases(info, hir, order, last_use, break_skip_blocks);
+
+    // Runs after the break window, and so after every pass that can place a
+    // release: what it clamps against is where the value releases FINALLY land.
+    pin_cell_release_after_routed_releases(
+        info,
+        order,
+        &iter_scopes,
+        inference_binding_regions,
+        binder_init_sites,
+    );
+}
+
+/// Clamp each env cell's box release to at-or-after every release routed THROUGH
+/// that cell (docs/impl/region/bindings.md § "A cell's release lands at or after
+/// every release routed through that cell").
+///
+/// A captured binding's init value and the box that holds it are addressed by one
+/// env index. The value's `DecrefValueRegion` loads the box RAW and lets
+/// `result_region_of` unwrap it to the content, so it READS the box's page; the
+/// box's `DecrefCellRegion` frees that page. Emitted in the other order, the
+/// unwrap reads memory the free reclaimed.
+///
+/// At one `decref_point` the release order already states this — a value release
+/// that unwraps a cell reads deepest and sorts ahead of the cell release that
+/// frees the page (`lir::lower::Lowerer::order_releases`,
+/// docs/impl/region/rules.md Rule 4). Across two points nothing does, and the two
+/// points diverge by construction: both regions
+/// ride the binding's uses through the binding-chain extension, then the VALUE
+/// region takes a second, later bound from its allocation site's last use, which
+/// follows the binder's own value out to whatever consumes it. The cell region is
+/// a phantom placeholder with no allocation site, so it keeps the binding-use
+/// bound alone and the box is freed at the capture.
+///
+/// The one region a value route reads through the cell is the region the
+/// binding's own binder ALLOCATED — the entry `record_region_slot` makes against
+/// the binder's slot, which for an env-celled binding is the env index
+/// (`lir::lower::binding::define`). A region the binding merely NAMES records no
+/// slot and takes the release-by-id route, which reads no page: `(def @c n)`
+/// names its parameter's phantom region and allocates nothing, so its box owes
+/// that region's release nothing. A binder whose init allocates nothing, a
+/// binding two binders claim, and a captured-reassigned binding (whose init
+/// reference is dropped off its own register rather than through the cell) are
+/// all absent from the route for the same reason, and are left alone here.
+///
+/// The clamp is a maximum like every other pin, so it can only move the box
+/// release later; the point it produces is then taken out of any enclosing loop,
+/// because an env cell is minted once per activation and its release must fire
+/// once per activation whatever drew it inward.
+fn pin_cell_release_after_routed_releases(
+    info: &mut RegionInfo,
+    order: &HashMap<HirId, u32>,
+    iter_scopes: &[(HirId, u32, u32)],
+    inference_binding_regions: &HashMap<Binding, Vec<Region>>,
+    binder_init_sites: &HashMap<Binding, Option<HirId>>,
+) {
+    if info.cell_release_regions.is_empty() {
+        return;
+    }
+    let porder = ProgramOrder::new(order);
+    // Staged: the scan reads one region's `decref_point` while the pin writes
+    // another's, which one pass over `region_data` cannot borrow.
+    let mut pins: Vec<(Region, HirId)> = Vec::new();
+    for (b, regions) in inference_binding_regions {
+        let cells: Vec<Region> = regions
+            .iter()
+            .copied()
+            .filter(|r| info.cell_release_regions.contains(r))
+            .collect();
+        if cells.is_empty() || info.captured_reassigned_bindings.contains(b) {
+            continue;
+        }
+        let Some(&Some(init)) = binder_init_sites.get(b) else {
+            continue;
+        };
+        let Some(routed) = info.alloc_region.get(&init).copied() else {
+            continue;
+        };
+        let Some(at) = info.region_data.get(&routed).map(|d| d.decref_point) else {
+            continue;
+        };
+        let at = post_loop_placement(at, iter_scopes, order).unwrap_or(at);
+        for c in cells {
+            pins.push((c, at));
+        }
+    }
+    for (cell, at) in pins {
+        info.region_data.pin_to(cell, at, porder);
+    }
+}
+
+/// The node an env cell's release takes instead of `at`, so that it fires once
+/// per activation rather than once per iteration: the OUTERMOST `While`/`Loop`
+/// enclosing `at`, which the lowerer emits after the loop. `None` when `at` is in
+/// no loop, or is already at or past the enclosing loop's own node — a release
+/// anchored at the loop node already runs once per execution of the loop.
+///
+/// An ancestor carries the largest post-order index, so the outermost enclosing
+/// scope is the containing interval with the greatest high end.
+fn post_loop_placement(
+    at: HirId,
+    iter_scopes: &[(HirId, u32, u32)],
+    order: &HashMap<HirId, u32>,
+) -> Option<HirId> {
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let at_ord = ord(at);
+    iter_scopes
+        .iter()
+        .filter(|&&(_, lo, hi)| lo <= at_ord && at_ord <= hi)
+        .max_by_key(|&&(_, _, hi)| hi)
+        .map(|&(id, _, _)| id)
+        .filter(|&id| ord(id) > at_ord)
 }
 
 /// Re-anchor a release that landed inside one arm of a branch onto the branch.
