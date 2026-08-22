@@ -512,3 +512,103 @@ fn letrec_init_does_not_overwrite_destructure_binding_regions() {
         r_covers,
     );
 }
+
+/// The captured `def` inside a lambda: `p` is env-celled, and the closure that
+/// captures it makes the capture `p`'s last binding-use. Its init is a CALL, so
+/// the init owns a `call_result` region whose release is value-routed THROUGH
+/// the cell (`LoadCaptureRaw` + `DecrefValueRegion`, which unwraps the box).
+const CAPTURED_DEF_IN_LAMBDA: &str = "((fn [] \
+     (def p (f 1)) \
+     (let [r (fn [] (g p))] :built)))";
+
+/// The env-celled binding of `CAPTURED_DEF_IN_LAMBDA`: the `Define` under a
+/// `Lambda` whose binding needs a capture cell.
+fn captured_define_binding(hir: &Hir, arena: &BindingArena) -> Option<Binding> {
+    fn walk(h: &Hir, arena: &BindingArena, in_lambda: bool) -> Option<Binding> {
+        let inner = in_lambda || matches!(&h.kind, HirKind::Lambda { .. });
+        if in_lambda {
+            if let HirKind::Define { binding, .. } = &h.kind {
+                if arena.get(*binding).needs_capture() {
+                    return Some(*binding);
+                }
+            }
+        }
+        let mut found = None;
+        h.for_each_child(|c| {
+            if found.is_none() {
+                found = walk(c, arena, inner);
+            }
+        });
+        found
+    }
+    walk(hir, arena, false)
+}
+
+#[test]
+fn a_cell_release_lands_at_or_after_the_release_routed_through_it() {
+    // A value release routed through an env cell READS the cell's page: it
+    // loads the box raw and `result_region_of` unwraps it to the content. The
+    // cell's own `DecrefCellRegion` FREES that page. So the cell's release must
+    // be placed at or after every such value release
+    // (docs/impl/region/bindings.md § "A cell's release lands at or after every
+    // release routed through that cell").
+    //
+    // The counter-factual this pins: both regions ride the binding's uses, so
+    // the binding-chain extension gives them the same point — but the VALUE
+    // region takes a second, later bound from its allocation site's last use
+    // (the `def` form's own value flows out to the enclosing `let`), which the
+    // phantom cell placeholder has no allocation site to receive. Without the
+    // clamp the cell dies at the capture and the value release then unwraps a
+    // reclaimed page.
+    let (hir, arena, _symbols) = crate::hir::testkit::HirFixture::new()
+        .stubs(crate::hir::testkit::STUBS_RETURNING_ARGS)
+        .build(CAPTURED_DEF_IN_LAMBDA);
+    let info = analyze_regions(&hir, &arena);
+    let b =
+        captured_define_binding(&hir, &arena).expect("expected a captured `def` inside the lambda");
+    let regions = info
+        .binding_source_regions
+        .get(&b)
+        .cloned()
+        .unwrap_or_default();
+    let cells: Vec<_> = regions
+        .iter()
+        .copied()
+        .filter(|r| info.cell_release_regions.contains(r))
+        .collect();
+    let routed: Vec<_> = regions
+        .iter()
+        .copied()
+        .filter(|r| info.call_result_regions.contains(r) && !info.cell_release_regions.contains(r))
+        .collect();
+    assert!(
+        !cells.is_empty(),
+        "the captured `def` must own an env-cell placeholder region; \
+         binding_source_regions={regions:?} — if the walk changed, update the \
+         shape so this test keeps biting",
+    );
+    assert!(
+        !routed.is_empty(),
+        "the captured `def`'s init must own a call-result region released \
+         through the cell; binding_source_regions={regions:?} — if the walk \
+         changed, update the shape so this test keeps biting",
+    );
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    for cell in &cells {
+        let cell_dp = info.region_data[cell].decref_point;
+        for value in &routed {
+            let value_dp = info.region_data[value].decref_point;
+            assert!(
+                ord(cell_dp) >= ord(value_dp),
+                "cell region r{} is released at @{} — BEFORE the value release \
+                 of r{} at @{}, which unwraps that very cell. The box's free \
+                 reclaims the page the unwrap reads.",
+                cell.0,
+                cell_dp.0,
+                value.0,
+                value_dp.0,
+            );
+        }
+    }
+}
