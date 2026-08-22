@@ -190,7 +190,7 @@ pub(crate) fn prim_read_lines(
 // Declarative primitive definitions for file I/O operations.
 primitive! {
     "file/read" => prim_slurp {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Read entire file as a string",
         params: &["path"],
@@ -200,7 +200,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/write" => prim_spit {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(2),
         doc: "Write string content to a file (overwrites if exists)",
         params: &["path", "content"],
@@ -210,7 +210,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/append" => prim_append_file {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(2),
         doc: "Append string content to a file",
         params: &["path", "content"],
@@ -220,7 +220,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/delete" => prim_delete_file {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Delete a file",
         params: &["path"],
@@ -230,7 +230,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/delete-dir" => prim_delete_directory {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Delete a directory (must be empty)",
         params: &["path"],
@@ -240,7 +240,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/delete-dir-all" => prim_delete_directory_all {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Delete a directory and everything under it (need not be empty)",
         params: &["path"],
@@ -250,7 +250,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/mktempdir" => prim_make_temp_directory {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(0),
         doc: "Create a uniquely-named directory under the platform temp root \
               (TMPDIR on Unix, %TEMP% on Windows) and return its path",
@@ -261,7 +261,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/mkdir" => prim_create_directory {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Create a directory",
         params: &["path"],
@@ -271,7 +271,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/mkdir-all" => prim_create_directory_all {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Create a directory and all parent directories",
         params: &["path"],
@@ -281,7 +281,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/rename" => prim_rename_file {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(2),
         doc: "Rename a file",
         params: &["old-path", "new-path"],
@@ -291,7 +291,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/copy" => prim_copy_file {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(2),
         doc: "Copy a file",
         params: &["src", "dst"],
@@ -301,7 +301,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/size" => prim_file_size {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Get file size in bytes",
         params: &["path"],
@@ -311,7 +311,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/stat" => prim_file_stat {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Get filesystem metadata as a struct (follows symlinks)",
         params: &["path"],
@@ -320,7 +320,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/lstat" => prim_file_lstat {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Get filesystem metadata as a struct (does not follow symlinks)",
         params: &["path"],
@@ -329,7 +329,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/ls" => prim_list_directory {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "List directory contents",
         params: &["path"],
@@ -339,7 +339,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/lines" => prim_read_lines {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Read lines from a file and return as a list of strings",
         params: &["path"],

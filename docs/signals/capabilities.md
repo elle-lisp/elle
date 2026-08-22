@@ -30,20 +30,58 @@ can't do. They're independent:
 
 ## Deniable capabilities
 
-The following signal keywords can be denied:
+Every signal bit is a capability bit. A fiber's `:deny` set is tested
+against the bits a primitive *declares*, so any bit a primitive declares
+is one a parent can withhold. Some bits also drive dispatch — `:io`
+routes a request through the scheduler, `:yield` suspends — and some do
+no dispatch work at all. That distinction belongs to the VM. It does not
+change what a mask can deny.
 
-| Keyword | Bit | Effect when denied |
-|---------|-----|--------------------|
-| `:error` | 0 | Blocks primitives that may error (~66% of all) |
-| `:yield` | 1 | Blocks cooperative suspension |
-| `:debug` | 2 | Blocks breakpoints/tracing |
-| `:ffi` | 4 | Blocks foreign function calls |
-| `:halt` | 8 | Blocks VM termination |
-| `:io` | 9 | Blocks I/O operations |
-| `:exec` | 11 | Blocks subprocess execution |
+| Keyword | Bit | Effect when denied | Dispatch |
+|---------|-----|--------------------|----------|
+| `:error` | 0 | Blocks primitives that may error (~66% of all) | yes |
+| `:yield` | 1 | Blocks cooperative suspension | yes |
+| `:debug` | 2 | Blocks breakpoints/tracing | yes |
+| `:ffi` | 4 | Blocks foreign function calls | no |
+| `:halt` | 8 | Blocks VM termination | yes |
+| `:io` | 9 | Blocks operations that reach the I/O scheduler | yes |
+| `:exec` | 11 | Blocks subprocess execution | no |
+| `:gpu` | 15 | Blocks GPU dispatch | no |
+| `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
+| `:fs` | 17 | Blocks filesystem access | no |
 
 VM-internal signals (resume, propagate, abort, query, terminal,
 switch, wait) cannot be denied.
+
+## Filesystem authority is `:fs`, not `:io`
+
+`:io` means "this request reaches the I/O scheduler". It is a dispatch
+bit that a fiber can also deny, and it covers ports, sockets, and the
+subprocess pipes — everything that suspends into the event loop.
+
+The filesystem primitives are synchronous `std::fs` calls. They never
+reach the scheduler, so they carry no `:io`, and denying `:io` never
+stopped them. `:fs` is the bit that means "resolves a filesystem path",
+and it is the one to deny to close the disk off:
+
+```text
+(fiber/new body |:error| :deny |:fs|)
+```
+
+The two bits are independent on purpose. A worker can keep `:io` — so it
+still writes to stdout and talks to the network — while the disk is
+denied and mediated by its parent. Deny both to close off all of it.
+
+`port/open` carries both. It resolves a path (`:fs`) and it opens that
+path through the scheduler (`:io`), so either denial blocks it. Without
+the `:fs` bit on it, a fiber denied `:fs` alone could open a port on any
+path and read it, which is the same authority `file/read` grants.
+
+A primitive carries `:fs` when its implementation resolves a filesystem
+path, decided by reading the implementation and not the name. `path/join`,
+`path/parent`, and `path/normalize` are string operations and do not carry
+it. `path/exists?`, `path/canonicalize`, and `path/cwd` reach the
+filesystem and do.
 
 ## What happens on denial
 
@@ -76,11 +114,11 @@ capability space that is NOT withheld:
 
 ```lisp
 (fiber/caps)
-# => |:error :yield :debug :ffi :halt :io :exec|
+# => |:debug :error :exec :ffi :fs :gpu :halt :io :os-signal :yield|
 
-(let [f (fiber/new (fn [] 42) |:error| :deny |:io :ffi|)]
+(let [f (fiber/new (fn [] 42) |:error| :deny |:fs :ffi|)]
   (fiber/caps f))
-# => |:error :yield :debug :halt :exec|
+# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
 ```
 
 ## Transitivity
@@ -91,15 +129,15 @@ A child inherits its parent's restrictions plus any `:deny` of its own:
 ```lisp
 (let [outer (fiber/new
                (fn []
-                 # inner denies :ffi, inherits :io denial from outer
+                 # inner denies :ffi, inherits :fs denial from outer
                  (let [inner (fiber/new (fn [] (fiber/caps))
                                         |:error| :deny |:ffi|)]
                    (fiber/resume inner)))
                |:error|
-               :deny |:io|)]
+               :deny |:fs|)]
   (fiber/resume outer))
-# => |:error :yield :debug :halt :exec|
-# (missing :io from parent, missing :ffi from own deny)
+# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
+# (missing :fs from parent, missing :ffi from own deny)
 ```
 
 A child can never gain capabilities its parent lacks. Requesting to
@@ -133,9 +171,13 @@ blocks `length` but not `+`.
 ## Examples
 
 ```text
-# Pure computation sandbox — no IO, no FFI, no subprocess
-(let [f (fiber/new compute |:io :ffi :exec :error|
-                    :deny |:io :ffi :exec|)]
+# Pure computation sandbox — no IO, no filesystem, no FFI, no subprocess
+(let [f (fiber/new compute |:io :fs :ffi :exec :error|
+                    :deny |:io :fs :ffi :exec|)]
+  (fiber/resume f))
+
+# Mediated worker — keeps stdout and the network, mediates the disk
+(let [f (fiber/new worker |:fs :error| :deny |:fs|)]
   (fiber/resume f))
 
 # Capability-check a plugin before running it
