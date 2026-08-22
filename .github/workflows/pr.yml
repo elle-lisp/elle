@@ -79,6 +79,32 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  # The documentation site is generated from docs/*.md plus the Elle sources
+  # under src/, so it breaks on a renamed heading or a moved source file as
+  # readily as on a code change. Its only other run is the push-to-main job
+  # that publishes the site, which discovers such a break after the merge
+  # rather than before it. This job is that run, minus the publish.
+  #
+  # It carries no `if: needs.changes.outputs.source` gate on purpose: the
+  # filter reads `source` off .rs/.lisp/Cargo/Makefile paths, so a PR that
+  # touches only Markdown — exactly the PR most able to break the generator —
+  # would skip the one job that checks it.
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Build Elle
+        run: cargo build --release
+      - name: Generate pipeline diagram
+        run: make docs
+      - name: Generate Elle documentation site
+        run: ./target/release/elle demos/docgen/generate.lisp
+
   tests:
     name: VM+JIT Tests
     needs: changes

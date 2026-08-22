@@ -1,12 +1,12 @@
 use super::{
-    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO, SIG_OS_SIGNAL,
-    SIG_WAIT, SIG_YIELD,
+    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO,
+    SIG_OS_SIGNAL, SIG_WAIT, SIG_YIELD,
 };
 /// Signal registry for mapping signal keywords to bit positions.
 ///
 /// The registry maintains a global mapping of signal keywords (`:error`, `:yield`, etc.)
-/// to their corresponding bit positions. Built-in signals occupy bits 0-15,
-/// bits 16-31 are runtime-reserved, and user-defined signals are allocated
+/// to their corresponding bit positions. Built-in signals occupy bits 0-17,
+/// bits 18-31 are runtime-reserved, and user-defined signals are allocated
 /// from bits 32-63.
 use std::sync::{Mutex, OnceLock};
 
@@ -52,6 +52,9 @@ impl SignalRegistry {
     /// - `:exec` at bit 11
     /// - `:fuel` at bit 12
     /// - `:wait` at bit 14
+    /// - `:gpu` at bit 15
+    /// - `:os-signal` at bit 16
+    /// - `:fs` at bit 17
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
@@ -66,6 +69,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("wait", SIG_WAIT.trailing_zeros());
         let _ = registry.register_builtin("gpu", SIG_GPU.trailing_zeros());
         let _ = registry.register_builtin("os-signal", SIG_OS_SIGNAL.trailing_zeros());
+        let _ = registry.register_builtin("fs", SIG_FS.trailing_zeros());
         registry
     }
 

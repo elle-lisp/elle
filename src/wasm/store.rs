@@ -64,6 +64,54 @@ impl wasmtime::CacheStore for DiskCache {
     }
 }
 
+/// Where `--cache` keeps the compiled artifact for `wasm_bytes`, or `None`
+/// when no cache directory is configured. `kind` separates the two module
+/// shapes that share the directory ("closure", "module").
+pub(crate) fn cache_path_for(kind: &str, wasm_bytes: &[u8]) -> Option<std::path::PathBuf> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let cache_dir = crate::config::get().cache.as_ref()?;
+    let mut hasher = DefaultHasher::new();
+    wasm_bytes.hash(&mut hasher);
+    Some(std::path::PathBuf::from(cache_dir).join(format!("{kind}_{:016x}.bin", hasher.finish())))
+}
+
+/// Compile `wasm_bytes`, reusing the artifact at `cache_path` when one is
+/// there and this wasmtime can load it.
+///
+/// A cache read that does not yield a usable module is a MISS: the name records
+/// a hash of the WASM bytes and nothing else, while `Module::deserialize`
+/// accepts an artifact only from the wasmtime that wrote it. Compiling fresh
+/// and overwriting repairs the entry in place, which is what keeps a wasmtime
+/// upgrade from stranding every warm cache
+/// (docs/impl/wasm.md § "The module cache is a cache").
+pub(crate) fn cached_or_compile(
+    engine: &Engine,
+    wasm_bytes: &[u8],
+    cache_path: Option<&std::path::Path>,
+) -> Result<Module> {
+    let Some(path) = cache_path else {
+        return Module::new(engine, wasm_bytes);
+    };
+
+    if let Ok(bytes) = std::fs::read(path) {
+        // SAFETY: the cache directory holds artifacts this process wrote.
+        if let Ok(module) = unsafe { Module::deserialize(engine, &bytes) } {
+            return Ok(module);
+        }
+    }
+
+    let module = Module::new(engine, wasm_bytes)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    if let Ok(serialized) = module.serialize() {
+        atomic_write(path, &serialized);
+    }
+    Ok(module)
+}
+
 /// Write data to a file atomically: write to a temp file in the same
 /// directory, then rename into place. Prevents readers from seeing
 /// partial writes.

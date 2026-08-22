@@ -146,7 +146,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "watch-add" => prim_watch_add {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Range(2, 3),
         doc: "Add a path to the watcher. Recursive by default. Optional third arg: {:recursive false}.",
         params: &["watcher", "path", "opts?"],
@@ -155,7 +155,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "watch-remove" => prim_watch_remove {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(2),
         doc: "Remove a watched path from the watcher.",
         params: &["watcher", "path"],

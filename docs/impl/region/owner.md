@@ -237,6 +237,29 @@ parked fiber's accounting symmetric with its unpark:
   theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
   (`tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp`);
   `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler witness.
+- **A propagated signal is a fresh park, and owes its own delivery reference.**
+  `fiber/propagate` installs the child's parked payload as the propagating fiber's own
+  `signal`. That fiber's resumer then reads the payload as its resume result and runs the
+  compiler-emitted release on it — the same consumer an `Emit` funds with its `EmitEscape`
+  mint. Re-parking a value the child already parked mints nothing, so that release consumes
+  a reference the propagate never took. One propagate hides the theft: an error unwind runs
+  no continuation, so the raising body's own reference is stranded and unclaimed, and the
+  release eats that instead. Two propagates do not, nor does a native error, whose payload
+  reaches `fiber.signal` with no body reference at all. The count then runs one short of the
+  recorded `fiber → payload` edges, and the last fiber's free cascade reclaims the payload
+  while the caller still holds it. So the propagate mints one itself
+  (`EscapeSite::PropagateEscape`), through the one `take_propagated_signal` helper the
+  call-, tail-, and JIT-position handlers share — all three run the same install, so all
+  three owe the same reference. Three cases take no mint. A NON-TERMINAL signal, because the
+  fiber runs again and the resume path proper governs the payload — step 6a excludes the same
+  set from its park retain, and the delivery follows the park. `SIG_HALT`, for the reason
+  `handle_emit` skips it: a halted fiber is promoted to `:dead` and `fiber/resume` refuses
+  it, so that delivery has no consumer and a retain would strand the payload. And the
+  no-signal fallback, whose error `escaping_error` builds in a fresh region already carrying
+  the reference the consumer releases — only a BORROWED payload is unfunded. The WASM tier's
+  `handle_fiber_propagate` is not this shape: it never installs into `fiber.signal`, and
+  returns the child's `(bits, value)` to its caller, whose park runs through `install_signal`
+  instead. Pinned by `tests/elle/region-fiber-propagate-uaf.lisp`.
 - **A resume value crosses counted, or not at all.** The delivery going *out* of a park
   is counted (above); the value coming *back* in is not, and by the same accounting must
   be. `VM::resume_suspended` pushes the resume value onto the parked frame's stack and

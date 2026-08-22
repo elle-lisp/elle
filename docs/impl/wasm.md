@@ -356,6 +356,28 @@ elle --wasm=11 tests/elle/wasm-tier.lisp
 cargo test wasm
 ```
 
+## The module cache is a cache
+
+`--cache=path` stores each compiled module as a serialized wasmtime artifact
+named for a hash of the WASM bytes it was compiled from. Those bytes are the
+only thing the name captures, and they are not the whole of what the artifact
+depends on: `Module::deserialize` accepts an artifact only from the wasmtime
+that wrote it, and refuses one written by any other version.
+
+So a read that yields no usable module is a MISS, not an error. The compiler
+falls back to compiling the WASM fresh and overwrites the entry, which repairs
+the cache in place. The same fallback covers every other reason the bytes on
+disk may be unusable — a truncated write, a file another tool put there, a
+host whose CPU features no longer match.
+
+The alternative is to fail the run, and it fails it for good: nothing in the
+program deletes the entry, so every later run reads the same unusable bytes
+and stops the same way. An upgrade would strand every user holding a warm
+cache until they cleared it by hand, and the error naming a wasmtime version
+gives no hint that a directory is what needs deleting. A cache that cannot
+miss is not a cache. `wasm::tests::cache_entry_that_cannot_be_deserialized_recompiles`
+pins the fallback on both cached paths.
+
 ## CLI flags
 
 | Flag | Effect |

@@ -322,8 +322,9 @@ primitive! {
         example: "(path/normalize \"./a/../b\")",
         effect: RegionEffect::Fresh,
     }
+    // Reads the cwd (`std::env::current_dir`) to resolve a relative path.
     "path/absolute" => prim_path_absolute {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Compute absolute path (does not require path to exist)",
         params: &["path"],
@@ -332,7 +333,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "path/canonicalize" => prim_path_canonicalize {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Resolve path through filesystem (symlinks resolved, must exist)",
         params: &["path"],
@@ -377,14 +378,14 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "path/cwd" => prim_path_cwd {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         doc: "Get current working directory",
         category: "path",
         example: "(path/cwd)",
         effect: RegionEffect::Fresh,
     }
     "path/exists?" => prim_path_exists {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Check if path exists",
         params: &["path"],
@@ -394,7 +395,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "path/file?" => prim_path_is_file {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a regular file",
         params: &["path"],
@@ -404,7 +405,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "path/dir?" => prim_path_is_dir {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a directory",
         params: &["path"],

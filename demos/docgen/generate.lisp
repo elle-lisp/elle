@@ -8,7 +8,16 @@
 (def @docs-root "docs")
 (def @output-dir "site")
 (def @docs-dir "demos/docgen/docs")
-(def @github-base "https://github.com/anthropics/elle/blob/main")
+# The Elle sources whose comments and defns become the API reference.
+# Every path here is resolved against the repository root, which is where
+# the generator is invoked from.
+(def @src-dir "src")
+(def @prelude-path (path/join src-dir "prelude.lisp"))
+(def @stdlib-path (path/join src-dir "stdlib.lisp"))
+# Every stdlib entry carries a source link built on this. Cargo.toml's
+# `repository` is the canonical spelling of the URL; tests/integration/paths.rs
+# pins the two together.
+(def @github-base "https://github.com/elle-lisp/elle/blob/main")
 
 # ── Imports ────────────────────────────────────────────────────────
 
@@ -218,7 +227,7 @@
 
 (defn generate-prelude-html []
   "Generate HTML for prelude macros."
-  (let [source (slurp "prelude.lisp")]
+  (let [source (slurp prelude-path)]
     (def @html @"")
     (push html
           "<p>Macros loaded automatically before user code. These expand at compile time.</p>\n")
@@ -268,8 +277,8 @@
 
 (defn generate-stdlib-html []
   "Generate HTML for stdlib functions with signal profiles."
-  (let* [source (slurp "stdlib.lisp")
-         analysis (compile/analyze source {:file "stdlib.lisp"})
+  (let* [source (slurp stdlib-path)
+         analysis (compile/analyze source {:file stdlib-path})
          syms (compile/symbols analysis)
          fn-syms (filter (fn [s] (= (get s :kind) :function)) syms)
          lines (string/split source "\n")]
@@ -328,7 +337,7 @@
                    desc (or (get fn-comments fn-name) "")
                    line-num (get fn-lines fn-name)
                    source-link (when line-num
-                                 (string github-base "/stdlib.lisp#L"
+                                 (string github-base "/" stdlib-path "#L"
                                  (string line-num)))]
               (push html "<div class=\"api-entry\">")
               (push html
