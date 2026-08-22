@@ -254,6 +254,13 @@ impl PendingTable {
     /// Mark every operation still in flight as having no reader. Backend
     /// teardown: the fibers are gone and the heap that carried their values may
     /// be too, so the drain that follows must retire rather than cook.
+    ///
+    /// Only `quiesce_pending` calls this, and only the ring has a teardown
+    /// drain, so the allow is narrowed to the platforms that compile that path
+    /// out rather than a blanket `dead_code`. The three below are the same
+    /// story: `restore` is the ring's resubmission, `len` and `ids` are what the
+    /// teardown loop reads.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn cancel_all(&mut self) {
         self.cancelled.extend(self.ops.keys().copied());
     }
@@ -261,6 +268,7 @@ impl PendingTable {
     /// Put a resubmitted operation's entry back. The operation is the same one
     /// — a read that needs another syscall to reach its newline, its count, or
     /// its EOF — so this is one operation's entry moving, not a new submission.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn restore(&mut self, id: SubmissionId, op: PendingOp) {
         self.ops.insert(id, op);
     }
@@ -269,12 +277,14 @@ impl PendingTable {
         self.ops.is_empty()
     }
 
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn len(&self) -> usize {
         self.ops.len()
     }
 
     /// The ids in flight. Callers that submit while iterating take this rather
     /// than borrowing the table.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn ids(&self) -> Vec<SubmissionId> {
         self.ops.keys().copied().collect()
     }
