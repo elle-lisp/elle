@@ -663,6 +663,21 @@ fn pin_branch_arm_releases(
     for (&alloc_id, &r) in &info.alloc_region {
         region_anchors.entry(r).or_default().push(ord(alloc_id));
     }
+    // The window's per-region loop was O(branches × regions) — every branch
+    // re-scanned every region even though only regions whose `decref_point`
+    // lands inside the branch's arms can move (the whole-stdlib branch window
+    // iterates ≈7M times to move 470). Index the regions by post-order
+    // `decref_point` ONCE, and each branch scans only the arm-interval slices
+    // (binary-searched) instead of the whole map. `by_dord` stays ordered as
+    // moves raise a region's `decref_point` (a bubble-up per move), so later
+    // branches — processed innermost-outward — see the same post-move values
+    // the old loop did.
+    let mut by_dord: Vec<(u32, Region)> = info
+        .region_data
+        .iter()
+        .map(|(&r, d)| (ord(d.decref_point), r))
+        .collect();
+    by_dord.sort_unstable_by_key(|&(o, _)| o);
 
     // ── The admission: the frame must be the region's only holder ────────────
     //
@@ -766,58 +781,124 @@ fn pin_branch_arm_releases(
             .copied()
             .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
             .collect();
-        for (&r, d) in info.region_data.iter_mut() {
-            if excluded.contains(&r) {
-                continue;
+        // The exemption `arm_exits.any(|e| e.callee.contains(r))` below only asks
+        // whether r is in ANY exiting arm's callee set — a union, queried per region.
+        // Merge the per-arm sets once per branch so the per-region test is O(1)
+        // instead of O(arm_exits) hash lookups (the whole-stdlib branch window
+        // iterates branches × regions ≈ 7M times).
+        let callee_union: rustc_hash::FxHashSet<Region> = arm_exits
+            .iter()
+            .flat_map(|e| e.callee.iter().copied())
+            .collect();
+        // Same for the barrier-interval test: disjoint-merge the half-open
+        // intervals once, then answer `any(lo <= dord < hi)` with a binary search
+        // instead of scanning every barrier per region. Overlapping intervals
+        // merge; adjacent ones ([1,5) and [5,8)) do NOT — 5 is in neither.
+        let mut sorted_barriers = inner_barriers;
+        sorted_barriers.sort_unstable_by_key(|&(lo, _)| lo);
+        let mut merged_barriers: Vec<(u32, u32)> = Vec::new();
+        for &(lo, hi) in &sorted_barriers {
+            if let Some(last) = merged_barriers.last_mut() {
+                if lo < last.1 {
+                    if hi > last.1 {
+                        last.1 = hi;
+                    }
+                    continue;
+                }
             }
-            if arm_exits_frame && !value_routed.contains(&r) {
-                continue;
+            merged_barriers.push((lo, hi));
+        }
+        let in_barrier = |dord: u32| -> bool {
+            let i = merged_barriers.partition_point(|&(lo, _)| lo <= dord);
+            i > 0 && merged_barriers[i - 1].1 > dord
+        };
+        // Merge the arms' closed intervals (`lo <= dord <= hi`) so each region in
+        // the branch's union is scanned once, then binary-search the `by_dord`
+        // index for each merged interval instead of scanning every region.
+        let mut arm_ivs: Vec<(u32, u32)> = br.arms.iter().map(|a| (a.lo, a.hi)).collect();
+        arm_ivs.sort_unstable_by_key(|&(lo, _)| lo);
+        let mut merged_arms: Vec<(u32, u32)> = Vec::new();
+        for (lo, hi) in arm_ivs {
+            if let Some(last) = merged_arms.last_mut() {
+                if lo <= last.1 {
+                    if hi > last.1 {
+                        last.1 = hi;
+                    }
+                    continue;
+                }
             }
-            // A region the exiting arm's call names as its CALLEE is exempt from the
-            // relocation, so no replica reaches that arm — and what stands in for the
-            // release there is the deferred callee channel, which is keyed on where
-            // the release SITS (`deferred_release_slot`; mechanism.md § "What the
-            // exemption keeps, a channel must still run"). Moving it to the merge
-            // takes it out of that channel's reach and leaves the arm with nothing,
-            // so such a region keeps its in-arm release. An ARGUMENT's exemption is
-            // the opposite story — the release the arm never runs IS the ownership
-            // move, and the callee's owned-parameter release consumes it — so an
-            // argument is no refusal here (rules.md Rule 5).
-            if arm_exits.iter().any(|e| e.callee.contains(&r)) {
-                continue;
+            merged_arms.push((lo, hi));
+        }
+        for &(lo, hi) in &merged_arms {
+            let start = by_dord.partition_point(|&(o, _)| o < lo);
+            let end = by_dord.partition_point(|&(o, _)| o <= hi);
+            let mut i = start;
+            while i < end {
+                let (dord, r) = by_dord[i];
+                if excluded.contains(&r) {
+                    i += 1;
+                    continue;
+                }
+                if arm_exits_frame && !value_routed.contains(&r) {
+                    i += 1;
+                    continue;
+                }
+                // A region the exiting arm's call names as its CALLEE is exempt from the
+                // relocation, so no replica reaches that arm — and what stands in for the
+                // release there is the deferred callee channel, which is keyed on where
+                // the release SITS (`deferred_release_slot`; mechanism.md § "What the
+                // exemption keeps, a channel must still run"). Moving it to the merge
+                // takes it out of that channel's reach and leaves the arm with nothing,
+                // so such a region keeps its in-arm release. An ARGUMENT's exemption is
+                // the opposite story — the release the arm never runs IS the ownership
+                // move, and the callee's owned-parameter release consumes it — so an
+                // argument is no refusal here (rules.md Rule 5).
+                if callee_union.contains(&r) {
+                    i += 1;
+                    continue;
+                }
+                if dord >= anchor_ord {
+                    i += 1;
+                    continue;
+                }
+                // A boundary is the scope's BODY, not the scope's own node: the
+                // lowerer emits a node's releases after it finishes lowering that
+                // node, so a `decref_point` AT the `While`/`Loop` lands after the loop
+                // and runs once per execution of it — the count the merge label is
+                // reached with. A `Lambda` node reads the same way; only its body runs
+                // in another activation. The interval is therefore half-open on the
+                // high end, which is what admits a live-in region a nested loop merely
+                // READS: the loop-node extension anchors every such read at the loop
+                // node (`hir/liveness/lastuse`), so the closed reading would leave the
+                // branch's only release under the looping arm.
+                if in_barrier(dord) {
+                    i += 1;
+                    continue;
+                }
+                let live_in = region_anchors
+                    .get(&r)
+                    .is_some_and(|a| a.iter().all(|&o| o < br.node_lo || o > br.node_hi));
+                if !live_in {
+                    i += 1;
+                    continue;
+                }
+                // The window moves only where the release is EMITTED. `lifetime_point`
+                // stays at the structural last use, so the ownership and merge cuts —
+                // whose post-dominance obligations are lifetime questions — keep
+                // reading the region's real lifetime and not this anchor
+                // (`RegionData::lifetime_point`).
+                info.region_data.get_mut(&r).unwrap().decref_point = anchor;
+                by_dord[i].0 = anchor_ord;
+                // Bubble the moved entry up (its `decref_point` only rises) so the
+                // index stays ordered for later branches; the element now at `i`
+                // may itself be an unprocessed in-interval region, so do not
+                // advance `i` on a move.
+                let mut j = i;
+                while j + 1 < by_dord.len() && by_dord[j].0 > by_dord[j + 1].0 {
+                    by_dord.swap(j, j + 1);
+                    j += 1;
+                }
             }
-            let dord = ord(d.decref_point);
-            if dord >= anchor_ord || !br.arms.iter().any(|a| a.lo <= dord && dord <= a.hi) {
-                continue;
-            }
-            // A boundary is the scope's BODY, not the scope's own node: the
-            // lowerer emits a node's releases after it finishes lowering that
-            // node, so a `decref_point` AT the `While`/`Loop` lands after the loop
-            // and runs once per execution of it — the count the merge label is
-            // reached with. A `Lambda` node reads the same way; only its body runs
-            // in another activation. The interval is therefore half-open on the
-            // high end, which is what admits a live-in region a nested loop merely
-            // READS: the loop-node extension anchors every such read at the loop
-            // node (`hir/liveness/lastuse`), so the closed reading would leave the
-            // branch's only release under the looping arm.
-            if inner_barriers
-                .iter()
-                .any(|&(lo, hi)| lo <= dord && dord < hi)
-            {
-                continue;
-            }
-            let live_in = region_anchors
-                .get(&r)
-                .is_some_and(|a| a.iter().all(|&o| o < br.node_lo || o > br.node_hi));
-            if !live_in {
-                continue;
-            }
-            // The window moves only where the release is EMITTED. `lifetime_point`
-            // stays at the structural last use, so the ownership and merge cuts —
-            // whose post-dominance obligations are lifetime questions — keep
-            // reading the region's real lifetime and not this anchor
-            // (`RegionData::lifetime_point`).
-            d.decref_point = anchor;
         }
     }
 }
