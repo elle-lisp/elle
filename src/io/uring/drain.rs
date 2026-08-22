@@ -41,12 +41,13 @@ fn push_resubmit(
 /// This is the **single** CQE processing path — used by both poll (non-blocking)
 /// and wait (after blocking). Handles:
 /// - Timeout CQE filtering (high-bit user_data tag)
+/// - Cancelled submissions (retired rather than cooked)
 /// - Connect fd cleanup on error
 /// - PortOp-aware buffer extraction (only reads buffer for stream reads)
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn drain_cqes(
     ring: &mut io_uring::IoUring,
-    pending: &mut HashMap<SubmissionId, PendingOp>,
+    pending: &mut PendingTable,
     buffer_pool: &mut BufferPool,
     fd_states: &mut HashMap<PortKey, FdState>,
     completions: &mut VecDeque<Completion>,
@@ -85,7 +86,16 @@ pub(crate) fn drain_cqes(
         }
 
         let id = SubmissionId::from_raw(user_data);
-        if let Some(mut pending_op) = pending.remove(&id) {
+        // A cancelled submission is retired here rather than cooked. Everything
+        // below reads what the operation held — the port, the process handle,
+        // the fiber's pre-allocated buffer — and the fiber that owned all three
+        // is gone by the time its cancel is issued.
+        let taken = pending.take(id);
+        if let Taken::Cancelled(op) = taken {
+            op.retire(result_code, buffer_pool);
+            continue;
+        }
+        if let Taken::Live(mut pending_op) = taken {
             // Connect: on failure, close the pre-created socket.
             if let PendingOp::Connect {
                 ref mut connect_fd, ..
@@ -430,7 +440,7 @@ pub(crate) fn drain_cqes(
                 .build()
                 .user_data(id.as_u64())
             };
-            pending.insert(id, pending_op);
+            pending.restore(id, pending_op);
             link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         } else {
             // `ReadAll` lands here: it has no pre-allocated fiber buffer to
@@ -457,7 +467,7 @@ pub(crate) fn drain_cqes(
                 *buffer_handle = Some(new_buf);
                 *filled = 0;
             }
-            pending.insert(id, pending_op);
+            pending.restore(id, pending_op);
             link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         }
     }
@@ -494,7 +504,7 @@ pub(crate) fn drain_cqes(
         // payload larger than one syscall would otherwise be unbounded from
         // its second chunk on, and a peer that stops reading would hang a
         // write that asked for a timeout.
-        pending.insert(id, pending_op);
+        pending.restore(id, pending_op);
         link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));
     }
 
@@ -506,7 +516,7 @@ pub(crate) fn drain_cqes(
 pub(crate) fn wait_uring(
     ring: &mut io_uring::IoUring,
     timeout: Option<u64>,
-    pending: &mut HashMap<SubmissionId, PendingOp>,
+    pending: &mut PendingTable,
     buffer_pool: &mut BufferPool,
     fd_states: &mut HashMap<PortKey, FdState>,
     completions: &mut VecDeque<Completion>,

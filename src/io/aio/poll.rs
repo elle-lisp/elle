@@ -3,18 +3,19 @@ use super::*;
 impl AsyncBackend {
     /// Cancel a pending I/O operation by submission ID.
     ///
-    /// For io_uring: submits IORING_OP_ASYNC_CANCEL. The original SQE will
-    /// generate a CQE with result = -ECANCELED; the cancel SQE's CQE is
-    /// tagged and skipped by drain_cqes.
+    /// Two halves, and both platforms have both. **Asking the operation to
+    /// stop** is platform-specific: io_uring takes `IORING_OP_ASYNC_CANCEL`
+    /// (its own CQE is high-bit tagged and skipped; the operation's own CQE
+    /// arrives with `-ECANCELED`), while a pool worker is asked through its stop
+    /// pipe (src/io/AGENTS.md § "The stop pipe"). **Marking the id** is shared:
+    /// the operation's completion, whenever it arrives, retires the entry
+    /// instead of building a result nobody would read.
     ///
-    /// For the thread pool: write the operation's stop pipe if it carries one
-    /// (every operation that can wait indefinitely does — see src/io/AGENTS.md
-    /// § "The stop pipe"), and mark the id so its result is dropped when it
-    /// arrives. The `pending` entry stays. The worker's `RawCompletion` then
-    /// still decrements the hub's `in_flight` at the drain site and still
-    /// releases the descriptor the operation named; removing the entry here
-    /// would strand both. We must NOT decrement `in_flight` here — the drain
-    /// site does it, and doing it twice would underflow the combined count.
+    /// The `pending` entry stays either way. The worker's `RawCompletion` still
+    /// decrements the hub's `in_flight` at the drain site and still releases the
+    /// descriptor the operation named; removing the entry here would strand
+    /// both. We must NOT decrement `in_flight` here — the drain site does it,
+    /// and doing it twice would underflow the combined count.
     pub(crate) fn cancel(&self, id: SubmissionId) -> Result<(), String> {
         let mut inner = self.inner.borrow_mut();
         match inner.platform {
@@ -22,13 +23,9 @@ impl AsyncBackend {
             PlatformBackend::Uring(ref mut ring) => {
                 crate::io::uring::submit_uring_cancel(ring, id)?;
             }
-            PlatformBackend::ThreadPool => {
-                inner.hub.stop(id);
-                if inner.pending.contains_key(&id) {
-                    inner.cancelled.insert(id);
-                }
-            }
+            PlatformBackend::ThreadPool => inner.hub.stop(id),
         }
+        inner.pending.mark_cancelled(id);
         Ok(())
     }
 
@@ -68,7 +65,6 @@ impl AsyncBackend {
                 ref mut platform,
                 ref mut hub,
                 ref mut pending,
-                ref mut cancelled,
                 ref mut buffer_pool,
                 ref mut fd_states,
                 ref mut completions,
@@ -118,15 +114,8 @@ impl AsyncBackend {
                                 crate::io::threadpool::RawCompletion::Pool(pc) => pc.id,
                                 crate::io::threadpool::RawCompletion::Stdin(sc) => sc.id,
                             });
-                            let cooked = cook_raw(
-                                rc,
-                                pending,
-                                cancelled,
-                                fd_states,
-                                buffer_pool,
-                                origin_heap,
-                                gen,
-                            );
+                            let cooked =
+                                cook_raw(rc, pending, fd_states, buffer_pool, origin_heap, gen);
                             hub.forget_stop(id);
                             if let Some(c) = cooked {
                                 completions.push_back(c);

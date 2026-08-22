@@ -3,7 +3,7 @@
 //! Uses io_uring on Linux (feature-gated), thread-pool fallback elsewhere.
 
 use crate::io::completion;
-use crate::io::pending::PendingOp;
+use crate::io::pending::{PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
     ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
@@ -35,14 +35,9 @@ struct AsyncBackendInner {
     /// byte stream at cluster boundaries with it, on and off the VM thread.
     unicode_generation: crate::segment::Generation,
     fd_states: HashMap<PortKey, FdState>,
-    pending: HashMap<SubmissionId, PendingOp>,
-    /// Submissions whose result no fiber will receive. The `pending` entry
-    /// stays, so the worker's completion is still matched, counted and
-    /// released; only the cooked value is dropped. Dropping the entry instead
-    /// would strand the submission — the worker it runs on and the descriptor
-    /// it names would never come back. See src/io/AGENTS.md
-    /// § "I/O Cancellation".
-    cancelled: std::collections::HashSet<SubmissionId>,
+    /// The operations in flight, and which of them no fiber will receive a
+    /// result for. See src/io/AGENTS.md § "I/O Cancellation".
+    pending: PendingTable,
     /// Descriptors kept open past their port's close because a submitted
     /// operation still names them. A worker resolves its fd when it runs, so a
     /// number handed back to the OS while an operation holds it can be given
@@ -126,8 +121,7 @@ impl AsyncBackend {
             inner: RefCell::new(AsyncBackendInner {
                 unicode_generation: gen,
                 fd_states: HashMap::new(),
-                pending: HashMap::new(),
-                cancelled: std::collections::HashSet::new(),
+                pending: PendingTable::new(),
                 retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
@@ -160,8 +154,7 @@ impl AsyncBackend {
             inner: RefCell::new(AsyncBackendInner {
                 unicode_generation: crate::config::get().unicode_generation(),
                 fd_states: HashMap::new(),
-                pending: HashMap::new(),
-                cancelled: std::collections::HashSet::new(),
+                pending: PendingTable::new(),
                 retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
@@ -241,7 +234,7 @@ impl AsyncBackend {
     /// the entry is keyed by the id `submit` returned.
     #[cfg(test)]
     pub(crate) fn pending_ids(&self) -> Vec<SubmissionId> {
-        let mut ids: Vec<SubmissionId> = self.inner.borrow().pending.keys().copied().collect();
+        let mut ids = self.inner.borrow().pending.ids();
         ids.sort();
         ids
     }
@@ -309,22 +302,37 @@ impl AsyncBackendInner {
     /// survives this call.
     ///
     /// Ops serviced by the stdin/network channels post no CQE here; they make
-    /// no progress, so we stop after the first pass that neither shrinks
-    /// `pending` nor drains a completion. Those workers copy results through
-    /// channels and never write into a freed pooled buffer, so leaving them is
-    /// safe. The pass count is bounded as a backstop against an op that keeps
-    /// re-submitting (a continuously-readable fd reaped via resubmission).
+    /// no progress, so we stop after the first pass that does not shrink
+    /// `pending`. Those workers copy results through channels and never write
+    /// into a freed pooled buffer, so leaving them is safe. The pass count is
+    /// bounded as a backstop.
+    ///
+    /// Every entry is marked cancelled first, so each CQE retires its entry
+    /// instead of building a result from it. The values a `PendingOp` holds —
+    /// the port, the process handle — live on a heap this teardown may be
+    /// running after, and a read of one is a read of freed memory. That is also
+    /// why the shrink is the whole progress test: no completion is produced
+    /// here for a shrink to be read off.
     #[cfg(target_os = "linux")]
     fn quiesce_pending(&mut self) {
         if !matches!(self.platform, PlatformBackend::Uring(_)) || self.pending.is_empty() {
             return;
         }
+        // Where `drain_cqes` puts what it cooked. Every entry here is marked
+        // cancelled, so it stays empty; it exists because the drain is one
+        // function with one signature.
         let mut sink: VecDeque<Completion> = VecDeque::new();
         let mut passes = 0u32;
         while !self.pending.is_empty() && passes < 64 {
             passes += 1;
             let before = self.pending.len();
-            let ids: Vec<SubmissionId> = self.pending.keys().copied().collect();
+            let ids: Vec<SubmissionId> = self.pending.ids();
+
+            // Nobody is left to read any of these, and the heap their values
+            // live on may already be gone — this is the teardown a stranded
+            // backend gets (`IoBackend::quiesce`). Mark them so the drain
+            // retires each entry rather than building a result from it.
+            self.pending.cancel_all();
 
             // Cancel everything still pending. A cancel for an id the ring
             // doesn't know (a stdin/network op) returns a tagged `-ENOENT` CQE
@@ -372,10 +380,9 @@ impl AsyncBackendInner {
                 );
             }
 
-            let drained = !sink.is_empty();
             sink.clear();
-            // No CQE and no shrink ⇒ only channel-serviced ops remain; stop.
-            if !drained && self.pending.len() >= before {
+            // No shrink ⇒ only channel-serviced ops remain; stop.
+            if self.pending.len() >= before {
                 break;
             }
         }
@@ -468,7 +475,6 @@ impl AsyncBackendInner {
         let AsyncBackendInner {
             ref mut hub,
             ref mut pending,
-            ref mut cancelled,
             ref mut retired,
             ref mut fd_states,
             ref mut buffer_pool,
@@ -480,15 +486,7 @@ impl AsyncBackendInner {
                 crate::io::threadpool::RawCompletion::Pool(pc) => pc.id,
                 crate::io::threadpool::RawCompletion::Stdin(sc) => sc.id,
             });
-            let cooked = cook_raw(
-                rc,
-                pending,
-                cancelled,
-                fd_states,
-                buffer_pool,
-                origin_heap,
-                gen,
-            );
+            let cooked = cook_raw(rc, pending, fd_states, buffer_pool, origin_heap, gen);
             hub.forget_stop(id);
             if let Some(c) = cooked {
                 completions.push_back(c);
@@ -504,7 +502,7 @@ impl AsyncBackendInner {
     /// OS. Its `fd_states` entry goes with it, so per-fd buffering never spans
     /// two ports that happened to share a number.
     fn close_drained_fds(
-        pending: &HashMap<SubmissionId, PendingOp>,
+        pending: &PendingTable,
         fd_states: &mut HashMap<PortKey, FdState>,
         retired: &mut HashMap<RawFd, std::os::unix::io::OwnedFd>,
     ) {
