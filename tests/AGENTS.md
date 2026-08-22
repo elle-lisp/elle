@@ -23,7 +23,16 @@ tests/
 ├── unittests/          # Unit tests for individual modules
 │   ├── mod.rs          # Module declarations
 │   └── *.rs            # One file per module under test
+└── *.rs                # One standalone binary each — see below
 ```
+
+Everything under `lib.rs` shares one binary and one process. A file directly
+under `tests/` gets a binary of its own, which is what a test needs when its
+subject is process-global: a counter, an rlimit, a signal disposition, a
+re-exec, or a fault that would take every other test down with it
+(`worker_heap.rs`, `region_process_teardown.rs`, `wasm_smoke.rs`, …). See
+[docs/analysis/testing.md](../docs/analysis/testing.md) § "Process-global state
+needs its own binary" for when to reach for one.
 
 In addition to the `tests/` directory:
 

@@ -120,11 +120,35 @@ value. Otherwise, write Elle test scripts.
 | Runtime error message inspection | `tests/integration/` | Substring matching on error strings |
 | VM internals (scope stack, frames) | `tests/vm/` | Below integration, above unit |
 | Invariants across generated inputs | `tests/property/` | Property-based tests with proptest |
+| Reads or perturbs process-global state | `tests/<name>.rs`, its own binary | A process-wide counter, an rlimit, a signal disposition, a re-exec, or a fault the harness must survive |
 
 For Rust integration tests that don't call stdlib functions (map, filter,
 fold, etc.), prefer `eval_source_bare` over `eval_source` — it skips stdlib
 initialization and is faster. Prelude macros (defn, let*, ->, etc.) are
 still available with `eval_source_bare`.
+
+### Process-global state needs its own binary
+
+Everything under `tests/lib.rs` — `unittests/`, `integration/`, `property/` —
+compiles into ONE binary, and libtest runs its tests concurrently on many
+threads. A test there shares the process with a thousand others.
+
+That is fine for a test whose subject is a value it owns. It is wrong for a
+test whose subject is a process-wide fact, because a concurrent sibling
+changes that fact underneath the measurement and the test cannot tell the
+two apart. A page counter reads a sibling's allocation as its own leak. An
+rlimit or a signal disposition one test installs stays installed for every
+test that follows it. A deliberate fault takes the whole binary down, and
+with it every unrelated test.
+
+Give such a test its own file directly under `tests/`. Cargo builds one
+binary per file there, so the process holds only that test and whatever it
+starts. Name the file for the subject (`worker_heap.rs`,
+`region_process_teardown.rs`), and say in its header which global it reads —
+that is the fact the next reader needs and cannot see from the assertion.
+
+A test that merely runs slowly does not qualify. The cost is a whole extra
+link of the crate per file, so the reason must be the shared process itself.
 
 
 ## Running tests

@@ -201,8 +201,11 @@ pub(crate) fn prim_unix_shutdown(
 // ---------------------------------------------------------------------------
 
 primitive! {
+    // Binds a socket at a filesystem path, and unlinks that path first.
+    // Abstract-namespace names ("@name") touch no filesystem, but the
+    // primitive accepts either, so the capability covers both.
     "unix/listen" => prim_unix_listen {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Listen on a Unix domain socket. Returns a listener port.",
         params: &["path"],
@@ -222,7 +225,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/connect" => prim_unix_connect {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],

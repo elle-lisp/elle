@@ -17,7 +17,11 @@ else
   CARGO_PROFILE :=
 endif
 TIMEOUT ?= 30s
-LISP_FILES := $(shell find stdlib.lisp prelude.lisp lib/ tests/ demos/ -name '*.lisp' 2>/dev/null)
+# `find` is told to be quiet about a missing root, so a root that moves drops
+# silently out of the format gate rather than failing it. The pin that every
+# Elle source in the tree stays reachable from this list is
+# tests/integration/paths.rs.
+LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ -name '*.lisp' 2>/dev/null)
 
 # oracle.lisp is the leak-measurement instrument: a couple of hundred adaptive
 # empirical-Bernstein probes, each looping blocks of heap ops until its interval

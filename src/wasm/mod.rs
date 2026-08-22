@@ -193,30 +193,8 @@ fn compile_or_cache_module(
     engine: &wasmtime::Engine,
     wasm_bytes: &[u8],
 ) -> Result<wasmtime::Module, String> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    if let Some(cache_dir) = &crate::config::get().cache {
-        let mut hasher = DefaultHasher::new();
-        wasm_bytes.hash(&mut hasher);
-        let hash = hasher.finish();
-        let cache_path =
-            std::path::PathBuf::from(cache_dir).join(format!("closure_{:016x}.bin", hash));
-
-        if let Ok(bytes) = std::fs::read(&cache_path) {
-            return unsafe { wasmtime::Module::deserialize(engine, &bytes) }
-                .map_err(|e| e.to_string());
-        }
-
-        let module = wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())?;
-        if let Ok(serialized) = module.serialize() {
-            std::fs::create_dir_all(cache_dir).ok();
-            store::atomic_write(&cache_path, &serialized);
-        }
-        Ok(module)
-    } else {
-        wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())
-    }
+    let cache_path = store::cache_path_for("closure", wasm_bytes);
+    store::cached_or_compile(engine, wasm_bytes, cache_path.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Build the source the full-module WASM path actually compiles: the stdlib
@@ -443,32 +421,9 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let linker = linker::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();
 
-    // Module cache: hash the WASM bytes, check for a cached pre-compiled module.
-    let module = if let Some(cache_dir) = &crate::config::get().cache {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        result.wasm_bytes.hash(&mut hasher);
-        let hash = hasher.finish();
-        let cache_path =
-            std::path::PathBuf::from(&cache_dir).join(format!("module_{:016x}.bin", hash));
-
-        if let Ok(bytes) = std::fs::read(&cache_path) {
-            // SAFETY: we trust our own cache files.
-            unsafe { wasmtime::Module::deserialize(&engine, &bytes) }
-                .map_err(|e: wasmtime::Error| e.to_string())?
-        } else {
-            let module =
-                store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
-            if let Ok(serialized) = module.serialize() {
-                std::fs::create_dir_all(cache_dir).ok();
-                store::atomic_write(&cache_path, &serialized);
-            }
-            module
-        }
-    } else {
-        store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?
-    };
+    let cache_path = store::cache_path_for("module", &result.wasm_bytes);
+    let module = store::cached_or_compile(&engine, &result.wasm_bytes, cache_path.as_deref())
+        .map_err(|e| e.to_string())?;
     let t4 = std::time::Instant::now();
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
     let t5 = std::time::Instant::now();
