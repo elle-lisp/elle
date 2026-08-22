@@ -19,6 +19,7 @@ User-facing fiber operations and patterns.
 | `fiber/propagate` | `(fiber) → (propagates)` | Propagate caught signal, preserve chain |
 | `fiber/cancel` | `(fiber value?) → value` | Hard-kill: set to :error, no unwinding |
 | `fiber/abort` | `(fiber value?) → value` | Graceful: inject error, resume for unwinding |
+| `fiber/refuse` | `(fiber value?) → value` | Refuse a paused fiber's call: raise at its call site, fiber lives on |
 | `fiber?` | `(value) → bool` | Type predicate |
 
 Primitives that need VM-side execution (`fiber/resume`) signal the VM

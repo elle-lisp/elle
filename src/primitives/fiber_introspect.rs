@@ -178,6 +178,73 @@ pub(crate) fn prim_fiber_cancel(
 
 /// (fiber/abort fiber \[value\]) → value
 ///
+/// Install `error_value` as an error raised at a PAUSED fiber's own suspension
+/// point and hand the VM the abort signal that resumes it there.
+///
+/// Shared by `fiber/abort` and `fiber/refuse`. The two differ in intent and in
+/// which fiber states they accept, not in the injection: both raise the error
+/// where the fiber stopped, so the fiber's `protect` and `defer` see it. Keeping
+/// one body means the region bookkeeping below cannot drift between them.
+fn inject_error_at_suspension(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    fiber_value: Value,
+    handle: &crate::value::fiber::FiberHandle,
+    error_value: Value,
+) -> (SignalBits, Value) {
+    // A parked TERMINAL result this install displaces carries a park-retain +
+    // recorded content edge the free-time signal scan will never see
+    // (`release_displaced_terminal_signal`); a parked non-terminal signal's
+    // strand here is the dead-continuation residual (docs/impl/region/owner.md
+    // § "Park/unpark symmetry"), not released blind.
+    let parked = handle.with(|fiber| fiber.signal);
+    crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), fiber_value, parked);
+    handle.with_mut(|fiber| {
+        fiber.signal = Some((SIG_ERROR, error_value));
+    });
+    // The VM injects the error, resumes the fiber, and lets it unwind.
+    (SIG_ABORT, fiber_value)
+}
+
+/// (fiber/refuse fiber) → value
+/// (fiber/refuse fiber error) → value
+///
+/// Refuse the call a paused fiber is suspended on: raise `error` as a failure
+/// at the fiber's own call site, so its `protect` or `try` catches it there.
+///
+/// A refusal is not a termination. A fiber that catches keeps running and may
+/// be refused again on its next call — which is what a mediator needs, since a
+/// refused operation is an ordinary event in a mediated session. A fiber that
+/// does not catch unwinds through its `defer` blocks and ends `:error`, as any
+/// uncaught error would.
+///
+/// Only a `:paused` fiber can be refused: refusal answers a call the fiber is
+/// waiting on, and no other state has one. This is the guard that separates it
+/// from `fiber/abort`, which hard-kills a `:new` fiber and no-ops a `:dead` one
+/// — reasonable when ending a fiber, wrong when answering a request.
+pub(crate) fn prim_fiber_refuse(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = prim_arg!(ctx, args, 0, as_fiber, "fiber/refuse", "fiber");
+
+    let error_value = args.get(1).copied().unwrap_or(Value::NIL);
+    let status = handle.with(|fiber| fiber.status);
+
+    match status {
+        FiberStatus::Paused => inject_error_at_suspension(ctx, args[0], handle, error_value),
+        other => (
+            SIG_ERROR,
+            ctx.error(
+                "state-error",
+                format!(
+                    "fiber/refuse: expected a paused fiber, got :{}",
+                    other.as_str()
+                ),
+            ),
+        ),
+    }
+}
+
 /// Gracefully terminate a fiber by injecting an error and resuming it.
 /// The fiber's error handlers (protect) and cleanup blocks (defer) will
 /// execute. The fiber's final state depends on what its code does with
@@ -195,21 +262,7 @@ pub(crate) fn prim_fiber_abort(
     let status = handle.with(|fiber| fiber.status);
 
     match status {
-        FiberStatus::Paused => {
-            // Store the error value on the fiber for do_fiber_abort to pick up.
-            // A parked TERMINAL result this install displaces carries a
-            // park-retain + recorded content edge the free-time signal scan
-            // will never see (`release_displaced_terminal_signal`); a parked
-            // non-terminal signal's strand here is the dead-continuation residual
-            // (docs/impl/region/owner.md § "Park/unpark symmetry"), not released blind.
-            let parked = handle.with(|fiber| fiber.signal);
-            crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), args[0], parked);
-            handle.with_mut(|fiber| {
-                fiber.signal = Some((SIG_ERROR, error_value));
-            });
-            // Return SIG_ABORT — VM will inject error, resume, let it unwind
-            (SIG_ABORT, args[0])
-        }
+        FiberStatus::Paused => inject_error_at_suspension(ctx, args[0], handle, error_value),
         FiberStatus::New => {
             // Nothing to unwind — hard-kill directly (like cancel), freeing
             // anything the never-started fiber owned (its fiber owner node; a
@@ -367,6 +420,21 @@ primitive! {
         // mints the caller's reference (the unwinding exit runs no `Return` to
         // mint it). Aborting an already-dead fiber hands back that fiber's
         // terminal value, read out of the fiber argument: unbounded.
+        effect: RegionEffect::Delivers { args: &[1] },
+    }
+    "fiber/refuse" => prim_fiber_refuse {
+        signal: Signal::of(SIG_ERROR.union(SIG_ABORT)),
+        arity: Arity::Range(1, 2),
+        doc: "Refuse the call a paused fiber is suspended on: raise the error at the fiber's own call site, where its protect catches it. The fiber stays alive and runs on.",
+        params: &["fiber", "error?"],
+        category: "fiber",
+        example: "(fiber/refuse f)\n(fiber/refuse f :not-permitted)",
+        // Same delivery accounting as `fiber/abort`: the injected error is
+        // installed in the fiber's signal slot and taken straight back out by
+        // `do_fiber_abort`, and where it comes back OUT as the result,
+        // `handle_fiber_abort_signal` mints the caller's reference. Refusal
+        // accepts only a `:paused` fiber, so neither the `kill_fiber` park nor
+        // the dead-fiber terminal-value read applies.
         effect: RegionEffect::Delivers { args: &[1] },
     }
 }

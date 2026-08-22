@@ -144,6 +144,22 @@ A child can never gain capabilities its parent lacks. Requesting to
 deny something the parent already withholds is a no-op (silently
 absorbed).
 
+Withheld capabilities also cross a thread. `sys/spawn` and
+`sys/spawn-vm` run a deep-copied closure in a fresh VM, and that VM's
+root fiber starts with the spawning fiber's withheld set. A worker
+cannot reach what the fiber that spawned it could not.
+
+A worker has no parent to suspend into, so a denial there cannot be
+mediated. The thread ends instead, and the join reports it:
+
+```text
+(sys/join (sys/spawn-vm (fn [] (file/write path "x"))))
+# from a fiber denying :fs => [:failed "..."], and nothing is written
+```
+
+Mediate on the fiber side of the boundary, before the work is handed to
+a thread.
+
 ## Mediation
 
 The parent can catch a denial, perform the operation on the child's
@@ -160,6 +176,45 @@ behalf, and resume the child with the result:
       (let [result (apply length (val :args))]
         (fiber/resume f result)))))
 ```
+
+### Refusing
+
+Resuming with an ordinary value tells the child the call succeeded and
+returned that value. A mediator that wants to say *no* must not do that:
+agent-written code reads the resume value as `file/write`'s return and
+proceeds as though the write happened.
+
+`fiber/refuse` raises the denied call as a failure **at the child's own
+call site**. The child's `protect` or `try` catches it, and the child
+keeps running:
+
+```lisp
+(with-temp-dir dir
+  (let [target (path/join dir "notes")
+        f (fiber/new
+             (fn []
+               (let [[ok? err] (protect (file/write target "x"))]
+                 (list :refused (not ok?) err)))
+             |:fs :error|
+             :deny |:fs|)]
+    (fiber/resume f)
+    (fiber/refuse f :not-permitted)
+    (fiber/value f)))
+# => (:refused true :not-permitted)
+```
+
+The fiber stays alive. A refused call is an ordinary event in a mediated
+session — the child is told no and carries on, and may be refused again
+on its next call.
+
+Refuse with `:fs`, not with `:error`. The child's own `protect` runs
+primitives that declare `:error`, so a fiber denying that bit has no
+working recovery path for the refusal to land in, and it ends `:error`
+whatever the parent does.
+
+An uncaught refusal is an ordinary uncaught error: it unwinds the child
+through any `defer` blocks and the fiber ends `:error`. To end a fiber
+outright rather than refuse one call, use `fiber/abort`.
 
 ## Specialized instructions
 

@@ -145,5 +145,29 @@
   (assert ((fiber/caps f) :fs) ":deny |:io| leaves :fs held")
   (assert (not ((fiber/caps f) :io)) "fiber/caps omits :io when denied"))
 
+# ── The gate holds on a hot, already-compiled call site ───────────────
+
+# The trap: running this file under `--jit=eager` does NOT make this claim.
+# Eager compiles everything up front, so it never produces the shape that
+# matters — a function the adaptive tier compiled because it got hot, then
+# called from inside a denied fiber. Warm the function OUTSIDE any denial
+# so it is compiled by the time the denied fiber reaches it.
+(defn hot-writer [p]
+  (file/write p "x"))
+
+(let [warm (path/join root "WARM")]
+  (each i (range 0 500)
+    (hot-writer warm))
+  (assert (path/exists? warm) "the function is warm and its writes land"))
+
+(let [victim (path/join root "HOT-DENIED")
+      f (fiber/new (fn [] (hot-writer victim)) |:fs :error| :deny |:fs|)]
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused)
+          "a compiled call site denies exactly as a cold one does")
+  (assert (= "file/write" (get (fiber/value f) :primitive))
+          "and names the same primitive")
+  (assert (not (path/exists? victim)) "the hot path wrote nothing"))
+
 (file/delete-dir-all root)
 (println "caps-fs: OK")
