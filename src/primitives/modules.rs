@@ -364,8 +364,9 @@ pub(crate) fn prim_import_file(
 
 // Declarative primitive definitions for module loading operations
 primitive! {
+    // Resolves the specifier against the search paths and reads the file.
     "import" => prim_import_file {
-        signal: Signal::errors(),
+        signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
         doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, native plugins). Binary files that fail UTF-8 reading are automatically tried as plugins.",
         params: &["spec"],

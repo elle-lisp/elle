@@ -182,6 +182,12 @@ pub enum EscapeSite {
     /// An emitted value the scheduler holds via `fiber.signal` past the
     /// matching compiler-emitted `DecrefRegion`.
     EmitEscape,
+    /// A child's parked payload re-installed as the propagating fiber's own
+    /// `signal` (`fiber/propagate`). The install is a fresh park, so it owes the
+    /// delivery reference its resumer's result release consumes — the child's
+    /// park funded its own resumer, not this one (docs/impl/region/owner.md
+    /// § "Park/unpark symmetry").
+    PropagateEscape,
     /// A child fiber's set-once terminal result, park-retained until the fiber
     /// is freed (released by the signal scan — asymmetric by Rule 7).
     TerminalSignal,
@@ -207,6 +213,7 @@ impl EscapeSite {
             EscapeSite::ChanSend => "chan-send",
             EscapeSite::SuspendEscape => "suspend-escape",
             EscapeSite::EmitEscape => "emit-escape",
+            EscapeSite::PropagateEscape => "propagate-escape",
             EscapeSite::TerminalSignal => "terminal-signal",
             EscapeSite::ParamBaseline => "param-baseline",
         }

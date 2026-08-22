@@ -365,3 +365,57 @@ fn squelched_bits_subtracts_the_pause_rather_than_exempting_the_signal() {
         SIG_YIELD
     );
 }
+
+// ── Filesystem capability ───────────────────────────────────────────
+
+/// The filesystem primitives are synchronous `std::fs` calls. `:fs` marks the
+/// authority; it must not claim the scheduler round trip that `:io` means.
+#[test]
+fn fs_errors_carries_authority_without_dispatch() {
+    let s = Signal::fs_errors();
+    assert!(s.bits.intersects(SIG_FS));
+    assert!(s.may_error());
+    assert!(
+        !s.bits.intersects(SIG_IO),
+        ":fs must not imply a scheduler round trip"
+    );
+    assert!(!s.may_yield(), ":fs must not imply suspension");
+}
+
+/// `port/open` resolves a path AND opens it through the scheduler, so either
+/// denial must block it. Without `:fs` a fiber denied only the filesystem
+/// could open a port on any path and read it.
+#[test]
+fn fs_io_yields_errors_is_deniable_from_either_side() {
+    let s = Signal::fs_io_yields_errors();
+    assert!(s.bits.intersects(SIG_FS));
+    assert!(s.may_io());
+    assert!(s.may_yield());
+    assert!(s.may_error());
+}
+
+/// The three async constructors share one base, so a change to what a
+/// scheduler round trip means cannot reach one and miss the others.
+#[test]
+fn capability_gated_io_constructors_extend_the_same_base() {
+    let base = Signal::io_yields_errors().bits;
+    assert_eq!(Signal::subprocess().bits, base.union(SIG_EXEC));
+    assert_eq!(Signal::fs_io_yields_errors().bits, base.union(SIG_FS));
+}
+
+/// Every signal bit is a capability bit: a fiber mask can withhold `:fs`
+/// exactly as it withholds `:io` or `:exec`.
+#[test]
+fn fs_is_deniable_and_not_vm_internal() {
+    assert!(CAP_MASK.intersects(SIG_FS), ":fs must be deniable");
+    assert!(!VM_INTERNAL.intersects(SIG_FS), ":fs is not VM-internal");
+}
+
+/// The keyword a `:deny |:fs|` mask is written with must resolve to the bit
+/// the primitives declare, or the mask silently withholds nothing.
+#[test]
+fn fs_keyword_resolves_to_the_declared_bit() {
+    let registry = registry::SignalRegistry::with_builtins();
+    assert_eq!(registry.lookup("fs"), Some(SIG_FS.trailing_zeros()));
+    assert_eq!(registry.to_signal_bits("fs"), Some(SIG_FS));
+}

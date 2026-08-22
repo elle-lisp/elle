@@ -442,3 +442,73 @@ fn letrec_init_release_fires_after_cell_store() {
         check(c);
     }
 }
+
+#[test]
+fn a_cell_box_release_follows_every_release_that_unwraps_it() {
+    // Two releases address one env index: `DecrefValueRegion` loads the box RAW
+    // and unwraps it to the content (so it READS the box's page), and
+    // `DecrefCellRegion` frees that page. Emitting the free first leaves the
+    // unwrap reading reclaimed memory — a stray release of whatever region id
+    // the recycled page spells (docs/impl/region/bindings.md § "A cell's release
+    // lands at or after every release routed through that cell").
+    //
+    // The shape is a `def` inside a lambda captured by a sibling closure: `p` is
+    // env-celled, its init is a call so it owns a value region of its own, and
+    // the capture is `p`'s last binding-use — which puts the box's release at
+    // the capture and the value's release at the enclosing `let`.
+    let module = compile_to_lir(
+        "((fn [] \
+            (def p (f 1)) \
+            (let [r (fn [] (g p))] :built)))",
+    );
+    let mut checked = 0usize;
+    for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
+        let instrs = flat_instrs(func);
+        // Which env index each register was loaded raw from. A register id is
+        // reused across a function, so the map records the LATEST load, which is
+        // the one the release right after it names.
+        let mut raw_from: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
+        // Per env index: where its box is freed, and where its content is last
+        // unwrapped out of that box.
+        let mut frees: rustc_hash::FxHashMap<u16, usize> = rustc_hash::FxHashMap::default();
+        let mut unwraps: rustc_hash::FxHashMap<u16, usize> = rustc_hash::FxHashMap::default();
+        for (pos, instr) in instrs.iter().enumerate() {
+            match instr {
+                LirInstr::LoadCaptureRaw { dst, index } => {
+                    raw_from.insert(*dst, *index);
+                }
+                LirInstr::DecrefValueRegion { src } => {
+                    if let Some(&index) = raw_from.get(src) {
+                        let e = unwraps.entry(index).or_insert(pos);
+                        *e = (*e).max(pos);
+                    }
+                }
+                LirInstr::DecrefCellRegion { src } => {
+                    if let Some(&index) = raw_from.get(src) {
+                        let e = frees.entry(index).or_insert(pos);
+                        *e = (*e).max(pos);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (index, free_at) in &frees {
+            checked += 1;
+            let Some(&unwrap_at) = unwraps.get(index) else {
+                continue;
+            };
+            assert!(
+                *free_at > unwrap_at,
+                "cap[{index}]'s DecrefCellRegion at #{free_at} frees the box before \
+                 the DecrefValueRegion at #{unwrap_at} unwraps that same box — the \
+                 unwrap reads a reclaimed page. instrs={instrs:?}",
+            );
+        }
+    }
+    assert!(
+        checked > 0,
+        "expected the captured-`def` shape to emit at least one DecrefCellRegion \
+         off a LoadCaptureRaw — if lowering changed, update the shape so this test \
+         keeps biting",
+    );
+}
