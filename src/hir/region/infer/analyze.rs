@@ -172,6 +172,7 @@ pub fn analyze_regions_with(
         &break_sites,
         &break_skip_blocks,
         &frame_replacing_tail_calls,
+        &reassigns.binder_init_sites,
     );
     let last_use = &last_use_info.per_node;
 
