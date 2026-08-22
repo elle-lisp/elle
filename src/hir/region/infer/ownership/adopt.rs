@@ -130,6 +130,27 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     order: &HashMap<HirId, u32>,
 ) -> AdoptEdges {
     let owned = compute_owned_subtrees(inputs, info);
+    // The read/funnel alias tables indexed by their source/container, built once
+    // for the whole ownership pass. The per-root fixpoint below was
+    // O(roots × all-alias-edges): every root re-scanned the WHOLE stdlib alias
+    // table (≈34k edges) even though only edges out of reachable regions can
+    // grow it. Indexed, each root's closure walks only the edges its reachable
+    // set actually touches.
+    let mut aliases_by_source: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
+    for &(_, alias, source) in info
+        .counted_read_aliases
+        .iter()
+        .chain(info.opaque_result_aliases.iter())
+    {
+        aliases_by_source.entry(source).or_default().push(alias);
+    }
+    let mut funnel_by_container: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
+    for &(_, result, container) in &info.funnel_result_containers {
+        funnel_by_container
+            .entry(container)
+            .or_default()
+            .push(result);
+    }
     // Capture containment edges `(lambda_id, captured, closure)` — re-derived (capture
     // records no `cross_region_refs` edge), so they are a second source of interior
     // owner-edges, emitted at the closure's construction site rather than a store node.
@@ -431,28 +452,23 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         // Each alias's own release point — `None` where none is recorded, which bounds
         // nothing and so refuses, exactly as an unbounded member does.
         let mut alias_dps: Vec<Option<HirId>> = Vec::new();
-        let bounded_edges = info
-            .counted_read_aliases
-            .iter()
-            .chain(info.opaque_result_aliases.iter());
-        loop {
-            let mut grew = false;
-            for &(_, alias, source) in bounded_edges.clone() {
-                if !reachable.contains(&source) {
-                    continue;
-                }
-                grew |= reachable.insert(alias);
-                if bounded.insert(alias) {
-                    alias_dps.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
+        let mut worklist: Vec<Region> = reachable.iter().copied().collect();
+        while let Some(src) = worklist.pop() {
+            if let Some(aliases) = aliases_by_source.get(&src) {
+                for &alias in aliases {
+                    if reachable.insert(alias) {
+                        bounded.insert(alias);
+                        alias_dps.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
+                        worklist.push(alias);
+                    }
                 }
             }
-            for &(_, result, container) in &info.funnel_result_containers {
-                if reachable.contains(&container) {
-                    grew |= reachable.insert(result);
+            if let Some(results) = funnel_by_container.get(&src) {
+                for &result in results {
+                    if reachable.insert(result) {
+                        worklist.push(result);
+                    }
                 }
-            }
-            if !grew {
-                break;
             }
         }
         if !alias_dps
