@@ -70,12 +70,10 @@ impl VM {
             }
         };
 
-        let (child_bits, child_value) = handle.with(|fiber| fiber.signal).unwrap_or_else(|| {
-            (
-                SIG_ERROR,
-                self.escaping_error("internal-error", "fiber/propagate: no signal"),
-            )
-        });
+        // Same install as the bytecode handlers, so the same delivery reference
+        // is owed — routed through the one helper rather than a third copy
+        // (docs/impl/region/owner.md § "Park/unpark symmetry").
+        let (child_bits, child_value) = self.take_propagated_signal(&handle);
 
         self.fiber.child = Some(handle);
         self.fiber.child_value = Some(fiber_value);
