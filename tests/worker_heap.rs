@@ -1,4 +1,8 @@
-// A worker thread's heap dies with the thread.
+//! A worker thread's heap dies with the thread.
+//!
+//! Its own binary: `mapped_bytes` is one process-wide counter, and the window
+//! measured below is a minute and a half wide (docs/analysis/testing.md
+//! § "Process-global state needs its own binary").
 //
 // `os/spawn` stands a whole instance up on the worker: a VM, a symbol table, a
 // compile context, and the region heap every value it builds lives in. The
@@ -20,7 +24,10 @@
 // must outlive them), each heavy worker left its whole instance mapped —
 // ~7 MB of stdlib apiece, plus anything the body left live.
 
-use super::*;
+#[path = "common/mod.rs"]
+mod common;
+
+use common::eval_source;
 use elle::value::fiberheap::mapped_bytes;
 
 /// Spawn `n` heavy workers one after another, joining each before the next.

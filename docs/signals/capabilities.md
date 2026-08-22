@@ -30,20 +30,58 @@ can't do. They're independent:
 
 ## Deniable capabilities
 
-The following signal keywords can be denied:
+Every signal bit is a capability bit. A fiber's `:deny` set is tested
+against the bits a primitive *declares*, so any bit a primitive declares
+is one a parent can withhold. Some bits also drive dispatch — `:io`
+routes a request through the scheduler, `:yield` suspends — and some do
+no dispatch work at all. That distinction belongs to the VM. It does not
+change what a mask can deny.
 
-| Keyword | Bit | Effect when denied |
-|---------|-----|--------------------|
-| `:error` | 0 | Blocks primitives that may error (~66% of all) |
-| `:yield` | 1 | Blocks cooperative suspension |
-| `:debug` | 2 | Blocks breakpoints/tracing |
-| `:ffi` | 4 | Blocks foreign function calls |
-| `:halt` | 8 | Blocks VM termination |
-| `:io` | 9 | Blocks I/O operations |
-| `:exec` | 11 | Blocks subprocess execution |
+| Keyword | Bit | Effect when denied | Dispatch |
+|---------|-----|--------------------|----------|
+| `:error` | 0 | Blocks primitives that may error (~66% of all) | yes |
+| `:yield` | 1 | Blocks cooperative suspension | yes |
+| `:debug` | 2 | Blocks breakpoints/tracing | yes |
+| `:ffi` | 4 | Blocks foreign function calls | no |
+| `:halt` | 8 | Blocks VM termination | yes |
+| `:io` | 9 | Blocks operations that reach the I/O scheduler | yes |
+| `:exec` | 11 | Blocks subprocess execution | no |
+| `:gpu` | 15 | Blocks GPU dispatch | no |
+| `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
+| `:fs` | 17 | Blocks filesystem access | no |
 
 VM-internal signals (resume, propagate, abort, query, terminal,
 switch, wait) cannot be denied.
+
+## Filesystem authority is `:fs`, not `:io`
+
+`:io` means "this request reaches the I/O scheduler". It is a dispatch
+bit that a fiber can also deny, and it covers ports, sockets, and the
+subprocess pipes — everything that suspends into the event loop.
+
+The filesystem primitives are synchronous `std::fs` calls. They never
+reach the scheduler, so they carry no `:io`, and denying `:io` never
+stopped them. `:fs` is the bit that means "resolves a filesystem path",
+and it is the one to deny to close the disk off:
+
+```text
+(fiber/new body |:error| :deny |:fs|)
+```
+
+The two bits are independent on purpose. A worker can keep `:io` — so it
+still writes to stdout and talks to the network — while the disk is
+denied and mediated by its parent. Deny both to close off all of it.
+
+`port/open` carries both. It resolves a path (`:fs`) and it opens that
+path through the scheduler (`:io`), so either denial blocks it. Without
+the `:fs` bit on it, a fiber denied `:fs` alone could open a port on any
+path and read it, which is the same authority `file/read` grants.
+
+A primitive carries `:fs` when its implementation resolves a filesystem
+path, decided by reading the implementation and not the name. `path/join`,
+`path/parent`, and `path/normalize` are string operations and do not carry
+it. `path/exists?`, `path/canonicalize`, and `path/cwd` reach the
+filesystem and do.
 
 ## What happens on denial
 
@@ -76,11 +114,11 @@ capability space that is NOT withheld:
 
 ```lisp
 (fiber/caps)
-# => |:error :yield :debug :ffi :halt :io :exec|
+# => |:debug :error :exec :ffi :fs :gpu :halt :io :os-signal :yield|
 
-(let [f (fiber/new (fn [] 42) |:error| :deny |:io :ffi|)]
+(let [f (fiber/new (fn [] 42) |:error| :deny |:fs :ffi|)]
   (fiber/caps f))
-# => |:error :yield :debug :halt :exec|
+# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
 ```
 
 ## Transitivity
@@ -91,20 +129,36 @@ A child inherits its parent's restrictions plus any `:deny` of its own:
 ```lisp
 (let [outer (fiber/new
                (fn []
-                 # inner denies :ffi, inherits :io denial from outer
+                 # inner denies :ffi, inherits :fs denial from outer
                  (let [inner (fiber/new (fn [] (fiber/caps))
                                         |:error| :deny |:ffi|)]
                    (fiber/resume inner)))
                |:error|
-               :deny |:io|)]
+               :deny |:fs|)]
   (fiber/resume outer))
-# => |:error :yield :debug :halt :exec|
-# (missing :io from parent, missing :ffi from own deny)
+# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
+# (missing :fs from parent, missing :ffi from own deny)
 ```
 
 A child can never gain capabilities its parent lacks. Requesting to
 deny something the parent already withholds is a no-op (silently
 absorbed).
+
+Withheld capabilities also cross a thread. `sys/spawn` and
+`sys/spawn-vm` run a deep-copied closure in a fresh VM, and that VM's
+root fiber starts with the spawning fiber's withheld set. A worker
+cannot reach what the fiber that spawned it could not.
+
+A worker has no parent to suspend into, so a denial there cannot be
+mediated. The thread ends instead, and the join reports it:
+
+```text
+(sys/join (sys/spawn-vm (fn [] (file/write path "x"))))
+# from a fiber denying :fs => [:failed "..."], and nothing is written
+```
+
+Mediate on the fiber side of the boundary, before the work is handed to
+a thread.
 
 ## Mediation
 
@@ -123,6 +177,45 @@ behalf, and resume the child with the result:
         (fiber/resume f result)))))
 ```
 
+### Refusing
+
+Resuming with an ordinary value tells the child the call succeeded and
+returned that value. A mediator that wants to say *no* must not do that:
+agent-written code reads the resume value as `file/write`'s return and
+proceeds as though the write happened.
+
+`fiber/refuse` raises the denied call as a failure **at the child's own
+call site**. The child's `protect` or `try` catches it, and the child
+keeps running:
+
+```lisp
+(with-temp-dir dir
+  (let [target (path/join dir "notes")
+        f (fiber/new
+             (fn []
+               (let [[ok? err] (protect (file/write target "x"))]
+                 (list :refused (not ok?) err)))
+             |:fs :error|
+             :deny |:fs|)]
+    (fiber/resume f)
+    (fiber/refuse f :not-permitted)
+    (fiber/value f)))
+# => (:refused true :not-permitted)
+```
+
+The fiber stays alive. A refused call is an ordinary event in a mediated
+session — the child is told no and carries on, and may be refused again
+on its next call.
+
+Refuse with `:fs`, not with `:error`. The child's own `protect` runs
+primitives that declare `:error`, so a fiber denying that bit has no
+working recovery path for the refusal to land in, and it ends `:error`
+whatever the parent does.
+
+An uncaught refusal is an ordinary uncaught error: it unwinds the child
+through any `defer` blocks and the fiber ends `:error`. To end a fiber
+outright rather than refuse one call, use `fiber/abort`.
+
 ## Specialized instructions
 
 Arithmetic operations (`+`, `-`, `*`, `/`, comparisons) are compiled
@@ -133,9 +226,13 @@ blocks `length` but not `+`.
 ## Examples
 
 ```text
-# Pure computation sandbox — no IO, no FFI, no subprocess
-(let [f (fiber/new compute |:io :ffi :exec :error|
-                    :deny |:io :ffi :exec|)]
+# Pure computation sandbox — no IO, no filesystem, no FFI, no subprocess
+(let [f (fiber/new compute |:io :fs :ffi :exec :error|
+                    :deny |:io :fs :ffi :exec|)]
+  (fiber/resume f))
+
+# Mediated worker — keeps stdout and the network, mediates the disk
+(let [f (fiber/new worker |:fs :error| :deny |:fs|)]
   (fiber/resume f))
 
 # Capability-check a plugin before running it

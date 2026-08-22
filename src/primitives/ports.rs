@@ -39,7 +39,7 @@ use query::*;
 
 primitive! {
     "port/open" => prim_port_open {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Open a file as a text (UTF-8) port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
@@ -50,7 +50,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port/open-bytes" => prim_port_open_bytes {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Open a file as a binary port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],

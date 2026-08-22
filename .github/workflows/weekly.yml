@@ -1,15 +1,35 @@
-name: Weekly Toolchain Check
+name: Weekly Checks
 
 on:
   schedule:
-    # Weekly toolchain check: Sunday 06:00 UTC
+    # Weekly toolchain and advisory check: Sunday 06:00 UTC
     - cron: '0 6 * * 0'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
+  # A RustSec advisory lands against a dependency version, not against a
+  # commit, so a frozen Cargo.lock goes from clean to vulnerable with nothing
+  # pushed. A schedule is what notices that; a per-PR run would instead turn
+  # every open PR red the day an advisory is published, for a lockfile none of
+  # them touched. Non-blocking for the same reason the push-to-main copy is:
+  # the report is the product, and the fix is a deliberate dependency bump.
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install and run cargo-audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
+
   toolchain-check:
     name: Toolchain Check
     runs-on: ubuntu-latest

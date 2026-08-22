@@ -49,7 +49,8 @@ use std::fmt;
 //   Bit  14:    Wait - structured concurrency wait request
 //   Bit  15:    GPU
 //   Bit  16:    OsSignal — POSIX signal send/raise capability (access control; NOT a dispatch bit)
-//   Bits 17-31: Runtime-reserved (future runtime signals)
+//   Bit  17:    Fs — filesystem capability (access control; NOT a dispatch bit)
+//   Bits 18-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::EMPTY; // no bits set = normal return
@@ -70,6 +71,13 @@ pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch tra
 pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurrency wait request
 pub const SIG_GPU: SignalBits = SignalBits::new(1 << 15); // GPU hardware dispatch (capability bit)
 pub const SIG_OS_SIGNAL: SignalBits = SignalBits::new(1 << 16); // POSIX signal send/raise (capability bit)
+pub const SIG_FS: SignalBits = SignalBits::new(1 << 17); // filesystem access (capability bit, not dispatch)
+
+/// The scheduler round trip: the dispatch bit that routes a request to the
+/// I/O backend, the suspension it implies, and the error it may come back
+/// with. Every async primitive carries these three; a capability-gated one
+/// adds its own bit on top, so the base cannot drift between them.
+const IO_ROUND_TRIP: SignalBits = SIG_IO.union(SIG_YIELD).union(SIG_ERROR);
 
 /// VM-internal signal bits: infrastructure signals that user code cannot
 /// produce. These are emitted exclusively by the VM's own dispatch machinery.
@@ -215,7 +223,37 @@ impl Signal {
     /// suspends the calling fiber until the backend completes it.
     pub const fn io_yields_errors() -> Self {
         Signal {
-            bits: SIG_IO.union(SIG_YIELD).union(SIG_ERROR),
+            bits: IO_ROUND_TRIP,
+            propagates: 0,
+        }
+    }
+
+    /// Resolves a filesystem path and may error (SIG_FS | SIG_ERROR).
+    ///
+    /// The signal of every primitive whose implementation reaches the
+    /// filesystem synchronously. `SIG_FS` is a capability bit only: these are
+    /// `std::fs` calls that return their result directly, so nothing about
+    /// dispatch or the event loop changes. Carrying `SIG_IO` instead would be
+    /// wrong twice over — it claims a scheduler round trip that never happens,
+    /// and it ties the disk to the bit that governs ports and sockets.
+    pub const fn fs_errors() -> Self {
+        Signal {
+            bits: SIG_FS.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Opens a filesystem path through the I/O scheduler
+    /// (SIG_FS | SIG_IO | SIG_YIELD | SIG_ERROR).
+    ///
+    /// Both capabilities apply and either denial blocks the call: `SIG_FS` for
+    /// the path the primitive resolves, `SIG_IO` for the scheduler round trip
+    /// that opens it. Without `SIG_FS`, a fiber denied only the filesystem
+    /// could open a port on any path and read it — the same authority
+    /// `file/read` grants.
+    pub const fn fs_io_yields_errors() -> Self {
+        Signal {
+            bits: IO_ROUND_TRIP.union(SIG_FS),
             propagates: 0,
         }
     }
@@ -229,7 +267,7 @@ impl Signal {
     /// permit or deny spawning at all.
     pub const fn subprocess() -> Self {
         Signal {
-            bits: SIG_EXEC.union(SIG_IO).union(SIG_YIELD).union(SIG_ERROR),
+            bits: IO_ROUND_TRIP.union(SIG_EXEC),
             propagates: 0,
         }
     }

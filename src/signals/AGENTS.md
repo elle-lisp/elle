@@ -65,14 +65,21 @@ The global signal registry maps signal keywords to bit positions. It is a proces
 | `:io` | 9 | I/O request to scheduler |
 | `:exec` | 11 | Subprocess execution (spawn, wait, kill) |
 | `:fuel` | 12 | Instruction budget exhaustion |
-| `:switch` | 13 | Context switch |
 | `:wait` | 14 | Blocking wait |
+| `:gpu` | 15 | GPU hardware dispatch |
+| `:os-signal` | 16 | POSIX signal send/raise |
+| `:fs` | 17 | Filesystem access |
 
-Bits 3, 5, 6, 7, 10, 15 are VM-internal.
+Bits 3, 5, 6, 7, 10, and 13 are VM-internal and are not registered.
+
+`:exec`, `:gpu`, `:os-signal`, and `:fs` do no dispatch work. They exist so
+a fiber mask can withhold the authority, which is what `VM::call_inner`
+tests against `def.signal.bits`. Every bit is deniable; only some also
+route the call somewhere.
 
 ### User-Defined Signals
 
-User signals are allocated bits 32–63 (up to 32 user signals per compilation unit). Bits 16–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process.
+User signals are allocated bits 32–63 (up to 32 user signals per compilation unit). Bits 18–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process.
 
 ### Registry Interface
 
