@@ -6,30 +6,18 @@ use super::*;
 /// caller discards it; the hub's `in_flight` was already decremented at the
 /// drain site, so a discarded item still balances the count.
 ///
-/// A cancelled op is discarded *before* cooking. Cooking a read writes the
-/// worker's bytes into the buffer the requesting fiber pre-allocated, and a
-/// cancelled read's fiber is gone — the write would land in a freed heap.
+/// [`PendingTable::take`] is what decides. A cancelled op is retired instead of
+/// cooked, because cooking reads the values the operation held: the bytes go
+/// into the buffer the requesting fiber pre-allocated, and the result is
+/// assembled through the port. Both belong to a fiber that is already gone.
 pub(super) fn cook_raw(
     rc: RawCompletion,
-    pending: &mut HashMap<SubmissionId, PendingOp>,
-    cancelled: &mut std::collections::HashSet<SubmissionId>,
+    pending: &mut PendingTable,
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
-    let id = SubmissionId::from_raw(match &rc {
-        RawCompletion::Pool(pc) => pc.id,
-        RawCompletion::Stdin(sc) => sc.id,
-    });
-    if cancelled.remove(&id) {
-        let result_fd = match &rc {
-            RawCompletion::Pool(pc) => pc.result_code,
-            RawCompletion::Stdin(_) => 0,
-        };
-        discard_pending(id, result_fd, pending, buffer_pool);
-        return None;
-    }
     match rc {
         RawCompletion::Pool(pc) => {
             pool_to_completion(pc, pending, fd_states, buffer_pool, origin_heap, gen)
@@ -38,52 +26,23 @@ pub(super) fn cook_raw(
     }
 }
 
-/// Retire a cancelled operation's entry, releasing everything it owns without
-/// building a value for it. `result_fd` is the raw completion's result code,
-/// which for a connect is the descriptor the worker opened — nobody will take
-/// it now, so it is closed here rather than leaked.
-fn discard_pending(
-    id: SubmissionId,
-    result_fd: i32,
-    pending: &mut HashMap<SubmissionId, PendingOp>,
-    buffer_pool: &mut BufferPool,
-) {
-    let Some(op) = pending.remove(&id) else {
-        return;
-    };
-    if let Some(bh) = op.buffer_handle() {
-        buffer_pool.release(bh);
-    }
-    match op {
-        PendingOp::Connect { connect_fd, .. } => {
-            // io_uring pre-creates the socket; the pool reports it here.
-            if let Some(fd) = connect_fd.or(if result_fd > 0 { Some(result_fd) } else { None }) {
-                // SAFETY: nothing else holds this descriptor — the port that
-                // would have owned it is never built.
-                unsafe { libc::close(fd) };
-            }
-        }
-        PendingOp::Open { .. } if result_fd > 0 => {
-            // SAFETY: as above — the port for this descriptor is never built.
-            unsafe { libc::close(result_fd) };
-        }
-        PendingOp::ProcessWait { siginfo, .. } if !siginfo.is_null() => {
-            // SAFETY: allocated by `Box::into_raw` at submit; reclaimed once.
-            drop(unsafe { Box::from_raw(siginfo) });
-        }
-        _ => {}
-    }
-}
-
 /// Convert a `StdinCompletion` into a `Completion`, releasing the buffer.
 pub(super) fn stdin_to_completion(
     sc: crate::io::threadpool::StdinCompletion,
-    pending: &mut HashMap<SubmissionId, PendingOp>,
+    pending: &mut PendingTable,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(sc.id);
-    let pending_op = pending.remove(&id)?;
+    let pending_op = match pending.take(id) {
+        Taken::Live(op) => op,
+        // The stdin worker reports no descriptor, so there is none to close.
+        Taken::Cancelled(op) => {
+            op.retire(0, buffer_pool);
+            return None;
+        }
+        Taken::Unknown => return None,
+    };
     // Release BufferPool handle if present
     if let Some(bh) = pending_op.buffer_handle() {
         buffer_pool.release(bh);
@@ -165,14 +124,21 @@ pub(super) fn stdin_to_completion(
 /// Convert a `PoolCompletion` into a `Completion`, handling Connect fd stash.
 pub(super) fn pool_to_completion(
     pc: PoolCompletion,
-    pending: &mut HashMap<SubmissionId, PendingOp>,
+    pending: &mut PendingTable,
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(pc.id);
-    let mut pending_op = pending.remove(&id)?;
+    let mut pending_op = match pending.take(id) {
+        Taken::Live(op) => op,
+        Taken::Cancelled(op) => {
+            op.retire(pc.result_code, buffer_pool);
+            return None;
+        }
+        Taken::Unknown => return None,
+    };
     if let PendingOp::Connect {
         ref mut connect_fd, ..
     } = pending_op
