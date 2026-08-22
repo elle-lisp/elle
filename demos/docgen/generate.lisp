@@ -14,7 +14,10 @@
 (def @src-dir "src")
 (def @prelude-path (path/join src-dir "prelude.lisp"))
 (def @stdlib-path (path/join src-dir "stdlib.lisp"))
-(def @github-base "https://github.com/anthropics/elle/blob/main")
+# Every stdlib entry carries a source link built on this. Cargo.toml's
+# `repository` is the canonical spelling of the URL; tests/integration/paths.rs
+# pins the two together.
+(def @github-base "https://github.com/elle-lisp/elle/blob/main")
 
 # ── Imports ────────────────────────────────────────────────────────
 

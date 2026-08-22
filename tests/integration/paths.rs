@@ -1,18 +1,23 @@
-// Every Elle source path a build or doc driver names must resolve.
+// What the Makefile and the doc generator name in text must match the tree.
 //
-// Both drivers below name their inputs as text, so a moved file leaves a
-// reference that no compiler checks. Worse, both fail QUIETLY: the Makefile's
-// `find` roots are swallowed by `2>/dev/null`, so a missing root drops its
-// files out of the format gate and the gate still exits 0; the doc generator
-// runs only on a push to main, so a stale `slurp` path turns main red after
-// the merge that caused it. These tests are the cheap standing check that the
-// text still points at the tree.
+// Neither driver is compiled, so every path and URL in them is a reference
+// nothing checks. Both also fail quietly when a reference goes stale. The
+// Makefile's `find` roots are swallowed by `2>/dev/null`, so a root that no
+// longer exists narrows the format gate and the gate still exits 0. The doc
+// generator runs on a push to main and nowhere earlier, so a stale path or a
+// wrong URL reaches the published site before anything reports it. These
+// tests are the standing check, and they cost a filesystem walk.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The doc generator, whose configuration block both generator tests read.
+fn generator_path() -> PathBuf {
+    repo_root().join("demos/docgen/generate.lisp")
 }
 
 /// Directories whose `.lisp` files are not this repository's to format:
@@ -58,9 +63,9 @@ fn makefile_find_roots() -> Vec<String> {
 // The format gate is only as wide as its `find` roots, and a root that no
 // longer exists costs nothing at the shell — `find` reports it on stderr and
 // the Makefile discards that. So the files under it stop being formatted and
-// nothing anywhere fails. Counter-factual: with `src/` absent from the roots,
-// the five Elle sources under src/ (prelude, stdlib, core, test, the Lua
-// prelude) went unformatted and unchecked, and `make fmt-check` stayed green.
+// nothing anywhere fails. The counter-factual: drop `src/` from the roots and
+// the five Elle sources under it — prelude, stdlib, core, test, the Lua
+// prelude — leave the gate, while `make fmt-check` still exits 0.
 #[test]
 fn format_gate_covers_every_elle_source() {
     let root = repo_root();
@@ -100,14 +105,14 @@ fn format_gate_covers_every_elle_source() {
 
 // The doc generator reads the Elle sources whose comments and defns become the
 // API reference. It runs on a push to main and nowhere earlier, so a path that
-// no longer resolves is a red main rather than a failed PR. Counter-factual:
-// the generator slurped "prelude.lisp" and "stdlib.lisp" from the repo root
-// after both moved under src/, and every gate before the merge passed.
+// no longer resolves is a red main rather than a failed PR. The
+// counter-factual: point `src-dir` back at the repository root, where the
+// prelude and the stdlib used to live, and every gate ahead of the merge
+// still passes.
 #[test]
 fn docgen_source_inputs_exist() {
+    let text = fs::read_to_string(generator_path()).expect("read the doc generator");
     let root = repo_root();
-    let generator = root.join("demos/docgen/generate.lisp");
-    let text = fs::read_to_string(&generator).expect("read the doc generator");
 
     let src_dir = text
         .split_once("(def @src-dir \"")
@@ -130,7 +135,7 @@ fn docgen_source_inputs_exist() {
          If the generator's configuration changed shape, teach this test the \
          new shape — do not let it pass by matching nothing.",
         inputs.len(),
-        generator.display()
+        generator_path().display()
     );
 
     for name in &inputs {
@@ -141,4 +146,36 @@ fn docgen_source_inputs_exist() {
             path.display()
         );
     }
+}
+
+// Every stdlib entry on the published site carries a source link built on the
+// generator's `github-base`. Cargo.toml's `repository` is where this project
+// spells its own URL, so the generator's copy has to agree with it or the
+// whole API reference links somewhere else. A wrong host still generates, still
+// publishes, and still renders — it fails only when a reader clicks a link, and
+// nothing in the build is watching for that.
+#[test]
+fn docgen_source_links_point_at_this_repository() {
+    let manifest =
+        fs::read_to_string(repo_root().join("Cargo.toml")).expect("read the crate manifest");
+    let repository = manifest
+        .lines()
+        .find_map(|l| l.strip_prefix("repository = \""))
+        .and_then(|rest| rest.split_once('"'))
+        .map(|(url, _)| url.trim_end_matches('/').to_string())
+        .expect("Cargo.toml declares a repository URL");
+
+    let text = fs::read_to_string(generator_path()).expect("read the doc generator");
+    let github_base = text
+        .split_once("(def @github-base \"")
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(url, _)| url.to_string())
+        .expect("the generator defines github-base");
+
+    assert!(
+        github_base.starts_with(&repository),
+        "the doc generator builds source links on {github_base}, but this crate \
+         is published from {repository} (Cargo.toml). Every source link in the \
+         generated API reference points at the wrong repository."
+    );
 }
