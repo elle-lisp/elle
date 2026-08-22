@@ -307,7 +307,17 @@ test: smoke crosscheck  ## Rust unit + integration tests + clippy + fmt + crossc
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 	$(MLIR_ENV) cargo test --workspace --lib --all-features
-	cargo test --test '*' -- --skip property
+	RUST_TEST_THREADS=$(INTEGRATION_TEST_THREADS) cargo test --test '*' -- --skip property
+
+# The integration suite runs at CI's thread count, not the host's core count.
+# `thread_transfer::heap` gauges `mapped_bytes()` — bytes the region page pools
+# hold from the OS, PROCESS-wide — so every other test sharing the binary moves
+# the number under it. At full parallelism on a many-core box the reading swings
+# by an order of magnitude and the gauge fails on correct code; CI pins
+# RUST_TEST_THREADS=2 (.github/workflows/pr.yml, tests-combined) and reads it
+# steady. A pre-commit gate has to reproduce CI, so it pins the same value. The
+# cost is wall-clock: the suite takes ~45min here against ~13min unpinned.
+INTEGRATION_TEST_THREADS ?= 2
 
 # Clippy over the macOS arm of every `cfg(target_os)`. A Linux-only gate sees
 # only the io_uring side, so a binding the thread-pool backend never reads
