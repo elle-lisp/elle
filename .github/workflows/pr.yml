@@ -254,6 +254,13 @@ jobs:
       # Keep the symbol table on this runner: it is the box where the corpus
       # wedges, and the photograph is the only evidence a timeout leaves.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
+      # The other half of `--trace=scrub` below. The scrub's `memset` runs in
+      # any build, but the panic that READS the zeros — the `arena::deref`
+      # tag/object mismatch that names the deref site and attributes the free —
+      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
+      # and says nothing: a stale read faults near its site instead of naming
+      # it. See docs/impl/region/diagnostics.md § `--trace=scrub`.
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -282,12 +289,34 @@ jobs:
       # backend only this box exercises). Scrub zeroes each released page, so
       # the first stale read panics at the deref naming its site instead of
       # failing minutes later somewhere unrelated. One memset per freed page.
+      # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
       - name: make smoke
         run: make smoke ELLE_TEST_FLAGS=--trace=scrub
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
       - name: Run property tests
         run: "cargo test --test lib property::"
+      # A batch killed by a signal leaves the batch number and nothing else. The
+      # kernel's crash report has the faulting thread's stack, and the symbol
+      # table is kept on this runner (CARGO_PROFILE_RELEASE_STRIP above), so the
+      # frames are readable. Reports are written asynchronously by ReportCrash,
+      # so give it a moment before looking.
+      - name: Crash reports
+        if: failure()
+        run: |
+          sleep 15
+          dir=~/Library/Logs/DiagnosticReports
+          shopt -s nullglob
+          reports=("$dir"/elle*.ips "$dir"/elle*.crash)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "no crash report for elle under $dir"
+            ls -la "$dir" 2>/dev/null || echo "$dir does not exist"
+            exit 0
+          fi
+          for r in "${reports[@]}"; do
+            echo "===== $r ====="
+            cat "$r"
+          done
 
   all-checks:
     name: All Checks Passed
