@@ -663,15 +663,11 @@ fn pin_branch_arm_releases(
     for (&alloc_id, &r) in &info.alloc_region {
         region_anchors.entry(r).or_default().push(ord(alloc_id));
     }
-    // The window's per-region loop was O(branches × regions) — every branch
-    // re-scanned every region even though only regions whose `decref_point`
-    // lands inside the branch's arms can move (the whole-stdlib branch window
-    // iterates ≈7M times to move 470). Index the regions by post-order
-    // `decref_point` ONCE, and each branch scans only the arm-interval slices
-    // (binary-searched) instead of the whole map. `by_dord` stays ordered as
-    // moves raise a region's `decref_point` (a bubble-up per move), so later
-    // branches — processed innermost-outward — see the same post-move values
-    // the old loop did.
+    // Only regions whose `decref_point` lands inside the branch's arms can move,
+    // so index the regions by post-order `decref_point` once and let each branch
+    // binary-search the arm-interval slices. `by_dord` stays ordered as moves
+    // raise a region's `decref_point` (a bubble-up per move), so later branches —
+    // processed innermost-outward — see the post-move values.
     let mut by_dord: Vec<(u32, Region)> = info
         .region_data
         .iter()
@@ -781,18 +777,15 @@ fn pin_branch_arm_releases(
             .copied()
             .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
             .collect();
-        // The exemption `arm_exits.any(|e| e.callee.contains(r))` below only asks
-        // whether r is in ANY exiting arm's callee set — a union, queried per region.
-        // Merge the per-arm sets once per branch so the per-region test is O(1)
-        // instead of O(arm_exits) hash lookups (the whole-stdlib branch window
-        // iterates branches × regions ≈ 7M times).
+        // The exemption below only asks whether r is in ANY exiting arm's callee
+        // set, so the per-arm sets are merged once per branch and the per-region
+        // test is an O(1) membership lookup in that union.
         let callee_union: rustc_hash::FxHashSet<Region> = arm_exits
             .iter()
             .flat_map(|e| e.callee.iter().copied())
             .collect();
-        // Same for the barrier-interval test: disjoint-merge the half-open
-        // intervals once, then answer `any(lo <= dord < hi)` with a binary search
-        // instead of scanning every barrier per region. Overlapping intervals
+        // Disjoint-merge the half-open barrier intervals once, then answer
+        // `any(lo <= dord < hi)` with a binary search. Overlapping intervals
         // merge; adjacent ones ([1,5) and [5,8)) do NOT — 5 is in neither.
         let mut sorted_barriers = inner_barriers;
         sorted_barriers.sort_unstable_by_key(|&(lo, _)| lo);
@@ -814,7 +807,7 @@ fn pin_branch_arm_releases(
         };
         // Merge the arms' closed intervals (`lo <= dord <= hi`) so each region in
         // the branch's union is scanned once, then binary-search the `by_dord`
-        // index for each merged interval instead of scanning every region.
+        // index for each merged interval.
         let mut arm_ivs: Vec<(u32, u32)> = br.arms.iter().map(|a| (a.lo, a.hi)).collect();
         arm_ivs.sort_unstable_by_key(|&(lo, _)| lo);
         let mut merged_arms: Vec<(u32, u32)> = Vec::new();

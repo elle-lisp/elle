@@ -130,12 +130,9 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     order: &HashMap<HirId, u32>,
 ) -> AdoptEdges {
     let owned = compute_owned_subtrees(inputs, info);
-    // The read/funnel alias tables indexed by their source/container, built once
-    // for the whole ownership pass. The per-root fixpoint below was
-    // O(roots × all-alias-edges): every root re-scanned the WHOLE stdlib alias
-    // table (≈34k edges) even though only edges out of reachable regions can
-    // grow it. Indexed, each root's closure walks only the edges its reachable
-    // set actually touches.
+    // The read/funnel alias tables, indexed by source/container, are built once
+    // for the whole ownership pass. The per-root fixpoint below walks only the
+    // edges out of the regions its reachable set actually touches.
     let mut aliases_by_source: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
     for &(_, alias, source) in info
         .counted_read_aliases
