@@ -86,11 +86,22 @@ fn compile_syntaxes_frontend_xform_inner(
     xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     intern_primitive_names(symbols);
+    let profile = std::env::var("ELLE_PROFILE").is_ok();
+    let ft0 = std::time::Instant::now();
+    let fmark = |label: &str| {
+        if profile {
+            eprintln!(
+                "[elle-profile] frontend {source_name} {label}: {:?}",
+                ft0.elapsed()
+            );
+        }
+    };
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
     }
+    fmark("parse+epoch");
 
     let (expanded_forms, mut expander, meta) =
         cctx.with_macro_expansion(|macro_vm, mut expander, meta| {
@@ -113,6 +124,7 @@ fn compile_syntaxes_frontend_xform_inner(
             }
             Ok::<_, String>((expanded_forms, expander, meta))
         })?;
+    fmark("expand(include+macros)");
 
     // A fresh scope for any accumulator/temporaries `xform` injects, minted after
     // expansion so it cannot collide with a scope the expander already assigned.

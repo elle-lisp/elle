@@ -264,14 +264,23 @@ impl CompileCtx {
     pub fn get_or_compile_projection(
         &mut self,
         resolved_path: &str,
+        symbols: &mut SymbolTable,
     ) -> Option<HashMap<String, Signal>> {
         if let Some(proj) = self.projections.get(resolved_path) {
             return proj.clone();
         }
 
         let source = std::fs::read_to_string(resolved_path).ok()?;
-        let mut symbols = SymbolTable::new();
-        let projection = super::compile::compile_file(&source, &mut symbols, self, resolved_path)
+        // Compile in the CALLER's symbol table, not a throwaway one. Macro
+        // transformers compile lazily on first expansion and cache on the
+        // expander; quoted-literal symbol ids baked into a transformer bind to
+        // whichever table compiled it. A throwaway table here makes the FIRST
+        // expansion (often this projection probe) bake throwaway ids, so the
+        // real import's expansion compares against the instance table and
+        // fails — e.g. `each`'s `(= (syntax->datum iter-or-in) 'in)`. The
+        // stdlib disk cache skips the stdlib compile that would otherwise warm
+        // every transformer; using the instance table keeps both paths consistent.
+        let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
             .ok()
             .and_then(|result| result.bytecode.signal_projection);
 

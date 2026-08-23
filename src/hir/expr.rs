@@ -23,7 +23,7 @@ mod traverse;
 /// was the source of a phantom-region class. Code that needs program
 /// order must use the explicit index from
 /// `crate::hir::liveness::compute_order` instead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct HirId(pub u32);
 
 /// Global monotonic counter for HirId assignment.
@@ -39,14 +39,14 @@ fn fresh_hir_id() -> HirId {
 }
 
 /// A declared signal bound on a function parameter.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParamBound {
     pub binding: Binding,
     pub signal: Signal,
 }
 
 /// HIR expression with source location, signal, and unique ID.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Hir {
     pub kind: HirKind,
     pub span: Span,
@@ -77,7 +77,7 @@ impl Hir {
 }
 
 /// A function call argument, which may be spliced (spread).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CallArg {
     pub expr: Hir,
     pub spliced: bool,
@@ -85,12 +85,12 @@ pub struct CallArg {
 
 /// Unique identifier for a named/anonymous block, used by `break` to target
 /// the correct block at compile time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BlockId(pub u32);
 
 /// How extra arguments beyond fixed params are collected.
 /// Only meaningful when `rest_param` is `Some`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VarargKind {
     /// Collect into a list (existing `&` behavior)
     List,
@@ -102,7 +102,7 @@ pub enum VarargKind {
 }
 
 /// HIR expression kinds - fully analyzed forms
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum HirKind {
     // === Literals ===
     Nil,
@@ -164,8 +164,10 @@ pub enum HirKind {
         /// string data (`Rc<str>`), NOT a heap `Value`. It rides the closure
         /// template (held alive by RC with it) and is materialized as a fresh
         /// ordinary (reclaimable) allocation when `(doc f)` reads it.
+        #[serde(skip)]
         doc: Option<std::rc::Rc<str>>,
         /// Original lambda Syntax node for eval environment reconstruction
+        #[serde(skip)]
         syntax: Option<Rc<crate::syntax::Syntax>>,
         /// True if the function body contains `(numeric!)` assertion.
         /// The lowerer checks `is_gpu_eligible()` after lowering.

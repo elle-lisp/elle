@@ -99,9 +99,9 @@ struct Wrapper {
 /// bindings. The operand map (`Arm::arg_src`) is not carried — it was already proven
 /// to be the identity `0..arity` when the wrapper was collected, so the rewrite reuses
 /// the call's args in order.
-struct RegArm {
-    ty: TyId,
-    native_name: SymbolId,
+pub(crate) struct RegArm {
+    pub(crate) ty: TyId,
+    pub(crate) native_name: SymbolId,
     /// This arm does not monomorphize cross-unit — it is a mutable in-place `del`
     /// and stays on the wrapper's container compensation (see
     /// `is_mutable_container`). Decided at record time because an arm's `ty` is
@@ -110,9 +110,9 @@ struct RegArm {
 }
 
 /// A wrapper summarized by name for cross-unit reuse (see `RegArm`).
-struct RegWrapper {
-    arity: usize,
-    arms: Vec<RegArm>,
+pub(crate) struct RegWrapper {
+    pub(crate) arity: usize,
+    pub(crate) arms: Vec<RegArm>,
 }
 
 /// Per-instance persistent map of dispatch wrappers, keyed by wrapper NAME. Each
@@ -127,7 +127,7 @@ struct RegWrapper {
 /// compile that defined the wrapper — never on any VM/region structure.
 #[derive(Default)]
 pub struct DispatchWrapperRegistry {
-    by_name: HashMap<SymbolId, RegWrapper>,
+    pub(crate) by_name: HashMap<SymbolId, RegWrapper>,
 }
 
 impl DispatchWrapperRegistry {
@@ -159,6 +159,63 @@ impl DispatchWrapperRegistry {
                 })
                 .collect(),
         });
+    }
+    /// Snapshot this registry for the stdlib disk cache. SymbolIds are
+    /// per-process; names travel instead, re-interned on load. `TyId` is a
+    /// well-known `TypeInterner` constant (stable across processes).
+    pub(crate) fn to_stored(&self, symbols: &crate::symbol::SymbolTable) -> StoredDispatchRegistry {
+        StoredDispatchRegistry {
+            by_name: self
+                .by_name
+                .iter()
+                .map(|(name, rw)| {
+                    (
+                        symbols.name(*name).unwrap_or("").to_string(),
+                        StoredRegWrapper {
+                            arity: rw.arity,
+                            arms: rw
+                                .arms
+                                .iter()
+                                .map(|a| StoredRegArm {
+                                    ty: a.ty.0,
+                                    native_name: symbols
+                                        .name(a.native_name)
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    skip: a.skip,
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+    /// Restore a registry snapshot into this one (used by the stdlib disk
+    /// cache load path; re-interns names in the loading process's table).
+    pub(crate) fn restore(
+        &mut self,
+        stored: StoredDispatchRegistry,
+        symbols: &mut crate::symbol::SymbolTable,
+    ) {
+        self.by_name.clear();
+        for (name, rw) in stored.by_name {
+            self.by_name.insert(
+                symbols.intern(&name),
+                RegWrapper {
+                    arity: rw.arity,
+                    arms: rw
+                        .arms
+                        .into_iter()
+                        .map(|a| RegArm {
+                            ty: TyId(a.ty),
+                            native_name: symbols.intern(&a.native_name),
+                            skip: a.skip,
+                        })
+                        .collect(),
+                },
+            );
+        }
     }
 }
 
@@ -637,4 +694,22 @@ mod tests {
             );
         }
     }
+}
+
+/// Serializable snapshot of [`DispatchWrapperRegistry`] for the stdlib disk
+/// cache. Names (not per-process `SymbolId`s) travel; re-interned on load.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub(crate) struct StoredDispatchRegistry {
+    pub(crate) by_name: Vec<(String, StoredRegWrapper)>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct StoredRegWrapper {
+    pub(crate) arity: usize,
+    pub(crate) arms: Vec<StoredRegArm>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct StoredRegArm {
+    pub(crate) ty: u32,
+    pub(crate) native_name: String,
+    pub(crate) skip: bool,
 }

@@ -131,7 +131,7 @@ use clone::*;
 use ops::*;
 use registry::*;
 
-pub(crate) use registry::FnInlineRegistry;
+pub(crate) use registry::{FnInlineRegistry, StoredFnInlineRegistry};
 
 /// Fuse every qualifying HOF chain into an inlined index-walk loop. Runs on
 /// surface HIR, before functionalize (see the module doc). `registry` is the

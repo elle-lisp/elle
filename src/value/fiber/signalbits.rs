@@ -7,7 +7,7 @@
 /// The inner representation is an implementation detail. All code outside
 /// this impl block should use the provided methods instead of accessing
 /// the raw field.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SignalBits(u64);
 
 impl SignalBits {

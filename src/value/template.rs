@@ -21,7 +21,7 @@ use crate::value::Value;
 /// data mirroring the quoted datum. Leaves that are immediates (`Symbol`,
 /// `Int`, …) materialize to immediate `Value`s with no allocation; heap nodes
 /// (`String`, `Pair`, `Array`, …) allocate into the literal's region.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ConstTemplate {
     // Immediate leaves — no allocation.
     Nil,

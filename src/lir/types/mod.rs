@@ -32,14 +32,14 @@ pub fn closure_value_const_count() -> usize {
 }
 
 /// Virtual register
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Reg(pub u32);
 
 /// Index into an `LirModule`'s closure list.
 ///
 /// `MakeClosure` references closures by ID rather than owning them,
 /// so each closure is an independent compilation unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ClosureId(pub u32);
 
 /// A module: an entry function plus independently compiled closures.
@@ -60,7 +60,7 @@ impl Reg {
 }
 
 /// Basic block label
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Label(pub u32);
 
 impl Label {
@@ -77,7 +77,7 @@ impl Label {
 /// the absence of the field — never by a sentinel 0 or an `Option` that every
 /// instruction must drag along (which would let an allocation be built with no
 /// region, the exact invalid state the newtype exists to forbid).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpannedInstr {
     pub instr: LirInstr,
     pub span: Span,
@@ -90,7 +90,7 @@ impl SpannedInstr {
 }
 
 /// A terminator with source location
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpannedTerminator {
     pub terminator: Terminator,
     pub span: Span,
@@ -103,7 +103,7 @@ impl SpannedTerminator {
 }
 
 /// A basic block - sequence of instructions ending in a terminator
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BasicBlock {
     pub label: Label,
     pub instructions: Vec<SpannedInstr>,
@@ -121,7 +121,7 @@ impl BasicBlock {
 }
 
 /// Binary operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BinOp {
     Add,
     Sub,
@@ -136,7 +136,7 @@ pub enum BinOp {
 }
 
 /// Unary operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UnaryOp {
     Neg,
     Not,
@@ -144,14 +144,14 @@ pub enum UnaryOp {
 }
 
 /// Conversion operations (type coercion intrinsics)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConvOp {
     IntToFloat,
     FloatToInt,
 }
 
 /// Comparison operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CmpOp {
     Eq,
     Ne,
@@ -162,7 +162,7 @@ pub enum CmpOp {
 }
 
 /// Block terminator - how control leaves a block
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Terminator {
     /// Return from function
     Return(Reg),
@@ -188,7 +188,7 @@ pub enum Terminator {
 }
 
 /// Constant values in LIR
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum LirConst {
     Nil,
     EmptyList,

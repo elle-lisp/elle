@@ -22,8 +22,8 @@ mod de;
 mod ser;
 mod syntax;
 
-use de::{into_value_inner, DeserContext, ReconState};
-use ser::{from_value_inner, SerContext};
+use de::{into_value_inner, template_from_sendable, DeserContext, ReconState};
+use ser::{from_value_inner, sendable_from_template, SerContext};
 use syntax::{send_to_syntax, SendSyntax};
 
 /// Sendable snapshot of a closure.
@@ -38,7 +38,7 @@ use syntax::{send_to_syntax, SendSyntax};
 ///
 /// This struct is `pub(crate)` — it is part of the public interface of
 /// `SendBundle` but not independently useful outside `send.rs`.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SendableClosure {
     pub bytecode: Vec<u8>,
     pub arity: Arity,
@@ -77,6 +77,11 @@ pub struct SendableClosure {
     /// § Merging), serialized so the worker mint-or-reuses them and its region count
     /// matches the sender's. Empty unless a merge fired.
     pub merged_slots: Vec<u32>,
+    /// Value-routed release slots (`ClosureTemplate.frame_release_slots`), so an
+    /// abandoned frame on the worker runs the releases it still owes.
+    pub frame_release_slots: Vec<u16>,
+    /// Slot-routed release regions (`ClosureTemplate.frame_release_regions`).
+    pub frame_release_regions: Vec<u32>,
 }
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
@@ -317,6 +322,117 @@ impl SendBundle {
         }
 
         result
+    }
+}
+
+/// Serialize a list of closure templates (e.g. a module's `child_protos`) into
+/// owned `SendableClosure`s, for the stdlib compilation cache.
+///
+/// Each template is a blueprint: `env`/`squelch_mask` are empty. Templates have
+/// no heap identity to intern, so they are emitted inline; their own
+/// `child_protos` recurse. Closure constants *inside* a template's constant
+/// pool are live heap instances and intern into `ctx.closures`, which is
+/// returned as the second element — the reconstructed templates reference it
+/// by `Ref(idx)`.
+pub(crate) fn serialize_templates(
+    protos: &[std::rc::Rc<crate::value::ClosureTemplate>],
+    heap: &crate::value::fiberheap::FiberHeap,
+    symbols: &crate::symbol::SymbolTable,
+) -> Result<(Vec<SendableClosure>, Vec<SendableClosure>), String> {
+    let mut ctx = SerContext::new(heap, symbols);
+    let mut out = Vec::with_capacity(protos.len());
+    for t in protos {
+        out.push(sendable_from_template(t, &mut ctx)?);
+    }
+    Ok((out, ctx.closures))
+}
+
+/// Reconstruct closure templates from owned `SendableClosure`s (the `(templates,
+/// intern_table)` pair from `serialize_templates`). The intern table is shared
+/// across all templates so `Ref(idx)` entries (closure constants) resolve.
+///
+/// `Alloc` is the receiving context's allocation capability (every
+/// reconstructed heap object is born in its region); symbols re-intern names.
+///
+/// The stored `symbol_names` maps and LIR `LirConst::Symbol` ids carry the
+/// *storing* process's ids; both are remapped to this process's table before
+/// reconstruction (constants themselves re-intern by name in
+/// `template_from_sendable`).
+pub(crate) fn deserialize_templates(
+    templates: Vec<SendableClosure>,
+    mut intern_table: Vec<SendableClosure>,
+    alloc: &mut crate::primitives::ctx::Alloc<'_>,
+    symbols: &mut crate::symbol::SymbolTable,
+) -> Result<Vec<std::rc::Rc<crate::value::ClosureTemplate>>, String> {
+    remap_sendable_symbols(&mut intern_table, symbols);
+    let mut templates = templates;
+    remap_sendable_symbols(&mut templates, symbols);
+    let mut dctx = DeserContext::new(intern_table, alloc, symbols);
+    let mut out = Vec::with_capacity(templates.len());
+    for sc in templates {
+        out.push(template_from_sendable(sc, &mut dctx));
+    }
+    Ok(out)
+}
+
+/// Rewrite a `SendableClosure`'s `symbol_names` map and LIR symbol ids from the
+/// storing process's table to this one. Recurses through `child_protos`.
+fn remap_sendable_symbols(
+    protos: &mut [SendableClosure],
+    symbols: &mut crate::symbol::SymbolTable,
+) {
+    fn fix_one(sc: &mut SendableClosure, symbols: &mut crate::symbol::SymbolTable) {
+        let old_names: Vec<(u32, String)> = sc
+            .symbol_names
+            .iter()
+            .map(|(&id, name)| (id, name.clone()))
+            .collect();
+        let mut old_to_new = HashMap::new();
+        let mut new_names = HashMap::new();
+        for (old_id, name) in &old_names {
+            let new_id = symbols.intern(name).0;
+            old_to_new.insert(*old_id, new_id);
+            new_names.entry(new_id).or_insert_with(|| name.clone());
+        }
+        if let Some(lir) = sc.lir_function.as_mut() {
+            remap_lir_symbols(lir, &old_to_new);
+        }
+        sc.symbol_names = new_names;
+        for child in sc.child_protos.iter_mut() {
+            fix_one(child, symbols);
+        }
+    }
+    for p in protos.iter_mut() {
+        fix_one(p, symbols);
+    }
+}
+
+/// Re-map every `LirConst::Symbol(old_id)` in a LIR function to the id that
+/// `name` has in the *loading* process's symbol table. Symbol ids are
+/// per-process: the JIT materializes them into `Value::symbol(id)` directly.
+fn remap_lir_symbols(lir: &mut crate::lir::LirFunction, old_to_new: &HashMap<u32, u32>) {
+    use crate::lir::{LirConst, LirInstr};
+    for block in &mut lir.blocks {
+        for si in &mut block.instructions {
+            let fix = |c: &mut LirConst| {
+                if let LirConst::Symbol(sid) = c {
+                    if let Some(&new_id) = old_to_new.get(&sid.0) {
+                        *sid = crate::value::SymbolId(new_id);
+                    }
+                }
+            };
+            match &mut si.instr {
+                LirInstr::Const { value, .. } => fix(value),
+                LirInstr::StructGetOrNil { key, .. } => fix(key),
+                LirInstr::StructGetDestructure { key, .. } => fix(key),
+                LirInstr::StructRest { exclude_keys, .. } => {
+                    for k in exclude_keys.iter_mut() {
+                        fix(k);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 

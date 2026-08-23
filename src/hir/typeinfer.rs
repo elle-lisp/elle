@@ -26,12 +26,13 @@ use std::collections::HashMap;
 mod contract;
 mod fuse;
 pub(crate) use fuse::fuse_map_chains;
-pub(crate) use fuse::FnInlineRegistry;
+pub(crate) use fuse::{FnInlineRegistry, StoredFnInlineRegistry};
 mod guard;
 mod infer;
 use infer::*;
 mod monomorphize;
 pub use monomorphize::DispatchWrapperRegistry;
+pub(crate) use monomorphize::StoredDispatchRegistry;
 mod prune;
 pub(crate) use prune::prune_typeof_match_arms;
 

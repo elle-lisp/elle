@@ -30,7 +30,9 @@ use std::fmt;
 ///
 /// Symbols are interned for fast comparison (O(1) via ID comparison
 /// instead of O(n) string comparison).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct SymbolId(pub u32);
 
 impl SymbolId {
@@ -56,7 +58,7 @@ impl fmt::Display for SymbolId {
 /// assert!(Arity::Exact(2).matches(2));
 /// assert!(!Arity::Exact(2).matches(1));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Arity {
     /// Exact number of arguments required
     Exact(usize),

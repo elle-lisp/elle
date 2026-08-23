@@ -18,17 +18,78 @@ const STDLIB: &str = include_str!("../stdlib.lisp");
 /// export into the compilation cache's PrimitiveMeta so that
 /// `bind_primitives` pre-binds them for all subsequent compilations.
 pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) {
+    let profile = std::env::var("ELLE_PROFILE").is_ok();
+    let t0 = std::time::Instant::now();
+    let mark = |label: &str| {
+        if profile {
+            eprintln!("[elle-profile] stdlib {label}: {:?}", t0.elapsed());
+        }
+    };
+    // Try the disk cache first: same stdlib source + same elle binary → same
+    // compiled bytecode. On hit we skip the entire ~2.4s front end.
+    if let Some(cached) = crate::compiler::stdlib_cache::try_load(STDLIB, vm, symbols, cctx) {
+        let bytecode = match cached {
+            Ok(bc) => {
+                mark("cache-load");
+                if profile {
+                    eprintln!("[elle-profile] stdlib cache HIT");
+                }
+                bc
+            }
+            Err(e) => {
+                if profile {
+                    eprintln!("[elle-profile] stdlib cache miss ({}); recompiling", e);
+                }
+                match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
+                    Ok(r) => r.bytecode,
+                    Err(e) => panic!("stdlib compilation failed: {}", e),
+                }
+            }
+        };
+        // Execute stdlib — returns the last expression (a closure).
+        let closure_val = match vm.execute(&bytecode) {
+            Ok(v) => v,
+            Err(e) => panic!("stdlib execution failed: {}", e),
+        };
+        mark("executed");
+        // Call the returned closure to get the exports struct.
+        let exports_val = call_closure(vm, closure_val);
+        mark("exports");
+        register_exports(vm, symbols, cctx, closure_val, exports_val);
+        return;
+    }
     let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
         Ok(r) => r,
         Err(e) => panic!("stdlib compilation failed: {}", e),
     };
+    mark("compiled");
+    // Persist the compiled bytecode so the next process start skips the front
+    // end entirely. A write failure is not fatal — the cache is a speedup, and
+    // a fresh compile is always the fallback.
+    crate::compiler::stdlib_cache::try_store(STDLIB, &result.bytecode, vm, symbols, cctx);
+    mark("cache-store");
     // Execute stdlib — returns the last expression (a closure).
     let closure_val = match vm.execute(&result.bytecode) {
         Ok(v) => v,
         Err(e) => panic!("stdlib execution failed: {}", e),
     };
+    mark("executed");
     // Call the returned closure to get the exports struct.
     let exports_val = call_closure(vm, closure_val);
+    mark("exports");
+    register_exports(vm, symbols, cctx, closure_val, exports_val);
+}
+
+/// Register each stdlib export into the compilation cache (the tail of the
+/// original `init_stdlib`, split out so both the cached and compiled paths
+/// share it).
+fn register_exports(
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    closure_val: Value,
+    exports_val: Value,
+) {
     // Root the stdlib export aggregate (the struct + its module closure), not
     // each export. `exports_val` references every stdlib export, and the `Value`s
     // registered into the compilation caches below are aliases into those

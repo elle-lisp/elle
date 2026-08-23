@@ -300,13 +300,25 @@ fn compile_file_inner(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(CompileResult, crate::syntax::Expander), String> {
+    let profile = std::env::var("ELLE_PROFILE").is_ok();
+    let t0 = std::time::Instant::now();
+    let mark = |label: &str| {
+        if profile {
+            eprintln!(
+                "[elle-profile] compile {source_name} {label}: {:?}",
+                t0.elapsed()
+            );
+        }
+    };
     let (hir, arena, expander, prim_values, signal_projection) =
         compile_file_frontend(source, symbols, cctx, source_name)?;
+    mark("frontend(parse+expand+analyze)");
 
     // Lower to LIR
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+    mark("regions");
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
         let names = symbols.all_names();
         eprintln!(
@@ -322,11 +334,13 @@ fn compile_file_inner(
         .with_region_info(region_info);
 
     let lir_module = lowerer.lower(&hir)?;
+    mark("lower(HIR->LIR)");
 
     // Emit bytecode
     let signal = lir_module.entry.signal;
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
+    mark("emit(LIR->bytecode)");
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
 

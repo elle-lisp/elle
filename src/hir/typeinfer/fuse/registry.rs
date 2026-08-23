@@ -7,7 +7,7 @@ use super::*;
 /// `let`-bound bindings per call site, and re-resolves every free global by name
 /// against the consuming unit's own primitive bindings (`clone_reg_template`). The
 /// signal feeds the composition-reorder gate exactly as a same-unit template's does.
-pub(super) struct RegFnTemplate {
+pub(crate) struct RegFnTemplate {
     pub(super) arity: usize,
     pub(super) params: Vec<Binding>,
     pub(super) body: Hir,
@@ -18,6 +18,27 @@ pub(super) struct RegFnTemplate {
     /// arenas, so the fact travels here). It is what proves a spliced raw
     /// `%`-intrinsic in the body — see `BindingInner::declared_numeric`.
     pub(super) declared_numeric: bool,
+}
+impl RegFnTemplate {
+    /// `clone_fresh` re-mints `let`-bound bindings by reading their metadata off
+    /// the defining arena (`arena.get`); a template restored from the stdlib
+    /// disk cache has no such arena, so templates whose body contains a `let`
+    /// are not serialized (they stay un-inlined on the cached path — a
+    /// performance-only difference). Pure-expression bodies are safe.
+    pub(super) fn body_has_let(h: &Hir) -> bool {
+        match &h.kind {
+            HirKind::Let { .. } => true,
+            _ => {
+                let mut found = false;
+                h.for_each_child(|c| {
+                    if !found && Self::body_has_let(c) {
+                        found = true;
+                    }
+                });
+                found
+            }
+        }
+    }
 }
 
 /// Per-instance persistent map of cross-unit-inlineable function templates, keyed
@@ -35,7 +56,7 @@ pub(super) struct RegFnTemplate {
 /// pattern mirrors `monomorphize::DispatchWrapperRegistry`.
 #[derive(Default)]
 pub struct FnInlineRegistry {
-    by_name: FxHashMap<SymbolId, RegFnTemplate>,
+    pub(crate) by_name: FxHashMap<SymbolId, RegFnTemplate>,
 }
 
 impl FnInlineRegistry {
@@ -44,6 +65,62 @@ impl FnInlineRegistry {
     /// binding, and re-recording across compiles is a cheap no-op.
     pub(super) fn record(&mut self, name: SymbolId, t: RegFnTemplate) {
         self.by_name.entry(name).or_insert(t);
+    }
+    /// Snapshot the registry for the stdlib disk cache. Templates whose body
+    /// contains a `let` are skipped (`clone_fresh` re-mints their bindings off
+    /// the defining arena, which a reloaded template cannot provide). Names
+    /// travel instead of per-process `SymbolId`s.
+    pub(crate) fn to_stored(&self, symbols: &crate::symbol::SymbolTable) -> StoredFnInlineRegistry {
+        StoredFnInlineRegistry {
+            by_name: self
+                .by_name
+                .iter()
+                .filter(|(_, t)| !RegFnTemplate::body_has_let(&t.body))
+                .map(|(name, t)| {
+                    (
+                        symbols.name(*name).unwrap_or("").to_string(),
+                        StoredFnTemplate {
+                            arity: t.arity,
+                            params: t.params.iter().map(|b| b.0).collect(),
+                            body: t.body.clone(),
+                            globals: t
+                                .globals
+                                .iter()
+                                .map(|(b, s)| (b.0, symbols.name(*s).unwrap_or("").to_string()))
+                                .collect(),
+                            signal: t.signal,
+                            declared_numeric: t.declared_numeric,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+    /// Restore a snapshot into this registry (stdlib disk cache load path);
+    /// re-interns names in the loading process's table.
+    pub(crate) fn restore(
+        &mut self,
+        stored: StoredFnInlineRegistry,
+        symbols: &mut crate::symbol::SymbolTable,
+    ) {
+        self.by_name.clear();
+        for (name, t) in stored.by_name {
+            self.by_name.insert(
+                symbols.intern(&name),
+                RegFnTemplate {
+                    arity: t.arity,
+                    params: t.params.iter().map(|&i| Binding(i)).collect(),
+                    body: t.body,
+                    globals: t
+                        .globals
+                        .iter()
+                        .map(|(i, n)| (Binding(*i), symbols.intern(n)))
+                        .collect(),
+                    signal: t.signal,
+                    declared_numeric: t.declared_numeric,
+                },
+            );
+        }
     }
 }
 
@@ -310,4 +387,19 @@ impl FnResolver<'_> {
             _ => unreachable!("validate_chain proved a lambda or a template Var"),
         }
     }
+}
+
+/// Serializable snapshot of [`FnInlineRegistry`] for the stdlib disk cache.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub(crate) struct StoredFnInlineRegistry {
+    pub(crate) by_name: Vec<(String, StoredFnTemplate)>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct StoredFnTemplate {
+    pub(crate) arity: usize,
+    pub(crate) params: Vec<u32>,
+    pub(crate) body: Hir,
+    pub(crate) globals: Vec<(u32, String)>,
+    pub(crate) signal: Signal,
+    pub(crate) declared_numeric: bool,
 }

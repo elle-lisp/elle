@@ -5,7 +5,7 @@ use crate::hir::arena::BindingArena;
 use crate::value::SymbolId;
 
 /// HIR pattern for match expressions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum HirPattern {
     /// Match anything, don't bind
     Wildcard,
@@ -77,7 +77,7 @@ pub enum HirPattern {
 }
 
 /// Literal values that can appear in patterns
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PatternLiteral {
     Bool(bool),
     Int(i64),
@@ -102,7 +102,7 @@ impl std::hash::Hash for PatternLiteral {
 }
 
 /// Key type in struct/table patterns: keyword (:foo) or symbol ('foo)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PatternKey {
     Keyword(String),
     Symbol(SymbolId),

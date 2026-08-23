@@ -105,7 +105,7 @@ impl<'a, 'h, 's> DeserContext<'a, 'h, 's> {
 /// `env`/`squelch_mask` (a blueprint is a pure template). Used to rebuild a
 /// reconstructed template's `child_protos` so the worker's `MakeClosure`
 /// resolves by index.
-fn template_from_sendable(
+pub(in crate::value::send) fn template_from_sendable(
     sc: SendableClosure,
     ctx: &mut DeserContext<'_, '_, '_>,
 ) -> std::rc::Rc<crate::value::ClosureTemplate> {
@@ -146,6 +146,8 @@ fn template_from_sendable(
         name: sc.name.map(|s| Rc::from(s.as_str())),
         child_protos: Rc::new(child_protos),
         merged_slots: Rc::new(sc.merged_slots.into_iter().collect()),
+        frame_release_slots: Rc::new(sc.frame_release_slots),
+        frame_release_regions: Rc::new(sc.frame_release_regions),
         ..crate::value::ClosureTemplate::new(Rc::new(sc.bytecode), sc.arity, Rc::new(constants))
     })
 }
@@ -419,6 +421,8 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_, '_>
                 name: sc.name.map(|s| Rc::from(s.as_str())),
                 child_protos: Rc::new(child_protos),
                 merged_slots: Rc::new(sc.merged_slots.into_iter().collect()),
+                frame_release_slots: Rc::new(sc.frame_release_slots),
+                frame_release_regions: Rc::new(sc.frame_release_regions),
                 ..ClosureTemplate::new(Rc::new(sc.bytecode), sc.arity, Rc::new(constants))
             });
 
