@@ -13,7 +13,17 @@ impl VM {
     /// The stack holds pairs pushed as `[param1, val1, param2, val2, ...]`, so
     /// they pop in reverse (last pair first); we re-reverse to restore source
     /// order before installing. A non-parameter operand raises a type-error and
-    /// aborts the frame (pushing nil for the aborted `parameterize` result).
+    /// aborts the frame (pushing nil for the aborted `parameterize` result);
+    /// the error's unwind also skips the scope-end `PopParamFrame`, so push
+    /// and pop stay balanced on both paths.
+    ///
+    /// The abort must be decided by THIS opcode's own failure, never by
+    /// `fiber.signal`: that slot ambiently carries the `(SIG_OK, value)`
+    /// return-value handoff between frames, so a signal can be pending while
+    /// execution is entirely healthy. Gating the push on it skips a frame
+    /// whose balanced pop still runs, and that pop then consumes the frame
+    /// below — an enclosing `parameterize`'s, or the fiber's seeded parameter
+    /// baseline (pinned by `tests/elle/param-frame-balance.lisp`).
     #[inline]
     pub(super) fn handle_push_param_frame(&mut self, bc: &[u8], ip: &mut usize) {
         let count = bc[*ip] as usize;
@@ -42,11 +52,9 @@ impl VM {
                     format!("parameterize: {} is not a parameter", param.type_name()),
                 );
                 self.fiber.stack.push(Value::NIL);
-                break;
+                return;
             }
         }
-        if self.fiber.signal.is_none() {
-            self.fiber.param_frames.push(frame);
-        }
+        self.fiber.param_frames.push(frame);
     }
 }
