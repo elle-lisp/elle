@@ -822,77 +822,74 @@ fn pin_branch_arm_releases(
             }
             merged_arms.push((lo, hi));
         }
+        // Snapshot the branch's candidates before any move: the inner loop mutates
+        // `by_dord` in place (a move raises the entry's ord), so iterating the live
+        // slice would shift not-yet-visited entries across the fixed `end` boundary
+        // and admit regions whose ord falls OUTSIDE the arm union. Collecting the
+        // union's entries once — each region appears in exactly one merged interval —
+        // matches the original per-region pass, which read every `decref_point`
+        // before mutating any of them.
+        let mut candidates: Vec<(u32, Region, usize)> = Vec::new();
         for &(lo, hi) in &merged_arms {
             let start = by_dord.partition_point(|&(o, _)| o < lo);
             let end = by_dord.partition_point(|&(o, _)| o <= hi);
-            let mut i = start;
-            while i < end {
-                let (dord, r) = by_dord[i];
-                if excluded.contains(&r) {
-                    i += 1;
-                    continue;
-                }
-                if arm_exits_frame && !value_routed.contains(&r) {
-                    i += 1;
-                    continue;
-                }
-                // A region the exiting arm's call names as its CALLEE is exempt from the
-                // relocation, so no replica reaches that arm — and what stands in for the
-                // release there is the deferred callee channel, which is keyed on where
-                // the release SITS (`deferred_release_slot`; mechanism.md § "What the
-                // exemption keeps, a channel must still run"). Moving it to the merge
-                // takes it out of that channel's reach and leaves the arm with nothing,
-                // so such a region keeps its in-arm release. An ARGUMENT's exemption is
-                // the opposite story — the release the arm never runs IS the ownership
-                // move, and the callee's owned-parameter release consumes it — so an
-                // argument is no refusal here (rules.md Rule 5).
-                if callee_union.contains(&r) {
-                    i += 1;
-                    continue;
-                }
-                if dord >= anchor_ord {
-                    i += 1;
-                    continue;
-                }
-                // A boundary is the scope's BODY, not the scope's own node: the
-                // lowerer emits a node's releases after it finishes lowering that
-                // node, so a `decref_point` AT the `While`/`Loop` lands after the loop
-                // and runs once per execution of it — the count the merge label is
-                // reached with. A `Lambda` node reads the same way; only its body runs
-                // in another activation. The interval is therefore half-open on the
-                // high end, which is what admits a live-in region a nested loop merely
-                // READS: the loop-node extension anchors every such read at the loop
-                // node (`hir/liveness/lastuse`), so the closed reading would leave the
-                // branch's only release under the looping arm.
-                if in_barrier(dord) {
-                    i += 1;
-                    continue;
-                }
-                let live_in = region_anchors
-                    .get(&r)
-                    .is_some_and(|a| a.iter().all(|&o| o < br.node_lo || o > br.node_hi));
-                if !live_in {
-                    i += 1;
-                    continue;
-                }
-                // The window moves only where the release is EMITTED. `lifetime_point`
-                // stays at the structural last use, so the ownership and merge cuts —
-                // whose post-dominance obligations are lifetime questions — keep
-                // reading the region's real lifetime and not this anchor
-                // (`RegionData::lifetime_point`).
-                info.region_data.get_mut(&r).unwrap().decref_point = anchor;
-                by_dord[i].0 = anchor_ord;
-                // Bubble the moved entry up (its `decref_point` only rises) so the
-                // index stays ordered for later branches; the element now at `i`
-                // may itself be an unprocessed in-interval region, so do not
-                // advance `i` on a move.
-                let mut j = i;
-                while j + 1 < by_dord.len() && by_dord[j].0 > by_dord[j + 1].0 {
-                    by_dord.swap(j, j + 1);
-                    j += 1;
-                }
+            for (rel, &(o, r)) in by_dord[start..end].iter().enumerate() {
+                candidates.push((o, r, start + rel));
             }
         }
+        for &(dord, r, idx) in &candidates {
+            if excluded.contains(&r) {
+                continue;
+            }
+            if arm_exits_frame && !value_routed.contains(&r) {
+                continue;
+            }
+            // A region the exiting arm's call names as its CALLEE is exempt from the
+            // relocation, so no replica reaches that arm — and what stands in for the
+            // release there is the deferred callee channel, which is keyed on where
+            // the release SITS (`deferred_release_slot`; mechanism.md § "What the
+            // exemption keeps, a channel must still run"). Moving it to the merge
+            // takes it out of that channel's reach and leaves the arm with nothing,
+            // so such a region keeps its in-arm release. An ARGUMENT's exemption is
+            // the opposite story — the release the arm never runs IS the ownership
+            // move, and the callee's owned-parameter release consumes it — so an
+            // argument is no refusal here (rules.md Rule 5).
+            if callee_union.contains(&r) {
+                continue;
+            }
+            if dord >= anchor_ord {
+                continue;
+            }
+            // A boundary is the scope's BODY, not the scope's own node: the
+            // lowerer emits a node's releases after it finishes lowering that
+            // node, so a `decref_point` AT the `While`/`Loop` lands after the loop
+            // and runs once per execution of it — the count the merge label is
+            // reached with. A `Lambda` node reads the same way; only its body runs
+            // in another activation. The interval is therefore half-open on the
+            // high end, which is what admits a live-in region a nested loop merely
+            // READS: the loop-node extension anchors every such read at the loop
+            // node (`hir/liveness/lastuse`), so the closed reading would leave the
+            // branch's only release under the looping arm.
+            if in_barrier(dord) {
+                continue;
+            }
+            let live_in = region_anchors
+                .get(&r)
+                .is_some_and(|a| a.iter().all(|&o| o < br.node_lo || o > br.node_hi));
+            if !live_in {
+                continue;
+            }
+            // The window moves only where the release is EMITTED. `lifetime_point`
+            // stays at the structural last use, so the ownership and merge cuts —
+            // whose post-dominance obligations are lifetime questions — keep
+            // reading the region's real lifetime and not this anchor
+            // (`RegionData::lifetime_point`).
+            info.region_data.get_mut(&r).unwrap().decref_point = anchor;
+            by_dord[idx].0 = anchor_ord;
+        }
+        // A move raises a region's `decref_point` in place; restore the index
+        // order once per branch so the next branch's interval searches hold.
+        by_dord.sort_unstable_by_key(|&(o, _)| o);
     }
 }
 
