@@ -194,16 +194,20 @@ static NEXT_STORE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU3
 /// validation and the page-header magic close the known cause) or a stale/foreign
 /// read — not a region to lazily create.
 ///
-/// The bound sits between what a real program reaches and what the allocator can
-/// build, and it needs both sides. Below: 2^24 concurrently-live regions would
-/// own at least 64 GiB of pages (Rule 6 — a live region owns at least one 4 KiB
-/// page), so no real program comes near. Above: the panic fires only if the
-/// table at that id is still *allocatable*, since the check runs before
-/// `regions.resize_with`. At 2^24 that table is ~3.5 GB, which an allocator can
-/// satisfy; set the bound where the table itself exceeds what the machine can
-/// supply and the allocator aborts one id below the tripwire instead, killing
-/// the program with a byte count and no diagnosis.
-const MAX_PLAUSIBLE_REGION_ID: u32 = 1 << 24;
+/// The bound has to clear two things at once, and it is the *ratio* between them
+/// that leaves room to do so — not any absolute figure, which only tracks the
+/// machine. A live region owns at least one 4 KiB page (Rule 6), so holding 2^28
+/// regions at once means holding at least 1 TiB of region pages, while the table
+/// for those ids is 2^28 × `size_of::<Option<RegionEntry>>()`, about 56 GB. The
+/// table is always ~1/20th of the pages a program at that id is already holding.
+/// Set the bound past what a machine's memory lets a program hold live, and the
+/// table at that bound is something the same machine can still allocate — which
+/// it must, because the check runs before `regions.resize_with`: a table the
+/// allocator cannot build aborts one id *below* the tripwire, killing the program
+/// with a byte count and no diagnosis. That failure is still reachable on a
+/// machine too small to allocate the 56 GB table, which is why the assertion
+/// message names id exhaustion beside corruption instead of asserting the latter.
+const MAX_PLAUSIBLE_REGION_ID: u32 = 1 << 28;
 
 impl RegionStore {
     pub fn new(
