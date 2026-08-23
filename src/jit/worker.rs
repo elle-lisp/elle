@@ -10,6 +10,10 @@
 use crate::jit::{JitCode, JitCompiler, JitError};
 use crate::lir::LirFunction;
 use crate::value::SymbolId;
+/// Cumulative Cranelift compilation time (ns) and task count across the
+/// process, readable by embedders for profiling (`ELLE_PROFILE=1`).
+pub static JIT_COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static JIT_COMPILE_TASKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Compilation request sent to the background JIT thread.
 pub(crate) struct JitTask {
@@ -64,10 +68,16 @@ impl JitWorker {
 
                 while let Ok(task) = task_rx.recv() {
                     let key = task.bytecode_key;
+                    let t0 = std::time::Instant::now();
                     let result = match JitCompiler::new() {
                         Ok(compiler) => compiler.compile(&task.lir, task.self_sym, Vec::new()),
                         Err(e) => Err(e),
                     };
+                    JIT_COMPILE_NS.fetch_add(
+                        t0.elapsed().as_nanos() as u64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    JIT_COMPILE_TASKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let _ = result_tx.send(JitResult {
                         bytecode_key: key,
                         result,

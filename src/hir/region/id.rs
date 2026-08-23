@@ -21,7 +21,10 @@ use std::num::NonZeroU32;
 /// `StaticRegion` lives in the typed LIR layer only. Serialized into bytecode it
 /// becomes a raw `u32`, and the VM decodes that `u32` slot and resolves it to a
 /// `RuntimeRegion` — the two never meet as the same type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct StaticRegion(NonZeroU32);
 
 impl StaticRegion {
@@ -61,7 +64,10 @@ impl std::fmt::Display for StaticRegion {
 /// Region ids are minted fresh per allocation *execution* (not per static
 /// site), so a long-running program churns through many ids even though the
 /// *live* count stays bounded by recycling. `u32` gives ample headroom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct RuntimeRegion(NonZeroU32);
 
 impl RuntimeRegion {
@@ -113,7 +119,7 @@ impl std::fmt::Display for RuntimeRegion {
 /// an entry whose region has since moved on (`gen != current`) is recognized as
 /// a dead leftover and skipped, while a genuine borrow freed *while parked* still
 /// trips the check (docs/impl/region/generations.md § "Uncounted-borrow check").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MappedRegion {
     /// The physical region the slot resolves to.
     pub region: RuntimeRegion,

@@ -9,7 +9,7 @@ use std::fmt;
 /// three places here plus the lexer, free to drift).
 pub const UNKNOWN_FILE: &str = "<unknown>";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceLoc {
     pub file: String,
     pub line: usize,

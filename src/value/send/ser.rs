@@ -16,6 +16,7 @@ mod lir;
 mod template;
 
 pub(super) use ctx::SerContext;
+pub(super) use template::sendable_from_template;
 
 use closure::send_closure;
 

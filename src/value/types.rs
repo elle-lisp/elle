@@ -33,7 +33,9 @@ use std::fmt;
 /// integer compare, and a symbol value is portable by construction. Ordering
 /// follows the hash, which is deterministic but carries no alphabetical
 /// meaning; see [docs/impl/symbol.md](../../docs/impl/symbol.md).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct SymbolId(pub u64);
 
 impl SymbolId {
@@ -67,7 +69,7 @@ impl fmt::Display for SymbolId {
 /// assert!(Arity::Exact(2).matches(2));
 /// assert!(!Arity::Exact(2).matches(1));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Arity {
     /// Exact number of arguments required
     Exact(usize),

@@ -24,7 +24,7 @@
 
 /// A capture bitmask over a function's locally-defined slots, unbounded in
 /// width. Bit `i` set means slot `i` needs a capture cell.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct CaptureMask {
     words: Vec<u64>,
 }

@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// A span in source code (byte offsets plus line/column for errors)
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

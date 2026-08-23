@@ -3,7 +3,7 @@ use super::*;
 mod region;
 
 /// LIR instruction (SSA form - each register assigned exactly once)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum LirInstr {
     // === Constants ===
     /// Load a constant into a register

@@ -152,7 +152,7 @@ pub const CAP_MASK: SignalBits = SignalBits::new(VM_INTERNAL.raw() ^ 0xFFFF_FFFF
 ///   function propagates (bit i set = parameter i's signals flow through)
 ///
 /// `Copy` and `const fn` constructors — no allocation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Signal {
     /// Signal bits this function itself might emit.
     pub bits: SignalBits,

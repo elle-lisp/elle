@@ -20,20 +20,81 @@ const STDLIB: &str = include_str!("../stdlib.lisp");
 pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) {
     let boot = crate::trace::boot();
     let t = std::time::Instant::now();
+    // Try the disk cache first: same stdlib source + same elle binary → same
+    // compiled bytecode. On hit we skip the entire ~2.4s front end.
+    //
+    // Both arms report `stdlib-compile`: the boot mark attributes the cost of
+    // OBTAINING the compiled stdlib, and a run that loads it has to be
+    // comparable with a run that compiles it. `tests/integration/trace_boot.rs`
+    // pins the mark, and it must not disappear the moment the cache warms.
+    if let Some(cached) = crate::compiler::stdlib_cache::try_load(STDLIB, vm, symbols, cctx) {
+        let bytecode = match cached {
+            Ok(bc) => {
+                crate::trace::phase(boot, "boot", "stdlib-compile (cache hit)", t);
+                bc
+            }
+            Err(e) => {
+                crate::trace::phase(
+                    boot,
+                    "boot",
+                    &format!("stdlib-cache-miss ({e}); recompiling"),
+                    t,
+                );
+                let t = std::time::Instant::now();
+                let bc = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
+                    Ok(r) => r.bytecode,
+                    Err(e) => panic!("stdlib compilation failed: {}", e),
+                };
+                crate::trace::phase(boot, "boot", "stdlib-compile", t);
+                bc
+            }
+        };
+        let t = std::time::Instant::now();
+        // Execute stdlib — returns the last expression (a closure).
+        let closure_val = match vm.execute(&bytecode) {
+            Ok(v) => v,
+            Err(e) => panic!("stdlib execution failed: {}", e),
+        };
+        crate::trace::phase(boot, "boot", "stdlib-execute", t);
+        // Call the returned closure to get the exports struct.
+        let exports_val = call_closure(vm, closure_val);
+        register_exports(vm, symbols, cctx, closure_val, exports_val);
+        return;
+    }
     let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
         Ok(r) => r,
         Err(e) => panic!("stdlib compilation failed: {}", e),
     };
     crate::trace::phase(boot, "boot", "stdlib-compile", t);
     let t = std::time::Instant::now();
+    // Persist the compiled bytecode so the next process start skips the front
+    // end entirely. A write failure is not fatal — the cache is a speedup, and
+    // a fresh compile is always the fallback.
+    crate::compiler::stdlib_cache::try_store(STDLIB, &result.bytecode, vm, symbols, cctx);
+    crate::trace::phase(boot, "boot", "stdlib-cache-store", t);
+    let t = std::time::Instant::now();
     // Execute stdlib — returns the last expression (a closure).
     let closure_val = match vm.execute(&result.bytecode) {
         Ok(v) => v,
         Err(e) => panic!("stdlib execution failed: {}", e),
     };
+    crate::trace::phase(boot, "boot", "stdlib-execute", t);
     // Call the returned closure to get the exports struct.
     let exports_val = call_closure(vm, closure_val);
-    crate::trace::phase(boot, "boot", "stdlib-execute", t);
+    register_exports(vm, symbols, cctx, closure_val, exports_val);
+}
+
+/// Register each stdlib export into the compilation cache (the tail of the
+/// original `init_stdlib`, split out so both the cached and compiled paths
+/// share it).
+fn register_exports(
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    closure_val: Value,
+    exports_val: Value,
+) {
+    let boot = crate::trace::boot();
     let t = std::time::Instant::now();
     // Root the stdlib export aggregate (the struct + its module closure), not
     // each export. `exports_val` references every stdlib export, and the `Value`s
