@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::fiberheap::regionstore::RegionMint;
 
 impl VM {
     /// Resolve a static region slot to a **fresh** physical region for an
@@ -110,12 +111,26 @@ impl VM {
     /// instead of always minting fresh. Keep it wired; the `StaticRegion`
     /// newtype already guards the static-vs-runtime confusion bug
     /// (`dispatch_native_call`'s doc). Do not "scrub" it as vestigial.
+    ///
+    /// The mint is **tracked**: the region is minted before the callee runs,
+    /// because the callee may allocate its result into it, and a callee that
+    /// returns an immediate or a value borrowed from an argument allocates
+    /// nothing. The receipt lets the dispatcher return that id to the free list
+    /// (docs/impl/region/model.md § "Physical id recycling"); a call that does
+    /// allocate leaves the id live and the recycle no-ops.
     #[inline]
     pub(crate) fn new_runtime_region_for_call_slot(
         &mut self,
         _static_id: StaticRegion,
-    ) -> RuntimeRegion {
-        self.heap().new_runtime_region()
+    ) -> RegionMint {
+        self.heap().new_runtime_region_tracked()
+    }
+    /// Close out a call-result mint: return its id to the free list unless the
+    /// call materialized the region (docs/impl/region/model.md § "Physical id
+    /// recycling"). The shared tail of both call dispatchers.
+    #[inline]
+    pub(crate) fn release_unused_call_region(&mut self, mint: RegionMint) {
+        self.heap().recycle_unmaterialized_region(mint);
     }
     /// Dispatch a native primitive call with per-execution region routing and
     /// the "pass-through retain", shared verbatim by the interpreter
@@ -148,7 +163,8 @@ impl VM {
         args: &[Value],
         region_id: StaticRegion,
     ) -> (SignalBits, Value) {
-        let alloc_region = self.new_runtime_region_for_call_slot(region_id);
+        let mint = self.new_runtime_region_for_call_slot(region_id);
+        let alloc_region = mint.region();
         let (bits, value) = {
             // The native-call capability: this call's fresh result region, the
             // VM's heap, and the driving VM itself, so the primitive can reach
@@ -292,6 +308,11 @@ impl VM {
                 alloc_region,
             );
         }
+        // A primitive that returned an immediate or a borrowed value never
+        // allocated into this call's region, so its id names nothing and goes
+        // back to the free list. Runs after the pass-through retain, which reads
+        // `alloc_region` to decide whether the result is fresh.
+        self.release_unused_call_region(mint);
         (bits, value)
     }
     /// Resolve a static slot to the physical region it currently maps to in this

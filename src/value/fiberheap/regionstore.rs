@@ -95,6 +95,32 @@ impl RegionEntry {
     }
 }
 
+/// A mint receipt: the physical id a mint handed out, plus the generation that
+/// id carried at that moment (docs/impl/region/model.md § "Physical id
+/// recycling").
+///
+/// It is the only key [`RegionStore::recycle_unmaterialized`] accepts, and its
+/// fields are private to this module, so a caller cannot ask the store to
+/// recycle an id no mint produced — injecting an id `next_physical` has not
+/// passed would let a later mint issue it a second time, and that is
+/// unrepresentable here rather than guarded against at the use site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RegionMint {
+    region: RuntimeRegion,
+    /// The id's generation at the mint. A teardown bumps it, so an id that
+    /// lived and died since the mint no longer matches — which is what keeps the
+    /// recycle from putting a second copy of that id in the free list.
+    gen: u32,
+}
+
+impl RegionMint {
+    /// The physical region this mint handed out.
+    #[inline]
+    pub(crate) fn region(self) -> RuntimeRegion {
+        self.region
+    }
+}
+
 /// Region table on FiberHeap.
 pub(crate) struct RegionStore {
     /// Indexed by physical region id (mortal `RuntimeRegion`s, id ≥ 2).
@@ -105,9 +131,17 @@ pub(crate) struct RegionStore {
     /// Next never-used physical region id (monotonic). Id 0 is the
     /// unassigned/immediate sentinel and id 1 is reserved, so minting starts at 2.
     next_physical: u32,
-    /// Recycled physical ids returned by `free_runtime_region_pages`. Reusing freed ids keeps
-    /// the `regions` Vec bounded by the max *concurrently-live* region count
-    /// even though allocation mints a fresh region per execution.
+    /// Physical ids available for reissue. Two paths return an id here, and
+    /// between them every minted id comes back (docs/impl/region/model.md
+    /// § "Physical id recycling"): `free_runtime_region_pages`, when a region's
+    /// pages are torn down, and `recycle_unmaterialized`, when a mint ends
+    /// without ever allocating into its id. Reusing them keeps the `regions` Vec
+    /// bounded by the max *concurrently-live* region count even though
+    /// allocation mints a fresh region per execution.
+    ///
+    /// An id appears here at most once. A duplicate would be handed to two mints
+    /// before either materialized — `new_runtime_region` rejects only an id that
+    /// is already *live* — aliasing two logical regions onto one physical id.
     free_physical: Vec<u32>,
     /// Per-physical-id generation counter (docs/impl/region/generations.md § "Region
     /// generations"), indexed like `regions`. Bumped on every path that
@@ -153,16 +187,23 @@ static NEXT_STORE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU3
 /// Upper bound on a physically-plausible region id, the `ensure_raw` backstop's
 /// tripwire (docs/impl/region/generations.md § "Region generations"). The region
 /// table is indexed by id and bounded by the max *concurrently-live* regions —
-/// freed ids recycle through `free_physical`, and static-slot ids are bounded by
+/// every minted id returns to `free_physical`, and static-slot ids are bounded by
 /// the compiler's region-slot count — so a real id stays far below this. An id
 /// above it reaching `ensure_raw` is a corrupt page-header read handed back as a
 /// region id — a misidentified page base (the `region_of_ptr` walk's ownership
 /// validation and the page-header magic close the known cause) or a stale/foreign
-/// read — not a region to lazily create: resizing the table to it commits
-/// hundreds of GB and OOM-aborts far from the deref. 2^28 ids is a ~36 GB table —
-/// already impossible for a real program (each live region owns at least one
-/// 4 KiB page) — while leaving headroom below the garbage range.
-const MAX_PLAUSIBLE_REGION_ID: u32 = 1 << 28;
+/// read — not a region to lazily create.
+///
+/// The bound sits between what a real program reaches and what the allocator can
+/// build, and it needs both sides. Below: 2^24 concurrently-live regions would
+/// own at least 64 GiB of pages (Rule 6 — a live region owns at least one 4 KiB
+/// page), so no real program comes near. Above: the panic fires only if the
+/// table at that id is still *allocatable*, since the check runs before
+/// `regions.resize_with`. At 2^24 that table is ~3.5 GB, which an allocator can
+/// satisfy; set the bound where the table itself exceeds what the machine can
+/// supply and the allocator aborts one id below the tripwire instead, killing
+/// the program with a byte count and no diagnosis.
+const MAX_PLAUSIBLE_REGION_ID: u32 = 1 << 24;
 
 impl RegionStore {
     pub fn new(

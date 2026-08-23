@@ -16,4 +16,5 @@ pub(super) fn cons_obj() -> HeapObject {
 mod edges;
 mod forest;
 mod generations;
+mod recycle;
 mod refcount;

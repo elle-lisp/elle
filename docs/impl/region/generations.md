@@ -69,11 +69,22 @@ principle, hand it a garbage id from a stale or foreign read): an id past
 `regions.resize_with(id + 1, …)` would grow the table to that id — hundreds of GB
 — and abort on allocation failure far from the deref. It panics there, naming the
 hazard, in every build. The region table is bounded by the max *concurrently-live*
-regions (freed ids recycle through `free_physical`), so a real id never approaches
-the bound; the backstop only ever fires on corruption. It is a backstop, not a
-detector: it makes the failure *loud* instead of an opaque OOM — the deref site
-and the freeing region still come from the generation check (debug) and
-`--trace=guardfree` / `--trace=free`.
+regions — every id reaches `free_physical` again, freed and never-materialized
+alike ([model.md](model.md) § "Physical id recycling") — so a real id never
+approaches the bound. It is a backstop, not a detector: it makes the failure
+*loud* instead of an opaque OOM — the deref site and the freeing region still
+come from the generation check (debug) and `--trace=guardfree` / `--trace=free`.
+
+The bound has a ceiling of its own, and it is the reason the constant is not
+simply set as high as the id space allows. The panic can only fire if the table
+at that id is **allocatable**: the check runs before `resize_with`, but a bound
+whose table exceeds what the machine can supply lets the allocator abort one id
+below it instead, at which point the program dies with a byte count and no
+diagnosis. So `MAX_PLAUSIBLE_REGION_ID` is `1 << 24`: a table of ~3.5 GB, which
+an allocator can still satisfy, while a program with 2^24 concurrently-live
+regions would need at least 64 GiB of region pages to hold them (Rule 6 — a live
+region owns at least one page). The bound sits between what a real program
+reaches and what the allocator can build.
 
 The free-time cascade scan (`find_object_cross_refs`) deliberately does NOT
 check generations: teardown legitimately scans objects whose contained

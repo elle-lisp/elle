@@ -47,6 +47,44 @@ impl RegionStore {
         }
     }
 
+    /// Mint a physical region id together with the receipt that can return it —
+    /// the mint used where the caller may end without allocating into the id
+    /// (docs/impl/region/model.md § "Physical id recycling"). The per-call result
+    /// region is that case: it is minted before the callee runs, because the
+    /// callee may allocate its result into it, and a callee that returns an
+    /// immediate or a borrowed value allocates nothing.
+    pub fn new_runtime_region_tracked(&mut self) -> RegionMint {
+        let region = self.new_runtime_region();
+        RegionMint {
+            region,
+            gen: self.generation_raw(region.get()),
+        }
+    }
+
+    /// Return a minted id to the free list when the mint never materialized it —
+    /// the reserved → free exit of the id lifecycle (docs/impl/region/model.md
+    /// § "Physical id recycling"). Without it an id that no allocation touched is
+    /// stranded forever, and since `regions` is indexed by id, each stranded id
+    /// is a table slot of resident memory that no heap gauge accounts for.
+    ///
+    /// Unmaterialized means two conditions together. `regions[id]` empty alone
+    /// is also true of a region that materialized and was *freed* since the
+    /// mint — whose teardown already pushed that id, so pushing it again would
+    /// duplicate it in `free_physical`. A teardown bumps the id's generation, so
+    /// requiring the generation to still equal the mint's admits only an id
+    /// nothing has touched. Neither condition is redundant; `tests::recycle`
+    /// pins what each one catches.
+    pub fn recycle_unmaterialized(&mut self, mint: RegionMint) {
+        let idx = mint.region().get() as usize;
+        if idx < self.regions.len() && self.regions[idx].is_some() {
+            return;
+        }
+        if self.generation_raw(mint.region().get()) != mint.gen {
+            return;
+        }
+        self.free_physical.push(mint.region().get());
+    }
+
     /// Ensure a region entry exists for `id`, creating it lazily.
     pub(super) fn ensure(&mut self, id: RuntimeRegion) {
         self.ensure_raw(id.get());
@@ -59,21 +97,30 @@ impl RegionStore {
         let idx = id as usize;
         if idx >= self.regions.len() {
             // Backstop (always on, release included — the generation check in
-            // `region_of_ptr` is debug-only): an id this large is never a real
-            // region (see `MAX_PLAUSIBLE_REGION_ID`). It is a corrupt page-header
-            // read handed back as a region id — a misidentified page base or a
-            // stale/foreign read — so detonate here, naming it, instead of
-            // resizing the table to ~584 GB and OOM-aborting far from the deref
+            // `region_of_ptr` is debug-only): an id this large names no region a
+            // real program can hold (see `MAX_PLAUSIBLE_REGION_ID`), so detonate
+            // here, naming it, instead of resizing the table to hundreds of GB
+            // and OOM-aborting far from the deref
             // (docs/impl/region/generations.md § "Region generations").
+            //
+            // The message names both admissible causes rather than asserting
+            // one. The expected cause is a corrupt page-header read; the other
+            // is a heap whose ids stopped recycling, which reaches this check
+            // with ids that are sequential and a table that grew honestly. The
+            // two are indistinguishable at this point, and naming only the first
+            // sends a reader hunting corruption that is not there.
             assert!(
                 id <= MAX_PLAUSIBLE_REGION_ID,
                 "region id {id} (0x{id:08x}) reaching ensure_raw would grow the \
-                 region table to {} entries — physically implausible; this is a \
+                 region table to {} entries — physically implausible. Either a \
                  corrupt page-header read (a misidentified page base, or a \
-                 stale/foreign read) handed back as a region id. The in-situ \
-                 detectors are the ownership-validated walk and generation check \
-                 in region_of_ptr and --trace=guardfree \
-                 (docs/impl/region/generations.md)",
+                 stale/foreign read) was handed back as a region id, or this \
+                 heap's physical ids stopped returning to the free list \
+                 (docs/impl/region/model.md § 'Physical id recycling'). Sequential \
+                 ids and a live-region count far below this id point at the \
+                 second. For the first, the in-situ detectors are the \
+                 ownership-validated walk and generation check in region_of_ptr \
+                 and --trace=guardfree (docs/impl/region/generations.md)",
                 idx + 1,
             );
             self.regions.resize_with(idx + 1, || None);
