@@ -453,9 +453,14 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         while let Some(src) = worklist.pop() {
             if let Some(aliases) = aliases_by_source.get(&src) {
                 for &alias in aliases {
-                    if reachable.insert(alias) {
-                        bounded.insert(alias);
+                    // Bounding is per-edge, not per-new-reach: a read alias that a
+                    // funnel edge happened to make reachable first still owes its own
+                    // bound, so `bounded`/`alias_dps` must see every alias whose
+                    // source is reachable, regardless of which edge grew `reachable`.
+                    if bounded.insert(alias) {
                         alias_dps.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
+                    }
+                    if reachable.insert(alias) {
                         worklist.push(alias);
                     }
                 }
