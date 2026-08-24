@@ -117,8 +117,16 @@ fn prim_identity_hash_sensitive_to_name_and_aliases() {
         aliases: &["a2"],
         ..PrimitiveDef::DEFAULT
     };
-    assert_ne!(hash(&base), hash(&renamed), "rename must change the identity");
-    assert_ne!(hash(&base), hash(&aliased), "alias change must change the identity");
+    assert_ne!(
+        hash(&base),
+        hash(&renamed),
+        "rename must change the identity"
+    );
+    assert_ne!(
+        hash(&base),
+        hash(&aliased),
+        "alias change must change the identity"
+    );
     assert_eq!(hash(&base), hash(&base), "identity hash is deterministic");
 }
 

@@ -1,6 +1,6 @@
 //! Primitive definition type for declarative registration.
 //!
-//! Each primitive module exports a `const PRIMITIVES: &[PrimitiveDef]`
+//! Each primitive module exports a `static PRIMITIVES: &[PrimitiveDef]`
 //! table. `register_primitives` iterates all tables to register
 //! primitives with the VM and build the metadata maps.
 
@@ -182,7 +182,7 @@ pub enum RegionEffect {
 /// Declarative definition of a primitive function.
 ///
 /// All metadata for a primitive lives here. Each primitive module
-/// exports a const array of these. Adding a new metadata field
+/// exports a static array of these. Adding a new metadata field
 /// means adding it here with a default; existing tables use
 /// `..PrimitiveDef::DEFAULT`.
 pub struct PrimitiveDef {
@@ -299,7 +299,7 @@ const fn _default_prim(
 ///
 /// Three forms:
 ///
-/// - **Anonymous table** — emits `pub(crate) const PRIMITIVES: &[PrimitiveDef]`,
+/// - **Anonymous table** — emits `pub(crate) static PRIMITIVES: &[PrimitiveDef]`,
 ///   the per-module registration table:
 ///
 ///   ```ignore
@@ -314,11 +314,11 @@ const fn _default_prim(
 ///   }
 ///   ```
 ///
-/// - **Named table** — same, but a caller-chosen const name and visibility,
+/// - **Named table** — same, but a caller-chosen static name and visibility,
 ///   for the feature-gated side tables:
 ///
 ///   ```ignore
-///   primitive!(pub(crate) const CALLBACK_PRIMITIVES =
+///   primitive!(pub(crate) static CALLBACK_PRIMITIVES =
 ///       "ffi/call" => prim_ffi_call { arity: Arity::AtLeast(2) }
 ///   );
 ///   ```
@@ -344,10 +344,10 @@ macro_rules! primitive {
         };
     };
 
-    // Named const table. Forwards outer attributes (doc comments, `#[cfg]`).
-    ( $(#[$meta:meta])* $vis:vis const $tbl:ident = $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
+    // Named static table. Forwards outer attributes (doc comments, `#[cfg]`).
+    ( $(#[$meta:meta])* $vis:vis static $tbl:ident = $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
         $(#[$meta])*
-        $vis const $tbl: &[crate::primitives::def::PrimitiveDef] = &[
+        $vis static $tbl: &[crate::primitives::def::PrimitiveDef] = &[
             $(
                 #[allow(clippy::needless_update)]
                 crate::primitives::def::PrimitiveDef {
@@ -360,9 +360,9 @@ macro_rules! primitive {
         ];
     };
 
-    // Anonymous `pub(crate) const PRIMITIVES` table.
+    // Anonymous `pub(crate) static PRIMITIVES` table.
     ( $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
-        pub(crate) const PRIMITIVES: &[crate::primitives::def::PrimitiveDef] = &[
+        pub(crate) static PRIMITIVES: &[crate::primitives::def::PrimitiveDef] = &[
             $(
                 #[allow(clippy::needless_update)]
                 crate::primitives::def::PrimitiveDef {

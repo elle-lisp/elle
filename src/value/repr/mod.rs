@@ -362,7 +362,12 @@ impl<'de> serde::Deserialize<'de> for Value {
             (ScalarKind::NativeFn, ScalarPayload::NativeFn(id)) => {
                 match crate::primitives::prim_def(id) {
                     Some(def) => Value::native_fn(def),
-                    None => panic!("unknown prim id {id}"),
+                    // The stdlib disk cache persists native-fn immediates by
+                    // prim_id; a cache written by a process whose registry
+                    // differs (different feature set, different prim tables)
+                    // is a stale file, not a reason to crash. Report the error
+                    // so the cache layer treats it as a miss and recompiles.
+                    None => return Err(serde::de::Error::custom(format!("unknown prim id {id}"))),
                 }
             }
             (ScalarKind::Nil, ScalarPayload::Nil) => Value::NIL,
