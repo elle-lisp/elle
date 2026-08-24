@@ -13,7 +13,7 @@ to a backend for execution.
 |--------|----------------|
 | `types.rs` | Shared types: `PortKey`, `FdState` — used by both backends |
 | `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
-| `pending.rs` | `PendingOp` enum — in-flight async operation tracking, one variant per operation shape |
+| `pending.rs` | `PendingOp` enum — in-flight async operation tracking, one variant per operation shape — and `PendingTable`, the backend's set of them plus the ids no fiber will read. `take` answers "does anybody want this?" once, for both backends. |
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
 | `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
@@ -191,26 +191,50 @@ the mechanism and § "The stop pipe" for the cancellation half.
 
 ## I/O Cancellation
 
-`io/cancel` submits `IORING_OP_ASYNC_CANCEL` on io_uring. The cancel SQE's CQE uses the high-bit tag (same as timeout CQEs) and is skipped by `drain_cqes`. The cancelled operation generates a CQE with `result = -ECANCELED`.
+`io/cancel` has two halves. **Asking the operation to stop** is
+platform-specific: io_uring takes `IORING_OP_ASYNC_CANCEL` (the cancel SQE's own
+CQE carries the high-bit tag, same as a timeout CQE, and `drain_cqes` skips it;
+the operation's own CQE arrives with `result = -ECANCELED`), while a pool worker
+is asked through its stop pipe. **Marking the submission** is shared: both
+platforms record the id in `PendingTable`, and both retire the entry when its
+completion arrives instead of building a result from it.
 
-Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling fibers, and by `ev/timeout`, which cancels whichever of the body and the timer lost.
+Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling
+fibers, and by `ev/timeout`, which cancels whichever of the body and the timer
+lost.
 
-### What cancellation promises on the thread pool
+### What cancellation promises, on either backend
 
-A pool operation runs on its own worker thread, which holds a plain
-descriptor number and calls a syscall on it. No other thread can retract a
-syscall already running, so a cancel asks rather than interrupts: the stop
-pipe below is how it asks, and two things hold however the worker answers:
+Three things hold however the operation ends.
 
-- **The submission is accounted for.** `cancel` marks the id in
-  `cancelled` and leaves the `pending` entry in place. The worker's
-  completion still arrives, still finds its entry, and still decrements
-  `in_flight`; the cooked result is then thrown away instead of being
-  handed to a fiber. Removing the entry instead would strand the
-  submission: the worker's thread would never be accounted for again,
-  and cancellation is a path `ev/timeout` takes on every call.
-- **The descriptor outlives the operation.** See "Descriptor retirement"
-  below.
+- **The submission is accounted for.** `cancel` marks the id and leaves the
+  `pending` entry in place. The operation's completion still arrives, still
+  finds its entry, and — on the pool — still decrements `in_flight`. Removing
+  the entry at the cancel would strand the submission: the worker's thread would
+  never be accounted for again, and cancellation is a path `ev/timeout` takes on
+  every call.
+- **No completion is delivered.** `PendingTable::take` reports a cancelled
+  submission as such, and its entry is retired rather than cooked — the pooled
+  buffer released, a descriptor the completion would have wrapped in a port
+  closed, a process wait's `siginfo_t` reclaimed. Nothing is left for a fiber,
+  and nothing needs to be: every `io/cancel` caller in the scheduler
+  (`complete-fiber`, `handle-abort`, `handle-io-forward-cancel`, `do-shutdown`)
+  drops its own record of the submission first, so the id is marked precisely
+  when there is no longer a reader. Cooking it anyway would read what the
+  operation held — the port `Value`, the process handle, the fiber's
+  pre-allocated read buffer — after the finished fiber's release freed the
+  regions those live in. Pinned by
+  `a_cancelled_operation_delivers_no_completion_on_either_backend`
+  (`src/io/aio/tests/park.rs`), which holds both backends to the one answer.
+- **The descriptor outlives the operation.** See "Descriptor retirement" below.
+
+Backend teardown marks everything in flight the same way (`PendingTable::
+cancel_all`, from `quiesce_pending`), for the same reason at a larger scale: the
+heap those values live on may already be gone.
+
+A cancel for an id that is no longer in flight marks nothing. The operation
+completed and its result already reached the fiber that asked; a mark left
+behind would meet a later submission.
 
 ### The stop pipe
 

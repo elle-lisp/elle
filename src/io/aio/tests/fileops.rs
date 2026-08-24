@@ -171,6 +171,70 @@ fn test_async_submit_process_wait_uring() {
     });
 }
 
+/// A failed process wait names the syscall the platform actually called.
+///
+/// One completion arm serves both backends, and they call different things:
+/// `IORING_OP_WAITID` on the ring, `waitpid(2)` in the pool worker
+/// (`src/io/threadpool/child.rs`). The trap: a report that names `waitid` on a
+/// platform that has no `waitid` call in the path sends its reader looking for
+/// code that is not there.
+///
+/// The failure is arranged by reaping the child first, so the worker's
+/// `waitpid` finds no child and returns `ECHILD` — the same shape any lost
+/// child produces.
+#[test]
+fn a_failed_pool_process_wait_names_waitpid() {
+    crate::value::arena::with_test_region(|| {
+        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let pid = child.id();
+        // Reaped here, so the pool worker's own `waitpid` has no child left.
+        child.wait().unwrap();
+
+        let h = crate::primitives::ctx::TestHeap::new();
+        let handle_val = h
+            .ctx()
+            .external("process", ProcessHandle::new(pid, child_stub()));
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let id = backend
+            .submit(
+                &IoRequest {
+                    op: IoOp::ProcessWait,
+                    port: handle_val,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        let completions = backend.wait(5000).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        let err = completions[0]
+            .result
+            .as_ref()
+            .expect_err("a wait for a child that is gone must fail");
+        let fields = err.as_struct().expect("an io error is a struct");
+        let msg = sorted_struct_get(fields, &TableKey::Keyword("message".into()))
+            .and_then(|v| v.with_string(|s| s.to_string()))
+            .expect("an io error carries a :message");
+        assert!(
+            msg.contains("waitpid failed"),
+            "the pool's process wait must name waitpid, the call it makes; got {msg:?}",
+        );
+    });
+}
+
+/// A reaped placeholder child for a `ProcessHandle` whose real child is already
+/// gone. `ProcessHandle::new` demands a `Child`, and its `Drop` calls
+/// `try_wait`, so the stand-in is a process that has already exited.
+#[cfg(test)]
+fn child_stub() -> std::process::Child {
+    let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+    child.wait().unwrap();
+    child
+}
+
 // ── IoOp::Open integration tests ─────────────────────────────────────────
 
 #[test]
