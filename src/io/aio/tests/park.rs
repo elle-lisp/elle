@@ -264,6 +264,96 @@ fn a_cancelled_pool_open_of_a_fifo_ends_rather_than_being_abandoned() {
     });
 }
 
+/// A cancelled operation delivers no completion — on either backend.
+///
+/// Every `io/cancel` caller in the scheduler drops its record of the submission
+/// before cancelling it (`complete-fiber`, `handle-abort`,
+/// `handle-io-forward-cancel`, `do-shutdown`), so no fiber is left to receive a
+/// result. Building one anyway is not merely wasted work: the completion path
+/// dereferences the operation's port `Value`, and the release that ran when the
+/// asking fiber finished may already have freed the region that value lives in.
+///
+/// The trap: the two backends reach the same cancellation by different routes —
+/// the pool worker returns `-ECANCELED` through the hub, the ring posts a
+/// `-ECANCELED` CQE — so a discard implemented on one of them says nothing about
+/// the other. The counter-factual is the ring cooking the CQE: one completion
+/// arrives for an id nobody is waiting on, carrying a value read through the
+/// dead port.
+#[test]
+fn a_cancelled_operation_delivers_no_completion_on_either_backend() {
+    use std::os::unix::io::FromRawFd;
+    crate::value::arena::with_test_region(|| {
+        for (backend, which) in [
+            (AsyncBackend::new().unwrap(), "the platform default"),
+            (AsyncBackend::new_thread_pool().unwrap(), "the thread pool"),
+        ] {
+            // A pipe whose write end stays open and empty: the read parks, and
+            // the cancel is the only thing that can end it. The port takes a
+            // duplicate so its close and the pipe's are each of one descriptor.
+            let pipe = Pipe::new();
+            let dup_fd = unsafe { libc::dup(pipe.read_fd) };
+            assert!(dup_fd >= 0, "{which}: dup(2) failed");
+            let h = crate::primitives::ctx::TestHeap::new();
+            let port = h.ctx().external(
+                "port",
+                Port::new_file(
+                    unsafe { std::os::unix::io::OwnedFd::from_raw_fd(dup_fd) },
+                    Direction::Read,
+                    Encoding::Binary,
+                    "<pipe>".into(),
+                ),
+            );
+            let id = backend
+                .submit(
+                    &IoRequest {
+                        op: PortOp::ReadAll.into(),
+                        port,
+                        timeout: None,
+                    },
+                    crate::value::arena::leaked_test_heap(),
+                )
+                .unwrap();
+
+            // The pool cancels a worker that is already waiting; give it the
+            // thread before asking. The ring has no worker to wait for.
+            for _ in 0..200 {
+                if backend.workers() > 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            backend.cancel(id).unwrap();
+
+            // Bounded, because the property is that this terminates: the entry
+            // must be retired by the cancelled operation's own completion.
+            let mut delivered = Vec::new();
+            for _ in 0..40 {
+                delivered.extend(backend.wait(50).unwrap().into_iter().map(|c| c.id));
+                if !backend.has_pending() && backend.workers() == 0 {
+                    break;
+                }
+            }
+
+            assert!(
+                delivered.is_empty(),
+                "{which}: a cancelled operation delivered {} completion(s) — \
+                 no fiber is waiting for one, and building it reads the port \
+                 value the finished fiber's release may already have freed",
+                delivered.len(),
+            );
+            assert!(
+                !backend.has_pending(),
+                "{which}: the cancelled operation kept its pending entry",
+            );
+            assert_eq!(
+                backend.workers(),
+                0,
+                "{which}: the cancelled operation never gave its worker back",
+            );
+        }
+    });
+}
+
 /// `ev/poll-fd` answers an expired wait with 0 — on either backend.
 ///
 /// That is the primitive's documented contract, and what lets a caller poll in

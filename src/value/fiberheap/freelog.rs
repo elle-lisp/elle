@@ -116,14 +116,20 @@ pub(crate) fn guard_armed() -> bool {
 /// The third instrument in this family, and the cheap one. `guardfree` never
 /// reuses a page, so it catches a stale read at any distance but costs a
 /// mapping per freed page; the generation check catches a stale *region
-/// resolution* but only in debug builds and only while the page is still
-/// unclaimed. Scrub instead makes the page's contents wrong on purpose: a
-/// stale read lands on an all-zero `HeapObject` slot, whose tag matches no
-/// live value, so `arena::deref` panics naming the deref site — in release
-/// builds too, at the cost of one `memset` of the bytes the dying region
-/// wrote. Off by default, because the ordinary contract is that a claimed
-/// page's body is unspecified, not blank (docs/impl/region/model.md
-/// § "Page recycling").
+/// resolution* but only while the page is still unclaimed. Scrub instead makes
+/// the page's contents wrong on purpose: a stale read lands on an all-zero
+/// `HeapObject` slot, whose tag matches no live value. It costs one `memset` of
+/// the bytes the dying region wrote. Off by default, because the ordinary
+/// contract is that a claimed page's body is unspecified, not blank
+/// (docs/impl/region/model.md § "Page recycling").
+///
+/// **What the scrub buys depends on `debug_assertions`.** The report — the
+/// `arena::deref` panic that names the deref site and attributes the free — is
+/// `#[cfg(debug_assertions)]`, so a plain release build never prints it: there
+/// the zeroed slot merely turns a wrong-typed value into a fault somewhere near
+/// the stale read, with nothing said. A build that wants the report must carry
+/// debug assertions, which is why the macOS CI job sets
+/// `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` alongside `--trace=scrub`.
 pub(crate) fn scrub_armed() -> bool {
     crate::config::get().has_trace("scrub")
 }
