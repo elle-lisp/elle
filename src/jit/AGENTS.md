@@ -368,10 +368,9 @@ No errors are silently swallowed.
 spaces:
 
 - **Stack-relative (LoadLocal/StoreLocal):** The lowerer assigns slots starting
-  at `num_params` (it initializes `num_locals = num_params`). The JIT maps these
-  via `local_slot_to_var()` in `helpers.rs`: slots >= `num_params` are offset
-  into the `local_var_base` region; slots < `num_params` defensively map to
-  `arg_var_base`.
+  at 0 for all non-LBox locals (non-LBox params copied into local slots, plus
+  let bindings). The JIT maps these via `local_slot_to_var()` in `helpers.rs`:
+  every slot offsets into the `local_var_base` region.
 
 - **Env-relative (LoadCapture/StoreCapture):** Indices address the closure
   environment array directly. Captures with index < `num_captures` load from
@@ -445,21 +444,26 @@ resume IP and stack state.
 ### Environment Reconstruction on Side-Exit
 
 When building a `SuspendedFrame` for interpreter resumption, the JIT yield
-helpers (`elle_jit_yield`, `elle_jit_yield_through_call`) reconstruct the full
-interpreter environment from the closure's captures and the spilled locals:
+helpers (`elle_jit_yield`, `elle_jit_yield_through_call`) reconstruct the
+interpreter frame from the closure's captures and the spill buffer. The
+spill buffer layout is `[params(num_params), locals(num_locals),
+operands(num_spilled)]`, with all three counts from the yield-point /
+call-site metadata:
 
 ```
-env = [closure.env[0], ..., closure.env[n-1], local_0, ..., local_{m-1}]
-stack = [operand_0, ..., operand_k]
+env   = [closure.env[0], ..., closure.env[n-1], param_0, ..., param_{p-1}]
+stack = [local_0, ..., local_{m-1}, operand_0, ..., operand_k]
 ```
 
-The interpreter's `LoadUpvalue` accesses `env[idx]` for ALL variables —
-captures, params, and locally-defined vars. The JIT stores captures in
-`closure.env` and params/locals in Cranelift variables. The spill buffer
-layout is `[locals..., operands...]`, where `num_locals` (from yield/call-site
-metadata) gives the split point. The first `num_locals` spilled values are
-appended to `closure.env` to form the full env; the remaining values form
-the operand stack.
+This matches the interpreter's frame shape: `LoadUpvalue` reads captures
+and params from `env`; `LoadLocal` reads locals from the bottom of the
+frame stack. LBox cells are first-class values in JIT registers (no
+auto-unwrap), so spilled cells are the original objects — no re-wrapping.
+Note the env rebuilt here carries captures and params only; an
+interpreter-built frame for the same activation also has one env slot per
+local (`populate_env` pads with nil / CaptureCell). The asymmetry is
+benign because celled locals require `MakeClosure`, which the JIT
+rejects.
 
 ## Roadmap
 
