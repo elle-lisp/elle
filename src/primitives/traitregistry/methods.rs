@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::primitives::def::RegionEffect;
+use crate::primitives::def::{PrimitiveDef, RegionEffect};
 
 /// Build the :Sequence method struct (immutable) into `heap`'s root region.
 pub(super) fn build_sequence_methods(heap: &mut FiberHeap) -> Value {
@@ -9,27 +9,27 @@ pub(super) fn build_sequence_methods(heap: &mut FiberHeap) -> Value {
 
     // Native function definitions for sequence methods — `&'static`
     // native-fn handles, carried as immediate `prim_id` values (no region).
-    primitive!(static SEQ_FIRST = "trait:Sequence:first" => trait_seq_first {
+    primitive!(static SEQ_FIRST: PrimitiveDef = "trait:Sequence:first" => trait_seq_first {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Sequence trait: first element", params: &["self"],
         category: "trait", effect: RegionEffect::Funnel,
     });
-    primitive!(static SEQ_REST = "trait:Sequence:rest" => trait_seq_rest {
+    primitive!(static SEQ_REST: PrimitiveDef = "trait:Sequence:rest" => trait_seq_rest {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Sequence trait: rest of sequence", params: &["self"],
         category: "trait", effect: RegionEffect::Funnel,
     });
-    primitive!(static SEQ_LAST = "trait:Sequence:last" => trait_seq_last {
+    primitive!(static SEQ_LAST: PrimitiveDef = "trait:Sequence:last" => trait_seq_last {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Sequence trait: last element", params: &["self"],
         category: "trait", effect: RegionEffect::Funnel,
     });
-    primitive!(static SEQ_NTH = "trait:Sequence:nth" => trait_seq_nth {
+    primitive!(static SEQ_NTH: PrimitiveDef = "trait:Sequence:nth" => trait_seq_nth {
         signal: Signal::errors(), arity: Arity::Exact(2),
         doc: "Sequence trait: nth element", params: &["self", "n"],
         category: "trait", effect: RegionEffect::Funnel,
     });
-    primitive!(static SEQ_ITER = "trait:Sequence:iter" => trait_seq_iter {
+    primitive!(static SEQ_ITER: PrimitiveDef = "trait:Sequence:iter" => trait_seq_iter {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Sequence trait: fiber iterator", params: &["self"],
         category: "trait", effect: RegionEffect::Fresh,
@@ -67,27 +67,27 @@ pub(super) fn build_collection_methods(heap: &mut FiberHeap) -> Value {
     use crate::signals::Signal;
     use crate::value::types::Arity;
 
-    primitive!(static COLL_LENGTH = "trait:Collection:length" => trait_coll_length {
+    primitive!(static COLL_LENGTH: PrimitiveDef = "trait:Collection:length" => trait_coll_length {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Collection trait: element count", params: &["self"],
         category: "trait", effect: RegionEffect::Immediate,
     });
-    primitive!(static COLL_EMPTY = "trait:Collection:empty?" => trait_coll_empty {
+    primitive!(static COLL_EMPTY: PrimitiveDef = "trait:Collection:empty?" => trait_coll_empty {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Collection trait: is empty?", params: &["self"],
         category: "trait", effect: RegionEffect::Immediate,
     });
-    primitive!(static COLL_HAS = "trait:Collection:has?" => trait_coll_has {
+    primitive!(static COLL_HAS: PrimitiveDef = "trait:Collection:has?" => trait_coll_has {
         signal: Signal::errors(), arity: Arity::Exact(2),
         doc: "Collection trait: membership test", params: &["self", "needle"],
         category: "trait", effect: RegionEffect::Immediate,
     });
-    primitive!(static COLL_CONJ = "trait:Collection:conj" => trait_coll_conj {
+    primitive!(static COLL_CONJ: PrimitiveDef = "trait:Collection:conj" => trait_coll_conj {
         signal: Signal::errors(), arity: Arity::Exact(2),
         doc: "Collection trait: add element", params: &["self", "item"],
         category: "trait", effect: RegionEffect::Funnel,
     });
-    primitive!(static COLL_EMPTY_NEW = "trait:Collection:empty" => trait_coll_empty_new {
+    primitive!(static COLL_EMPTY_NEW: PrimitiveDef = "trait:Collection:empty" => trait_coll_empty_new {
         signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Collection trait: empty container of same type", params: &["self"],
         category: "trait", effect: RegionEffect::Fresh,
