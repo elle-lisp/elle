@@ -324,19 +324,23 @@ const fn _default_prim(
 ///   ```
 ///
 /// - **Single static** — one `static`, for the trait-method handles and the
-///   ad-hoc no-op def:
+///   ad-hoc no-op def. Requires an explicit type annotation so the arm
+///   cannot be confused with a single-entry *table* (a bare
+///   `static NAME = "x" => f { .. }` with one entry is always a table):
 ///
 ///   ```ignore
-///   primitive!(static SEQ_FIRST = "trait:Sequence:first" => trait_seq_first {
+///   primitive!(static SEQ_FIRST: PrimitiveDef = "trait:Sequence:first" => trait_seq_first {
 ///       signal: Signal::errors(), arity: Arity::Exact(1), effect: RegionEffect::Mixed
 ///   });
 ///   ```
 macro_rules! primitive {
     // Single static def. Forwards outer attributes (doc comments, `#[cfg]`).
-    ( $(#[$meta:meta])* $vis:vis static $id:ident = $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } ) => {
+    // The explicit `: Type` marks this as one def, not a single-entry table;
+    // without it the named-table arm below wins and emits `&[PrimitiveDef]`.
+    ( $(#[$meta:meta])* $vis:vis static $id:ident : $ty:ty = $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } ) => {
         $(#[$meta])*
         #[allow(clippy::needless_update)]
-        $vis static $id: crate::primitives::def::PrimitiveDef = crate::primitives::def::PrimitiveDef {
+        $vis static $id: $ty = crate::primitives::def::PrimitiveDef {
             name: $name,
             func: $func,
             $( $key : $val, )*
@@ -391,7 +395,7 @@ fn _noop_prim(
 primitive!(
     /// A silent, no-op PrimitiveDef for ad-hoc `Value::native_fn` creation.
     /// Used by tests and FFI wrappers that need a `&'static PrimitiveDef`.
-    pub static NOOP_PRIM = "<noop>" => _noop_prim {
+    pub static NOOP_PRIM: PrimitiveDef = "<noop>" => _noop_prim {
         signal: Signal::silent(),
         arity: Arity::AtLeast(0),
     }
