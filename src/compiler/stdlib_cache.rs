@@ -6,7 +6,9 @@
 //! same stdlib source, same elle binary → same bytecode. This module turns that
 //! work into a one-time cost by serializing the compiled `Bytecode` (plus the
 //! per-closure `ClosureTemplate`s and their LIR, so the JIT keeps working) to a
-//! content-addressed cache file, keyed by elle version + stdlib source hash.
+//! content-addressed cache file, keyed by elle version + stdlib source hash +
+//! the canonical primitive-table identity (the last because serialized
+//! native-fn immediates carry process-local `prim_id`s).
 //!
 //! Serialization strategy: the cache format is a plain `StoredBytecode` struct
 //! that is 100% owned data — no `Rc`, no pointers, no symbol-table ids. Symbols
@@ -76,7 +78,8 @@ fn cache_dir() -> std::path::PathBuf {
     base.join("elle").join("stdlib-cache")
 }
 
-/// Content hash of the stdlib source + elle version, forming the cache key.
+/// Content hash of the stdlib source + elle version + primitive-table
+/// identity, forming the cache key.
 fn cache_key(stdlib_source: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -87,6 +90,12 @@ fn cache_key(stdlib_source: &str) -> String {
         .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
         .hash(&mut hasher);
     FORMAT_VERSION.hash(&mut hasher);
+    // A serialized native-fn immediate carries a `prim_id`, which is only
+    // valid against the exact primitive table that minted it. Mix the table
+    // identity in so a prim addition/removal/reorder (a different elle
+    // binary) invalidates the cache instead of deserializing a foreign id
+    // into `panic!("unknown prim id")`.
+    crate::primitives::registration::hash_prim_table_identity(&mut hasher);
     format!("{:016x}.bin", hasher.finish())
 }
 

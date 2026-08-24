@@ -86,3 +86,52 @@ fn every_primitive_declares_an_examined_region_effect() {
         undeclared,
     );
 }
+
+/// The stdlib disk cache mixes `hash_prim_table_identity` into its key: a
+/// serialized native-fn immediate carries a `prim_id` that is only valid
+/// against the exact canonical table that minted it. The per-def hash must be
+/// sensitive to a rename or alias change (over-conservative is fine — a miss
+/// just recompiles; a false hit panics on `unknown prim id`).
+#[test]
+fn prim_identity_hash_sensitive_to_name_and_aliases() {
+    use super::super::def::PrimitiveDef;
+    use super::hash_def_identity;
+    use std::hash::{DefaultHasher, Hasher};
+
+    let hash = |def: &PrimitiveDef| {
+        let mut h = DefaultHasher::new();
+        hash_def_identity(def, &mut h);
+        h.finish()
+    };
+
+    let base = PrimitiveDef {
+        name: "a",
+        ..PrimitiveDef::DEFAULT
+    };
+    let renamed = PrimitiveDef {
+        name: "b",
+        ..PrimitiveDef::DEFAULT
+    };
+    let aliased = PrimitiveDef {
+        name: "a",
+        aliases: &["a2"],
+        ..PrimitiveDef::DEFAULT
+    };
+    assert_ne!(hash(&base), hash(&renamed), "rename must change the identity");
+    assert_ne!(hash(&base), hash(&aliased), "alias change must change the identity");
+    assert_eq!(hash(&base), hash(&base), "identity hash is deterministic");
+}
+
+/// The canonical table's identity is what the cache key reads, so it must be
+/// deterministic across calls within a process (stable startup ordering).
+#[test]
+fn prim_table_identity_deterministic() {
+    use super::hash_prim_table_identity;
+    use std::hash::{DefaultHasher, Hasher};
+    let fingerprint = || {
+        let mut h = DefaultHasher::new();
+        hash_prim_table_identity(&mut h);
+        h.finish()
+    };
+    assert_eq!(fingerprint(), fingerprint());
+}

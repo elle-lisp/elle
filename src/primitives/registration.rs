@@ -141,6 +141,30 @@ static PRIM_REGISTRY: std::sync::LazyLock<std::sync::Mutex<PrimRegistry>> =
         std::sync::Mutex::new(reg)
     });
 
+/// Visit the ordered canonical primitive-table identity (`name` + `aliases`)
+/// into a hasher.
+///
+/// A native-fn immediate's whole payload is its `prim_id`, which is the def's
+/// index in the canonical `ALL_TABLES`+`ffi_tables` enumeration. That id is
+/// only meaningful against the exact table that minted it, so consumers that
+/// persist native-fn values (the stdlib disk cache) must mix this identity
+/// into their key: any addition, removal, rename, or reorder of a canonical
+/// primitive changes the hash and invalidates the persisted payload.
+pub(crate) fn hash_prim_table_identity<H: std::hash::Hasher>(hasher: &mut H) {
+    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
+        for def in *table {
+            hash_def_identity(def, hasher);
+        }
+    }
+}
+
+/// Hash one def's identity fields (see [`hash_prim_table_identity`]).
+fn hash_def_identity<H: std::hash::Hasher>(def: &PrimitiveDef, hasher: &mut H) {
+    use std::hash::Hash;
+    def.name.hash(hasher);
+    def.aliases.hash(hasher);
+}
+
 /// The `prim_id` of a primitive definition — how `Value::native_fn` finds the id
 /// to store as the immediate payload. Returns the existing id, or appends the def
 /// and assigns the next one (for defs minted outside the canonical tables, e.g.
