@@ -95,7 +95,7 @@ fn activation_owner_node_survives_yield_resume_completion() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         let code = crate::value::Code::new(
             Rc::new(bc.instructions),
@@ -168,11 +168,11 @@ fn activation_owner_node_survives_repeated_parks() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Pop);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         let code = crate::value::Code::new(
             Rc::new(bc.instructions),

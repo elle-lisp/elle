@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::fiber::SignalBits;
 
 #[test]
 fn test_bytecode_emission() {
@@ -113,30 +114,36 @@ fn adopt_into_activation_is_operandless() {
 
 #[test]
 fn disassemble_skips_emit_operand() {
-    // Emit carries a 2-byte signal-bits operand.
+    // Emit carries an 8-byte signal-bits operand, wide enough for a user
+    // signal's bit (32-63). The disassembler must skip all eight and report
+    // the whole mask; a narrower skip decodes the operand's tail as opcodes.
     let mut bc = Bytecode::new();
     bc.emit(Instruction::Emit);
-    bc.emit_u16(0xb600);
+    bc.emit_signal_bits(SignalBits::from_bit(40).union(SignalBits::from_bit(1)));
     bc.emit(Instruction::Return);
     let lines = disassemble_lines(&bc.instructions);
     assert_eq!(lines.len(), 2, "got: {lines:?}");
-    assert!(lines[0].contains("Emit"), "got: {lines:?}");
+    assert!(
+        lines[0].contains("Emit") && lines[0].contains("signal_bits=0x0000010000000002"),
+        "got: {lines:?}"
+    );
     assert!(lines[1].contains("Return"), "got: {lines:?}");
 }
 
 #[test]
 fn disassemble_skips_check_signal_bound_operand() {
-    // CheckSignalBound carries an 8-byte (4 × u16) operand.
+    // CheckSignalBound carries the same 8-byte signal-bits operand as Emit.
     let mut bc = Bytecode::new();
     bc.emit(Instruction::CheckSignalBound);
-    bc.emit_u16(0xb600);
-    bc.emit_u16(0xb601);
-    bc.emit_u16(0xb602);
-    bc.emit_u16(0xb603);
+    bc.emit_signal_bits(SignalBits::from_bit(63).union(SignalBits::from_bit(0)));
     bc.emit(Instruction::Return);
     let lines = disassemble_lines(&bc.instructions);
     assert_eq!(lines.len(), 2, "got: {lines:?}");
-    assert!(lines[0].contains("CheckSignalBound"), "got: {lines:?}");
+    assert!(
+        lines[0].contains("CheckSignalBound")
+            && lines[0].contains("allowed_bits=0x8000000000000001"),
+        "got: {lines:?}"
+    );
     assert!(lines[1].contains("Return"), "got: {lines:?}");
 }
 

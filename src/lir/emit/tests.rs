@@ -294,3 +294,50 @@ fn test_yield_sentinel_distinct() {
     assert_ne!(YIELD_SENTINEL, JitValue::nil());
     assert_ne!(TAIL_CALL_SENTINEL, JitValue::nil());
 }
+
+#[test]
+fn emit_terminator_carries_a_user_signal_bit_whole() {
+    // `(signal :keyword)` allocates bits 32-63, and the emitter bakes the mask
+    // of a literal `emit` into the `Emit` operand. The whole mask must survive:
+    // an emit of empty bits builds a suspension nothing can route, and the VM
+    // tears the fiber down as if its body had returned.
+    //
+    // The trap: `:yield` and every other built-in sits in bits 0-15, so a
+    // narrow operand carries them fine and only user signals disappear. This
+    // asserts over a mask with a bit in each half for that reason.
+    use crate::compiler::bytecode::disassemble_lines;
+    use crate::value::fiber::SignalBits;
+
+    let signal = SignalBits::from_bit(32).union(crate::value::fiber::SIG_YIELD);
+    let func = LirFixture::new(Arity::Exact(0))
+        .signal(crate::signals::Signal::of(signal))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Int(42),
+            }],
+            Terminator::Emit {
+                signal,
+                value: Reg(0),
+                resume_label: Label(1),
+            },
+        )
+        .block(
+            1,
+            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            Terminator::Return(Reg(1)),
+        )
+        .build();
+
+    let (bytecode, _, _) = Emitter::new().emit(&func);
+    let lines = disassemble_lines(&bytecode.instructions);
+    let emit_line = lines
+        .iter()
+        .find(|l| l.contains("Emit "))
+        .unwrap_or_else(|| panic!("no Emit line in: {lines:?}"));
+    assert!(
+        emit_line.contains(&format!("signal_bits=0x{:016x}", signal.raw())),
+        "got: {emit_line}"
+    );
+}

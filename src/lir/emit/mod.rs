@@ -411,12 +411,12 @@ impl Emitter {
                 resume_label,
             } => {
                 self.ensure_on_top(*value);
-                // Emit instruction with signal bits as u16 operand.
-                // Only bits 0-15 (built-in) are encoded here; user-defined
-                // signals (bits 32-63) are resolved at runtime via the
-                // signal registry, not baked into bytecode.
+                // The whole mask is baked in: `(signal :keyword)` resolves to a
+                // bit at analysis time, so nothing at runtime re-reads the
+                // registry for a literal `emit`, and the operand is the only
+                // place a user signal's bit (32-63) can live.
                 self.bytecode.emit(Instruction::Emit);
-                self.bytecode.emit_u16(signal.raw() as u16);
+                self.bytecode.emit_signal_bits(*signal);
                 self.pop();
 
                 let resume_ip = self.bytecode.current_pos();

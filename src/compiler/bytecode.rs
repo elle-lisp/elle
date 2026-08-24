@@ -144,6 +144,16 @@ impl Bytecode {
         self.instructions.push((value & 0xff) as u8);
     }
 
+    /// Emit a `SignalBits` operand: eight bytes, big-endian.
+    ///
+    /// Every bit of the mask is meaningful — user signals live at bits 32-63 —
+    /// so this is the only way to write one. See `docs/impl/bytecode.md`
+    /// § "Signal-bits operands"; [`crate::vm::VM::read_signal_bits`] reads it.
+    pub fn emit_signal_bits(&mut self, bits: crate::value::fiber::SignalBits) {
+        self.instructions
+            .extend_from_slice(&bits.raw().to_be_bytes());
+    }
+
     /// Emit an i16 (big-endian)
     pub fn emit_i16(&mut self, value: i16) {
         self.emit_u16(value as u16);

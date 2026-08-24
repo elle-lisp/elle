@@ -50,6 +50,19 @@ impl VM {
             .expect("region operand is nonzero — emitter writes StaticRegion::get()")
     }
 
+    /// Read a `SignalBits` operand: eight bytes, big-endian.
+    ///
+    /// The counterpart of [`crate::compiler::bytecode::Bytecode::emit_signal_bits`].
+    /// The full width is load-bearing: a `(signal :keyword)` declaration
+    /// allocates bits 32-63, so a mask read at any narrower width names no
+    /// user signal at all. See `docs/impl/bytecode.md` § "Signal-bits operands".
+    #[inline(always)]
+    pub fn read_signal_bits(&self, bytecode: &[u8], ip: &mut usize) -> SignalBits {
+        let raw = u64::from_be_bytes(bytecode[*ip..*ip + 8].try_into().expect("8 bytes"));
+        *ip += 8;
+        SignalBits::new(raw)
+    }
+
     #[inline(always)]
     pub fn read_i32(&self, bytecode: &[u8], ip: &mut usize) -> i32 {
         let b0 = bytecode[*ip] as u32;

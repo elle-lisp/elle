@@ -118,8 +118,8 @@
 (begin
   (signal :intro_c6a)
   (def reg2 (signals))  # bit position depends on how many user signals were registered before this one
-  (assert (>= (get reg2 :intro_c6a) 16)
-          "signals contains user-defined signal at bit >= 16"))
+  (assert (>= (get reg2 :intro_c6a) 32)
+          "signals contains user-defined signal at bit >= 32"))
 
 # ============================================================================
 # squelch runtime checks — passing cases

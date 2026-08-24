@@ -126,7 +126,7 @@ pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
 /// Capability mask: all signals that user code can produce.
 ///
 /// Defined as the complement of VM-internal bits within the 64-bit signal
-/// space (bits 0-15 compiler-reserved, bits 16-31 runtime-reserved,
+/// space (bits 0-17 built-in, bits 18-31 runtime-reserved,
 /// bits 32-63 user-defined). Used for capability enforcement (which
 /// operations a fiber can be denied) and for static analysis (what an
 /// unknown callee might emit).

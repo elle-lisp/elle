@@ -18,9 +18,14 @@ Signal     Bit   Purpose
 :fuel      12    Instruction budget exhaustion
 :switch    13    Context switch
 :wait      14    Blocking wait
+:gpu       15    GPU hardware dispatch
+:os-signal 16    POSIX signal send/raise
+:fs        17    Filesystem access
 ```
 
-User-defined signals (via `(signal :keyword)`) get bits 16–31.
+Bits 18–31 are reserved for future runtime signals. User-defined signals
+(via `(signal :keyword)`) get bits 32–63 — see
+[signals/protocol.md](signals/protocol.md).
 
 ## Fuel budgets
 

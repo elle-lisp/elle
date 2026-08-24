@@ -190,18 +190,16 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (region={})", region_id));
                 i += 4;
             }
-            Instruction::Emit if i + 1 < instructions.len() => {
-                let signal_bits = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (signal_bits=0x{:04x})", signal_bits));
-                i += 2;
+            // Both signal-bits operands are eight bytes, big-endian —
+            // `Bytecode::emit_signal_bits` writes them (docs/impl/bytecode.md
+            // § "Signal-bits operands").
+            Instruction::Emit if i + 7 < instructions.len() => {
+                let raw = u64::from_be_bytes(instructions[i..i + 8].try_into().expect("8 bytes"));
+                line.push_str(&format!(" (signal_bits=0x{:016x})", raw));
+                i += 8;
             }
             Instruction::CheckSignalBound if i + 7 < instructions.len() => {
-                let mut raw: u64 = 0;
-                for word in 0..4 {
-                    let w = ((instructions[i + word * 2] as u16) << 8)
-                        | (instructions[i + word * 2 + 1] as u16);
-                    raw |= (w as u64) << (word * 16);
-                }
+                let raw = u64::from_be_bytes(instructions[i..i + 8].try_into().expect("8 bytes"));
                 line.push_str(&format!(" (allowed_bits=0x{:016x})", raw));
                 i += 8;
             }
