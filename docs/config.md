@@ -43,6 +43,7 @@ Available trace keywords:
 | `:regions` | Region inference and lifetime decisions |
 | `:anf` | A-normal form lift pass |
 | `:pages` | Region page allocation |
+| `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute (string-traced, no bit) |
 | `:free` | Region free diagnostics (string-traced, no bit) |
 | `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
 | `:freebt` | Free backtrace diagnostics (string-traced, no bit) |

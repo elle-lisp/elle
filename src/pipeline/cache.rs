@@ -104,17 +104,24 @@ impl CompileCtx {
     /// Shared compile-context construction over an already-built macro VM
     /// (standalone or instance-heap-sharing).
     fn on_vm(mut vm: VM) -> Self {
+        let boot = crate::trace::boot();
         let mut init_symbols = SymbolTable::new();
+        let t = std::time::Instant::now();
         let mut meta = register_primitives(&mut vm, &mut init_symbols);
         let mut expander = Expander::new();
         // Macro-transformer bodies compile against primitives (+ stdlib once
         // `init_stdlib` runs); seed it before `load_prelude`, whose macro
         // expansions evaluate transformer bodies via `eval_syntax`.
         expander.set_eval_meta(build_primitive_meta(&mut init_symbols));
+        crate::trace::phase(boot, "boot", "primitives-macrovm", t);
+        let t = std::time::Instant::now();
         compile_core(&mut vm, &mut init_symbols, &mut meta, &mut expander);
+        crate::trace::phase(boot, "boot", "core", t);
+        let t = std::time::Instant::now();
         expander
             .load_prelude(&mut init_symbols, &mut vm)
             .expect("prelude loading must succeed");
+        crate::trace::phase(boot, "boot", "prelude", t);
         // `init_symbols` is a throwaway used only for this setup; `expand` pointed
         // the macro VM at it. Reset to null so the dropped table is never reached
         // — the next `expand` (a real compile) re-points the VM at the instance's

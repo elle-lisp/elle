@@ -21,3 +21,29 @@ macro_rules! etrace {
         }
     };
 }
+
+/// True when `--trace=boot` is active. Boot marks fire before any VM
+/// trace cell exists, so they gate on the static CLI config, like the
+/// other string-traced keywords (`free`, `guardfree`).
+pub(crate) fn boot() -> bool {
+    crate::config::get().has_trace("boot")
+}
+
+/// True when `--trace=compile` is active. Compile phases run on the
+/// compiler's own thread against the static CLI config — the same
+/// gating the `[trace:regions]` dump in `compile_file_inner` uses.
+pub(crate) fn compile() -> bool {
+    crate::config::get().trace_bits() & crate::config::trace_bits::COMPILE != 0
+}
+
+/// Print one phase-timing mark: `[trace:SUBSYSTEM] LABEL 12.3ms`.
+pub(crate) fn phase(enabled: bool, subsystem: &str, label: &str, start: std::time::Instant) {
+    if enabled {
+        eprintln!(
+            "[trace:{}] {} {:.1}ms",
+            subsystem,
+            label,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}

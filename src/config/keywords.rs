@@ -31,6 +31,8 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "spirv",
     "mlir",
     "gpu",
+    // Boot-sequence phase timing (string-traced, no bit; src/trace.rs).
+    "boot",
     // Region/free diagnostics (see src/value/fiberheap/freelog.rs).
     "free",
     "guardfree",
