@@ -124,6 +124,43 @@ impl VM {
             Some(&label),
         );
 
+        // `--trace=syncjit`: compile here on the VM thread and install
+        // immediately; the `elle-jit` worker never spawns. Codegen inputs are
+        // identical to the background path (same prepare_task output), so a
+        // failure that persists under syncjit indicts codegen or its inputs,
+        // while one that vanishes lives at the worker boundary — the Send
+        // claim on JitTask, or a poll/install racing execution. Diagnosing a
+        // suspected JIT race starts here; `--trace=jit,syncjit` logs each
+        // synchronous install like the background path logs its own.
+        if crate::config::get().has_trace("syncjit") {
+            let res = crate::jit::JitCompiler::new()
+                .and_then(|c| c.compile(&task.lir, task.self_sym, task.symbol_names, Vec::new()));
+            match res {
+                Ok(jit_code) => {
+                    if self
+                        .runtime_config
+                        .has_trace_bit(crate::config::trace_bits::JIT)
+                    {
+                        eprintln!(
+                            "[jit] synchronous compile (syncjit): bc_ptr={:#x}",
+                            bytecode_ptr as usize,
+                        );
+                    }
+                    self.jit_cache.insert(bytecode_ptr, Arc::new(jit_code));
+                }
+                Err(e) => {
+                    self.jit_rejections
+                        .entry(bytecode_ptr)
+                        .or_insert_with(|| JitRejectionInfo {
+                            name: None,
+                            reason: e,
+                        });
+                }
+            }
+            *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
+            return;
+        }
+
         // Lazily spawn the worker thread on first use
         let worker = self
             .jit_worker

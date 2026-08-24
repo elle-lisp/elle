@@ -37,6 +37,14 @@ into `jit_cache`; rejections are recorded in `jit_rejections`.
 Diagnostics (`jit/rejections`, `--stats`) call `drain_jit_pending()`
 to block until all pending compilations finish before reporting.
 
+**`--trace=syncjit`** disables the worker entirely: `submit_jit_task`
+compiles on the VM thread and installs into `jit_cache` before returning.
+Codegen inputs are identical (same `prepare_task` output), so this is the
+first lever when chasing a suspected JIT race — a failure that persists
+under `syncjit` is a codegen or input bug; one that vanishes lives at the
+worker boundary (the `Send` claim on `JitTask`, or poll/install racing
+execution). Combine with `--trace=jit` to log each synchronous install.
+
 ## Interface
 
 | Type | Purpose |
