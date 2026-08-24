@@ -196,6 +196,89 @@ impl Value {
         self.tag != TAG_NIL && self.tag != TAG_FALSE
     }
 
+    /// The reason these bits cannot be a live `Value`, or `None` when they can.
+    ///
+    /// A conservative structural check for the park/resume tripwires
+    /// (`elle_jit_yield`, `resume_suspended`): the tag must be a known
+    /// `TAG_*` constant, and a heap tag must carry a non-null, 8-byte-aligned
+    /// payload. A permutation of valid values passes — this catches torn or
+    /// zeroed slots, not misplaced ones.
+    pub fn malformed_reason(&self) -> Option<&'static str> {
+        if self.tag > TAG_CLOSURE_TEMPLATE {
+            return Some("tag out of range");
+        }
+        if self.is_heap() {
+            if self.payload == 0 {
+                return Some("heap tag with null payload");
+            }
+            if !self.payload.is_multiple_of(8) {
+                return Some("heap tag with unaligned payload");
+            }
+        }
+        None
+    }
+
+    /// The static name of this value's TAG — no heap dereference. A parked
+    /// frame may carry values in slots that are past their last use
+    /// (uncounted borrows whose regions are already freed), so a trace over
+    /// a whole frame must never deref; `type_name` would.
+    pub fn tag_name(&self) -> &'static str {
+        match self.tag {
+            TAG_INT => "int",
+            TAG_FLOAT => "float",
+            TAG_NIL => "nil",
+            TAG_TRUE | TAG_FALSE => "bool",
+            TAG_EMPTY_LIST => "empty",
+            TAG_SYMBOL => "sym",
+            TAG_KEYWORD => "kw",
+            TAG_UNDEFINED => "undef",
+            TAG_CPOINTER => "cptr",
+            TAG_NATIVE_FN => "native",
+            TAG_STRING_MUT => "@string",
+            TAG_ARRAY => "array",
+            TAG_ARRAY_MUT => "@array",
+            TAG_STRUCT => "struct",
+            TAG_STRUCT_MUT => "@struct",
+            TAG_CONS => "cons",
+            TAG_CLOSURE => "closure",
+            TAG_BYTES => "bytes",
+            TAG_BYTES_MUT => "@bytes",
+            TAG_SET => "set",
+            TAG_SET_MUT => "@set",
+            TAG_LBOX => "lbox",
+            TAG_FIBER => "fiber",
+            TAG_SYNTAX => "syntax",
+            TAG_STRING => "string",
+            TAG_FFI_SIG => "ffi-sig",
+            TAG_FFI_TYPE => "ffi-type",
+            TAG_LIB_HANDLE => "lib",
+            TAG_MANAGED_PTR => "managed",
+            TAG_EXTERNAL => "external",
+            TAG_PARAMETER => "param",
+            TAG_THREAD => "thread",
+            TAG_CAPTURE_CELL => "cell",
+            TAG_CLOSURE_TEMPLATE => "template",
+            _ => "invalid",
+        }
+    }
+
+    /// Render `values` as a comma-joined tag-name list for trace output
+    /// (`--trace=park`). Tag names only — never dereferences (see
+    /// [`Value::tag_name`]); raw bits are shown for a malformed value.
+    pub fn type_name_line(values: &[Value]) -> String {
+        values
+            .iter()
+            .map(|v| {
+                if v.malformed_reason().is_some() {
+                    format!("bad(0x{:x},0x{:x})", v.tag, v.payload)
+                } else {
+                    v.tag_name().to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     /// Create a heap pointer value from a raw pointer and an explicit tag.
     ///
     /// # Safety

@@ -36,6 +36,10 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "guardfree",
     "freebt",
     "scrub",
+    // Park/resume diagnostics: log every suspended-frame park (JIT side-exit
+    // helpers) and every frame replay (resume_suspended) with the frame's
+    // shape and value types. See src/jit/suspend.rs and src/vm/core/resume.rs.
+    "park",
 ];
 
 // ── Dump keywords ─────────────────────────────────────────────────
