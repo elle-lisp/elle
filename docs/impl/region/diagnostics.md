@@ -35,10 +35,18 @@ the region rules ([rules.md](rules.md)) honest.
   matches no live value, so `arena::deref` panics naming the deref site. The
   cheap member of the family: `guardfree` catches a stale read at any distance
   but costs a mapping per freed page, the generation check catches a stale
-  region *resolution* but only in debug builds and only while the page is
-  unclaimed, and scrub catches a stale *content* read in release builds too,
-  for one `memset` per freed page. Reach for it when a program returns a
-  well-typed wrong answer and the leak gauges are clean.
+  region *resolution* only while the page is unclaimed, and scrub catches a
+  stale *content* read for one `memset` per freed page. Reach for it when a
+  program returns a well-typed wrong answer and the leak gauges are clean.
+
+  **The scrub and its report are separate.** The `memset` runs in any build; the
+  `arena::deref` panic that reads the zeros and names the site is
+  `#[cfg(debug_assertions)]`. A plain release build therefore scrubs and says
+  nothing — the stale read faults somewhere near its site instead of returning a
+  wrong-typed value, which is an improvement but not a report. To get the report
+  out of a release build, turn debug assertions on for it:
+  `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`. The macOS CI job pairs the two
+  for exactly this reason.
 - `(arena/dump)`: a Lisp-level leak localiser — prints every live mortal region
   (id, RC, object count, and the object *tags* it holds) to stderr. Where
   `arena/count` / `arena/region-count` say *that* memory grew across a loop, the
