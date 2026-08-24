@@ -131,6 +131,25 @@ impl RegionStore {
         self.regions.len()
     }
 
+    /// Every live object across every active region, in region-id order.
+    /// Drives the post-boot heap census (value/fiberheap/census.rs).
+    pub(crate) fn live_objects(&self) -> impl Iterator<Item = &HeapObject> {
+        self.regions
+            .iter()
+            .filter_map(|r| r.as_ref())
+            .flat_map(|e| e.pool.live_objects())
+    }
+
+    /// Committed region-page bytes, excluding the pool's cached (unowned)
+    /// pages that `allocated_bytes` includes.
+    pub(crate) fn region_bytes(&self) -> usize {
+        self.regions
+            .iter()
+            .filter_map(|r| r.as_ref())
+            .map(|e| e.pool.allocated_bytes())
+            .sum()
+    }
+
     /// Object tags currently live in a region (the `arena/dump` diagnostic).
     pub fn region_tags(&self, id: u32) -> Vec<crate::value::heap::HeapTag> {
         self.regions

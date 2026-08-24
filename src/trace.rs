@@ -29,6 +29,12 @@ pub(crate) fn boot() -> bool {
     crate::config::get().has_trace("boot")
 }
 
+/// True when `--trace=census` is active. Read once, after boot completes —
+/// same static-CLI gating as `boot` (no VM trace cell exists yet).
+pub(crate) fn census() -> bool {
+    crate::config::get().has_trace("census")
+}
+
 /// True when `--trace=compile` is active. Compile phases run on the
 /// compiler's own thread against the static CLI config — the same
 /// gating the `[trace:regions]` dump in `compile_file_inner` uses.

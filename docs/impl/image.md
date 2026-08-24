@@ -52,10 +52,10 @@ accounting, the generation checks, `--trace=scrub`, `--trace=guardfree`, and
 `arena/dump` all see ordinary pages in an ordinary region.
 
 Compaction is where the runtime win comes from. Stdlib boot today produces
-thousands of regions — one per letrec capture cell plus everything they pin.
-The image is **one** region: every internal reference is a self-edge, so its
-edge tables are empty, and all RC traffic against stdlib values lands on a
-single counter.
+hundreds of regions — one per letrec capture cell plus everything they pin
+(405 measured; risk item 2 records the census). The image is **one**
+region: every internal reference is a self-edge, so its edge tables are
+empty, and all RC traffic against stdlib values lands on a single counter.
 
 ## One mechanism, two configurations
 
@@ -101,7 +101,7 @@ environment-over-boot are simply the two depths this design ships.
   path that runs once.
 - **In-place capture of live regions.** Pages of a live heap are entangled
   with Rust-side state (`Rc` payloads, cursors, dtor lists) and fragmented
-  across thousands of regions. Dumping is the rare, slow operation; a
+  across hundreds of regions. Dumping is the rare, slow operation; a
   compacting copy buys a dense, sealed, single-region body.
 - **An immortal image store outside the region system.** Image values as
   permanently region-less foreign pointers would skip even the single
@@ -267,6 +267,16 @@ closures like `println` capture the `Parameter` object itself, so a
 re-evaluated `def` would mint a second parameter the captured references
 never see. Anything the dumper meets that is neither sealed nor
 reconstructible nor side-streamable fails the dump with a named binding.
+
+The **default trait tables** are the second reconstructible class, found by
+the census (risk item 2): every collection's `traits` field points at one of
+the instance's two default traitsets — `@struct`s built by
+`init_default_traits` at VM init, before any stdlib load or hydration. They
+are instance infrastructure, not program state, so the dumper never copies
+them: a `traits` slot aimed at a default traitset becomes a reconstruction
+entry whose constructor resolves the hydrating instance's own table for that
+tag. The tables exist before hydration by construction (VM-init order), so
+the constructor is a lookup, not an allocation.
 
 **Macros persist whole.** A manifest macro entry carries its parameter
 lists, its template syntax (a body value), and its transformer cache's body
@@ -532,12 +542,36 @@ wrong about. Run these before the foundations land, in this order:
    that ~38 ms floor and the 1.4 ms execute — roughly a 10× boot. Region
    inference alone is 44% of the stdlib compile, an independent
    optimization target for the fallback path.
-2. **Post-boot heap census.** The sealed-set and snapping claims describe a
-   graph nobody has enumerated. Walk today's process roots and histogram
-   `HeapObject` variants, count capture cells whose binding is assigned,
-   and measure bytes and pointer-slot density. This decides whether the
-   boot image is dumpable at all, sizes the file, and predicts the dirty
-   set.
+2. **Post-boot heap census — dispatched, sealing confirmed.**
+   `--trace=census` (landed with this experiment; pinned by
+   `tests/integration/census.rs`, whose sealing net fails the moment an
+   unsealed variant enters the boot graph) walks every live object in the
+   instance's region store after boot. A warm release boot leaves **405
+   regions**, **630 objects**, 1.62 MiB of committed region pages, and
+   ~455 KiB of estimated body payload:
+
+   | Tag | Count | Bytes | Heap-ptr slots | Slices |
+   |-----|-------|-------|----------------|--------|
+   | ClosureTemplate | 202 | 317,383 | 24 | 0 |
+   | Closure | 202 | 68,320 | 816 | 142 |
+   | CaptureCell | 210 | 63,840 | 205 | 0 |
+   | LStruct | 4 | 12,490 | 197 | 0 |
+   | Parameter | 7 | 2,016 | 3 | 0 |
+   | External | 3 | 864 | 0 | 0 |
+   | LStructMut | 2 | 748 | 3 | 0 |
+
+   The boot residue is code, not data: no pair, string, or array survives
+   to the post-boot heap. The 210 capture cells are the snapping set — the
+   static scan found zero top-level `assign`s in stdlib.lisp, so every
+   cell snaps. The unsealed leaves are exactly the reconstruction stream's
+   two classes: the three stdio-port `External`s and the two default
+   traitsets (§ "Process-owned resources reconstruct in place"); nothing
+   else in the graph is refused, so the boot image is dumpable. Relocation
+   load: 1,248 heap-pointer slots + 142 `RegionSlice` ptrs + 682
+   primitive slots ≈ 2,100 relocation entries, ~2.7 heap-pointer slots
+   per KiB of payload. `shared-templates 0`: every boot closure already
+   references a region-resident template object, so the template
+   foundation rewrites representation, not sharing structure.
 3. **The store spike** (already in the landing order): mapping, the pool
    flag, relocation, teardown, on data-only graphs.
 4. **Symbol-identity scout.** Audit the ~220 `SymbolId` sites for density

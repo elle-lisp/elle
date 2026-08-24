@@ -140,6 +140,9 @@ mod scratch {
 mod truncation {
     include!("truncation.rs");
 }
+mod census {
+    include!("census.rs");
+}
 mod timeout_capture {
     include!("timeout_capture.rs");
 }

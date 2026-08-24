@@ -16,6 +16,8 @@ pub(crate) mod pagepool;
 pub(crate) mod regionpool;
 pub(crate) mod regionstore;
 
+pub mod census;
+
 // The `FiberHeap` surface is split by concern across sibling submodules; each
 // is an inherent `impl` block or `pub(crate)` free fn, so callers reach them by
 // method-call or path resolution unchanged. See each module's own docs.

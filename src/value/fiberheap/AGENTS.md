@@ -31,6 +31,7 @@ heap and region explicitly through `arena`.
 | `regionpool/introspect.rs` | `find_object_cross_refs` content scan (cascade + diagnostics) |
 | `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook |
 | `freelog.rs` | `--trace=free`/`freebt` free-log; guardfree arming |
+| `census.rs` | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts (docs/impl/image.md § Sealing) |
 | `tests.rs` | `FiberHeap` unit tests |
 
 ## Page layout

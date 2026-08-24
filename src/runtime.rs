@@ -210,6 +210,15 @@ impl Runtime {
             core.load_stdlib();
         }
 
+        // The post-boot heap census (docs/impl/image.md § "Open risks and
+        // dispatch experiments", item 2): at this point every live object is
+        // boot state, the graph a boot image must dump.
+        if crate::trace::census() {
+            for line in core.heap().census().lines() {
+                eprintln!("[trace:census] {}", line);
+            }
+        }
+
         Runtime {
             core,
             torn_down: false,

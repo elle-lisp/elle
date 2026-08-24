@@ -33,6 +33,8 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "gpu",
     // Boot-sequence phase timing (string-traced, no bit; src/trace.rs).
     "boot",
+    // Post-boot heap census (string-traced, no bit; value/fiberheap/census.rs).
+    "census",
     // Region/free diagnostics (see src/value/fiberheap/freelog.rs).
     "free",
     "guardfree",
