@@ -11,12 +11,12 @@ use super::{
     structs, subprocess, time, traits, types, unix, watch,
 };
 
-/// All primitive tables. Each module exports a `const PRIMITIVES`
+/// All primitive tables. Each module exports a `static PRIMITIVES`
 /// array; this list is the single place that enumerates them.
 ///
 /// Tables gated behind `ffi` are appended via `ffi_tables()` below
-/// because `const` arrays cannot contain conditional entries.
-pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
+/// because `static` arrays cannot contain conditional entries.
+pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
     arena::PRIMITIVES,
     arithmetic::PRIMITIVES,
@@ -74,7 +74,8 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
 /// Primitive tables that require the `ffi` feature (libffi).
 #[cfg(feature = "ffi")]
 fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
-    &[loading::CALLBACK_PRIMITIVES]
+    static TABLES: &[&[PrimitiveDef]] = &[loading::CALLBACK_PRIMITIVES];
+    TABLES
 }
 
 #[cfg(not(feature = "ffi"))]
@@ -86,7 +87,7 @@ fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
 ///
 /// Compile-time consumers (type inference reading `PrimitiveDef::ret`)
 /// use this to look up primitive metadata by source name without a VM —
-/// the same const tables `register_primitives` feeds, so the data cannot
+/// the same static tables `register_primitives` feeds, so the data cannot
 /// drift from what runs.
 pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
     use std::collections::HashMap;
@@ -115,8 +116,8 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
 /// small, deterministic ids; any other native-fn def (the trait-method handlers
 /// in `traitregistry`, ffi callbacks) is appended on first `prim_id_of` — in a
 /// deterministic startup order, so the ids are stable across runs of one binary.
-/// Keyed by the def's `&'static` address (every table is a `const PRIMITIVES`
-/// reference into promoted static memory, so addresses are stable).
+/// Keyed by the def's `&'static` address (every table is a `static PRIMITIVES`
+/// item, so addresses are stable across every reference site).
 struct PrimRegistry {
     defs: Vec<&'static PrimitiveDef>,
     by_ptr: std::collections::HashMap<usize, u32>,

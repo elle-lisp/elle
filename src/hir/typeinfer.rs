@@ -200,7 +200,7 @@ fn unwrap_to_call(hir: &Hir) -> Option<usize> {
 ///
 /// Primitives carry their return type in the registry
 /// (`PrimitiveDef::ret`, looked up through `def_by_name` — name and
-/// alias spellings alike), so inference reads the same const tables
+/// alias spellings alike), so inference reads the same static tables
 /// `register_primitives` feeds and cannot drift from them. The only
 /// names matched here are stdlib *closures* (defined in stdlib.lisp,
 /// not in any primitive table) whose pass-through typing inference

@@ -451,7 +451,7 @@ primitive! {
 
 #[cfg(feature = "mlir")]
 primitive!(
-    pub(crate) const MLIR_PRIMITIVES =
+    pub(crate) static MLIR_PRIMITIVES =
         "mlir/compile-spirv" => prim_compile_spirv {
             signal: Signal::query_errors(),
             arity: Arity::Range(1, 2),
