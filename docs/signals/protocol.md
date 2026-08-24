@@ -7,7 +7,7 @@
 Signal types are bit positions in a 64-bit bitfield (`SignalBits` is `u64`).
 The lower 32 bits are reserved for the runtime; the upper 32 bits are
 available for user-defined signals. Within the runtime's 32 bits, the
-first 16 are compiler-known:
+first 18 are allocated:
 
 | Bit | Name | Value | Meaning |
 |-----|------|-------|---------|
@@ -23,8 +23,8 @@ first 16 are compiler-known:
 | 8 | halt | 256 | Graceful VM termination |
 | 9 | io | 512 | I/O request to scheduler |
 | 10 | terminal | 1024 | Uncatchable — passes through mask checks |
-| 11–15 | reserved | — | Future compiler-known signals |
-| 16–31 | runtime | — | Runtime-reserved signals |
+| 11–17 | runtime | — | Runtime signals and capability bits ([runtime.md](../runtime.md)) |
+| 18–31 | reserved | — | Future runtime signals |
 | 32–63 | user | — | User-defined signal types |
 
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
@@ -362,7 +362,7 @@ the scheduler, not by the language.
 
 ## Signal Registry
 
-The signal registry maps signal keywords to bit positions. Built-in signals occupy bits 0–15; bits 16–31 are runtime-reserved; user-defined signals use bits 32–63.
+The signal registry maps signal keywords to bit positions. Built-in signals occupy bits 0–17; bits 18–31 are runtime-reserved; user-defined signals use bits 32–63.
 
 ### Built-in Signals
 
@@ -376,7 +376,9 @@ The signal registry maps signal keywords to bit positions. Built-in signals occu
 | `:io` | 9 | I/O request to scheduler |
 
 Bits 3, 5–7 are VM-internal (resume, propagate, query). Bits 10–14 are
-VM-internal (terminal, exec, fuel, switch, wait). Bit 15 is reserved.
+VM-internal (terminal, exec, fuel, switch, wait). Bits 15–17 name
+capabilities (gpu, os-signal, fs) and bits 18–31 are reserved for future
+runtime signals — see [../runtime.md](../runtime.md).
 
 ### User-Defined Signals
 
@@ -387,7 +389,7 @@ supported. Registration happens at analysis time.
 ```lisp
 (signal :heartbeat)
 (signal :rate-limit)
-# :heartbeat gets bit 16, :rate-limit gets bit 17
+# :heartbeat gets bit 32, :rate-limit gets bit 33
 
 # Expression position — returns the keyword
 (def my-signal (signal :custom))

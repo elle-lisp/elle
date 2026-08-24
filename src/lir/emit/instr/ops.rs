@@ -523,12 +523,7 @@ impl Emitter {
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::CheckSignalBound);
-                // Emit SignalBits raw value as four u16s (least-significant first)
-                let raw = allowed_bits.raw();
-                self.bytecode.emit_u16(raw as u16);
-                self.bytecode.emit_u16((raw >> 16) as u16);
-                self.bytecode.emit_u16((raw >> 32) as u16);
-                self.bytecode.emit_u16((raw >> 48) as u16);
+                self.bytecode.emit_signal_bits(*allowed_bits);
                 // Value consumed by the check
                 self.pop();
             }

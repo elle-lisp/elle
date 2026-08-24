@@ -54,7 +54,7 @@ MakeStruct n       construct struct from n key-value pairs
 ### Fiber operations
 ```text
 Yield              yield current fiber
-Emit signal val    emit a signal
+Emit bits          emit a signal; value comes off the stack
 ```
 
 ### Self-reference
@@ -81,6 +81,20 @@ Instructions are encoded as a byte stream. The opcode byte is followed
 by zero or more operand bytes (typically u16 or u32 indices). The
 `LocationMap` maps bytecode offsets to source locations for error
 reporting.
+
+### Signal-bits operands
+
+`SignalBits` is a 64-bit mask, and every bit of it is meaningful in
+bytecode: built-in signals sit at bits 0–17, the runtime reserves bits
+18–31, and `(signal :keyword)` allocates user signals from bit 32 upward
+(`docs/signals/protocol.md`). An operand that holds fewer than 64 bits
+therefore cannot name a user signal at all.
+
+Two instructions carry such an operand — `Emit` and `CheckSignalBound` —
+and both encode it the same way: eight bytes, big-endian, written by
+`Bytecode::emit_signal_bits` and read by `VM::read_signal_bits`. Use that
+pair rather than an open-coded byte sequence; a hand-written operand is
+how a mask silently loses its high half.
 
 ## Files
 

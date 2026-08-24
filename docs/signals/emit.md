@@ -79,11 +79,11 @@ overlap the fiber's mask:
 
 ## User-defined signals
 
-Any keyword can be a signal. Register it with `signal/register` and
+Any keyword can be a signal. Declare it with `(signal :keyword)` and
 use it with `emit`:
 
 ```text
-(signal/register :heartbeat)
+(signal :heartbeat)
 (emit :heartbeat {:timestamp (clock/monotonic)})
 ```
 
@@ -92,6 +92,12 @@ The parent catches it through the mask like any other signal:
 ```text
 (fiber/new body |:heartbeat|)
 ```
+
+A user signal is allocated a bit in the 32–63 range
+([protocol.md](protocol.md)), and the literal `emit` above carries that
+bit into the bytecode whole — a user signal suspends, routes, and gets
+squelched exactly as `:yield` does. The `Emit` operand is 64 bits wide
+for this reason ([impl/bytecode.md](../impl/bytecode.md)).
 
 ## Dynamic emit (primitive fallback)
 
