@@ -51,7 +51,6 @@ fn setup_yield_test(
         squelch_mask: SignalBits::EMPTY,
     };
 
-    let bytecode_ptr = template.bytecode.as_ptr();
     // The closure header must share `region` with its env slice (see above), so
     // allocate it into `region` explicitly via a NativeCtx over this VM rather
     // than dropping the region argument.
@@ -63,7 +62,7 @@ fn setup_yield_test(
     .closure(closure);
 
     let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
-    vm.jit_cache.insert(bytecode_ptr, jit_code);
+    vm.install_jit_code(bytecode, jit_code);
 
     (vm, closure_val)
 }
@@ -114,7 +113,6 @@ fn setup_yield_test_with_lbox(
         squelch_mask: SignalBits::EMPTY,
     };
 
-    let bytecode_ptr = template.bytecode.as_ptr();
     // The closure header must share `region` with its env slice (see above), so
     // allocate it into `region` explicitly via a NativeCtx over this VM rather
     // than dropping the region argument.
@@ -126,7 +124,7 @@ fn setup_yield_test_with_lbox(
     .closure(closure);
 
     let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
-    vm.jit_cache.insert(bytecode_ptr, jit_code);
+    vm.install_jit_code(bytecode, jit_code);
 
     (vm, closure_val)
 }

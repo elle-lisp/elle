@@ -17,6 +17,29 @@ use std::sync::Arc;
 #[cfg(feature = "jit")]
 use crate::jit::{JitCode, JitRejectionInfo};
 
+/// A `jit_cache` entry: the compiled code plus the pin that keeps the keyed
+/// bytecode allocation alive (docs/impl/jit.md § "Cache identity"). The pin
+/// makes the raw-address key sound: a pinned allocation cannot be freed, so
+/// its address cannot be reused by a different function's bytecode while
+/// this entry lives.
+#[cfg(feature = "jit")]
+pub struct JitCacheEntry {
+    _pin: Rc<Vec<u8>>,
+    pub code: Arc<JitCode>,
+}
+
+#[cfg(feature = "jit")]
+impl JitCacheEntry {
+    /// Build an entry pinning `bytecode` — the same `Rc` the entry's cache
+    /// key is derived from.
+    pub fn new(bytecode: Rc<Vec<u8>>, code: Arc<JitCode>) -> Self {
+        JitCacheEntry {
+            _pin: bytecode,
+            code,
+        }
+    }
+}
+
 /// The releases a frame-replacing tail call leaves behind, one per channel.
 ///
 /// Everything the lowerer emits after a `TailCall` runs only on the native
@@ -215,15 +238,20 @@ pub struct VM {
     /// per-thread, keeping the trap scoped to the calling OS thread (the runner's
     /// own `exit`, on a VM with the trap unset, still terminates the process).
     pub(crate) exit_trapped: bool,
-    /// JIT code cache: bytecode pointer → compiled native code.
+    /// JIT code cache: bytecode pointer → pinned entry (see `JitCacheEntry`
+    /// and docs/impl/jit.md § "Cache identity"). Write through
+    /// `install_jit_code`; read through `jit_code_for`.
     #[cfg(feature = "jit")]
-    pub jit_cache: FxHashMap<*const u8, Arc<JitCode>>,
+    pub jit_cache: FxHashMap<*const u8, JitCacheEntry>,
     /// Background JIT compilation worker (spawned lazily).
     #[cfg(feature = "jit")]
     pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,
-    /// Bytecode pointers currently being compiled in background.
+    /// Compilations in flight on the worker, keyed by bytecode address. The
+    /// value pins the keyed allocation from submission until the result
+    /// installs (docs/impl/jit.md § "Cache identity"); the pin then moves
+    /// into `jit_cache` or `jit_rejections`.
     #[cfg(feature = "jit")]
-    pub(crate) jit_pending: rustc_hash::FxHashSet<usize>,
+    pub(crate) jit_pending: FxHashMap<usize, Rc<Vec<u8>>>,
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,

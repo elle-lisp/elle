@@ -12,7 +12,34 @@ use std::sync::Arc;
 
 use super::core::VM;
 
+#[cfg(test)]
+mod tests;
+
 impl VM {
+    /// Install compiled code for the function whose bytecode is `bytecode`.
+    /// The single write path into `jit_cache`: the key is derived from the
+    /// bytecode here, never passed separately, and the entry pins the
+    /// bytecode so the key stays sound (docs/impl/jit.md § "Cache identity").
+    pub fn install_jit_code(&mut self, bytecode: std::rc::Rc<Vec<u8>>, code: Arc<JitCode>) {
+        self.jit_cache.insert(
+            bytecode.as_ptr(),
+            crate::vm::core::JitCacheEntry::new(bytecode, code),
+        );
+    }
+
+    /// Compiled code for the function at `bytecode_ptr`, if cached.
+    pub fn jit_code_for(&self, bytecode_ptr: *const u8) -> Option<Arc<JitCode>> {
+        self.jit_cache.get(&bytecode_ptr).map(|e| e.code.clone())
+    }
+
+    /// Record that a compile for `bytecode` is in flight on the worker. The
+    /// entry pins `bytecode` until the result installs, so the key the
+    /// worker echoes back still names this function.
+    pub(crate) fn record_jit_pending(&mut self, bytecode: std::rc::Rc<Vec<u8>>) {
+        self.jit_pending
+            .insert(bytecode.as_ptr() as usize, bytecode);
+    }
+
     /// Try JIT compilation/dispatch for a closure call.
     ///
     /// Returns `Some(Option<SignalBits>)` if JIT handled the call (the inner
@@ -40,7 +67,7 @@ impl VM {
         self.poll_jit_completions();
 
         // Check cache (may have been populated by poll above)
-        if let Some(jit_code) = self.jit_cache.get(&bytecode_ptr).cloned() {
+        if let Some(jit_code) = self.jit_code_for(bytecode_ptr) {
             return Some(self.run_jit(&jit_code, closure, args, func));
         }
 
@@ -52,7 +79,7 @@ impl VM {
         // every call "hot") the absence of this check re-submits un-jit'able
         // hot functions on every call and saturates the background worker.
         if is_hot
-            && !self.jit_pending.contains(&(bytecode_ptr as usize))
+            && !self.jit_pending.contains_key(&(bytecode_ptr as usize))
             && !self.jit_rejections.contains_key(&bytecode_ptr)
         {
             if let Some(ref lir_func) = closure.template.lir_function {
@@ -72,10 +99,14 @@ impl VM {
         };
         let results: Vec<_> = worker.poll().collect();
         for result in results {
-            self.jit_pending.remove(&result.bytecode_key);
+            // The pin recorded at submit is what keeps `bytecode_key`
+            // naming this function; without it the address may already
+            // belong to a different function's bytecode, so the result
+            // must not be installed under it.
+            let pin = self.jit_pending.remove(&result.bytecode_key);
             match result.result {
                 Ok(jit_code) => {
-                    let bytecode_ptr = result.bytecode_key as *const u8;
+                    let Some(pin) = pin else { continue };
                     if self
                         .runtime_config
                         .has_trace_bit(crate::config::trace_bits::JIT)
@@ -85,7 +116,7 @@ impl VM {
                             result.bytecode_key,
                         );
                     }
-                    self.jit_cache.insert(bytecode_ptr, Arc::new(jit_code));
+                    self.install_jit_code(pin, Arc::new(jit_code));
                 }
                 Err(e) => match &e {
                     crate::jit::JitError::UnsupportedInstruction(_)
@@ -93,12 +124,9 @@ impl VM {
                     | crate::jit::JitError::Yielding => {
                         // Expected rejection — record for diagnostics.
                         let bytecode_ptr = result.bytecode_key as *const u8;
-                        self.jit_rejections.entry(bytecode_ptr).or_insert_with(|| {
-                            JitRejectionInfo {
-                                name: None,
-                                reason: e,
-                            }
-                        });
+                        self.jit_rejections
+                            .entry(bytecode_ptr)
+                            .or_insert_with(|| JitRejectionInfo::new(e, pin));
                     }
                     _ => {
                         eprintln!("[jit] background compilation failed: {}", e);
@@ -116,6 +144,7 @@ impl VM {
         bytecode_ptr: *const u8,
     ) {
         let label = closure.template.display_label();
+        let bytecode = closure.template.bytecode.clone();
         let task = crate::jit::worker::prepare_task(
             lir_func,
             None,
@@ -146,15 +175,12 @@ impl VM {
                             bytecode_ptr as usize,
                         );
                     }
-                    self.jit_cache.insert(bytecode_ptr, Arc::new(jit_code));
+                    self.install_jit_code(bytecode, Arc::new(jit_code));
                 }
                 Err(e) => {
                     self.jit_rejections
                         .entry(bytecode_ptr)
-                        .or_insert_with(|| JitRejectionInfo {
-                            name: None,
-                            reason: e,
-                        });
+                        .or_insert_with(|| JitRejectionInfo::new(e, Some(bytecode)));
                 }
             }
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
@@ -167,7 +193,7 @@ impl VM {
             .get_or_insert_with(crate::jit::worker::JitWorker::new);
 
         if worker.submit(task) {
-            self.jit_pending.insert(bytecode_ptr as usize);
+            self.record_jit_pending(bytecode);
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             if self
                 .runtime_config
@@ -194,20 +220,19 @@ impl VM {
             };
             match worker.recv_blocking() {
                 Some(result) => {
-                    self.jit_pending.remove(&result.bytecode_key);
+                    // As in `poll_jit_completions`: no pin, no install — the
+                    // key may already name a different function's bytecode.
+                    let pin = self.jit_pending.remove(&result.bytecode_key);
                     match result.result {
                         Ok(jit_code) => {
-                            let bytecode_ptr = result.bytecode_key as *const u8;
-                            self.jit_cache.insert(bytecode_ptr, Arc::new(jit_code));
+                            let Some(pin) = pin else { continue };
+                            self.install_jit_code(pin, Arc::new(jit_code));
                         }
                         Err(e) => {
                             let bytecode_ptr = result.bytecode_key as *const u8;
-                            self.jit_rejections.entry(bytecode_ptr).or_insert_with(|| {
-                                JitRejectionInfo {
-                                    name: None,
-                                    reason: e,
-                                }
-                            });
+                            self.jit_rejections
+                                .entry(bytecode_ptr)
+                                .or_insert_with(|| JitRejectionInfo::new(e, pin));
                         }
                     }
                 }

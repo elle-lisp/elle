@@ -32,7 +32,9 @@ through the VM pointer threaded into each call.
 
 On every call to `try_jit_call`, the VM polls for completed
 compilations via non-blocking `try_recv()`. Compiled code is inserted
-into `jit_cache`; rejections are recorded in `jit_rejections`.
+into `jit_cache`; rejections are recorded in `jit_rejections`. All three
+maps key by raw bytecode address, sound only because every entry pins the
+allocation it is keyed by — see docs/impl/jit.md § "Cache identity".
 
 Diagnostics (`jit/rejections`, `--stats`) call `drain_jit_pending()`
 to block until all pending compilations finish before reporting.

@@ -107,14 +107,14 @@ fn jit_yield_through_call_parks_owner_node_for_resume_completion() {
     // CALL-SITE helper, so re-key the cache entry with call-site metadata.
     let (mut vm, closure_val) =
         setup_yield_test(vec![Instruction::Return as u8], vec![], vec![], vec![]);
-    let bytecode_ptr = closure_val
+    let bytecode = closure_val
         .as_closure()
         .expect("setup builds a closure")
         .template
         .bytecode
-        .as_ptr();
-    vm.jit_cache.insert(
-        bytecode_ptr,
+        .clone();
+    vm.install_jit_code(
+        bytecode,
         Arc::new(crate::jit::JitCode::test_with_call_sites(vec![
             CallSiteMeta {
                 resume_ip: 0,

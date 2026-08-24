@@ -121,8 +121,7 @@ pub extern "C" fn elle_jit_yield(
     // Look up yield point metadata from JitCode
     let bytecode_ptr = closure.template.bytecode.as_ptr();
     let jit_code = vm
-        .jit_cache
-        .get(&bytecode_ptr)
+        .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield called but no JitCode in cache");
     let yield_meta = &jit_code.yield_points[yield_index as usize];
     let num_params = yield_meta.num_params as usize;
@@ -256,8 +255,7 @@ pub extern "C" fn elle_jit_yield_through_call(
     // Look up call site metadata from JitCode
     let bytecode_ptr = closure.template.bytecode.as_ptr();
     let jit_code = vm
-        .jit_cache
-        .get(&bytecode_ptr)
+        .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");
     let call_meta = &jit_code.call_sites[call_site_index as usize];
 
