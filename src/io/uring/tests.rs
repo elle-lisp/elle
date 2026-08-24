@@ -242,7 +242,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     )
     .expect("submit_uring_stream");
 
-    let mut pending: HashMap<SubmissionId, PendingOp> = HashMap::new();
+    let mut pending = crate::io::pending::PendingTable::new();
     pending.insert(
         id,
         PendingOp::Port {
@@ -266,7 +266,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
         assert!(
             Instant::now() < deadline,
             "write never completed: {} of {} bytes reported after 20s",
-            pending.get(&id).map(|p| p.filled()).unwrap_or(0),
+            pending.get(id).map(|p| p.filled()).unwrap_or(0),
             PAYLOAD
         );
         let ts = io_uring::types::Timespec::new().sec(1).nsec(0);

@@ -75,6 +75,16 @@ pub(super) fn process_raw_completion(
             // buffer_pool.release is already called at the top of process_raw_completion.
 
             if result_code < 0 {
+                // Which syscall actually ran is what the `siginfo` allocation
+                // says: the kernel fills one for `IORING_OP_WAITID`, and the
+                // pool worker — which calls `waitpid(2)` itself — leaves it
+                // null. Naming the other one sends a reader looking for a call
+                // this platform never makes.
+                let syscall = if siginfo.is_null() {
+                    "waitpid"
+                } else {
+                    "waitid"
+                };
                 // On the uring path, reclaim siginfo before returning.
                 if !siginfo.is_null() {
                     unsafe { drop(Box::from_raw(*siginfo)) };
@@ -84,7 +94,12 @@ pub(super) fn process_raw_completion(
                     id,
                     crate::io::io_error(
                         "exec-error",
-                        format!("subprocess/wait: waitid failed: errno {}", errno),
+                        format!(
+                            "subprocess/wait: {} failed: errno {} ({})",
+                            syscall,
+                            errno,
+                            errno_message(errno)
+                        ),
                         origin_heap,
                     ),
                 );
