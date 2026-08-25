@@ -104,6 +104,33 @@ impl RegionStore {
         self.regions.iter().filter(|r| r.is_some()).count()
     }
 
+    /// Physical region ids issued — one past the largest id ever minted from
+    /// scratch, so it is the high-water mark of ids in simultaneous circulation.
+    /// The backend of the `arena/region-ids` gauge
+    /// (docs/impl/region/diagnostics.md).
+    ///
+    /// The *id* dimension, which the object, byte, and page gauges cannot show: a
+    /// minted id that never allocates holds none of what they count, yet keeps
+    /// its id out of circulation forever (docs/impl/region/model.md § "Physical
+    /// id recycling"). A mint that finds `free_physical` empty raises this;
+    /// a mint that recycles leaves it alone. So a steady-state loop holds it
+    /// flat, and every unit of growth is an id that did not come back.
+    ///
+    /// This leads [`Self::region_table_len`], which only moves when an id is made
+    /// *live*: stranded ids are never materialized, so they inflate the table
+    /// only once some later mint reaches their range. Read this one to detect an
+    /// id leak, and the table length for what it costs in resident memory.
+    pub fn region_ids_issued(&self) -> u32 {
+        self.next_physical
+    }
+
+    /// Entries in the region table — one past the largest physical id ever made
+    /// live, since `ensure_raw` sizes the table to the id it materializes. Its
+    /// slot size times this is what the table costs resident.
+    pub fn region_table_len(&self) -> usize {
+        self.regions.len()
+    }
+
     /// Object tags currently live in a region (the `arena/dump` diagnostic).
     pub fn region_tags(&self, id: u32) -> Vec<crate::value::heap::HeapTag> {
         self.regions

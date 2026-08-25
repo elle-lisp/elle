@@ -69,11 +69,33 @@ principle, hand it a garbage id from a stale or foreign read): an id past
 `regions.resize_with(id + 1, …)` would grow the table to that id — hundreds of GB
 — and abort on allocation failure far from the deref. It panics there, naming the
 hazard, in every build. The region table is bounded by the max *concurrently-live*
-regions (freed ids recycle through `free_physical`), so a real id never approaches
-the bound; the backstop only ever fires on corruption. It is a backstop, not a
-detector: it makes the failure *loud* instead of an opaque OOM — the deref site
-and the freeing region still come from the generation check (debug) and
-`--trace=guardfree` / `--trace=free`.
+regions — every id reaches `free_physical` again, freed and never-materialized
+alike ([model.md](model.md) § "Physical id recycling") — so a real id never
+approaches the bound. It is a backstop, not a detector: it makes the failure
+*loud* instead of an opaque OOM — the deref site and the freeing region still
+come from the generation check (debug) and `--trace=guardfree` / `--trace=free`.
+
+The bound has a ceiling of its own. The panic can only fire if the table at that
+id is **allocatable**: the check runs before `resize_with`, so a bound whose
+table exceeds what the machine can supply lets the allocator abort one id below
+it instead, and the program dies with a byte count and no diagnosis.
+
+Those two requirements pull in opposite directions, and what leaves room between
+them is a ratio rather than any absolute size. A live region owns at least one
+4 KiB page (Rule 6), so a program holding N regions at once already holds at
+least 4N KiB of pages, while the table for those ids costs
+N × `size_of::<Option<RegionEntry>>()` — about a twentieth as much. Set
+`MAX_PLAUSIBLE_REGION_ID` past the live-region count a machine's memory permits,
+and the table at that bound stays within what the same machine can allocate. At
+`1 << 28` that is 1 TiB of pages against a ~56 GB table.
+
+Do not read the bound as "no program can want this much memory". A machine large
+enough to host such a program is the same machine that can allocate the table, so
+the bound tracks the hardware; picking a smaller constant to make the table
+cheaper only moves the tripwire into the range where real programs live. On a
+machine too small for the table the allocator still aborts first — which is why
+the assertion message names id exhaustion beside corruption rather than
+asserting the second.
 
 The free-time cascade scan (`find_object_cross_refs`) deliberately does NOT
 check generations: teardown legitimately scans objects whose contained

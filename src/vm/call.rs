@@ -268,7 +268,8 @@ impl VM {
         args: &[Value],
         region_id: StaticRegion,
     ) -> Option<Result<Value, (&'static str, String)>> {
-        let alloc_region = self.new_runtime_region_for_call_slot(region_id);
+        let mint = self.new_runtime_region_for_call_slot(region_id);
+        let alloc_region = mint.region();
         let result = {
             // The ctx is the explicit capability `call_collection` allocates
             // through, minted from this call's fresh region exactly as
@@ -289,6 +290,10 @@ impl VM {
                 );
             }
         }
+        // A borrowed element or an immediate result left this call's region
+        // unallocated, so its id goes back to the free list — the same close-out
+        // `dispatch_native_call` makes.
+        self.release_unused_call_region(mint);
         result
     }
 

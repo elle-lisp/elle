@@ -9,6 +9,7 @@ use crate::hir::region::RuntimeRegion;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
+use super::regionstore::RegionMint;
 use super::FiberHeap;
 
 impl FiberHeap {
@@ -63,6 +64,21 @@ impl FiberHeap {
     /// slot; the two id-spaces are distinct (see docs/impl/region/model.md § id-spaces).
     pub fn new_runtime_region(&mut self) -> RuntimeRegion {
         self.region_store.new_runtime_region()
+    }
+
+    /// Mint a fresh runtime region id together with the receipt that returns it
+    /// if nothing allocates into it — the mint for a caller that may end without
+    /// materializing its region (docs/impl/region/model.md § "Physical id
+    /// recycling"). Pair with [`Self::recycle_unmaterialized_region`].
+    pub(crate) fn new_runtime_region_tracked(&mut self) -> RegionMint {
+        self.region_store.new_runtime_region_tracked()
+    }
+
+    /// Return a minted id to the free list if the mint never materialized it.
+    /// A no-op when the id names a live region, or when it lived and died since
+    /// the mint (docs/impl/region/model.md § "Physical id recycling").
+    pub(crate) fn recycle_unmaterialized_region(&mut self, mint: RegionMint) {
+        self.region_store.recycle_unmaterialized(mint);
     }
 
     /// Increment the reference count for a region.
@@ -212,6 +228,20 @@ impl FiberHeap {
     /// Number of active regions.
     pub fn active_region_count(&self) -> usize {
         self.region_store.active_region_count()
+    }
+
+    /// Physical region ids this heap has issued — the backend of the
+    /// `arena/region-ids` gauge (docs/impl/region/diagnostics.md). Flat in a
+    /// steady-state loop; every unit of growth is an id that never returned to
+    /// the free list.
+    pub fn region_ids_issued(&self) -> u32 {
+        self.region_store.region_ids_issued()
+    }
+
+    /// Entries in this heap's region table — what the table costs resident, in
+    /// slots (docs/impl/region/model.md § "Physical id recycling").
+    pub fn region_table_len(&self) -> usize {
+        self.region_store.region_table_len()
     }
 
     /// Per-region info: (region_id, rc, object_count) for every active region.

@@ -162,6 +162,33 @@ pub(crate) fn prim_arena_region_count(
     (SIG_OK, Value::int(count as i64))
 }
 
+/// (arena/region-ids) — physical region ids issued, one past the largest id ever
+/// minted from scratch.
+///
+/// The *id* dimension the object, byte, and page gauges cannot show: a minted id
+/// that never allocates holds no object, no page, and no reference count, yet
+/// never returns to the free list (docs/impl/region/model.md § "Physical id
+/// recycling"). A mint that recycles leaves this alone, so a delta across a fixed
+/// window of a steady-state loop must be zero.
+pub(crate) fn prim_arena_region_ids(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let issued = ctx.heap_mut().region_ids_issued();
+    (SIG_OK, Value::int(i64::from(issued)))
+}
+
+/// (arena/region-table) — entries in the region table, one past the largest
+/// physical region id ever made live. What the table costs resident, in slots;
+/// `arena/region-ids` is the gauge that detects an id leak.
+pub(crate) fn prim_arena_region_table(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let len = ctx.heap_mut().region_table_len();
+    (SIG_OK, Value::int(len as i64))
+}
+
 /// (arena/region-info) — return array of {:id N :rc N :objects N} per region.
 pub(crate) fn prim_arena_region_info(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -305,6 +332,24 @@ primitive! {
         category: "debug",
         example: "(debug/arena-region-count)",
         aliases: &["arena/region-count"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-region-ids" => prim_arena_region_ids {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return physical region ids issued (one past the largest id ever minted from scratch).",
+        category: "debug",
+        example: "(debug/arena-region-ids)",
+        aliases: &["arena/region-ids"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-region-table" => prim_arena_region_table {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return entries in the region table (one past the largest physical region id ever made live).",
+        category: "debug",
+        example: "(debug/arena-region-table)",
+        aliases: &["arena/region-table"],
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-info" => prim_arena_region_info {
