@@ -1477,8 +1477,11 @@ bounded whether the raise chain allocates it directly, in a helper, or hands it 
 as a parameter, beside native-raise and borrowed-payload controls) with
 `tests/elle/region-error-payload-uaf.lisp` as its guardfree complement (the payload a
 catcher stores outward, a borrowed module payload raised repeatedly, a native raise's
-unrecorded install, and a restarted `:error` fiber's replay),
-the `denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate),
+unrecorded install, and a restarted `:error` fiber's replay), the
+`error-payload`/`error-payload-native` closed-control pair in `tests/elle/oracle.lisp`
+(the dashboard's per-op regression insurance — the pair's gap isolates the recorded
+mint from the walk), the `denied-discard` probe in `tests/elle/oracle.lisp` (the
+per-op rate of what the tables cannot name),
 `lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
 a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so a route
 the emitter declined has no entry), and `tests/elle/region-error-unwind-uaf.lisp` (the
