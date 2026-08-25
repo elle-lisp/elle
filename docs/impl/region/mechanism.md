@@ -1467,21 +1467,26 @@ locals and its saved activation map standing in for the live ones
 ([owner.md](owner.md) § "The bounded residual").
 
 The **JIT** tier keeps today's behaviour: a compiled frame's error exit walks nothing,
-a bounded over-keep, never an over-free.
+an over-keep, never an over-free. The gap now has a gauge: the
+`error-payload-helper` probe in `tests/elle/oracle.lisp` raises from a non-tail
+callee frame with a payload that frame owns, and its cross-tier range pin reads 0
+under `--jit=off` and one region per raise under `--jit=eager` — per raise in a
+loop, so a compiled retry loop grows by it until the walk (or its equivalent) is
+realized on the tier.
 
 Pinned by `tests/elle/region-error-unwind.lisp` (the leak gauge — the pending release
 of a raising call's argument, of two of them, of a binding live across the raising
 call, and of an enclosing frame, each bounded beside a control that raises holding
-nothing), `tests/elle/region-error-payload.lisp` (the emitted payload's own region,
-bounded whether the raise chain allocates it directly, in a helper, or hands it down
-as a parameter, beside native-raise and borrowed-payload controls) with
-`tests/elle/region-error-payload-uaf.lisp` as its guardfree complement (the payload a
-catcher stores outward, a borrowed module payload raised repeatedly, a native raise's
-unrecorded install, and a restarted `:error` fiber's replay), the
-`error-payload`/`error-payload-native` closed-control pair in `tests/elle/oracle.lisp`
-(the dashboard's per-op regression insurance — the pair's gap isolates the recorded
-mint from the walk), the `denied-discard` probe in `tests/elle/oracle.lisp` (the
-per-op rate of what the tables cannot name),
+nothing), the `error-payload*` closed controls in `tests/elle/oracle.lisp` (the
+emitted payload's own region, bounded per face — raised in the parked body frame,
+in a walked non-tail callee, handed down as an owned parameter, and as a
+two-region struct — beside the native-raise control whose gap isolates the
+recorded mint from the walk and discharge) with
+`tests/elle/region-error-payload-uaf.lisp` as their guardfree complement (the
+payload a catcher stores outward, a borrowed module payload raised repeatedly, a
+native raise's unrecorded install, and a restarted `:error` fiber's replay), the
+`denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate of what the
+tables cannot name),
 `lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
 a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so a route
 the emitter declined has no entry), and `tests/elle/region-error-unwind-uaf.lisp` (the

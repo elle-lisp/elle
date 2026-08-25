@@ -617,7 +617,8 @@ fn region_error_unwind_uaf() {
 // the walk does not own: the delivery the catcher reads, a counted store's, a
 // borrowed payload's owner, a native raise's unrecorded install, and a
 // restarted frame's replay. Each faults under guardfree if the walk releases
-// one it never had. The leak face is `region-error-payload.lisp`.
+// one it never had. The leak face is the `error-payload*` closed-control
+// family in `tests/elle/oracle.lisp`.
 #[test]
 fn region_error_payload_uaf() {
     run_elle_script_with_args(
