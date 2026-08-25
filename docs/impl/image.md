@@ -159,9 +159,11 @@ re-interning; the `CompileCtx` ordering invariant dissolves.
 
 Migration notes: `SymbolId(u32)` widens to `u64` (the `Value` payload
 already is one); the `SYNTHETIC` sentinel survives as a reserved hash;
-bytecode operand widths at symbol sites must be audited; struct and set
-iteration order changes from intern-order to hash-order — deterministic, but
-print-order test expectations churn once.
+struct and set iteration order changes from intern-order to hash-order —
+deterministic, and measured to churn nothing. Risk item 4 records the
+full site audit and the measured cost: no bytecode operand carries a
+symbol id, no live dense-index site exists, and the widening is ~75
+mechanical seam edits.
 
 ### Region-native immutable structs
 
@@ -600,9 +602,38 @@ wrong about. Run these before the foundations land, in this order:
    hydrated region, the `(fd, offset)` input form (memfd for byte
    sources), and the always-on verifier's pointer-bounds walk beyond the
    tag check.
-4. **Symbol-identity scout.** Audit the ~220 `SymbolId` sites for density
-   assumptions (`as usize` indexing beyond `SymbolTable`), prototype the
-   hash id, and measure the struct-sort and print-order fallout.
+4. **Symbol-identity scout — dispatched, migration confirmed cheap.** The
+   audit classified all 221 `SymbolId` sites, and a throwaway prototype —
+   `SymbolId(u64)` minted as the FNV-1a name hash, `SymbolTable` reduced
+   to a hash→name registry with the keyword collision panic — ran the full
+   suites. Site classes and the cost of each:
+
+   | Site class | Sites | Migration cost |
+   |------------|-------|----------------|
+   | Opaque keys and pass-throughs (`PrimitiveMeta`, classification maps, inline/dispatch registries, JIT `scc_peers`, binding arenas) | ~170 | none — already hash-keyed |
+   | Width seams: `SymbolId(u32)`; `Value::symbol(u32)`; the truncating `as_symbol() → u32`; `Bytecode::add_symbol(u32)`; `SendValue::Symbol.id` (dead on receive); `errors.rs` parses `SymbolId(N)` as `u32`; 66 `HashMap<u32, String>` name maps | ~75 | mechanical widening — the whole prototype is 39 files, ±110 lines, and compiles clean beyond these seams |
+   | Dense indexing beyond `SymbolTable` | 1 | `jit/group.rs` `globals[sym.0 as usize]` — dead code with test-only callers; there is no VM globals table (the letrec model has no `LoadGlobal`), so no live density assumption exists |
+   | Bytecode operands carrying a symbol id | 0 | none to audit: symbols reach bytecode only as constant-pool `Value`s (u16 pool index) and `ConstTemplate`s, which already encode symbols by name |
+   | Raw-id comparators (`Value::Ord` rank-3 arm, `TableKey::Ord` symbol arm) | 2 | sort order flips to hash order coherently; sorted structs, sets, and their binary searches stay correct because build and probe share the comparator |
+   | Sentinel `SYNTHETIC = u32::MAX` | 1 production read | becomes a reserved `u64::MAX`; the binding's existing `is_synthetic` flag could replace it outright |
+
+   Measured fallout: Rust suites green except two tests that pin the
+   property being removed (the sequential-mint assertion, and a
+   different-ids-across-two-tables setup assert). The full smoke corpus —
+   2,264 files, VM and JIT — passes with **zero expectation churn**: no
+   Elle test observes symbol sort or print order. `(environment)` is the
+   one producer of symbol-keyed structs, and nothing pins its key order.
+   Keyword-keyed containers sort by name string and are unaffected. Boot
+   is unharmed: quiet-machine stdlib-compile is not slower under hash
+   interning. Deleted by the migration: the five `symbol_names` maps and
+   their threading, `all_names()`, `send`'s by-name symbol re-intern,
+   `intern_primitive_names` and its five call sites, and the `CompileCtx`
+   registration-order invariant (including the docs/pipeline.md bullet).
+   The audit also found two live cross-table id holes that stable ids
+   close: `send` ships `LirConst::Symbol` inside the live `LirFunction`
+   verbatim, so worker-side JIT re-emission pools sender-space ids; and
+   `TableKey::Symbol` keys inside sent structs cross untranslated. The
+   symbol milestone must land regression tests for both.
 5. **Expander mutation parity.** The region-native syntax migration is
    whole (see *Region-native syntax*), and its bar is parity with the
    Rust-heap tree it replaces. Benchmark expansion-heavy compiles on a
