@@ -175,6 +175,61 @@ scrubbed — an unmapped address faults on its own.
 call from Elle, through the `arena/page-claims` gauge; `pagepool::tests` pins
 the untouched-recycle contract and the scrub's spans.
 
+## Physical id recycling: reserved, live, free
+
+A physical region id has three states, and every id must reach `free` again.
+
+- **Reserved.** `new_runtime_region` takes an id off `free_physical`, or bumps
+  `next_physical` when that list is empty. The id names no region yet: it has no
+  entry and no pages. Its generation slot, if it has one, still holds the value
+  its previous incarnation's teardown left.
+- **Live.** `ensure_raw` builds the id's `RegionEntry` on first touch. It also
+  sizes `regions` and `generations` to the id, so **the table is as long as the
+  largest id ever made live**, whatever the count of live regions is. (Static
+  slot ids reach `ensure_raw` too and size the table the same way; they come
+  from the compiler's own bounded counter — see § "Two id-spaces".)
+- **Free.** A teardown returns the id's pages, bumps its generation, and pushes
+  the id onto `free_physical`, where the next mint finds it.
+
+The reserved state has a second exit: a caller can mint an id and never allocate
+into it. The **per-call result region** is that case, on the hottest path in the
+runtime. `dispatch_native_call` and `dispatch_collection_call` each mint one
+region per call, before the call runs, because the callee may allocate its
+result into it. A primitive that returns an
+immediate (`(< a b)`), or one that returns a value borrowed from an argument
+(`first`, `rest`, `get`), allocates nothing into it. That id never reaches
+`ensure_raw`, so no teardown can ever return it.
+
+An id stranded that way costs no heap object, no page, and no reference count,
+which is why the object and region gauges cannot see it. It costs the region
+**table**: it raises the largest id a later mint hands out, and `regions` is a
+`Vec<Option<RegionEntry>>` indexed by id, so a stranded id is one
+`size_of::<Option<RegionEntry>>()` slot of resident memory that nothing frees.
+Resident memory then grows with total work while `arena/count`,
+`arena/region-count`, and `arena/bytes` all stay flat.
+
+So both dispatchers close the reserved state themselves: after the call,
+`recycle_unmaterialized` pushes the result region back onto `free_physical` when
+the call left it unmaterialized. Unmaterialized means two things together —
+`regions[id]` is empty **and** the id's generation still equals the generation
+read at the mint.
+
+The generation half is what makes the test exact, and it is not optional. A
+region that materialized and was freed inside the call (a native that re-enters
+the VM) also leaves `regions[id]` empty — but its teardown already pushed that
+id, so pushing it again would put a **duplicate** in `free_physical`. Two mints
+could then take the same id before either materialized, and `new_runtime_region`
+could not tell them apart: its skip loop only rejects an id that is already
+*live*. Two logical regions on one physical id is the aliasing UAF the mint loop
+exists to prevent. A teardown bumps the generation, so the generation check
+rejects exactly that id and admits only a mint that nothing has touched since.
+
+`arena/region-ids` reads `next_physical` from Elle — the gauge that moves the
+moment an id fails to come back — and `arena/region-table` reads what the table
+costs. `tests/elle/region-id-recycle.lisp` uses them to pin the bound: a loop of
+calls that allocate nothing issues no new id. `regionstore::tests::recycle` pins
+the store-level contract, the duplicate the generation check refuses included.
+
 ## RegionSlice contents share their object's region
 
 Non-obvious and load-bearing: immutable aggregates (string, array, struct, and a

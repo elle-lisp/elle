@@ -63,6 +63,25 @@ the region rules ([rules.md](rules.md)) honest.
   variadic stdlib operator allocates"). `tests/elle/region-page-recycle.lisp`
   reads it. Immediate, so sampling it allocates nothing and does not perturb
   the measurement.
+- `(arena/region-ids)` and `(arena/region-table)`: the *id* dimension, which no
+  other gauge can show. A minted id that never allocates holds no object, no
+  page, and no reference count, so `arena/count`, `arena/bytes`,
+  `arena/page-claims`, and `arena/region-count` all read flat while it strands
+  ([model.md](model.md) § "Physical id recycling"). Reach for `region-ids` to
+  *detect* the leak and `region-table` to size it:
+  - `arena/region-ids` is `next_physical`, one past the largest id ever minted
+    from scratch. A mint that finds an id on the free list leaves it alone, so a
+    steady-state loop holds it flat and every unit of growth is an id that did
+    not come back. A delta across a fixed window of such a loop must be zero.
+  - `arena/region-table` is `regions.len()`, one past the largest id ever made
+    *live*, which times the slot size is what the table costs resident. It
+    **lags**: a stranded id is never materialized, so it inflates the table only
+    once some later mint reaches its range. A loop whose calls allocate nothing
+    can leak ids at full rate and leave this gauge flat, which is why it is the
+    wrong one to assert on.
+
+  `tests/elle/region-id-recycle.lisp` reads both. Both are Immediate, so
+  sampling allocates nothing.
 - **Direct vs cascade free** — the two have different fixes. A *direct* free of a
   still-live value is a liveness bug: a `decref_point` fired while the value was still
   reachable. A *cascade* free of a still-referenced region is a missing incref on
