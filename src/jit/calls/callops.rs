@@ -98,7 +98,7 @@ pub extern "C" fn elle_jit_call(
 
         // JIT-to-JIT fast path: check if callee has JIT code
         let bytecode_ptr = closure.template.bytecode.as_ptr();
-        if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
+        if let Some(jit_code) = vm.jit_code_for(bytecode_ptr) {
             vm.fiber.call_depth += 1;
 
             // Stack overflow guard: resource exhaustion (not signal-theoretic).

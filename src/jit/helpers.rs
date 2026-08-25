@@ -483,10 +483,19 @@ impl<'a> FunctionTranslator<'a> {
         builder.switch_to_block(yield_block);
         builder.seal_block(yield_block);
 
-        let call_site = self.lir.call_sites.get(call_site_idx as usize);
-        let stack_regs = match call_site {
+        // Every yield check must have its emitter-recorded call site: the
+        // runtime helper indexes JitCode.call_sites with this same index, so
+        // a missing entry means the counters diverged and the side-exit
+        // would rebuild the frame from another site's stack shape.
+        let stack_regs = match self.lir.call_sites.get(call_site_idx as usize) {
             Some(cs) => cs.stack_regs.as_slice(),
-            None => &[] as &[crate::lir::Reg],
+            None => {
+                return Err(JitError::InvalidLir(format!(
+                    "call site {} has no emitter-recorded metadata ({} recorded)",
+                    call_site_idx,
+                    self.lir.call_sites.len()
+                )))
+            }
         };
 
         let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
