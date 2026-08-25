@@ -146,6 +146,12 @@ unsafe fn unmap(addr: usize, len: usize) {
 pub(crate) struct MmapPage {
     ptr: *mut u8,
     len: usize,
+    /// A hydrated image page: a `MAP_PRIVATE` view of an image file
+    /// (docs/impl/image.md § Hydration step 3). The pool neither caches nor
+    /// recycles such a page — its body is image bytes, not the blank slate
+    /// the claim contract hands out — so its release is this page's `Drop`:
+    /// `munmap`. Anonymous pages (every other constructor) are `false`.
+    file_backed: bool,
 }
 
 impl MmapPage {
@@ -187,6 +193,7 @@ impl MmapPage {
         Some(MmapPage {
             ptr: trim.base as *mut u8,
             len,
+            file_backed: false,
         })
     }
 
@@ -209,7 +216,30 @@ impl MmapPage {
             Some(MmapPage {
                 ptr: ptr as *mut u8,
                 len,
+                file_backed: false,
             })
+        }
+    }
+
+    /// Wrap an already-established fixed mapping (a hydrated image page) as a
+    /// file-backed page the region system owns. See [`MmapPage::file_backed`].
+    ///
+    /// # Safety
+    /// `ptr` must be the base of a live `len`-byte private mapping, `len`-aligned
+    /// (the masked-header walk requires self-alignment), owned by no other
+    /// `MmapPage` — this takes over its `munmap`.
+    pub(crate) unsafe fn from_fixed_mapping(ptr: *mut u8, len: usize) -> Self {
+        debug_assert!(len >= base_page() && len.is_power_of_two());
+        debug_assert_eq!(
+            ptr as usize & (len - 1),
+            0,
+            "hydrated page not self-aligned"
+        );
+        MAPPED_BYTES.fetch_add(len as u64, Ordering::Relaxed);
+        MmapPage {
+            ptr,
+            len,
+            file_backed: true,
         }
     }
 
@@ -477,6 +507,11 @@ impl PagePool {
     pub fn release(&mut self, mut page: MmapPage, dirty: PageDirty) {
         if crate::value::fiberheap::freelog::guard_armed() {
             page.guard_and_leak();
+            return;
+        }
+        if page.file_backed {
+            // A hydrated image page: never cached, never recycled — drop
+            // unmaps it (see `MmapPage::file_backed`).
             return;
         }
         let size = page.len();

@@ -33,6 +33,7 @@ Provide the complete Elle implementation:
 | `compiler` | Bytecode instruction definitions and debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (16-byte tagged union) with types: LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
+| `image` | Image persistence: dump a sealed value graph as page bytes + relocations, hydrate by private file mapping (docs/impl/image.md) |
 | `signals` | Signal type system (`Signal` struct with `bits` and `propagates`) |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |

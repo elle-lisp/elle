@@ -186,6 +186,15 @@ impl RegionPage {
     }
 }
 
+/// One page's byte layout, as [`RegionPool::page_layouts`] reports it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PageLayout {
+    pub base: usize,
+    pub len: usize,
+    pub obj_cursor: usize,
+    pub data_cursor: usize,
+}
+
 /// Per-region storage: owns pages, tracks objects needing Drop.
 pub(crate) struct RegionPool {
     pages: Vec<RegionPage>,
@@ -343,6 +352,59 @@ impl RegionPool {
         let freed = self.obj_count;
         self.obj_count = 0;
         freed
+    }
+
+    /// Byte layout of every page this region owns, in claim order. The image
+    /// dumper reads these to copy page bytes and bound the meaningful spans
+    /// (docs/impl/image.md § Dumping).
+    pub(crate) fn page_layouts(&self) -> Vec<PageLayout> {
+        self.pages
+            .iter()
+            .map(|p| PageLayout {
+                base: p.page.as_ptr() as usize,
+                len: p.page.len(),
+                obj_cursor: p.obj_cursor,
+                data_cursor: p.data_cursor,
+            })
+            .collect()
+    }
+
+    /// Adopt a hydrated image page (docs/impl/image.md § Hydration steps 3–5):
+    /// stamp its header with this region's identity and install the cursors
+    /// the image's page table recorded, so later allocation into this region
+    /// and the release spans both see the true layout.
+    pub(crate) fn adopt_hydrated_page(
+        &mut self,
+        page: MmapPage,
+        obj_cursor: usize,
+        data_cursor: usize,
+    ) {
+        debug_assert!(
+            HEADER_SIZE <= obj_cursor && obj_cursor <= data_cursor && data_cursor <= page.len(),
+            "hydrated page cursors out of order: {obj_cursor}..{data_cursor} in {}",
+            page.len(),
+        );
+        let mut rp = RegionPage::new(page, self.region_id, self.stamp);
+        rp.obj_cursor = obj_cursor;
+        rp.data_cursor = data_cursor;
+        self.pages.push(rp);
+    }
+
+    /// Rebuild the object bookkeeping from an image's object index
+    /// (docs/impl/image.md § Hydration step 5): route each object to `dtors`
+    /// or `ref_objs` by the same predicates the alloc path uses, and count it.
+    pub(crate) fn install_object_index(
+        &mut self,
+        objects: &[(*mut HeapObject, crate::value::heap::HeapTag)],
+    ) {
+        for &(ptr, tag) in objects {
+            if needs_drop(tag) {
+                self.dtors.push(ptr);
+            } else if holds_value_refs(tag) {
+                self.ref_objs.push(ptr);
+            }
+        }
+        self.obj_count += objects.len();
     }
 
     /// Add a new page from the pool.

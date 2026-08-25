@@ -313,9 +313,10 @@ One image is one file (or one embedded blob):
 | Section | Content |
 |---------|---------|
 | header | magic, format version, fingerprint, section offsets, page count |
-| pages | the dumped region's pages in order: size class + body bytes per page; each page's bytes start at a 4 KiB-aligned file offset (padding between pages), so the section is mappable |
-| relocations | pointer stream: (slot page, slot offset, target segment, target page, target offset); primitive stream: (slot page, slot offset); reconstruction stream: (slot page, slot offset, constructor tag) |
-| object index | (page, offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs`/cursors and drives the verifier |
+| pages | the dumped region's pages, largest first: body bytes per page at 4 KiB-aligned file offsets, so the section is mappable. Descending size order makes the packed layout self-aligning: every earlier page's size is a multiple of every later page's, so each page's offset — in the file and in the mapped interval — is a multiple of its own size, satisfying the masked-header walk with no padding |
+| page table | (size, object cursor, data cursor) per page, in placement order — rebuilds each page's cursors |
+| relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval (Hydration step 3), so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
+| object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | primitive names in dump-time `prim_id` order |
 | name table | symbol and keyword names in the body — hashes are stable, but the process-global hash→name display registries must learn them |
 | signal table | user-defined signal names in dump-time bit order |
@@ -331,7 +332,7 @@ missing from the live registry is minted on the spot from its static def
 can hold ids the fresh process has not minted yet). Symbol and keyword
 payloads are stable hashes and need no relocation. The dumper emits each
 entry as it copies the object — it knows every variant's layout, so there is
-no post-hoc discovery, and targets are (page, offset) pairs so hydration
+no post-hoc discovery, and targets are region-relative offsets so hydration
 rewrites each slot in O(1) with no address search.
 
 **Static region slots** baked into bytecode operands are opaque per-function
@@ -472,9 +473,19 @@ environment dump it is the session's delta.
 
 Dump determinism is engineered, not assumed: the walk visits roots and
 children in sorted order and never iterates a hash map, so the same graph
-always yields byte-identical output. That is what lets the warm-cache path
-key the artifact content-addressably and lets concurrent dumpers race
-harmlessly through the atomic rename.
+always yields the same layout — offsets, page table, relocation table, and
+object index are byte-identical across dumps, and the dumper canonicalizes
+everything it can in the page bytes (headers, cursor gaps, alignment slack,
+and every relocation slot are written as zeros). The store spike measured
+the one residue: raw object-slot bytes are *not* byte-stable, because a
+`repr(Rust)` enum copy carries uninitialized padding from its construction
+temporary, and no Rust construct can zero it without per-variant field
+extents. Those extents are exactly what the `offset_of!` probes of risk
+item 6 record; once known, the dumper zeroes non-field slot bytes and the
+whole file becomes canonical. Until then nothing is lost: the warm cache
+keys on the fingerprint (not a content hash), and concurrent dumpers racing
+through the atomic rename need only produce valid images for the same
+fingerprint, which layout determinism already guarantees.
 
 Mutable bindings are the dump-policy fork. The strict policy (boot) fails
 the dump, naming the binding. The environment policy defaults to the same
@@ -572,8 +583,23 @@ wrong about. Run these before the foundations land, in this order:
    per KiB of payload. `shared-templates 0`: every boot closure already
    references a region-resident template object, so the template
    foundation rewrites representation, not sharing structure.
-3. **The store spike** (already in the landing order): mapping, the pool
-   flag, relocation, teardown, on data-only graphs.
+3. **The store spike — dispatched, mechanism proven.** `src/image` dumps
+   and hydrates data-only graphs (pairs, strings, bytes, arrays, floats,
+   portable immediates) end to end, pinned by `tests/integration/image.rs`
+   against the § Test plan: round-trip equality in a fresh heap, sharing
+   preservation, corrupted-fingerprint fallback with no leaked region or
+   mapping, double hydration with independent address sets, rename-over-a-
+   live-mapping, teardown to baseline, and file-backed release as `munmap`
+   (never cached — also pinned at the pool in `pagepool/tests.rs`). The
+   pool interplay reduced to one field: `MmapPage` carries a `file_backed`
+   flag the release path checks. Two findings: relocation slots and targets
+   collapse to region-relative offsets (recorded in § File format), and
+   raw object-slot bytes are not byte-deterministic under `repr(Rust)`
+   padding (recorded in § Dumping; resolution rides risk item 6). Still
+   open for the full **store** milestone: scrub/guardfree exercised over a
+   hydrated region, the `(fd, offset)` input form (memfd for byte
+   sources), and the always-on verifier's pointer-bounds walk beyond the
+   tag check.
 4. **Symbol-identity scout.** Audit the ~220 `SymbolId` sites for density
    assumptions (`as usize` indexing beyond `SymbolTable`), prototype the
    hash id, and measure the struct-sort and print-order fallout.
@@ -654,7 +680,10 @@ Then the image milestones:
   stdout (the reconstructed default, not a stale dump-time resource), and
   `parameterize` of `*stdout*` redirects it — the captured `Parameter`
   identity and the fiber's frame lookup both survived hydration.
-- Determinism: dump the same graph twice and assert byte-identical files.
+- Determinism: dump the same graph twice and assert identical metadata
+  sections and layout, with any byte difference confined to object slots
+  (the `repr(Rust)` padding residue — § Dumping); byte-identical whole
+  files become the assertion once risk item 6's field extents land.
 - Resolution: a unit test pins that an image pointer resolves through the
   interval table without touching the header ladder, and that `owns` on a
   hydrated region is a range check.

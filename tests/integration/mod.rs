@@ -143,6 +143,9 @@ mod truncation {
 mod census {
     include!("census.rs");
 }
+mod image {
+    include!("image.rs");
+}
 mod timeout_capture {
     include!("timeout_capture.rs");
 }
