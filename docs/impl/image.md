@@ -212,9 +212,9 @@ conversion seams, double maintenance, and a standing invitation for the two
 to drift. The performance bar for the migration is **parity**: building and
 mutating syntax trees in regions must be comparably fast to the Rust-heap
 tree they replace, since expansion is compile-path-hot and the fallback
-compile pays it too. The boundary-only split is a last resort, considered
-only if measured parity proves unreachable and the regression is a
-deal-breaker.
+compile pays it too. Risk item 5 measured the bar and retired it: the
+prototype region tree beats the Rust-heap tree on every expansion-hot
+operation by 2–5×, so the boundary-only split is off the table.
 
 Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
@@ -634,11 +634,53 @@ wrong about. Run these before the foundations land, in this order:
    verbatim, so worker-side JIT re-emission pools sender-space ids; and
    `TableKey::Symbol` keys inside sent structs cross untranslated. The
    symbol milestone must land regression tests for both.
-5. **Expander mutation parity.** The region-native syntax migration is
-   whole (see *Region-native syntax*), and its bar is parity with the
-   Rust-heap tree it replaces. Benchmark expansion-heavy compiles on a
-   prototype before committing the full migration; the boundary-only split
-   exists only as a last resort behind a measured deal-breaker.
+5. **Expander mutation parity — dispatched, parity exceeded.** A throwaway
+   prototype node ran the expander's hot operations head to head against
+   the Rust-heap tree, allocating through the real region store
+   (`FiberHeap::alloc_region_slice_in_region`). The node is 56 bytes to
+   `Syntax`'s 112: kind tag, packed span over an interned file id, scope
+   set inline (capacity 4 plus an overflow slice), string payloads and
+   child slices as `RegionSlice`, symbols as stable hashes (the symbol
+   foundation lands first). Corpus: the parsed prelude + stdlib trees
+   (230 forms, 13,332 nodes), 20 rounds per op, in-place walks mutating
+   uniquely owned trees through the child slices:
+
+   | Per node | Rust-heap tree | Region tree |
+   |----------|----------------|-------------|
+   | stamp-copy (macro-arg clone + add-scope walk) | 176 ns | 37 ns |
+   | hygiene flip walk, in place | 40 ns | 17 ns |
+   | file-scope add walk, in place | 31 ns | 13 ns |
+   | build + drop (the `from_value` shape) | 73 ns | 17 ns |
+   | teardown | 31 ns | 7 ns |
+
+   Region mint + free measures ~6 ns, so per-expansion transient regions
+   are noise. The no-inline-capacity fallback — regrow the scope slice on
+   every add — costs 8 ns per visit, so scope storage is not a parity risk
+   in either form. The op mix is measured, not assumed: counters on
+   `Syntax::clone`, the constructors, `map_scope_recursive`, and the
+   converters (dumped at the `--trace=compile` expand/analyze marks)
+   showed the stdlib expand phase (84.5 ms warm release) deep-clones
+   **464,089** nodes against 46,746 built and 24,718 from `from_value`,
+   across 1,532 expansions; analysis clones another 143,298. A 300-defn
+   macro-heavy user file amplified the same shape: 992,170 clones in a
+   206 ms expand, ~254 clones per expansion — a large share being the
+   per-call `MacroDef` template deep clone, which pointer-shared immutable
+   region trees delete outright. perf agrees: `Syntax::clone` +
+   `drop_in_place<Syntax>` is ~10% of the whole boot. Scope sets are tiny
+   everywhere: every one of the ~430k measured scope ops ended with ≤3
+   scopes. Counts × per-op deltas put tree ops near half of an
+   expansion-heavy expand phase and ~4× cheaper in regions, so the
+   migration is projected to make expansion-heavy compiles roughly a
+   third *faster* — and even a fully immutable working tree meets the
+   bar, since a full stamp-copy (37 ns) undercuts the Rust tree's
+   in-place walk (40 ns). The boundary-only split is dead; no measured
+   deal-breaker exists. One condition binds the migration: keep in-place
+   mutation legal on uniquely owned working trees (stamped copies and
+   conversion results — the ownership discipline the hygiene flip already
+   relies on). To redo: counter patch at the sites above, plus a
+   `#[cfg(test)]` bench under `src/syntax/expand/` building the prototype
+   node from `read_syntax_all` output and running stamp/flip/add/build/
+   teardown against `stamp_scope`/`flip_scope_recursive`.
 6. **Fingerprint strength.** Size/align probes do not pin field offsets.
    Record `offset_of!` for every field of every sealed variant, so the
    two-stage embed build cannot pass the fingerprint with a shifted layout.
