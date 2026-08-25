@@ -8,12 +8,15 @@
 //!
 //! Determinism is engineered: the copy visits children in order, the visited
 //! map is only ever probed (never iterated), and the file's page bytes are
-//! assembled from a zeroed buffer — the page header, the cursor gap, and
-//! data-area alignment slack are never copied from the scratch pages, so
-//! recycled-page residue cannot leak into the artifact.
+//! assembled from a zeroed buffer. Object slots are never copied wholesale —
+//! each receives only its discriminant byte and probed leaf-field extents
+//! (`layout::write_canonical`), so neither recycled-page residue nor a
+//! construction temporary's uninitialized padding can reach the artifact,
+//! and two dumps of the same graph are byte-identical whole files.
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::mem::size_of;
 use std::path::Path;
 
 use crate::hir::region::RuntimeRegion;
@@ -26,6 +29,7 @@ use crate::value::repr::{
 use crate::value::Value;
 
 use super::format::{self, Header, PageEntry, HEADER_BLOCK};
+use super::layout;
 use super::ImageError;
 
 /// Dump `root`'s value graph to `path`, atomically (temp file + rename).
@@ -73,8 +77,10 @@ fn dump_into(
         })
     };
 
-    // Walk the copied objects: index entries, relocation slots, and the
-    // meaningful data spans (slice backings) to copy into the file.
+    // Walk the copied objects: canonical slot bytes into the zeroed pages
+    // buffer, index entries, relocation slots, and the meaningful data
+    // spans (slice backings) to copy into the file.
+    let mut pages = vec![0u8; pages_len as usize];
     let mut relocs: Vec<(u64, u64)> = Vec::new();
     let mut index: Vec<(u64, u64)> = Vec::new();
     let mut data_spans: Vec<(u64, usize, usize)> = Vec::new(); // (rel, src, len)
@@ -83,6 +89,8 @@ fn dump_into(
             let addr = obj as *const HeapObject as usize;
             let obj_off = in_image(off_of(addr))?;
             index.push((obj_off, obj.tag() as u64));
+            let dst = obj_off as usize;
+            layout::write_canonical(obj, &mut pages[dst..dst + size_of::<HeapObject>()]);
             let mut slot = |slot_addr: usize, target: usize| -> Result<(), ImageError> {
                 let s = in_image(off_of(slot_addr))?;
                 let t = in_image(off_of(target))?;
@@ -122,31 +130,24 @@ fn dump_into(
     relocs.sort_unstable();
     index.sort_unstable();
 
-    // Assemble the pages section from a zeroed buffer: object spans verbatim,
-    // slice backings individually; headers, gaps, and alignment slack stay
-    // zero (see the module docs on determinism).
-    let mut pages = vec![0u8; pages_len as usize];
-    let mut entries: Vec<PageEntry> = Vec::new();
-    for (l, &(base, _, r)) in layouts.iter().zip(intervals.iter()) {
-        entries.push(PageEntry {
+    // Object slots are already canonical in `pages`; add the slice
+    // backings. Headers, gaps, alignment slack, and slot padding stay zero
+    // (see the module docs on determinism).
+    let entries: Vec<PageEntry> = layouts
+        .iter()
+        .map(|l| PageEntry {
             size: l.len as u64,
             obj_cursor: l.obj_cursor as u64,
             data_cursor: l.data_cursor as u64,
-        });
-        let dst = r as usize;
-        let span = unsafe {
-            std::slice::from_raw_parts((base + 16) as *const u8, l.obj_cursor.saturating_sub(16))
-        };
-        pages[dst + 16..dst + l.obj_cursor].copy_from_slice(span);
-    }
+        })
+        .collect();
     for &(rel, src, len) in &data_spans {
         let bytes = unsafe { std::slice::from_raw_parts(src as *const u8, len) };
         pages[rel as usize..rel as usize + len].copy_from_slice(bytes);
     }
     // Canonicalize every relocation slot to zero: its dump-time content is a
-    // scratch-region absolute address — meaningless to the file, rewritten
-    // wholesale by hydration's relocation pass, and the one thing that would
-    // make two dumps of the same graph differ.
+    // scratch-region absolute address — meaningless to the file and rewritten
+    // wholesale by hydration's relocation pass.
     for &(slot, _) in &relocs {
         pages[slot as usize..slot as usize + 8].fill(0);
     }

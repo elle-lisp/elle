@@ -354,6 +354,14 @@ instruction-set high-water mark, `CURRENT_EPOCH`, the feature set, a hash of
 the primitive name list in registration order, and (for the boot
 configuration) the hashes of the three sources.
 
+Size and align alone do not pin field offsets. The fingerprint therefore
+also records the probed layout of every variant the dumper can emit: the
+discriminant byte and each leaf field's offset and length (risk item 6
+records the probe mechanism and the measured layout). A build whose layout
+reorders a field or moves the discriminant fails the fingerprint instead of
+hydrating garbage, so the two-stage embed build cannot pass with a shifted
+layout. The same extents drive slot canonicalization (§ Dumping).
+
 On mismatch the loader falls back — the `include_str!` sources never go away,
 so the image is an optimization, not a correctness dependency. Images are
 regenerated, not migrated; epochs stay a source-level concept. An environment
@@ -476,18 +484,17 @@ environment dump it is the session's delta.
 Dump determinism is engineered, not assumed: the walk visits roots and
 children in sorted order and never iterates a hash map, so the same graph
 always yields the same layout — offsets, page table, relocation table, and
-object index are byte-identical across dumps, and the dumper canonicalizes
-everything it can in the page bytes (headers, cursor gaps, alignment slack,
-and every relocation slot are written as zeros). The store spike measured
-the one residue: raw object-slot bytes are *not* byte-stable, because a
-`repr(Rust)` enum copy carries uninitialized padding from its construction
-temporary, and no Rust construct can zero it without per-variant field
-extents. Those extents are exactly what the `offset_of!` probes of risk
-item 6 record; once known, the dumper zeroes non-field slot bytes and the
-whole file becomes canonical. Until then nothing is lost: the warm cache
-keys on the fingerprint (not a content hash), and concurrent dumpers racing
-through the atomic rename need only produce valid images for the same
-fingerprint, which layout determinism already guarantees.
+object index are byte-identical across dumps. The page bytes are assembled
+canonically from a zeroed buffer: headers, cursor gaps, alignment slack,
+and relocation slots stay zero, and each object slot receives only its
+discriminant byte and the leaf-field extents the layout probes record
+(§ Fingerprint). A `repr(Rust)` enum copy carries uninitialized padding
+from its construction temporary — the store spike measured this residue —
+so the dumper never copies a slot wholesale; the extent copy leaves padding
+out, and two dumps of the same graph are byte-identical whole files. The
+warm cache still keys on the fingerprint, not a content hash; whole-file
+determinism buys reproducible embedded blobs, and concurrent dumpers racing
+through the atomic rename produce identical files.
 
 Mutable bindings are the dump-policy fork. The strict policy (boot) fails
 the dump, naming the binding. The environment policy defaults to the same
@@ -597,7 +604,8 @@ wrong about. Run these before the foundations land, in this order:
    flag the release path checks. Two findings: relocation slots and targets
    collapse to region-relative offsets (recorded in § File format), and
    raw object-slot bytes are not byte-deterministic under `repr(Rust)`
-   padding (recorded in § Dumping; resolution rides risk item 6). Still
+   padding (recorded in § Dumping; resolved by risk item 6's extent
+   copy). Still
    open for the full **store** milestone: scrub/guardfree exercised over a
    hydrated region, the `(fd, offset)` input form (memfd for byte
    sources), and the always-on verifier's pointer-bounds walk beyond the
@@ -681,9 +689,31 @@ wrong about. Run these before the foundations land, in this order:
    `#[cfg(test)]` bench under `src/syntax/expand/` building the prototype
    node from `read_syntax_all` output and running stamp/flip/add/build/
    teardown against `stamp_scope`/`flip_scope_recursive`.
-6. **Fingerprint strength.** Size/align probes do not pin field offsets.
-   Record `offset_of!` for every field of every sealed variant, so the
-   two-stage embed build cannot pass the fingerprint with a shifted layout.
+6. **Fingerprint strength — dispatched, probes landed.** Size/align probes
+   do not pin field offsets; the fingerprint now records, per dumpable
+   variant, the discriminant byte and every leaf field's offset and length
+   (`src/image/layout.rs`), so the two-stage embed build cannot pass the
+   fingerprint with a shifted layout. Mechanism finding: `offset_of!`
+   cannot name an enum variant's field on stable Rust (E0658,
+   rust-lang/rust#120141), so the probes construct one exemplar per variant
+   and measure each field's address against the object's base, with
+   `offset_of!` covering the nested structs (`Pair`, `Value`,
+   `RegionSlice`). Measured layout (rustc 1.95, x86-64): `HeapObject` is
+   288 bytes, align 8 — the by-value `ClosureTemplate` variant sets the
+   size, so a `Float` slot is ~95% padding until the template foundation
+   shrinks it. The discriminant is one byte at offset 0 (declaration index
+   plus 3) with bytes 1–7 zero; every probed variant places its payload
+   field at 8 and `traits` at 24 (`Pair` nests its whole struct at 8).
+   `RegionSlice`'s `u32` len leaves interior padding at bytes 12–16 of the
+   field, which is why extents are recorded per leaf field, never per
+   variant field. The probes verify themselves on first use — distinct
+   discriminant bytes, zero upper discriminant bytes, disjoint in-bounds
+   extents, and a canonicalize-then-read-back check per variant — and
+   panic on violation, so a rustc that moves the tag or reorders fields
+   fails loudly before any image is written or trusted. The unlock
+   (§ Dumping): the dumper assembles object slots from the extents, dumps
+   are byte-identical whole files, and the determinism pin asserts
+   whole-file equality with a poisoned-padding counter-factual.
 
 ## Landing order
 
@@ -753,10 +783,10 @@ Then the image milestones:
   stdout (the reconstructed default, not a stale dump-time resource), and
   `parameterize` of `*stdout*` redirects it — the captured `Parameter`
   identity and the fiber's frame lookup both survived hydration.
-- Determinism: dump the same graph twice and assert identical metadata
-  sections and layout, with any byte difference confined to object slots
-  (the `repr(Rust)` padding residue — § Dumping); byte-identical whole
-  files become the assertion once risk item 6's field extents land.
+- Determinism: dump the same graph twice and assert byte-identical whole
+  files. The counter-factual: scribble a pattern into a live object's
+  padding bytes before the dump and assert the file does not change — a
+  wholesale slot copy would carry the pattern into the artifact.
 - Resolution: a unit test pins that an image pointer resolves through the
   interval table without touching the header ladder, and that `owns` on a
   hydrated region is a range check.

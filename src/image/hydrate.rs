@@ -17,15 +17,6 @@ use crate::value::Value;
 use super::format::{self, Header, HEADER_BLOCK, INDEX_BYTES, PAGE_ENTRY_BYTES, RELOC_BYTES};
 use super::{Hydrated, ImageError};
 
-/// The variants a spike (data-only) image may contain. The verifier rejects
-/// anything else at load, before a torn read can happen later.
-fn spike_sealed(tag: HeapTag) -> bool {
-    matches!(
-        tag,
-        HeapTag::Pair | HeapTag::LString | HeapTag::LBytes | HeapTag::LArray | HeapTag::Float
-    )
-}
-
 /// An address reservation that unmaps itself unless disarmed — the cleanup
 /// for every fallible step between `mmap` and region installation.
 struct Reservation {
@@ -113,7 +104,8 @@ pub fn hydrate(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError
     for i in 0..header.n_objects as usize {
         let (off, raw_tag) = format::read_u64_pair(index_table, i, INDEX_BYTES);
         let tag = format::tag_from_u64(raw_tag)?;
-        if !spike_sealed(tag) {
+        // The accept set is the dumper's emit set, spelled once (layout.rs).
+        if !super::layout::dumpable(tag) {
             return Err(ImageError::Corrupt(format!(
                 "{tag:?} in a data-only image (docs/impl/image.md § Sealing)"
             )));

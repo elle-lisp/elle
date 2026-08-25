@@ -12,6 +12,7 @@
 mod dump;
 mod format;
 mod hydrate;
+mod layout;
 
 pub use dump::dump;
 pub use format::fingerprint;

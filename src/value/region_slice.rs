@@ -101,6 +101,18 @@ impl<T: 'static> RegionSlice<T> {
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.as_slice().iter()
     }
+
+    /// Byte layout of the slice header itself, for the image layout probes
+    /// (docs/impl/image.md § Fingerprint): the `ptr` and `len` field offsets
+    /// and the `len` field's size. Lives here because the fields are private.
+    pub(crate) fn header_layout() -> (usize, usize, usize) {
+        let probe = Self::empty();
+        (
+            std::mem::offset_of!(Self, ptr),
+            std::mem::offset_of!(Self, len),
+            std::mem::size_of_val(&probe.len),
+        )
+    }
 }
 
 // Manual Clone/Copy: just copies the pointer and length.

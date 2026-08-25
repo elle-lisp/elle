@@ -28,10 +28,13 @@ pub(crate) const HEADER_BLOCK: usize = 4096;
 const FINGERPRINT_AT: usize = 80;
 
 /// The live process's image fingerprint. An image whose stored fingerprint
-/// differs is rejected at hydration — images are regenerated, never migrated.
+/// differs is rejected at hydration — images are regenerated, never
+/// migrated. Beyond sizes and aligns, the fingerprint carries the probed
+/// per-variant layout (docs/impl/image.md § Fingerprint): size checks alone
+/// cannot see a reordered field or a moved discriminant.
 pub fn fingerprint() -> String {
     format!(
-        "elle-image v{} rustc={} target={}-{} value={}/{} heapobject={}/{} regionslice={}/{} epoch={}",
+        "elle-image v{} rustc={} target={}-{} value={}/{} heapobject={}/{} regionslice={}/{} epoch={} {}",
         VERSION,
         env!("ELLE_RUSTC"),
         std::env::consts::ARCH,
@@ -43,6 +46,7 @@ pub fn fingerprint() -> String {
         size_of::<RegionSlice<u8>>(),
         align_of::<RegionSlice<u8>>(),
         crate::epoch::rules::CURRENT_EPOCH,
+        super::layout::fingerprint_component(),
     )
 }
 

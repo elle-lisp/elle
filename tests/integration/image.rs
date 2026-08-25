@@ -211,17 +211,30 @@ fn double_hydration_is_correct_and_independent() {
 
 // ── Determinism ─────────────────────────────────────────────────────
 
-// § Test plan, "Determinism" / § Dumping: the ordered walk makes the dump's
-// LAYOUT deterministic — identical lengths, identical header and metadata
-// sections — and any byte difference between two dumps of the same graph is
-// confined to object slots. The trap the spike measured: a `repr(Rust)`
-// enum copy carries uninitialized padding from its construction temporary,
-// so raw object-slot bytes cannot be canonicalized until the field-extent
-// probes (risk item 6) land — but headers, gaps, alignment slack, and
-// relocation slots ARE canonicalized (zeroed), and this test fails if any
-// of those, or any metadata byte, ever differs.
+/// Fill `depth + 1` stack frames with `pattern` so that any construction
+/// temporary a later call materializes inherits pattern bytes in its
+/// padding. The xor keeps the recursion and the buffer observable.
+#[inline(never)]
+fn paint_stack(pattern: u8, depth: usize) -> u64 {
+    let buf = [pattern; 4096];
+    let sum: u64 = buf.iter().map(|&b| b as u64).sum();
+    if depth == 0 {
+        sum
+    } else {
+        sum ^ paint_stack(pattern, depth - 1)
+    }
+}
+
+// § Test plan, "Determinism" / § Dumping: two dumps of the same graph are
+// byte-identical whole files. The counter-factual is the stack painting:
+// the dumper's scratch objects are `repr(Rust)` enum copies whose padding
+// comes from their construction temporaries, so a dumper that copies slot
+// bytes wholesale writes whatever the stack held into the file — painting
+// the stack differently before each dump forced ~700 differing bytes.
+// Only a dumper that assembles slots from the probed field extents
+// (docs/impl/image.md risk item 6) keeps the files identical.
 #[test]
-fn dump_layout_is_deterministic_and_diffs_confine_to_object_slots() {
+fn dump_is_byte_deterministic_whole_file() {
     let dir = crate::common::ScratchDir::new("image-determinism");
     let a = dir.join("a.image");
     let b = dir.join("b.image");
@@ -229,42 +242,35 @@ fn dump_layout_is_deterministic_and_diffs_confine_to_object_slots() {
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
     let root = build_graph(&mut src, region);
+    paint_stack(0xAA, 16);
     image::dump(&mut src, root, &a).expect("dump a");
+    paint_stack(0x55, 16);
     image::dump(&mut src, root, &b).expect("dump b");
 
     let ba = std::fs::read(&a).expect("read a");
     let bb = std::fs::read(&b).expect("read b");
-    assert_eq!(ba.len(), bb.len(), "dump lengths differ");
-
-    // Header geometry (fixed little-endian offsets; see image/format.rs).
-    let u64_at = |buf: &[u8], at: usize| u64::from_le_bytes(buf[at..at + 8].try_into().unwrap());
-    const HEADER_BLOCK: usize = 4096;
-    let pages_len = u64_at(&ba, 16) as usize;
-    let n_pages = u64_at(&ba, 24) as usize;
-
-    assert_eq!(ba[..HEADER_BLOCK], bb[..HEADER_BLOCK], "headers differ");
-    let meta_at = HEADER_BLOCK + pages_len;
-    assert_eq!(ba[meta_at..], bb[meta_at..], "metadata sections differ");
-
-    // Object spans per page, from the page table: [16, obj_cursor) at each
-    // page's placement offset. Every remaining diff must fall inside one.
-    let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
-    let mut page_off = HEADER_BLOCK;
-    for i in 0..n_pages {
-        let entry = meta_at + i * 24;
-        let size = u64_at(&ba, entry) as usize;
-        let obj_cursor = u64_at(&ba, entry + 8) as usize;
-        spans.push(page_off + 16..page_off + obj_cursor);
-        page_off += size;
-    }
-    let stray: Vec<usize> = (HEADER_BLOCK..meta_at)
-        .filter(|&i| ba[i] != bb[i] && !spans.iter().any(|s| s.contains(&i)))
+    let diff: Vec<usize> = (0..ba.len().min(bb.len()))
+        .filter(|&i| ba[i] != bb[i])
         .collect();
+    assert_eq!(ba.len(), bb.len(), "dump lengths differ");
     assert!(
-        stray.is_empty(),
-        "dumps differ outside object slots at offsets {:?}",
-        &stray[..stray.len().min(16)]
+        diff.is_empty(),
+        "dumps differ at {} offsets, first: {:?}",
+        diff.len(),
+        &diff[..diff.len().min(16)]
     );
+}
+
+// § Fingerprint: the layout probes participate in the fingerprint, so a
+// binary whose `HeapObject` layout shifted rejects the image instead of
+// hydrating garbage. Pin that every dumpable variant appears with extents.
+#[test]
+fn fingerprint_records_variant_layouts() {
+    let fp = image::fingerprint();
+    assert!(fp.contains("layout="), "no layout section: {fp}");
+    for variant in ["LString", "Pair", "LArray", "LBytes", "Float"] {
+        assert!(fp.contains(variant), "layout section lacks {variant}: {fp}");
+    }
 }
 
 // ── Pool interplay ──────────────────────────────────────────────────
