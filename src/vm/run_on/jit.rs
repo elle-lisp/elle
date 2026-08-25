@@ -43,7 +43,7 @@ impl VM {
 
         // Use the cached JIT code if available, else force-compile.
         let bytecode_ptr = closure.template.bytecode.as_ptr();
-        let jit_code = match self.jit_cache.get(&bytecode_ptr).cloned() {
+        let jit_code = match self.jit_code_for(bytecode_ptr) {
             Some(jc) => jc,
             None => {
                 let compiler = match crate::jit::JitCompiler::new() {
@@ -63,7 +63,7 @@ impl VM {
                 ) {
                     Ok(jc) => {
                         let jc = Arc::new(jc);
-                        self.jit_cache.insert(bytecode_ptr, jc.clone());
+                        self.install_jit_code(closure.template.bytecode.clone(), jc.clone());
                         jc
                     }
                     Err(e) => {

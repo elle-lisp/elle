@@ -93,10 +93,12 @@ fn trace_all_covers_every_defined_bit() {
 fn trace_keywords_are_known() {
     // Future GPU backends — accepted without error, no bit yet.
     const FORWARD_COMPAT: &[&str] = &["spirv", "mlir", "gpu"];
-    // Region/free diagnostics: functional today but checked via the
-    // string `has_trace` (cold free paths in fiberheap/freelog.rs),
-    // so they deliberately carry no `trace_bits` entry.
-    const STRING_TRACED: &[&str] = &["free", "guardfree", "freebt", "scrub"];
+    // Region/free diagnostics, the park trace, and the syncjit compile
+    // mode: functional today but checked via the string `has_trace` (cold
+    // free paths in fiberheap/freelog.rs; the park/resume seam; the submit
+    // path in vm/jit_entry.rs), so they deliberately carry no `trace_bits`
+    // entry.
+    const STRING_TRACED: &[&str] = &["free", "guardfree", "freebt", "scrub", "park", "syncjit"];
     for kw in TRACE_KEYWORDS {
         let recognized = trace_bits::from_name(kw) != 0
             || FORWARD_COMPAT.contains(kw)

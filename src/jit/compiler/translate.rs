@@ -391,6 +391,28 @@ impl JitCompiler {
             }
         }
 
+        // Metadata/translation agreement: the yield helpers index
+        // `JitCode.yield_points` / `JitCode.call_sites` by the translator's
+        // running counters, and the emitter recorded those lists in its own
+        // walk over the same blocks. A count mismatch means some side-exit
+        // would read ANOTHER site's resume_ip and stack shape — a silently
+        // corrupted resume. Reject the compile; the interpreter tier is
+        // always correct.
+        if translator.yield_point_index as usize != lir.yield_points.len() {
+            return Err(JitError::InvalidLir(format!(
+                "yield-point count mismatch: translated {}, emitter recorded {}",
+                translator.yield_point_index,
+                lir.yield_points.len()
+            )));
+        }
+        if lir.signal.may_suspend() && translator.call_site_index as usize != lir.call_sites.len() {
+            return Err(JitError::InvalidLir(format!(
+                "call-site count mismatch: translated {}, emitter recorded {}",
+                translator.call_site_index,
+                lir.call_sites.len()
+            )));
+        }
+
         builder.seal_all_blocks();
         builder.finalize();
 
