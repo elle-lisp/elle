@@ -67,6 +67,15 @@ impl VM {
                 value_region,
                 crate::value::arena::EscapeSite::EmitEscape,
             );
+            // An ERROR emit's retain is the payload's whole delivery, so the
+            // raise chain's own reference funds nothing: record the mint so the
+            // abandoned-frame walk and the parked frame's discharge stop
+            // exempting the payload's region and reclaim that reference
+            // (docs/impl/region/mechanism.md § "An abandoned frame runs the
+            // releases it still owes").
+            if signal_bits.intersects(SIG_ERROR) {
+                self.fiber.emit_delivery = Some(value);
+            }
         }
 
         self.fiber.signal = Some((signal_bits, value));

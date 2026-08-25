@@ -1432,12 +1432,29 @@ function releases for is what keeps a caller's leftovers out: the map survives a
 frame-replacing tail call, and the references still in it are the callee's own machinery
 to answer for.
 
-**What the signal carries is not abandoned.** The error's payload leaves with the
-signal and the raising frame may be the one that owns its region — a native hands back
-a value it read out of an argument, and `protect` delivers that payload to the catcher
-as data. So the walk skips a slot whose value lives in the payload's region. Nothing
-else survives the frame: a value the frame stored elsewhere is held by a counted edge
-the store funnel recorded, which this release cannot take below that holder's count.
+**What the signal carries is not abandoned — unless the raise minted its delivery.**
+The error's payload leaves with the signal, and the catcher's read of it is funded by
+exactly one **delivery** reference. Where that reference comes from decides what the
+walk may release, and the two raise paths differ:
+
+- A **native** raise installs the payload with no retain. A fresh error struct funds
+  the delivery with its own birth reference; a payload the native read out of an
+  argument funds it with the frame's reference to that argument — the very release the
+  walk would otherwise run. So the walk skips a slot whose value lives in the
+  payload's region: the skipped release *is* the delivery.
+- An **`Emit`** raise (`(error v)`) mints the delivery itself — the `EmitEscape`
+  retain `handle_emit` takes, consumed by the resumer's release of the resume result.
+  The frame's own reference funds nothing, so the skip has nothing to stand in for and
+  would strand one region per raised-and-caught error whose payload the raise chain
+  owns. The raise records the mint (`Fiber::emit_delivery`), and a walk whose live
+  signal payload matches it skips nothing.
+
+The same reading governs the parked frame's discharge: `Fiber::take_parked_state`
+withholds its payload protection exactly where the mint is recorded, so the free-path
+discharge runs the parked body frame's owed release for an emitted payload and leaves a
+native payload's standing. Nothing else survives the frame either way: a value the
+frame stored elsewhere is held by a counted edge the store funnel recorded, which this
+release cannot take below that holder's count.
 
 **A frame the restarts system can replay is not abandoned.** A fiber body's first run
 parks its own frame on an error exit (`do_fiber_first_resume`), so a restart replays
@@ -1455,7 +1472,13 @@ a bounded over-keep, never an over-free.
 Pinned by `tests/elle/region-error-unwind.lisp` (the leak gauge — the pending release
 of a raising call's argument, of two of them, of a binding live across the raising
 call, and of an enclosing frame, each bounded beside a control that raises holding
-nothing), the `denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate),
+nothing), `tests/elle/region-error-payload.lisp` (the emitted payload's own region,
+bounded whether the raise chain allocates it directly, in a helper, or hands it down
+as a parameter, beside native-raise and borrowed-payload controls) with
+`tests/elle/region-error-payload-uaf.lisp` as its guardfree complement (the payload a
+catcher stores outward, a borrowed module payload raised repeatedly, a native raise's
+unrecorded install, and a restarted `:error` fiber's replay),
+the `denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate),
 `lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
 a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so a route
 the emitter declined has no entry), and `tests/elle/region-error-unwind-uaf.lisp` (the

@@ -16,9 +16,13 @@
 //! the body merely borrows — a capture, a parameter, a module-level binding —
 //! supplies none, so the discharge would release the delivery reference the
 //! resumer already consumed. This pass names those sites; `lower_emit` mints the
-//! missing reference at each **suspending** one — an error emit leaves through the
-//! unwind path and a halt promotes the fiber to `:dead`, so no instruction past
-//! either ever runs and neither reaches the discharge (both are terminal).
+//! missing reference at each **suspending** one. A terminal emit takes no mint:
+//! a halt promotes the fiber to `:dead` and its delivery has no consumer at
+//! all, and an error's body-owned reference is reclaimed through the frames'
+//! own release tables instead — the raise records its minted delivery
+//! (`Fiber::emit_delivery`), so the abandoned-frame walk and the parked frame's
+//! discharge run the payload's owed releases with their receipts, where a
+//! blanket discharge could not tell a borrowed payload from an owned one.
 //!
 //! The question is per-**function**, not per-region: a borrowed payload usually
 //! does have a `decref_point`, just in the activation that allocated it, whose

@@ -223,7 +223,15 @@ parked fiber's accounting symmetric with its unpark:
   The copy the release loads is parked in a local slot of its own, the operand stack being
   what survives a suspend. Unresolvable counts as borrowed: minting where the body already
   owns a reference strands one per abandoned park, a bounded leak, while missing one frees a
-  live value. Pinned by `tests/elle/region-fiber-yield-borrow-uaf.lisp`.
+  live value. Pinned by `tests/elle/region-fiber-yield-borrow-uaf.lisp`. A TERMINAL
+  `:error` emit needs no compiler mint for the same invariant: its `EmitEscape` retain is
+  the delivery reference exactly as above, and the body's own reference — where the raise
+  chain holds one — is claimed through the frames' release tables instead of a blanket
+  discharge, because the raise records its minted delivery (`Fiber::emit_delivery`) and
+  the abandoned-frame walk and the parked frame's discharge stop exempting the payload's
+  region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
+  the releases it still owes"). A halt takes neither the retain nor the record — a halted
+  fiber is promoted to `:dead` and never resumed, so its delivery has no consumer.
 - **A delivery into a replayed frame carries one owning reference.** A parked
   `BytecodeFrame` re-enters at its suspending call's continuation, whose
   compiler-emitted result release consumes one owning reference of the value the
@@ -422,7 +430,9 @@ where its demise is actually observed: the region free. When a dying region's pa
 `Fiber` object, `RegionStore::teardown_set` takes that fiber's parked state (the same
 `Fiber::take_parked_state` set the terminal teardown consumes: parked activation owner
 nodes, the fiber owner node, the parked non-terminal signal's escape retain, and each
-parked frame's own owed releases — read off its two release tables) and feeds
+parked frame's own owed releases — read off its two release tables, with the signal
+payload's region exempted only where the raise did not mint the delivery itself,
+[mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes") and feeds
 the regions into the free's iterative cascade — after the debug equivalence oracle, since
 these are not recorded content edges. The take empties the fiber's slots, so a fiber that
 already tore down discharges nothing, and an executing (borrowed) fiber is skipped — its

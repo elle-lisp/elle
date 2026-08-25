@@ -119,6 +119,19 @@ pub struct Fiber {
     /// - On signal: (bits, payload) before suspending
     /// - On normal return: (SIG_OK, return_value) before completing
     pub signal: Option<(SignalBits, Value)>,
+    /// The `SIG_ERROR` payload whose DELIVERY reference the raise itself minted
+    /// — the `EmitEscape` retain `handle_emit` (and its JIT mirror) takes, which
+    /// the resumer's release of the resume result consumes. While this matches
+    /// the live signal's payload (representation identity, never structural
+    /// equality), the payload exemption on the abandoned-frame walk and the
+    /// parked frame's discharge is withdrawn: the raise chain's own reference
+    /// funds no delivery, so every release the tables name is genuinely owed
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). A native install leaves this untouched — its delivery is
+    /// the payload's birth reference or the frame's left-standing one, which the
+    /// exemption preserves. Cleared where the delivery is consumed: the resume's
+    /// signal take, and an abort's injection.
+    pub emit_delivery: Option<Value>,
     /// Suspended execution frames. Set when the fiber suspends; consumed
     /// when it resumes.
     ///
@@ -258,9 +271,12 @@ pub struct ParkedState {
     /// had, it is an over-free: a terminal signal reaches the slot by paths that
     /// take no escape retain at all (a native error's `set_error`, a bare
     /// `Return`), and releasing one they never took frees a live region — the
-    /// `elle test` harness dies on its own first file. What a terminal EMIT owes
-    /// instead is settled where the imbalance starts, by not retaining
-    /// (`VM::handle_emit`).
+    /// `elle test` harness dies on its own first file. What a terminal EMIT
+    /// owes — the raise chain's own reference to a payload it allocated — is
+    /// settled through [`Self::protect`] instead: the emit records its minted
+    /// delivery (`Fiber::emit_delivery`), the protection is withheld where the
+    /// record matches, and the frames' owed-release tables carry the reference
+    /// with their own receipts.
     pub signal: Option<(SignalBits, Value)>,
     /// The values each still-parked `BytecodeFrame` owes a release for — read out
     /// of its saved locals at the slots its own `Code::frame_release_slots` names
@@ -288,6 +304,13 @@ pub struct ParkedState {
     /// this value's region: a terminal payload is the fiber's result and a
     /// non-terminal one is the [`Self::signal`] discharge's own, and a frame may
     /// well hold the very value the payload names.
+    ///
+    /// `None` also where the raise MINTED the payload's delivery itself
+    /// (`Fiber::emit_delivery` matches the live signal): the frame's reference
+    /// funds nothing there, so the owed-release tables run in full and the one
+    /// reference the raise chain held is reclaimed rather than stranded
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+    /// it still owes").
     pub protect: Option<Value>,
 }
 
@@ -352,8 +375,13 @@ impl Fiber {
         // `fiber/value`, or accounted by the signal discharge below — so a slot
         // naming its region is not this discharge's to release. Reported rather
         // than filtered here: the region behind a value is the heap's to resolve,
-        // and both consumers have one.
-        let protect = signal.or(self.signal).map(|(_, v)| v);
+        // and both consumers have one. An emit-minted error payload is the
+        // exception: its delivery was retained at the raise, so the frames'
+        // owed releases run in full (see `protect`'s doc).
+        let protect = signal
+            .or(self.signal)
+            .map(|(_, v)| v)
+            .filter(|v| !self.emit_delivery.is_some_and(|m| m.bit_identical(*v)));
         ParkedState {
             nodes,
             signal,
@@ -380,6 +408,7 @@ impl Fiber {
             param_baseline_seeded: false,
             param_borrows: Vec::new(),
             signal: None,
+            emit_delivery: None,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],
@@ -414,6 +443,7 @@ impl Fiber {
             param_baseline_seeded: false,
             param_borrows: Vec::new(),
             signal: None,
+            emit_delivery: None,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],

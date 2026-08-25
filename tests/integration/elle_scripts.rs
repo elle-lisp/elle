@@ -609,6 +609,23 @@ fn region_error_unwind_uaf() {
     );
 }
 
+// Guard — an emit-raised error's payload keeps every frame-owed release: the
+// raise minted the delivery reference itself, so the walk and the parked
+// frame's discharge stop exempting the payload's region
+// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+// still owes"). What must survive the withdrawn exemption is every reference
+// the walk does not own: the delivery the catcher reads, a counted store's, a
+// borrowed payload's owner, a native raise's unrecorded install, and a
+// restarted frame's replay. Each faults under guardfree if the walk releases
+// one it never had. The leak face is `region-error-payload.lisp`.
+#[test]
+fn region_error_payload_uaf() {
+    run_elle_script_with_args(
+        "region-error-payload-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `def` evaluates to what it bound, so its initializer's demise must
 // not be narrowed onto the initializer when nothing reads the binding
 // (docs/impl/region/mechanism.md § "A binder's init release lands after the slot
