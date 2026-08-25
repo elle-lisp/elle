@@ -37,6 +37,10 @@ impl VM {
         // Extract resume value and status before taking the fiber
         let (resume_value, is_first_resume, child_params_seeded) = child_handle.with_mut(|child| {
             let rv = child.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
+            // The resume consumes the parked signal, and with it any recorded
+            // emit-minted delivery: the payload this record named is gone from
+            // the slot, and a later raise records its own.
+            child.emit_delivery = None;
             let first = child.status == FiberStatus::New;
             (rv, first, !child.param_frames.is_empty())
         });
@@ -115,8 +119,13 @@ impl VM {
                 inner_handle.with_mut(|f| f.withheld |= intermediate_withheld);
 
                 // Deliver the resume value to the inner fiber (matches what
-                // resume_suspended does at the FiberResume arm).
-                inner_handle.with_mut(|f| f.signal = Some((SIG_OK, resume_value)));
+                // resume_suspended does at the FiberResume arm). The install
+                // displaces any parked signal, so a recorded emit-minted
+                // delivery no longer names the slot's payload.
+                inner_handle.with_mut(|f| {
+                    f.signal = Some((SIG_OK, resume_value));
+                    f.emit_delivery = None;
+                });
 
                 // Set up the trampoline to descend into the inner fiber.
                 // Its true parent is the intermediate fiber whose FiberResume
@@ -286,8 +295,10 @@ impl VM {
             // Clear the signal — prim_fiber_abort pre-set it with the error
             // value, which we already extracted above. If we leave it set,
             // the dispatch loop will see SIG_ERROR and bail immediately
-            // when we try to resume remaining bytecode frames.
+            // when we try to resume remaining bytecode frames. The injected
+            // error minted no delivery, so any recorded one goes with it.
             vm.fiber.signal = None;
+            vm.fiber.emit_delivery = None;
 
             let frames = match vm.fiber.suspended.take() {
                 Some(frames) => frames,
