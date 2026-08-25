@@ -68,7 +68,8 @@ pub struct BytecodeFrame {
     /// use while the activation's `code`/`env` live on as `Rc`s — so it is never
     /// dereferenced on restore; it is live exactly where it is read (`LoadSelf`,
     /// whose self-recursive body keeps its closure region alive through the
-    /// recursion). `NIL` for an untracked activation (e.g. a JIT-built frame).
+    /// recursion). The JIT side-exit helpers park the executing closure here
+    /// too (`src/jit/suspend.rs`); `NIL` only for an untracked activation.
     pub current_closure: Value,
     /// Debug-only snapshot of the uncounted region borrows `activation_region_map`
     /// holds at suspension: `(slot, region, establish-generation)` per LIVE mapped

@@ -123,6 +123,50 @@ impl VM {
                         }
                     }
 
+                    // `--trace=park`: the replay twin of the park-side log in
+                    // src/jit/suspend.rs — shows the frame's shape as it
+                    // re-enters the interpreter.
+                    if crate::config::get().has_trace("park") {
+                        // `current_closure` is an uncounted borrow that may be
+                        // dead by resume time (see BytecodeFrame) — print its
+                        // bits, never dereference it for a name.
+                        eprintln!(
+                            "[park:resume] frame={i} closure=0x{:x} ip={} push_rv={} \
+                             rv={} env[{}]=[{}] stack[{}]=[{}]",
+                            frame.current_closure.payload,
+                            frame.ip,
+                            frame.push_resume_value,
+                            Value::type_name_line(std::slice::from_ref(&current_value)),
+                            frame.env.len(),
+                            Value::type_name_line(&frame.env),
+                            frame.stack.len(),
+                            Value::type_name_line(&frame.stack),
+                        );
+                    }
+
+                    // Resume-time tripwire (debug builds): every value this frame
+                    // carries back into the interpreter must be structurally
+                    // sound. The park-side twin (`check_parked_frame`,
+                    // src/jit/suspend.rs) validated a JIT-built frame as it was
+                    // built; a value that was sound at park and is malformed
+                    // here was corrupted WHILE the fiber was parked.
+                    #[cfg(debug_assertions)]
+                    for (section, values) in [
+                        ("stack", frame.stack.as_slice()),
+                        ("env", frame.env.as_slice()),
+                    ] {
+                        for (vi, v) in values.iter().enumerate() {
+                            if let Some(reason) = v.malformed_reason() {
+                                panic!(
+                                    "resume_suspended: frame {i} carries a malformed \
+                                     value — {reason}: ip={} {section}[{vi}] \
+                                     tag=0x{:x} payload=0x{:x}",
+                                    frame.ip, v.tag, v.payload,
+                                );
+                            }
+                        }
+                    }
+
                     // Confirm every uncounted region borrow this suspended frame
                     // holds across park/resume is still live (debug builds). The
                     // snapshot (`record_region_borrows`) recorded only the LIVE

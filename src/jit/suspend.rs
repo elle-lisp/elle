@@ -8,6 +8,75 @@ use crate::value::{BytecodeFrame, SuspendedFrame, Value};
 // Yield Side-Exit Helpers
 // =============================================================================
 
+/// `--trace=park`: log a JIT side-exit park with its frame shape. The resume
+/// twin lives in `resume_suspended`; together they show whether a wrong value
+/// was parked wrong or went wrong while parked.
+fn trace_park(
+    helper: &str,
+    closure: &crate::value::Closure,
+    site_index: u64,
+    resume_ip: usize,
+    env: &[Value],
+    stack: &[Value],
+) {
+    if !crate::config::get().has_trace("park") {
+        return;
+    }
+    eprintln!(
+        "[park:{helper}] fn={} site={site_index} resume_ip={resume_ip} \
+         env[{}]=[{}] stack[{}]=[{}]",
+        closure.template.name.as_deref().unwrap_or("<anonymous>"),
+        env.len(),
+        Value::type_name_line(env),
+        stack.len(),
+        Value::type_name_line(stack),
+    );
+}
+
+/// Park-time tripwire (debug builds): every value the side-exit parks must be
+/// structurally sound (`Value::malformed_reason`). A torn or zeroed slot here
+/// means the compiled frame's spill diverged from the interpreter layout the
+/// resume expects; detonating at the park names the function and the slot
+/// instead of leaving a segfault for the resumed reader.
+#[cfg(debug_assertions)]
+fn check_parked_frame(
+    helper: &str,
+    closure: &crate::value::Closure,
+    resume_ip: usize,
+    env: &[Value],
+    stack: &[Value],
+) {
+    let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
+    for (section, values) in [("env", env), ("stack", stack)] {
+        for (i, v) in values.iter().enumerate() {
+            if let Some(reason) = v.malformed_reason() {
+                panic!(
+                    "{helper}: parked a malformed value — {reason}: \
+                     fn={name} resume_ip={resume_ip} {section}[{i}] \
+                     tag=0x{:x} payload=0x{:x} (env_len={} stack_len={} \
+                     num_params={} num_locals={})",
+                    v.tag,
+                    v.payload,
+                    env.len(),
+                    stack.len(),
+                    closure.template.num_params,
+                    closure.template.num_locals,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn check_parked_frame(
+    _helper: &str,
+    _closure: &crate::value::Closure,
+    _resume_ip: usize,
+    _env: &[Value],
+    _stack: &[Value],
+) {
+}
+
 /// JIT yield side-exit: build a SuspendedFrame and set fiber.signal.
 ///
 /// Called from JIT code when a Yield terminator is reached.
@@ -52,8 +121,7 @@ pub extern "C" fn elle_jit_yield(
     // Look up yield point metadata from JitCode
     let bytecode_ptr = closure.template.bytecode.as_ptr();
     let jit_code = vm
-        .jit_cache
-        .get(&bytecode_ptr)
+        .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield called but no JitCode in cache");
     let yield_meta = &jit_code.yield_points[yield_index as usize];
     let num_params = yield_meta.num_params as usize;
@@ -122,6 +190,8 @@ pub extern "C" fn elle_jit_yield(
         // jit-cache borrows so the `&mut self` VM accessors below are free to run.
         let code = closure.template.code();
         let resume_ip = yield_meta.resume_ip;
+        trace_park("jit-yield", closure, yield_index, resume_ip, &env, &stack);
+        check_parked_frame("elle_jit_yield", closure, resume_ip, &env, &stack);
         // MOVE the activation's owner node into the frame (its slot is
         // likewise still on top) so it rides the park to the resumed body's
         // completion — the compiled twin of the interpreter yield park
@@ -185,8 +255,7 @@ pub extern "C" fn elle_jit_yield_through_call(
     // Look up call site metadata from JitCode
     let bytecode_ptr = closure.template.bytecode.as_ptr();
     let jit_code = vm
-        .jit_cache
-        .get(&bytecode_ptr)
+        .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");
     let call_meta = &jit_code.call_sites[call_site_index as usize];
 
@@ -230,6 +299,21 @@ pub extern "C" fn elle_jit_yield_through_call(
     // jit-cache borrows so the `&mut self` VM accessors below are free to run.
     let code = closure.template.code();
     let resume_ip = call_meta.resume_ip;
+    trace_park(
+        "jit-yield-through-call",
+        closure,
+        call_site_index,
+        resume_ip,
+        &env,
+        &stack,
+    );
+    check_parked_frame(
+        "elle_jit_yield_through_call",
+        closure,
+        resume_ip,
+        &env,
+        &stack,
+    );
     // MOVE the caller's owner node into its park — this compiled activation
     // unwinds with the callee's suspending signal (see elle_jit_yield).
     let activation_owner_node = vm.take_activation_owner_node();

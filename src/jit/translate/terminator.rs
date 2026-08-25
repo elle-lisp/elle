@@ -149,12 +149,20 @@ impl<'a> FunctionTranslator<'a> {
                 let yield_index = self.yield_point_index;
                 self.yield_point_index += 1;
 
-                let stack_regs = self
-                    .lir
-                    .yield_points
-                    .get(yield_index as usize)
-                    .map(|yp| yp.stack_regs.as_slice())
-                    .unwrap_or(&[]);
+                // Every Emit terminator must have its emitter-recorded yield
+                // point: elle_jit_yield indexes JitCode.yield_points with this
+                // same index, so a missing entry means the counters diverged
+                // and the side-exit would resume at another point's ip.
+                let stack_regs = match self.lir.yield_points.get(yield_index as usize) {
+                    Some(yp) => yp.stack_regs.as_slice(),
+                    None => {
+                        return Err(JitError::InvalidLir(format!(
+                            "yield point {} has no emitter-recorded metadata ({} recorded)",
+                            yield_index,
+                            self.lir.yield_points.len()
+                        )))
+                    }
+                };
 
                 let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
                 let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);

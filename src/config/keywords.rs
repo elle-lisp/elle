@@ -36,6 +36,16 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "guardfree",
     "freebt",
     "scrub",
+    // Park/resume diagnostics: log every suspended-frame park (JIT side-exit
+    // helpers) and every frame replay (resume_suspended) with the frame's
+    // shape and value types. See src/jit/suspend.rs and src/vm/core/resume.rs.
+    "park",
+    // JIT diagnostics: force synchronous Cranelift compilation on the VM
+    // thread instead of the background `elle-jit` worker (see
+    // src/vm/jit_entry.rs `submit_jit_task`). Splits install-race bugs from
+    // codegen bugs: a failure that persists under `syncjit` is in codegen or
+    // its inputs; one that vanishes lives at the worker boundary.
+    "syncjit",
 ];
 
 // ── Dump keywords ─────────────────────────────────────────────────

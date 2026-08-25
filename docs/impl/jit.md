@@ -35,9 +35,9 @@ Not all functions can be JIT-compiled. The JIT rejects functions that:
 **Negative-cache invariant.** A function whose compilation is rejected is
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
 call falls through to the interpreter directly. The rejection is keyed by the
-function's bytecode pointer, which uniquely identifies its (immutable) LIR, so
-a re-submission could only ever reproduce the identical rejection — it is pure
-wasted work.
+function's bytecode pointer (see "Cache identity" for why that key is sound),
+so a re-submission could only ever reproduce the identical rejection — it is
+pure wasted work.
 
 This invariant is load-bearing under eager JIT. With `--jit=eager` the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
@@ -49,7 +49,33 @@ dwarfs the program's real work. The `jit/rejections` report exposes a per-
 function `:attempts` count; the negative cache holds `attempts == 1` no matter
 how many times the function is called.
 
-## The code-address registry
+## Cache identity
+
+`jit_cache`, `jit_pending`, and `jit_rejections` key entries by the raw
+address of the template's bytecode allocation (`bytecode.as_ptr()`). A raw
+address identifies a function only while that allocation is alive: templates
+are ordinary reclaimable data (region-allocated per `MakeClosure`, sharing
+one `Rc<Vec<u8>>` bytecode buffer per lambda proto), so a dropped compile
+unit frees its bytecode buffers, and a later compile can allocate a NEW
+function's bytecode at a reused address. A cache entry that outlived its
+template would then serve the old function's code to the new function —
+which runs the wrong body with the new closure's env and args, producing
+healthy-looking wrong values and no memory corruption.
+
+The invariant that makes the address key sound: **every entry pins the
+bytecode `Rc` it was keyed by** (`JitEntryPin`), from submission until the
+entry is removed. A pinned allocation cannot be freed, so its address cannot
+be reused, so a key collision cannot occur. The pin travels: recorded in
+`jit_pending` at submit, moved into `jit_cache` (or `jit_rejections`) when
+the result installs. The cost is that cached/rejected functions' bytecode
+stays resident for the VM's lifetime — bounded by the amount of code the
+program compiles, the same order as the retained native code itself.
+
+An alternative — validating entries at hit time by content — was rejected:
+it puts an O(bytecode) compare (or a hash plus per-template caching) on the
+hot dispatch path to detect a situation the pin makes impossible.
+
+Pinning tests: `src/vm/jit_entry/tests.rs`.
 
 Native samplers (`/usr/bin/sample`, `eu-stack`) cannot name JIT frames: the
 code lives in anonymous Cranelift mappings, so a wedged thread's stack shows

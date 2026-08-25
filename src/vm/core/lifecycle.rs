@@ -112,7 +112,7 @@ impl VM {
             #[cfg(feature = "jit")]
             jit_worker: None,
             #[cfg(feature = "jit")]
-            jit_pending: rustc_hash::FxHashSet::default(),
+            jit_pending: FxHashMap::default(),
             #[cfg(feature = "jit")]
             jit_rejections: FxHashMap::default(),
             #[cfg(feature = "jit")]
