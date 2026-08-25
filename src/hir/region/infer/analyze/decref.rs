@@ -663,6 +663,18 @@ fn pin_branch_arm_releases(
     for (&alloc_id, &r) in &info.alloc_region {
         region_anchors.entry(r).or_default().push(ord(alloc_id));
     }
+    // Only regions whose `decref_point` lands inside the branch's arms can move,
+    // so index the regions by post-order `decref_point` once and let each branch
+    // binary-search the arm-interval slices. A move writes the region's new ord
+    // straight into the index, which leaves it unsorted, so a branch that moved
+    // anything re-sorts before the next one runs — later branches, processed
+    // innermost-outward, then search an ordered index and see the post-move values.
+    let mut by_dord: Vec<(u32, Region)> = info
+        .region_data
+        .iter()
+        .map(|(&r, d)| (ord(d.decref_point), r))
+        .collect();
+    by_dord.sort_unstable_by_key(|&(o, _)| o);
 
     // ── The admission: the frame must be the region's only holder ────────────
     //
@@ -766,7 +778,71 @@ fn pin_branch_arm_releases(
             .copied()
             .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
             .collect();
-        for (&r, d) in info.region_data.iter_mut() {
+        // The exemption below only asks whether r is in ANY exiting arm's callee
+        // set, so the per-arm sets are merged once per branch and the per-region
+        // test is an O(1) membership lookup in that union.
+        let callee_union: rustc_hash::FxHashSet<Region> = arm_exits
+            .iter()
+            .flat_map(|e| e.callee.iter().copied())
+            .collect();
+        // Merge the half-open barrier intervals into one ordered disjoint list,
+        // then answer `any(lo <= dord < hi)` with a binary search. Disjointness is
+        // what the search rests on: among disjoint intervals only the LAST whose
+        // `lo <= dord` can hold dord, because every earlier one ends at or before
+        // that `lo`. Overlapping intervals merge; adjacent ones ([1,5) and [5,8))
+        // are left alone, since they are already disjoint — 5 is in the second.
+        let mut sorted_barriers = inner_barriers;
+        sorted_barriers.sort_unstable_by_key(|&(lo, _)| lo);
+        let mut merged_barriers: Vec<(u32, u32)> = Vec::new();
+        for &(lo, hi) in &sorted_barriers {
+            if let Some(last) = merged_barriers.last_mut() {
+                if lo < last.1 {
+                    if hi > last.1 {
+                        last.1 = hi;
+                    }
+                    continue;
+                }
+            }
+            merged_barriers.push((lo, hi));
+        }
+        let in_barrier = |dord: u32| -> bool {
+            let i = merged_barriers.partition_point(|&(lo, _)| lo <= dord);
+            i > 0 && merged_barriers[i - 1].1 > dord
+        };
+        // Merge the arms' closed intervals (`lo <= dord <= hi`) so each region in
+        // the branch's union is scanned once, then binary-search the `by_dord`
+        // index for each merged interval.
+        let mut arm_ivs: Vec<(u32, u32)> = br.arms.iter().map(|a| (a.lo, a.hi)).collect();
+        arm_ivs.sort_unstable_by_key(|&(lo, _)| lo);
+        let mut merged_arms: Vec<(u32, u32)> = Vec::new();
+        for (lo, hi) in arm_ivs {
+            if let Some(last) = merged_arms.last_mut() {
+                if lo <= last.1 {
+                    if hi > last.1 {
+                        last.1 = hi;
+                    }
+                    continue;
+                }
+            }
+            merged_arms.push((lo, hi));
+        }
+        // Snapshot the branch's candidates before any move: the inner loop mutates
+        // `by_dord` in place (a move raises the entry's ord), so iterating the live
+        // slice would shift not-yet-visited entries across the fixed `end` boundary
+        // and admit regions whose ord falls OUTSIDE the arm union. Collecting the
+        // union's entries once — each region appears in exactly one merged interval —
+        // matches the original per-region pass, which read every `decref_point`
+        // before mutating any of them.
+        let mut candidates: Vec<(u32, Region, usize)> = Vec::new();
+        for &(lo, hi) in &merged_arms {
+            let start = by_dord.partition_point(|&(o, _)| o < lo);
+            let end = by_dord.partition_point(|&(o, _)| o <= hi);
+            for (rel, &(o, r)) in by_dord[start..end].iter().enumerate() {
+                candidates.push((o, r, start + rel));
+            }
+        }
+        let mut moved = false;
+        for &(dord, r, idx) in &candidates {
             if excluded.contains(&r) {
                 continue;
             }
@@ -783,11 +859,10 @@ fn pin_branch_arm_releases(
             // the opposite story — the release the arm never runs IS the ownership
             // move, and the callee's owned-parameter release consumes it — so an
             // argument is no refusal here (rules.md Rule 5).
-            if arm_exits.iter().any(|e| e.callee.contains(&r)) {
+            if callee_union.contains(&r) {
                 continue;
             }
-            let dord = ord(d.decref_point);
-            if dord >= anchor_ord || !br.arms.iter().any(|a| a.lo <= dord && dord <= a.hi) {
+            if dord >= anchor_ord {
                 continue;
             }
             // A boundary is the scope's BODY, not the scope's own node: the
@@ -800,10 +875,7 @@ fn pin_branch_arm_releases(
             // READS: the loop-node extension anchors every such read at the loop
             // node (`hir/liveness/lastuse`), so the closed reading would leave the
             // branch's only release under the looping arm.
-            if inner_barriers
-                .iter()
-                .any(|&(lo, hi)| lo <= dord && dord < hi)
-            {
+            if in_barrier(dord) {
                 continue;
             }
             let live_in = region_anchors
@@ -817,7 +889,15 @@ fn pin_branch_arm_releases(
             // whose post-dominance obligations are lifetime questions — keep
             // reading the region's real lifetime and not this anchor
             // (`RegionData::lifetime_point`).
-            d.decref_point = anchor;
+            info.region_data.get_mut(&r).unwrap().decref_point = anchor;
+            by_dord[idx].0 = anchor_ord;
+            moved = true;
+        }
+        // A move raises a region's `decref_point` in place and so unsorts the
+        // index; restore the order so the next branch's interval searches hold.
+        // Most branches move nothing, and those owe no sort at all.
+        if moved {
+            by_dord.sort_unstable_by_key(|&(o, _)| o);
         }
     }
 }
