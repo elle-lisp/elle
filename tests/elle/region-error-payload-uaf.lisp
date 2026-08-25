@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# Soundness complement of region-error-payload.lisp
+# Soundness complement of the `error-payload*` closed controls in oracle.lisp
 # (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
 # still owes" — "What the signal carries is not abandoned — unless the raise
 # minted its delivery"). Run under `--trace=guardfree` by the subprocess pin
