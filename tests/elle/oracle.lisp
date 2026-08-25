@@ -1282,7 +1282,28 @@
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 0]])
+        (protect (fiber/abort f "boom")))) 0]  # An emit-raised error's payload keeps
+   # every frame-owed release: `(error v)` mints the payload's delivery itself (the
+   # `EmitEscape` retain the resumer's release of the resume result consumes), so the
+   # raise records the mint and the abandoned-frame walk and the parked frame's
+   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md
+   # § "An abandoned frame runs the releases it still owes"). A CLOSED control
+   # (undeclared, like `rest-array-copy`), so a regression to open trips the
+   # completeness gate loudly rather than being absorbed under F2. Gauged directly by
+   # tests/elle/region-error-payload.lisp. Must stay a PAIR with
+   # `error-payload-native`: a native raise installs its payload unretained, so the
+   # frame-funded exemption stays — the gap between the two isolates the recorded
+   # mint from the walk itself.
+   ["error-payload"
+    (fn [j]
+      (try
+        (error (string "x" j))
+        (catch e nil))) 0]
+   ["error-payload-native"
+    (fn [j]
+      (try
+        (get j :k)
+        (catch e nil))) 0]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape
