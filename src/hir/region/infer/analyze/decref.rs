@@ -665,9 +665,10 @@ fn pin_branch_arm_releases(
     }
     // Only regions whose `decref_point` lands inside the branch's arms can move,
     // so index the regions by post-order `decref_point` once and let each branch
-    // binary-search the arm-interval slices. `by_dord` stays ordered as moves
-    // raise a region's `decref_point` (a bubble-up per move), so later branches —
-    // processed innermost-outward — see the post-move values.
+    // binary-search the arm-interval slices. A move writes the region's new ord
+    // straight into the index, which leaves it unsorted, so a branch that moved
+    // anything re-sorts before the next one runs — later branches, processed
+    // innermost-outward, then search an ordered index and see the post-move values.
     let mut by_dord: Vec<(u32, Region)> = info
         .region_data
         .iter()
@@ -784,9 +785,12 @@ fn pin_branch_arm_releases(
             .iter()
             .flat_map(|e| e.callee.iter().copied())
             .collect();
-        // Disjoint-merge the half-open barrier intervals once, then answer
-        // `any(lo <= dord < hi)` with a binary search. Overlapping intervals
-        // merge; adjacent ones ([1,5) and [5,8)) do NOT — 5 is in neither.
+        // Merge the half-open barrier intervals into one ordered disjoint list,
+        // then answer `any(lo <= dord < hi)` with a binary search. Disjointness is
+        // what the search rests on: among disjoint intervals only the LAST whose
+        // `lo <= dord` can hold dord, because every earlier one ends at or before
+        // that `lo`. Overlapping intervals merge; adjacent ones ([1,5) and [5,8))
+        // are left alone, since they are already disjoint — 5 is in the second.
         let mut sorted_barriers = inner_barriers;
         sorted_barriers.sort_unstable_by_key(|&(lo, _)| lo);
         let mut merged_barriers: Vec<(u32, u32)> = Vec::new();
@@ -837,6 +841,7 @@ fn pin_branch_arm_releases(
                 candidates.push((o, r, start + rel));
             }
         }
+        let mut moved = false;
         for &(dord, r, idx) in &candidates {
             if excluded.contains(&r) {
                 continue;
@@ -886,10 +891,14 @@ fn pin_branch_arm_releases(
             // (`RegionData::lifetime_point`).
             info.region_data.get_mut(&r).unwrap().decref_point = anchor;
             by_dord[idx].0 = anchor_ord;
+            moved = true;
         }
-        // A move raises a region's `decref_point` in place; restore the index
-        // order once per branch so the next branch's interval searches hold.
-        by_dord.sort_unstable_by_key(|&(o, _)| o);
+        // A move raises a region's `decref_point` in place and so unsorts the
+        // index; restore the order so the next branch's interval searches hold.
+        // Most branches move nothing, and those owe no sort at all.
+        if moved {
+            by_dord.sort_unstable_by_key(|&(o, _)| o);
+        }
     }
 }
 
