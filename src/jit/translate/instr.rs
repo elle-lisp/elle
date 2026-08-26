@@ -85,19 +85,10 @@ impl<'a> FunctionTranslator<'a> {
                 let arity = self.lir.num_params as u16;
                 if *index < num_captures {
                     // Load from closure environment (captures)
-                    // Each Value is 16 bytes: tag at offset i*16, payload at i*16+8
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCapture without env pointer".to_string())
                     })?;
-                    let tag_offset = (*index as i32) * 16;
-                    let payload_offset = (*index as i32) * 16 + 8;
-                    let raw_tag = builder
-                        .ins()
-                        .load(I64, MemFlags::trusted(), env_ptr, tag_offset);
-                    let raw_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), env_ptr, payload_offset);
+                    let (raw_tag, raw_payload) = load_value_slot(builder, env_ptr, *index as u32);
                     // Auto-unwrap LocalCell if present
                     let (val_tag, val_payload) = self.call_helper_value_unary(
                         builder,
@@ -149,15 +140,7 @@ impl<'a> FunctionTranslator<'a> {
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCaptureRaw without env pointer".to_string())
                     })?;
-                    let tag_offset = (*index as i32) * 16;
-                    let payload_offset = (*index as i32) * 16 + 8;
-                    let raw_tag = builder
-                        .ins()
-                        .load(I64, MemFlags::trusted(), env_ptr, tag_offset);
-                    let raw_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), env_ptr, payload_offset);
+                    let (raw_tag, raw_payload) = load_value_slot(builder, env_ptr, *index as u32);
                     self.def_var_pair(builder, dst.0, raw_tag, raw_payload);
                 } else if *index < num_captures + arity {
                     let param_index = *index - num_captures;

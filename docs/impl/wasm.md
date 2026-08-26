@@ -291,6 +291,26 @@ mishandles the boundary: a fuel-suspended callee's frame survives the JIT tier
 is retained as it escapes into `fiber.signal`, where the resumer reads it
 (`tests/elle/region-jit-emit-escape-uaf.lisp`).
 
+### One Cranelift in the dependency graph
+
+That sharing holds only while `wasmtime` and the JIT's `cranelift-*` crates
+resolve to the same `cranelift-codegen`. Cargo picks one version per
+semver-incompatible requirement, so a JIT held a minor line behind the
+Cranelift `wasmtime` carries puts two complete copies of the code generator
+into a `--features wasm` build. The copies do not stay independent either:
+they share the one `regalloc2` the union of their requirements allows, so the
+JIT every default build runs gets its register allocator chosen by the WASM
+tier's pin.
+
+The two pins therefore move together. `wasmtime 46` carries Cranelift 0.133,
+and `Cargo.toml` pins `cranelift-codegen`, `-frontend`, `-module`, `-jit`, and
+`-native` at 0.133 to match. Raising `wasmtime` means raising the JIT's
+Cranelift in the same change, which is a code change and not only a manifest
+one — 0.133 interns memory-operation flags per function (see
+[impl/jit.md](jit.md) § "Memory flags on emitted loads").
+`integration::deps` (`tests/integration/deps.rs`) reads `Cargo.lock` and fails
+if the graph ever holds two versions of `cranelift-codegen` or `regalloc2`.
+
 ## Full-module coverage and its two teardown/lowering invariants
 
 The full-module tier runs the whole corpus under `make smoke-wasm` except

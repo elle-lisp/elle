@@ -47,6 +47,9 @@ mod time_elapsed {
 // primitives tests migrated to tests/elle/primitives.lisp
 // ffi tests migrated to tests/elle/ffi.lisp
 // bracket_errors tests migrated to tests/elle/brackets.lisp
+mod deps {
+    include!("deps.rs");
+}
 mod dispatch {
     include!("dispatch.rs");
 }

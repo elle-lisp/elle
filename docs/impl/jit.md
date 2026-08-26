@@ -19,6 +19,26 @@ LIR → FunctionTranslator → Cranelift IR → Native code → JitCode
 - **`RuntimeHelpers`** — extern symbols the JIT calls back into the
   VM (allocation, GC barriers, signal checks)
 
+## Memory flags on emitted loads
+
+Every load the translator emits reads memory the runtime owns and has already
+validated: an argument array, a closure environment, a spill slot. Such an
+access is aligned and cannot trap, which Cranelift spells
+`MemFlagsData::trusted()`.
+
+Cranelift keeps the flag data in a table on the function
+(`func.dfg.mem_flags`) and puts a `MemFlags` handle — an index into that table
+— on the instruction. `InstBuilder::load` interns for its caller, so the
+translator passes `MemFlagsData` by value and holds no handle of its own. That
+is worth keeping: a handle means "trusted" only inside the function whose
+table minted it, so a handle cached across functions would index a table where
+the same slot holds different flags, or nothing at all.
+
+`load_value_slot` (`src/jit/translate.rs`) is where the JIT names those flags.
+It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
+16-byte stride is written once, from `size_of`/`offset_of` rather than as a
+literal.
+
 ## Function selection
 
 Functions become JIT candidates based on a hotness threshold
