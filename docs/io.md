@@ -159,6 +159,28 @@ port dropped without `port/close` still closes its descriptor — so the next
 whichever port held the number before it. The pinning test is
 `tests/elle/io.lisp` § "a recycled descriptor number carries no remainder".
 
+What a read reserves before it runs is not a bound on what it answers with.
+`port/read-line` reserves 64 KiB, which covers every real protocol line; a line
+longer than that is answered in pieces, and reading on gives the next piece
+until the newline arrives. No byte is dropped to make an answer fit — the
+backend has already taken those bytes from the kernel, so there would be
+nothing left to read them again. `tests/elle/port-longline.lisp` pins it, and
+`port_longline_threadpool` (`tests/integration/elle_scripts.rs`) pins it on the
+other backend.
+
+On a text port `port/read-exact` counts grapheme clusters, and a cluster has no
+upper bound in bytes: one emoji built from four people and three joiners is 25
+bytes and one grapheme. So the byte length of `n` clusters is not known until
+the bytes arrive. The backend reads in chunks, holds what it has, and sizes the
+result to what it turns out to be — the count in the request bounds the answer
+in clusters and says nothing about its bytes. A `read-exact` that follows an
+over-reading `read-line` is the same story: the held remainder joins the bytes
+this read produces, the first `n` clusters of the join are the answer, and the
+rest goes back to the remainder for the next read on that port.
+`tests/elle/port-text-framing.lisp` pins all three, and
+`port_text_framing_threadpool` (`tests/integration/elle_scripts.rs`) pins them
+on the other backend.
+
 ### `:timeout` bounds each operation
 
 Every port call takes an optional `:timeout` in milliseconds, and it bounds
