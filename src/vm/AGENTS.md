@@ -159,6 +159,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
+| `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches (docs/impl/vm.md § "Where a reported error's location comes from") |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
 | `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
@@ -172,6 +173,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `call_stack` | `Vec<CallFrame>` | For stack traces |
 | `call_depth` | `usize` | Stack overflow detection |
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
+| `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |

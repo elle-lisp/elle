@@ -338,6 +338,11 @@ impl VM {
                     // unwind does for the same signal on a plain resume. The
                     // resume re-enters the inner fiber first, and only its
                     // completion delivers the value the frames below wait for.
+                    //
+                    // `mask_catches`, not `VM::absorbs`: this is a lookahead at
+                    // what the INNER fiber's mask will do, and absorbs nothing
+                    // itself, so an error still travelling must keep the
+                    // location recorded for it.
                     let inner_mask = inner_handle.with(|f| f.mask);
                     if !super::catch::mask_catches(inner_mask, inner_bits)
                         && !super::is_terminal_signal(inner_bits)

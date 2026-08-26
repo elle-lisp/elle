@@ -162,7 +162,7 @@ impl VM {
 
         self.finalize_if_halted(&handle, result_bits);
 
-        if mask_catches(mask, result_bits) {
+        if self.absorbs(&handle, mask, result_bits, result_value) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
@@ -269,7 +269,7 @@ impl VM {
 
         self.finalize_if_halted(&handle, result_bits);
 
-        if mask_catches(mask, result_bits) {
+        if self.absorbs(&handle, mask, result_bits, result_value) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));

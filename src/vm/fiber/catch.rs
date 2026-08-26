@@ -7,7 +7,7 @@
 //! delivers the answer (operand stack, `JitValue`, or a signal return). The
 //! question lives here so the rule has one definition.
 
-use crate::value::{SignalBits, SIG_ERROR, SIG_HALT, SIG_TERMINAL};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_TERMINAL};
 use crate::vm::core::VM;
 
 /// True when `mask` absorbs `bits`, so the resuming fiber receives a value
@@ -27,6 +27,39 @@ pub(crate) fn mask_catches(mask: SignalBits, bits: SignalBits) -> bool {
 }
 
 impl VM {
+    /// [`mask_catches`] for `child`'s signal, plus the state change catching an
+    /// error implies.
+    ///
+    /// Absorbing `SIG_ERROR` ends that error's propagation, so the location the
+    /// dispatch loop recorded for it stops answering "where did the error now
+    /// travelling come from?". It parks on `child` paired with `value`, the
+    /// payload it describes, and `fiber/propagate` reads it back if `child`'s
+    /// signal is re-raised (docs/impl/vm.md § "Where a reported error's
+    /// location comes from"). Either way the live record is cleared: it is
+    /// first-writer-wins (`VM::record_error_loc`), so a location left standing
+    /// past its own error would be handed to the next one instead of letting it
+    /// record its own.
+    ///
+    /// Every position that drives a child fiber asks this rather than
+    /// [`mask_catches`] directly. The exception is a *lookahead* — asking
+    /// whether some other fiber's signal will be caught, without catching it
+    /// here — which must leave a still-propagating error's record alone.
+    pub(crate) fn absorbs(
+        &mut self,
+        child: &crate::value::FiberHandle,
+        mask: SignalBits,
+        bits: SignalBits,
+        value: Value,
+    ) -> bool {
+        let caught = mask_catches(mask, bits);
+        if caught && bits.intersects(SIG_ERROR) {
+            if let Some(loc) = self.error_loc.take() {
+                child.with_mut(|f| f.error_loc = Some((value, loc)));
+            }
+        }
+        caught
+    }
+
     /// Reject a signal that nothing can ever catch, reporting a state-error
     /// attributed to `op` (the driving primitive, for example `"fiber/resume"`).
     ///

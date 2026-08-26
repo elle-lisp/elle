@@ -43,6 +43,22 @@ impl VM {
                 self.escaping_error("internal-error", "fiber/propagate: no signal"),
             );
         };
+        // Re-raising the child's error resumes the propagation the catch ended,
+        // so the location parked with the payload becomes live again. This is
+        // what lets `defer` and the scheduler report the form that raised,
+        // rather than the form that re-raised (docs/impl/vm.md § "Where a
+        // reported error's location comes from"). The parked pair is taken only
+        // when it still names THIS payload; a record the fiber kept from an
+        // earlier error describes nothing here.
+        if bits.intersects(SIG_ERROR) && self.error_loc.is_none() {
+            self.error_loc = handle.with(|fiber| {
+                fiber
+                    .error_loc
+                    .as_ref()
+                    .filter(|(payload, _)| payload.bit_identical(value))
+                    .map(|(_, loc)| loc.clone())
+            });
+        }
         if super::is_terminal_signal(bits) && !bits.intersects(SIG_HALT) {
             let heap = unsafe { &mut *self.heap_ptr };
             let region = crate::value::arena::region_of(heap, value);

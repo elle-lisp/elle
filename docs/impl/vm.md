@@ -50,6 +50,39 @@ Specialized fast paths exist for common sequences (e.g., `LoadLocal` +
 - **Fuel** — decrements a counter per instruction; when zero, emits
   `:fuel` signal
 
+## Where a reported error's location comes from
+
+An error that reaches the root is printed with one `at file:line:col` line
+and a caret under the source. That location is `VM::error_loc`, and it names
+**the innermost frame that was running when the error was raised** — the
+raising form itself, not any call above it.
+
+The dispatch loop records it. Every path that leaves
+`execute_bytecode_inner_impl` carrying `SIG_ERROR` or `SIG_HALT` calls
+`VM::record_error_loc`, which maps the current instruction offset through
+the frame's `LocationMap`. Recording is first-writer-wins: the raising frame
+reaches its exit path first, and each frame the error then unwinds through
+finds the slot already taken, so the innermost location is the one that
+survives to the root. A frame whose `LocationMap` has no entry for the
+instruction leaves the slot empty for an outer frame to fill.
+
+First-writer-wins needs an end, because the record answers only for the error
+currently propagating. A fiber mask that absorbs `SIG_ERROR` ends that
+propagation — `try`, `protect`, and `defer` all catch that way — so
+`VM::absorbs` takes the live record at the moment it reports the catch. Every
+position that drives a child fiber asks `absorbs`, so a later error finds an
+empty slot and records its own location.
+
+The record is parked, not dropped. `absorbs` moves it onto the caught fiber
+(`Fiber::error_loc`), paired with the payload it describes. An error that is
+caught and then sent on again — what `defer` does, and what `ev/run`'s
+scheduler does with a failed thunk — keeps its raising form that way.
+`fiber/propagate` re-raises the fiber's parked signal and takes the parked
+location back, but only while the pair still names the payload being
+re-raised. Both stdlib sites that surface a failed fiber's error therefore
+use `(fiber/propagate f)`; raising the payload afresh with `(error
+(fiber/value f))` would report the stdlib line that re-raised it.
+
 ## Tail calls
 
 `TailCall` reuses the current call frame rather than pushing a new one.

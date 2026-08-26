@@ -69,7 +69,7 @@ impl VM {
 
                 self.finalize_if_halted(&current_handle, bits);
 
-                if super::catch::mask_catches(mask, bits) {
+                if self.absorbs(&current_handle, mask, bits, value) {
                     self.fiber.child = None;
                     self.fiber.child_value = None;
 
