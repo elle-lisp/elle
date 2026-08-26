@@ -1,4 +1,5 @@
 use super::*;
+use crate::wasm::outcome::CallOutcome;
 
 /// Build closure environment in WASM linear memory.
 ///
@@ -132,7 +133,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
          args_ptr: i32,
          nargs: i32,
          _ctx: i32|
-         -> (i64, i64, i64) {
+         -> (i64, i64, i64, i64) {
             let func_val = caller.data().inner.wasm_to_value(func_tag, func_payload);
             let args = read_args(&mut caller, args_ptr, nargs);
 
@@ -145,7 +146,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                 let (bits, result) = native_fn(&mut ctx, &args);
                 let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-                return (tag, payload, bits.raw() as i64);
+                return CallOutcome::signalled(tag, payload, bits).to_wasm();
             }
 
             if let Some((id, default)) = func_val.as_parameter() {
@@ -157,11 +158,11 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                         format!("parameter call: expected 0 arguments, got {}", args.len()),
                     );
                     let (tag, payload) = caller.data_mut().inner.value_to_wasm(err);
-                    return (tag, payload, 1);
+                    return CallOutcome::error(tag, payload).to_wasm();
                 }
                 let value = caller.data().inner.resolve_parameter(id, default);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
-                return (tag, payload, 0);
+                return CallOutcome::value(tag, payload).to_wasm();
             }
 
             if let Some(closure) = func_val.as_closure() {
@@ -225,14 +226,31 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                             let status = results[2].unwrap_i64();
                             // Restore env_stack_ptr after the call
                             caller.data_mut().inner.env_stack_ptr = env_base;
-                            return (tag, payload, status);
+                            // `status` is not a signal. A tiered closure cannot
+                            // park — `standalone_emittable` refuses every parking
+                            // shape — so a non-zero one means the emission gate
+                            // and this caller have drifted apart. The signal it
+                            // raised is in SIGNAL_SLOT.
+                            if status != 0 {
+                                let heap = unsafe { &mut *(*caller.data().vm).heap_ptr };
+                                let ctx = crate::primitives::ctx::Alloc::new(heap);
+                                let err = ctx.error(
+                                    "internal-error",
+                                    format!("wasm self-call suspended at resume state {status}"),
+                                );
+                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(err);
+                                return CallOutcome::error(tag, payload).to_wasm();
+                            }
+                            let signal =
+                                super::super::store::take_raised_signal(&mut caller, &self_memory);
+                            return CallOutcome::signalled(tag, payload, signal).to_wasm();
                         }
                         Err(e) => {
                             let heap = unsafe { &mut *(*caller.data().vm).heap_ptr };
                             let ctx = crate::primitives::ctx::Alloc::new(heap);
                             let err = ctx.error("internal-error", format!("wasm self-call: {}", e));
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(err);
-                            return (tag, payload, 1);
+                            return CallOutcome::error(tag, payload).to_wasm();
                         }
                     }
                 }
@@ -253,28 +271,23 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                     let wasm_tier = vm_ref.wasm_tier.as_ref().unwrap();
                     match wasm_tier.call(vm, bytecode_ptr, &closure_rc, &args, func_val) {
                         Ok((value, signal)) => {
-                            if signal.is_empty() {
-                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
-                                return (tag, payload, 0);
-                            } else if signal == crate::value::SIG_HALT {
-                                if value == Value::NIL {
-                                    let (tag, payload) =
-                                        caller.data_mut().inner.value_to_wasm(value);
-                                    return (tag, payload, 0);
-                                }
-                                // Non-NIL halt: propagate as error
-                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
-                                return (tag, payload, signal.raw() as i64);
-                            }
+                            // A NIL `(halt)` is a normal return; every other
+                            // signal rides back out for the caller to classify.
+                            let signal = if signal == crate::value::SIG_HALT && value == Value::NIL
+                            {
+                                crate::value::SIG_OK
+                            } else {
+                                signal
+                            };
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
-                            return (tag, payload, signal.raw() as i64);
+                            return CallOutcome::signalled(tag, payload, signal).to_wasm();
                         }
                         Err(e) => {
                             let heap = unsafe { &mut *(*caller.data().vm).heap_ptr };
                             let ctx = crate::primitives::ctx::Alloc::new(heap);
                             let err = ctx.error("internal-error", format!("wasm: {}", e));
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(err);
-                            return (tag, payload, 1);
+                            return CallOutcome::error(tag, payload).to_wasm();
                         }
                     }
                 }
@@ -292,22 +305,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                         if bits.is_empty() {
                             let (_, val) = vm_ref.fiber.signal.take().unwrap();
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                            (tag, payload, 0)
-                        } else if bits == crate::value::SIG_HALT {
-                            let val = vm_ref
-                                .fiber
-                                .signal
-                                .as_ref()
-                                .map(|(_, v)| *v)
-                                .unwrap_or(Value::NIL);
-                            if val == Value::NIL {
-                                vm_ref.fiber.signal.take();
-                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                                (tag, payload, 0)
-                            } else {
-                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                                (tag, payload, bits.raw() as i64)
-                            }
+                            CallOutcome::value(tag, payload).to_wasm()
                         } else {
                             let val = vm_ref
                                 .fiber
@@ -315,8 +313,16 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                                 .as_ref()
                                 .map(|(_, v)| *v)
                                 .unwrap_or(Value::NIL);
+                            // A NIL `(halt)` is a normal return; every other
+                            // signal rides back out on the signal word.
+                            let bits = if bits == crate::value::SIG_HALT && val == Value::NIL {
+                                vm_ref.fiber.signal.take();
+                                crate::value::SIG_OK
+                            } else {
+                                bits
+                            };
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                            (tag, payload, bits.raw() as i64)
+                            CallOutcome::signalled(tag, payload, bits).to_wasm()
                         }
                     }
                     None => {
@@ -333,7 +339,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                             .map(|(b, _)| *b)
                             .unwrap_or(crate::value::SIG_ERROR);
                         let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                        (tag, payload, bits.raw() as i64)
+                        CallOutcome::signalled(tag, payload, bits).to_wasm()
                     }
                 }
             } else {
@@ -344,7 +350,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                     format!("rt_call: cannot call {}", func_val.type_name()),
                 );
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(err);
-                (tag, payload, 1)
+                CallOutcome::error(tag, payload).to_wasm()
             }
         },
     )?;

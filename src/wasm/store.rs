@@ -7,8 +7,8 @@ use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
 
 mod call;
-pub(in crate::wasm) use call::{call_precached_closure, call_wasm_closure};
-pub use call::{compile_module, resume_wasm_closure, run_module};
+pub(in crate::wasm) use call::{call_precached_closure, call_wasm_closure, resume_wasm_closure};
+pub use call::{compile_module, run_module};
 
 /// Write the executing closure `(tag, payload)` into the reserved `SELF_SLOT`
 /// (src/wasm/emit.rs) of `memory`. The host installs it at every closure entry so

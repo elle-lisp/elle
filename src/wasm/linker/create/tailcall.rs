@@ -7,6 +7,34 @@ use wasmtime::*;
 
 use crate::wasm::host::ElleHost;
 use crate::wasm::linker::read_args_from_memory;
+use crate::wasm::outcome::CallOutcome;
+
+/// Hand a tail callee's outcome back through `SIGNAL_SLOT`, returning the
+/// `(env_ptr, table_idx, is_wasm, tag, payload, signal)` tuple that tells the
+/// caller to `return` rather than `return_call_indirect`.
+///
+/// A tail call replaces the frame, so there is no continuation here to capture
+/// and no status word to set — the dispatch returns `(tag, payload, 0)` right
+/// after this. The signal therefore travels in the slot, and the caller's
+/// `handle_wasm_result` classifies it there. That is why `suspended` is dropped:
+/// re-deriving it from the signal is exactly what `is_suspending` is for, and
+/// doing it in one place keeps the tail and non-tail paths agreeing.
+fn return_via_slot(
+    caller: &mut Caller<'_, ElleHost>,
+    out: CallOutcome,
+) -> (i32, i32, i32, i64, i64, i64) {
+    let signal = out.signal.raw() as i64;
+    if signal != 0 {
+        if let Some(memory) = caller
+            .get_export("__elle_memory")
+            .and_then(|e| e.into_memory())
+        {
+            let base = crate::wasm::emit::SIGNAL_SLOT as usize;
+            memory.data_mut(&mut *caller)[base..base + 8].copy_from_slice(&signal.to_le_bytes());
+        }
+    }
+    (0, 0, 0, out.tag, out.payload, signal)
+}
 
 pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
     // rt_prepare_tail_call(func_tag, func_payload, args_ptr, nargs, caller_env_ptr)
@@ -105,21 +133,13 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 // and hand the caller the result to `return` (is_wasm = 0),
                 // routing any non-zero signal through memory[0..8] exactly as the
                 // native-tail path below does.
-                let (tag, payload, signal) = crate::wasm::linker::run_bytecode_closure(
+                let out = crate::wasm::linker::run_bytecode_closure(
                     &mut caller,
                     closure,
                     func_val,
                     &args,
                 );
-                if signal != 0 {
-                    if let Some(memory) = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                    {
-                        memory.data_mut(&mut caller)[0..8].copy_from_slice(&signal.to_le_bytes());
-                    }
-                }
-                return (0, 0, 0, tag, payload, signal);
+                return return_via_slot(&mut caller, out);
             }
 
             if func_val.is_native_fn() {
@@ -140,36 +160,16 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 // memory[0..8] like the native-error path below so the caller's
                 // epilogue observes it (tail dispatch returns tag/payload/0).
                 if bits.raw() & crate::value::fiber::SIG_RESUME.raw() != 0 {
-                    let (tag, payload, signal) =
-                        crate::wasm::resume::handle_fiber_resume(&mut caller, result);
-                    if signal != 0 {
-                        if let Some(memory) = caller
-                            .get_export("__elle_memory")
-                            .and_then(|e| e.into_memory())
-                        {
-                            memory.data_mut(&mut caller)[0..8]
-                                .copy_from_slice(&signal.to_le_bytes());
-                        }
-                    }
-                    return (0, 0, 0, tag, payload, signal);
+                    let out = crate::wasm::resume::handle_fiber_resume(&mut caller, result);
+                    return return_via_slot(&mut caller, out);
                 }
                 // A tail-position `(fiber/propagate …)` re-raises the child's
                 // caught signal (defer/with unwind branch). Convert it to the
                 // child's (bits, value) and route through memory[0..8] like the
                 // resume path, so the caller's epilogue observes the real error.
                 if bits.raw() & crate::value::fiber::SIG_PROPAGATE.raw() != 0 {
-                    let (tag, payload, signal) =
-                        crate::wasm::resume::handle_fiber_propagate(&mut caller, result);
-                    if signal != 0 {
-                        if let Some(memory) = caller
-                            .get_export("__elle_memory")
-                            .and_then(|e| e.into_memory())
-                        {
-                            memory.data_mut(&mut caller)[0..8]
-                                .copy_from_slice(&signal.to_le_bytes());
-                        }
-                    }
-                    return (0, 0, 0, tag, payload, signal);
+                    let out = crate::wasm::resume::handle_fiber_propagate(&mut caller, result);
+                    return return_via_slot(&mut caller, out);
                 }
                 // Write non-zero signal to memory[0..8] so handle_wasm_result
                 // picks it up. The WASM tail call dispatch returns immediately
@@ -210,21 +210,13 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             // to `return` (is_wasm = 0), routing any non-zero signal through
             // memory[0..8] exactly as the native-tail path above does. A value
             // that is not a collection either yields the `cannot call` error.
-            let (tag, payload, signal) = crate::wasm::linker::run_collection_call(
+            let out = crate::wasm::linker::run_collection_call(
                 &mut caller,
                 func_val,
                 &args,
                 "rt_prepare_tail_call",
             );
-            if signal != 0 {
-                if let Some(memory) = caller
-                    .get_export("__elle_memory")
-                    .and_then(|e| e.into_memory())
-                {
-                    memory.data_mut(&mut caller)[0..8].copy_from_slice(&signal.to_le_bytes());
-                }
-            }
-            (0, 0, 0, tag, payload, signal)
+            return_via_slot(&mut caller, out)
         },
     )?;
 

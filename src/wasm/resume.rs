@@ -20,41 +20,7 @@ use wasmtime::*;
 use super::host::ElleHost;
 use super::store::{call_wasm_closure, resume_wasm_closure};
 use crate::value::Value;
-
-/// Read signal_bits from the front (innermost) suspension frame for a fiber.
-/// The innermost frame carries the original signal (e.g. SIG_IO); outer frames
-/// only have SIG_YIELD.
-fn front_frame_signal(caller: &Caller<'_, ElleHost>) -> u64 {
-    caller
-        .data()
-        .first_suspension_frame()
-        .map(|f| f.signal_bits)
-        .unwrap_or(crate::value::fiber::SIG_YIELD.raw())
-}
-
-/// The real signal bits a fiber's SUSPEND carries, given the `signal` word a
-/// closure call/resume returned. A closure signals a suspend by setting the
-/// SIG_YIELD bit; two shapes reach here:
-///
-/// - **Pure `SIG_YIELD`** (the `rt_yield` suspension path) — a call in the body
-///   suspended and pushed a frame; the frame carries the original signal
-///   (SIG_IO / SIG_WAIT), so read it from the front frame.
-/// - **`SIG_YIELD` set alongside another bit** — a tail-position io returned
-///   through the function epilogue (`handle_wasm_result` OR-ed SIG_YIELD onto the
-///   native's SIG_IO). No frame was pushed, so `front_frame_signal` would
-///   mis-default to SIG_YIELD; the real signal IS `signal` itself.
-///
-/// Keeping SIG_IO visible here is what lets the scheduler submit the io: a fiber
-/// whose final action is a tail `println`/`port/write` (the whole-program thunk
-/// under `ev/run` ends this way) would otherwise be mis-routed. Pinned by
-/// tests/elle/wasm-tail-io-in-fiber.lisp.
-fn yield_sig_bits(caller: &Caller<'_, ElleHost>, signal: i64) -> u64 {
-    if signal as u64 == crate::value::fiber::SIG_YIELD.raw() {
-        front_frame_signal(caller)
-    } else {
-        signal as u64
-    }
-}
+use crate::wasm::outcome::CallOutcome;
 
 /// Resume outcome from drive_resume_chain.
 enum ResumeOutcome {
@@ -93,16 +59,15 @@ fn redrive_child(
         handle.with_mut(|f| f.signal = Some((crate::value::fiber::SIG_OK, resume_value)));
     }
     let current = caller.data().current_fiber_id();
-    let (t, p, s) = handle_fiber_resume(caller, child_value);
+    let out = handle_fiber_resume(caller, child_value);
     caller.data_mut().pending_redrive.remove(&current);
 
-    let raw = s as u64;
-    if raw == 0 {
-        RedriveOutcome::Completed(caller.data().wasm_to_value(t, p))
-    } else if raw & crate::value::fiber::SIG_YIELD.raw() != 0 {
-        RedriveOutcome::Suspended(t, p, raw)
+    if out.suspended {
+        RedriveOutcome::Suspended(out.tag, out.payload, out.signal.raw())
+    } else if !out.signal.is_empty() {
+        RedriveOutcome::Errored(out.tag, out.payload, out.signal.raw())
     } else {
-        RedriveOutcome::Errored(t, p, raw)
+        RedriveOutcome::Completed(caller.data().wasm_to_value(out.tag, out.payload))
     }
 }
 
@@ -119,7 +84,6 @@ fn redrive_child(
 /// the new yield point. We evict the stale frames so the next
 /// resume starts from the new innermost frame.
 fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -> ResumeOutcome {
-    let yield_signal = crate::value::fiber::SIG_YIELD.raw() as i64;
     let mut result_val = initial_value;
 
     loop {
@@ -150,31 +114,28 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
         // new inner chain is consumed first on the next resume.
         let frames_before = caller.data().suspension_frame_count();
         match resume_wasm_closure(caller, result_val) {
-            Some((t, p, s)) => {
-                if s & yield_signal != 0 {
-                    if s == yield_signal {
-                        // Re-yield via `rt_yield`: a call in the resumed body
-                        // suspended again and pushed new frames to the back. After
-                        // pop in resume_wasm_closure, old outer frames are at
-                        // positions 0..remaining, new frames after — rotate the old
-                        // ones behind so the new inner chain resumes first.
-                        let remaining_old = frames_before.saturating_sub(1);
+            Some(out) => {
+                if out.suspended {
+                    // Did `rt_yield` push new frames, or did a tail-position io
+                    // ride out through the epilogue with no frame at all? Ask the
+                    // deque, not the signal word: `resume_wasm_closure` popped one
+                    // frame, so any count above `frames_before - 1` is new.
+                    let remaining_old = frames_before.saturating_sub(1);
+                    if caller.data().suspension_frame_count() > remaining_old {
+                        // Re-yield: after the pop, old outer frames sit at
+                        // 0..remaining_old and the new ones after them. Rotate the
+                        // old ones behind so the new inner chain resumes first.
                         for _ in 0..remaining_old {
                             if let Some(frame) = caller.data_mut().pop_suspension_frame() {
                                 caller.data_mut().push_suspension_frame(frame);
                             }
                         }
                     }
-                    // Otherwise SIG_YIELD rode out alongside SIG_IO on a
-                    // tail-position io returned through the epilogue: no new frame,
-                    // so no rotation, and `yield_sig_bits` reads the signal from `s`
-                    // rather than the (absent) front frame.
-                    let sig_bits = yield_sig_bits(caller, s);
-                    return ResumeOutcome::Yielded(t, p, sig_bits);
-                } else if s != 0 {
-                    return ResumeOutcome::Error(t, p, s as u64);
+                    return ResumeOutcome::Yielded(out.tag, out.payload, out.signal.raw());
+                } else if !out.signal.is_empty() {
+                    return ResumeOutcome::Error(out.tag, out.payload, out.signal.raw());
                 }
-                result_val = caller.data().wasm_to_value(t, p);
+                result_val = caller.data().wasm_to_value(out.tag, out.payload);
             }
             None => {
                 return ResumeOutcome::Dead(result_val);
@@ -216,8 +177,9 @@ fn install_signal(
 ///   WASM tier's nested-`handle_fiber_resume` recursion otherwise skipped, which
 ///   left an uncaught `(emit :error …)` wrongly `:paused`.
 /// - A `SIG_WAIT`/`SIG_IO` suspension the fiber's mask does NOT cover → PROPAGATE
-///   it to the resumer (as `SIG_YIELD | bits`, so the resumer's `fiber/resume`
-///   SuspendingCall captures a continuation and the wait reaches the scheduler)
+///   it to the resumer, parked (so the resumer's `fiber/resume` SuspendingCall
+///   captures a continuation and the wait reaches the scheduler) and carrying the
+///   fiber's real bits, not a transport bit OR-ed on top —
 ///   and register a re-drive of this fiber against the parent, so the parent's
 ///   next resume feeds the scheduler's value back into this fiber rather than
 ///   into the parent's continuation. This is the WASM analogue of the VM
@@ -241,7 +203,7 @@ fn route_emit(
     payload: i64,
     bits: crate::value::SignalBits,
     value: Value,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     let mask = fiber_handle.with(|f| f.mask);
 
     if bits.intersects(crate::value::SIG_ERROR) && !mask.covers(bits) {
@@ -253,24 +215,18 @@ fn route_emit(
             bits,
             value,
         );
-        return (tag, payload, bits.raw() as i64);
+        return CallOutcome::signalled(tag, payload, bits);
     }
 
     // An uncaught scheduler suspension (wait/io the mask does not cover) must
     // propagate to the resumer so the scheduler drives it — the resumer's mask,
-    // one level up, decides where it is finally caught. `bits` may carry the
-    // SIG_YIELD transport bit alongside the real signal (a tail-io rides out as
-    // SIG_IO|SIG_YIELD); strip it before the mask test, which speaks the emit
-    // signals the VM checks (SIG_IO / SIG_WAIT), not the tier's transport.
-    let yield_bit = crate::value::fiber::SIG_YIELD.raw();
-    let emit_raw = bits.raw() & !yield_bit;
+    // one level up, decides where it is finally caught. `bits` is the fiber's
+    // own signal, in the vocabulary the VM checks; the tier no longer mixes a
+    // transport bit into it.
     let is_scheduler_suspend =
-        emit_raw & (crate::signals::SIG_IO.raw() | crate::signals::SIG_WAIT.raw()) != 0;
+        bits.intersects(crate::signals::SIG_IO.union(crate::signals::SIG_WAIT));
     let stack_len = caller.data().fiber_id_stack.len();
-    if is_scheduler_suspend
-        && !mask.covers(crate::value::SignalBits::new(emit_raw))
-        && stack_len >= 2
-    {
+    if is_scheduler_suspend && !mask.covers(bits) && stack_len >= 2 {
         // Park this fiber holding its wait so it stays resumable with its frames;
         // the parent re-drives it (overwriting this signal) on resume.
         install_signal(
@@ -288,9 +244,11 @@ fn route_emit(
             .data_mut()
             .pending_redrive
             .insert(parent_id, fiber_value);
-        // Set SIG_YIELD so the parent's `fiber/resume` SuspendingCall fires;
-        // carry the real emit bits so the parent's park records the wait/io.
-        return (tag, payload, (emit_raw | yield_bit) as i64);
+        // Park the parent — its `fiber/resume` SuspendingCall must capture a
+        // continuation — and carry the fiber's real bits so the parent's own
+        // park records the wait/io. `suspended` says park; the bits stay clean,
+        // which is what keeps `fiber/bits` reporting |:io| and not |:io :yield|.
+        return CallOutcome::parked(tag, payload, bits);
     }
 
     install_signal(
@@ -301,7 +259,7 @@ fn route_emit(
         bits,
         value,
     );
-    (tag, payload, 0)
+    CallOutcome::value(tag, payload)
 }
 
 /// Route an ERROR that propagated up into this fiber's body from a resumed child
@@ -319,7 +277,7 @@ fn route_error(
     payload: i64,
     bits: crate::value::SignalBits,
     value: Value,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     let caught =
         bits.intersects(crate::value::SIG_ERROR) && fiber_handle.with(|f| f.mask).covers(bits);
     if caught {
@@ -331,7 +289,7 @@ fn route_error(
             bits,
             value,
         );
-        (tag, payload, 0)
+        CallOutcome::value(tag, payload)
     } else {
         install_signal(
             caller,
@@ -341,9 +299,8 @@ fn route_error(
             bits,
             value,
         );
-        // The unwind signal re-returned to the caller IS this fiber's bits (the
-        // callers pass `SignalBits::new(signal)` and `signal` in lockstep).
-        (tag, payload, bits.raw() as i64)
+        // The unwind signal re-returned to the caller IS this fiber's bits.
+        CallOutcome::signalled(tag, payload, bits)
     }
 }
 
@@ -356,7 +313,7 @@ fn route_error(
 pub(super) fn handle_fiber_propagate(
     caller: &mut Caller<'_, ElleHost>,
     fiber_value: Value,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     use crate::value::fiber::SIG_ERROR;
 
     let (child_bits, child_value) = match fiber_value.as_fiber() {
@@ -373,12 +330,12 @@ pub(super) fn handle_fiber_propagate(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("internal-error", "fiber/propagate: not a fiber");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.raw() as i64);
+            return CallOutcome::error(tag, payload);
         }
     };
 
     let (tag, payload) = caller.data_mut().value_to_wasm(child_value);
-    (tag, payload, child_bits.raw() as i64)
+    CallOutcome::signalled(tag, payload, child_bits)
 }
 
 /// When `fiber/resume` returns SIG_RESUME, the fiber value contains the
@@ -386,8 +343,8 @@ pub(super) fn handle_fiber_propagate(
 pub(super) fn handle_fiber_resume(
     caller: &mut Caller<'_, ElleHost>,
     fiber_value: Value,
-) -> (i64, i64, i64) {
-    use crate::value::fiber::{FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_YIELD};
+) -> CallOutcome {
+    use crate::value::fiber::{FiberStatus, SignalBits, SIG_OK};
 
     let fiber_handle = match fiber_value.as_fiber() {
         Some(f) => f.clone(),
@@ -396,7 +353,7 @@ pub(super) fn handle_fiber_resume(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("type-error", "fiber/resume: not a fiber");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.raw() as i64);
+            return CallOutcome::error(tag, payload);
         }
     };
 
@@ -419,7 +376,7 @@ pub(super) fn handle_fiber_resume(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("internal-error", "fiber/resume: bytecode closure in WASM");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.raw() as i64);
+            return CallOutcome::error(tag, payload);
         }
     };
 
@@ -440,7 +397,6 @@ pub(super) fn handle_fiber_resume(
         );
     }
 
-    let yield_signal = SIG_YIELD.raw() as i64;
     let fiber_id = fiber_handle.id();
 
     match status {
@@ -461,17 +417,16 @@ pub(super) fn handle_fiber_resume(
                 crate::primitives::ctx::Alloc::new(heap).closure((*closure).clone())
             };
             let (self_tag, self_payload) = caller.data_mut().value_to_wasm(self_val);
-            let (tag, payload, signal) =
-                call_wasm_closure(caller, &closure, wasm_idx, &args, self_tag, self_payload);
+            let out = call_wasm_closure(caller, &closure, wasm_idx, &args, self_tag, self_payload);
+            let (tag, payload) = (out.tag, out.payload);
 
-            if signal & yield_signal != 0 {
+            if out.suspended {
                 let yielded = caller.data().wasm_to_value(tag, payload);
-                let sig_bits = yield_sig_bits(caller, signal);
                 if caller.data().debug {
                     eprintln!(
-                        "[handle_fiber_resume] New yield: sig_bits={} (SIG_IO={})",
-                        sig_bits,
-                        sig_bits & 512
+                        "[handle_fiber_resume] New yield: signal={} (SIG_IO={})",
+                        out.signal,
+                        out.signal.intersects(crate::signals::SIG_IO)
                     );
                 }
                 let ret = route_emit(
@@ -480,12 +435,12 @@ pub(super) fn handle_fiber_resume(
                     fiber_value,
                     tag,
                     payload,
-                    SignalBits::new(sig_bits),
+                    out.signal,
                     yielded,
                 );
                 caller.data_mut().fiber_id_stack.pop();
                 ret
-            } else if signal != 0 {
+            } else if !out.signal.is_empty() {
                 let err_val = caller.data().wasm_to_value(tag, payload);
                 let ret = route_error(
                     caller,
@@ -493,7 +448,7 @@ pub(super) fn handle_fiber_resume(
                     fiber_value,
                     tag,
                     payload,
-                    SignalBits::new(signal as u64),
+                    out.signal,
                     err_val,
                 );
                 caller.data_mut().fiber_id_stack.pop();
@@ -509,7 +464,7 @@ pub(super) fn handle_fiber_resume(
                     ret_val,
                 );
                 caller.data_mut().fiber_id_stack.pop();
-                (tag, payload, 0)
+                CallOutcome::value(tag, payload)
             }
         }
         // An `:error` fiber is resumable via the restarts system (only `:dead` is
@@ -555,7 +510,7 @@ pub(super) fn handle_fiber_resume(
                         result_val,
                     );
                     let (t, p) = caller.data_mut().value_to_wasm(result_val);
-                    (t, p, 0)
+                    CallOutcome::value(t, p)
                 }
             };
 
@@ -567,7 +522,7 @@ pub(super) fn handle_fiber_resume(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("fiber-error", "fiber/resume: fiber not resumable");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, SIG_ERROR.raw() as i64)
+            CallOutcome::error(tag, payload)
         }
     }
 }

@@ -65,5 +65,30 @@ pub fn classify(bits: SignalBits, value: &Value) -> SignalAction {
     SignalAction::Suspend
 }
 
+/// True when `bits` parks its caller rather than returning, unwinding, or
+/// asking the VM to do something.
+///
+/// The question every tier asks after a call, and it must have one answer. The
+/// interpreter asks it in `VM::call_inner`; the WASM tier asks it in `rt_call`,
+/// where the result becomes the `suspended` word emitted code branches on.
+///
+/// Deliberately not a test for any particular bit. `:yield`, `:io`, `:wait`,
+/// `:fuel`, and every user-defined signal all park, and a compound signal parks
+/// on the strength of any of them — so the rule is stated by exclusion.
+///
+/// The VM-internal dispatch signals are excluded because they are requests to
+/// the VM, not suspensions: `SIG_QUERY` asks it to read fiber state, `SIG_RESUME`
+/// and `SIG_PROPAGATE` to drive a child fiber. Treating one as a park makes a
+/// caller wait for a resume nobody will deliver. `SIG_ABORT` needs no case of
+/// its own — it is `SIG_ERROR | SIG_TERMINAL`, so the error test already covers
+/// it. `dispatch/tests.rs` pins that this agrees with [`classify`] bit for bit.
+#[inline]
+pub fn is_suspending(bits: SignalBits) -> bool {
+    if bits.is_empty() || bits == SIG_RESUME || bits == SIG_PROPAGATE || bits == SIG_QUERY {
+        return false;
+    }
+    !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT)
+}
+
 #[cfg(test)]
 mod tests;

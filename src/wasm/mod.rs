@@ -32,6 +32,7 @@ mod instruction;
 pub mod lazy;
 pub mod linker;
 mod liveness;
+mod outcome;
 pub mod regalloc;
 pub mod resume;
 pub mod store;

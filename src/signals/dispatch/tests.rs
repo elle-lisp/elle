@@ -64,3 +64,43 @@ fn abort_without_fiber_falls_through() {
     // SIG_ABORT = SIG_ERROR | SIG_TERMINAL).
     assert_eq!(classify(SIG_ABORT, &Value::NIL), SignalAction::Error);
 }
+
+#[test]
+fn is_suspending_agrees_with_classify_on_every_shape() {
+    // The WASM tier branches on `is_suspending` while the interpreter branches
+    // on `classify`. They are separate functions, so nothing but this test stops
+    // them drifting — and a drift is silent: the tier parks a caller the
+    // interpreter would have let return, or vice versa.
+    //
+    // COUNTER-FACTUAL: `is_suspending` first read "not empty, not error, not
+    // halt", which sends SIG_QUERY to Suspend where classify sends it to Query.
+    // Under --wasm=full that parked the caller of `vm/config` and
+    // `list-primitives` forever instead of reporting them unsupported
+    // (tests/elle/{trace,unicode,vm}.lisp).
+    let user_bit = SignalBits::from_bit(32);
+    let shapes = [
+        SIG_OK,
+        SIG_ERROR,
+        SIG_HALT,
+        SIG_YIELD,
+        SIG_IO,
+        SIG_DEBUG,
+        SIG_RESUME,
+        SIG_PROPAGATE,
+        SIG_QUERY,
+        SIG_ABORT,
+        user_bit,
+        SIG_YIELD | SIG_IO,
+        SIG_ERROR | SIG_IO,
+        SIG_IO | user_bit,
+        SIG_HALT | SIG_IO,
+    ];
+    for bits in shapes {
+        let by_classify = classify(bits, &Value::NIL) == SignalAction::Suspend;
+        assert_eq!(
+            is_suspending(bits),
+            by_classify,
+            "is_suspending and classify disagree on {bits}"
+        );
+    }
+}

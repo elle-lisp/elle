@@ -33,14 +33,15 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::Call(FN_RT_CALL));
 
+        f.instruction(&Instruction::LocalSet(self.suspended_local()));
         f.instruction(&Instruction::LocalSet(self.signal_local));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
 
-        // Check SIG_YIELD (bit 1 = value 2)
-        f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I64Const(2));
-        f.instruction(&Instruction::I64And);
+        // Did the callee park? Ask the word the host set, never the signal: which
+        // signals park is `signals::dispatch::is_suspending`'s rule, and a
+        // suspension need not carry any particular bit.
+        f.instruction(&Instruction::LocalGet(self.suspended_local()));
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
@@ -62,12 +63,13 @@ impl WasmEmitter {
         }
         f.instruction(&Instruction::End);
 
-        // Check other signals (error etc.)
+        // Not a park, but still a signal: an error or a halt. Hand it to the
+        // caller through SIGNAL_SLOT with `status = 0`.
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
-        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(SIGNAL_SLOT));
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::I64Store(MemArg {
             offset: 0,
@@ -100,13 +102,14 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::Call(FN_RT_CALL));
 
+        f.instruction(&Instruction::LocalSet(self.suspended_local()));
         f.instruction(&Instruction::LocalSet(self.signal_local));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
 
-        f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I64Const(2));
-        f.instruction(&Instruction::I64And);
+        // Park on the host's answer, not on a bit of the signal — see
+        // `emit_call_suspending`.
+        f.instruction(&Instruction::LocalGet(self.suspended_local()));
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
@@ -132,7 +135,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
-        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(SIGNAL_SLOT));
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::I64Store(MemArg {
             offset: 0,

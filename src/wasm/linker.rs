@@ -5,6 +5,7 @@ use wasmtime::*;
 use super::host::ElleHost;
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
+use crate::wasm::outcome::CallOutcome;
 
 mod dataop;
 pub use dataop::*;
@@ -25,12 +26,12 @@ pub use create::*;
 /// here via the VM makes the call transparent; without this the caller aborts
 /// with "bytecode closure in WASM backend". Pinned by
 /// `tests/elle/wasm-bytecode-closure-call.lisp`.
-pub(crate) fn run_bytecode_closure(
+pub(in crate::wasm) fn run_bytecode_closure(
     caller: &mut Caller<'_, ElleHost>,
     closure: &crate::value::Closure,
     func_val: Value,
     args: &[Value],
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     let vm = caller.data().vm;
     // Raw-pointer deref: the VM outlives the call, and it is a distinct object
     // from the `ElleHost` reached via `caller.data_mut()` below (the value/handle
@@ -44,7 +45,7 @@ pub(crate) fn run_bytecode_closure(
             .signal
             .unwrap_or((crate::value::SIG_ERROR, Value::NIL));
         let (tag, payload) = caller.data_mut().value_to_wasm(val);
-        return (tag, payload, bits.raw() as i64);
+        return CallOutcome::signalled(tag, payload, bits);
     };
     // Hand the callee its executing-closure register via the one-shot (the
     // WASM→interp entry boundary), so a self-reference in the body resolves to
@@ -71,12 +72,12 @@ pub(crate) fn run_bytecode_closure(
         vm_ref.fiber.signal.take();
     }
     let (tag, payload) = caller.data_mut().value_to_wasm(val);
-    (tag, payload, signal.raw() as i64)
+    CallOutcome::signalled(tag, payload, signal)
 }
 
 /// Apply a **callable collection** — a struct/array/set/string/bytes indexed by
 /// a key (`(request :op)`, `(arr i)`, `(set x)`) — via the interpreter's shared
-/// `call_collection`, returning `(tag, payload, signal)` for the wasm caller.
+/// `call_collection`, returning a [`CallOutcome`] for the wasm caller.
 /// When `func_val` is not a collection either, produces the `cannot call …` type
 /// error so both dispatch sites (`rt_call`, `rt_prepare_tail_call`) share one
 /// tail. Mirrors the collection arm of the interpreter's `call_inner`.
@@ -92,12 +93,12 @@ pub(crate) fn run_bytecode_closure(
 /// The full-module tier makes region instructions structural no-ops, so — like
 /// the native-fn arm of `rt_call` — this skips the interpreter's Rule-5 escape
 /// retain and mints a fresh `Alloc` only for the element/error it may build.
-pub(crate) fn run_collection_call(
+pub(in crate::wasm) fn run_collection_call(
     caller: &mut Caller<'_, ElleHost>,
     func_val: Value,
     args: &[Value],
     what: &str,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     let call_result = {
         let gen = unsafe { &*caller.data().vm }.unicode_generation();
         let heap = unsafe { &mut *caller.data().heap_ptr() };
@@ -105,11 +106,11 @@ pub(crate) fn run_collection_call(
         crate::vm::call::call_collection(&func_val, args, gen, &mut ctx)
     };
     let (value, signal) = match call_result {
-        Some(Ok(value)) => (value, crate::value::SIG_OK.raw() as i64),
+        Some(Ok(value)) => (value, crate::value::SIG_OK),
         Some(Err((kind, msg))) => {
             let heap = unsafe { &mut *caller.data().heap_ptr() };
             let ctx = crate::primitives::ctx::Alloc::new(heap);
-            (ctx.error(kind, msg), crate::value::SIG_ERROR.raw() as i64)
+            (ctx.error(kind, msg), crate::value::SIG_ERROR)
         }
         None => {
             let heap = unsafe { &mut *caller.data().heap_ptr() };
@@ -118,9 +119,9 @@ pub(crate) fn run_collection_call(
                 "type-error",
                 format!("{}: cannot call {}", what, func_val.type_name()),
             );
-            (err, crate::value::SIG_ERROR.raw() as i64)
+            (err, crate::value::SIG_ERROR)
         }
     };
     let (tag, payload) = caller.data_mut().value_to_wasm(value);
-    (tag, payload, signal)
+    CallOutcome::signalled(tag, payload, signal)
 }
