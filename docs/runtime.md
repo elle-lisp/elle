@@ -13,8 +13,8 @@ Signal     Bit   Purpose
 :debug      2    Debugger breakpoints
 :ffi        4    FFI callbacks
 :halt       8    Fiber termination
-:io         9    Async I/O completion
-:exec      11    Subprocess completion
+:io         9    Async I/O request
+:exec      11    Subprocess execution
 :fuel      12    Instruction budget exhaustion
 :switch    13    Context switch
 :wait      14    Blocking wait

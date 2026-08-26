@@ -68,7 +68,7 @@ use keywords in set literals for fiber masks:
 | `:ffi` | 4 | Calls foreign code |
 | `:halt` | 8 | Graceful VM termination |
 | `:io` | 9 | I/O request to scheduler |
-| `:exec` | 11 | Subprocess completion |
+| `:exec` | 11 | Subprocess execution |
 | `:fuel` | 12 | Instruction budget exhaustion |
 
 Bits 3, 5–7, 10, 13–14 are VM-internal. Bits 15–17 name capabilities
