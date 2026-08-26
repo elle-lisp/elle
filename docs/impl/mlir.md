@@ -2,7 +2,10 @@
 
 > **Feature-gated:** The MLIR backend requires `--features mlir` at build
 > time and a working LLVM 22 + MLIR install (the `melior` crate links to
-> them). It is disabled by default.
+> them). It is disabled by default. If your MLIR install lives outside the
+> system prefix, set `MLIR_SYS_220_PREFIX` to its root in the `[env]` table
+> of `~/.cargo/config.toml`. That file is per-user, so the repository
+> carries no machine-specific paths.
 
 The MLIR backend is a tier-2 path that takes a hot, **GPU-eligible**
 `LirFunction`, lowers it through the MLIR `arith` / `func` / `cf` /

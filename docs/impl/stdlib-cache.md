@@ -27,7 +27,8 @@ recompile, and store failures are silently ignored.
 ## Cache key and invalidation
 
 ```
-cache_key = hash(stdlib source, elle version, FORMAT_VERSION) + ".bin"
+cache_key = hash(stdlib source, elle version, FORMAT_VERSION,
+                 primitive-table identity) + ".bin"
 ```
 
 - **stdlib source**: the text embedded via `include_str!`; a source change
@@ -37,6 +38,11 @@ cache_key = hash(stdlib source, elle version, FORMAT_VERSION) + ".bin"
   `ELLE_CACHE_VERSION` env var (tests and debugging).
 - **FORMAT_VERSION**: a hard version number bumped manually on incompatible
   layout changes; validated on load.
+- **primitive-table identity**: the ordered names and aliases of every
+  canonical primitive (`hash_prim_table_identity`). A serialized native-fn
+  immediate carries a `prim_id` that is only valid against the exact table
+  that minted it, so any addition, removal, rename, or reorder must
+  invalidate the cache.
 
 Cache directory defaults to `$XDG_CACHE_HOME/elle/stdlib-cache`
 (`~/.cache` without XDG); override with `ELLE_CACHE_DIR`.
@@ -104,14 +110,16 @@ These two fields were missing from `SendableClosure`; adding them makes the
 send/spawn path and the cache path share the same machinery and incidentally
 fixes a send/spawn omission.
 
-### `SendValue` uses a symmetric hand-written Mirror enum serde
+### `SendValue` and `TableKey` serialize through symmetric mirror enums
 
-For scalar values (int/float/bool/nil/keyword/symbol/native-fn), hand-written
-tuple serialization can drift from derived deserialization (bincode's enum-tag
-encoding differs), so both sides are written against a symmetric Mirror enum.
-Heap values (string/struct/closure instances, …) are rejected on this path —
-compound literals in the constant pool lower to `MaterializeConst` templates at
-compile time and never enter the pool.
+Hand-written tuple serialization drifts from derived deserialization
+(bincode's enum-tag encoding differs), so both directions of each impl go
+through one derived mirror enum (`src/value/send/mirror.rs`). A symbol
+`TableKey` or symbol `Value` refuses to serialize: it carries only a
+process-local id, no name a loader could re-intern — symbols cross by name as
+`SendValue::Symbol` or `LirConst::Symbol` instead. Heap `Value`s are likewise
+rejected — compound literals in the constant pool lower to `MaterializeConst`
+templates at compile time and never enter the pool.
 
 ## Integration point
 

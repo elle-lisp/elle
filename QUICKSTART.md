@@ -91,6 +91,7 @@ make smoke                 # run all tests (~30s)
 | [spirv](docs/impl/spirv.md) | SPIR-V emission for GPU compute |
 | [gpu](docs/impl/gpu.md) | End-to-end GPU compute (Vulkan) |
 | [values](docs/impl/values.md) | Value representation, tagged union |
+| [stdlib-cache](docs/impl/stdlib-cache.md) | Disk cache for the compiled standard library |
 
 ## Reference
 
