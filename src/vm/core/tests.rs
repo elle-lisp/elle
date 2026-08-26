@@ -58,3 +58,28 @@ fn test_wrap_error_empty_stack() {
 
     assert_eq!(wrapped, error_msg);
 }
+
+#[test]
+fn signal_bits_operand_round_trips_the_user_range() {
+    // A `(signal :keyword)` declaration allocates a bit in 32-63, so the
+    // operand the emitter writes and the operand the VM reads must agree over
+    // the whole 64-bit width (docs/impl/bytecode.md § "Signal-bits operands").
+    //
+    // The counter-factual: a narrower operand decodes this mask to SIG_OK,
+    // which is exactly what a fiber returning normally looks like — the emit
+    // then reads as a return, and nothing downstream reports an error.
+    use crate::compiler::bytecode::Bytecode;
+    use crate::value::fiber::SignalBits;
+
+    let bits = SignalBits::from_bit(32)
+        .union(SignalBits::from_bit(63))
+        .union(crate::value::SIG_YIELD);
+    let mut bc = Bytecode::new();
+    bc.emit_signal_bits(bits);
+    assert_eq!(bc.instructions.len(), 8, "a signal-bits operand is 8 bytes");
+
+    let vm = VM::new();
+    let mut ip = 0;
+    assert_eq!(vm.read_signal_bits(&bc.instructions, &mut ip), bits);
+    assert_eq!(ip, 8, "reading a signal-bits operand advances 8 bytes");
+}

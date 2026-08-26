@@ -57,7 +57,7 @@ back-pointers, avoiding Rc cycles.
 ## Signals
 
 
-Signal types are bit positions in a `u32` bitmask. User-facing signals
+Signal types are bit positions in a 64-bit mask. User-facing signals
 use keywords in set literals for fiber masks:
 
 | Keyword | Bit | Purpose |
@@ -71,8 +71,11 @@ use keywords in set literals for fiber masks:
 | `:exec` | 11 | Subprocess completion |
 | `:fuel` | 12 | Instruction budget exhaustion |
 
-Bits 3, 5–7, 10, 13–15 are VM-internal. Bits 16–31 are for
-user-defined signals (via `(signal :keyword)`).
+Bits 3, 5–7, 10, 13–14 are VM-internal. Bits 15–17 name capabilities
+(`:gpu`, `:os-signal`, `:fs`) and bits 18–31 are reserved for future
+runtime signals — see [runtime.md](../runtime.md) for the full table.
+Bits 32–63 are for user-defined signals (via `(signal :keyword)`) — see
+[protocol.md](protocol.md).
 
 The terminal signal (bit 10) is **uncatchable** — it passes through all
 mask checks. `fiber/cancel` uses this to ensure the fiber dies immediately.

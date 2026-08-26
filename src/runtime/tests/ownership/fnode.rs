@@ -101,7 +101,7 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
 
@@ -221,7 +221,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
 
@@ -324,7 +324,7 @@ fn fiber_kill_park_retains_terminal_payload() {
     let mut bc = Bytecode::new();
     bc.emit(Instruction::Nil);
     bc.emit(Instruction::Emit);
-    bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+    bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
     bc.emit(Instruction::Return);
     let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
 
@@ -418,7 +418,7 @@ fn discard_frees_parked_activation_owner_node() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         crate::value::Code::new(
             Rc::new(bc.instructions),
@@ -525,7 +525,7 @@ fn dropped_parked_fiber_discharges_owned_state() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
 
@@ -599,7 +599,7 @@ fn dropped_parked_fiber_releases_signal_escape_retain() {
         bc.emit(Instruction::LoadConst);
         bc.emit_u16(idx);
         bc.emit(Instruction::Emit);
-        bc.emit_u16(crate::value::fiber::SIG_YIELD.raw() as u16);
+        bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
         let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
 
@@ -699,7 +699,7 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
         bc.emit_u16(idx);
         if !bits.is_empty() {
             bc.emit(Instruction::Emit);
-            bc.emit_u16(bits.raw() as u16);
+            bc.emit_signal_bits(bits);
         }
         bc.emit(Instruction::Return);
         let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
@@ -775,7 +775,7 @@ fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
         bc.emit_u16(idx);
         if !bits.is_empty() {
             bc.emit(Instruction::Emit);
-            bc.emit_u16(bits.raw() as u16);
+            bc.emit_signal_bits(bits);
         }
         bc.emit(Instruction::Return);
         let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
