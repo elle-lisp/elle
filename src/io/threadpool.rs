@@ -1,6 +1,7 @@
 //! Thread-pool backend and stdin thread for async I/O.
 
 use crate::io::grapheme_count_in_valid_prefix;
+use crate::io::pending::OpKind;
 use crate::io::request::SocketOptions;
 use crate::io::SubmissionId;
 use std::collections::HashMap;
@@ -149,9 +150,43 @@ pub(super) enum PoolOp {
     },
 }
 
+impl PoolOp {
+    /// What this operation is, in the terms a completion reports it in.
+    ///
+    /// The worker knows what it ran; the submission table claims what is in
+    /// flight under the id. `PendingOp::accepts` compares the two, so a
+    /// completion resolving to the wrong entry is reported rather than cooked
+    /// through an arm its payload does not fit. See [`OpKind`].
+    pub(super) fn kind(&self) -> OpKind {
+        match self {
+            PoolOp::Read { .. }
+            | PoolOp::ReadExact { .. }
+            | PoolOp::ReadLine { .. }
+            | PoolOp::ReadAll { .. }
+            | PoolOp::Write { .. }
+            | PoolOp::Flush { .. }
+            | PoolOp::Accept { .. }
+            | PoolOp::SendTo { .. }
+            | PoolOp::RecvFrom { .. }
+            | PoolOp::Shutdown { .. } => OpKind::Port,
+            PoolOp::ConnectTcp { .. } | PoolOp::ConnectUnix { .. } => OpKind::Connect,
+            PoolOp::Sleep => OpKind::Sleep,
+            PoolOp::ProcessWait { .. } => OpKind::ProcessWait,
+            PoolOp::Open { .. } => OpKind::Open,
+            PoolOp::Task(_) => OpKind::Task,
+            PoolOp::Resolve { .. } => OpKind::Resolve,
+            PoolOp::WatchRead { .. } => OpKind::Watch,
+            PoolOp::SigfdRead { .. } | PoolOp::KqSigRead { .. } => OpKind::Signal,
+            PoolOp::PollFd { .. } => OpKind::Poll,
+        }
+    }
+}
+
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
 pub(super) struct PoolCompletion {
     pub(super) id: u64,
+    /// What the worker ran, checked against the entry the id resolves through.
+    pub(super) kind: OpKind,
     pub(super) result_code: i32,
     pub(super) data: Vec<u8>,
 }
