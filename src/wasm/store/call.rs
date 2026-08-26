@@ -56,11 +56,7 @@ pub(in crate::wasm) fn handle_wasm_result(
             } else {
                 caller.data_mut().env_stack_ptr = env_base;
 
-                let mut signal =
-                    i64::from_le_bytes(memory.data(&*caller)[0..8].try_into().unwrap());
-                if signal != 0 {
-                    memory.data_mut(&mut *caller)[0..8].copy_from_slice(&0i64.to_le_bytes());
-                }
+                let mut signal = super::take_raised_signal(&mut *caller, &memory).raw() as i64;
                 // A NativeFn tail call that yielded SIG_IO (written to
                 // memory[0..8] by rt_prepare_tail_call — the tail-position path a
                 // stdlib wrapper like `tcp/connect`'s `(apply tcp/connect-ip …)`
@@ -576,11 +572,35 @@ pub(in crate::wasm) fn call_precached_closure(
 
     match func.call(&mut store, (env_base as i32, 0, 0, 0)) {
         Ok((tag, payload, status)) => {
+            // The third slot of this function's result is the host's SIGNAL, not
+            // the wasm `status` word. They are different channels: `status` says
+            // whether the closure suspended, and the signal it raised lives in
+            // this store's SIGNAL_SLOT. Returning `status` here reported a failed
+            // primitive as a successful return of the error value.
+            //
+            // A precached closure cannot suspend — precaching only engages when
+            // no closure in the module may suspend, and `standalone_emittable`
+            // refuses every parking shape besides — so a non-zero status means
+            // the emission gate and this caller have drifted apart.
+            if status != 0 {
+                let heap = unsafe { &mut *caller.data().heap_ptr() };
+                let ctx = crate::primitives::ctx::Alloc::new(heap);
+                let err = ctx.error(
+                    "internal-error",
+                    format!(
+                        "precached closure suspended at resume state {status}, \
+                         which a standalone store cannot drive"
+                    ),
+                );
+                let (tag, payload) = caller.data_mut().value_to_wasm(err);
+                return (tag, payload, crate::value::fiber::SIG_ERROR.raw() as i64);
+            }
+            let signal = super::take_raised_signal(&mut store, &memory);
             // Convert result from standalone store's handle space
             // back to the caller's handle space.
             let value = store.data().wasm_to_value(tag, payload);
             let (caller_tag, caller_payload) = caller.data_mut().value_to_wasm(value);
-            (caller_tag, caller_payload, status)
+            (caller_tag, caller_payload, signal.raw() as i64)
         }
         Err(e) => {
             let heap = unsafe { &mut *caller.data().heap_ptr() };

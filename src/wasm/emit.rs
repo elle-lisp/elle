@@ -204,6 +204,15 @@ pub(super) const FN_ENTRY: u32 = 11;
 // Linear memory layout
 pub(super) const ARGS_BASE: i32 = 256;
 
+/// Reserved 8-byte slot at the base of linear memory holding the `SignalBits` a
+/// compiled function raised.
+///
+/// A compiled function answers on two channels, and both must be read. The
+/// `status` word it returns says whether it suspended; the signal it raised
+/// goes here. Reading only `status` reports a failed primitive as a successful
+/// return of the error value — see `store::take_raised_signal`.
+pub(in crate::wasm) const SIGNAL_SLOT: i32 = 0;
+
 /// Reserved 16-byte slot in linear memory holding the **executing closure**
 /// (tag at `SELF_SLOT`, payload at `SELF_SLOT + 8`) — the WASM analogue of the
 /// interpreter's `Fiber::current_closure` and the JIT's `self_tag_payload`. A

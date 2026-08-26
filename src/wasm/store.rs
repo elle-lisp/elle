@@ -27,6 +27,29 @@ pub(in crate::wasm) fn write_self_slot<T: 'static>(
     data[base + 8..base + 16].copy_from_slice(&payload.to_le_bytes());
 }
 
+/// Take the signal a compiled function raised, clearing the channel behind it.
+///
+/// A compiled WASM function answers on two channels: the `status` word it
+/// returns (0 = ran to completion, >0 = the resume state it suspended at), and
+/// the `SignalBits` it raised, written to `SIGNAL_SLOT`. A caller that reads
+/// only `status` reports a failed primitive as a successful return of the error
+/// value — pinned by `tests/elle/wasm-tier-error-signal.lisp`.
+///
+/// Generic over the host type so the full-module (`ElleHost`) and tiered
+/// (`TieredHost`) paths, and both `Caller` and `Store` contexts, share it.
+pub(in crate::wasm) fn take_raised_signal<T: 'static>(
+    mut ctx: impl wasmtime::AsContextMut<Data = T>,
+    memory: &wasmtime::Memory,
+) -> crate::value::fiber::SignalBits {
+    let base = super::emit::SIGNAL_SLOT as usize;
+    let data = memory.data_mut(ctx.as_context_mut());
+    let raw = i64::from_le_bytes(data[base..base + 8].try_into().unwrap());
+    if raw != 0 {
+        data[base..base + 8].copy_from_slice(&0i64.to_le_bytes());
+    }
+    crate::value::fiber::SignalBits::new(raw as u64)
+}
+
 /// Read the executing closure `(tag, payload)` out of the reserved `SELF_SLOT`.
 /// The mirror of [`write_self_slot`] — used to save/restore the slot around a
 /// nested call and to snapshot it into a suspension frame at yield.
