@@ -10,6 +10,36 @@ use std::collections::{HashMap, HashSet};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
+/// What kind of operation a worker ran.
+///
+/// A completion carries this back beside its id, so the entry the id resolves
+/// through can be checked against the operation that actually finished. Without
+/// it a completion resolving to the wrong entry is silent, and the arm it
+/// matches applies its own ownership rules to another operation's payload:
+/// `ProcessWait` reclaims a `Box<siginfo_t>`, `Connect` and `Open` take
+/// ownership of a descriptor, the port arms write through a fiber's buffer. Each
+/// of those frees or dereferences memory belonging to something else.
+///
+/// The kinds are coarser than [`PendingOp`] on purpose: they name what a worker
+/// can tell you it did. `ev/poll-fd` and the `chan/wait-ready` park run the same
+/// operation and are both [`OpKind::Poll`], which is why the check is
+/// [`PendingOp::accepts`] rather than an equality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpKind {
+    /// Stream or socket I/O on a descriptor a port owns.
+    Port,
+    Connect,
+    Sleep,
+    ProcessWait,
+    Open,
+    Task,
+    Resolve,
+    Watch,
+    Signal,
+    /// A readiness wait on a bare descriptor.
+    Poll,
+}
+
 /// Pending async I/O operation.
 ///
 /// Three variants matching the three port lifecycles:
@@ -123,6 +153,47 @@ impl PendingOp {
             PendingOp::SigNext { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::PollFd { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::ChanSelectPark { buffer_handle, .. } => Some(*buffer_handle),
+        }
+    }
+
+    /// Could an operation of kind `kind` have filed this entry?
+    ///
+    /// A completion answers "no" only when the submission table and the
+    /// completion disagree about what is in flight under one id. Nothing
+    /// downstream can be trusted then, so the caller reports the disagreement
+    /// rather than cooking a result through an arm the payload does not fit.
+    pub(crate) fn accepts(&self, kind: OpKind) -> bool {
+        matches!(
+            (self, kind),
+            (PendingOp::Port { .. }, OpKind::Port)
+                | (PendingOp::Connect { .. }, OpKind::Connect)
+                | (PendingOp::Sleep { .. }, OpKind::Sleep)
+                | (PendingOp::ProcessWait { .. }, OpKind::ProcessWait)
+                | (PendingOp::Open { .. }, OpKind::Open)
+                | (PendingOp::Task { .. }, OpKind::Task)
+                | (PendingOp::Resolve { .. }, OpKind::Resolve)
+                | (PendingOp::WatchNext { .. }, OpKind::Watch)
+                | (PendingOp::SigNext { .. }, OpKind::Signal)
+                | (PendingOp::PollFd { .. }, OpKind::Poll)
+                | (PendingOp::ChanSelectPark { .. }, OpKind::Poll)
+        )
+    }
+
+    /// The name of this entry's operation, for a report about an id whose entry
+    /// and completion disagree.
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            PendingOp::Port { .. } => "port I/O",
+            PendingOp::Connect { .. } => "connect",
+            PendingOp::Sleep { .. } => "sleep",
+            PendingOp::ProcessWait { .. } => "process wait",
+            PendingOp::Open { .. } => "open",
+            PendingOp::Task { .. } => "task",
+            PendingOp::Resolve { .. } => "resolve",
+            PendingOp::WatchNext { .. } => "watch",
+            PendingOp::SigNext { .. } => "signal",
+            PendingOp::PollFd { .. } => "poll",
+            PendingOp::ChanSelectPark { .. } => "channel park",
         }
     }
 

@@ -1749,6 +1749,28 @@ fn port_read_timeout_threadpool() {
     run_elle_script_with_args("port-read-timeout", &["--no-uring"]);
 }
 
+// Grapheme-counted `read-exact` framing, on the OTHER backend. The two backends
+// assemble a text read's answer from different places — io_uring from the
+// fiber's buffer, the pool worker from the bytes it hands back — so each needs
+// its own coverage of a cluster too wide for that buffer. The pool half is the
+// sole mechanism on macOS. See docs/io.md § "A read that overshoots keeps the
+// rest for the same port".
+#[test]
+fn port_text_framing_threadpool() {
+    run_elle_script_with_args("port-text-framing", &["--no-uring"]);
+}
+
+// A line longer than the buffer `read-line` reserves, on the OTHER backend. The
+// two backends outgrow that buffer in different places — the pool worker reads
+// to the newline and hands back every byte at once, io_uring fills the buffer
+// and resubmits — so each needs its own coverage. The pool half is the sole
+// mechanism on macOS. See docs/io.md § "A read that overshoots keeps the rest
+// for the same port".
+#[test]
+fn port_longline_threadpool() {
+    run_elle_script_with_args("port-longline", &["--no-uring"]);
+}
+
 // Two timed operations on one descriptor, on the OTHER backend. The bound the
 // pool worker uses is descriptor state the operations share, so the file only
 // measures anything where that mechanism runs: io_uring gives each operation

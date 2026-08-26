@@ -204,4 +204,21 @@
           (println "  3. 8 MB through a TLS connection: every byte written"))))
     (file/delete-dir-all scratch)))
 
+## ── an empty payload is a count of zero, not an end of stream ──────────
+##
+## `port/write` returns the length of what it was given, and zero is a
+## length. The trap: a write of nothing completes with the same zero a
+## read uses to report EOF, so a completion path that reads zero as "the
+## stream ended" answers nil here and breaks the return contract for the
+## one payload that has nothing to distinguish it.
+(with-temp-dir dir
+               (let [p (port/open (path/join dir "empty-write.txt") :write)]
+                 (defer
+                   (port/close p)
+                   (assert (= (port/write p "") 0)
+                           "port/write of an empty payload returns 0")
+                   (assert (= (port/write p "abc") 3)
+                           "and a payload after it still reports its own length"))))
+(println "  4. an empty payload returns a count of zero")
+
 (println "port-shortwrite: all tests passed")

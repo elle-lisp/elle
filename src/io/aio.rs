@@ -3,7 +3,7 @@
 //! Uses io_uring on Linux (feature-gated), thread-pool fallback elsewhere.
 
 use crate::io::completion;
-use crate::io::pending::{PendingOp, PendingTable, Taken};
+use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
     ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, ProcessState, SpawnRequest, TaskFn,

@@ -238,7 +238,6 @@ fn short_write_resubmits_until_the_payload_is_gone() {
         None,
         &mut pool,
         Some(buf_handle),
-        0,
     )
     .expect("submit_uring_stream");
 

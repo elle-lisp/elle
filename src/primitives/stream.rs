@@ -120,11 +120,13 @@ fn prim_stream_read_exact(
         Err(e) => return e,
     };
     // `count` is the number of *units* to read: bytes on a binary port,
-    // grapheme clusters on a text port. A grapheme can span several
-    // UTF-8 bytes, so a text read reserves 4 bytes per grapheme (the
-    // UTF-8 codepoint upper bound, ample for the common case) so the
-    // backend can fill it in one read; the completion path splits at the
-    // Nth grapheme boundary and stashes any remainder for the next read.
+    // grapheme clusters on a text port. Binary reserves exactly what it
+    // will answer with. Text cannot: a cluster is any number of joined
+    // codepoints, so no reservation is a bound on the answer. Four bytes
+    // per cluster is a chunk large enough that the common case is filled
+    // in one read; the completion assembles the answer outside this buffer
+    // when the clusters turn out wider, splits at the Nth boundary, and
+    // stashes the remainder for the next read on the port.
     // The buffer is allocated in the caller's region so the resulting
     // string stays in-region (bytes_to_string_in_place).
     let is_text = port

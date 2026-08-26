@@ -267,152 +267,54 @@ impl AsyncBackend {
             return Ok(id);
         }
 
-        // ReadLine / Read: check per-fd buffer first.
-        // When a previous raw libc::read returned more data than one line (common
-        // with TCP), the excess is stored in fd_states[port_key].buffer.
-        // Serve subsequent reads from the buffer before submitting to the pool.
+        // A previous read on this port took more from the kernel than it
+        // answered with, and the remainder belongs to this one. When it already
+        // answers the request in full, this read finishes here and no backend
+        // runs — which is not merely a saved syscall: a read submitted for bytes
+        // the port is already holding would park until the peer sent more, and a
+        // peer that has said everything it has to say never would.
         //
-        // `read_buffered` tracks how many bytes were already in the buffer
-        // when a Read request can't be fully served — the completion handler
-        // must prepend those bytes to the fd data.
+        // When the remainder falls short it stays exactly where it is. The
+        // completion joins it to the bytes this read produces (`assemble_read`),
+        // so the fiber's buffer holds only what a kernel read put there. Moving
+        // the remainder in instead would make the buffer hold both, and no size
+        // fixed in advance can promise that: a remainder is as long as whatever
+        // the last kernel read returned.
         let port_encoding = port.encoding();
         let gen = inner.unicode_generation;
-        let mut read_buffered: usize = 0;
         {
-            let state = inner
-                .fd_states
-                .entry(port_key.clone())
-                .or_insert_with(FdState::new);
-            match op {
-                PortOp::ReadLine { buffer } => {
-                    if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
-                        let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                        unsafe {
-                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                            let copy_len = line_bytes.len().min(dst_cap);
-                            std::ptr::copy_nonoverlapping(line_bytes.as_ptr(), dst, copy_len);
-                            let final_len = if copy_len > 0 && line_bytes[copy_len - 1] == b'\n' {
-                                let mut end = copy_len - 1;
-                                if end > 0 && line_bytes[end - 1] == b'\r' {
-                                    end -= 1;
-                                }
-                                end
-                            } else {
-                                copy_len
-                            };
-                            crate::io::request::truncate_buffer(buffer, final_len);
-                        }
-                        // Transmute LBytes → LString (zero-copy)
-                        let result = unsafe {
-                            crate::io::request::bytes_to_string_in_place(*buffer, origin_heap)
-                        };
-                        inner.completions.push_back(Completion::new(id, result));
-                        return Ok(id);
-                    }
-                    // No newline found in state.buffer, but there IS buffered data.
-                    // Copy it into the fiber buffer at offset 0 so the completion
-                    // handler can prepend it to the kernel/thread-pool data.
-                    if !state.buffer.is_empty() {
-                        unsafe {
-                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                            let copy_len = state.buffer.len().min(dst_cap);
-                            std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
-                        }
-                        read_buffered = state.buffer.len();
-                        state.buffer.clear();
-                    }
-                }
+            let origin_heap = inner.origin_heap;
+            let state = crate::io::types::fd_state_mut(&mut inner.fd_states, &port_key);
+            let held = match op {
+                PortOp::ReadLine { buffer } => state
+                    .buffer
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .map(|pos| (buffer, pos + 1, Encoding::Text)),
                 PortOp::Read { count, buffer } => {
-                    if state.buffer.len() >= *count {
-                        let chunk: Vec<u8> = state.buffer.drain(..*count).collect();
-                        unsafe {
-                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                            let copy_len = chunk.len().min(dst_cap);
-                            std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, copy_len);
-                            crate::io::request::truncate_buffer(buffer, copy_len);
-                        }
-                        let result = if port_encoding == Encoding::Text {
-                            unsafe {
-                                crate::io::request::bytes_to_string_in_place(*buffer, origin_heap)
-                            }
-                        } else {
-                            Ok(*buffer)
-                        };
-                        inner.completions.push_back(Completion::new(id, result));
-                        return Ok(id);
-                    }
-                    // Buffered prefix is shorter than the request.  Move it
-                    // into the fiber buffer at offset 0 and clear it (see the
-                    // ReadExact branch below for why leaving it in state.buffer
-                    // while offsetting the kernel write corrupts the result).
-                    unsafe {
-                        let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                        let copy_len = state.buffer.len().min(dst_cap);
-                        std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
-                    }
-                    read_buffered = state.buffer.len();
-                    state.buffer.clear();
+                    (state.buffer.len() >= *count).then_some((buffer, *count, port_encoding))
                 }
                 PortOp::ReadExact { count, buffer } => {
-                    // ReadExact's unit is whatever the port is measured in:
-                    // bytes for Binary, graphemes for Text.  If the buffered
-                    // prefix already contains `count` units, serve from buffer.
-                    let early = match port.encoding() {
-                        Encoding::Binary => {
-                            if state.buffer.len() >= *count {
-                                Some(*count)
-                            } else {
-                                None
-                            }
-                        }
-                        Encoding::Text => {
-                            crate::io::nth_grapheme_byte_end(&state.buffer, *count, gen)
-                        }
-                    };
-                    if let Some(take_bytes) = early {
-                        let chunk: Vec<u8> = state.buffer.drain(..take_bytes).collect();
-                        let heap =
-                            unsafe { &mut *crate::io::completion_heap_ptr(inner.origin_heap) };
-                        let ctx = crate::primitives::ctx::Alloc::new(heap);
-                        let value = match port.encoding() {
-                            Encoding::Text => ctx.string(String::from_utf8_lossy(&chunk).as_ref()),
-                            Encoding::Binary => ctx.bytes(chunk),
-                        };
-                        if let Some(bh) = buf_handle {
-                            inner.buffer_pool.release(bh);
-                        }
-                        inner.completions.push_back(Completion::ok(id, value));
-                        return Ok(id);
-                    }
-                    // Not enough yet.  For Binary, move the buffered prefix
-                    // into the fiber buffer at offset 0 and clear it — exactly
-                    // the ReadLine no-newline branch above.  The kernel then
-                    // writes at dst+read_buffered, so the completion sees an
-                    // empty fd_state buffer and needs no shift.
-                    //
-                    // Leaving the prefix in state.buffer while ALSO offsetting
-                    // the kernel write (read_buffered) double-handled it: the
-                    // completion's shift-prepend branch moves kernel data as if
-                    // it sat at dst[0] when it actually sits at dst+filled,
-                    // stranding `read_buffered` zero bytes in the middle of the
-                    // reassembled result.  That corrupted any read-exact that
-                    // followed a read-line whose recv over-read past the line
-                    // (the redis bulk-string framing bug — corruption at the
-                    // byte offset equal to the over-read length).
-                    //
-                    // Text stays as-is: its buffer is oversized (4 B/grapheme)
-                    // and the completion grapheme-splits the combined buffer.
-                    if matches!(port.encoding(), Encoding::Binary) {
-                        unsafe {
-                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                            let copy_len = state.buffer.len().min(dst_cap);
-                            std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
-                        }
-                        read_buffered = state.buffer.len();
-                        state.buffer.clear();
-                    }
+                    crate::io::frame::exact_end(&state.buffer, *count, port_encoding, gen)
+                        .map(|end| (buffer, end, port_encoding))
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some((buffer, take, encoding)) = held {
+                let chunk: Vec<u8> = state.buffer.drain(..take).collect();
+                // A line's terminator is not part of it; the other two answer
+                // with every byte they took.
+                let answer = if matches!(op, PortOp::ReadLine { .. }) {
+                    chunk[..crate::io::frame::line_end(&chunk).0].to_vec()
+                } else {
+                    chunk
+                };
+                let result = crate::io::frame::read_result(buffer, answer, encoding, origin_heap);
+                if let Some(bh) = buf_handle {
+                    inner.buffer_pool.release(bh);
+                }
+                inner.completions.push_back(Completion::new(id, result));
+                return Ok(id);
             }
         }
 
@@ -449,7 +351,6 @@ impl AsyncBackend {
                             request.timeout,
                             buffer_pool,
                             buf_handle,
-                            read_buffered,
                         )?;
                     }
                     PlatformBackend::ThreadPool => {
@@ -475,37 +376,23 @@ impl AsyncBackend {
                             PortOp::Write { .. } => Bounds::new(request.timeout, None),
                             _ => Bounds::prompt(),
                         };
+                        // Each read asks the kernel for its whole count. The
+                        // remainder the port is holding is short of that count
+                        // — a remainder that met it answered above — but by how
+                        // much is a question in the port's own unit, and only
+                        // the completion, holding the join, can answer it. So
+                        // the worker may bring back more than the request needs,
+                        // and the completion gives the surplus to the port.
                         let pool_op = match op {
                             PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             PortOp::ReadAll => PoolOp::ReadAll { fd },
-                            PortOp::Read { count, .. } => PoolOp::Read {
+                            PortOp::Read { count, .. } => PoolOp::Read { fd, size: *count },
+                            PortOp::ReadExact { count, .. } => PoolOp::ReadExact {
                                 fd,
-                                size: *count - read_buffered,
+                                size: *count,
+                                graphemes: matches!(port.encoding(), Encoding::Text),
+                                gen,
                             },
-                            PortOp::ReadExact { count, .. } => {
-                                let is_text = matches!(port.encoding(), Encoding::Text);
-                                if is_text {
-                                    // Grapheme-counted: the worker grows its
-                                    // own buffer and loops until `count`
-                                    // graphemes are present.  `read_buffered`
-                                    // bytes already sitting in fd_state are
-                                    // handled by the completion path on the
-                                    // combined buffer.
-                                    PoolOp::ReadExact {
-                                        fd,
-                                        size: *count,
-                                        graphemes: true,
-                                        gen,
-                                    }
-                                } else {
-                                    PoolOp::ReadExact {
-                                        fd,
-                                        size: *count - read_buffered,
-                                        graphemes: false,
-                                        gen,
-                                    }
-                                }
-                            }
                             PortOp::Write { data } => PoolOp::Write {
                                 fd,
                                 data: Self::extract_write_bytes(data),
@@ -529,7 +416,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
-                        filled: read_buffered,
+                        filled: 0,
                         timeout: request.timeout,
                     },
                 );
