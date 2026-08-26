@@ -382,10 +382,7 @@ impl VM {
     /// `compile/run-on` entry returns it as the call's result. `squelched` must
     /// be non-empty, the answer `signals::squelched_bits` gives.
     pub(crate) fn squelch_violation(&mut self, squelched: SignalBits) -> Value {
-        let squelched_str = {
-            let registry = crate::signals::registry::global_registry().lock().unwrap();
-            registry.format_signal_bits(squelched)
-        };
+        let squelched_str = crate::signals::registry::format_bits(squelched);
         let err = self.escaping_error(
             "signal-violation",
             format!("squelch: signal {} caught at boundary", squelched_str),

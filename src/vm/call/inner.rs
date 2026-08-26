@@ -346,11 +346,13 @@ impl VM {
             {
                 let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
                 let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
-                let reg = crate::signals::registry::global_registry().lock().unwrap();
                 eprintln!("panic: silence violation in '{}'", name);
                 eprintln!("  A (silence)'d function signaled at runtime.");
                 eprintln!("  silence asserts purity — any signal is a programmer bug.");
-                eprintln!("  signal: {}", reg.format_signal_bits(sig_bits));
+                eprintln!(
+                    "  signal: {}",
+                    crate::signals::registry::format_bits(sig_bits)
+                );
                 eprintln!("  value:  {}", sig_val);
                 if let Some(loc) = self.error_loc.as_ref() {
                     eprintln!("  at {}", loc);

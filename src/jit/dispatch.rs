@@ -188,10 +188,8 @@ pub extern "C" fn elle_jit_check_signal_bound(
         let excess = signal_bits.subtract(allowed);
         if !excess.is_empty() {
             let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
-            let registry = crate::signals::registry::global_registry().lock().unwrap();
-            let excess_str = registry.format_signal_bits(excess);
-            let allowed_str = registry.format_signal_bits(allowed);
-            drop(registry);
+            let excess_str = crate::signals::registry::format_bits(excess);
+            let allowed_str = crate::signals::registry::format_bits(allowed);
             vm_ref.set_error(
                 "signal-violation",
                 format!(

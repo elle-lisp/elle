@@ -7,12 +7,12 @@
 # so unless the spawning fiber's withheld travels with the closure, a
 # sandboxed fiber escapes every denial by spawning a thread.
 #
-# The trap: `file/write` is synchronous. An earlier attempt to settle this
-# with `:exec` saw `{:error :thread-error :message "Unexpected yield
-# outside fiber context"}` and read it as enforcement. It was not — the
-# subprocess primitive tried to suspend and found no fiber context. A
-# synchronous primitive never hits that wall, so the escape was real and
-# invisible.
+# The trap: `file/write` is synchronous. Settle this with `:exec` instead
+# and the worker fails with a `:thread-error` whose message reports an
+# unhandled signal — which reads as enforcement and is not. The subprocess
+# primitive suspends, and a worker has no fiber context to suspend into. A
+# synchronous primitive never hits that wall, so the escape it hides is
+# real and invisible.
 #
 # A worker has no parent to suspend into, so a denial there cannot be
 # mediated. The thread ends and the join reports it.

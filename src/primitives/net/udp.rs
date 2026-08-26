@@ -50,7 +50,7 @@ pub(super) fn prim_udp_send_to(
         Err(e) => return e,
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             PortOp::SendTo {
@@ -113,7 +113,7 @@ pub(super) fn prim_udp_recv_from(
         ctx.struct_from(fields)
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             PortOp::RecvFrom { count, result }.into(),
@@ -131,8 +131,5 @@ pub(super) fn prim_sys_resolve(
         Ok(s) => s,
         Err(e) => return e,
     };
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::portless(ctx, IoOp::Resolve { hostname }),
-    )
+    (SIG_IO, IoRequest::portless(ctx, IoOp::Resolve { hostname }))
 }

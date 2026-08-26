@@ -102,6 +102,40 @@ fn test_format_signal_bits_empty() {
 }
 
 #[test]
+fn format_signal_bits_reports_a_bit_the_registry_does_not_carry() {
+    // The trap: the formatter walks the registry's entries, and the VM-internal
+    // bits are deliberately never registered. Reporting only what it walks
+    // renders a signal that is demonstrably not empty as `{}` — the string
+    // reserved for no signal at all. The counter-factual: assert `:error` alone
+    // and the dropped bit passes unseen.
+    let registry = SignalRegistry::with_builtins();
+    let internal = crate::signals::SIG_RESUME;
+    assert_eq!(
+        registry.lookup("resume"),
+        None,
+        "the premise: :resume is VM-internal and carries no registry entry"
+    );
+
+    let alone = registry.format_signal_bits(internal);
+    assert_ne!(
+        alone, "{}",
+        "an unnamed bit must not render as the empty set"
+    );
+    assert!(
+        alone.contains(&internal.to_string()),
+        "an unnamed bit is reported as its raw mask, got: {}",
+        alone
+    );
+
+    let beside_a_name = registry.format_signal_bits(SIG_ERROR.union(internal));
+    assert!(
+        beside_a_name.contains(":error") && beside_a_name.contains(&internal.to_string()),
+        "a named bit and an unnamed one are reported together, got: {}",
+        beside_a_name
+    );
+}
+
+#[test]
 fn test_global_registry_returns_same_instance() {
     let reg1 = global_registry();
     let reg2 = global_registry();

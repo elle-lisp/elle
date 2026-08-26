@@ -56,7 +56,7 @@ fn prim_stream_read(ctx: &mut NativeCtx, args: &[Value]) -> (SignalBits, Value) 
     let timeout = extract_keyword_timeout(args, 2, "port/read", ctx)?;
     let buffer = ctx.bytes(vec![0u8; count]);  // ← in the caller's region, via NativeCtx
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(IoOp::Read { count, buffer }, port, timeout),
     )
 }

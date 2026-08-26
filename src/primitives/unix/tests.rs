@@ -1,7 +1,7 @@
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
-use crate::value::fiber::{SIG_IO, SIG_YIELD};
+use crate::value::fiber::SIG_IO;
 
 /// A short socket path under the platform temp root.
 ///
@@ -51,7 +51,7 @@ fn test_unix_accept_returns_sig_io() {
             listener.as_external::<Port>().unwrap().close();
             bits
         });
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        assert_eq!(bits, SIG_IO);
         std::fs::remove_file(&path).ok();
     });
 }
@@ -63,7 +63,7 @@ fn test_unix_connect_returns_sig_io() {
             let arg = ctx.string(&*sock_path("nonexistent"));
             prim_unix_connect(ctx, &[arg])
         });
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        assert_eq!(bits, SIG_IO);
     });
 }
 
@@ -79,6 +79,6 @@ fn test_unix_shutdown_returns_sig_io() {
         let (bits, _) = crate::primitives::ctx::with_test_ctx(|ctx| {
             prim_unix_shutdown(ctx, &[stream_port, Value::keyword("read-write")])
         });
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        assert_eq!(bits, SIG_IO);
     });
 }

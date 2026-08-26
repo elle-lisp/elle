@@ -12,7 +12,7 @@ use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::primitives::kwarg::{extract_connect_kwargs, extract_keyword_timeout};
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 

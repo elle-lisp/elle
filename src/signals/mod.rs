@@ -74,10 +74,16 @@ pub const SIG_OS_SIGNAL: SignalBits = SignalBits::new(1 << 16); // POSIX signal 
 pub const SIG_FS: SignalBits = SignalBits::new(1 << 17); // filesystem access (capability bit, not dispatch)
 
 /// The scheduler round trip: the dispatch bit that routes a request to the
-/// I/O backend, the suspension it implies, and the error it may come back
-/// with. Every async primitive carries these three; a capability-gated one
-/// adds its own bit on top, so the base cannot drift between them.
-const IO_ROUND_TRIP: SignalBits = SIG_IO.union(SIG_YIELD).union(SIG_ERROR);
+/// I/O backend, and the error it may come back with. Every async primitive
+/// carries these two; a capability-gated one adds its own bit on top, so the
+/// base cannot drift between them.
+///
+/// `SIG_YIELD` is deliberately absent. The request does suspend its fiber, but
+/// suspension follows from raising a signal at all — see
+/// [`dispatch::is_suspending`] — not from that bit. `:yield` is the keyword a
+/// generator's mask names, and a request that carried it would be caught by
+/// every such mask on its way to the scheduler.
+const IO_ROUND_TRIP: SignalBits = SIG_IO.union(SIG_ERROR);
 
 /// VM-internal signal bits: infrastructure signals that user code cannot
 /// produce. These are emitted exclusively by the VM's own dispatch machinery.
@@ -215,12 +221,13 @@ impl Signal {
         }
     }
 
-    /// Performs asynchronous I/O: suspends on the request and may error
-    /// (SIG_IO | SIG_YIELD | SIG_ERROR).
+    /// Performs asynchronous I/O: raises a request and may error
+    /// (SIG_IO | SIG_ERROR).
     ///
     /// The signal of every port, socket, and file primitive that reaches the
-    /// scheduler. `SIG_YIELD` belongs with `SIG_IO` because the request
-    /// suspends the calling fiber until the backend completes it.
+    /// scheduler. The request suspends the calling fiber until the backend
+    /// completes it, but that is true of any signal and needs no bit of its own
+    /// — see the `IO_ROUND_TRIP` constant.
     pub const fn io_yields_errors() -> Self {
         Signal {
             bits: IO_ROUND_TRIP,
@@ -244,7 +251,7 @@ impl Signal {
     }
 
     /// Opens a filesystem path through the I/O scheduler
-    /// (SIG_FS | SIG_IO | SIG_YIELD | SIG_ERROR).
+    /// (SIG_FS | SIG_IO | SIG_ERROR).
     ///
     /// Both capabilities apply and either denial blocks the call: `SIG_FS` for
     /// the path the primitive resolves, `SIG_IO` for the scheduler round trip
@@ -259,7 +266,7 @@ impl Signal {
     }
 
     /// Runs a subprocess: asynchronous I/O under the exec capability
-    /// (SIG_EXEC | SIG_IO | SIG_YIELD | SIG_ERROR).
+    /// (SIG_EXEC | SIG_IO | SIG_ERROR).
     ///
     /// Both `SIG_EXEC` and `SIG_IO` are emitted, and they do different jobs.
     /// `SIG_IO` is the dispatch bit that routes the request through the I/O
@@ -434,6 +441,11 @@ impl fmt::Display for Signal {
             write!(f, "polymorphic({})", indices.join(","))?;
         } else if self.bits.intersects(SIG_YIELD) {
             write!(f, "yields")?;
+        } else if self.bits.intersects(SIG_IO) {
+            // An async primitive raises `:io` and no longer claims `:yield`, so
+            // without this arm every port and socket signal would print as
+            // "silent" — the one word it is not.
+            write!(f, "io")?;
         } else {
             write!(f, "silent")?;
         }

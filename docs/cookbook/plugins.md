@@ -128,7 +128,7 @@ a.get_external::<T>(v, "name")   // Option<&T>
 // Results
 a.ok(value)             // ElleResult with SIG_OK
 a.err("kind", "msg")    // ElleResult with SIG_ERROR
-a.yield_io(request)     // ElleResult with SIG_YIELD | SIG_IO
+a.yield_io(request)     // ElleResult with SIG_IO
 
 // Async
 a.poll_fd(fd, events)   // Create poll-fd I/O request

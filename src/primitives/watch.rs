@@ -4,7 +4,7 @@ use crate::io::request::{IoOp, IoRequest};
 use crate::io::watch::FsWatcher;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{sorted_struct_get, Value};
 
@@ -113,10 +113,7 @@ fn prim_watch_next(
             ctx.error("type-error", "watch-next: argument must be a watcher"),
         );
     }
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::new(ctx, IoOp::WatchNext, args[0]),
-    )
+    (SIG_IO, IoRequest::new(ctx, IoOp::WatchNext, args[0]))
 }
 
 /// (watch-close watcher)

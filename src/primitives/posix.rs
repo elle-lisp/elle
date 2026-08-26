@@ -10,7 +10,7 @@ use crate::io::sigmap;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::signals::{Signal, SIG_OS_SIGNAL};
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::collections::BTreeSet;
@@ -303,10 +303,7 @@ fn prim_sig_next(
             ),
         );
     }
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::new(ctx, IoOp::SigNext, args[0]),
-    )
+    (SIG_IO, IoRequest::new(ctx, IoOp::SigNext, args[0]))
 }
 
 // ── os/sig-close ───────────────────────────────────────────────────────

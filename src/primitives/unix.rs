@@ -5,7 +5,7 @@ use crate::port::{Direction, Port, PortKind};
 use crate::primitives::def::RegionEffect;
 use crate::primitives::kwarg::extract_connect_kwargs;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::os::unix::io::{FromRawFd, OwnedFd};
@@ -108,7 +108,7 @@ pub(crate) fn prim_unix_accept(
     };
     let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             PortOp::Accept {
@@ -160,7 +160,7 @@ pub(crate) fn prim_unix_connect(
         ),
     );
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             IoOp::Connect {
@@ -191,7 +191,7 @@ pub(crate) fn prim_unix_shutdown(
         Err(e) => return e,
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::new(ctx, PortOp::Shutdown { how }.into(), port_val),
     )
 }

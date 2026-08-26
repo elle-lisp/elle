@@ -20,9 +20,8 @@ impl VM {
             let signal_bits = closure.signal().bits;
             let excess = signal_bits.subtract(allowed_bits);
             if !excess.is_empty() {
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
-                let excess_str = registry.format_signal_bits(excess);
-                let allowed_str = registry.format_signal_bits(allowed_bits);
+                let excess_str = crate::signals::registry::format_bits(excess);
+                let allowed_str = crate::signals::registry::format_bits(allowed_bits);
                 let err = self.escaping_error(
                     "signal-violation",
                     format!(
