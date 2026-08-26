@@ -93,6 +93,7 @@ make smoke                 # run all tests (~30s)
 | [values](docs/impl/values.md) | Value representation, tagged union |
 | [symbol](docs/impl/symbol.md) | Symbol and keyword identity: name hash, per-instance display memo, ordering |
 | [image](docs/impl/image.md) | Image persistence design: boot image, environment save/load |
+| [stdlib-cache](docs/impl/stdlib-cache.md) | Disk cache for the compiled standard library |
 
 ## Reference
 

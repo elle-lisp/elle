@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 
 /// The on-disk form of a compiled module's entry `Bytecode`.
 ///
@@ -151,12 +151,6 @@ pub fn try_store(
     }
 }
 
-/// Serialize compiled stdlib bytecode into the cache format.
-///
-/// The entry constant pool is scalar by construction; the nested-lambda
-/// blueprints (`child_protos`) may contain live closure constants, LIR, and
-/// region-release tables, so they go through the send module's template
-/// serialization (which deep-copies closures and interns them by pointer).
 /// Serialize compiled stdlib bytecode into the cache format.
 ///
 /// The whole `Bytecode` is wrapped as a synthetic entry `ClosureTemplate`
@@ -362,182 +356,5 @@ mod tests {
         let _ = probe(&mut a);
         let _ = probe(&mut b);
         std::env::remove_var("ELLE_CACHE_DIR");
-    }
-}
-
-// =============================================================================
-// SendValue / TableKey serde for the stdlib cache
-// =============================================================================
-//
-// `SendValue` is the owned deep-copy form the send module produces for
-// cross-thread transport, and it is exactly the shape the stdlib cache needs:
-// no Rc, no pointers, symbols by name. We implement serde for it directly
-// rather than storing `Value`s, which carry process-local ids/pointers.
-//
-// Only the pure-data variants are supported; runtime-resource variants
-// (channels, ports, FFI descriptors) return an error, which makes the cache
-// miss and the caller recompile — safe, never wrong.
-
-/// Symmetric serde mirror for `SendValue`. Both directions go through this
-/// enum so the bincode encoding is identical (a hand-written `Serialize` that
-/// emitted tuples would not round-trip against a derived `Deserialize`, which
-/// expects bincode's enum encoding).
-#[derive(serde::Serialize, serde::Deserialize)]
-enum Mirror {
-    Immediate(crate::value::Value),
-    Keyword(String),
-    Symbol {
-        name: String,
-        id: u32,
-    },
-    String(String),
-    Pair(Box<Mirror>, Box<Mirror>, Box<Mirror>),
-    Seq(Vec<Mirror>, Box<Mirror>),
-    Map(
-        std::collections::BTreeMap<crate::value::TableKey, Mirror>,
-        Box<Mirror>,
-    ),
-    Buffer(Vec<u8>, Box<Mirror>),
-    Float(f64),
-    Closure(Box<crate::value::send::SendableClosure>),
-    Ref(usize),
-    CaptureCell(Box<Mirror>, Box<Mirror>),
-}
-
-impl serde::Serialize for crate::value::send::SendValue {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use crate::value::send::SendValue as SV;
-        use serde::ser::Error;
-        fn to_mirror(sv: &SV) -> Result<Mirror, String> {
-            if let SV::Immediate(v) = sv {
-                if v.is_heap() && !v.is_native_fn() {
-                    return Err(format!("Immediate heap value {}", v.type_name()));
-                }
-            }
-            Ok(match sv {
-                SV::Immediate(v) => Mirror::Immediate(*v),
-                SV::Keyword(k) => Mirror::Keyword(k.clone()),
-                SV::Symbol { name, id } => Mirror::Symbol {
-                    name: name.clone(),
-                    id: *id,
-                },
-                SV::String(st) => Mirror::String(st.clone()),
-                SV::Pair(a, b, t) => Mirror::Pair(
-                    Box::new(to_mirror(a)?),
-                    Box::new(to_mirror(b)?),
-                    Box::new(to_mirror(t)?),
-                ),
-                SV::Array(v, t) | SV::Tuple(v, t) | SV::LSet(v, t) | SV::LSetMut(v, t) => {
-                    Mirror::Seq(
-                        v.iter().map(to_mirror).collect::<Result<_, _>>()?,
-                        Box::new(to_mirror(t)?),
-                    )
-                }
-                SV::Struct(m, t) | SV::StructMut(m, t) => Mirror::Map(
-                    m.iter()
-                        .map(|(k, v)| Ok((k.clone(), to_mirror(v)?)))
-                        .collect::<Result<_, String>>()?,
-                    Box::new(to_mirror(t)?),
-                ),
-                SV::Buffer(v, t) | SV::Bytes(v, t) | SV::Blob(v, t) => {
-                    Mirror::Buffer(v.clone(), Box::new(to_mirror(t)?))
-                }
-                SV::LBox(..) => return Err("LBox not needed by stdlib cache".into()),
-                SV::CaptureCell(a, b) => {
-                    Mirror::CaptureCell(Box::new(to_mirror(a)?), Box::new(to_mirror(b)?))
-                }
-                SV::Float(f) => Mirror::Float(*f),
-                SV::Closure(c) => Mirror::Closure(c.clone()),
-                SV::Ref(r) => Mirror::Ref(*r),
-                _ => return Err("SendValue variant not serializable by stdlib cache".into()),
-            })
-        }
-        to_mirror(self).map_err(Error::custom)?.serialize(s)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for crate::value::send::SendValue {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use crate::value::send::SendValue as SV;
-        fn from_mirror(m: Mirror) -> Result<SV, String> {
-            Ok(match m {
-                Mirror::Immediate(v) => SV::Immediate(v),
-                Mirror::Keyword(k) => SV::Keyword(k),
-                Mirror::Symbol { name, id } => SV::Symbol { name, id },
-                Mirror::String(st) => SV::String(st),
-                Mirror::Pair(a, b, t) => SV::Pair(
-                    Box::new(from_mirror(*a)?),
-                    Box::new(from_mirror(*b)?),
-                    Box::new(from_mirror(*t)?),
-                ),
-                Mirror::Seq(v, t) => {
-                    let vals = v
-                        .into_iter()
-                        .map(from_mirror)
-                        .collect::<Result<Vec<_>, _>>()?;
-                    SV::Array(vals, Box::new(from_mirror(*t)?))
-                }
-                Mirror::Map(m, t) => {
-                    let map = m
-                        .into_iter()
-                        .map(|(k, v)| Ok((k, from_mirror(v)?)))
-                        .collect::<Result<_, String>>()?;
-                    SV::Struct(map, Box::new(from_mirror(*t)?))
-                }
-                Mirror::Buffer(v, t) => SV::Bytes(v, Box::new(from_mirror(*t)?)),
-                Mirror::Float(f) => SV::Float(f),
-                Mirror::Closure(c) => SV::Closure(c),
-                Mirror::Ref(r) => SV::Ref(r),
-                Mirror::CaptureCell(a, b) => {
-                    SV::CaptureCell(Box::new(from_mirror(*a)?), Box::new(from_mirror(*b)?))
-                }
-            })
-        }
-        from_mirror(Mirror::deserialize(d)?).map_err(serde::de::Error::custom)
-    }
-}
-
-impl serde::Serialize for crate::value::TableKey {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use crate::value::TableKey as TK;
-        match self {
-            TK::Nil => (0u8, ()).serialize(s),
-            TK::Bool(b) => (1u8, b).serialize(s),
-            TK::Int(i) => (2u8, i).serialize(s),
-            TK::Symbol(sym) => (3u8, sym.0).serialize(s),
-            TK::String(st) => (4u8, st).serialize(s),
-            TK::Keyword(k) => (5u8, k).serialize(s),
-            TK::EmptyList => (6u8, ()).serialize(s),
-            TK::Array(a) => (7u8, a).serialize(s),
-            TK::Heap(_) => Err(serde::ser::Error::custom(
-                "TableKey::Heap not serializable by stdlib cache",
-            )),
-        }
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for crate::value::TableKey {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use crate::value::TableKey as TK;
-        #[derive(serde::Deserialize)]
-        enum Raw {
-            A(u8, ()),
-            B(u8, bool),
-            C(u8, i64),
-            D(u8, u32),
-            E(u8, String),
-            F(u8, Vec<TK>),
-        }
-        match Raw::deserialize(d)? {
-            Raw::A(0, _) => Ok(TK::Nil),
-            Raw::B(1, b) => Ok(TK::Bool(b)),
-            Raw::C(2, i) => Ok(TK::Int(i)),
-            Raw::D(3, s) => Ok(TK::Symbol(crate::value::SymbolId(s))),
-            Raw::E(4, st) => Ok(TK::String(st)),
-            Raw::E(5, k) => Ok(TK::Keyword(k)),
-            Raw::A(6, _) => Ok(TK::EmptyList),
-            Raw::F(7, a) => Ok(TK::Array(a)),
-            _ => Err(serde::de::Error::custom("unsupported TableKey variant")),
-        }
     }
 }
