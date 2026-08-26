@@ -171,6 +171,12 @@ pub extern "C" fn elle_jit_yield(
             crate::value::arena::EscapeSite::EmitEscape,
         );
     }
+    // An ERROR emit's retain is the payload's whole delivery — record the mint,
+    // exactly as `handle_emit` does, so the walk and the parked frame's
+    // discharge reclaim the raise chain's own reference.
+    if sig.intersects(crate::value::fiber::SIG_ERROR) {
+        vm.fiber.emit_delivery = Some(yielded);
+    }
     vm.fiber.signal = Some((sig, yielded));
 
     if !sig.intersects(crate::value::fiber::SIG_ERROR) {

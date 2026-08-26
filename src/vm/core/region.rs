@@ -365,17 +365,22 @@ impl VM {
     /// reason the route stamps it — a slot released twice is an over-free.
     /// [`Self::release_abandoned_regions`] is the same reading of the other route.
     ///
-    /// `payload` is the value leaving with the signal. The raising frame may be
-    /// the one that owns the payload's region — a native hands back a value read
-    /// out of an argument, and `protect` delivers it to the catcher as data — so
-    /// a slot naming that region is skipped and its release stays owed.
+    /// `payload` is the value leaving with the signal. Where the raise did NOT
+    /// mint the delivery — a native hands back a value read out of an argument,
+    /// and `protect` delivers it to the catcher as data — the raising frame's
+    /// reference IS the delivery, so a slot naming the payload's region is
+    /// skipped and its release stays owed. An emit-raised error minted the
+    /// delivery itself (`Fiber::emit_delivery`), so nothing is exempt and the
+    /// frame's reference is reclaimed here
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+    /// it still owes").
     pub(crate) fn release_abandoned_frame(&mut self, code: &crate::value::Code, payload: Value) {
         self.release_abandoned_regions(code, payload);
         if code.frame_release_slots.is_empty() {
             return;
         }
         let heap = unsafe { &mut *self.heap_ptr };
-        let payload_region = crate::value::arena::region_of(heap, payload);
+        let payload_region = self.unminted_payload_region(heap, payload);
         let base = self.current_frame_base();
         let slots = code.frame_release_slots.clone();
         for slot in slots.iter() {
@@ -394,6 +399,25 @@ impl VM {
             Self::freelog_abandoned("value route", *slot as u32, region);
             self.heap().decref_region(region);
         }
+    }
+    /// The payload region the abandoned-frame walk must leave standing, or
+    /// `None` when nothing is exempt: an immediate payload has no region, and an
+    /// emit-raised error minted its own delivery (`Fiber::emit_delivery`
+    /// matches), so the frame's reference funds nothing and every owed release
+    /// runs.
+    fn unminted_payload_region(
+        &self,
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        payload: Value,
+    ) -> Option<RuntimeRegion> {
+        if self
+            .fiber
+            .emit_delivery
+            .is_some_and(|m| m.bit_identical(payload))
+        {
+            return None;
+        }
+        crate::value::arena::region_of(heap, payload)
     }
     /// Name this release in the free log, so `--trace=free` attributes a page to
     /// the walk rather than to whichever emitted release set the reason last.
@@ -418,7 +442,7 @@ impl VM {
             return;
         }
         let heap = unsafe { &mut *self.heap_ptr };
-        let payload_region = crate::value::arena::region_of(heap, payload);
+        let payload_region = self.unminted_payload_region(heap, payload);
         let owed: Vec<RuntimeRegion> = {
             let Some(frame) = self.fiber.activation_region_maps.last() else {
                 return;

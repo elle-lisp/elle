@@ -244,7 +244,7 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard"])
+                   "cancel-discard" "error-payload-helper"])
 # `abort-discard` is a CLOSED control now (undeclared, like `rest-array-copy`, so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # back under F2): what it measured was the borrowed-argument
@@ -495,6 +495,13 @@
   (string "item-" i))
 (defn t19-store [c v]
   (put c :x v))
+# The `error-payload-helper` / `error-payload-param` raisers: each allocates or
+# receives the payload in a frame the error exit WALKS (the raising body's own
+# frame is parked instead — that face is `error-payload`).
+(defn ep-raiser [j]
+  (error (string "x" j)))
+(defn ep-raise-param [v]
+  (error v))
 # The `fresh-env-cell` / `shared-env-cell` pair drives one env cell each, split on
 # where the cell is minted. `c` is a captured, REASSIGNED local, so `populate_env`
 # mints its cell box once per activation — a fresh region per call — and the frame
@@ -1282,7 +1289,61 @@
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 0]])
+        (protect (fiber/abort f "boom")))) 0]  # An emit-raised error's payload keeps
+   # every frame-owed release: `(error v)` mints the payload's delivery itself (the
+   # `EmitEscape` retain the resumer's release of the resume result consumes), so the
+   # raise records the mint and the abandoned-frame walk and the parked frame's
+   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md
+   # § "An abandoned frame runs the releases it still owes"). CLOSED controls
+   # (undeclared, like `rest-array-copy`), so a regression to open trips the
+   # completeness gate loudly rather than being absorbed under F2; the soundness
+   # complement is tests/elle/region-error-payload-uaf.lisp. The faces are distinct
+   # consumers of the recorded mint and must stay together: `error-payload` raises
+   # in the try's own body frame, which is PARKED for the restarts system, so its
+   # release runs at the free-path discharge; `error-payload-helper` raises in a
+   # called frame, which is WALKED at the error exit; `error-payload-param` hands
+   # the payload down as an owned parameter, so the tail-replaced parked frame owes
+   # it through the prologue-recorded slot; `error-payload-struct` raises a struct whose message
+   # string is a second region, so both of the frame's tables are owed.
+   # `error-payload-native` is the pair-control for all four: a native raise
+   # installs its payload unretained, so the frame-funded exemption stays — the gap
+   # isolates the recorded mint from the walk and discharge themselves.
+   # `error-payload-helper` calls its raiser as a STATEMENT: a bare call in the
+   # try body is a frame-replacing tail call, which lands in the parked frame like
+   # `error-payload` — only the non-tail call leaves a callee frame for the walk.
+   # Its pin is a cross-tier RANGE, and it is DECLARED under F2 rather than a
+   # closed control: the walk is interpreter machinery, and a compiled frame's
+   # error exit walks nothing (docs/impl/region/mechanism.md § "An abandoned frame
+   # runs the releases it still owes"), so the same shape reads 0 under --jit=off
+   # and one region per raise under --jit=eager. The pinned range is that gap's
+   # gauge; closing the JIT side shrinks it to 0.
+   ["error-payload"
+    (fn [j]
+      (try
+        (error (string "x" j))
+        (catch e nil))) 0]
+   ["error-payload-helper"
+    (fn [j]
+      (try
+        (begin
+          (ep-raiser j)
+          nil)
+        (catch e nil))) [0 1]]
+   ["error-payload-param"
+    (fn [j]
+      (try
+        (ep-raise-param (string "x" j))
+        (catch e nil))) 0]
+   ["error-payload-struct"
+    (fn [j]
+      (try
+        (error {:error :e :message (string "m" j)})
+        (catch e nil))) 0]
+   ["error-payload-native"
+    (fn [j]
+      (try
+        (get j :k)
+        (catch e nil))) 0]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape
