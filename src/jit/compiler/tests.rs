@@ -551,3 +551,78 @@ fn compile_batch_records_each_member_in_code_address_registry() {
         .map(|(_, name)| name);
     assert_eq!(name.as_deref(), Some("registry-probe-batch"));
 }
+
+/// fn() -> capture 0. With `num_captures = 1`, `LoadCapture` index 0 reads
+/// through the closure environment pointer rather than an argument variable.
+fn make_capture_read_lir() -> LirFunction {
+    LirFixture::new(Arity::Exact(0))
+        .signal(Signal::silent())
+        .num_captures(1)
+        .block(
+            0,
+            vec![LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build()
+}
+
+/// The `load` lines of a rendered Cranelift function, in emission order.
+fn load_lines(clif: &[String]) -> Vec<&str> {
+    clif.iter()
+        .map(|line| line.trim())
+        .filter(|line| line.contains("= load."))
+        .collect()
+}
+
+#[test]
+fn an_argument_load_carries_trusted_flags() {
+    // Trap: memory flags change the access the backend emits, never the value
+    // it computes, so nothing but the rendered CLIF shows which flags a load
+    // actually got.
+    //
+    // Counter-factual: passing `MemFlagsData::new()` instead of `::trusted()`
+    // compiles, and the compiled code returns the right answers, because the
+    // argument array really is aligned and mapped. It costs a trapping,
+    // unaligned-tolerant access on every parameter of every hot function.
+    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let clif = compiler
+        .clif_text(&make_simple_lir(), None)
+        .expect("Failed to translate");
+    let loads = load_lines(&clif);
+    assert!(
+        !loads.is_empty(),
+        "a one-parameter function loads its argument; got:\n{}",
+        clif.join("\n")
+    );
+    for load in &loads {
+        assert!(
+            load.contains("notrap aligned"),
+            "argument load without trusted flags: {load}"
+        );
+    }
+}
+
+#[test]
+fn a_capture_load_carries_trusted_flags() {
+    // The environment pointer is a second base pointer, reached from a
+    // different translator path than the argument array.
+    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let clif = compiler
+        .clif_text(&make_capture_read_lir(), None)
+        .expect("Failed to translate");
+    let loads = load_lines(&clif);
+    assert!(
+        !loads.is_empty(),
+        "reading capture 0 loads from the env pointer; got:\n{}",
+        clif.join("\n")
+    );
+    for load in &loads {
+        assert!(
+            load.contains("notrap aligned"),
+            "capture load without trusted flags: {load}"
+        );
+    }
+}

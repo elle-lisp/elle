@@ -123,15 +123,7 @@ impl JitCompiler {
 
             // Load required params unconditionally
             for i in 0..required as u32 {
-                let tag_offset = (i as i32) * 16;
-                let payload_offset = (i as i32) * 16 + 8;
-                let arg_tag = builder
-                    .ins()
-                    .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                let arg_payload =
-                    builder
-                        .ins()
-                        .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                let (arg_tag, arg_payload) = load_value_slot(&mut builder, args_ptr, i);
                 let base = arg_var_base + i;
                 if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
                     let (cell_t, cell_p) = translator.call_helper_value_vm(
@@ -168,16 +160,7 @@ impl JitCompiler {
 
                     builder.switch_to_block(then_block);
                     builder.seal_block(then_block);
-                    let tag_offset = (i as i32) * 16;
-                    let payload_offset = (i as i32) * 16 + 8;
-                    let arg_tag =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                    let arg_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    let (arg_tag, arg_payload) = load_value_slot(&mut builder, args_ptr, i);
                     builder.ins().jump(
                         merge_block,
                         &[BlockArg::Value(arg_tag), BlockArg::Value(arg_payload)],
@@ -275,16 +258,7 @@ impl JitCompiler {
                     // then: load from args
                     builder.switch_to_block(then_block);
                     builder.seal_block(then_block);
-                    let tag_offset = (i as i32) * 16;
-                    let payload_offset = (i as i32) * 16 + 8;
-                    let arg_tag =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                    let arg_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    let (arg_tag, arg_payload) = load_value_slot(&mut builder, args_ptr, i);
                     builder.ins().jump(
                         merge_block,
                         &[BlockArg::Value(arg_tag), BlockArg::Value(arg_payload)],
@@ -322,16 +296,7 @@ impl JitCompiler {
                     }
                 } else {
                     // Required param: load unconditionally
-                    let tag_offset = (i as i32) * 16;
-                    let payload_offset = (i as i32) * 16 + 8;
-                    let arg_tag =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                    let arg_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    let (arg_tag, arg_payload) = load_value_slot(&mut builder, args_ptr, i);
                     if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_vm(
                             &mut builder,

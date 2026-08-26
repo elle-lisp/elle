@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I32, I64};
-use cranelift_codegen::ir::{InstBuilder, MemFlags};
+use cranelift_codegen::ir::{InstBuilder, MemFlagsData};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
@@ -97,6 +97,27 @@ pub(crate) struct FunctionTranslator<'a> {
     /// (`elle_jit_release_activation_owner_node`) only for a function that can
     /// have minted a node; the common path pays no extra helper call.
     pub(crate) uses_activation_owner_node: bool,
+}
+
+/// Load the `index`-th `Value` of a runtime-owned array of `Value`s — an
+/// argument array, or a closure environment — as its (tag, payload) halves.
+///
+/// This is the JIT's only site for memory flags; see docs/impl/jit.md
+/// § "Memory flags on emitted loads".
+pub(crate) fn load_value_slot(
+    builder: &mut FunctionBuilder,
+    base: cranelift_codegen::ir::Value,
+    index: u32,
+) -> (cranelift_codegen::ir::Value, cranelift_codegen::ir::Value) {
+    const STRIDE: i32 = std::mem::size_of::<crate::value::Value>() as i32;
+    const TAG: i32 = std::mem::offset_of!(crate::value::Value, tag) as i32;
+    const PAYLOAD: i32 = std::mem::offset_of!(crate::value::Value, payload) as i32;
+
+    let flags = MemFlagsData::trusted();
+    let slot = index as i32 * STRIDE;
+    let tag = builder.ins().load(I64, flags, base, slot + TAG);
+    let payload = builder.ins().load(I64, flags, base, slot + PAYLOAD);
+    (tag, payload)
 }
 
 impl<'a> FunctionTranslator<'a> {

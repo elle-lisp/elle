@@ -8,9 +8,7 @@ use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I32, I64};
-use cranelift_codegen::ir::{
-    AbiParam, BlockArg, Function, InstBuilder, MemFlags, Signature, UserFuncName,
-};
+use cranelift_codegen::ir::{AbiParam, BlockArg, Function, InstBuilder, Signature, UserFuncName};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -21,7 +19,7 @@ use crate::lir::{Label, LirFunction};
 use crate::value::{Arity, SymbolId};
 
 use super::code::JitCode;
-use super::translate::FunctionTranslator;
+use super::translate::{load_value_slot, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
 
