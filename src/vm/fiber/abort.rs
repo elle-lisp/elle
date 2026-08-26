@@ -7,7 +7,6 @@ use std::rc::Rc;
 use crate::value::fiber::FiberStatus;
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
 use crate::vm::core::VM;
-use crate::vm::fiber::mask_catches;
 
 impl VM {
     /// Mint the caller's reference to an aborted child's ERROR result — the one
@@ -64,7 +63,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        if mask_catches(mask, result_bits) {
+        if self.absorbs(&handle, mask, result_bits, result_value) {
             // Abort is terminal — even if the parent catches the signal,
             // the aborted fiber is finished and must not stay :paused.
             if result_bits.intersects(SIG_ERROR) {
@@ -112,7 +111,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        if mask_catches(mask, result_bits) {
+        if self.absorbs(&handle, mask, result_bits, result_value) {
             // Abort is terminal — set child to :error even when caught
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);

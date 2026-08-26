@@ -119,6 +119,27 @@ pub struct Fiber {
     /// - On signal: (bits, payload) before suspending
     /// - On normal return: (SIG_OK, return_value) before completing
     pub signal: Option<(SignalBits, Value)>,
+    /// The `SIG_ERROR` payload this fiber parked, paired with the source
+    /// location of the form that raised it.
+    ///
+    /// A mask that absorbs the error stops it travelling, so `VM::absorbs`
+    /// moves the live record (`VM::error_loc`) here rather than discarding it;
+    /// `fiber/propagate` reads it back when it re-raises this fiber's parked
+    /// signal, which is how the location survives the `defer` and scheduler
+    /// catch-then-re-raise chains (docs/impl/vm.md § "Where a reported error's
+    /// location comes from").
+    ///
+    /// The payload is carried so the reader can tell that the location still
+    /// describes the error being re-raised — representation identity, as for
+    /// `emit_delivery`, never structural equality. A fiber that goes on to
+    /// park a different error (an injected abort, a second raise that recorded
+    /// no location) therefore lends its old location to nothing.
+    ///
+    /// Like `emit_delivery`, the payload is an UNCOUNTED marker: it is only
+    /// ever compared bit-wise, never dereferenced, so it takes no retain and
+    /// the Fiber content scan records no edge for it. The counted edge for the
+    /// same value is `signal`'s.
+    pub error_loc: Option<(Value, crate::error::SourceLoc)>,
     /// The `SIG_ERROR` payload whose DELIVERY reference the raise itself minted
     /// — the `EmitEscape` retain `handle_emit` (and its JIT mirror) takes, which
     /// the resumer's release of the resume result consumes. While this matches
@@ -408,6 +429,7 @@ impl Fiber {
             param_baseline_seeded: false,
             param_borrows: Vec::new(),
             signal: None,
+            error_loc: None,
             emit_delivery: None,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
@@ -443,6 +465,7 @@ impl Fiber {
             param_baseline_seeded: false,
             param_borrows: Vec::new(),
             signal: None,
+            error_loc: None,
             emit_delivery: None,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],

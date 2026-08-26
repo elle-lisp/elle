@@ -24,7 +24,7 @@ impl VM {
 
         self.finalize_if_halted(&handle, result_bits);
 
-        if mask_catches(mask, result_bits) {
+        if self.absorbs(&handle, mask, result_bits, result_value) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)
@@ -108,7 +108,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        if mask_catches(mask, result_bits) {
+        if self.absorbs(&handle, mask, result_bits, result_value) {
             // Abort is terminal — set child to :error even when caught
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);

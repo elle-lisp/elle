@@ -318,7 +318,7 @@ impl VM {
                 .with_mut(|f| f.status = crate::value::FiberStatus::Error);
         }
 
-        if crate::vm::fiber::mask_catches(mask, result_bits) {
+        if self.absorbs(&pending.handle, mask, result_bits, result_value) {
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.resume_suspended(caller_frames, result_value)

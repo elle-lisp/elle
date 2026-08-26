@@ -51,6 +51,21 @@ impl VM {
         );
     }
 
+    /// Record the source location of the instruction at `instr_ip` as the
+    /// origin of the error now leaving this frame.
+    ///
+    /// First-writer-wins: the frame that raised reaches its exit path before
+    /// any frame it unwinds through, so the innermost location is the one that
+    /// reaches the root (docs/impl/vm.md § "Where a reported error's location
+    /// comes from"). `VM::absorbs` takes the record when a mask catches the
+    /// error, so the slot an outer frame finds full always belongs to the
+    /// error it is carrying.
+    fn record_error_loc(&mut self, location_map: &LocationMap, instr_ip: usize) {
+        if self.error_loc.is_none() {
+            self.error_loc = location_map.get(&instr_ip).cloned();
+        }
+    }
+
     /// Inner execution loop that handles all instructions.
     ///
     /// Takes `Rc` references to bytecode and constants so that yield and
@@ -98,9 +113,7 @@ impl VM {
             // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits, _)) = self.fiber.signal {
                 if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
-                    if self.error_loc.is_none() {
-                        self.error_loc = location_map.get(&instr_ip).cloned();
-                    }
+                    self.record_error_loc(location_map, instr_ip);
                     return (bits, ip);
                 }
             }
@@ -120,9 +133,7 @@ impl VM {
                 );
                 self.heap().set_object_limit(saved_limit);
                 self.fiber.signal = Some((SIG_ERROR, err));
-                if self.error_loc.is_none() {
-                    self.error_loc = location_map.get(&instr_ip).cloned();
-                }
+                self.record_error_loc(location_map, instr_ip);
                 return (SIG_ERROR, ip);
             }
 
@@ -168,15 +179,22 @@ impl VM {
                 &mut ip,
                 instr_ip,
             ) {
+                // The dominant error exit: a handler that raises (or that
+                // propagates a callee's raise) returns the signal here rather
+                // than falling through to the post-handler check below, so this
+                // is where most errors get the location of the form that
+                // raised them.
+                let (exit_bits, _) = exit;
+                if exit_bits.intersects(SIG_ERROR) || exit_bits.intersects(SIG_HALT) {
+                    self.record_error_loc(location_map, instr_ip);
+                }
                 return exit;
             }
 
             // Check for error signal set by this instruction's handler
             if let Some((bits, _)) = self.fiber.signal {
                 if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
-                    if self.error_loc.is_none() {
-                        self.error_loc = location_map.get(&instr_ip).cloned();
-                    }
+                    self.record_error_loc(location_map, instr_ip);
                     return (bits, ip);
                 }
             }

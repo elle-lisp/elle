@@ -48,7 +48,6 @@ mod borrow_tests;
 // `crate::vm::fiber::<Item>` (external callers) or `super::<Item>` (sibling
 // submodules) still resolves unchanged. Visibility matches each item's original
 // `pub(crate)`/private declaration.
-pub(crate) use catch::mask_catches;
 pub(crate) use owned::{kill_fiber, parked_owner_nodes, release_fiber_owned, take_fiber_owned};
 use refcount::{incref_signal_region, release_discarded_signal};
 pub(crate) use refcount::{

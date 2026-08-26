@@ -2177,10 +2177,13 @@
        # scheduler-killed fibers are excluded: we injected their :shutdown
        # at teardown time, so re-raising would surface our own signal as a
        # user error.
+       # fiber/propagate, not (error (fiber/value fiber)): re-raising the
+       # fiber's own signal carries the location of the form that raised it,
+       # which a fresh raise of the payload would replace with this line.
        (each [fiber status] in (pairs completed)
          (when (and (= status :error) (not (contains? joined fiber))
                     (not (contains? scheduler-killed fiber)))
-           (error (fiber/value fiber)))))
+           (fiber/propagate fiber))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
      :mark-joined  # mark one of the program's own fibers: observed (suppress the
@@ -2261,11 +2264,12 @@
         (apply (get sched :pump) fibers)  # Propagate the first error among our thunks; else the last
         # thunk's value.
         (def @result nil)
-        (def @first-error nil)
+        (def @failed nil)
         (each f in fibers
-          (when (and (nil? first-error) (fiber-failed? f))
-            (assign first-error (fiber/value f))))
-        (when (not (nil? first-error)) (error first-error))  # Return the last fiber's value
+          (when (and (nil? failed) (fiber-failed? f)) (assign failed f)))  # fiber/propagate, not (error (fiber/value f)): re-raising the
+        # fiber's own signal carries the location of the form that raised it,
+        # which a fresh raise of the payload would replace with this line.
+        (when (not (nil? failed)) (fiber/propagate failed))  # Return the last fiber's value
         (when (> (length fibers) 0)
           (assign result (fiber/value (get fibers (- (length fibers) 1)))))
         result))))
