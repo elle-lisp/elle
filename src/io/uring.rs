@@ -25,9 +25,9 @@ mod submit;
 pub(crate) use submit::submit_linked;
 
 /// Upper bound on a single kernel read, in bytes. A `read-exact` whose
-/// buffer is larger (e.g. a text read of many graphemes, sized at
-/// 4 bytes/grapheme) is filled by several page-sized reads plus the
-/// resubmit loop rather than one oversized syscall. 64 KiB matches the
+/// buffer is larger (a text read of many clusters, whose buffer is a chunk
+/// four bytes per cluster wide) is filled by several page-sized reads plus
+/// the resubmit loop rather than one oversized syscall. 64 KiB matches the
 /// default Linux loopback recv buffer, so a single read rarely returns
 /// less anyway.
 const MAX_READ_CHUNK: usize = 64 * 1024;

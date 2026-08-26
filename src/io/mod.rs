@@ -11,6 +11,7 @@ pub(crate) mod completion;
 /// io_uring wait from an off-ring worker). Also backs `chan`'s Linux wake fd.
 #[cfg(target_os = "linux")]
 pub(crate) mod eventfd;
+pub(crate) mod frame;
 pub(crate) mod mock;
 pub(crate) mod pending;
 pub(crate) mod pool;

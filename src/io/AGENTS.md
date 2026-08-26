@@ -116,7 +116,7 @@ Typed thread-pool submission and completion:
 - `PoolOp` — one variant per operation the pool runs. Each carries exactly the data that operation needs (fd, buffers, addresses, or closures) and nothing about waiting: a typed submission.
 - `Bounds` — how long an operation may wait and how `io/cancel` ends it, passed alongside the `PoolOp` to every `CompletionHub::submit`. Three constructors, and a submission must pick one: `CompletionHub::bounds(id, timeout)` pairs the caller's deadline with a fresh stop pipe, `Bounds::prompt()` says the syscalls wait on nothing outside this process, and `Bounds::uninterruptible()` says the syscall cannot be stopped once entered. Because the bound is an argument rather than a field, a variant cannot forget it. The `Bounds` own the stop pipe's read end and close it with themselves, so a submission no worker runs — a refused `Builder::spawn`, a path the kernel rejects — disposes of the pipe by being dropped.
 - `OpBound` — what a worker runs under: it holds the descriptor non-blocking for the operation's lifetime and turns the declared `Bounds` into waits. `OpBound::new(fd, ..)` for an operation that reads or writes `fd`, `OpBound::watching(fd, ..)` for one that only polls a descriptor somebody else owns, `OpBound::detached(..)` for one with no descriptor at all.
-- `PoolCompletion { id, result_code, data }` — typed completion from a thread-pool worker.
+- `PoolCompletion { id, kind, result_code, data }` — typed completion from a thread-pool worker. `kind` is the `OpKind` the worker ran, checked against the entry the id resolves through — see § "One id, one operation".
 - `RawCompletion` — `Pool(PoolCompletion)` | `Stdin(StdinCompletion)`. The single
   shape every background worker ships through the hub. A worker cannot build a
   cooked `Completion` (the cook fns need main-thread `pending`/`fd_states`/
@@ -345,6 +345,71 @@ a submission may proceed.
 io_uring has no equivalent count. Its operations run in the kernel, so
 `workers()` is zero there and the only limit is the 256-entry submission
 queue, which drains as it is submitted.
+
+## One id, one operation
+
+A completion carries an id and is resolved through the entry filed under it.
+The arm that entry selects decides who owns the completion's payload:
+`ProcessWait` reclaims a `Box<siginfo_t>`, `Connect` and `Open` take ownership
+of a descriptor, the port arms write through a fiber's buffer. So a completion
+that resolves to the wrong entry does not merely report the wrong thing — it
+applies one operation's ownership rules to another operation's payload.
+
+A pool worker therefore reports the `OpKind` it ran alongside the id, and
+`pool_to_completion` asks `PendingOp::accepts` whether the entry could have
+been filed by an operation of that kind. A "no" is the submission table and the
+worker contradicting each other about one id. The completion is then withheld:
+the entry is let go **unread** rather than retired, because retiring reclaims
+the very payload in question, and the fiber is told what happened rather than
+handed a result read through the wrong shape. The kinds are coarser than
+`PendingOp` because they name what a worker can report having done —
+`ev/poll-fd` and the `chan/wait-ready` park run the same operation, so both
+answer to `OpKind::Poll`.
+
+The stdin worker runs reads on a port and nothing else, so its completions
+answer to `OpKind::Port`. io_uring has no such tag: a CQE's `user_data` is the
+`u64` the SQE carried, returned by the kernel untouched.
+
+Pinned by `a_completion_for_another_operation_is_withheld_from_the_entry_it_found`
+and `a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it`
+(`src/io/aio/tests/submit.rs`).
+
+## Assembling a read's answer
+
+A finishing read owns two runs of bytes: the remainder a previous read on the
+port left behind, and the bytes this read produced. `assemble_read`
+(`src/io/completion/port.rs`) joins them into one `Vec` in stream order, the
+op decides how much of that join answers the request, and whatever is past that
+goes back to the port as its new remainder. One path serves `read`,
+`read-line`, and `read-exact`, and serves them the same whether the stream
+delivered bytes or ended.
+
+The join is built outside the fiber's buffer because what a read reserves is
+not a bound on what it answers with. A text `read-exact` counts grapheme
+clusters and a cluster is any number of joined codepoints; a `read-line`
+reserves 64 KiB and a line can be longer. So `read_result` writes the join back
+into that buffer when it fits — keeping the caller's region and the zero-copy
+`LBytes`→`LString` transmute — and builds the value on the requesting
+instance's heap when it does not, exactly as `read-all` does. What it never
+does is clamp: the bytes past a reservation are bytes the port has already
+taken from the kernel, and nothing is left to read them again.
+
+That is also why a pool worker's bytes stay in `pc.data` rather than being
+staged into the fiber's buffer first, and why a remainder the submission could
+not answer from stays in `fd_states` rather than being copied in ahead of the
+read. `assemble_read` is the one place the two meet.
+
+The submission answers from the remainder alone whenever it can, using
+`frame::line_end` and `frame::exact_end` — the same two the completion cuts
+with, so the submission and the completion cannot frame one stream two ways.
+Answering there is not merely a saved syscall: a read submitted for bytes the
+port is already holding would park until the peer sent more, and a peer that has
+said everything never will.
+
+Pinned by `tests/elle/port-text-framing.lisp` and
+`tests/elle/port-longline.lisp`, and on the other backend by
+`port_text_framing_threadpool` / `port_longline_threadpool`
+(`tests/integration/elle_scripts.rs`).
 
 ## Buffer Drain Invariant
 

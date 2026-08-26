@@ -263,3 +263,135 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
         expect_completion(&backend, id, "process-wait");
     });
 }
+
+// A completion resolves through the entry filed under its id. What follows is
+// the case where those two disagree — the submission table says one operation
+// is in flight and the worker reports another. The disagreement is not
+// something the frame above can produce; these check what happens if it ever
+// does, because the arm a completion lands in decides who owns its payload.
+
+/// The kinds and the entries answer each other one for one.
+#[test]
+fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
+    let mut pool = crate::io::pool::BufferPool::new();
+    let entries: Vec<(PendingOp, OpKind)> = vec![
+        (
+            PendingOp::Sleep {
+                buffer_handle: pool.alloc(0),
+            },
+            OpKind::Sleep,
+        ),
+        (
+            PendingOp::Task {
+                buffer_handle: pool.alloc(0),
+            },
+            OpKind::Task,
+        ),
+        (
+            PendingOp::Resolve {
+                buffer_handle: pool.alloc(0),
+            },
+            OpKind::Resolve,
+        ),
+        (
+            PendingOp::PollFd {
+                buffer_handle: pool.alloc(0),
+            },
+            OpKind::Poll,
+        ),
+    ];
+    let every_kind = [
+        OpKind::Port,
+        OpKind::Connect,
+        OpKind::Sleep,
+        OpKind::ProcessWait,
+        OpKind::Open,
+        OpKind::Task,
+        OpKind::Resolve,
+        OpKind::Watch,
+        OpKind::Signal,
+        OpKind::Poll,
+    ];
+    for (entry, own) in &entries {
+        for kind in every_kind {
+            assert_eq!(
+                entry.accepts(kind),
+                kind == *own,
+                "a {} entry and a {:?} completion",
+                entry.name(),
+                kind,
+            );
+        }
+    }
+}
+
+/// A completion that resolves to another operation's entry is withheld, and
+/// the entry's payload is left alone.
+///
+/// The trap: the `ProcessWait` arm reads `siginfo` as a `Box<siginfo_t>` and
+/// reclaims it, so cooking a port read through a process-wait entry frees an
+/// allocation the process wait still owns. This test keeps its own copy of that
+/// pointer and frees it at the end — under a cook that ran the wrong arm, that
+/// second free is a double free rather than the only one.
+///
+/// The counter-factual is the report itself. Without the check the read's
+/// completion comes back as `:exec-error` — "subprocess/wait failed" from a
+/// fiber that never spawned anything — which reads as a diagnosis of the I/O
+/// instead of what it is.
+#[test]
+fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
+    crate::value::arena::with_test_region(|| {
+        let mut pending = crate::io::pending::PendingTable::new();
+        let mut fd_states = HashMap::new();
+        let mut pool = crate::io::pool::BufferPool::new();
+        let heap = crate::value::arena::leaked_test_heap();
+
+        // SAFETY: zeroed is a valid initialized `siginfo_t`, and this test owns
+        // the allocation for as long as it stands in for a process wait's.
+        let siginfo: *mut libc::siginfo_t = Box::into_raw(unsafe { Box::new(std::mem::zeroed()) });
+        let id = SubmissionId::from_raw(1);
+        pending.insert(
+            id,
+            PendingOp::ProcessWait {
+                buffer_handle: pool.alloc(0),
+                handle_val: Value::NIL,
+                siginfo,
+            },
+        );
+
+        // The witness shape: a read reports a failure under an id whose entry
+        // is a process wait.
+        let completion = crate::io::aio::convert::pool_to_completion(
+            crate::io::threadpool::PoolCompletion {
+                id: id.as_u64(),
+                kind: OpKind::Port,
+                result_code: -libc::ECHILD,
+                data: Vec::new(),
+            },
+            &mut pending,
+            &mut fd_states,
+            &mut pool,
+            heap,
+            crate::config::get().unicode_generation(),
+        )
+        .expect("a mismatch is reported, not dropped — a dropped one hangs the fiber");
+
+        let err = completion
+            .result
+            .expect_err("a mismatched completion carries no result");
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("Port") && msg.contains("process wait"),
+            "the report names the operation that completed and the entry it \
+             found, so it cannot read as a subprocess failure: {msg}",
+        );
+        assert!(
+            matches!(pending.take(id), crate::io::pending::Taken::Unknown),
+            "the entry is consumed either way",
+        );
+
+        // SAFETY: the allocation above, freed exactly once — here — because the
+        // withheld completion never reached the arm that reclaims it.
+        drop(unsafe { Box::from_raw(siginfo) });
+    });
+}

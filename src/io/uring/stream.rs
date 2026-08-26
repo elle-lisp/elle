@@ -3,9 +3,10 @@ use super::*;
 /// Submit a stream I/O operation (ReadLine, Read, ReadExact, ReadAll, Write,
 /// Flush) — the byte-stream half of [`PortOp`].
 ///
-/// `read_buffered`: for Read ops, the number of bytes already sitting in the
-/// fd_state buffer. The kernel read is reduced by this amount so the
-/// completion handler can prepend the buffered prefix.
+/// A first submission reads into the whole of the fiber's buffer. The remainder
+/// the port may be holding stays in `fd_states` and is joined to these bytes by
+/// the completion, so nothing here has to leave room for it. `drain_cqes` is
+/// what reads into the tail of a partly-filled buffer, on a resubmission.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
@@ -15,7 +16,6 @@ pub(crate) fn submit_uring_stream(
     timeout: Option<Duration>,
     buffer_pool: &mut BufferPool,
     buf_handle: Option<BufferHandle>,
-    read_buffered: usize,
 ) -> Result<(), String> {
     use io_uring::opcode;
     use io_uring::types::Fd;
@@ -23,13 +23,11 @@ pub(crate) fn submit_uring_stream(
     let entry = match op {
         PortOp::ReadLine { buffer } => {
             let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
-            let read_size = (dst_cap - read_buffered).min(4096);
-            unsafe {
-                opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
-                    .offset(u64::MAX)
-                    .build()
-                    .user_data(id.as_u64())
-            }
+            let read_size = dst_cap.min(4096);
+            opcode::Read::new(Fd(fd), dst, read_size as u32)
+                .offset(u64::MAX)
+                .build()
+                .user_data(id.as_u64())
         }
         PortOp::ReadAll => {
             let bh = buf_handle.expect("ReadAll requires BufferHandle");
@@ -43,19 +41,18 @@ pub(crate) fn submit_uring_stream(
         PortOp::Read { count, buffer } | PortOp::ReadExact { count, buffer } => {
             let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
             // Fill to buffer capacity. For binary Read/ReadExact the buffer
-            // is sized to `count`, so this reads exactly `count` bytes. For a
-            // text ReadExact the buffer is oversized (4 bytes/grapheme), so
-            // this reads as many bytes as the buffer holds in one shot — the
-            // gate then stops once `count` graphemes are assembled and the
-            // completion splits + stashes the remainder.
+            // is sized to `count`, so this reads exactly `count` bytes. A text
+            // ReadExact counts clusters instead, which have no byte size to
+            // reserve by, so its buffer is a chunk rather than a bound: this
+            // reads as many bytes as the chunk holds, the gate stops once
+            // `count` clusters are assembled, and the completion splits at the
+            // Nth boundary and stashes the remainder.
             let _ = count;
-            let read_size = dst_cap.saturating_sub(read_buffered).min(MAX_READ_CHUNK);
-            unsafe {
-                opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
-                    .offset(u64::MAX)
-                    .build()
-                    .user_data(id.as_u64())
-            }
+            let read_size = dst_cap.min(MAX_READ_CHUNK);
+            opcode::Read::new(Fd(fd), dst, read_size as u32)
+                .offset(u64::MAX)
+                .build()
+                .user_data(id.as_u64())
         }
         PortOp::Write { data } => {
             let bytes = crate::io::aio::AsyncBackend::extract_write_bytes(data);

@@ -26,6 +26,28 @@ pub(super) fn cook_raw(
     }
 }
 
+/// Why a completion may not be cooked through the entry it resolved to, or
+/// `None` when the two agree.
+///
+/// One id names one operation, so a disagreement is the submission table saying
+/// something the worker contradicts. Cooking on would hand the wrong-shaped
+/// payload to an arm that trusts what it matched — the shape of defect this
+/// reports rather than performs. The report goes to the fiber as an error, which
+/// is louder than any assertion: it raises in the caller's own code, in every
+/// build, naming both sides.
+fn misrouted(pending_op: &PendingOp, kind: OpKind, id: SubmissionId) -> Option<String> {
+    if pending_op.accepts(kind) {
+        return None;
+    }
+    Some(format!(
+        "io completion {}: a {:?} operation completed, but the submission filed \
+         under that id is a {} — the result is withheld rather than read as one",
+        id,
+        kind,
+        pending_op.name()
+    ))
+}
+
 /// Convert a `StdinCompletion` into a `Completion`, releasing the buffer.
 pub(super) fn stdin_to_completion(
     sc: crate::io::threadpool::StdinCompletion,
@@ -43,6 +65,15 @@ pub(super) fn stdin_to_completion(
         }
         Taken::Unknown => return None,
     };
+    // The stdin worker runs reads on a port and nothing else, so its completions
+    // answer to one kind.
+    if let Some(mismatch) = misrouted(&pending_op, OpKind::Port, id) {
+        std::mem::forget(pending_op);
+        return Some(Completion::err(
+            id,
+            crate::io::io_error("io-error", mismatch, origin_heap),
+        ));
+    }
     // Release BufferPool handle if present
     if let Some(bh) = pending_op.buffer_handle() {
         buffer_pool.release(bh);
@@ -139,6 +170,19 @@ pub(super) fn pool_to_completion(
         }
         Taken::Unknown => return None,
     };
+    if let Some(mismatch) = misrouted(&pending_op, pc.kind, id) {
+        // The entry filed under this id is not the operation that finished, so
+        // nothing it holds can be trusted to be what it claims. The entry is let
+        // go unread rather than retired: retiring reclaims exactly the payload
+        // in question — a `Box<siginfo_t>`, a descriptor, a pooled buffer — and
+        // that is the free this check exists to prevent. Leaking those is the
+        // cheap half of the trade.
+        std::mem::forget(pending_op);
+        return Some(Completion::err(
+            id,
+            crate::io::io_error("io-error", mismatch, origin_heap),
+        ));
+    }
     if let PendingOp::Connect {
         ref mut connect_fd, ..
     } = pending_op
@@ -148,38 +192,13 @@ pub(super) fn pool_to_completion(
         }
     }
 
-    // For buffer-backed reads on the thread pool, copy the worker's bytes into
-    // the pre-allocated fiber buffer before `process_raw_completion` assembles
-    // the result. On io_uring the kernel writes the fiber buffer directly at
-    // `dst + filled`; the pool worker instead returns the bytes in `pc.data`, so
-    // we stage them at the same `dst + filled` offset here. `ReadExact` belongs
-    // with `Read`/`ReadLine`: the worker runs the read-exact loop internally and
-    // hands back the full result in `pc.data`, and `complete_port_op` then does
-    // the same `read_buffered`-prepend / grapheme-split it does for the ring.
-    // (`ReadAll` is excluded — it accumulates in `fd_state.buffer` and reads
-    // `pc.data` straight through `process_raw_completion`.)
-    if let PendingOp::Port {
-        op:
-            PortOp::Read { ref buffer, .. }
-            | PortOp::ReadLine { ref buffer }
-            | PortOp::ReadExact { ref buffer, .. },
-        filled,
-        ..
-    } = &pending_op
-    {
-        if pc.result_code > 0 && !pc.data.is_empty() {
-            unsafe {
-                let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                let offset = *filled;
-                let remaining = dst_cap.saturating_sub(offset);
-                let copy_len = pc.data.len().min(remaining);
-                std::ptr::copy_nonoverlapping(pc.data.as_ptr(), dst.add(offset), copy_len);
-                let total = offset + copy_len;
-                crate::io::request::truncate_buffer(buffer, total);
-            }
-        }
-    }
-
+    // A pool worker's bytes stay in `pc.data`, and `assemble_read` reads them
+    // there. Staging them into the fiber's buffer first would clamp them to its
+    // size, and that size is not a bound on what the worker read: `read_until`
+    // runs to the newline and `read_exact` to its cluster count, each returning
+    // however many bytes that took. Bytes dropped by such a clamp are bytes the
+    // port has already taken from the kernel, so nothing is left to read them
+    // again.
     let bh = pending_op.buffer_handle();
     Some(completion::process_raw_completion(
         id,

@@ -399,6 +399,27 @@ pub(crate) fn drain_cqes(
         // unbounded from its second operation on, and a peer that goes quiet
         // would hang a read that asked for a timeout.
         let op_timeout = pending_op.timeout();
+        // A byte-counted read's answer goes back into the fiber's own buffer,
+        // which is what keeps it in the caller's region. The chunk asked for
+        // below therefore leaves room for the whole answer: both the stash the
+        // completion prepends and the in-fiber `filled` prefix are subtracted.
+        //
+        // A grapheme-counted `read-exact` reserves nothing, because no
+        // reservation could be right — its count is in clusters and a cluster
+        // has no upper bound in bytes. Its answer is assembled outside the
+        // buffer (`assemble_read`), which leaves the buffer free to serve as a
+        // whole chunk every round however long the stash grows.
+        let grapheme_counted = matches!(
+            &pending_op,
+            PendingOp::Port {
+                op: PortOp::ReadExact { .. },
+                port,
+                ..
+            } if port
+                .as_external::<Port>()
+                .map(|p| p.encoding() == crate::port::Encoding::Text)
+                .unwrap_or(false)
+        );
         if let PendingOp::Port {
             op:
                 PortOp::ReadLine { ref buffer }
@@ -409,14 +430,11 @@ pub(crate) fn drain_cqes(
             ..
         } = pending_op
         {
-            // The completion will prepend whatever is already stashed in the
-            // fd_state buffer (e.g. a ReadExact whose earlier short reads were
-            // moved there) ahead of the bytes this read produces. Subtract
-            // both the in-fiber `filled` prefix and that stash from the
-            // capacity so the assembled total never exceeds the fixed buffer
-            // — otherwise read-exact overflows when the peer has more bytes
-            // available than `count` (e.g. a fixed header followed by a body).
-            let buffered = fd_states.get(port_key).map(|s| s.buffer.len()).unwrap_or(0);
+            let buffered = if grapheme_counted {
+                0
+            } else {
+                fd_states.get(port_key).map(|s| s.buffer.len()).unwrap_or(0)
+            };
             let buf_bytes = buffer.as_bytes().unwrap();
             let remaining = buf_bytes
                 .len()
@@ -424,9 +442,22 @@ pub(crate) fn drain_cqes(
                 .saturating_sub(buffered)
                 .min(MAX_READ_CHUNK);
             if remaining == 0 {
-                // Buffer full — return what we have as a partial result.
-                // Don't re-submit; let process_raw_completion handle it.
-                // Push back into completions via process_raw_completion.
+                // The buffer is full and the read still wants more — a line
+                // longer than `READ_LINE_BUF_SIZE`, which answers with a partial
+                // the caller can read on from (see `prim_stream_read_line`).
+                // Report what it has. Abandoning the operation here instead
+                // leaves the fiber that asked parked with no completion coming.
+                completions.push_back(process_raw_completion(
+                    id,
+                    0,
+                    Vec::new(),
+                    &pending_op,
+                    fd_states,
+                    buffer_pool,
+                    None,
+                    origin_heap,
+                    gen,
+                ));
                 continue;
             }
             let sqe = unsafe {

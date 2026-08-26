@@ -23,8 +23,12 @@ impl CompletionHub {
         op: PoolOp,
         bounds: Bounds,
     ) -> Result<(), String> {
-        // The pool carries the id as an opaque round-tripped token.
+        // The pool carries the id as an opaque round-tripped token. The kind
+        // travels with it so the completion can be checked against the entry the
+        // id resolves through — a submission table that has drifted is then a
+        // report rather than a wrong-arm free (see `OpKind`).
         let raw_id = id.as_u64();
+        let kind = op.kind();
         let sender = self.sender();
         let eventfd = self.eventfd();
         let started = std::thread::Builder::new().spawn(move || {
@@ -40,6 +44,7 @@ impl CompletionHub {
                 eventfd,
                 RawCompletion::Pool(PoolCompletion {
                     id,
+                    kind,
                     result_code,
                     data,
                 }),
