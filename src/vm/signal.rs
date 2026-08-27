@@ -90,6 +90,12 @@ impl VM {
                     r,
                     crate::value::arena::EscapeSite::SuspendEscape,
                 );
+                // This primitive never returns, so the frame's continuation —
+                // the code after the Call, including the call's own result
+                // release — is funded by the delivery instead of by a `Return`
+                // mint (docs/impl/region/owner.md § "A delivery into a replayed
+                // frame carries one owning reference").
+                self.fiber.resume_value_unfunded = true;
                 let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                 let activation_region_map = self
                     .fiber
@@ -173,6 +179,13 @@ impl VM {
                     r,
                     crate::value::arena::EscapeSite::SuspendEscape,
                 );
+                // Tail-position mirror of the Call-position park classification.
+                // A tail suspend builds no frame of its own — the driver it
+                // unwinds to parks one — so the obligation rides the fiber until
+                // the delivery. The frame that driver parks resumes into the
+                // post-`TailCall` block, whose result release the missing `Return`
+                // mint would have funded.
+                self.fiber.resume_value_unfunded = true;
                 self.fiber.signal = Some((bits, value));
                 bits
             }
@@ -220,6 +233,11 @@ impl VM {
             r,
             crate::value::arena::EscapeSite::SuspendEscape,
         );
+
+        // The denied primitive never runs, let alone returns, so the mediating
+        // parent's resume value takes the place of its result — and the frame's
+        // continuation releases that result (see the `SignalAction::Suspend` arm).
+        self.fiber.resume_value_unfunded = true;
 
         // Save the stack and build a suspended frame (same as suspending signals)
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -273,6 +291,9 @@ impl VM {
             r,
             crate::value::arena::EscapeSite::SuspendEscape,
         );
+        // Tail-position mirror of the Call-position denial park (see
+        // `handle_capability_denial`).
+        self.fiber.resume_value_unfunded = true;
         self.fiber.signal = Some((blocked, payload));
         blocked
     }

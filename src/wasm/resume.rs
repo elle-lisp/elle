@@ -400,11 +400,15 @@ pub(super) fn handle_fiber_resume(
         }
     };
 
-    let (closure, resume_value, status) = fiber_handle.with_mut(|fiber| {
+    let (closure, resume_value, status, unfunded) = fiber_handle.with_mut(|fiber| {
         let closure = fiber.closure.clone();
         let resume_value = fiber.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
         let status = fiber.status;
-        (closure, resume_value, status)
+        // The park's delivery obligation travels with the parked signal, exactly
+        // as it does in the VM's fiber driver (`do_fiber_resume_single`), so every
+        // delivery route consumes it once.
+        let unfunded = std::mem::take(&mut fiber.resume_value_unfunded);
+        (closure, resume_value, status, unfunded)
     });
 
     let wasm_idx = match closure.template.wasm_func_idx {
@@ -418,6 +422,23 @@ pub(super) fn handle_fiber_resume(
             return (tag, payload, SIG_ERROR.raw() as i64);
         }
     };
+
+    // Fund the crossing into a frame parked at a suspending PRIMITIVE call: that
+    // frame resumes into the parked call's continuation, which runs the call's
+    // compiler-emitted result release, and the primitive that never returned
+    // minted nothing for it (docs/impl/region/owner.md § "A delivery into a
+    // replayed frame carries one owning reference"). Emitted past the guards
+    // above, so a resume that never reaches the body mints nothing; `region_of`
+    // no-ops an immediate.
+    if unfunded {
+        let heap = unsafe { &mut *caller.data().heap_ptr() };
+        let r = crate::value::arena::region_of(heap, resume_value);
+        crate::value::arena::incref_for_escape(
+            heap,
+            r,
+            crate::value::arena::EscapeSite::ResumeDelivery,
+        );
+    }
 
     let yield_signal = SIG_YIELD.raw() as i64;
     let fiber_id = fiber_handle.id();

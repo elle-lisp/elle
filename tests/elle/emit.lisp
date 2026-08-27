@@ -58,6 +58,25 @@
 (let [f (fiber/new (fn [] (emit 2 :dynamic)) |:yield|)]
   (assert (= (fiber/resume f) :dynamic) "dynamic emit still works"))
 
+# The resume value flows back through a dynamic emit too, and the body
+# runs on over it. The dynamic emit is an ordinary call, so its result is
+# the resume value the way any call's result is its return value.
+(let [s :yield
+      f (fiber/new (fn []
+                     (let [r (emit s {:p 1})]
+                       [:resumed r])) |:yield|)]
+  (assert (= (fiber/resume f) {:p 1}) "dynamic emit: payload delivered")
+  (assert (= (fiber/resume f "MEDIATED") [:resumed "MEDIATED"])
+          "dynamic emit: the resumed body reads the value it was handed"))
+
+# …including from tail position, where the resume value becomes the
+# body's own result.
+(let [s :yield
+      f (fiber/new (fn [] (emit s 7)) |:yield|)]
+  (assert (= (fiber/resume f) 7) "dynamic tail emit: payload delivered")
+  (assert (= (fiber/resume f "MEDIATED") "MEDIATED")
+          "dynamic tail emit: the resume value is the body's result"))
+
 # ── Resume value flows back through emit ─────────────────────────────
 
 (let [f (fiber/new (fn []

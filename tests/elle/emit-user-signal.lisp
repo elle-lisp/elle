@@ -38,11 +38,8 @@
 #
 # A non-literal first argument falls through to the runtime primitive,
 # which reads the registry and keeps all 64 bits. Both paths emit the
-# same signal, so both must report the same bits and the same status.
-#
-# This stops at the first resume. A second one — resuming a fiber parked
-# through the dynamic path, whatever the signal — reads the fiber's freed
-# activation region; see issue #915.
+# same signal, so both must report the same bits and the same status —
+# and both must run the resumed body over the value they were handed.
 
 (let [s :user_sig_893
       f (fiber/new (fn []
@@ -51,7 +48,9 @@
   (assert (= (fiber/resume f) {:p 1}) "dynamic emit delivers its payload")
   (assert (= (fiber/status f) :paused) "dynamic emit suspends the fiber")
   (assert (= (fiber/bits f) user-bits)
-          "dynamic emit reports the same bit as the literal emit"))
+          "dynamic emit reports the same bit as the literal emit")
+  (assert (= (fiber/resume f "MEDIATED") [:resumed "MEDIATED"])
+          "the resume value is the result of the dynamic emit"))
 
 # ── A compound literal emit keeps both halves ────────────────────────
 #

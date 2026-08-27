@@ -245,6 +245,21 @@ parked fiber's accounting symmetric with its unpark:
   theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
   (`tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp`);
   `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler witness.
+  A **primitive** that suspends is the other frame with no `Return` to fund it, and
+  it is the general case rather than an exit path: the resume value takes the place
+  of the primitive's result, and the continuation past the call releases that result
+  like any other. Two parks have that shape — a dynamic `emit`, whose non-literal
+  first argument falls through to the runtime primitive instead of compiling to the
+  `Emit` terminator, and a capability denial, which parks a denied primitive call
+  for the parent to mediate — and neither can be told from an `Emit` park at the
+  delivery, where the frame is already built and, for a tail suspend, was built by a
+  driver that never saw the primitive. So the classifier records the shape on the
+  fiber (`Fiber::resume_value_unfunded`) and `do_fiber_resume_single` takes it with
+  the parked signal, minting one `ResumeDelivery` retain on every route into the
+  fiber. What needs no mint is an `Emit` park, whose resume block mints in bytecode
+  (above), and an io completion, which the scheduler allocates fresh and hands over
+  carrying its own birth reference. Pinned by
+  `tests/elle/region-primitive-resume-uaf.lisp`.
 - **A propagated signal is a fresh park, and owes its own delivery reference.**
   `fiber/propagate` installs the child's parked payload as the propagating fiber's own
   `signal`. That fiber's resumer then reads the payload as its resume result and runs the

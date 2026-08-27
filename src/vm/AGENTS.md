@@ -175,6 +175,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
+| `resume_value_unfunded` | `bool` | Whether the innermost suspension is a PRIMITIVE call, so the next delivery owes its resume value one reference (docs/impl/region/owner.md § "A delivery into a replayed frame carries one owning reference") |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
@@ -225,6 +226,12 @@ When a fiber suspends (via yield instruction or `emit`):
    (caller) at last index.
 5. **Resume** (`resume_suspended`): iterates frames forward, calling
    `execute_bytecode_from_ip` for each. Handles re-yields and errors.
+
+A park at a suspending PRIMITIVE call — a dynamic `emit`, a capability denial —
+resumes into that call's continuation, which releases the call's result. The
+primitive never returns, so nothing mints the reference that release consumes:
+`handle_primitive_signal` and the denial path record the shape on the fiber
+(`resume_value_unfunded`) and `do_fiber_resume_single` mints it as it delivers.
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants

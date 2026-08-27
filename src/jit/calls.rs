@@ -107,6 +107,12 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
                 r,
                 crate::value::arena::EscapeSite::SuspendEscape,
             );
+            // …and the same arm's park classification: this primitive never
+            // returns, so the resume value stands in for its result and the
+            // delivery owes the reference the missing `Return` mint would have
+            // carried (docs/impl/region/owner.md § "A delivery into a replayed
+            // frame carries one owning reference").
+            vm.fiber.resume_value_unfunded = true;
             vm.fiber.signal = Some((bits, value));
             YIELD_SENTINEL
         }
@@ -143,6 +149,10 @@ pub(crate) fn jit_capability_denial(
     let heap = unsafe { &mut *vm.heap_ptr };
     let r = crate::value::arena::region_of(heap, payload);
     crate::value::arena::incref_for_escape(heap, r, crate::value::arena::EscapeSite::SuspendEscape);
+    // The denied primitive never runs, so the mediating parent's resume value
+    // stands in for its result — the same park classification the interpreter's
+    // `handle_capability_denial` records.
+    vm.fiber.resume_value_unfunded = true;
     vm.fiber.signal = Some((blocked, payload));
     YIELD_SENTINEL
 }

@@ -191,6 +191,13 @@ pub enum EscapeSite {
     /// A child fiber's set-once terminal result, park-retained until the fiber
     /// is freed (released by the signal scan — asymmetric by Rule 7).
     TerminalSignal,
+    /// A resume value delivered into a frame parked at a suspending PRIMITIVE
+    /// call. The primitive never returns, so its `Return` mint never runs and
+    /// the resume value takes the place of the result the continuation's
+    /// compiler-emitted release consumes — this retain is that missing mint
+    /// (docs/impl/region/owner.md § "A delivery into a replayed frame carries
+    /// one owning reference").
+    ResumeDelivery,
     /// A heap value in a child fiber's inherited dynamic-parameter baseline,
     /// retained at the seed until the fiber is freed (released by the Fiber
     /// content scan's baseline walk — the terminal-signal shape;
@@ -215,6 +222,7 @@ impl EscapeSite {
             EscapeSite::EmitEscape => "emit-escape",
             EscapeSite::PropagateEscape => "propagate-escape",
             EscapeSite::TerminalSignal => "terminal-signal",
+            EscapeSite::ResumeDelivery => "resume-delivery",
             EscapeSite::ParamBaseline => "param-baseline",
         }
     }

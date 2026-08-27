@@ -153,6 +153,23 @@ pub struct Fiber {
     /// exemption preserves. Cleared where the delivery is consumed: the resume's
     /// signal take, and an abort's injection.
     pub emit_delivery: Option<Value>,
+    /// Whether this fiber's innermost suspension is a PRIMITIVE call, whose
+    /// resume value therefore arrives owing one reference.
+    ///
+    /// A parked frame re-enters at its suspending call's continuation, which
+    /// runs that call's compiler-emitted result release. A bytecode callee funds
+    /// the reference that release consumes with its `Return` mint; a primitive
+    /// that suspends never returns, so the delivery mints it instead
+    /// (docs/impl/region/owner.md § "A delivery into a replayed frame carries one
+    /// owning reference"). The classifier — `handle_primitive_signal` and the
+    /// capability-denial path, in call and tail position and in their JIT twins
+    /// (`src/jit/calls.rs`) — is the only place that knows which shape a park has,
+    /// and the park itself may be built later
+    /// and elsewhere (a tail suspend leaves no frame of its own), so the answer
+    /// rides the fiber rather than the frame. `do_fiber_resume_single` takes it
+    /// with the parked signal, so every delivery route consumes it exactly once
+    /// and a later park of a different shape starts from `false`.
+    pub resume_value_unfunded: bool,
     /// Suspended execution frames. Set when the fiber suspends; consumed
     /// when it resumes.
     ///
@@ -431,6 +448,7 @@ impl Fiber {
             signal: None,
             error_loc: None,
             emit_delivery: None,
+            resume_value_unfunded: false,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],
@@ -467,6 +485,7 @@ impl Fiber {
             signal: None,
             error_loc: None,
             emit_delivery: None,
+            resume_value_unfunded: false,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],

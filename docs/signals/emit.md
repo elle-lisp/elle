@@ -108,6 +108,12 @@ through to the runtime primitive. This supports dynamic signal selection:
 (emit some-variable value)   # runtime dispatch, not compile-time
 ```
 
+The dynamic form suspends, routes, and resumes exactly as the literal one
+does, and the resume value is its result the way a return value is any
+call's result. What differs is the shape of the compiled code: the literal
+`emit` ends a basic block and resumes in the next one, while the dynamic
+`emit` is an ordinary call the fiber parks inside of.
+
 This is rare. Prefer literal keywords for compile-time signal inference.
 
 ## Capability interaction
