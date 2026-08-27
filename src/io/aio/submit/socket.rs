@@ -143,6 +143,7 @@ impl AsyncBackend {
             }
         }
 
+        let origin_heap = inner.origin_heap;
         inner.pending.insert(
             id,
             PendingOp::Port {
@@ -154,6 +155,7 @@ impl AsyncBackend {
                 filled: 0,
                 timeout: request.timeout,
             },
+            origin_heap,
         );
         Ok(id)
     }

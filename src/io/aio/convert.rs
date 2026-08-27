@@ -56,12 +56,18 @@ pub(super) fn stdin_to_completion(
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(sc.id);
-    let pending_op = match pending.take(id) {
+    let pending_op = match pending.take(id, origin_heap) {
         Taken::Live(op) => op,
         // The stdin worker reports no descriptor, so there is none to close.
         Taken::Cancelled(op) => {
             op.retire(0, buffer_pool);
             return None;
+        }
+        // Nothing left to read a result from, but the scheduler still holds
+        // this id against the fiber that asked; answer so it can let go.
+        Taken::Stale(op) => {
+            op.retire(0, buffer_pool);
+            return Some(PendingTable::stale_operand_error(id, origin_heap));
         }
         Taken::Unknown => return None,
     };
@@ -162,11 +168,17 @@ pub(super) fn pool_to_completion(
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(pc.id);
-    let mut pending_op = match pending.take(id) {
+    let mut pending_op = match pending.take(id, origin_heap) {
         Taken::Live(op) => op,
         Taken::Cancelled(op) => {
             op.retire(pc.result_code, buffer_pool);
             return None;
+        }
+        // As above: retire the entry unread, and answer so the scheduler can
+        // retire the pairing it still holds under this id.
+        Taken::Stale(op) => {
+            op.retire(pc.result_code, buffer_pool);
+            return Some(PendingTable::stale_operand_error(id, origin_heap));
         }
         Taken::Unknown => return None,
     };

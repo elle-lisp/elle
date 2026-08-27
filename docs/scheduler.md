@@ -95,12 +95,21 @@ Two invariants govern delivery:
   raises `fiber/resume: cannot resume completed fiber` out of the event
   loop, which reaches the program as a runtime error with no connection
   to the fiber that died.
+
+  What arrives for such an operation is an error rather than a result. The
+  values it named — the port, the buffer the read reserved — lived in the
+  regions that fiber released on its way out, so the backend retires the
+  entry unread and answers with an error built from nothing it held
+  (`src/io/AGENTS.md` § "An operation whose operands are gone has no reader
+  either"). The scheduler drops that error exactly as it would a result.
 - **A finished fiber holds no operation.** Completing a fiber cancels the
   submission it still waits on. Otherwise that submission keeps a worker
   and a descriptor for a fiber that can never read the result, and the
   loop keeps waiting on a completion nobody wants.
 
-`tests/elle/io-late-completion.lisp` pins both.
+`tests/elle/io-late-completion.lisp` pins both over a portless timer, and
+`tests/elle/io-late-completion-port.lisp` over a port operation — the case
+where the entry holds values to read.
 
 ## Completion records
 

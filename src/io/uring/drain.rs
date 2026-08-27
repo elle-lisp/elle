@@ -86,13 +86,23 @@ pub(crate) fn drain_cqes(
         }
 
         let id = SubmissionId::from_raw(user_data);
-        // A cancelled submission is retired here rather than cooked. Everything
-        // below reads what the operation held — the port, the process handle,
-        // the fiber's pre-allocated buffer — and the fiber that owned all three
-        // is gone by the time its cancel is issued.
-        let taken = pending.take(id);
+        // A submission with no reader is retired here rather than cooked.
+        // Everything below reads what the operation held — the port, the
+        // process handle, the fiber's pre-allocated buffer — and the fiber that
+        // owned all three is gone in both of the arms that skip it.
+        let taken = pending.take(id, origin_heap);
+        // Cancelled: whoever cancelled dropped its record of the submission
+        // first, so there is nobody left to tell.
         if let Taken::Cancelled(op) = taken {
             op.retire(result_code, buffer_pool);
+            continue;
+        }
+        // Operands gone: nobody dropped this id, so the scheduler still pairs
+        // it with the fiber that asked and clears the pairing on a completion.
+        // Retire the entry and answer with an error that reads none of it.
+        if let Taken::Stale(op) = taken {
+            op.retire(result_code, buffer_pool);
+            completions.push_back(PendingTable::stale_operand_error(id, origin_heap));
             continue;
         }
         if let Taken::Live(mut pending_op) = taken {
@@ -471,7 +481,7 @@ pub(crate) fn drain_cqes(
                 .build()
                 .user_data(id.as_u64())
             };
-            pending.restore(id, pending_op);
+            pending.restore(id, pending_op, origin_heap);
             link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         } else {
             // `ReadAll` lands here: it has no pre-allocated fiber buffer to
@@ -498,7 +508,7 @@ pub(crate) fn drain_cqes(
                 *buffer_handle = Some(new_buf);
                 *filled = 0;
             }
-            pending.restore(id, pending_op);
+            pending.restore(id, pending_op, origin_heap);
             link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         }
     }
@@ -535,7 +545,7 @@ pub(crate) fn drain_cqes(
         // payload larger than one syscall would otherwise be unbounded from
         // its second chunk on, and a peer that stops reading would hang a
         // write that asked for a timeout.
-        pending.restore(id, pending_op);
+        pending.restore(id, pending_op, origin_heap);
         link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));
     }
 

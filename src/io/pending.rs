@@ -156,6 +156,48 @@ impl PendingOp {
         }
     }
 
+    /// The heap values this operation holds and a completion dereferences when
+    /// it cooks a result: the port it names, the caller's pre-allocated buffer
+    /// or result struct, the payload a write hands over, the process handle it
+    /// caches an exit code in, the watcher or receiver it reads through.
+    ///
+    /// None of them are the operation's own allocations. Each was born in a
+    /// region of the fiber that asked, so each is live only while that fiber's
+    /// regions are — which is what [`OperandSite`] records and
+    /// [`PendingTable::take`] checks.
+    ///
+    /// Both matches are exhaustive on purpose: a variant that gains a value
+    /// field and does not name it here loses that protection silently. A slot
+    /// an operation does not use reads `Value::NIL`, which carries no region
+    /// and so answers every question about one with "nothing to lose".
+    pub(crate) fn operands(&self) -> [Value; MAX_OPERANDS] {
+        let mut out = [Value::NIL; MAX_OPERANDS];
+        match self {
+            PendingOp::Port { op, port, .. } => {
+                out[0] = *port;
+                out[1] = match op {
+                    PortOp::ReadLine { buffer }
+                    | PortOp::Read { buffer, .. }
+                    | PortOp::ReadExact { buffer, .. } => *buffer,
+                    PortOp::Write { data } | PortOp::SendTo { data, .. } => *data,
+                    PortOp::Accept { accept_port, .. } => *accept_port,
+                    PortOp::RecvFrom { result, .. } => *result,
+                    PortOp::ReadAll | PortOp::Flush | PortOp::Shutdown { .. } => Value::NIL,
+                };
+            }
+            PendingOp::Connect { port, .. } | PendingOp::Open { port, .. } => out[0] = *port,
+            PendingOp::ProcessWait { handle_val, .. } => out[0] = *handle_val,
+            PendingOp::WatchNext { watcher, .. } => out[0] = *watcher,
+            PendingOp::SigNext { receiver, .. } => out[0] = *receiver,
+            PendingOp::Sleep { .. }
+            | PendingOp::Task { .. }
+            | PendingOp::Resolve { .. }
+            | PendingOp::PollFd { .. }
+            | PendingOp::ChanSelectPark { .. } => {}
+        }
+        out
+    }
+
     /// Could an operation of kind `kind` have filed this entry?
     ///
     /// A completion answers "no" only when the submission table and the
@@ -258,6 +300,82 @@ impl PendingOp {
     }
 }
 
+/// The most heap values one operation holds: the port it names and the one
+/// buffer, payload or result struct the caller reserved for it.
+/// [`PendingOp::operands`] fills the rest with `Value::NIL`.
+pub(crate) const MAX_OPERANDS: usize = 2;
+
+/// Where one operand lived when its entry was filed: the region, and the
+/// incarnation of that region current at the time.
+///
+/// The generation is what makes "is it still there?" an exact question. Region
+/// ids are recycled, so the id alone cannot tell this incarnation from the next,
+/// and the value's own page header cannot either — a freed page that has been
+/// re-claimed carries its new owner's stamp. The store's counter moves only on a
+/// free (docs/impl/region/generations.md § "Region generations").
+#[derive(Clone, Copy)]
+struct OperandSite {
+    region: u32,
+    generation: u32,
+}
+
+impl OperandSite {
+    /// Where each of `op`'s operands lives, on `heap`. `None` for a slot the
+    /// operation does not use, and for a value `heap` does not own: a worker
+    /// reading a parent-heap value is the tolerated cross-store borrow, and this
+    /// store's generation counter says nothing about another store's frees.
+    fn of(
+        op: &PendingOp,
+        heap: &crate::value::fiberheap::FiberHeap,
+    ) -> [Option<OperandSite>; MAX_OPERANDS] {
+        op.operands().map(|v| {
+            if !heap.value_in_region_store(v) {
+                return None;
+            }
+            crate::value::arena::region_of(heap, v).map(|r| OperandSite {
+                region: r.get(),
+                generation: heap.region_generation(r.get()),
+            })
+        })
+    }
+
+    /// Whether the region this operand was born in has since been freed.
+    fn gone(&self, heap: &crate::value::fiberheap::FiberHeap) -> bool {
+        heap.region_generation(self.region) != self.generation
+    }
+}
+
+/// One in-flight operation, and where the values it holds lived when it was
+/// filed. The two travel together because a completion reads both: the entry to
+/// build a result from, and the sites to decide whether it may.
+struct Entry {
+    op: PendingOp,
+    /// The heap the sites below were read from, so a completion can tell that
+    /// it is asking the store that answered before. Generations are per store —
+    /// one store's counter for an id says nothing about another's.
+    heap: *mut crate::value::fiberheap::FiberHeap,
+    sites: [Option<OperandSite>; MAX_OPERANDS],
+}
+
+impl Entry {
+    /// Whether any region this entry's operands were born in has since been
+    /// freed.
+    ///
+    /// False when the backend recorded no heap — the answer a submission made
+    /// outside a region store wants — and false when `heap` is not the store the
+    /// sites came from, because the two stores' generation counters are
+    /// unrelated numbers.
+    fn operands_gone(&self, heap: *mut crate::value::fiberheap::FiberHeap) -> bool {
+        if heap.is_null() || heap != self.heap {
+            return false;
+        }
+        // SAFETY: the backend recorded this pointer at submit, and a completion
+        // is resolved on the instance that owns it.
+        let heap = unsafe { &*heap };
+        self.sites.iter().flatten().any(|s| s.gone(heap))
+    }
+}
+
 /// What a completion found when it looked its submission up.
 pub(crate) enum Taken {
     /// The operation, with a fiber waiting for its result. Cook it.
@@ -266,6 +384,20 @@ pub(crate) enum Taken {
     /// the result would read heap values whose regions the finished fiber's
     /// release may already have freed.
     Cancelled(PendingOp),
+    /// The operation, with its operands' regions gone. Retire it as a cancelled
+    /// one is — but answer, rather than fall silent.
+    ///
+    /// The difference from `Cancelled` is who still holds the id. Every
+    /// `io/cancel` caller in the scheduler drops its own record of the
+    /// submission first, so a cancelled id has no reader and no bookkeeping
+    /// left; silence is what it wants. Nobody dropped this one — the fiber that
+    /// asked ended without telling anyone — so the scheduler still pairs the id
+    /// with that fiber, and only a completion under this id retires the pairing.
+    /// Withholding it too would leave the pairing in place and the event loop
+    /// waiting on an operation that already finished.
+    ///
+    /// The answer is an error built from nothing the entry held.
+    Stale(PendingOp),
     /// No entry under this id — already reaped, or never filed.
     Unknown,
 }
@@ -283,7 +415,7 @@ pub(crate) enum Taken {
 /// completion; dropping the entry at the cancel would strand both.
 #[derive(Default)]
 pub(crate) struct PendingTable {
-    ops: HashMap<SubmissionId, PendingOp>,
+    ops: HashMap<SubmissionId, Entry>,
     /// Ids whose result no fiber will receive. Every `io/cancel` caller in the
     /// scheduler drops its own record of the submission before cancelling, so
     /// the id is marked here precisely when there is no longer a reader.
@@ -295,20 +427,69 @@ impl PendingTable {
         PendingTable::default()
     }
 
-    /// File a fresh submission's entry under the id it was dispatched with.
-    pub(crate) fn insert(&mut self, id: SubmissionId, op: PendingOp) {
-        self.ops.insert(id, op);
+    /// File a fresh submission's entry under the id it was dispatched with,
+    /// recording where its operands live.
+    pub(crate) fn insert(
+        &mut self,
+        id: SubmissionId,
+        op: PendingOp,
+        heap: *mut crate::value::fiberheap::FiberHeap,
+    ) {
+        let sites = if heap.is_null() {
+            [None; MAX_OPERANDS]
+        } else {
+            // SAFETY: the caller submits on the instance whose heap this is, and
+            // the operands were allocated on it moments ago.
+            OperandSite::of(&op, unsafe { &*heap })
+        };
+        self.ops.insert(id, Entry { op, heap, sites });
     }
 
     /// Take the entry a completion resolves through, and say whether anybody
     /// is waiting for its result.
-    pub(crate) fn take(&mut self, id: SubmissionId) -> Taken {
+    ///
+    /// Two ways to have no reader, and they are answered differently because a
+    /// different amount of bookkeeping is left. The id was cancelled — a caller
+    /// dropped its record of the submission and said so, so there is nothing
+    /// left to tell. Or an operand's region is gone, which says the fiber that
+    /// asked ended without anybody cancelling for it, and the scheduler is still
+    /// holding the pairing (see [`Taken::Stale`]).
+    pub(crate) fn take(
+        &mut self,
+        id: SubmissionId,
+        heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Taken {
         let was_cancelled = self.cancelled.remove(&id);
         match self.ops.remove(&id) {
-            Some(op) if was_cancelled => Taken::Cancelled(op),
-            Some(op) => Taken::Live(op),
+            Some(e) if was_cancelled => Taken::Cancelled(e.op),
+            Some(e) if e.operands_gone(heap) => Taken::Stale(e.op),
+            Some(e) => Taken::Live(e.op),
             None => Taken::Unknown,
         }
+    }
+
+    /// What a completion for an operation whose operands are gone says.
+    ///
+    /// Built from nothing the entry held — that is the point — so it names the
+    /// reason rather than the operation. The only reader is the scheduler,
+    /// which retires the pairing this id belongs to and drops the error: the
+    /// fiber that would have received it is what went away.
+    pub(crate) fn stale_operand_error(
+        id: SubmissionId,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> crate::io::Completion {
+        crate::io::Completion::err(
+            id,
+            crate::io::io_error(
+                "io-error",
+                format!(
+                    "io completion {id}: the fiber that requested this operation \
+                     ended before it finished, and the values the operation named \
+                     went with it"
+                ),
+                origin_heap,
+            ),
+        )
     }
 
     /// Mark `id` as having no reader, so its completion is retired rather than
@@ -339,9 +520,19 @@ impl PendingTable {
     /// Put a resubmitted operation's entry back. The operation is the same one
     /// — a read that needs another syscall to reach its newline, its count, or
     /// its EOF — so this is one operation's entry moving, not a new submission.
+    ///
+    /// Its operand sites are recorded again: the `take` that pulled the entry
+    /// out consumed the old ones, and the operands are known live right now
+    /// because that same `take` answered `Live`. No Elle runs between the two,
+    /// so nothing can have been freed in between.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub(crate) fn restore(&mut self, id: SubmissionId, op: PendingOp) {
-        self.ops.insert(id, op);
+    pub(crate) fn restore(
+        &mut self,
+        id: SubmissionId,
+        op: PendingOp,
+        heap: *mut crate::value::fiberheap::FiberHeap,
+    ) {
+        self.insert(id, op, heap);
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -366,15 +557,15 @@ impl PendingTable {
     /// skips that question is exactly what this table exists to prevent.
     #[cfg(test)]
     pub(crate) fn get(&self, id: SubmissionId) -> Option<&PendingOp> {
-        self.ops.get(&id)
+        self.ops.get(&id).map(|e| &e.op)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&SubmissionId, &PendingOp)> {
-        self.ops.iter()
+        self.ops.iter().map(|(id, e)| (id, &e.op))
     }
 
     pub(crate) fn values(&self) -> impl Iterator<Item = &PendingOp> {
-        self.ops.values()
+        self.ops.values().map(|e| &e.op)
     }
 }
 
@@ -395,13 +586,28 @@ mod tests {
         SubmissionId::from_raw(n)
     }
 
+    /// What a table test files against when its entries hold no values: a
+    /// `Sleep` owns nothing that could be freed, so there is no store to ask.
+    fn no_heap() -> *mut crate::value::fiberheap::FiberHeap {
+        std::ptr::null_mut()
+    }
+
+    /// An entry holding one heap value. `WatchNext` is the shape with a single
+    /// operand and nothing else to stand up.
+    fn watch_op(pool: &mut BufferPool, watcher: Value) -> PendingOp {
+        PendingOp::WatchNext {
+            watcher,
+            buffer_handle: pool.alloc(0),
+        }
+    }
+
     /// An uncancelled submission's completion is handed its entry to cook.
     #[test]
     fn a_live_submission_is_taken_live() {
         let mut pool = BufferPool::new();
         let mut table = PendingTable::new();
-        table.insert(id(1), sleep_op(&mut pool));
-        assert!(matches!(table.take(id(1)), Taken::Live(_)));
+        table.insert(id(1), sleep_op(&mut pool), no_heap());
+        assert!(matches!(table.take(id(1), no_heap()), Taken::Live(_)));
         assert!(table.is_empty(), "taking an entry removes it");
     }
 
@@ -412,13 +618,13 @@ mod tests {
     fn a_cancelled_submission_is_taken_cancelled_exactly_once() {
         let mut pool = BufferPool::new();
         let mut table = PendingTable::new();
-        table.insert(id(1), sleep_op(&mut pool));
+        table.insert(id(1), sleep_op(&mut pool), no_heap());
         table.mark_cancelled(id(1));
-        match table.take(id(1)) {
+        match table.take(id(1), no_heap()) {
             Taken::Cancelled(op) => op.retire(0, &mut pool),
             _ => panic!("a marked submission must be reported cancelled"),
         }
-        assert!(matches!(table.take(id(1)), Taken::Unknown));
+        assert!(matches!(table.take(id(1), no_heap()), Taken::Unknown));
     }
 
     /// Cancelling an id that is no longer in flight marks nothing.
@@ -430,11 +636,11 @@ mod tests {
     fn cancelling_a_reaped_submission_marks_nothing() {
         let mut pool = BufferPool::new();
         let mut table = PendingTable::new();
-        table.insert(id(1), sleep_op(&mut pool));
-        assert!(matches!(table.take(id(1)), Taken::Live(_)));
+        table.insert(id(1), sleep_op(&mut pool), no_heap());
+        assert!(matches!(table.take(id(1), no_heap()), Taken::Live(_)));
 
         table.mark_cancelled(id(1));
-        assert!(matches!(table.take(id(1)), Taken::Unknown));
+        assert!(matches!(table.take(id(1), no_heap()), Taken::Unknown));
     }
 
     /// A resubmitted operation is still in flight, so a cancel still reaches
@@ -449,17 +655,112 @@ mod tests {
     fn a_resubmitted_operation_can_still_be_cancelled() {
         let mut pool = BufferPool::new();
         let mut table = PendingTable::new();
-        table.insert(id(1), sleep_op(&mut pool));
-        let op = match table.take(id(1)) {
+        table.insert(id(1), sleep_op(&mut pool), no_heap());
+        let op = match table.take(id(1), no_heap()) {
             Taken::Live(op) => op,
             _ => panic!("an unmarked entry is live"),
         };
-        table.restore(id(1), op);
+        table.restore(id(1), op, no_heap());
 
         table.mark_cancelled(id(1));
-        match table.take(id(1)) {
+        match table.take(id(1), no_heap()) {
             Taken::Cancelled(op) => op.retire(0, &mut pool),
             _ => panic!("a resubmitted operation must still be cancellable"),
+        }
+    }
+
+    /// An entry whose operand's region is gone has no reader, whether or not
+    /// anybody cancelled it.
+    ///
+    /// The trap: nothing marks this id. The fiber that asked ran to a terminal
+    /// state by a path that told no one, so the only evidence left is that the
+    /// region its operand lived in has been freed.
+    #[test]
+    fn an_entry_whose_operand_region_is_gone_is_taken_stale() {
+        let mut pool = BufferPool::new();
+        let mut table = PendingTable::new();
+        let heap = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process.
+        let h = unsafe { &mut *heap };
+        let region = h.new_runtime_region();
+        let watcher = h.alloc_in_region(
+            crate::value::heap::HeapObject::LBox {
+                cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
+                traits: Value::NIL,
+            },
+            region,
+        );
+
+        table.insert(id(1), watch_op(&mut pool, watcher), heap);
+        h.decref_region(region);
+
+        match table.take(id(1), heap) {
+            Taken::Stale(op) => op.retire(0, &mut pool),
+            _ => panic!("an operation whose operand region is gone has no reader"),
+        }
+    }
+
+    /// The same entry read while its operand is still there is live.
+    ///
+    /// The counter-factual for the test above: without it, a check that simply
+    /// answered "gone" would pass that one and withhold every completion in the
+    /// process.
+    #[test]
+    fn an_entry_whose_operand_region_lives_is_taken_live() {
+        let mut pool = BufferPool::new();
+        let mut table = PendingTable::new();
+        let heap = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process.
+        let h = unsafe { &mut *heap };
+        let region = h.new_runtime_region();
+        let watcher = h.alloc_in_region(
+            crate::value::heap::HeapObject::LBox {
+                cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
+                traits: Value::NIL,
+            },
+            region,
+        );
+
+        table.insert(id(1), watch_op(&mut pool, watcher), heap);
+        match table.take(id(1), heap) {
+            Taken::Live(op) => op.retire(0, &mut pool),
+            _ => panic!("an operation whose operands are all there has a reader"),
+        }
+    }
+
+    /// A resubmission keeps the question askable.
+    ///
+    /// The trap: `take` consumes the entry's operand sites, and a read that
+    /// needs another syscall goes back through `restore`. An entry that came
+    /// back without its sites would answer "live" forever after, which is
+    /// exactly the answer that reads a freed port.
+    #[test]
+    fn a_restored_entry_still_checks_its_operands() {
+        let mut pool = BufferPool::new();
+        let mut table = PendingTable::new();
+        let heap = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process.
+        let h = unsafe { &mut *heap };
+        let region = h.new_runtime_region();
+        let watcher = h.alloc_in_region(
+            crate::value::heap::HeapObject::LBox {
+                cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
+                traits: Value::NIL,
+            },
+            region,
+        );
+
+        table.insert(id(1), watch_op(&mut pool, watcher), heap);
+        let op = match table.take(id(1), heap) {
+            Taken::Live(op) => op,
+            _ => panic!("a live operand reads as live"),
+        };
+        table.restore(id(1), op, heap);
+
+        h.decref_region(region);
+        match table.take(id(1), heap) {
+            Taken::Stale(op) => op.retire(0, &mut pool),
+            _ => panic!("a resubmitted operation must still lose its reader"),
         }
     }
 
@@ -469,12 +770,12 @@ mod tests {
         let mut pool = BufferPool::new();
         let mut table = PendingTable::new();
         for n in 1..=3 {
-            table.insert(id(n), sleep_op(&mut pool));
+            table.insert(id(n), sleep_op(&mut pool), no_heap());
         }
         table.cancel_all();
         for n in 1..=3 {
             assert!(
-                matches!(table.take(id(n)), Taken::Cancelled(_)),
+                matches!(table.take(id(n), no_heap()), Taken::Cancelled(_)),
                 "submission {n} must be withheld at teardown",
             );
         }

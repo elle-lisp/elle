@@ -357,6 +357,7 @@ fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
                 handle_val: Value::NIL,
                 siginfo,
             },
+            heap,
         );
 
         // The witness shape: a read reports a failure under an id whose entry
@@ -386,7 +387,7 @@ fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
              found, so it cannot read as a subprocess failure: {msg}",
         );
         assert!(
-            matches!(pending.take(id), crate::io::pending::Taken::Unknown),
+            matches!(pending.take(id, heap), crate::io::pending::Taken::Unknown),
             "the entry is consumed either way",
         );
 

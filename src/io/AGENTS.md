@@ -236,6 +236,56 @@ A cancel for an id that is no longer in flight marks nothing. The operation
 completed and its result already reached the fiber that asked; a mark left
 behind would meet a later submission.
 
+### An operation whose operands are gone has no reader either
+
+A cancel is something a caller must remember to issue, and one caller cannot:
+a fiber that terminates by a path the scheduler did not route. `fiber/abort`
+injects an error the fiber's own `protect` may catch, so it runs to `:dead`
+with its operation still submitted, and `fiber/cancel` leaves it `:error` the
+same way. The scheduler finds out when it next looks at that fiber — which is
+after the completion has been assembled, because assembling happens inside
+`io/wait`.
+
+So the reader-gone question is not asked of the canceller alone. Every entry
+records, at the moment it is filed, **where each of its operands lives**: the
+region, and the incarnation of that region that was current then. A completion
+compares those against the store's generation counter, and an operand whose
+incarnation is gone retires the entry unread, exactly as a cancelled one is.
+
+The generation is what makes the answer exact rather than a guess. Region ids
+are recycled, so an id alone cannot distinguish this incarnation from the next,
+and reading the value's own page header cannot either — a freed page that has
+been re-claimed carries its new owner's stamp. The store's counter only ever
+moves on a free, so a match means the very region the operand was born in is
+still there.
+
+Unlike a cancelled operation, this one **answers**. A cancel is issued by a
+caller that has already dropped its record of the submission, so silence leaves
+nothing behind. Nobody dropped this id. The scheduler still pairs it with the
+fiber that asked, and retires that pairing only on a completion, so silence here
+would leave the event loop waiting on an operation that already finished. The
+answer is an error built from nothing the entry held; the scheduler retires the
+pairing and drops the error, because the fiber it would have gone to is what
+went away.
+
+`PendingOp::operands` is the list this rests on: the port an operation names,
+the buffer or result struct the caller reserved, the payload a write hands
+over, the process handle, the watcher, the receiver. None of them are the
+operation's own allocations, and assembling a result dereferences them.
+
+A payload a write already copied at submit is listed too, though no completion
+reads it back. An entry holding a dead value is itself the evidence that the
+fiber which asked is gone, and that is the fact the check wants — a result
+assembled for a fiber that ended reaches nobody either way.
+
+A variant that gains a value field and does not name it in `operands` loses
+this protection silently, which is why the match there is exhaustive over both
+`PendingOp` and `PortOp`.
+
+Pinned by `a_completion_is_withheld_when_its_operands_region_is_gone`
+(`src/io/aio/tests/park.rs`) and, end to end, by
+`tests/elle/io-late-completion-port.lisp`.
+
 ### The stop pipe
 
 An operation that can wait indefinitely carries a **stop pipe**, and that

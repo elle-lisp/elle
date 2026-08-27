@@ -403,3 +403,117 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
         }
     });
 }
+
+/// A completion is withheld when the region its operands live in is gone.
+///
+/// A cancel is something a caller must remember to issue, and one caller
+/// cannot: a fiber that terminates by a path the scheduler did not route runs
+/// to `:dead` with its operation still submitted and nothing marking the id.
+/// The completion then resolves `Live`, and assembling it dereferences the port
+/// the entry holds — a value in a region that fiber released on its way out.
+///
+/// The trap: reading freed memory is not what a test can assert on. By the
+/// time the completion runs, the slot has been recycled and reads as whatever
+/// its new owner wrote, so a regression comes back with a plausible result
+/// rather than a fault. What IS deterministic is the answer, so that is what
+/// this asserts: an error, carrying nothing the entry held.
+///
+/// An answer rather than silence, unlike a cancelled operation, because nobody
+/// dropped this id — the scheduler still pairs it with the fiber that asked,
+/// and retires the pairing on a completion.
+///
+/// The operand freed below is a write's payload rather than a read's port,
+/// because freeing the port's region would also close the descriptor: a worker
+/// that has not reached its syscall would then run on a number the OS has
+/// handed to somebody else, and this test would be measuring that instead. The
+/// payload is a fair stand-in — `operands` is one list, and `take` asks the
+/// same question of every entry in it.
+///
+/// Counter-factual: with the operand-site check removed from
+/// `PendingTable::take`, the write below resolves `Live` and answers with a
+/// byte count instead. `tests/elle/io-late-completion-port.lisp` shows the
+/// same rule end to end on a read, where the entry's port IS dereferenced and
+/// the removal faults under `--trace=guardfree`.
+#[test]
+fn a_completion_is_withheld_when_its_operands_region_is_gone() {
+    crate::value::arena::with_test_region(|| {
+        for (backend, which) in [
+            (AsyncBackend::new().unwrap(), "the platform default"),
+            (AsyncBackend::new_thread_pool().unwrap(), "the thread pool"),
+        ] {
+            // A regular file, so the write runs to its end on its own. An
+            // operation that parks would leave which of the two happened first
+            // — the completion or the free — up to the machine.
+            let path = temp_path("operand-region");
+            let heap_ptr = crate::value::arena::leaked_test_heap();
+            // SAFETY: the heap is leaked for the process, so this borrow is
+            // valid for the whole test.
+            let heap = unsafe { &mut *heap_ptr };
+
+            // The port outlives the operation, so its descriptor is nobody
+            // else's to reuse while a worker still names it.
+            let port_region = heap.new_runtime_region();
+            let file = std::fs::File::create(&path).expect("create the file");
+            let port = crate::value::build::external(
+                heap,
+                "port",
+                Port::new_file(
+                    file.into(),
+                    Direction::Write,
+                    Encoding::Binary,
+                    path.clone(),
+                ),
+                port_region,
+            );
+
+            // The asking fiber's own region, holding the payload it handed over.
+            let region = heap.new_runtime_region();
+            let data = crate::primitives::ctx::Alloc::with_region(region, heap).string("late\n");
+            let id = backend
+                .submit(
+                    &IoRequest {
+                        op: PortOp::Write { data }.into(),
+                        port,
+                        timeout: None,
+                    },
+                    heap_ptr,
+                )
+                .unwrap();
+
+            // The fiber ends: its region goes, and with it the payload.
+            heap.decref_region(region);
+
+            let mut delivered = Vec::new();
+            for _ in 0..40 {
+                delivered.extend(backend.wait(50).unwrap());
+                if !backend.has_pending() && backend.workers() == 0 {
+                    break;
+                }
+            }
+            std::fs::remove_file(&path).ok();
+
+            assert_eq!(
+                delivered.len(),
+                1,
+                "{which}: the operation must answer once — the scheduler holds \
+                 this id against the fiber that asked and lets go on a completion",
+            );
+            let completion = delivered.pop().unwrap();
+            assert_eq!(completion.id, id, "{which}: the submitted id came back");
+            completion.result.expect_err(
+                "an operation whose operand region is gone must answer with an \
+                 error: a value could only have been assembled by reading that \
+                 region",
+            );
+            assert!(
+                !backend.has_pending(),
+                "{which}: the retired operation kept its pending entry",
+            );
+            assert_eq!(
+                backend.workers(),
+                0,
+                "{which}: the retired operation never gave its worker back",
+            );
+        }
+    });
+}

@@ -125,6 +125,23 @@ fn region_toplevel_reassign_thunk_uaf() {
     );
 }
 
+// Guard — a fiber parked on a PORT operation can terminate by a path the
+// scheduler does not route (`fiber/abort` injects an error the fiber's own
+// `protect` catches), releasing the regions that hold the port and the read
+// buffer while the operation is still submitted. The completion that arrives
+// afterwards must be withheld rather than assembled: assembling it dereferences
+// the port, which SIGSEGVs under guardfree. The harness runs this file under its
+// plain vm/jit policies, where the same read lands on a recycled page and shows
+// a false green, so the fault only exists here. See src/io/AGENTS.md § "An
+// operation whose operands are gone has no reader either".
+#[test]
+fn io_late_completion_port_uaf() {
+    run_elle_script_with_args(
+        "io-late-completion-port",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `match` pattern binding that aliases into the scrutinee's region
 // (`(a & rest)`, `(h . t)`, an immutable-array element, an immutable-struct
 // value) must record the scrutinee's `binding_regions`, so the subject region's
