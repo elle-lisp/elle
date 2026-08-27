@@ -510,6 +510,26 @@ fn region_fiber_yield_borrow_uaf() {
     );
 }
 
+// Guard — a resume value delivered into a frame parked at a suspending PRIMITIVE
+// call carries one owning reference (docs/impl/region/owner.md § "A delivery into
+// a replayed frame carries one owning reference"). The replayed frame re-enters at
+// that call's continuation and runs the call's compiler-emitted result release; a
+// bytecode callee funds that release with its `Return` mint, but a primitive that
+// suspends never returns, so the delivery owes it. This drives both parks that
+// land in such a continuation — a dynamic `emit`, in bound and tail position and
+// held across a further park, and a mediated capability denial — each paired with
+// the literal `Emit`, whose resume block mints the reference in bytecode and is
+// therefore correct without the delivery's. Freeing the delivered value early
+// faults on the read below — SIGSEGV under guardfree — and a growth gauge over the
+// emit witnesses refuses a delivery that mints more than one.
+#[test]
+fn region_primitive_resume_uaf() {
+    run_elle_script_with_args(
+        "region-primitive-resume-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — an inlined callee's body regions name the CALLEE's activation, so the
 // caller names the call's own region for the result (docs/impl/region/mechanism.md
 // § "A call's result is named by the call's own region"). The result therefore

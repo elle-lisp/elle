@@ -35,15 +35,39 @@ impl VM {
         }
 
         // Extract resume value and status before taking the fiber
-        let (resume_value, is_first_resume, child_params_seeded) = child_handle.with_mut(|child| {
-            let rv = child.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
-            // The resume consumes the parked signal, and with it any recorded
-            // emit-minted delivery: the payload this record named is gone from
-            // the slot, and a later raise records its own.
-            child.emit_delivery = None;
-            let first = child.status == FiberStatus::New;
-            (rv, first, !child.param_frames.is_empty())
-        });
+        let (resume_value, is_first_resume, child_params_seeded, unfunded) =
+            child_handle.with_mut(|child| {
+                let rv = child.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
+                // The resume consumes the parked signal, and with it any recorded
+                // emit-minted delivery: the payload this record named is gone from
+                // the slot, and a later raise records its own.
+                child.emit_delivery = None;
+                // …and with it the park's delivery obligation, so a park of a
+                // different shape later starts from `false`.
+                let unfunded = std::mem::take(&mut child.resume_value_unfunded);
+                let first = child.status == FiberStatus::New;
+                (rv, first, !child.param_frames.is_empty(), unfunded)
+            });
+
+        // Fund the crossing into a frame parked at a suspending PRIMITIVE call.
+        // The replayed frame re-enters at that call's continuation and runs the
+        // call's compiler-emitted result release; a bytecode callee funds that
+        // release with its `Return` mint, but a primitive that suspends never
+        // returns and the resume value stands in for its result. Without the
+        // retain the continuation consumes a reference the resumer still owns,
+        // and the value is freed under every holder that outlives the resume
+        // (docs/impl/region/owner.md § "A delivery into a replayed frame carries
+        // one owning reference"; `tests/elle/region-primitive-resume-uaf.lisp`).
+        // `region_of` no-ops an immediate.
+        if unfunded {
+            let heap = unsafe { &mut *self.heap_ptr };
+            let r = crate::value::arena::region_of(heap, resume_value);
+            crate::value::arena::incref_for_escape(
+                heap,
+                r,
+                crate::value::arena::EscapeSite::ResumeDelivery,
+            );
+        }
 
         // Inherit parent's parameter bindings on first resume.
         // Flatten all frames into a single frame so the child starts
@@ -299,6 +323,13 @@ impl VM {
             // error minted no delivery, so any recorded one goes with it.
             vm.fiber.signal = None;
             vm.fiber.emit_delivery = None;
+            // An abort delivers no resume value — the replayed frame re-enters
+            // with `SIG_ERROR` set and leaves before the parked call's result
+            // release — so the park's delivery obligation goes with the signal it
+            // rode in on. Each arm below funds what it does hand over
+            // (docs/impl/region/owner.md § "A delivery into a replayed frame
+            // carries one owning reference").
+            vm.fiber.resume_value_unfunded = false;
 
             let frames = match vm.fiber.suspended.take() {
                 Some(frames) => frames,

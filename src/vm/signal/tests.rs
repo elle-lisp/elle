@@ -150,3 +150,71 @@ fn dispatch_query_answer_is_born_in_the_ctx_region() {
         "the SIG_QUERY answer is born in the ctx's region, not the region TLS",
     );
 }
+
+// -- which parks owe their resume value a reference --
+
+/// A suspending primitive's park owes its resume value one reference: the
+/// primitive never returns, so the `Return` mint that would fund the parked
+/// call's compiler-emitted result release never runs, and the resume value
+/// stands in for that result (docs/impl/region/owner.md § "A delivery into a
+/// replayed frame carries one owning reference"). The classifier is the only
+/// place that can tell — by the delivery the frame is built and, for a tail
+/// suspend, was built by a driver that never saw the primitive — so it records
+/// the answer on the fiber for `do_fiber_resume_single` to take.
+#[test]
+fn a_suspending_primitive_park_owes_its_resume_value_a_reference() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (code, env) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result = vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+
+        assert_eq!(result, Some(SIG_YIELD));
+        assert!(
+            vm.fiber.resume_value_unfunded,
+            "the park at a suspending primitive call owes its resume value a reference",
+        );
+    })
+}
+
+/// The tail-position mirror: the suspend leaves no frame of its own, so the
+/// obligation must survive on the fiber until whichever driver parks the frame
+/// and, later, whichever route delivers into it.
+#[test]
+fn a_tail_suspending_primitive_park_owes_its_resume_value_a_reference() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+
+        let result = vm.handle_primitive_signal_tail(SIG_YIELD, Value::int(1));
+
+        assert_eq!(result, SIG_YIELD);
+        assert!(
+            vm.fiber.resume_value_unfunded,
+            "a tail suspend at a primitive owes its resume value a reference too",
+        );
+    })
+}
+
+/// A primitive that COMPLETES parks nothing, so nothing is owed. The
+/// counter-factual for the two above: a classifier that set the flag on every
+/// primitive result would mint against a resume the fiber never waits for.
+#[test]
+fn a_completing_primitive_owes_its_resume_value_nothing() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (code, env) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result = vm.handle_primitive_signal(SIG_OK, Value::int(1), &code, &env, &mut ip);
+
+        assert!(
+            result.is_none(),
+            "a completing primitive continues dispatch"
+        );
+        assert!(
+            !vm.fiber.resume_value_unfunded,
+            "a primitive that returns funds its own result — nothing is owed",
+        );
+    })
+}

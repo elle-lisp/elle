@@ -802,3 +802,95 @@ fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
         rc!("after the test's own release — nothing holds it", 0);
     }
 }
+
+/// A resume value delivered into a frame parked at a suspending PRIMITIVE call
+/// arrives carrying one owning reference (docs/impl/region/owner.md § "A delivery
+/// into a replayed frame carries one owning reference").
+///
+/// The replayed frame re-enters at the parked call's continuation, which runs
+/// that call's compiler-emitted result release. A bytecode callee funds the
+/// reference that release consumes with its `Return` mint; a primitive that
+/// suspends never returns, so the delivery mints it instead. Which shape a park
+/// has is the classifier's answer, recorded on the fiber, so the two arms below
+/// park IDENTICAL frames and differ only in `Fiber::resume_value_unfunded` — the
+/// flag is the counter-factual. Both arms then complete and park the same value
+/// as their terminal result, which is worth its own single retain
+/// (`a_parked_terminal_payload_is_worth_one_retain_at_every_stage`), so the whole
+/// difference between the arms is the delivery's one reference.
+#[test]
+fn a_primitive_park_delivery_is_worth_one_retain() {
+    use crate::compiler::bytecode::{Bytecode, Instruction};
+    use crate::value::fiber::FiberStatus;
+    use crate::value::{BytecodeFrame, SuspendedFrame};
+    use std::rc::Rc;
+
+    for unfunded in [false, true] {
+        let mut vm = crate::vm::VM::new();
+        let heap_ptr = vm.heap_ptr;
+        let (payload, rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        macro_rules! rc {
+            ($stage:expr, $want:expr) => {
+                assert_eq!(
+                    unsafe { &*heap_ptr }.region_rc(rid),
+                    $want,
+                    "unfunded={unfunded}: delivered region rc {}",
+                    $stage
+                )
+            };
+        }
+        rc!("as allocated — the test's own reference", 1);
+
+        // The parked continuation: the resume value is pushed as the suspended
+        // call's result and returned, exactly as a body that binds nothing else
+        // would.
+        let mut body = Bytecode::new();
+        body.emit(Instruction::Return);
+        let (handle, fiber_value) =
+            child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(body));
+        let mut parked = Bytecode::new();
+        parked.emit(Instruction::Return);
+        let code = crate::value::Code::new(
+            Rc::new(parked.instructions),
+            Rc::new(parked.constants),
+            Rc::new(crate::error::LocationMap::new()),
+            Rc::new(vec![]),
+        );
+        let frame = BytecodeFrame::suspend(
+            code,
+            Rc::new(vec![]),
+            0,
+            vec![],
+            true,
+            rustc_hash::FxHashMap::default(),
+            None,
+            crate::value::Value::NIL,
+            unsafe { &*heap_ptr },
+        );
+        handle.with_mut(|f| {
+            f.status = FiberStatus::Paused;
+            f.suspended = Some(vec![SuspendedFrame::Bytecode(frame)]);
+            // What `prim_fiber_resume` installs: the value to deliver, plus the
+            // park shape the classifier recorded when the fiber suspended.
+            f.signal = Some((crate::value::fiber::SIG_OK, payload));
+            f.resume_value_unfunded = unfunded;
+        });
+        rc!("after the park is installed — the delivery has not run", 1);
+
+        let (result_bits, v) = vm.do_fiber_resume(&handle, fiber_value);
+        assert!(result_bits.is_empty(), "the replayed frame completes");
+        assert_eq!(v, payload, "the resumed frame returns what it was handed");
+        rc!(
+            "after the resume — the terminal park retain, plus the delivery's \
+             reference where the park owed one",
+            if unfunded { 3 } else { 2 }
+        );
+
+        release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+        drop(handle);
+        unsafe { &mut *heap_ptr }.decref_region_if_present(rid);
+        rc!(
+            "after every holder releases — only an unconsumed delivery is left",
+            if unfunded { 1 } else { 0 }
+        );
+    }
+}
