@@ -986,3 +986,100 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
         let _ = std::fs::remove_file(&path);
     });
 }
+
+/// A retired accept gives back the connection it took.
+///
+/// An accept that succeeded owns a descriptor: the connection the kernel
+/// handed it. Every other retiring arm gives its descriptor back — a connect
+/// closes the socket it pre-created, an open closes the file it opened — and
+/// an accept must too, or a server whose accept loop ends leaks one socket per
+/// round it had in flight.
+///
+/// The trap: an fd count cannot say this. Tests share a process and run in
+/// parallel, so the number moves under the measurement. The peer can say it
+/// instead — a connection nobody closed leaves the peer's read waiting, while
+/// a closed one ends it.
+#[test]
+fn a_retired_accept_closes_the_connection_it_took() {
+    use std::io::Read;
+    crate::value::arena::with_test_region(|| {
+        for (backend, which) in [
+            (AsyncBackend::new().unwrap(), "the platform default"),
+            (AsyncBackend::new_thread_pool().unwrap(), "the thread pool"),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let addr = listener.local_addr().expect("local_addr");
+
+            let heap_ptr = crate::value::arena::leaked_test_heap();
+            // SAFETY: the heap is leaked for the process.
+            let heap = unsafe { &mut *heap_ptr };
+
+            // The listener outlives the operation; only the fiber's own region
+            // goes, which is what makes the entry retire unread.
+            let kept = heap.new_runtime_region();
+            let listener_port = crate::value::build::external(
+                heap,
+                "port",
+                Port::new_tcp_listener(listener.into(), addr.to_string()),
+                kept,
+            );
+            let region = heap.new_runtime_region();
+            let accept_port = crate::value::build::external(
+                heap,
+                "port",
+                Port::new_unopened(
+                    PortKind::TcpStream,
+                    Direction::ReadWrite,
+                    Encoding::Binary,
+                    String::new(),
+                ),
+                region,
+            );
+
+            backend
+                .submit(
+                    &IoRequest {
+                        op: PortOp::Accept {
+                            options: Default::default(),
+                            encoding: Encoding::Binary,
+                            accept_port,
+                        }
+                        .into(),
+                        port: listener_port,
+                        timeout: None,
+                    },
+                    heap_ptr,
+                )
+                .unwrap();
+
+            // A peer, so the accept succeeds and the entry ends up owning a
+            // descriptor rather than an error.
+            let client = std::net::TcpStream::connect(addr).expect("connect");
+
+            // The fiber ends: its region goes, and with it the port the accept
+            // would have filled.
+            heap.decref_region(region);
+
+            for _ in 0..40 {
+                let _ = backend.wait(50).unwrap();
+                if !backend.has_pending() && backend.workers() == 0 {
+                    break;
+                }
+            }
+
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("set_read_timeout");
+            let mut buf = [0u8; 1];
+            match (&client).read(&mut buf) {
+                Ok(0) => {}
+                Ok(n) => panic!("{which}: the peer read {n} bytes from a retired accept"),
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+                Err(e) => panic!(
+                    "{which}: the peer's read never ended ({e}) — the accept was \
+                     retired but the connection it took was never closed",
+                ),
+            }
+        }
+    });
+}

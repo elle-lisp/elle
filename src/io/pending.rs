@@ -270,9 +270,9 @@ impl PendingOp {
     /// it: the pooled buffer, a descriptor the completion would have wrapped in
     /// a port, and the `siginfo_t` a process wait allocated.
     ///
-    /// `result_fd` is the raw completion's result code, which for a connect or
-    /// an open is the descriptor the worker opened. Nobody will take it now, so
-    /// it is closed here rather than leaked.
+    /// `result_fd` is the raw completion's result code, which for a connect, an
+    /// open or an accept is the descriptor the operation obtained. Nobody will
+    /// take it now, so it is closed here rather than leaked.
     pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
         if let Some(bh) = self.buffer_handle() {
             buffer_pool.release(bh);
@@ -288,6 +288,19 @@ impl PendingOp {
                 }
             }
             PendingOp::Open { .. } if result_fd > 0 => {
+                // SAFETY: as above — the port for this descriptor is never built.
+                unsafe { libc::close(result_fd) };
+            }
+            // An accept that succeeded owns a descriptor too: the connection the
+            // kernel handed back. `listener_kind` is what says this entry is an
+            // accept, and a negative `result_fd` is a failure or a cancellation,
+            // which produced none. A server whose accept loop is aborted retires
+            // an accept on every round, so leaving this one open leaks a socket
+            // per round.
+            PendingOp::Port {
+                listener_kind: Some(_),
+                ..
+            } if result_fd > 0 => {
                 // SAFETY: as above — the port for this descriptor is never built.
                 unsafe { libc::close(result_fd) };
             }
