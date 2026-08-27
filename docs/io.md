@@ -240,24 +240,31 @@ whole call runs well past it:
 (ev/run (fn []
           (let* [listener (tcp/listen "127.0.0.1" 0)
                  chunk 4096
-                 chunks 10]
+                 chunks 20
+                 gap 0.05
+                 deadline 500]
             (ev/spawn (fn []
                         (let [conn (tcp/accept listener)]
                           (repeat chunks
                                   (port/write conn (bytes (string/repeat "z" chunk)))
-                                  (ev/sleep 0.1))
+                                  (ev/sleep gap))
                           (port/close conn))))
             (let* [conn (tcp/connect "127.0.0.1" (listener-port listener)
                                      :timeout 5000)
                    want (* chunk chunks)
                    started (clock/monotonic)
-                   got (port/read-exact conn want :timeout 300)
+                   got (port/read-exact conn want :timeout deadline)
                    elapsed (- (clock/monotonic) started)]
               (port/close conn)
               (port/close listener)
               (assert (= (length got) want)
                       "a slow peer still delivers every byte")
-              (assert (> elapsed 0.3)
+              # The read returns once the last chunk lands, after `chunks - 1`
+              # gaps — so this bound sits between the deadline and that total,
+              # and the gap sits an order of magnitude under the deadline. Tie
+              # either margin closer and a loaded scheduler's overshoot on one
+              # `ev/sleep` trips the deadline this example exists to survive.
+              (assert (> elapsed 0.5)
                       "and the call outlives its own :timeout while doing it")))))
 ```
 
