@@ -28,14 +28,42 @@ can't do. They're independent:
 | **deny has `:io`** | blocked; parent catches denial | blocked; denial propagates |
 | **deny lacks `:io`** | child does IO; parent catches signal | child does IO silently |
 
+The table reads the same for every capability. A mask catches a signal
+when the two share **any** bit, so naming a capability in the mask catches
+the operations that raise it — `:exec` catches subprocess requests, `:fs`
+catches the filesystem denials, `:io` catches scheduler requests. There is
+no bit a mask must name before another bit takes effect.
+
+Naming a capability catches the operation whether or not you also deny it.
+Denial changes what the child is *allowed* to do; the mask changes what
+you *see*:
+
+```lisp
+# Watch subprocess calls without forbidding them.
+(let [f (fiber/new (fn [] (subprocess/system "echo" ["hi"]) :done)
+                   |:error :exec|)]
+  (fiber/resume f)          # => #<io-request>, the fiber is :paused
+  (fiber/bits f))           # => 2560 = |:io :exec|
+```
+
+Catching a request makes you responsible for it. The fiber is parked until
+you service the request — with `io/submit` against a backend, or by
+re-raising it so your own scheduler handles it — and resume the child with
+the result. A mask you do not intend to service should not name the bit.
+
 ## Deniable capabilities
 
 Every signal bit is a capability bit. A fiber's `:deny` set is tested
 against the bits a primitive *declares*, so any bit a primitive declares
 is one a parent can withhold. Some bits also drive dispatch — `:io`
-routes a request through the scheduler, `:yield` suspends — and some do
-no dispatch work at all. That distinction belongs to the VM. It does not
-change what a mask can deny.
+routes a request through the scheduler — and some do no dispatch work at
+all. That distinction belongs to the VM. It changes neither what a mask
+can deny nor what it can catch.
+
+`:yield` is not in this table. It is the cooperative suspension `(yield v)`
+raises, not a capability: an I/O request raises `|:io|` alone, so a
+generator masked `|:yield|` catches its own yields while its reads travel
+out to the scheduler. See `docs/signals/protocol.md`.
 
 | Keyword | Bit | Effect when denied | Dispatch |
 |---------|-----|--------------------|----------|

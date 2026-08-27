@@ -43,13 +43,19 @@ use std::fmt;
 //   Bit  8:     Halt — graceful VM termination with return value
 //   Bit  9:     IO — I/O request to scheduler
 //   Bit  10:    Terminal — non-resumable signal
-//   Bit  11:    Exec — subprocess capability (access control; NOT a dispatch bit)
+//   Bit  11:    Exec — subprocess capability (no backend of its own; see below)
 //   Bit  12:    Fuel — instruction budget exhaustion
 //   Bit  13:    Switch - fiber switch trampoline
 //   Bit  14:    Wait - structured concurrency wait request
 //   Bit  15:    GPU
-//   Bit  16:    OsSignal — POSIX signal send/raise capability (access control; NOT a dispatch bit)
-//   Bit  17:    Fs — filesystem capability (access control; NOT a dispatch bit)
+//   Bit  16:    OsSignal — POSIX signal send/raise capability (see below)
+//   Bit  17:    Fs — filesystem capability (see below)
+//
+// "Capability bit" says only that the bit selects no I/O backend: `SIG_IO` is
+// what routes a request to the scheduler, and `:exec` rides alongside it rather
+// than replacing it. It does NOT mean the bit is inert in a fiber mask. A mask
+// catches a signal on any shared bit, so `|:exec|` catches a subprocess request
+// exactly as `|:io|` does — see `SignalBits::covers` and #895.
 //   Bits 18-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 

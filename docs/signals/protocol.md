@@ -71,9 +71,10 @@ bits is valid and meaningful — the caller decides what the combination means.
 `intersects()` asks whether the two sets share **at least one** bit. It is
 symmetric, and it is true for a partial overlap: `(A|B).intersects(B|C)` holds.
 It is not a subset test. `SignalBits` has no subset test, because no caller
-wants one — a mask catches a compound signal on any shared bit. The one
-exception is `covers()`, which additionally requires the `SIG_IO`
-infrastructure bit on both sides; see its doc comment.
+wants one — a mask catches a compound signal on any shared bit, and there is
+no exception. `covers()` is the routing question a fiber mask asks, and it is
+`intersects()` plus the empty-signal case; see `docs/signals/capabilities.md`
+for what that means for a mask.
 
 Examples of valid composed signals:
 

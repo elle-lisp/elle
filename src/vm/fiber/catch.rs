@@ -130,11 +130,11 @@ mod tests {
     }
 
     #[test]
-    fn io_requires_the_mask_to_name_io() {
-        // `covers` treats SIG_IO specially: a mask must name it explicitly.
-        // Pinned here because `mask_catches` delegates that rule rather than
-        // restating it.
-        assert!(!mask_catches(SIG_YIELD, SIG_IO));
+    fn an_io_request_is_caught_by_any_bit_it_names() {
+        // No bit is privileged: `mask_catches` delegates to `covers`, which is
+        // plain overlap. A `|:yield|` mask still misses an I/O request, but
+        // because the two share no bit — not because of a rule about `:io`.
         assert!(mask_catches(SIG_IO, SIG_IO));
+        assert!(!mask_catches(SIG_YIELD, SIG_IO));
     }
 }

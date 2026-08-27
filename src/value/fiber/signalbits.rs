@@ -58,16 +58,23 @@ impl SignalBits {
 
     /// True iff this mask handles `other` for signal routing purposes.
     ///
-    /// Uses overlap (any shared bit) for semantic bits, but requires full
-    /// containment of infrastructure bits (specifically SIG_IO). This
-    /// ensures that a fiber with mask SIG_YIELD does not accidentally
-    /// swallow SIG_YIELD|SIG_IO signals that must reach the scheduler,
-    /// while still allowing user-defined compound signals (e.g. |:log :audit|)
-    /// to be caught by a partial mask (e.g. |:log|).
+    /// Plain overlap: a mask catches a signal when the two share any bit, and
+    /// no bit is privileged over another. `|:log|` catches `|:log :audit|`;
+    /// `|:exec|` catches a subprocess request; `|:io|` catches the same one.
+    ///
+    /// This used to require the mask to name `SIG_IO` whenever the signal
+    /// carried it, so that a fiber masking `|:yield|` could not swallow a
+    /// request the scheduler has to service. That rule bought the guarantee at
+    /// the cost of every OTHER bit in such a signal: `|:exec|` in a mask matched
+    /// nothing, because the subprocess request it named also carried `:io`
+    /// (#895). The guarantee now holds at the source — an I/O request raises
+    /// `|:io|` and no longer carries `:yield`, so a `|:yield|` mask shares no
+    /// bit with it and cannot catch it by accident.
+    ///
+    /// The empty signal is covered by every mask: a child that returned
+    /// normally emitted nothing for a mask to miss.
     pub fn covers(self, other: SignalBits) -> bool {
-        use crate::signals::SIG_IO;
-        other.is_empty()
-            || (self.intersects(other) && (!other.intersects(SIG_IO) || self.intersects(SIG_IO)))
+        other.is_empty() || self.intersects(other)
     }
 
     // -- Combining -----------------------------------------------------------

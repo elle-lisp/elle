@@ -5,7 +5,7 @@
 //! how every fiber mask catches a compound signal.
 
 use super::SignalBits;
-use crate::signals::{SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::signals::{SIG_ERROR, SIG_EXEC, SIG_IO, SIG_OK, SIG_YIELD};
 
 /// One bit each, distinct, well clear of the compiler-reserved range.
 const A: SignalBits = SignalBits::from_bit(32);
@@ -63,20 +63,32 @@ fn has_bit_agrees_with_intersects_on_a_single_bit() {
 }
 
 #[test]
-fn covers_needs_the_io_bit_on_both_sides() {
-    // `covers` is the routing question, and it is deliberately stricter than
-    // `intersects`: a mask without SIG_IO must not swallow a signal that the
-    // scheduler has to see.
-    assert!(SIG_YIELD.intersects(SIG_YIELD | SIG_IO));
-    assert!(!SIG_YIELD.covers(SIG_YIELD | SIG_IO));
-    assert!((SIG_YIELD | SIG_IO).covers(SIG_YIELD | SIG_IO));
-    // The overlap need not be the IO bit itself, only present on both sides.
-    assert!((SIG_ERROR | SIG_IO).covers(SIG_YIELD | SIG_IO));
-    assert!(SignalBits::ALL.covers(SIG_YIELD | SIG_IO));
+fn covers_privileges_no_bit_over_another() {
+    // A subprocess request is |:io :exec|. Both bits route it, and a mask
+    // naming either one catches it — `:io` is not a precondition for `:exec`
+    // taking effect (#895, tests/elle/mask-exec-routes.lisp).
+    let request = SIG_IO | SIG_EXEC;
+    assert!(SIG_EXEC.covers(request));
+    assert!(SIG_IO.covers(request));
+    assert!((SIG_ERROR | SIG_EXEC).covers(request));
+    assert!(SignalBits::ALL.covers(request));
+    // A mask sharing no bit with the request still catches nothing.
+    assert!(!SIG_ERROR.covers(request));
 }
 
 #[test]
-fn covers_is_intersects_when_no_io_bit_is_in_play() {
+fn a_yield_mask_does_not_catch_an_io_request() {
+    // The guarantee the old SIG_IO special case bought: an intermediate fiber
+    // masking |:yield| must not swallow a request the scheduler has to service.
+    // It now holds because the two genuinely share no bit — an I/O request
+    // raises |:io| and does not carry :yield.
+    assert!(!SIG_YIELD.intersects(SIG_IO));
+    assert!(!SIG_YIELD.covers(SIG_IO));
+    assert!(!SIG_YIELD.covers(SIG_IO | SIG_EXEC));
+}
+
+#[test]
+fn covers_is_intersects_plus_the_empty_signal() {
     assert!(SIG_YIELD.covers(SIG_YIELD));
     assert!(!SIG_YIELD.covers(SIG_ERROR));
     // A mask of |:log| catches the compound |:log :audit| on the shared bit.

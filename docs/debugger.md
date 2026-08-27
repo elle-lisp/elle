@@ -35,14 +35,12 @@ scheduler fiber
 
 A mask lives on the child and names the signals its parent catches
 (`src/vm/fiber/catch.rs`). The catch test is bit *overlap*, not
-subset, with two carve-outs (`covers`,
-`src/value/fiber/signalbits.rs`): a compound signal that carries
-`:io` is caught only by a mask that names `:io`, and a signal
-carrying the VM-internal `SIG_TERMINAL` bit is never absorbed by any
-mask. An I/O request is emitted as the
-compound `:io|:yield` — the primitive's *static* signature adds
+subset, with one carve-out (`covers`,
+`src/value/fiber/signalbits.rs`): a signal carrying the VM-internal
+`SIG_TERMINAL` bit is never absorbed by any mask. An I/O request is
+emitted as `:io` alone — the primitive's *static* signature adds
 `:error`, but an error is an alternative return, not a co-emitted
-bit, and subprocess completions add `:exec`. So the debuggee's
+bit, and a subprocess request adds `:exec`. So the debuggee's
 `:error` bit does not trap a request. The request passes through the
 suspending debugger to the scheduler, whose mask on the debugger
 names `:io`. The existing `FiberResume` chain
@@ -519,8 +517,9 @@ FFI stubbing is sound because every foreign observation flows back
 through an `ffi/*` seam: a recorded pointer is just a number until
 `ffi/read` dereferences it, and that read replays its recorded value.
 `ffi/callback` is refused under recording — a foreign-initiated entry
-into Elle has no seam. Note `:exec` is a capability bit, not a
-dispatch route; subprocess completion rides the `:io` seam.
+into Elle has no seam. A subprocess request carries `:exec` alongside
+`:io`, but only `:io` selects a backend, so it records on the `:io`
+seam like any other request.
 
 Thread refusal is load-bearing, not conservatism: `sys/thread-state`,
 `chan/send`, `chan/recv`, and `chan/try-select` are synchronous

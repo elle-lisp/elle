@@ -296,7 +296,7 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 
 **Location:** `src/primitives/subprocess.rs`
 
-**Capability bit:** `SIG_EXEC` (bit 11) is a capability bit for fiber mask access control. Subprocess primitives emit `SIG_EXEC | SIG_IO | SIG_YIELD` so that fiber signal masks can selectively allow or deny subprocess operations independently of general I/O. The dispatch mechanism remains `SIG_IO`-based — the `SIG_EXEC` bit exists for access control granularity, not for routing.
+**Capability bit:** `SIG_EXEC` (bit 11) gives subprocess operations their own bit, so a fiber mask can allow or deny them independently of general I/O. Subprocess primitives emit `SIG_EXEC | SIG_IO`. `SIG_IO` is what routes the request to the scheduler — `SIG_EXEC` selects no backend of its own — but both bits route for a fiber mask: `|:exec|` catches a subprocess request exactly as `|:io|` does (#895).
 
 **Primitives:**
 
