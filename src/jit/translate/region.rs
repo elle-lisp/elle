@@ -94,6 +94,143 @@ impl<'a> FunctionTranslator<'a> {
         Ok(())
     }
 
+    /// Materialize this function's two abandoned-frame release tables into stack
+    /// slots, and reserve the scratch the value route's locals spill into. Both
+    /// tables are compile-time constants, so the prologue writes them once and
+    /// every error exit passes the same addresses to the runtime walk
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). A function that owes nothing at an error exit gets neither
+    /// slot and emits no walk at all.
+    pub(crate) fn emit_abandoned_tables(&mut self, builder: &mut FunctionBuilder) {
+        // Read the function out of `self` first: the loops below borrow it while
+        // the writes at the end need `&mut self`.
+        let lir = self.lir;
+        let slots = &lir.frame_release_slots;
+        if !slots.is_empty() {
+            let table = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (slots.len() * 2) as u32,
+                1,
+            ));
+            for (i, slot) in slots.iter().enumerate() {
+                let c = builder
+                    .ins()
+                    .iconst(cranelift_codegen::ir::types::I16, *slot as i64);
+                builder.ins().stack_store(c, table, (i * 2) as i32);
+            }
+            self.abandoned_slots_table = Some(table);
+            // The value route reads slot `s` out of `locals[s]`, so the scratch
+            // is indexed by slot and covers all of them, not just the released
+            // ones (`Value` is 16 bytes).
+            self.abandoned_locals_spill = Some(builder.create_sized_stack_slot(
+                cranelift_codegen::ir::StackSlotData::new(
+                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                    (lir.num_locals as u32) * 16,
+                    0,
+                ),
+            ));
+        }
+        let regions = &lir.frame_release_regions;
+        if !regions.is_empty() {
+            let table = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (regions.len() * 4) as u32,
+                2,
+            ));
+            for (i, region) in regions.iter().enumerate() {
+                let c = builder.ins().iconst(I32, region.get() as i64);
+                builder.ins().stack_store(c, table, (i * 4) as i32);
+            }
+            self.abandoned_regions_table = Some(table);
+        }
+    }
+
+    /// Emit the abandoned-frame walk for an activation leaving by an **error**:
+    /// spill the frame's locals in slot order and hand them, with the prologue's
+    /// tables, to `elle_jit_release_abandoned_frame`. A no-op for a function
+    /// whose tables are both empty.
+    ///
+    /// Runs BEFORE the region-map pop: the slot route's receipt is this
+    /// activation's map, which the pop discards.
+    fn emit_release_abandoned_frame(
+        &mut self,
+        builder: &mut FunctionBuilder,
+    ) -> Result<(), JitError> {
+        if self.abandoned_slots_table.is_none() && self.abandoned_regions_table.is_none() {
+            return Ok(());
+        }
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("release_abandoned_frame without vm pointer".to_string())
+        })?;
+        let null = builder.ins().iconst(I64, 0);
+
+        let (slots_ptr, num_slots) = match self.abandoned_slots_table {
+            Some(table) => (
+                builder.ins().stack_addr(I64, table, 0),
+                builder
+                    .ins()
+                    .iconst(I64, self.lir.frame_release_slots.len() as i64),
+            ),
+            None => (null, null),
+        };
+        let (locals_ptr, num_locals) = match self.abandoned_locals_spill {
+            Some(spill) => {
+                for i in 0..self.lir.num_locals as u32 {
+                    let (tag, payload) = self.use_var_pair(builder, self.local_var_base + i);
+                    builder.ins().stack_store(tag, spill, (i * 16) as i32);
+                    builder
+                        .ins()
+                        .stack_store(payload, spill, (i * 16 + 8) as i32);
+                }
+                (
+                    builder.ins().stack_addr(I64, spill, 0),
+                    builder.ins().iconst(I64, self.lir.num_locals as i64),
+                )
+            }
+            None => (null, null),
+        };
+        let (regions_ptr, num_regions) = match self.abandoned_regions_table {
+            Some(table) => (
+                builder.ins().stack_addr(I64, table, 0),
+                builder
+                    .ins()
+                    .iconst(I64, self.lir.frame_release_regions.len() as i64),
+            ),
+            None => (null, null),
+        };
+
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.helpers.release_abandoned_frame, builder.func);
+        builder.ins().call(
+            func_ref,
+            &[
+                vm,
+                slots_ptr,
+                num_slots,
+                regions_ptr,
+                num_regions,
+                locals_ptr,
+                num_locals,
+            ],
+        );
+        Ok(())
+    }
+
+    /// Leave a compiled activation by an **error**: run the releases it still
+    /// owed, then pop its region-remap frame and return. Every error exit goes
+    /// through here — one that returns directly leaks whatever the frame's
+    /// release tables name.
+    pub(crate) fn emit_abandoned_error_return(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        rt: cranelift_codegen::ir::Value,
+        rp: cranelift_codegen::ir::Value,
+    ) -> Result<(), JitError> {
+        self.emit_release_abandoned_frame(builder)?;
+        self.emit_pop_then_return(builder, rt, rp)
+    }
+
     /// Pop the region-remap frame, then emit the function `return`. Every exit
     /// path goes through here so the prologue push is always balanced. The pop
     /// is correct on the yield/Emit side-exit too: the suspend helper has

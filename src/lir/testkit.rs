@@ -17,8 +17,8 @@
 //! the instructions do not justify says so with [`LirFixture::num_regs`].
 
 use crate::lir::{
-    for_each_def, for_each_terminator_use, for_each_use, BasicBlock, ClosureId, Label, LirFunction,
-    LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator, YieldPointInfo,
+    for_each_def, for_each_terminator_use, for_each_use, BasicBlock, CallSiteInfo, ClosureId,
+    Label, LirFunction, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator, YieldPointInfo,
 };
 use crate::signals::Signal;
 use crate::syntax::Span;
@@ -77,6 +77,14 @@ impl LirFixture {
 
     pub(crate) fn yield_points(mut self, yield_points: Vec<YieldPointInfo>) -> Self {
         self.func.yield_points = yield_points;
+        self
+    }
+
+    /// The per-call-site resume metadata a suspending function's backends index
+    /// by call-site number. A `Call` inside a `may_suspend` function needs one
+    /// entry per site, or the JIT's yield check fails translation.
+    pub(crate) fn call_sites(mut self, call_sites: Vec<CallSiteInfo>) -> Self {
+        self.func.call_sites = call_sites;
         self
     }
 

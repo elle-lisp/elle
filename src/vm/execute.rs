@@ -356,8 +356,24 @@ impl VM {
         // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
         // it still owes").
         let parks_error_frame = std::mem::take(&mut self.pending_error_park);
+        // The depth this activation's push lands on. Every activation the body
+        // enters — interpreted or compiled — must have handed its own frame back
+        // by the time control returns here, or `last()` names a callee's leftover
+        // map and this activation's slot-routed releases resolve against the
+        // wrong frame (docs/impl/region/rules.md Rule 4).
+        #[cfg(debug_assertions)]
+        let entry_depth = self.fiber.activation_region_maps.len();
         self.push_activation_region_map();
         let mut result = self.trampoline_loop(code, closure_env, 0, !parks_error_frame);
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            self.fiber.activation_region_maps.len(),
+            entry_depth + 1,
+            "region-remap frames left unbalanced by this activation's body: \
+             entered at depth {entry_depth}, returned at depth {} (one exit path \
+             pushed without popping)",
+            self.fiber.activation_region_maps.len(),
+        );
         if !result.bits.is_empty() {
             result.activation_region_map = self
                 .fiber

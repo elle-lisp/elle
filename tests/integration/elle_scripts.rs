@@ -647,6 +647,24 @@ fn region_error_payload_uaf() {
     );
 }
 
+// Guard — the COMPILED face of the same walk: a compiled frame's error exit
+// reads its value route off the locals it spilled there and its slot route off
+// the activation map its prologue pushed, then pops that map
+// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+// still owes"). What must survive is every reference the walk does not own: the
+// delivery the catcher reads, a counted store's, a borrowed payload's owner,
+// and the CALLER's binding live across the compiled callee's exit — the one the
+// map pop answers for, since a leftover callee map would resolve the caller's
+// releases against the wrong frame. Eager JIT, so the raisers are compiled
+// before the reads. The leak face is `region-jit-error-unwind.lisp`.
+#[test]
+fn region_jit_error_unwind_uaf() {
+    run_elle_script_with_args(
+        "region-jit-error-unwind-uaf",
+        &["--jit=eager", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `def` evaluates to what it bound, so its initializer's demise must
 // not be narrowed onto the initializer when nothing reads the binding
 // (docs/impl/region/mechanism.md § "A binder's init release lands after the slot

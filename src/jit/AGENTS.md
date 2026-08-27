@@ -478,5 +478,15 @@ The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /
 `DecrefCellRegion` accounting the interpreter does, so a loop body or a
 self-tail-call boundary needs no separate release step.
 
+An **error** exit runs none of those instructions, so the releases still among
+them run at the exit instead — `elle_jit_release_abandoned_frame`, the compiled
+half of the interpreter's abandoned-frame walk (docs/impl/region/mechanism.md
+§ "An abandoned frame runs the releases it still owes"). The prologue
+materializes the function's two release tables into stack slots, and every error
+exit — the post-call exception check, and an `Emit` of `SIG_ERROR` — hands both
+to the helper with the frame's locals spilled in slot order, ahead of the
+region-map pop. `emit_abandoned_error_return` is the one route out; a new
+error exit that returns directly leaks whatever the tables name.
+
 `elle_jit_rotate_pools` survives as an exported no-op that nothing calls —
 its vtable `FuncId` carries `#[allow(dead_code)]`. See `jit/calls/callops.rs`.

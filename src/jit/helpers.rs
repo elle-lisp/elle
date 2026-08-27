@@ -424,7 +424,12 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Emit exception check after a call instruction.
-    /// If an exception is pending, return (TAG_NIL, 0) immediately.
+    ///
+    /// The callee raised, so this activation is abandoned where it stands: it
+    /// runs the releases it still owed, pops its region-remap frame, and returns
+    /// (TAG_NIL, 0) for the caller's own check to find
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes").
     pub(crate) fn emit_exception_check_after_call(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -448,7 +453,7 @@ impl<'a> FunctionTranslator<'a> {
         builder.seal_block(exc_block);
         let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
         let zero = builder.ins().iconst(I64, 0);
-        builder.ins().return_(&[nil_tag, zero]);
+        self.emit_abandoned_error_return(builder, nil_tag, zero)?;
 
         builder.switch_to_block(cont_block);
         builder.seal_block(cont_block);
@@ -457,6 +462,13 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Emit yield check after a call instruction for yielding functions.
+    ///
+    /// The callee suspended, so this activation suspends with it: the helper
+    /// parks the frame — reading this activation's region map, still on top —
+    /// and the exit then pops that map like every other one
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes"). Nothing is released here: the frame resumes, and the
+    /// releases it still owes are the resumed body's to run.
     pub(crate) fn emit_yield_check_after_call(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -511,7 +523,7 @@ impl<'a> FunctionTranslator<'a> {
         );
         let result_tag = builder.inst_results(call)[0];
         let result_payload = builder.inst_results(call)[1];
-        builder.ins().return_(&[result_tag, result_payload]);
+        self.emit_pop_then_return(builder, result_tag, result_payload)?;
 
         builder.switch_to_block(cont_block);
         builder.seal_block(cont_block);
