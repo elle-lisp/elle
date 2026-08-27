@@ -249,6 +249,15 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_release_activation_owner_node",
             &make_sig(module, &[I64], &[]),
         )?,
+        // release_abandoned_frame: (vm, slots_ptr, num_slots, regions_ptr,
+        // num_regions, locals_ptr, num_locals) -> () — the two release tables
+        // the prologue materialized, plus the frame's locals spilled in slot
+        // order for the value route.
+        release_abandoned_frame: declare(
+            module,
+            "elle_jit_release_abandoned_frame",
+            &make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[]),
+        )?,
         // free_region_group: (members_ptr, count, vm) -> () — the members are
         // spilled to a stack slot as Value pairs, exactly like push_param_frame.
         free_region_group: declare(

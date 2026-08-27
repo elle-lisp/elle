@@ -318,6 +318,13 @@ impl JitCompiler {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
         }
 
+        // Materialize the abandoned-frame release tables (constants) and reserve
+        // the locals scratch every error exit spills into
+        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+        // it still owes"). After `init_locally_defined_vars`, so the spill at an
+        // exit reads locals that are already defined.
+        translator.emit_abandoned_tables(&mut builder);
+
         // Allocate shared spill slot for emit/call sites (if any).
         // Check yield_points (emit terminators) and call_sites directly,
         // not may_suspend() — emit can emit any signal, not just :yield.

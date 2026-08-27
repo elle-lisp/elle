@@ -1,6 +1,35 @@
 use super::*;
 use crate::value::fiberheap::regionstore::RegionMint;
 
+/// Where the abandoned-frame walk reads a value route's slot
+/// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+/// still owes"). Both tiers name the slot the same way — the table is the
+/// function's — and differ only in where slot `s` lives.
+#[derive(Clone, Copy)]
+pub(crate) enum FrameLocals<'a> {
+    /// An interpreter activation: slot `s` is `fiber.stack[base + s]`. The walk
+    /// stamps it nil as it releases, exactly as the abandoned instruction would.
+    Stack(usize),
+    /// A compiled activation: slot `s` is `spill[s]`, the frame's Cranelift
+    /// local spilled at the error exit. The frame returns as the walk completes,
+    /// so there is no slot left to stamp and none is written back.
+    ///
+    /// `elle_jit_release_abandoned_frame` is its only constructor, so a build
+    /// without the compiled tier never reaches this arm.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    Spilled(&'a [Value]),
+}
+
+impl FrameLocals<'_> {
+    /// The value slot `slot` holds, or `None` where the frame has no such slot.
+    fn get(&self, vm: &VM, slot: u16) -> Option<Value> {
+        match self {
+            FrameLocals::Stack(base) => vm.fiber.stack.get(base + slot as usize).copied(),
+            FrameLocals::Spilled(spill) => spill.get(slot as usize).copied(),
+        }
+    }
+}
+
 impl VM {
     /// Resolve a static region slot to a **fresh** physical region for an
     /// allocation that has a matching compiler-emitted `DecrefRegion` at its
@@ -351,19 +380,29 @@ impl VM {
             .and_then(|frame| frame.remove(&static_id.get()))
             .map(|m| m.region)
     }
+    /// The interpreter's entry to the abandoned-frame walk: the tables come off
+    /// the executing `Code`, and slot `s` lives on this activation's frame stack.
+    pub(crate) fn release_abandoned_frame(&mut self, code: &crate::value::Code, payload: Value) {
+        let base = self.current_frame_base();
+        let slots = code.frame_release_slots.clone();
+        let regions = code.frame_release_regions.clone();
+        self.release_abandoned(&slots, &regions, payload, FrameLocals::Stack(base));
+    }
+
     /// Run the releases an activation abandoned by an **error** still owed
     /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
     /// still owes").
     ///
     /// An error leaves through the signal machinery, so none of the frame's
     /// remaining instructions run — and every release it still owed is among
-    /// them. `Code::frame_release_slots` names each one by the local slot its
-    /// value route reads: the route is `LoadLocal s; DecrefValueRegion;
-    /// StoreLocal s nil`, so a slot still holding a heap value is a release that
-    /// did not run, and releasing what it holds is exactly what the abandoned
-    /// instruction would have done. The stamp is repeated here for the same
-    /// reason the route stamps it — a slot released twice is an over-free.
-    /// [`Self::release_abandoned_regions`] is the same reading of the other route.
+    /// them. `slots` names each value route by the local slot it reads: the route
+    /// is `LoadLocal s; DecrefValueRegion; StoreLocal s nil`, so a slot still
+    /// holding a heap value is a release that did not run, and releasing what it
+    /// holds is exactly what the abandoned instruction would have done. On an
+    /// interpreter frame the stamp is repeated here for the same reason the route
+    /// stamps it — a slot released twice is an over-free.
+    /// [`Self::release_abandoned_regions`] is the same reading of the other route,
+    /// off `regions`.
     ///
     /// `payload` is the value leaving with the signal. Where the raise did NOT
     /// mint the delivery — a native hands back a value read out of an argument,
@@ -371,21 +410,26 @@ impl VM {
     /// reference IS the delivery, so a slot naming the payload's region is
     /// skipped and its release stays owed. An emit-raised error minted the
     /// delivery itself (`Fiber::emit_delivery`), so nothing is exempt and the
-    /// frame's reference is reclaimed here
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-    /// it still owes").
-    pub(crate) fn release_abandoned_frame(&mut self, code: &crate::value::Code, payload: Value) {
-        self.release_abandoned_regions(code, payload);
-        if code.frame_release_slots.is_empty() {
+    /// frame's reference is reclaimed here.
+    ///
+    /// Both tiers walk here. The compiled tier arrives through
+    /// `elle_jit_release_abandoned_frame`, which reads the tables out of the stack
+    /// slots its prologue materialized and hands the frame's locals over spilled.
+    pub(crate) fn release_abandoned(
+        &mut self,
+        slots: &[u16],
+        regions: &[u32],
+        payload: Value,
+        locals: FrameLocals<'_>,
+    ) {
+        self.release_abandoned_regions(regions, payload);
+        if slots.is_empty() {
             return;
         }
         let heap = unsafe { &mut *self.heap_ptr };
         let payload_region = self.unminted_payload_region(heap, payload);
-        let base = self.current_frame_base();
-        let slots = code.frame_release_slots.clone();
-        for slot in slots.iter() {
-            let index = base + *slot as usize;
-            let Some(value) = self.fiber.stack.get(index).copied() else {
+        for &slot in slots {
+            let Some(value) = locals.get(self, slot) else {
                 continue;
             };
             let heap = unsafe { &mut *self.heap_ptr };
@@ -395,8 +439,10 @@ impl VM {
             if payload_region == Some(region) {
                 continue;
             }
-            self.fiber.stack[index] = Value::NIL;
-            Self::freelog_abandoned("value route", *slot as u32, region);
+            if let FrameLocals::Stack(base) = locals {
+                self.fiber.stack[base + slot as usize] = Value::NIL;
+            }
+            Self::freelog_abandoned("value route", slot as u32, region);
             self.heap().decref_region(region);
         }
     }
@@ -437,8 +483,8 @@ impl VM {
     /// frame-replacing tail call, so it can also hold a caller's leftovers, whose
     /// references the callee's own machinery answers for; naming only this
     /// function's slots leaves those out by construction.
-    fn release_abandoned_regions(&mut self, code: &crate::value::Code, payload: Value) {
-        if code.frame_release_regions.is_empty() {
+    fn release_abandoned_regions(&mut self, regions: &[u32], payload: Value) {
+        if regions.is_empty() {
             return;
         }
         let heap = unsafe { &mut *self.heap_ptr };
@@ -447,7 +493,7 @@ impl VM {
             let Some(frame) = self.fiber.activation_region_maps.last() else {
                 return;
             };
-            code.frame_release_regions
+            regions
                 .iter()
                 .filter_map(|slot| frame.get(slot).copied())
                 .filter(|m| payload_region != Some(m.region))
@@ -455,7 +501,7 @@ impl VM {
                 .collect()
         };
         if let Some(frame) = self.fiber.activation_region_maps.last_mut() {
-            for slot in code.frame_release_regions.iter() {
+            for slot in regions {
                 frame.remove(slot);
             }
         }

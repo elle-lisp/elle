@@ -187,9 +187,21 @@ impl<'a> FunctionTranslator<'a> {
                 );
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
-                // Pop AFTER elle_jit_yield: the suspend helper has already cloned
-                // the live activation map into the resume frame.
-                self.emit_pop_then_return(builder, rt, rp)?;
+                // An ERROR emit parks no frame — nothing resumes to run the rest
+                // of these instructions — so this activation is abandoned and
+                // runs the releases it still owed. The signal is a compile-time
+                // constant, so a suspending emit skips the walk's spill entirely
+                // rather than paying for a call that would decline it.
+                //
+                // The walk goes AFTER `elle_jit_yield`, which installs the
+                // payload and records its mint, so it reads both. The pop goes
+                // after them both: the suspend helper has already cloned the live
+                // activation map into the resume frame.
+                if signal.intersects(crate::value::fiber::SIG_ERROR) {
+                    self.emit_abandoned_error_return(builder, rt, rp)?;
+                } else {
+                    self.emit_pop_then_return(builder, rt, rp)?;
+                }
             }
 
             Terminator::Unreachable => {

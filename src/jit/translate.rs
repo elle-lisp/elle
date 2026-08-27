@@ -73,6 +73,15 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) call_site_index: u32,
     /// Shared stack slot for spilling locals + operands at yield/call sites.
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
+    /// The abandoned-frame release tables, materialized once in the prologue and
+    /// handed to `elle_jit_release_abandoned_frame` at every error exit: the
+    /// value routes' local slots (`u16`), the slot routes' static region ids
+    /// (`u32`), and the scratch the locals spill into. `None` on each where the
+    /// function's matching table is empty (docs/impl/region/mechanism.md § "An
+    /// abandoned frame runs the releases it still owes").
+    pub(crate) abandoned_slots_table: Option<cranelift_codegen::ir::StackSlot>,
+    pub(crate) abandoned_regions_table: Option<cranelift_codegen::ir::StackSlot>,
+    pub(crate) abandoned_locals_spill: Option<cranelift_codegen::ir::StackSlot>,
     /// Nested-lambda template **blueprints** built during MakeClosure
     /// translation. The native code holds a raw pointer to each (like
     /// `templates` below), and `elle_jit_make_closure` materializes a FRESH
@@ -148,6 +157,9 @@ impl<'a> FunctionTranslator<'a> {
             yield_point_index: 0,
             call_site_index: 0,
             shared_spill_slot: None,
+            abandoned_slots_table: None,
+            abandoned_regions_table: None,
+            abandoned_locals_spill: None,
             closure_protos: Vec::new(),
             templates: Vec::new(),
             symbol_names: HashMap::new(),

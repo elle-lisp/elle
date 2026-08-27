@@ -301,6 +301,13 @@ mod lifecycle;
 mod region;
 mod resume;
 
+/// Where a tier keeps the local slots the abandoned-frame walk reads — named
+/// here because the compiled entry (`elle_jit_release_abandoned_frame`) picks
+/// the variant the interpreter never uses. That entry is the only reader, so a
+/// build without the compiled tier does not name the type here at all.
+#[cfg(feature = "jit")]
+pub(crate) use region::FrameLocals;
+
 impl VM {
     /// Access the root heap.
     #[inline]

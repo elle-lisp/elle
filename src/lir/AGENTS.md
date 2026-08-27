@@ -76,7 +76,8 @@ The rules the fixture holds:
    instructions do not justify.
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
-`num_params`, `closure_id`, `yield_points` — write the like-named field.
+`num_params`, `closure_id`, `yield_points`, `call_sites` — write the like-named
+field.
 Fields with no setter are public on the built `LirFunction`: set them on the
 result, as the JIT's arity and `vararg_kind` tests do.
 

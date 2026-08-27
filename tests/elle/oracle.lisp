@@ -244,7 +244,7 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard" "error-payload-helper"])
+                   "cancel-discard"])
 # `abort-discard` is a CLOSED control now (undeclared, like `rest-array-copy`, so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # back under F2): what it measured was the borrowed-argument
@@ -1311,12 +1311,10 @@
    # `error-payload-helper` calls its raiser as a STATEMENT: a bare call in the
    # try body is a frame-replacing tail call, which lands in the parked frame like
    # `error-payload` — only the non-tail call leaves a callee frame for the walk.
-   # Its pin is a cross-tier RANGE, and it is DECLARED under F2 rather than a
-   # closed control: the walk is interpreter machinery, and a compiled frame's
-   # error exit walks nothing (docs/impl/region/mechanism.md § "An abandoned frame
-   # runs the releases it still owes"), so the same shape reads 0 under --jit=off
-   # and one region per raise under --jit=eager. The pinned range is that gap's
-   # gauge; closing the JIT side shrinks it to 0.
+   # Its pin is CROSS-TIER at 0: both tiers walk the abandoned frame, the compiled
+   # one off the tables its prologue materialized and the locals it spills at the
+   # exit, so the rate agrees under --jit=off and --jit=eager. The compiled face
+   # has its own gauge in tests/elle/region-jit-error-unwind.lisp.
    ["error-payload"
     (fn [j]
       (try
@@ -1328,7 +1326,7 @@
         (begin
           (ep-raiser j)
           nil)
-        (catch e nil))) [0 1]]
+        (catch e nil))) 0]
    ["error-payload-param"
     (fn [j]
       (try

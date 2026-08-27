@@ -1522,13 +1522,41 @@ own discharge reads the same two tables off each parked `BytecodeFrame`, its sav
 locals and its saved activation map standing in for the live ones
 ([owner.md](owner.md) § "The bounded residual").
 
-The **JIT** tier keeps today's behaviour: a compiled frame's error exit walks nothing,
-an over-keep, never an over-free. The gap now has a gauge: the
-`error-payload-helper` probe in `tests/elle/oracle.lisp` raises from a non-tail
-callee frame with a payload that frame owns, and its cross-tier range pin reads 0
-under `--jit=off` and one region per raise under `--jit=eager` — per raise in a
-loop, so a compiled retry loop grows by it until the walk (or its equivalent) is
-realized on the tier.
+**The compiled tier runs the same walk.** A compiled frame leaves by an error at two
+points, and each runs the walk before its activation's region-map pop: the check after
+a call, which finds the callee's raise, and an `Emit` of `SIG_ERROR`, which parks no
+frame to resume. The tables are compile-time constants, so the prologue materializes
+them once — each in its own stack slot, at its own width — and every exit hands the
+runtime both, with the frame's locals spilled in slot order. The value route resolves
+`s` to the spilled `LoadLocal s`; the slot route reads the very activation map the
+compiled prologue pushed. The two tiers share the walk itself; only where the slots
+are read differs.
+
+Nothing is spilled back. The compiled frame returns as the walk completes, so the nil
+stamp that is the interpreter's receipt has no compiled counterpart and needs none: a
+table names each slot once, and one error exit runs per unwind.
+
+A compiled frame is never one a restart replays, so `VM::pending_error_park` has no
+compiled reader. A fiber body's first run enters through
+`execute_bytecode_saving_stack`, and compiled code is reached only from a call site
+inside it, so the parked frame is always an interpreter frame.
+
+Every exit — compiled or not — pops the map it pushed, and the walk depends on it:
+`last()` must be the abandoned activation's own frame, not a callee's leftover.
+`execute_bytecode_saving_stack` asserts the balance in debug builds, so an exit path
+that returns without popping detonates at the first activation to return through it
+rather than resolving some later release against the wrong frame.
+
+The rule reaches the exits an error never takes. A compiled frame whose CALLEE
+suspends parks itself at the post-call yield check and returns the yield sentinel,
+and that exit pops too: the park reads the map first, so what the pop discards is a
+frame nothing needs again. Left behind, it is what `last()` names for the interpreter
+activation above — which then parks a map that was never its own — and the remap stack
+never shrinks back, one frame per suspend through a compiled callee. That the exit is a
+suspend rather than an unwind changes only what runs before the pop: nothing, because
+the frame resumes and still owes its releases to the resumed body.
+`jit::compiler::tests::every_compiled_exit_pops_the_region_map` pins it on the emitted
+code, where a missing pop is visible without an activation having to return first.
 
 Pinned by `tests/elle/region-error-unwind.lisp` (the leak gauge — the pending release
 of a raising call's argument, of two of them, of a binding live across the raising
@@ -1542,7 +1570,14 @@ recorded mint from the walk and discharge) with
 payload a catcher stores outward, a borrowed module payload raised repeatedly, a
 native raise's unrecorded install, and a restarted `:error` fiber's replay), the
 `denied-discard` probe in `tests/elle/oracle.lisp` (the per-op rate of what the
-tables cannot name),
+tables cannot name), `tests/elle/region-jit-error-unwind.lisp` with
+`tests/elle/region-jit-error-unwind-uaf.lisp` as its guardfree complement (the
+compiled face — one subject per compiled error exit, and, on the soundness side,
+the caller's binding live across a compiled callee's exit),
+`vm::core::region::tests::a_compiled_frames_*` (the spilled locals stand in for the
+frame stack, and the payload exemption reads the same) and
+`jit::dispatch::tests::release_abandoned_frame_runs_both_routes_off_the_compiled_exits_buffers`
+(the two tables reach the runtime as separate buffers of different widths),
 `lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
 a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so a route
 the emitter declined has no entry), and `tests/elle/region-error-unwind-uaf.lisp` (the

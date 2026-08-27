@@ -307,6 +307,63 @@ pub extern "C" fn elle_jit_release_activation_owner_node(vm: *mut ()) {
     vm.release_activation_owner_node();
 }
 
+/// Run the releases a COMPILED activation abandoned by an **error** still owed —
+/// the compiled entry to the same walk the interpreter reaches through
+/// `VM::release_abandoned_frame` (docs/impl/region/mechanism.md § "An abandoned
+/// frame runs the releases it still owes").
+///
+/// `slots` and `regions` are the function's two release tables, materialized once
+/// by the compiled prologue: the value routes' local slots and the slot routes'
+/// static region ids. `locals` is the frame's local slots spilled in slot order,
+/// so `locals[s]` is what `LoadLocal s` reads. The slot route needs no spill —
+/// its receipt is the activation region map, which the prologue pushed and this
+/// call reads ahead of the matching pop.
+///
+/// The payload is read off `fiber.signal`, which the raise has already installed:
+/// the callee's error at the post-call exit, this frame's own emitted value at
+/// the `Emit` exit. Only an **error** abandons the frame, so a signal without
+/// `SIG_ERROR` walks nothing — the post-call exception check also fires on a
+/// halt, which the interpreter's trampoline likewise declines to walk.
+///
+/// # Safety
+/// `slots` must point at `num_slots` contiguous `u16`s, `regions` at
+/// `num_regions` contiguous `u32`s, and `locals` at `num_locals` contiguous
+/// `Value`s. Any of the three may be null when its count is 0.
+#[no_mangle]
+pub extern "C" fn elle_jit_release_abandoned_frame(
+    vm: *mut (),
+    slots: *const u16,
+    num_slots: u64,
+    regions: *const u32,
+    num_regions: u64,
+    locals: *const Value,
+    num_locals: u64,
+) {
+    /// A null pointer with a zero count is the empty table, not a slice to build.
+    unsafe fn table<'a, T>(ptr: *const T, count: u64) -> &'a [T] {
+        if count == 0 || ptr.is_null() {
+            &[]
+        } else {
+            std::slice::from_raw_parts(ptr, count as usize)
+        }
+    }
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let Some((bits, payload)) = vm.fiber.signal else {
+        return;
+    };
+    if !bits.intersects(crate::value::SIG_ERROR) {
+        return;
+    }
+    unsafe {
+        vm.release_abandoned(
+            table(slots, num_slots),
+            table(regions, num_regions),
+            payload,
+            crate::vm::core::FrameLocals::Spilled(table(locals, num_locals)),
+        )
+    };
+}
+
 /// Free a co-owned region group as one unit — the `FreeRegionGroup` instruction.
 /// Mirrors the interpreter's `handle_free_region_group` arm
 /// (src/vm/dispatch/region.rs): `members_ptr` points at `count` member Values the
