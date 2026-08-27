@@ -319,10 +319,18 @@ impl VM {
             // Clear the signal — prim_fiber_abort pre-set it with the error
             // value, which we already extracted above. If we leave it set,
             // the dispatch loop will see SIG_ERROR and bail immediately
-            // when we try to resume remaining bytecode frames. The injected
-            // error minted no delivery, so any recorded one goes with it.
+            // when we try to resume remaining bytecode frames.
             vm.fiber.signal = None;
-            vm.fiber.emit_delivery = None;
+            // The injection minted the payload's delivery (`AbortDelivery`), so
+            // record it the way a raise records its own: with the delivery funded
+            // independently, a frame of THIS fiber that owns a reference to the
+            // payload funds nothing, and the abandoned-frame walk and the parked
+            // frame's discharge must stop exempting the payload's region
+            // (docs/impl/region/mechanism.md § "An abandoned frame runs the
+            // releases it still owes"). A fiber handed the same value it is
+            // aborted with is the shape that reaches this — the record is what
+            // keeps its release owed.
+            vm.fiber.emit_delivery = Some(error_value);
             // An abort delivers no resume value — the replayed frame re-enters
             // with `SIG_ERROR` set and leaves before the parked call's result
             // release — so the park's delivery obligation goes with the signal it
@@ -394,20 +402,12 @@ impl VM {
                         // parked call's compiler-emitted result release). A
                         // normally-completing child funds that reference with
                         // its Return's ReturnValue retain; the aborted child's
-                        // ERROR exit runs no Return, so the delivery must take
-                        // the retain the missing Return would have — without
-                        // it the replay consumes a reference the abort's
-                        // caller still owns, and the payload is freed under
-                        // the caller's later read. Pinned by
+                        // ERROR exit runs no Return, and the injection's
+                        // `AbortDelivery` retain stands in — this replay is one
+                        // of the four consumers that mint answers for, and it
+                        // takes no retain of its own. Pinned by
                         // `region_fiber_abort_io_protect_uaf`;
                         // tests/elle/grpc.lisp is the full-scheduler witness.
-                        let heap = unsafe { &mut *vm.heap_ptr };
-                        let r = crate::value::arena::region_of(heap, inner_result);
-                        crate::value::arena::incref_for_escape(
-                            heap,
-                            r,
-                            crate::value::arena::EscapeSite::ReturnValue,
-                        );
                         vm.resume_suspended(remaining, inner_result)
                     }
                 }

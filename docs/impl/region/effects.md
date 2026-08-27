@@ -208,18 +208,45 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   balanced by the fiber's free-time signal scan, and a consumed one by the
   resumed frame's own accounting.
 
-  **What a delivered value still owes is owed by its RESULT.** A caught
-  `fiber/abort` hands the injected payload straight back to its caller, whose
-  `DecrefValueRegion` then fires on it alongside the separate release the caller
-  already owes it as an *argument* — and the unwinding child runs no `Return` to
-  fund the second. So the caught arm mints that reference
-  (`handle_fiber_abort_signal`), and only that arm: the uncaught arm pushes `nil`
-  and routes the payload through the signal, where no caller release targets it,
-  and an in-body handler that catches the error consumes the payload inside the
-  fiber and hands the caller a value of its own. Minting at the delivery instead
-  would strand a region per abort on both of those paths
-  (`tests/elle/region-fiber-abort-delivery-uaf.lisp` carries the over-free face
-  and the two placement faces).
+  **An injected error payload arrives unfunded, so the injection mints its
+  delivery.** Every other install of a terminal payload into a signal slot funds
+  itself: a raise mints (the `EmitEscape` retain, or a fresh error struct's birth
+  reference), and a re-park mints (`PropagateEscape`). `fiber/abort` and
+  `fiber/refuse` install a payload the CALLER owns, and the caller's one
+  reference answers the caller's *argument* release alone. Exactly one further
+  release fires on that payload as a RESULT, and which one depends on where the
+  injected error stops:
+
+  - the fiber's mask catches it, and the abort's caller releases the payload as
+    the call's result;
+  - a `protect` or `try` inside the fiber catches it, and that handler's release
+    of its own resume result consumes it;
+  - the error escapes the fiber, and the resume result of whichever ancestor
+    absorbs it consumes it;
+  - the unwinding replays a parked `defer`/`protect` frame, and that frame's
+    suspending call runs its compiler-emitted result release on it.
+
+  One reference, one consumer, four routes. So `inject_error_at_suspension` mints
+  it once at the seam all four leave through, and no route has to recognize
+  itself. Each route's own delivery mint is therefore absent: `do_fiber_abort`
+  hands the replayed frame the injection's reference rather than taking a
+  `ReturnValue` retain of its own, and the caught arm hands the caller the same
+  one.
+
+  The injection also RECORDS the mint, on both fibers whose frames the payload
+  travels through — the aborted fiber (`do_fiber_abort`) and, where the error
+  escapes, the aborting one (`VM::park_propagating_abort`). A frame holding the
+  payload then funds no delivery, so the abandoned-frame walk and the parked
+  frame's discharge stop exempting the payload's region, exactly as they do for
+  an emit raise ([mechanism.md](mechanism.md) § "An abandoned frame runs the
+  releases it still owes"). A literal materialized straight into the
+  `fiber/abort` argument lives in a frame slot and nowhere else, so without the
+  record its release stays owed forever (the `abort-discard` probe in
+  `tests/elle/oracle.lisp`).
+
+  `tests/elle/region-fiber-abort-delivery-uaf.lisp` carries a face per route: the
+  under-mint faults there under `--trace=guardfree`, and the over-mint shows as
+  region growth, since a spare reference never faults.
 - **`Mixed`** — examined, and the native stores arguments *uncounted*
   (the property the arg clique exists to cover) — and/or returns a result
   that is neither always-fresh nor always-pass-through (a trait-dispatching

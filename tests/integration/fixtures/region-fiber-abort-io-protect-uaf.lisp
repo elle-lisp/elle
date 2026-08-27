@@ -11,8 +11,10 @@
 # § "Park/unpark symmetry", the delivery rule): a replayed frame's pending
 # release consumes one owning reference of the value it is resumed with. A
 # normally-completing child funds it with its Return's ReturnValue retain;
-# an ABORTED child's error exit runs no Return, so `do_fiber_abort`'s
-# delivery into the remaining parked frames takes that retain itself.
+# an ABORTED child's error exit runs no Return, so the reference the replay
+# consumes is the one `fiber/abort`'s injection minted — this replay is one
+# of the four consumers that single mint answers for
+# (docs/impl/region/effects.md § `Delivers`).
 #
 # The shape: a spawned fiber parks inside `(protect (ev/sleep …))` — an
 # io-parked protect child under a FiberResume frame — and the scheduler

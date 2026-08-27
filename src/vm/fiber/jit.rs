@@ -112,7 +112,6 @@ impl VM {
             // Abort is terminal — set child to :error even when caught
             if result_bits.intersects(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
-                self.mint_abort_error_result(result_value);
             }
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -124,7 +123,7 @@ impl VM {
             if self.reject_orphaned_signal(result_bits, "fiber/abort") {
                 JitValue::nil()
             } else {
-                self.fiber.signal = Some((result_bits, result_value));
+                self.park_propagating_abort(result_bits, result_value);
                 if result_bits.intersects(SIG_ERROR) || result_bits.intersects(SIG_HALT) {
                     JitValue::nil()
                 } else {

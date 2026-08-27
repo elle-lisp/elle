@@ -140,18 +140,25 @@ pub struct Fiber {
     /// the Fiber content scan records no edge for it. The counted edge for the
     /// same value is `signal`'s.
     pub error_loc: Option<(Value, crate::error::SourceLoc)>,
-    /// The `SIG_ERROR` payload whose DELIVERY reference the raise itself minted
-    /// — the `EmitEscape` retain `handle_emit` (and its JIT mirror) takes, which
-    /// the resumer's release of the resume result consumes. While this matches
-    /// the live signal's payload (representation identity, never structural
-    /// equality), the payload exemption on the abandoned-frame walk and the
-    /// parked frame's discharge is withdrawn: the raise chain's own reference
-    /// funds no delivery, so every release the tables name is genuinely owed
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). A native install leaves this untouched — its delivery is
+    /// The `SIG_ERROR` payload whose DELIVERY reference something OTHER than this
+    /// fiber's frames minted. Two raises record here, for one reason:
+    ///
+    /// - an `emit` raise — the `EmitEscape` retain `handle_emit` (and its JIT
+    ///   mirror) takes, which the resumer's release of the resume result consumes;
+    /// - an injected `fiber/abort` / `fiber/refuse` payload — the `AbortDelivery`
+    ///   retain the injection takes, recorded on the aborted fiber
+    ///   (`do_fiber_abort`) and on the aborting one where the error escapes it
+    ///   (`VM::park_propagating_abort`).
+    ///
+    /// While this matches the live signal's payload (representation identity,
+    /// never structural equality), the payload exemption on the abandoned-frame
+    /// walk and the parked frame's discharge is withdrawn: a frame's own
+    /// reference funds no delivery, so every release the tables name is genuinely
+    /// owed (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+    /// it still owes"). A native install leaves this untouched — its delivery is
     /// the payload's birth reference or the frame's left-standing one, which the
-    /// exemption preserves. Cleared where the delivery is consumed: the resume's
-    /// signal take, and an abort's injection.
+    /// exemption preserves. Cleared at the resume's signal take, where the parked
+    /// payload this record named leaves the slot.
     pub emit_delivery: Option<Value>,
     /// Whether this fiber's innermost suspension is a PRIMITIVE call, whose
     /// resume value therefore arrives owing one reference.

@@ -201,6 +201,27 @@ fn inject_error_at_suspension(
     handle.with_mut(|fiber| {
         fiber.signal = Some((SIG_ERROR, error_value));
     });
+    // The DELIVERY reference. Every other install of a terminal payload into a
+    // signal slot funds itself — a raise mints, a re-park mints — but this one
+    // installs a payload the CALLER owns, and the caller's reference answers the
+    // caller's ARGUMENT release alone. Exactly one further release fires on the
+    // payload as a RESULT, and which one depends on where the injected error
+    // stops: the abort's caller when the fiber's mask catches it, an in-body
+    // `protect`'s resume result when the fiber catches it, the resume result of
+    // whichever ancestor absorbs it when it escapes, or a replayed cleanup
+    // frame's parked call when the unwinding runs one. One reference, one
+    // consumer, four routes — minting here, at the seam all four leave through,
+    // is what keeps any of them from having to recognize itself
+    // (docs/impl/region/effects.md § `Delivers`;
+    // `tests/elle/region-fiber-abort-delivery-uaf.lisp` carries a face per
+    // route). `region_of` no-ops an immediate payload.
+    let heap = ctx.heap_mut();
+    let region = crate::value::arena::region_of(heap, error_value);
+    crate::value::arena::incref_for_escape(
+        heap,
+        region,
+        crate::value::arena::EscapeSite::AbortDelivery,
+    );
     // The VM injects the error, resumes the fiber, and lets it unwind.
     (SIG_ABORT, fiber_value)
 }
@@ -415,11 +436,11 @@ primitive! {
         // The injected error is installed in the fiber's signal slot and taken
         // straight back out by `do_fiber_abort`; where the fiber was never
         // started, `kill_fiber` parks it under the park-retain instead. Either
-        // way the install counts its own reference — no clique. Where the value
-        // comes back OUT as the abort's result, `handle_fiber_abort_signal`
-        // mints the caller's reference (the unwinding exit runs no `Return` to
-        // mint it). Aborting an already-dead fiber hands back that fiber's
-        // terminal value, read out of the fiber argument: unbounded.
+        // way the install counts its own reference — no clique. The payload
+        // arrives owned by the CALLER and so with no delivery of its own, which
+        // `inject_error_at_suspension` mints once for whichever consumer the
+        // injected error reaches. Aborting an already-dead fiber hands back that
+        // fiber's terminal value, read out of the fiber argument: unbounded.
         effect: RegionEffect::Delivers { args: &[1] },
     }
     "fiber/refuse" => prim_fiber_refuse {
@@ -431,10 +452,11 @@ primitive! {
         example: "(fiber/refuse f)\n(fiber/refuse f :not-permitted)",
         // Same delivery accounting as `fiber/abort`: the injected error is
         // installed in the fiber's signal slot and taken straight back out by
-        // `do_fiber_abort`, and where it comes back OUT as the result,
-        // `handle_fiber_abort_signal` mints the caller's reference. Refusal
-        // accepts only a `:paused` fiber, so neither the `kill_fiber` park nor
-        // the dead-fiber terminal-value read applies.
+        // `do_fiber_abort`, and the injection mints the one delivery reference
+        // its consumer releases. A refused fiber that catches at its own call
+        // site is the in-body-handler route — that handler's resume result is
+        // the consumer. Refusal accepts only a `:paused` fiber, so neither the
+        // `kill_fiber` park nor the dead-fiber terminal-value read applies.
         effect: RegionEffect::Delivers { args: &[1] },
     }
 }
