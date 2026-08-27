@@ -149,7 +149,12 @@ ELLE_SKIP_FFI := -e ffi.lisp -e prim-ffi.lisp -e region-ffi-callback-arg-uaf.lis
 # Skip list for the whole-file --wasm=full pass only (eval = dynamic
 # compilation, not in the WASM backend). The runner needs no list: a form a
 # tier cannot host is recorded :ineligible→skip per form.
-WASM_SKIP := -e eval.lisp -e eval-env.lisp
+#
+# wasm-tier-error-signal drives the TIERED backend through `compile/run-on
+# :wasm`, which a whole-file `--wasm=full` compile cannot host — the forced tier
+# needs the bytecode VM underneath it. Same shape as eval: the runner records it
+# :ineligible per form, so the corpus pass still covers the file.
+WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp
 
 # One corpus pass through the agent-first runner. Shared by smoke-elle and the
 # featured-build targets: the runner probes the tiers the binary carries, so

@@ -227,8 +227,20 @@ impl WasmTier {
             .call(&mut store, (env_base as i32, 0, 0, 0))
             .map_err(|e| e.to_string())?;
 
+        // A standalone module has no suspension machinery: no frame deque, no
+        // env snapshots, no resume chain. `standalone_emittable` refuses every
+        // shape that could park here, so a non-zero status means the emission
+        // gate and this caller have drifted apart. Report that rather than
+        // inventing a resume nobody can drive.
+        if status != 0 {
+            return Err(format!(
+                "wasm tier: standalone closure suspended at resume state {status}, \
+                 which the tiered path cannot drive"
+            ));
+        }
+
         let value = store.data().inner.wasm_to_value(tag, payload);
-        let signal = SignalBits::new(status as u64);
+        let signal = super::store::take_raised_signal(&mut store, &memory);
         Ok((value, signal))
     }
 }
