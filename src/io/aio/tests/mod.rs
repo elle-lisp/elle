@@ -88,6 +88,25 @@ fn open_rw_port(path: &str) -> Value {
     )
 }
 
+/// Give a submission time to reach a worker, and then a moment more, so a test
+/// that wants the operation already parked in its syscall gets that order.
+///
+/// Reports whether a worker came out. `workers()` counts a submission from the
+/// moment its thread spawns, so a true here says the operation is out rather
+/// than that the worker has reached its syscall — the pause is what makes the
+/// interesting order the likely one. Always false on the ring, which runs its
+/// operations in the kernel and has no worker to wait for.
+fn wait_for_worker(backend: &AsyncBackend) -> bool {
+    for _ in 0..200 {
+        if backend.workers() > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    false
+}
+
 /// Cancel a pool operation and assert it RETIRES: its worker comes back and
 /// its `pending` entry goes, within a bounded number of waits.
 ///
@@ -105,24 +124,11 @@ fn open_rw_port(path: &str) -> Value {
 /// would write the worker's bytes into a freed heap. What must not happen is
 /// the entry outliving the worker.
 fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
-    // `workers()` counts a submission from the moment its thread spawns, so
-    // this says the operation is out rather than that the worker has reached
-    // its syscall. The pause that follows makes the interesting order the
-    // likely one: a cancel arriving while the worker already waits.
-    let mut submitted = false;
-    for _ in 0..200 {
-        if backend.workers() > 0 {
-            submitted = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
     assert!(
-        submitted,
+        wait_for_worker(backend),
         "the pool never took the {} out to a worker",
         what
     );
-    std::thread::sleep(std::time::Duration::from_millis(50));
 
     backend.cancel(id).unwrap();
 

@@ -1839,6 +1839,18 @@ fn io_cancel_releases_threadpool() {
     run_elle_script_with_args("io-cancel-releases", &["--no-uring"]);
 }
 
+// An operation whose asking fiber is gone must end itself, on the OTHER
+// backend. The pool ends one through its stop pipe and io_uring through
+// `IORING_OP_ASYNC_CANCEL`, so neither half says anything about the other; the
+// pool's is what macOS always runs. `:workers` measures the second claim the
+// file makes — the thread comes back — and is zero on io_uring whatever the
+// pool does. See src/io/AGENTS.md § "Ending an operation whose operands are
+// gone".
+#[test]
+fn io_stale_operation_ends_threadpool() {
+    run_elle_script_with_args("io-stale-operation-ends", &["--no-uring"]);
+}
+
 // (Hygiene for syntax-case bindings is carried structurally — synthetic-ness
 // lives on PatternBinding (src/syntax/expand/syntaxcase.rs) rather than being
 // inferred from a name's string prefix. The regression for it lives in

@@ -286,6 +286,43 @@ Pinned by `a_completion_is_withheld_when_its_operands_region_is_gone`
 (`src/io/aio/tests/park.rs`) and, end to end, by
 `tests/elle/io-late-completion-port.lisp`.
 
+### Ending an operation whose operands are gone
+
+Withholding the result is half the answer. The completion still has to arrive,
+and an operation that parks arrives only when something outside this process
+acts. A read waits for a peer that may never write, an accept for a connection
+nobody makes. The fiber that would have received the result is gone, so nothing
+in the program is left to make that event happen.
+
+The backend therefore ends these operations itself.
+`PendingTable::stale_to_stop` reports the in-flight ids whose operands' regions
+have gone, and every drain asks each of them to stop before it waits. The ask
+goes through the stop pipe on the pool and through `IORING_OP_ASYNC_CANCEL` on
+the ring, the two halves `io/cancel` also uses. The operation completes with
+`-ECANCELED`, `take` reports it `Stale`, and the entry is retired and answered
+as above.
+
+The ask is deliberately not a cancel. A cancel marks the id, and a marked id
+falls silent; this one must answer, because the scheduler still holds the
+pairing and lets go only on a completion. The table records each id it has
+reported, so each worker is asked once — a drain runs on every loop tick, and
+the completion takes a moment to come back.
+
+Operations that end on their own are asked too, and the ask reaches nothing. A
+`Write` runs to the end of its payload and `Resolve` runs to the resolver's own
+end, so neither carries a stop pipe; their completions arrive as they always
+would.
+
+The runtime does not lean on the platform to deliver these. `poll(2)` on Linux
+holds a reference to the file it waits on, so a socket can outlive the close
+its fiber's release performed, and a peer writing afterwards still reaches the
+parked worker. That is one kernel's behavior rather than a promise, and an
+operation whose reader is gone must end whether or not any peer ever acts.
+
+Pinned by `an_operation_that_parks_ends_when_its_operands_region_is_gone`
+(`src/io/aio/tests/park.rs`), which gives the operation no peer at all, and end
+to end by `tests/elle/io-stale-operation-ends.lisp`.
+
 ### The stop pipe
 
 An operation that can wait indefinitely carries a **stop pipe**, and that
@@ -347,7 +384,7 @@ waiting for.
 `port/close` therefore hands the port's `OwnedFd` to the backend rather
 than dropping it whenever `pending` still holds an operation on that key.
 The port reports closed immediately, so Elle's semantics do not change;
-the descriptor itself is closed by `retire_fd_if_drained` once the last
+the descriptor itself is closed by `close_drained_fds` once the last
 operation naming it has completed. `fd_states` for the key is dropped at
 the same moment, so per-fd buffering never spans two ports either.
 

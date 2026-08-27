@@ -409,9 +409,35 @@ impl AsyncBackendInner {
 
     /// Drain everything ready now into self.completions: the ring's CQEs (uring
     /// platform) and the shared hub (pool + stdin workers), on both platforms.
+    ///
+    /// The stale sweep runs last, so an operation that already answered is read
+    /// off here rather than asked to stop, and anything left whose reader is
+    /// gone has its completion on the way before the caller blocks again.
     fn drain_ready(&mut self) {
         self.drain_uring_completions();
         self.drain_hub();
+        self.stop_stale();
+    }
+
+    /// Ask every in-flight operation whose operands' regions are gone to stop.
+    ///
+    /// Such an operation waits for an event outside this process — a peer that
+    /// writes, a client that connects — and the fiber that would have received
+    /// the result is what went away, so nothing here is left to make that event
+    /// happen. See src/io/AGENTS.md § "Ending an operation whose operands are
+    /// gone" for why the ask is not a cancel: the id stays unmarked, so the
+    /// completion still answers and the scheduler retires the pairing it holds.
+    fn stop_stale(&mut self) {
+        let heap = self.origin_heap;
+        for id in self.pending.stale_to_stop(heap) {
+            match self.platform {
+                #[cfg(target_os = "linux")]
+                PlatformBackend::Uring(ref mut ring) => {
+                    let _ = crate::io::uring::submit_uring_cancel(ring, id);
+                }
+                PlatformBackend::ThreadPool => self.hub.stop(id),
+            }
+        }
     }
 
     /// Drain the io_uring completion queue into self.completions. A no-op on the

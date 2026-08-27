@@ -433,6 +433,11 @@ pub(crate) struct PendingTable {
     /// scheduler drops its own record of the submission before cancelling, so
     /// the id is marked here precisely when there is no longer a reader.
     cancelled: HashSet<SubmissionId>,
+    /// Ids [`stale_to_stop`](Self::stale_to_stop) has already reported, so a
+    /// backend that sweeps on every drain asks each worker once. Unlike
+    /// `cancelled` this changes nothing about the answer: the completion these
+    /// ids are waiting for is still delivered.
+    stop_asked: HashSet<SubmissionId>,
 }
 
 impl PendingTable {
@@ -473,12 +478,41 @@ impl PendingTable {
         heap: *mut crate::value::fiberheap::FiberHeap,
     ) -> Taken {
         let was_cancelled = self.cancelled.remove(&id);
+        self.stop_asked.remove(&id);
         match self.ops.remove(&id) {
             Some(e) if was_cancelled => Taken::Cancelled(e.op),
             Some(e) if e.operands_gone(heap) => Taken::Stale(e.op),
             Some(e) => Taken::Live(e.op),
             None => Taken::Unknown,
         }
+    }
+
+    /// The in-flight ids whose operands' regions are gone and whose operation
+    /// nobody has asked to stop yet.
+    ///
+    /// An operation that parks completes when something outside this process
+    /// acts, and the fiber that would have read the result is what went away,
+    /// so the backend ends these itself (src/io/AGENTS.md § "Ending an
+    /// operation whose operands are gone"). Reporting an id records it here, so
+    /// a caller sweeping on every drain asks each worker once; the record
+    /// leaves with the entry in [`take`](Self::take).
+    pub(crate) fn stale_to_stop(
+        &mut self,
+        heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Vec<SubmissionId> {
+        if heap.is_null() {
+            return Vec::new();
+        }
+        let PendingTable {
+            ops, stop_asked, ..
+        } = self;
+        let ids: Vec<SubmissionId> = ops
+            .iter()
+            .filter(|(id, e)| !stop_asked.contains(*id) && e.operands_gone(heap))
+            .map(|(id, _)| *id)
+            .collect();
+        stop_asked.extend(ids.iter().copied());
+        ids
     }
 
     /// What a completion for an operation whose operands are gone says.
@@ -774,6 +808,73 @@ mod tests {
         match table.take(id(1), heap) {
             Taken::Stale(op) => op.retire(0, &mut pool),
             _ => panic!("a resubmitted operation must still lose its reader"),
+        }
+    }
+
+    /// A table holding one entry whose operand's region has been freed, and the
+    /// heap that freed it. `region` is gone; nothing else in the table is.
+    fn table_with_a_freed_operand() -> (
+        BufferPool,
+        PendingTable,
+        *mut crate::value::fiberheap::FiberHeap,
+    ) {
+        let mut pool = BufferPool::new();
+        let mut table = PendingTable::new();
+        let heap = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process.
+        let h = unsafe { &mut *heap };
+        let region = h.new_runtime_region();
+        let watcher = h.alloc_in_region(
+            crate::value::heap::HeapObject::LBox {
+                cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
+                traits: Value::NIL,
+            },
+            region,
+        );
+
+        table.insert(id(1), watch_op(&mut pool, watcher), heap);
+        // A second entry that owns nothing, so a sweep reporting everything is
+        // distinguishable from one reporting what it should.
+        table.insert(id(2), sleep_op(&mut pool), heap);
+        h.decref_region(region);
+        (pool, table, heap)
+    }
+
+    /// An operation whose operands are gone is reported for a stop exactly
+    /// once, and only that operation is.
+    ///
+    /// The trap: a backend sweeps on every drain, which is every tick of the
+    /// event loop. Without the record, each tick would ask the same worker
+    /// again for an operation whose completion is already on its way.
+    #[test]
+    fn an_operation_whose_operands_are_gone_is_reported_for_a_stop_once() {
+        let (_pool, mut table, heap) = table_with_a_freed_operand();
+
+        assert_eq!(
+            table.stale_to_stop(heap),
+            vec![id(1)],
+            "only the entry whose operand region is gone needs stopping",
+        );
+        assert!(
+            table.stale_to_stop(heap).is_empty(),
+            "a second sweep must ask nothing: the first ask is still in flight",
+        );
+    }
+
+    /// Being asked to stop does not change the answer the operation gets.
+    ///
+    /// The counter-factual is marking the id cancelled instead, which is the
+    /// other way to end an operation early: a cancelled id falls silent, and
+    /// the scheduler is still holding the pairing this completion has to
+    /// retire.
+    #[test]
+    fn an_operation_asked_to_stop_is_still_taken_stale() {
+        let (mut pool, mut table, heap) = table_with_a_freed_operand();
+        assert_eq!(table.stale_to_stop(heap), vec![id(1)]);
+
+        match table.take(id(1), heap) {
+            Taken::Stale(op) => op.retire(0, &mut pool),
+            _ => panic!("an operation asked to stop must still answer"),
         }
     }
 
