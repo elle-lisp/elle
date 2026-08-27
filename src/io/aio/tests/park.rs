@@ -423,9 +423,9 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
 ///
 /// Counter-factual: with the operand-site check removed from
 /// `PendingTable::take`, the write below resolves `Live` and answers with a
-/// byte count instead. `tests/elle/io-late-completion-port.lisp` shows the
-/// same rule end to end on a read, where the entry's port IS dereferenced and
-/// the removal faults under `--trace=guardfree`.
+/// byte count instead. This is the only place that counter-factual can be run:
+/// a program reaching the same state has no fiber left to receive the answer,
+/// so nothing there can tell an error from a result.
 #[test]
 fn a_completion_is_withheld_when_its_operands_region_is_gone() {
     crate::value::arena::with_test_region(|| {

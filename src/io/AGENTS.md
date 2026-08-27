@@ -238,13 +238,12 @@ behind would meet a later submission.
 
 ### An operation whose operands are gone has no reader either
 
-A cancel is something a caller must remember to issue, and one caller cannot:
-a fiber that terminates by a path the scheduler did not route. `fiber/abort`
-injects an error the fiber's own `protect` may catch, so it runs to `:dead`
-with its operation still submitted, and `fiber/cancel` leaves it `:error` the
-same way. The scheduler finds out when it next looks at that fiber — which is
-after the completion has been assembled, because assembling happens inside
-`io/wait`.
+A cancel is something a caller must remember to issue, and one caller cannot: a
+fiber that terminates by a path the scheduler did not route. `fiber/cancel`
+leaves such a fiber `:error` with its operation still submitted, and the regions
+holding that operation's operands are released as it unwinds. Nothing marks the
+id. The scheduler finds out when it next looks at that fiber — which is after
+the completion has been assembled, because assembling happens inside `io/wait`.
 
 So the reader-gone question is not asked of the canceller alone. Every entry
 records, at the moment it is filed, **where each of its operands lives**: the
@@ -283,8 +282,11 @@ this protection silently, which is why the match there is exhaustive over both
 `PendingOp` and `PortOp`.
 
 Pinned by `a_completion_is_withheld_when_its_operands_region_is_gone`
-(`src/io/aio/tests/park.rs`) and, end to end, by
-`tests/elle/io-late-completion-port.lisp`.
+(`src/io/aio/tests/park.rs`), which builds the state directly and asserts on the
+answer. No corpus file pins it end to end: the answer goes to a fiber that is
+gone, so nothing in the program can observe it.
+`tests/elle/io-stale-operation-ends.lisp` reaches the same state and asserts on
+what a program CAN see, which is the operation ending.
 
 ### Ending an operation whose operands are gone
 
