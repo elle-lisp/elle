@@ -152,6 +152,21 @@
 (defn bytes-gauge []
   (arena/bytes))
 # bump-arena bytes gauge
+(defn ids-gauge []
+  (arena/region-ids))
+# physical-id issuance gauge — `next_physical`, the dimension every other gauge
+# is blind to (docs/impl/region/diagnostics.md § the `arena/region-ids` bullet).
+# A physical id minted for a call whose callee allocates nothing never becomes a
+# live region, so it holds no object, no page, no bytes and no reference count,
+# and `count-gauge`/`bytes-gauge`/`region-gauge` all read flat while it strands.
+# A mint that finds an id on the free list leaves `next_physical` alone, so a
+# steady-state loop holds this gauge flat and every unit of rate is an id that
+# did not come back. `arena/region-table` is NOT a second gauge here: it is sized
+# by the largest id ever made live from EITHER id source — the per-heap counter
+# this gauge reads, and the raw static-slot ids whose range sits far above it —
+# so its high-water mark is already past anything a loop driving the counter can
+# reach, and it cannot move for any shape below. An unmovable gauge paints every
+# verdict green, which is what the discriminator discipline exists to refuse.
 
 (defn measure [label probe block minb maxb epsilon tau]
   "Direct-loop wrapper: PROBE is a per-op thunk, gauge is the object count."
@@ -183,8 +198,9 @@
 
 # ── The defect / by-design split — the instrument owns the burndown headline ──
 # Every leak class has a ROOT (F1a/F1b/F2/F3/F4/F5), declared below. A small fixed set
-# of probes read open BY DESIGN — the module-level live-growth discriminator and the
-# sub-integer estimator self-test — and are NOT counted as defects. The open/closed
+# of probes read open BY DESIGN — one live-growth discriminator per gauge (object count
+# and physical id), and the sub-integer estimator self-test — and are NOT counted as
+# defects. The open/closed
 # split and the defect-vs-by-design breakdown used to be
 # recovered from this dashboard by `grep -c` minus a hand count of them; the
 # classifier below prints it directly AND refuses to be silently wrong: every
@@ -205,7 +221,9 @@
 # scratch is reclaimed — undeclared, so a regression to open trips the completeness
 # gate as an F1a defect rather than being absorbed as growth.
 (def @by-design
-  @{"discriminator (live-growth)" true "sub-integer (1-in-3 retain)" true})
+  @{"discriminator (live-growth)" true
+    "id discriminator (live-growth)" true
+    "sub-integer (1-in-3 retain)" true})
 (def @root-of @{})
 (defn declare-root [root labels]
   (each l in labels
@@ -244,7 +262,8 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard"])
+                   "cancel-discard" "abort-tail-result"
+                   "abort-mask-caught-literal"])
 # `abort-discard` is a CLOSED control now (undeclared, like `rest-array-copy`, so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # back under F2): what it measured was the borrowed-argument
@@ -391,6 +410,18 @@
 (defn probe-disc [j]
   (push disc-sink {:k j}))
 
+# The ID gauge's own live-growth discriminator. The object-count discriminator
+# above proves nothing about `arena/region-ids`: the two gauges move on different
+# events, and an id gauge frozen at whatever the stdlib load left behind would
+# read flat for every id probe below and paint each one green. The shape that
+# moves it is the same genuine retain — a module-level sink keeps every region it
+# is handed, so nothing is freed, the free list drains, and every later mint has
+# to take a fresh id. Its own sink, not `disc-sink`: two gauges sharing one sink
+# would let either probe's ops satisfy the other's gate.
+(def @id-disc-sink @[])
+(defn probe-id-disc [j]
+  (push id-disc-sink (pair j j)))
+
 # Bounded shape: an immutable struct built and immediately dropped — the
 # reclaimed baseline (the leak suite pins this at slope 0). Should read :closed.
 (defn probe-bounded [j]
@@ -431,6 +462,17 @@
 (check (assert (= (get disc :verdict) :open)
                (string "GAUGE DEAD: discriminator read " (get disc :verdict)
                        " — every 'closed' verdict this run is void")))
+
+# 1b. The same gate for the ID gauge, which the gate above says nothing about.
+(def id-disc
+  (measure-core "id discriminator (live-growth)"
+                (fn [b] (run-thunk-block probe-id-disc b)) ids-gauge 200 6 60
+                0.4 0.5))
+(show id-disc)
+(check (assert (= (get id-disc :verdict) :open)
+               (string "ID GAUGE DEAD: id discriminator read "
+                       (get id-disc :verdict)
+                       " — every id-gauge 'closed' verdict this run is void")))
 
 # 2. Bounded baseline — must reclaim.
 (def bnd
@@ -502,6 +544,116 @@
   (error (string "x" j)))
 (defn ep-raise-param [v]
   (error v))
+# The `primitive-resume-*` bodies park at a suspending PRIMITIVE call, whose
+# resume value stands in for a result no `Return` mint ever funded, so the
+# delivery mints it instead (docs/impl/region/owner.md § "A delivery into a
+# replayed frame carries one owning reference"). What the rate gauges is the
+# mint's ARITY: one reference per delivery, consumed by the continuation's own
+# result release, so a second mint no release answers strands the resume value
+# per park. `ora-dyn-sig` is what makes the park a primitive one — a non-literal
+# first argument falls through to the runtime primitive, where the literal form
+# compiles to the `Emit` terminator whose resume block mints in bytecode. That
+# literal form is the control the three witnesses are read against: the same
+# program, the same delivery, one path funded by the compiler instead.
+(def ora-dyn-sig :yield)
+(defn pr-bind [j]
+  (let [f (fiber/new (fn []
+                       (let [r (emit ora-dyn-sig 7)]
+                         [:resumed r])) |:yield|)]
+    (fiber/resume f)
+    (fiber/resume f (string "b" j))))
+(defn pr-tail [j]
+  (let [f (fiber/new (fn [] (emit ora-dyn-sig 7)) |:yield|)]
+    (fiber/resume f)
+    (fiber/resume f (string "t" j))))
+(defn pr-keep [j]
+  (let [f (fiber/new (fn []
+                       (let [r (emit ora-dyn-sig 0)]
+                         (emit ora-dyn-sig (length r))
+                         (first r))) |:yield|)]
+    (fiber/resume f)
+    (fiber/resume f (string "k" j))
+    (fiber/resume f)))
+(defn pr-literal [j]
+  (let [f (fiber/new (fn []
+                       (let [r (emit :yield 7)]
+                         [:resumed r])) |:yield|)]
+    (fiber/resume f)
+    (fiber/resume f (string "l" j))))
+# The `propagate-*` raisers. `fiber/propagate` installs the child's parked
+# payload as the propagating fiber's own `signal`, which is a FRESH park and owes
+# its own delivery reference — the one the propagating fiber's resumer consumes
+# when it releases its resume result (docs/impl/region/owner.md § "Park/unpark
+# symmetry"). `defer` is that propagate in production form: it resumes a body
+# fiber, runs cleanup, then propagates when the body did not complete. So the
+# rate is read across propagate DEPTH: a mint no release answers strands one
+# region per park, which makes growth scale with the number of `defer`s the raise
+# passes through, and `propagate-none` is the same raise with no propagate in it
+# at all.
+(defn pg-raise [n]
+  (error {:reason :bang :tag (string "z" n)}))
+(defn pg-none [j]
+  (let [[ok? err] (protect (pg-raise j))]
+    (length err:tag)))
+(defn pg-one [j]
+  (let [[ok? err] (protect (defer
+                             nil
+                             (pg-raise j)))]
+    (length err:tag)))
+(defn pg-three [j]
+  (let [[ok? err] (protect (defer
+                             nil
+                             (defer
+                               nil
+                               (defer
+                                 nil
+                                 (pg-raise j)))))]
+    (length err:tag)))
+# The `env-cell-def-capture` / `env-cell-let-twin` pair drives a captured `def`
+# inside a lambda, whose init is a CALL (a constant folds and allocates nothing to
+# strand). Such a binding is env-celled, so its init's release is routed through
+# the env index rather than the stack slot of the same number, and the pair splits
+# on whether a cell exists at all: `def` is always mutable, hence always celled,
+# while the `let` twin's immutable local is captured by value and never gets one.
+# So the gap between them isolates the env route rather than the shape, and a
+# release that never reaches the env strands the init on every execution.
+(defn ec-increment [x]
+  (+ x 1))
+(defn ec-def-capture []
+  (let [root "/x"]
+    ((fn []
+       (def joined (path/join root "a"))
+       (let [reader (fn [] (list (string? joined) (ec-increment 1)))]
+         (reader))))))
+(defn ec-let-twin []
+  (let [root "/x"]
+    ((fn []
+       (let [joined (path/join root "a")]
+         (let [reader (fn [] (list (string? joined) (ec-increment 1)))]
+           (reader)))))))
+# `module-cell-read-window` is the closure-as-module: a lambda whose captured
+# `def`s the returned struct's accessors read, and whose last form is that struct
+# literal — a NATIVE tail call, so the block after the `TailCall` is reached and
+# everything the lowerer put there runs. The captured binding's value and its env
+# cell are two REGIONS and the frame-exit relocation answers per region, so the
+# pair can be split: an `Immediate` native's result is named by no binding, so the
+# frame-held admission refuses it for want of a holder and its release stays
+# behind the call, while the cell is admitted on its binding's verdict and moves
+# ahead. A move that crosses a read through the cell it frees is declined
+# (docs/impl/region/mechanism.md § "A move that crosses a read through the cell it
+# frees is declined"), and declining leaves the box release on the closure path —
+# the bounded fallback whose cost this gauges. `ptr/from-int` is the `Immediate`
+# init that splits the pair; `module-cell-heap-init` is the same module with a
+# HEAP init, where the value region has a holder and both releases are admitted
+# together, so the gap between them isolates the decline from the module shape.
+(defn mod-cell-immediate []
+  (def a (ptr/from-int 7))
+  (def p (fn [] a))
+  {:p p})
+(defn mod-cell-heap []
+  (def a (string "cap"))
+  (def p (fn [] a))
+  {:p p})
 # The `fresh-env-cell` / `shared-env-cell` pair drives one env cell each, split on
 # where the cell is minted. `c` is a captured, REASSIGNED local, so `populate_env`
 # mints its cell box once per activation — a fresh region per call — and the frame
@@ -1341,7 +1493,49 @@
     (fn [j]
       (try
         (get j :k)
-        (catch e nil))) 0]])
+        (catch e nil))) 0]  # The two fiber-crossing DELIVERIES, both CLOSED
+   # controls (undeclared, like `rest-array-copy`) so a regression to open trips
+   # the completeness gate loudly rather than being absorbed under F2. Each
+   # gauges a mint's ARITY rather than its presence: withhold the mint and the
+   # crossing over-frees, which is a soundness failure no leak gauge can see and
+   # `--trace=guardfree` reports (`region_primitive_resume_uaf`,
+   # `region_fiber_propagate_uaf` in tests/integration/elle_scripts.rs); mint
+   # more than one and the surplus is a reference no release answers, which is
+   # what these rates catch.
+   #
+   # `primitive-resume-*` are the three shapes a parked primitive's resume value
+   # reaches — bound by the body, returned from tail position, and held across a
+   # further park — beside `emit-resume-literal`, the control whose resume block
+   # mints in bytecode and so is correct with no delivery mint at all. A parked
+   # CAPABILITY DENIAL is the fourth park of this shape and has no probe here on
+   # purpose: its rate is dominated by the denied call's own argument scratch,
+   # which `denied-discard` already declares under F2, so a probe there would
+   # count one root twice instead of gauging the delivery. Its soundness face is
+   # the `w-denied` witness under guardfree.
+   ["primitive-resume-bind" (fn [j] (pr-bind j)) 0]
+   ["primitive-resume-tail" (fn [j] (pr-tail j)) 0]
+   ["primitive-resume-keep" (fn [j] (pr-keep j)) 0]
+   ["emit-resume-literal" (fn [j] (pr-literal j)) 0]
+   # `propagate-*` read the same mint across propagate DEPTH: the three must stay
+   # together, because a surplus delivery reference strands one region per park
+   # and only the depth gap tells that apart from the raise's own cost.
+   # `propagate-none` is that raise with no propagate in it, and it is a scalar 0
+   # rather than the baseline a differential would subtract — the raising body's
+   # own reference to the payload it allocated is released by the abandoned
+   # frame's release-table walk (§ `error-payload*` above), so there is nothing
+   # left for a depth difference to hide behind.
+   ["propagate-none" (fn [j] (pg-none j)) 0]
+   ["propagate-one" (fn [j] (pg-one j)) 0]
+   ["propagate-three" (fn [j] (pg-three j)) 0]
+   # The captured-`def` env cell and its `let` twin, CLOSED controls for the env
+   # ROUTE. Undeclared, like `rest-array-copy`.
+   ["env-cell-def-capture" (fn [j] (ec-def-capture)) 0]
+   ["env-cell-let-twin" (fn [j] (ec-let-twin)) 0]
+   # The closure-as-module pair, CLOSED controls for the declined move. The
+   # `Immediate` init is what splits the binding's two regions; the heap init is
+   # the same module with both admitted together.
+   ["module-cell-read-window" (fn [j] (mod-cell-immediate)) 0]
+   ["module-cell-heap-init" (fn [j] (mod-cell-heap)) 0]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare shape
@@ -1874,6 +2068,238 @@
                    100 6 60 0.4 0.5) 0)
 (pin (measure-core "discard-closure" (stmt-run (fn [] (ora-ret-closure 1)))
                    count-gauge 100 6 60 0.4 0.5) 0)
+
+# ── The injected abort delivery ───────────────────────────────────────
+# `fiber/abort` installs a payload the CALLER owns, whose one reference answers
+# the caller's ARGUMENT release and nothing else. So the injection mints the
+# delivery — once, at the seam every route leaves through — and exactly one
+# further release consumes it as a RESULT (docs/impl/region/effects.md
+# § `Delivers`). Which release that is depends on where the injected error
+# stops, and the routes are gauged apart because a mint keyed on the route
+# rather than on the injection funds two of them twice.
+#
+# Nine CLOSED controls (undeclared, like `rest-array-copy`), one per route and
+# per recorded mint:
+#
+#   `abort-masked`   — the fiber's mask catches, the caller releases the result;
+#   `abort-escape`   — the error leaves the fiber, an ancestor `try` absorbs it;
+#   `abort-caught`   — a handler INSIDE the body catches, and its own resume
+#                      result is the consumer;
+#   `abort-own-error`— that body then raises an error of its OWN, which mints its
+#                      own delivery, so the abort owes the result nothing;
+#   `abort-reraise`  — the body re-raises the injected payload, where value
+#                      identity alone cannot tell the two apart;
+#   `abort-defer`    — the unwind replays a parked `defer` frame, whose
+#                      suspending call runs the result release;
+#   `abort-held`     — the fiber is aborted with a value it was already handed,
+#                      so its abandoned frame owes that value a release, which
+#                      the recorded mint is what stops exempting;
+#   `abort-other`    — its pair-control, aborted with a value the fiber does not
+#                      hold, isolating the record from the walk;
+#   `abort-aborting-frame` — the other side of the record: a literal
+#                      materialized straight into the `fiber/abort` argument
+#                      lives in the ABORTING frame's slot and nowhere else.
+#
+# Every one of them discards the abort's result. That is not incidental — see
+# the tail-position pair below, which is what the discard is holding constant.
+# The soundness complement is `region-fiber-abort-delivery-uaf.lisp`.
+(defn ab-mk-caught []
+  (fiber/new (fn []
+               (protect (yield 1))
+               7) |:yield :error|))
+(defn ab-mk-masked []
+  (fiber/new (fn []
+               (yield 1)
+               2) |:yield :error|))
+(defn ab-hold-then-yield [q]
+  (yield q)
+  2)
+(println "── folded suite: injected abort delivery ──")
+(pin (measure-core "abort-masked"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-masked)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [1 2 3])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-escape"
+                   (stmt-run (fn []
+                               (let [p {:error :injected}
+                                     f (fiber/new (fn []
+                                       (yield 1)
+                                       2) |:yield|)]
+                                 (fiber/resume f)
+                                 (try
+                                   (begin
+                                     (fiber/abort f p)
+                                     nil)
+                                   (catch e nil))
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-caught"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-caught)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [1 2 3])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-own-error"
+                   (stmt-run (fn []
+                               (let [f (fiber/new (fn []
+                                       (protect (yield 1))
+                                       (error {:own 1})) |:yield :error|)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [1 2 3])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-reraise"
+                   (stmt-run (fn []
+                               (let [f (fiber/new (fn []
+                                       (let [r (protect (yield 1))]
+                                         (error (get r 1)))) |:yield :error|)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [1 2 3])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-defer"
+                   (stmt-run (fn []
+                               (let [f (fiber/new (fn []
+                                       (defer
+                                         (length [1 2 3 4 5])
+                                         (yield 1)
+                                         2)) |:yield :error|)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [7 8 9])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-held"
+                   (stmt-run (fn []
+                               (let [p {:a 1}
+                                     f (fiber/new ab-hold-then-yield
+                                     |:yield :error|)]
+                                 (fiber/resume f p)
+                                 (fiber/abort f p)
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-other"
+                   (stmt-run (fn []
+                               (let [p {:a 1}
+                                     f (fiber/new ab-hold-then-yield
+                                     |:yield :error|)]
+                                 (fiber/resume f p)
+                                 (fiber/abort f {:b 2})
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "abort-aborting-frame"
+                   (stmt-run (fn []
+                               (let [f (fiber/new (fn []
+                                       (yield 1)
+                                       2) |:yield|)]
+                                 (fiber/resume f)
+                                 (try
+                                   (begin
+                                     (fiber/abort f {:e 1})
+                                     nil)
+                                   (catch e nil))
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+# The TAIL-position face of the same abort, and the one that reads open. The
+# nine controls above all discard the abort's result; this one RETURNS it, which
+# is the whole difference — `abort-tail-discarded` is the identical body with a
+# `nil` after the call, so the gap between the pair isolates the tail position
+# rather than the abort. `fiber/abort` in tail position is a NATIVE tail call
+# that leaves by a signal, so the post-`TailCall` block holding the call's
+# compiler-emitted result release is reached on no path, and the delivery the
+# injection minted keeps a whole fiber alive behind it
+# (docs/impl/region/mechanism.md § "What the fall-through owes, a signal exit
+# owes too" states the rule for the borrowed-argument retain; a native tail
+# call's own RESULT release is the obligation this measures and it names a local
+# the fall-through would have stored). Declared under F2 — the dead
+# continuation's residual — and shrink-only, so a fix lowers it. An IMMEDIATE
+# payload, which has no region at all, still strands two regions here, and a
+# payload an enclosing binding owns changes nothing: what this counts is not the
+# payload. That is the discriminator against `abort-mask-caught-literal` below,
+# which the same two controls take to 0. Tracked as issue #945.
+#
+# The pin is a cross-tier RANGE because the strand is interpreter machinery: the
+# post-`TailCall` block is what the interpreter never reaches, and a compiled
+# frame reaches the same release by another route. So the shape measures 0 under
+# `--jit=eager` and the whole strand under `--jit=off`, and the pinned range is
+# that gap's gauge. Closing the interpreter side collapses it to 0.
+(pin (measure-core "abort-tail-result"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-caught)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [1 2 3])))) count-gauge 100 6 60
+                   0.4 0.5) [0 4])
+(pin (measure-core "abort-tail-discarded"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-caught)]
+                                 (fiber/resume f)
+                                 (fiber/abort f [1 2 3])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
+# The payload's OWN region, stranded where one frame both allocates it and
+# consumes the abort's result: the two releases the frame owes land in one region
+# slot and it emits one. `abort-mask-caught-literal` needs all three — the
+# fiber's MASK catches (so the caller receives the payload back), the payload is a
+# literal materialized in the aborting frame, and that frame consumes the result —
+# and `abort-mask-caught-bound` is the pair-control that removes the second, the
+# same abort over a payload an enclosing binding owns, whose own release then
+# covers it. Open, declared under F2, tracked as issue #942.
+#
+# It is NOT `abort-tail-result` seen smaller, and the two must stay a pair because
+# resemblance is all there is to go on otherwise: both need the result in tail
+# position and both flatten when it is bound. What separates them is an IMMEDIATE
+# payload, which has no region at all — this probe reads 0 there, since the
+# payload's region is the whole strand, while `abort-tail-result` still strands
+# two regions, since its strand is not the payload. So neither fix closes the
+# other. `abort-discard` above sits one mask bit away from this shape: with
+# `|:yield|` the injected error escapes the fiber instead of being caught by the
+# mask, and that route reclaims.
+(defn ab-mk-mask-caught []
+  (fiber/new (fn []
+               (yield 1)
+               9) |:yield :error|))
+(pin (measure-core "abort-mask-caught-literal"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-mask-caught)]
+                                 (fiber/resume f)
+                                 (protect (fiber/abort f "boom"))))) count-gauge
+                   100 6 60 0.4 0.5) 1)
+(pin (measure-core "abort-mask-caught-bound"
+                   (stmt-run (fn []
+                               (let [p "boom"
+                                     f (ab-mk-mask-caught)]
+                                 (fiber/resume f)
+                                 (protect (fiber/abort f p))))) count-gauge 100
+                   6 60 0.4 0.5) 0)
+
+# ── The physical-id dimension ─────────────────────────────────────────
+# What a CALL costs in physical region ids, the dimension every probe above is
+# blind to. A native call mints a physical region for its result before the
+# callee runs, because the callee may allocate the result into it; a callee that
+# returns an immediate, or a value borrowed from an argument, allocates nothing
+# into that id. It never becomes a live region, so no teardown can return it, and
+# it holds no object, no page, no bytes and no reference count for any other
+# gauge to see (docs/impl/region/model.md § "Physical id recycling"). What it
+# costs is resident: the region table is a `Vec` indexed by physical id, so the
+# largest id ever made live sets its length.
+#
+# Both exits of the id lifecycle are gauged here, and the pair must stay
+# together — the recycle admits an id only where the mint never materialized it,
+# so an id that DID materialize has to reach the free list by its teardown
+# instead, and a probe of one exit alone cannot tell a working recycle from one
+# that hands the same id back twice. `id-immediate-result` and `id-const-compare`
+# are results a native never allocates at all; `id-borrowed-element` and
+# `id-borrowed-index` are results borrowed out of an argument; `id-fresh-result`
+# is the materializing control, whose id comes back by the ordinary teardown.
+#
+# These are CLOSED controls (undeclared, like `rest-array-copy`), so a regression
+# to open trips the completeness gate loudly. Read them against the id
+# discriminator above: an id gauge that cannot move reads 0 for all five.
+(def id-hold [1 2 3])
+(println "── folded suite: physical-id recycling ──")
+(pin (measure-core "id-const-compare" (stmt-run (fn [] (< 1 2))) ids-gauge 100 6
+                   60 0.4 0.5) 0)
+(pin (measure-core "id-immediate-result" (stmt-run (fn [] (length id-hold)))
+                   ids-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "id-borrowed-index" (stmt-run (fn [] (get id-hold 0)))
+                   ids-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "id-borrowed-element" (stmt-run (fn [] (first (pair 1 2))))
+                   ids-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "id-fresh-result" (stmt-run (fn [] (pair 1 2))) ids-gauge 100
+                   6 60 0.4 0.5) 0)
 
 # ── The mutable-store funnel — remove/rebind half ─────────────────────
 # The store half (push/put/add) is pinned above (push-churn/struct-put/set-array/…);
@@ -2740,6 +3166,19 @@
                  (string "yield-at-scale last: " (get vals 999)))))
 (check (assert (= (concat [1 2] [3 4]) [1 2 3 4]) "array concat value"))
 (check (assert (= (concat "foo" "bar") "foobar") "string concat value"))
+# The closure-as-module's accessor still reaches its captured value after the
+# module's frame is gone. `module-cell-read-window` above prices the fallback the
+# frame-exit relocation takes for this shape; this is the property that fallback
+# exists to keep, and it is a value assertion because neither memory gauge can
+# see it — the box release and the release routed through the box are correctly
+# COUNTED either way, so an inverted pair reads flat here and clean under
+# `--trace=guardfree`. The emission order itself is stated over the finished
+# blocks by `lir::lower::assert_cells_outlive_their_readers`, which runs in every
+# debug build over every block it lowers.
+(check (assert (= ((get (mod-cell-immediate) :p)) (ptr/from-int 7))
+               "closure-as-module accessor read back its Immediate-init capture"))
+(check (assert (= ((get (mod-cell-heap) :p)) "cap")
+               "closure-as-module accessor read back its heap-init capture"))
 
 # ── The split headline — the number §1's protocol reads, printed by the tool ──
 # `open defects` is the burndown count; `by-design` is the fixed growth set; `roots` is
@@ -2756,10 +3195,11 @@
                (string "unclassified open probe(s): " unclassified
                        " — every open probe must be a declared root or by-design "
                        "(the split ledger is stale)")))
-(check (assert (= n-by-design 2)
+(check (assert (= n-by-design 3)
                (string "by-design tally " n-by-design
-                       " ≠ 2 — the growth probes (live-growth discriminator, "
-                       "sub-integer estimator self-test) must each read open")))
+                       " ≠ 3 — the growth probes (the object-count and "
+                       "physical-id live-growth discriminators, the sub-integer "
+                       "estimator self-test) must each read open")))
 
 (report)
 (println "oracle: ok")

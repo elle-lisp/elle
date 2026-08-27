@@ -226,9 +226,11 @@ rejects exactly that id and admits only a mint that nothing has touched since.
 
 `arena/region-ids` reads `next_physical` from Elle — the gauge that moves the
 moment an id fails to come back — and `arena/region-table` reads what the table
-costs. `tests/elle/region-id-recycle.lisp` uses them to pin the bound: a loop of
-calls that allocate nothing issues no new id. `regionstore::tests::recycle` pins
-the store-level contract, the duplicate the generation check refuses included.
+costs. The bound is pinned by the `id-*` probes of `tests/elle/oracle.lisp`,
+which measure id issuance per call against a live-growth discriminator of their
+own: a loop of calls that allocate nothing issues no new id, and a materializing
+call's id comes back by its teardown. `regionstore::tests::recycle` pins the
+store-level contract, the duplicate the generation check refuses included.
 
 ## RegionSlice contents share their object's region
 
