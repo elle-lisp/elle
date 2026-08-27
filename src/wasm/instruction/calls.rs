@@ -141,7 +141,7 @@ impl WasmEmitter {
     /// rather than branched on.
     ///
     /// Only `rt_call` returns four words. `rt_data_op` and `call_primitive`
-    /// return three and use [`store_result_with_signal`] directly.
+    /// return three and use [`Self::store_result_with_signal`] directly.
     pub(in crate::wasm) fn store_call_result(&self, f: &mut Function, dst: Reg) {
         f.instruction(&Instruction::LocalSet(self.suspended_local()));
         self.store_result_with_signal(f, dst);
