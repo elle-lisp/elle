@@ -1499,6 +1499,11 @@ walk may release, and the two raise paths differ:
   would strand one region per raised-and-caught error whose payload the raise chain
   owns. The raise records the mint (`Fiber::emit_delivery`), and a walk whose live
   signal payload matches it skips nothing.
+- An **injected** `fiber/abort` / `fiber/refuse` payload reads like the `Emit` case,
+  for the same reason: the injection mints the delivery
+  ([effects.md](effects.md) § `Delivers`) and records it on every fiber whose frames
+  the payload then travels through — the aborted one and, where the error escapes it,
+  the aborting one. A frame holding the payload owes its release like any other.
 
 The same reading governs the parked frame's discharge: `Fiber::take_parked_state`
 withholds its payload protection exactly where the mint is recorded, so the free-path

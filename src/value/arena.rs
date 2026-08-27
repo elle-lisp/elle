@@ -188,6 +188,12 @@ pub enum EscapeSite {
     /// park funded its own resumer, not this one (docs/impl/region/owner.md
     /// § "Park/unpark symmetry").
     PropagateEscape,
+    /// An error payload injected into a paused fiber's `signal` by `fiber/abort`
+    /// or `fiber/refuse`. The payload belongs to the CALLER, whose own reference
+    /// answers the caller's argument release alone — no raise minted a delivery
+    /// for it. This retain is that delivery, and whichever consumer the injected
+    /// error reaches releases it (docs/impl/region/effects.md § `Delivers`).
+    AbortDelivery,
     /// A child fiber's set-once terminal result, park-retained until the fiber
     /// is freed (released by the signal scan — asymmetric by Rule 7).
     TerminalSignal,
@@ -221,6 +227,7 @@ impl EscapeSite {
             EscapeSite::SuspendEscape => "suspend-escape",
             EscapeSite::EmitEscape => "emit-escape",
             EscapeSite::PropagateEscape => "propagate-escape",
+            EscapeSite::AbortDelivery => "abort-delivery",
             EscapeSite::TerminalSignal => "terminal-signal",
             EscapeSite::ResumeDelivery => "resume-delivery",
             EscapeSite::ParamBaseline => "param-baseline",

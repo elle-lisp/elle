@@ -238,11 +238,13 @@ parked fiber's accounting symmetric with its unpark:
   replay pushes. A normally-completing child funds it: its `Return` runs the
   ReturnValue retain before the result is handed up, and each frame of a replayed
   chain funds the next the same way. An **aborted** child's error exit runs no
-  `Return`, so `do_fiber_abort`'s delivery of the error payload into the remaining
-  parked frames takes that retain itself — without it the replay consumes a
-  reference the abort's caller still owns, and a fresh heap payload is freed under
-  the caller's read (a constant payload has no region, which is what kept the
-  theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
+  `Return`, and the reference the replay consumes is the one `fiber/abort`'s
+  injection minted for the payload — the replayed frame is one of the four
+  consumers that single mint answers for
+  ([effects.md](effects.md) § `Delivers`). Without a mint anywhere the replay
+  consumes a reference the abort's caller still owns, and a fresh heap payload is
+  freed under the caller's read (a constant payload has no region, which is what
+  kept the theft invisible). Pinned by `region_fiber_abort_io_protect_uaf`
   (`tests/integration/fixtures/region-fiber-abort-io-protect-uaf.lisp`);
   `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler witness.
   A **primitive** that suspends is the other frame with no `Return` to fund it, and

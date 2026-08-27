@@ -1273,10 +1273,11 @@ fn region_variadic_tail_forward_uaf() {
 // symmetry", the delivery rule). A replayed frame's pending release consumes
 // one owning reference of the value it is resumed with; a normally-completing
 // child funds it with its Return's ReturnValue retain, but an ABORTED child's
-// error exit runs no Return — so `do_fiber_abort`'s delivery of the error
-// payload into the remaining parked frames must take that retain itself, or
-// the replay steals a reference the abort's caller still owns and the payload
-// is freed under the caller's read (a stale-region deref once ids recycle).
+// error exit runs no Return — so the reference it consumes is the one
+// `fiber/abort`'s injection minted, and the replay is one of the four consumers
+// that single mint answers for. Without a mint anywhere the replay steals a
+// reference the abort's caller still owns and the payload is freed under the
+// caller's read (a stale-region deref once ids recycle).
 // The shape needs an io-parked protect child under the scheduler and a FRESH
 // heap payload (a constant payload has no region and masks the theft);
 // tests/elle/grpc.lisp's `with-server` teardown is the full-network witness.
@@ -1424,16 +1425,15 @@ fn region_squelch_fiber_uaf() {
     run_elle_script_with_args("region-squelch-fiber-uaf", &["--trace=guardfree"]);
 }
 
-// Guard — a caught `fiber/abort` hands its injected payload straight back to the
-// caller, whose `DecrefValueRegion` on the abort RESULT fires alongside the separate
-// one it already owes the payload as an ARGUMENT — and the unwinding child runs no
-// `Return` to fund the second. `handle_fiber_abort_signal` mints it on that arm.
-// Without the mint the payload's region is freed while the fiber and the caller still
-// point into it — a stale read the harness's ordinary vm/jit policies see as an intact
-// recycled page, and which only guardfree faults on deterministically. The file also
-// pins the mint's PLACEMENT: an in-body handler consumes the payload inside the fiber,
-// so minting at the delivery instead would strand a region per abort. The
-// bounded-growth face of the same declaration is
+// Guard — `fiber/abort` injects a payload the CALLER owns, whose one reference
+// answers the caller's ARGUMENT release alone; no raise minted a delivery for it.
+// Exactly one release then fires on it as a RESULT, and `inject_error_at_suspension`
+// mints that reference once for whichever of the four consumers the injected error
+// reaches (docs/impl/region/effects.md § `Delivers`). Under-mint and the payload's
+// region is freed while a fiber and the caller still point into it — a stale read the
+// harness's ordinary vm/jit policies see as an intact recycled page, and which only
+// guardfree faults on deterministically. Over-mint never faults, so the file carries a
+// churn face per route as well. The bounded-growth face of the same declaration is
 // tests/elle/region-fiber-install-clique-leak.lisp.
 #[test]
 fn region_fiber_abort_delivery_uaf() {
