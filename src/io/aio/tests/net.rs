@@ -1036,6 +1036,13 @@ fn a_retired_accept_closes_the_connection_it_took() {
                 region,
             );
 
+            // The peer connects BEFORE the accept is submitted, so the kernel
+            // has a connection queued and the operation takes one the moment it
+            // runs. An accept retired before it has a connection owns no
+            // descriptor and would close nothing, which is not the case under
+            // test.
+            let client = std::net::TcpStream::connect(addr).expect("connect");
+
             backend
                 .submit(
                     &IoRequest {
@@ -1052,9 +1059,12 @@ fn a_retired_accept_closes_the_connection_it_took() {
                 )
                 .unwrap();
 
-            // A peer, so the accept succeeds and the entry ends up owning a
-            // descriptor rather than an error.
-            let client = std::net::TcpStream::connect(addr).expect("connect");
+            // Let the operation reach its completion before the region goes.
+            // Nothing consumes a completion outside `wait`/`poll`, so the answer
+            // sits in the ring or the hub across this settle and is taken below
+            // — after the release, which is the order that makes the entry
+            // retire with a descriptor in hand.
+            wait_for_worker(&backend);
 
             // The fiber ends: its region goes, and with it the port the accept
             // would have filled.
@@ -1070,16 +1080,32 @@ fn a_retired_accept_closes_the_connection_it_took() {
             client
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .expect("set_read_timeout");
+            // The trap: this read is interrupted, not just bounded. The runtime
+            // signals its own threads, and `std::net`'s `read` reports `EINTR`
+            // rather than retrying — so a single call reports "the peer's read
+            // never ended" whatever the descriptor did. Retry until the
+            // descriptor answers or the deadline passes, and let only the
+            // deadline mean the connection is still open.
             let mut buf = [0u8; 1];
-            match (&client).read(&mut buf) {
-                Ok(0) => {}
-                Ok(n) => panic!("{which}: the peer read {n} bytes from a retired accept"),
-                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
-                Err(e) => panic!(
-                    "{which}: the peer's read never ended ({e}) — the accept was \
-                     retired but the connection it took was never closed",
-                ),
-            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let ended = loop {
+                if std::time::Instant::now() >= deadline {
+                    break false;
+                }
+                match (&client).read(&mut buf) {
+                    Ok(0) => break true,
+                    Ok(n) => panic!("{which}: the peer read {n} bytes from a retired accept"),
+                    Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break true,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break false,
+                    Err(e) => panic!("{which}: the peer's read failed with {e}"),
+                }
+            };
+            assert!(
+                ended,
+                "{which}: the peer's read never ended — the accept was retired \
+                 but the connection it took was never closed",
+            );
         }
     });
 }
