@@ -153,6 +153,27 @@ git config core.hooksPath .githooks
 - Do not silently swallow errors. Propagate or log with context.
 - Breaking changes are fine. Use epochs for mechanical migration.
 
+## Pull requests: the body describes the change, and nothing else
+
+A PR body says what was wrong, what the change does, how you measured it, and
+which tests pin it. That is the whole list.
+
+**Never write an "Out of scope" section.** A defect you found and did not fix
+does not belong in a PR body. File an issue.
+
+The reason is what each artifact is for. An issue has a number, a label, a
+state, and a life of its own: it is searchable, it can be assigned, and it
+closes when someone fixes it. A note in a PR body has none of that. It is dead
+the moment the PR merges, nobody can find it again, and until then it stands
+between the reviewer and the change they came to read. A defect worth recording
+is worth a number; a defect not worth a number is not worth writing down.
+
+The same rule covers every neighbouring temptation: work you considered and
+skipped, follow-ups you plan, adjacent shapes you measured and left alone,
+caveats about code the change does not touch. If a reviewer needs one of them
+to judge THIS change, state it in one sentence where it bears on the change and
+link the issue. Otherwise leave it out.
+
 ## Comments: write for the cold reader
 
 Every line of code and text here is written by an agent, and read by another
