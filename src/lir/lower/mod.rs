@@ -778,7 +778,10 @@ impl<'a> Lowerer<'a> {
         let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
         let closures = std::mem::take(&mut self.closures);
 
-        Ok(LirModule { entry, closures })
+        let module = LirModule { entry, closures };
+        #[cfg(debug_assertions)]
+        assert_cells_outlive_their_readers(&module);
+        Ok(module)
     }
 
     /// Check if a HIR body is a tail call (or control flow where all result
@@ -828,6 +831,51 @@ impl<'a> Lowerer<'a> {
                 .iter()
                 .all(|(_, _, body)| Self::body_is_tail_call(body)),
             _ => false,
+        }
+    }
+}
+
+/// Debug-only: no block frees an env cell before an instruction that reads through
+/// that same cell.
+///
+/// A captured binding's value and its box are addressed by one env index, and the
+/// value's release loads the box RAW and unwraps it to the content — so it READS
+/// the page the box's `DecrefCellRegion` frees. Two mechanisms hold that order and
+/// neither can see the other: the `decref_point` clamp places the box release at or
+/// after every release routed through the cell (docs/impl/region/bindings.md § "A
+/// cell's release lands at or after every release routed through that cell"), and
+/// the frame-exit relocation declines a move that would carry the box release back
+/// across such a read (docs/impl/region/mechanism.md § "A move that crosses a read
+/// through the cell it frees is declined"). This states the property both exist to
+/// hold, over the finished emission where the two meet.
+#[cfg(debug_assertions)]
+fn assert_cells_outlive_their_readers(module: &LirModule) {
+    for f in std::iter::once(&module.entry).chain(module.closures.iter()) {
+        for b in &f.blocks {
+            let mut from_index: HashMap<Reg, u16> = HashMap::new();
+            let mut freed: HashMap<u16, usize> = HashMap::new();
+            for (idx, i) in b.instructions.iter().enumerate() {
+                match &i.instr {
+                    LirInstr::LoadCapture { dst, index }
+                    | LirInstr::LoadCaptureRaw { dst, index } => {
+                        from_index.insert(*dst, *index);
+                        if let Some(&at) = freed.get(index) {
+                            panic!(
+                                "env cell {index} is read at instruction {idx} of block \
+                                 {:?}, after the DecrefCellRegion at {at} freed the box \
+                                 — the read lands on a reclaimed page",
+                                b.label
+                            );
+                        }
+                    }
+                    LirInstr::DecrefCellRegion { src } => {
+                        if let Some(&index) = from_index.get(src) {
+                            freed.insert(index, idx);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }

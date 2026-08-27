@@ -494,7 +494,10 @@ impl<'a> Lowerer<'a> {
             let start = self.current_block.instructions.len();
             f(self);
             let moved: Vec<_> = self.current_block.instructions.drain(start..).collect();
-            if moved.is_empty() || !self.hoistable_run(0, &moved) {
+            if moved.is_empty()
+                || !self.hoistable_run(0, &moved)
+                || self.move_frees_a_cell_the_window_reads(at, &moved)
+            {
                 self.current_block.instructions.extend(moved);
                 return;
             }
@@ -588,6 +591,53 @@ impl<'a> Lowerer<'a> {
             }
         }
         stamped
+    }
+
+    /// Would moving `run` back to `at` free an env cell that the instructions it
+    /// crosses still read?
+    ///
+    /// The two refusals of [`Self::hoistable_run`] are about the region and the
+    /// call; this one is about two REGIONS. A captured binding's value and its box
+    /// share one env index, and the value's `DecrefValueRegion` loads the box RAW
+    /// and unwraps it — so it reads the page the box's `DecrefCellRegion` frees.
+    /// The relocation answers per region and can move one of the pair alone, which
+    /// inverts the order the `decref_point` clamp established
+    /// (docs/impl/region/bindings.md § "A cell's release lands at or after every
+    /// release routed through that cell").
+    ///
+    /// The window is everything from `at` to the end of the open block — the
+    /// `TailCall` and every release already emitted after it. Reading it is enough
+    /// because the clamp fixes the emission order: a release routed through the
+    /// cell is already in the window by the time the cell's own release asks to
+    /// move. Declining leaves the box release on the closure path, the same bounded
+    /// fallback every other refusal takes.
+    ///
+    /// The replica placement needs no such question: only a self-cancelling run is
+    /// replicated, and a cell release is not one ([`Self::self_cancelling_run`]).
+    fn move_frees_a_cell_the_window_reads(&self, at: usize, run: &[SpannedInstr]) -> bool {
+        let mut from_index: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
+        let mut freed: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
+        for i in run {
+            match &i.instr {
+                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index } => {
+                    from_index.insert(*dst, *index);
+                }
+                LirInstr::DecrefCellRegion { src } => {
+                    freed.extend(from_index.get(src).copied());
+                }
+                _ => {}
+            }
+        }
+        if freed.is_empty() {
+            return false;
+        }
+        self.current_block.instructions[at..].iter().any(|i| {
+            matches!(
+                &i.instr,
+                LirInstr::LoadCapture { index, .. } | LirInstr::LoadCaptureRaw { index, .. }
+                    if freed.contains(index)
+            )
+        })
     }
 
     /// May this just-emitted release run ahead of the tail call at point `index`?

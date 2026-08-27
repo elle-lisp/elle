@@ -1164,6 +1164,57 @@ the box through `LoadCaptureRaw` + `DecrefCellRegion`, and it is already frame-h
 because the binding names its own region (§ "A mutated holder poisons its value
 route, not its cell box").
 
+### A move that crosses a read through the cell it frees is declined
+
+A captured binding's value and its env cell are addressed by one env index, and
+they are two **regions**. The relocation decides per region, so the pair can get
+different answers, and moving one of them alone inverts the order between them.
+The value release loads the box RAW and lets `result_region_of` unwrap it, so it
+READS the page the box's `DecrefCellRegion` frees ([bindings.md](bindings.md) § "A
+cell's release lands at or after every release routed through that cell"). Move
+the cell's release ahead of the `TailCall` while the value's stays behind, and the
+unwrap reads a reclaimed page.
+
+The everyday split is the admission's own holder rule. It judges a region through
+the bindings that name it, so a value region **no binding names** is refused for
+want of a holder, while the cell region is admitted on its binding's verdict (§ "A
+compiled capture cell is frame-held exactly as its binding is"). An
+`Immediate`-effect native's result is such a region: the walk records no result
+region for the call, and the lowerer still routes the binding's release through the
+env index.
+
+Neither reading the relocation already makes can see the inversion: the exemption
+asks what the CALL names and the admission asks whether the frame holds the region
+alone, and this obligation holds between two regions rather than between a region
+and the call. So the relocation asks one more question, of the window the move
+crosses rather than of the region: a run spliced from after the `TailCall` to
+before it crosses every instruction now between the two positions, and those
+instructions say whether the move inverts anything. A `DecrefCellRegion` naming an
+env index that some instruction in the window still reads — a `LoadCapture` or
+`LoadCaptureRaw` at that index — declines the move and stays where the lowerer put
+it.
+
+Reading the window is enough because the clamp already fixed the emission order:
+it puts the cell's `decref_point` at or after the value release's, and where both
+land on one point the release order sorts the deepest read first
+([rules.md](rules.md) Rule 4). So a value release that reads through the cell is
+already in the window when the cell release asks to move.
+
+Declining strands the box on the closure path — the bounded, always-legal fallback
+the relocation takes for every region it refuses, and one box per activation rather
+than a page freed under its own reader. The everyday shape is the closure-as-module
+whose last form is a struct literal over the closures its captured defs built:
+`(fn [] (def a (ptr/from-int 0)) (defn p [] a) {:p p})`. Pinned by
+`a_cell_release_declines_a_move_across_a_read_through_it`, beside the admitted face
+`reassigned_env_cell_release_precedes_the_frame_replacing_tail_call`, whose cell
+holds an immediate and so has no release routed through it at all.
+
+The order the clamp and this decline together hold is stated once more over the
+finished emission, as a debug-only walk of every block
+(`lir::lower::assert_cells_outlive_their_readers`). Each mechanism can only see its
+own half, so a block that frees a cell before a read through it names a gap in
+either.
+
 ### What the exemption keeps, a channel must still run
 
 The exemption states its reason positively: the callee's own region keeps its place

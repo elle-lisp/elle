@@ -451,6 +451,90 @@ fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
     );
 }
 
+/// Every place a block frees an env cell before something in that same block reads
+/// through it, as `(env index, release position, read position)`.
+///
+/// One reading serves both directions the pin needs: the release's own
+/// `LoadCaptureRaw` sits immediately BEFORE it, so a well-ordered block reports
+/// nothing, and any tuple here is a `DecrefCellRegion` that freed the box under a
+/// later unwrap of the same index.
+fn cell_release_inversions(module: &crate::lir::LirModule) -> Vec<(u16, usize, usize)> {
+    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
+    let mut out = Vec::new();
+    for f in funcs {
+        for b in &f.blocks {
+            let mut from_index: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
+            let mut reads: Vec<(u16, usize)> = Vec::new();
+            let mut freed: Vec<(u16, usize)> = Vec::new();
+            for (idx, i) in b.instructions.iter().enumerate() {
+                match &i.instr {
+                    LirInstr::LoadCapture { dst, index }
+                    | LirInstr::LoadCaptureRaw { dst, index } => {
+                        from_index.insert(*dst, *index);
+                        reads.push((*index, idx));
+                    }
+                    LirInstr::DecrefCellRegion { src } => {
+                        freed.extend(from_index.get(src).map(|&index| (index, idx)));
+                    }
+                    _ => {}
+                }
+            }
+            for (index, at) in freed {
+                out.extend(
+                    reads
+                        .iter()
+                        .filter(|&&(i, r)| i == index && r > at)
+                        .map(|&(_, r)| (index, at, r)),
+                );
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_cell_release_declines_a_move_across_a_read_through_it() {
+    // The closure-as-module shape: `a` is a captured def, and the body's last form
+    // is a struct literal — a NATIVE tail call, so the dispatch loop falls through
+    // into the block after the `TailCall` and runs everything the lowerer put
+    // there.
+    //
+    // The trap is that `a`'s two releases are two REGIONS, and the relocation
+    // answers per region. `ptr/from-int` declares `RegionEffect::Immediate`, so the
+    // walk records no result region for the init and no binding names it — the
+    // frame-held admission refuses it for want of a holder, and its
+    // `DecrefValueRegion` keeps its place in the dead block. The env CELL is
+    // admitted on the binding's own verdict and moves ahead of the call. That value
+    // release loads the box RAW and unwraps it, so it reads the page the cell
+    // release frees (docs/impl/region/mechanism.md § "A move that crosses a read
+    // through the cell it frees is declined").
+    //
+    // The counter-factual: asserting only that some cell release precedes the
+    // `TailCall` passes on this witness while the box is freed under its own
+    // reader, because the move is exactly what the assertion asks for.
+    let module = compile_to_lir(
+        "(begin (def m (fn () \
+           (def a (ptr/from-int 0)) \
+           (def p (fn () a)) \
+           {:p p})) \
+         (m))",
+    );
+    let (at, releases) =
+        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
+    assert!(
+        releases.iter().all(|&r| r > at),
+        "the env cell's release was moved ahead of the TailCall \
+         (at={at}, releases={releases:?}) while the release routed through that \
+         cell stayed behind — the unwrap then reads a freed page",
+    );
+    let inversions = cell_release_inversions(&module);
+    assert!(
+        inversions.is_empty(),
+        "a cell is freed before a read through it; (env index, release, read) \
+         positions = {inversions:?}",
+    );
+}
+
 #[test]
 fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
     // The decline face: the closure holding the cell is STORED into an aggregate
