@@ -215,11 +215,13 @@ impl WasmEmitter {
         self.yield_state_map.clear();
         self.call_state_map.clear();
 
+        // The trailing I64 pair is `signal_local` then `suspended_local`
+        // (`WasmEmitter::suspended_local`); they must stay adjacent and last.
         let mut f = Function::new([
             (n, ValType::I64),
             (n, ValType::I64),
             (1, ValType::I32),
-            (1, ValType::I64),
+            (2, ValType::I64),
         ]);
 
         self.emit_cfg(&mut f, func);
@@ -306,8 +308,10 @@ impl WasmEmitter {
         self.signal_local = 4 + 2 * n + 2 * m;
 
         if self.may_suspend {
-            self.resume_tag_local = 4 + 2 * n + 2 * m + 4;
-            self.resume_pay_local = 4 + 2 * n + 2 * m + 5;
+            // Past signal_local, suspended_local, and the three I32 tail-call
+            // scratch locals (see `emit_tail_call_dispatch`).
+            self.resume_tag_local = 4 + 2 * n + 2 * m + 5;
+            self.resume_pay_local = 4 + 2 * n + 2 * m + 6;
 
             self.pre_scan_resume_states(func);
             self.next_resume_state = 1;
@@ -344,7 +348,7 @@ impl WasmEmitter {
                 (n, ValType::I64),
                 (m, ValType::I64),
                 (m, ValType::I64),
-                (1, ValType::I64),
+                (2, ValType::I64),
                 (3, ValType::I32),
                 (2, ValType::I64),
             ]);
@@ -357,7 +361,7 @@ impl WasmEmitter {
                 (n, ValType::I64),
                 (m, ValType::I64),
                 (m, ValType::I64),
-                (1, ValType::I64),
+                (2, ValType::I64),
                 (3, ValType::I32),
             ]);
             self.emit_cfg(&mut f, func);

@@ -2,7 +2,9 @@
 //!
 //! These emitters marshal register values into linear memory at `ARGS_BASE`,
 //! invoke the runtime dispatch functions (`rt_call`, `rt_make_closure`), and
-//! unpack the `(tag, payload, signal)` triple they return.
+//! unpack the words they return. `rt_call` returns four —
+//! `(tag, payload, signal, suspended)` — while `rt_data_op` and `call_primitive`
+//! return three; the two shapes have separate store helpers below.
 
 use super::*;
 
@@ -107,7 +109,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(args.len() as i32));
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::Call(FN_RT_CALL));
-        self.store_result_with_signal(f, dst);
+        self.store_call_result(f, dst);
     }
 
     /// Emit CallArrayMut via rt_call with nargs=-1 protocol.
@@ -126,15 +128,32 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(-1));
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::Call(FN_RT_CALL));
+        self.store_call_result(f, dst);
+    }
+
+    /// Store `rt_call`'s FOUR-word result in a NON-suspending function.
+    ///
+    /// This function has no continuation frame to capture, so a callee that
+    /// parked is handled the same way as one that raised: the signal goes to
+    /// `SIGNAL_SLOT` and the function returns with `status = 0`. The caller's
+    /// `handle_wasm_result` reads the slot and classifies it there — that is the
+    /// yield-through path, and it is why `suspended` is popped and dropped here
+    /// rather than branched on.
+    ///
+    /// Only `rt_call` returns four words. `rt_data_op` and `call_primitive`
+    /// return three and use [`store_result_with_signal`] directly.
+    pub(in crate::wasm) fn store_call_result(&self, f: &mut Function, dst: Reg) {
+        f.instruction(&Instruction::LocalSet(self.suspended_local()));
         self.store_result_with_signal(f, dst);
     }
 
-    /// Store result from (tag, payload, signal) triple, early-return on error.
+    /// Store a THREE-word `(tag, payload, signal)` result, early-returning on
+    /// any signal. Shared by `rt_data_op` and `call_primitive`.
     pub(in crate::wasm) fn store_result_with_signal(&self, f: &mut Function, dst: Reg) {
         f.instruction(&Instruction::LocalSet(self.signal_local));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(SIGNAL_SLOT));
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::I64Store(MemArg {
             offset: 0,
@@ -157,9 +176,10 @@ impl WasmEmitter {
         let tc_signal = self.signal_local;
         let tc_payload = self.pay_local(Reg(0));
         let tc_tag = self.tag_local(Reg(0));
-        let tc_is_wasm = self.signal_local + 1;
-        let tc_table_idx = self.signal_local + 2;
-        let tc_env_ptr = self.signal_local + 3;
+        // The I32 scratch trio sits after signal_local and suspended_local.
+        let tc_is_wasm = self.signal_local + 2;
+        let tc_table_idx = self.signal_local + 3;
+        let tc_env_ptr = self.signal_local + 4;
 
         f.instruction(&Instruction::LocalSet(tc_signal));
         f.instruction(&Instruction::LocalSet(tc_payload));

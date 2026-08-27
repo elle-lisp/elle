@@ -7,6 +7,7 @@ use wasmtime::*;
 
 use crate::wasm::host::ElleHost;
 use crate::wasm::linker::read_args_from_memory;
+use crate::wasm::outcome::CallOutcome;
 
 pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
     // call_primitive(prim_id: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i64)
@@ -27,7 +28,12 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
         },
     )?;
 
-    // rt_call(func_tag: i64, func_payload: i64, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i64)
+    // rt_call(func_tag: i64, func_payload: i64, args_ptr: i32, nargs: i32, ctx: i32)
+    //   -> (tag: i64, payload: i64, signal: i64, suspended: i64)
+    //
+    // `suspended` is the word emitted code branches on. It is computed here, once,
+    // by `signals::dispatch::is_suspending` — never inferred from a bit of
+    // `signal`. See docs/impl/wasm.md § rt_call.
     linker.func_wrap(
         "elle",
         "rt_call",
@@ -37,7 +43,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
          args_ptr: i32,
          nargs: i32,
          _ctx: i32|
-         -> (i64, i64, i64) {
+         -> (i64, i64, i64, i64) {
             // Resolve the function value
             let func_val = caller.data().wasm_to_value(func_tag, func_payload);
 
@@ -88,7 +94,8 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 // signal. Convert it to the child's (bits, value) so the body
                 // unwinds with the real error (defer/with's tail unwind branch).
                 if bits.raw() & crate::value::fiber::SIG_PROPAGATE.raw() != 0 {
-                    return crate::wasm::resume::handle_fiber_propagate(&mut caller, result);
+                    return crate::wasm::resume::handle_fiber_propagate(&mut caller, result)
+                        .to_wasm();
                 }
 
                 // Handle SIG_RESUME: fiber/resume returns this signal.
@@ -98,15 +105,15 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     let r = crate::wasm::resume::handle_fiber_resume(&mut caller, result);
                     if caller.data().debug {
                         eprintln!(
-                            "[rt_call] handle_fiber_resume returned: tag={} payload={} signal={}",
-                            r.0, r.1, r.2
+                            "[rt_call] handle_fiber_resume returned: tag={} payload={} signal={} suspended={}",
+                            r.tag, r.payload, r.signal, r.suspended
                         );
                     }
-                    return r;
+                    return r.to_wasm();
                 }
 
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                (tag, payload, bits.raw() as i64)
+                CallOutcome::signalled(tag, payload, bits)
             } else if let Some((id, default)) = func_val.as_parameter() {
                 if caller.data().debug {
                     eprintln!("[rt_call] parameter id={} default={:?}", id, default);
@@ -119,11 +126,11 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                         format!("parameter call: expected 0 arguments, got {}", args.len()),
                     );
                     let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                    (tag, payload, 1)
+                    CallOutcome::error(tag, payload)
                 } else {
                     let value = caller.data().resolve_parameter(id, default);
                     let (tag, payload) = caller.data_mut().value_to_wasm(value);
-                    (tag, payload, 0)
+                    CallOutcome::value(tag, payload)
                 }
             } else if let Some(closure) = func_val.as_closure() {
                 if let Some(wasm_idx) = closure.template.wasm_func_idx {
@@ -167,6 +174,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 // `cannot call` type error. See `run_collection_call`.
                 crate::wasm::linker::run_collection_call(&mut caller, func_val, &args, "rt_call")
             }
+            .to_wasm()
         },
     )?;
 

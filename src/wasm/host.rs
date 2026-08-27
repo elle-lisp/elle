@@ -227,6 +227,22 @@ impl ElleHost {
         self.suspension_frames.get_mut(&id)?.front_mut()
     }
 
+    /// The signal on the most recently pushed frame for the current fiber.
+    ///
+    /// `handle_wasm_result` classifies an `Emit` with this. An `Emit` terminator
+    /// carries whatever the emission raised — `(yield v)` and `(error …)` alike
+    /// route through `rt_yield` — so "the function returned a non-zero status"
+    /// does not by itself mean it parked. This is the back frame rather than the
+    /// front because the front may still be a stale outer frame from a previous
+    /// suspension until `drive_resume_chain` rotates.
+    pub fn back_suspension_frame_signal(&self) -> Option<crate::value::fiber::SignalBits> {
+        let id = self.current_fiber_id();
+        self.suspension_frames
+            .get(&id)?
+            .back()
+            .map(|f| crate::value::fiber::SignalBits::new(f.signal_bits))
+    }
+
     /// Get the back suspension frame for the current fiber (most recently pushed).
     /// Used by handle_wasm_result to update the frame that rt_yield just pushed.
     pub fn back_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {

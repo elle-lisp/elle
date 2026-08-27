@@ -409,7 +409,7 @@ impl WasmEmitter {
     /// Type indices:
     ///   0: entry `(ctx: i32) -> (tag, payload, status)`
     ///   1: call_primitive `(prim_id, args_ptr, nargs, ctx) -> (tag, payload, signal)`
-    ///   2: rt_call `(func_tag, func_payload, args_ptr, nargs, ctx) -> (tag, payload, signal)`
+    ///   2: rt_call `(func_tag, func_payload, args_ptr, nargs, ctx) -> (tag, payload, signal, suspended)`
     ///   3: rt_load_const `(index) -> (tag, payload)`
     ///   4: rt_data_op `(op, args_ptr, nargs) -> (tag, payload, signal)`
     ///   5: closure `(env_ptr, args_ptr, nargs, ctx) -> (tag, payload, status)`
@@ -431,7 +431,10 @@ impl WasmEmitter {
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64, ValType::I64],
         );
-        // 2: rt_call
+        // 2: rt_call. The fourth result is `suspended`: whether the caller must
+        // park. It is a separate word from `signal` because which signals park
+        // is the interpreter's rule (`signals::dispatch::is_suspending`), not a
+        // bit the emitter can test — see docs/impl/wasm.md § rt_call.
         types.ty().function(
             [
                 ValType::I64,
@@ -440,7 +443,7 @@ impl WasmEmitter {
                 ValType::I32,
                 ValType::I32,
             ],
-            [ValType::I64, ValType::I64, ValType::I64],
+            [ValType::I64, ValType::I64, ValType::I64, ValType::I64],
         );
         // 3: rt_load_const
         types
@@ -527,6 +530,15 @@ impl WasmEmitter {
         } else {
             0
         }
+    }
+
+    /// The local holding `rt_call`'s fourth result: whether the callee parked.
+    ///
+    /// Declared immediately after `signal_local` in every function variant
+    /// (`emit_function` / `emit_closure_function`), so the two words that
+    /// describe one call sit together. The tail-call scratch follows it.
+    pub(in crate::wasm) fn suspended_local(&self) -> u32 {
+        self.signal_local + 1
     }
 
     pub(super) fn tag_local(&self, reg: Reg) -> u32 {

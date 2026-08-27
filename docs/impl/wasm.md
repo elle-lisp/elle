@@ -129,9 +129,43 @@ Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag:
 - `ctx`: resume state (0 = initial call, >0 = resuming after yield).
 - `status`: 0 = normal return, >0 = suspended (resume state ID).
 
+A compiled function reports on **two channels, and both must be read**.
+`status` says whether the function suspended. The `SignalBits` it raised
+go to `SIGNAL_SLOT`, the 8 bytes at the base of linear memory. Neither
+word implies the other: a function can raise `:error` and return
+(`status = 0`, signal set), suspend carrying `:io` (`status > 0`, signal
+on the frame), or return a value (both clear).
+
 Tail calls use `return_call_indirect` (WASM tail-call proposal) via
 `rt_prepare_tail_call`, which resolves the target and builds the
 callee's env at the caller's env position.
+
+### `rt_call` and the suspended flag
+
+`rt_call` returns four words: `(tag: i64, payload: i64, signal: i64,
+suspended: i64)`. `suspended` is the host's answer to "must my caller
+park?", and the emitted code branches on it alone.
+
+Emitted code must not derive that answer from the signal word. The
+callee's signal is its own vocabulary — `:io`, `:wait`, a user bit — and
+which of those suspend is the interpreter's rule, not the emitter's.
+`signals::dispatch::classify` owns it, and `rt_call` applies it once so
+the tiers cannot disagree.
+
+Testing a bit instead costs correctness twice over. A suspending signal
+need not carry any particular bit — `fiber/emit` of a bare `|:io|` does
+not — so a bit test misses the park, captures no continuation frame, and
+drops the code after the suspend; the fiber then returns its resume value.
+And a host that answers "suspended" by OR-ing a bit back onto the signal
+puts that bit where programs can see it: `fiber/bits` reports
+`|:io :yield|` where the VM reports `|:io|`. Pinned by
+`tests/elle/wasm-suspend-not-by-bit.lisp`.
+
+A non-zero `status` likewise does not mean "parked". `(yield v)` and
+`(error …)` both compile to an `Emit` terminator and both route through
+`rt_yield`, so an error also returns `status > 0`. `handle_wasm_result`
+reads the signal off the frame `rt_yield` pushed and classifies it, which
+is what makes an uncaught error unwind rather than park.
 
 ### Callee dispatch spectrum
 

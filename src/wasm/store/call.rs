@@ -1,18 +1,26 @@
 use super::*;
+use crate::wasm::outcome::CallOutcome;
 
-/// Handle the result of a WASM closure call (shared by call and resume paths).
+/// Turn a compiled function's two channels into one [`CallOutcome`] (shared by
+/// the call and resume paths).
 ///
-/// If the function suspended (status > 0): snapshot env to the front frame,
-/// clear memory[0..8], restore env_stack_ptr, return SIG_YIELD.
-/// If normal return: read signal from memory[0..8], clear if non-zero, return.
-/// If error: restore env_stack_ptr, return error.
+/// The function answered on two channels and this is the only place that reads
+/// both. `status > 0` means it parked; the `SignalBits` it raised are in
+/// `SIGNAL_SLOT`, or — when it parked — on the suspension frame `rt_yield`
+/// pushed, because the signal that matters then is the innermost one.
+///
+/// It used to answer on one word, manufacturing `SIG_YIELD` to mean "parked" and
+/// OR-ing it onto a tail-position `SIG_IO`. Three sites downstream then guessed
+/// which had happened by testing whether the word equalled `SIG_YIELD` exactly.
+/// Reporting `suspended` separately removes the guess, and stops the transport
+/// bit reaching `fiber/bits` — see `tests/elle/wasm-suspend-not-by-bit.lisp`.
 pub(in crate::wasm) fn handle_wasm_result(
     caller: &mut Caller<'_, ElleHost>,
     call_result: std::result::Result<(), wasmtime::Error>,
     results: &[Val; 3],
     env_base: usize,
     label: &str,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     let memory = caller
         .get_export("__elle_memory")
         .and_then(|e| e.into_memory())
@@ -38,11 +46,13 @@ pub(in crate::wasm) fn handle_wasm_result(
                     frame.env_snapshot = env_snapshot;
                 }
 
-                if caller.data().debug {
-                    let old = i64::from_le_bytes(memory.data(&*caller)[0..8].try_into().unwrap());
-                    eprintln!("[{}] clearing memory[0..8] from {} to 0", label, old);
+                // Discard whatever is in SIGNAL_SLOT. Every emitted write of a
+                // non-zero signal returns immediately, so a park cannot carry
+                // one — the real signal is on the frame `rt_yield` just pushed.
+                let stale = super::take_raised_signal(&mut *caller, &memory);
+                if caller.data().debug && !stale.is_empty() {
+                    eprintln!("[{}] clearing SIGNAL_SLOT from {} to 0", label, stale);
                 }
-                memory.data_mut(&mut *caller)[0..8].copy_from_slice(&0i64.to_le_bytes());
                 caller.data_mut().env_stack_ptr = env_base;
 
                 if caller.data().debug {
@@ -52,25 +62,38 @@ pub(in crate::wasm) fn handle_wasm_result(
                     );
                 }
 
-                (tag, payload, crate::value::fiber::SIG_YIELD.raw() as i64)
+                // `status > 0` says the function ran an `Emit`, NOT that it
+                // parked: `(yield v)` and `(error …)` both route through
+                // `rt_yield`. The frame `rt_yield` just pushed carries which, so
+                // read it and let `is_suspending` classify.
+                //
+                // The BACK frame, not the front: during a resume the front may
+                // still be a stale outer frame from the previous suspension,
+                // until `drive_resume_chain` rotates. The back is always the one
+                // this call just pushed. Every frame in a yield-through chain
+                // records the same real signal, because the caller's `rt_yield`
+                // records the signal word this function returns.
+                //
+                // Classifying here is what makes an uncaught `(error …)` unwind.
+                // Reporting it as a park returned `status > 0` with an empty
+                // SIGNAL_SLOT, and `run_module`'s uncaught-error check then read
+                // zero and exited 0 silently (tests/elle/upvalue-u16.lisp).
+                let emitted = caller
+                    .data()
+                    .back_suspension_frame_signal()
+                    .unwrap_or(crate::value::fiber::SIG_YIELD);
+                CallOutcome::signalled(tag, payload, emitted)
             } else {
                 caller.data_mut().env_stack_ptr = env_base;
 
-                let mut signal = super::take_raised_signal(&mut *caller, &memory).raw() as i64;
-                // A NativeFn tail call that yielded SIG_IO (written to
-                // memory[0..8] by rt_prepare_tail_call — the tail-position path a
-                // stdlib wrapper like `tcp/connect`'s `(apply tcp/connect-ip …)`
-                // takes) must ADD SIG_YIELD, not REPLACE with it: the WASM caller
-                // keys yield-through off SIG_YIELD (bit 1), but the scheduler
-                // keys IO submission off SIG_IO (bit 9) via fiber/bits. Dropping
-                // SIG_IO here left the yielded io-request tagged as a plain yield,
-                // so the scheduler re-queued the fiber and resumed it with nil
-                // instead of submitting the IO — every tail-position IO
-                // (`tcp/connect`, and the framing built on it) then read nil for
-                // its port. Pinned by tests/elle/wasm-tail-io-in-fiber.lisp.
-                if signal as u64 & crate::signals::SIG_IO.raw() != 0 {
-                    signal |= crate::value::fiber::SIG_YIELD.raw() as i64;
-                }
+                // Whatever the function raised, classified by the shared rule.
+                // A tail-position native that yielded `SIG_IO` — the path
+                // `tcp/connect`'s `(apply tcp/connect-ip …)` takes, via
+                // `rt_prepare_tail_call` — lands here with no frame pushed, and
+                // `is_suspending` parks the caller on it without the signal
+                // having to carry `SIG_YIELD`. Pinned by
+                // tests/elle/wasm-tail-io-in-fiber.lisp.
+                let signal = super::take_raised_signal(&mut *caller, &memory);
 
                 if caller.data().debug {
                     let v = caller.data().wasm_to_value(tag, payload);
@@ -79,7 +102,7 @@ pub(in crate::wasm) fn handle_wasm_result(
                         label, tag, payload, signal, v
                     );
                 }
-                (tag, payload, signal)
+                CallOutcome::signalled(tag, payload, signal)
             }
         }
         Err(e) => {
@@ -88,7 +111,7 @@ pub(in crate::wasm) fn handle_wasm_result(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("exec-error", e.to_string());
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, 1)
+            CallOutcome::error(tag, payload)
         }
     }
 }
@@ -105,7 +128,7 @@ pub(in crate::wasm) fn call_wasm_closure(
     args: &[Value],
     self_tag: i64,
     self_payload: i64,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     let env_base = caller.data().env_stack_ptr;
     prepare_wasm_env(caller, closure, args, env_base);
 
@@ -163,10 +186,10 @@ pub(in crate::wasm) fn call_wasm_closure(
 /// For multi-frame suspension chains (yield-through-call), the caller
 /// must call this repeatedly: first resume the innermost callee, then
 /// use its result to resume the next frame.
-pub fn resume_wasm_closure(
+pub(in crate::wasm) fn resume_wasm_closure(
     caller: &mut Caller<'_, ElleHost>,
     resume_val: Value,
-) -> Option<(i64, i64, i64)> {
+) -> Option<CallOutcome> {
     // Peek the front frame (innermost). During the WASM call, rt_load_saved_reg
     // reads from it. New frames pushed by rt_yield go to the back, so they
     // don't interfere. We pop_front AFTER the call completes.
@@ -277,14 +300,13 @@ pub fn resume_wasm_closure(
     caller.data_mut().pop_suspension_frame();
     caller.data_mut().resume_value = None;
 
-    let (t, p, s) = handle_wasm_result(
+    Some(handle_wasm_result(
         caller,
         call_result,
         &results,
         env_base,
         "resume_wasm_closure",
-    );
-    Some((t, p, s))
+    ))
 }
 
 /// Compile WASM bytes into a Module.
@@ -491,7 +513,7 @@ pub(in crate::wasm) fn call_precached_closure(
     pc: &super::super::host::PrecachedClosure,
     args: &[crate::value::Value],
     self_val: crate::value::Value,
-) -> (i64, i64, i64) {
+) -> CallOutcome {
     use crate::value::repr::TAG_HEAP_START;
 
     let engine = caller.engine().clone();
@@ -524,7 +546,7 @@ pub(in crate::wasm) fn call_precached_closure(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("internal-error", e.to_string());
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, 1);
+            return CallOutcome::error(tag, payload);
         }
     };
     let instance = match linker.instantiate(&mut store, &pc.module) {
@@ -534,7 +556,7 @@ pub(in crate::wasm) fn call_precached_closure(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("internal-error", e.to_string());
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, 1);
+            return CallOutcome::error(tag, payload);
         }
     };
 
@@ -566,18 +588,12 @@ pub(in crate::wasm) fn call_precached_closure(
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("internal-error", e.to_string());
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, 1);
+            return CallOutcome::error(tag, payload);
         }
     };
 
     match func.call(&mut store, (env_base as i32, 0, 0, 0)) {
         Ok((tag, payload, status)) => {
-            // The third slot of this function's result is the host's SIGNAL, not
-            // the wasm `status` word. They are different channels: `status` says
-            // whether the closure suspended, and the signal it raised lives in
-            // this store's SIGNAL_SLOT. Returning `status` here reported a failed
-            // primitive as a successful return of the error value.
-            //
             // A precached closure cannot suspend — precaching only engages when
             // no closure in the module may suspend, and `standalone_emittable`
             // refuses every parking shape besides — so a non-zero status means
@@ -593,21 +609,21 @@ pub(in crate::wasm) fn call_precached_closure(
                     ),
                 );
                 let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                return (tag, payload, crate::value::fiber::SIG_ERROR.raw() as i64);
+                return CallOutcome::error(tag, payload);
             }
             let signal = super::take_raised_signal(&mut store, &memory);
             // Convert result from standalone store's handle space
             // back to the caller's handle space.
             let value = store.data().wasm_to_value(tag, payload);
             let (caller_tag, caller_payload) = caller.data_mut().value_to_wasm(value);
-            (caller_tag, caller_payload, signal.raw() as i64)
+            CallOutcome::signalled(caller_tag, caller_payload, signal)
         }
         Err(e) => {
             let heap = unsafe { &mut *caller.data().heap_ptr() };
             let ctx = crate::primitives::ctx::Alloc::new(heap);
             let err = ctx.error("internal-error", e.to_string());
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, 1)
+            CallOutcome::error(tag, payload)
         }
     }
 }
