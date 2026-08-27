@@ -406,15 +406,19 @@ primitive! {
         doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
         category: "fiber",
-        // Mixed: the SIG_PROPAGATE return drives the VM to write the fiber
-        // argument into the propagating fiber's own `child`/`child_value` fields
-        // (`handle_fiber_propagate_signal`), with no counting seam — the uncounted
-        // store the clique exists to cover. The clique is empty either way (one
-        // heap argument), so what the declaration carries here is escape's store
-        // facet on the argument, which that write earns
-        // (docs/impl/region/effects.md § "A signal a handler stores for is a
-        // store").
-        effect: RegionEffect::Mixed,
+        // Opaque, not Mixed: the SIG_PROPAGATE return drives the VM to write the
+        // fiber argument into the propagating fiber's own `child`/`child_value`
+        // pair (`handle_fiber_propagate_signal`) — the child-chain WIRING, the
+        // same write `fiber/resume`'s handler performs and does not declare. The
+        // free-time walk's Fiber arm never enumerates that pair, so it holds no
+        // reference and the call stores nothing; the result leaves by signal, so
+        // it is unbounded. The clique is empty either way (one heap argument), so
+        // what the declaration decides is escape's store facet on the argument,
+        // and `Mixed` would cost every branch that names a live-in fiber here its
+        // release window — `defer`'s success path first
+        // (docs/impl/region/effects.md § "The child-chain WIRING is `Opaque`
+        // too").
+        effect: RegionEffect::Opaque,
     }
     "fiber/caps" => prim_fiber_caps {
         signal: Signal::query_errors(),

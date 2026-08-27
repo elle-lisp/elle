@@ -332,23 +332,26 @@ fn a_sequence_read_does_not_seed_the_store_facet() {
     );
 }
 
-/// The fiber-graph reads are the same claim on a different subject: `fiber/child`
-/// hands back the cached child-fiber `Value` its argument carries and stores
-/// nothing, so its argument is not a store-facet seed. `fiber/propagate` is the
-/// contrast that keeps the seed honest — it hands its argument to the
-/// `SIG_PROPAGATE` handler, which writes it into the propagating fiber's own
-/// `child`/`child_value` fields with no counting seam, the uncounted store `Mixed`
-/// exists to cover (docs/impl/region/effects.md § `Opaque`, § `Mixed`).
+/// The fiber-graph natives are the same claim on a different subject, and the
+/// WRITE side answers it the same way the read side does. `fiber/child` hands back
+/// the cached child-fiber `Value` its argument carries; `fiber/propagate` hands its
+/// argument to the `SIG_PROPAGATE` handler, which writes it into the propagating
+/// fiber's `child`/`child_value` pair. That pair is not enumerated by the free-time
+/// walk, so neither call creates a holder and neither argument is a store-facet
+/// seed (docs/impl/region/effects.md § `Opaque`, "The child-chain WIRING is
+/// `Opaque` too"). The counter-factual is `Mixed` on `fiber/propagate`, and this
+/// seed is the only thing that catches it: `Mixed` reads true on the result side
+/// (the SIG_PROPAGATE payload IS arg0) and the declaration oracle exempts a
+/// signal-carrying return, so no result check can. What it costs is `defer`'s
+/// success path, which names its fiber in the arm this call does not take.
 #[test]
-fn a_fiber_graph_read_does_not_seed_the_store_facet() {
-    assert_binding_escape(
-        "(let [f (fiber/new (fn () 1) |:error|)] (fiber? (fiber/child f)))",
-        &[("f", false, false)],
-    );
-    assert_binding_escape(
-        "(let [f (fiber/new (fn () 1) |:error|)] (fiber? (fiber/propagate f)))",
-        &[("f", true, false)],
-    );
+fn a_fiber_graph_write_does_not_seed_the_store_facet() {
+    for op in ["fiber/child", "fiber/propagate"] {
+        assert_binding_escape(
+            &format!("(let [f (fiber/new (fn () 1) |:error|)] (fiber? ({op} f)))"),
+            &[("f", false, false)],
+        );
+    }
 }
 
 /// `import` copies its specifier out to a Rust `String` to resolve it and stores

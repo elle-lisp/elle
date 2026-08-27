@@ -371,36 +371,40 @@ fn has_declares_opaque_no_arg_clique() {
 }
 
 #[test]
-fn fiber_child_declares_opaque_and_propagate_keeps_the_hard_edge() {
-    // The two fiber-graph natives split on the STORE side, and the split is what
-    // their declarations record. `fiber/child` reads the cached child-fiber `Value`
-    // out of its argument and returns it — no store, and a result living in whatever
-    // region the resume minted the cache in, so `Opaque`: no hard-edge site, and no
-    // store-facet escape seed on the argument (the escape half is
-    // `a_fiber_graph_read_does_not_seed_the_store_facet`). `fiber/propagate` returns
-    // SIG_PROPAGATE, which drives the VM to write its argument into the propagating
-    // fiber's own `child`/`child_value` fields with no counting seam — the uncounted
-    // store the clique covers — so it stays `Mixed` and stays a hard-edge site.
-    // Both are single-heap-arg, so the clique edge set is empty either way and
-    // `hard_edge_sites` is what distinguishes them (docs/impl/region/effects.md
-    // § `Opaque`, § `Mixed`).
-    let (hir, arena, symbols, info) = analyze_with_class("(fiber/child \"f\")");
-    let calls = find_calls_to_primitive(&hir, "fiber/child", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (fiber/child ...) call");
-    assert!(
-        !info.hard_edge_sites.contains(&calls[0]),
-        "fiber/child declares Opaque — it stores nothing — so its call site must \
-         NOT be a hard-edge site (a regression to Mixed re-seeds the store facet \
-         on every fiber it reads)"
-    );
+fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
+    // Both fiber-graph natives touch the same `child`/`child_value` pair and both
+    // declare `Opaque`. `fiber/child` READS the cached child-fiber `Value` out of
+    // its argument; `fiber/propagate` returns SIG_PROPAGATE, which drives the VM to
+    // WRITE its argument into that pair. Neither is a store: the free-time walk's
+    // Fiber arm does not enumerate the child chain, so the field creates no holder
+    // of the region and can under-count nothing (docs/impl/region/effects.md
+    // § `Opaque`, "The child-chain WIRING is `Opaque` too"). The escape half is
+    // `a_fiber_graph_write_does_not_seed_the_store_facet`.
+    for name in ["fiber/child", "fiber/propagate"] {
+        let (hir, arena, symbols, info) = analyze_with_class(&format!("({name} \"f\")"));
+        let calls = find_calls_to_primitive(&hir, name, &arena, &symbols);
+        assert_eq!(calls.len(), 1, "expected one ({name} ...) call");
+        assert!(
+            !info.hard_edge_sites.contains(&calls[0]),
+            "{name} declares Opaque — it stores nothing — so its call site must NOT \
+             be a hard-edge site (a regression to Mixed re-seeds the store facet on \
+             every fiber it names)"
+        );
+    }
 
-    let (hir, arena, symbols, info) = analyze_with_class("(fiber/propagate \"f\")");
-    let calls = find_calls_to_primitive(&hir, "fiber/propagate", &arena, &symbols);
-    assert_eq!(calls.len(), 1, "expected one (fiber/propagate ...) call");
+    // The contrast that keeps the handler-store rule honest. `git` also does its
+    // work through a signal handler, and that handler caches the compiled SPIR-V on
+    // its closure argument's template — a retention outliving the call that no seam
+    // records. Real, uncounted store: `Mixed`, and a hard-edge site. All three are
+    // single-heap-arg, so the clique edge set is empty for each and `hard_edge_sites`
+    // is the only thing that separates them.
+    let (hir, arena, symbols, info) = analyze_with_class("(git \"f\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (git ...) call");
     assert!(
         info.hard_edge_sites.contains(&calls[0]),
-        "fiber/propagate's argument is stored uncounted into the propagating \
-         fiber's child field, so it must stay a Mixed hard-edge site"
+        "git's argument keeps compiled SPIR-V cached on its template past the call, \
+         so it must stay a Mixed hard-edge site"
     );
 }
 

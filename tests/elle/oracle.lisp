@@ -1219,7 +1219,36 @@
    ["protect-while"
     (fn [j]
       (let [[ok v] (protect ((fn [] j)))]
-        v)) 0]
+        v)) 0]  # `defer` on its ordinary SUCCESS path — the twin of `protect-while`
+   # above. Same inner fiber, same resume; the whole difference is the trailing
+   # `if`, which reads the fiber with `fiber/value` in the arm taken here and with
+   # `fiber/propagate` in the arm that is not. Declaring `fiber/propagate` `Mixed`
+   # seeds that fiber on escape's store facet, the branch-arm release window
+   # declines, and the branch's only release stays in the untaken arm — 2 regions
+   # and 3 objects stranded per evaluation, so a loop whose body is wrapped in
+   # `defer` grows without bound (docs/impl/region/effects.md § `Opaque`, "The
+   # child-chain WIRING is `Opaque` too"). `protect-while` has no such arm and reads
+   # 0 whatever the declaration says, which is what makes it the pair-control here
+   # and not the gauge. Both are CLOSED controls (undeclared, like
+   # `rest-array-copy`), so a regression to open trips the completeness gate loudly
+   # instead of being absorbed under F2.
+   ["defer-while"
+    (fn [j]
+      (defer
+        (length [1 2])
+        ((fn [] j)))) 0]  # The other arm, and the control.
+   # `defer-error` raises in the body, so the arm it drives is the PROPAGATE arm —
+   # the one that held the branch's only release under `Mixed`, and so the one that
+   # correctly stays closed under `defer-while`'s counterfactual. It is what tells a
+   # real fix from a moved strand: a change that only re-anchored the release onto
+   # the other arm closes `defer-while` and opens this. The arm also leaves by
+   # SIG_PROPAGATE rather than falling through, so a release the window replicates
+   # into it must survive a signal exit to read 0 here.
+   ["defer-error"
+    (fn [j]
+      (protect (defer
+                 (length [1 2])
+                 (error j)))) 0]
    ["one-shot"
     (fn [j]
       (let [f (fiber/new (fn [] j) 1)]
