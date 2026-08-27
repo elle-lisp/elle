@@ -1,13 +1,25 @@
 (elle/epoch 12)
-# h2 stress test — scoped version
+# h2 request loops written so escape analysis can scope them.
 #
-# Demonstrates bounded memory under repeated HTTP/2 request loops
-# by using while loops (not each) so escape analysis can insert
-# scope marks. The key insight: `each` desugars to a fiber,
-# which blocks escape analysis. `while` with let-bound loop vars
-# keeps allocations within reclaimable scopes.
+# `each` desugars to a fiber, which blocks escape analysis; `while` with
+# let-bound loop vars keeps each iteration's allocations inside a scope the
+# compiler can reclaim. Every loop here is a `while` for that reason.
+#
+# What each case asserts is the status, the body length that came back, and an
+# empty stream table at the end. The `arena/bytes` deltas around them are
+# printed for a reader, not asserted.
+#
+# The counts are named below and kept small on purpose: none of the assertions
+# needs volume, and the cost is per-request. The shape this file had before —
+# 200 requests of 50k, then 200 of 10k — ran eight seconds here and outran a
+# 30 s budget on a CI runner.
 
 (def http2 ((import "std/http2")))
+
+(def seq-requests 60)
+(def reconnect-cycles 5)
+(def reconnect-requests 10)
+(def durability-requests 60)
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -111,21 +123,24 @@
 (def body-10k (make-body 10000))
 (def body-50k (make-body 50000))
 
-(println "sequential 200x50k...")
+# Each label reads the same constants its case does, so none of them can
+# report a shape that did not run.
+
+(println "sequential " seq-requests "x50k...")
 (def before (arena/bytes))
-(test-sequential-scoped 200 body-50k)
+(test-sequential-scoped seq-requests body-50k)
 (def after (arena/bytes))
 (println "  arena delta: " (- after before) " bytes")
 
-(println "reconnect 10x20...")
+(println "reconnect " reconnect-cycles "x" reconnect-requests "...")
 (def before2 (arena/bytes))
-(test-reconnect-scoped 10 20)
+(test-reconnect-scoped reconnect-cycles reconnect-requests)
 (def after2 (arena/bytes))
 (println "  arena delta: " (- after2 before2) " bytes")
 
-(println "durability 200x10k...")
+(println "durability " durability-requests "x10k...")
 (def before3 (arena/bytes))
-(test-durability-scoped 200 body-10k)
+(test-durability-scoped durability-requests body-10k)
 (def after3 (arena/bytes))
 (println "  arena delta: " (- after3 before3) " bytes")
 
