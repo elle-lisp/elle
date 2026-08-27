@@ -86,6 +86,7 @@ impl AsyncBackend {
         let id = inner.mint_id();
         let buffer = inner.buffer_pool.alloc(buf_bytes);
 
+        let origin_heap = inner.origin_heap;
         let AsyncBackendInner {
             ref mut platform,
             ref mut hub,
@@ -101,7 +102,7 @@ impl AsyncBackend {
             hub,
             buffer_pool,
         })?;
-        pending.insert(id, make_pending(buffer, decided));
+        pending.insert(id, make_pending(buffer, decided), origin_heap);
         Ok(id)
     }
 

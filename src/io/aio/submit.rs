@@ -332,6 +332,7 @@ impl AsyncBackend {
             | PortOp::ReadAll
             | PortOp::Write { .. }
             | PortOp::Flush => {
+                let origin_heap = inner.origin_heap;
                 let AsyncBackendInner {
                     ref mut platform,
                     ref mut hub,
@@ -419,6 +420,7 @@ impl AsyncBackend {
                         filled: 0,
                         timeout: request.timeout,
                     },
+                    origin_heap,
                 );
                 Ok(id)
             }

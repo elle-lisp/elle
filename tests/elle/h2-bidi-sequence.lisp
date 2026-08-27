@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# Three hundred bidi streams in a row on one connection.
+# Many bidi streams in a row on one connection.
 #
 # A bidi stream is opened, written to many times, half-closed, and then
 # read — so the client holds a send side and a receive side of the same
@@ -7,12 +7,17 @@
 # session: stream ids, which are never reused, and the flow-control
 # window each in-flight byte holds until a WINDOW_UPDATE returns it.
 #
-# This case pushes the id axis: 300 streams on one connection, which is
-# 600 ids on one session, since the peer numbers its own. Each stream
-# asserts the count of framed messages that came back, not the byte
-# total — a window that stalls mid-stream and a stream that ends early
-# both produce a short read, and the count is what names it. The request
-# at the end is the check that 300 finished streams left the table empty.
+# This case pushes the id axis: STREAMS of them on one connection, which
+# is twice that many ids on one session, since the peer numbers its own.
+# Each stream asserts the count of framed messages that came back, not
+# the byte total — a window that stalls mid-stream and a stream that ends
+# early both produce a short read, and the count is what names it. The
+# request at the end is the check that the finished streams left the
+# table empty.
+#
+# The cost is per-stream and steep: 300 of them ran over eight seconds
+# here and left no room under a 30 s budget on a CI runner, while 150
+# still carries 300 ids and runs in under four.
 #
 # The framing is gRPC's: a compression byte and a 4-byte big-endian
 # length per message.
@@ -23,6 +28,9 @@
 
 # A budget no unblocked case here can reach.
 (def deadline 120)
+
+(def streams 150)
+(def msgs 5)
 
 (defn listen-ephemeral []
   "A listening socket on a kernel-chosen port, with that port."
@@ -138,25 +146,27 @@
 # ── Three hundred streams in a row ───────────────────────────────────
 
 (defn sequential-bidi []
-  "300 bidi streams on one connection, five messages each. Stream ids
-   are never reused, so this is 600 of them on one session."
+  "STREAMS bidi streams on one connection, MSGS messages each. Stream ids
+   are never reused, so this is twice that many on one session."
   (let [framed (grpc-frame (make-body 200))]
     (with-server echo-handler
                  (fn [session]
-                   (each i in (range 0 300)
+                   (each i in (range 0 streams)
                      (assert (= (length (bidi-messages session
                                         (concat "/test.Svc/Evolve" (string i))
-                                        framed 5)) 5)
+                                        framed msgs)) msgs)
                              (string "sequential bidi: stream " (string i)
-                                     " returned five messages")))
+                                     " returned every message")))
                    (settled session "sequential bidi")
                    (no-stream-leak session "sequential bidi")
                    true))))
 
 # ── Run ──────────────────────────────────────────────────────────────
 
-(println "three hundred bidi streams in a row...")
+(println "many bidi streams in a row...")
 
-(timed "300 sequential bidi streams" sequential-bidi)
+# The label reads the same constant the loop does, so it cannot report a
+# stream count that did not run.
+(timed (concat (string streams) " sequential bidi streams") sequential-bidi)
 
 (println "h2 bidi sequence: every stream returned every message it was sent")

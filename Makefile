@@ -40,6 +40,35 @@ define RUN_ORACLE
 		|| { echo "FAILED: oracle.lisp ($(1))"; exit 1; }
 endef
 
+# One corpus pass with ONE PROCESS PER FILE, under a wall-clock TIMEOUT. Each
+# file starts, runs as a whole program, and exits — the shape `elle test` never
+# takes, and the only one that covers program teardown and process-global modes.
+#
+# $(1) the pass's `grep -v` skip patterns   $(3) the pass name, for the failure
+# $(2) the elle flags for the pass          $(4) a short tag, for the joblog
+# No argument may contain a comma: `$(call)` splits on them.
+#
+# The joblog is what makes a failure readable. `parallel` reports only a COUNT
+# of failed jobs, and a file killed by `timeout` prints nothing at all — exit
+# 124, no output, no name. Without the log the gate says "a file failed" and the
+# reader has to bisect the corpus to learn which. Every non-zero row is named
+# here, with its exit status and signal, before the gate fails.
+define RUN_PER_FILE
+	@mkdir -p target
+	@rm -f target/smoke-$(4).joblog
+	@printf '%s\n' tests/elle/*.lisp \
+		| grep -v $(1) | grep -v $(ORACLE_FILE) \
+		| parallel -j $(JOBS) --tag --joblog target/smoke-$(4).joblog \
+			'timeout $(TIMEOUT) $(ELLE) $(2) {}' \
+		|| { \
+			echo "--- files that failed the $(3) ---"; \
+			awk 'NR > 1 && ($$7 != 0 || $$8 != 0) { \
+				printf "  %s  exit=%s signal=%s  (%ss)\n", $$NF, $$7, $$8, $$4 }' \
+				target/smoke-$(4).joblog; \
+			echo "FAILED: elle tests $(3) — see target/smoke-$(4).joblog"; \
+			exit 1; }
+endef
+
 all: elle docs  ## Build everything
 
 # ── Build ───────────────────────────────────────────────────────────
@@ -85,18 +114,32 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    docs + the elle test corpus (one process) + embedding
+#   make smoke    docs + the elle test corpus (runner + per-file passes) + embedding
 #   make test     smoke + rust fmt/clippy/rustdoc/unit/integration
 #   cargo test    ~60min full suite (unit + integration + property)
 #
-# The default-build elle scripts run through the agent-first runner
-# (`smoke-elle`, see docs/testing.md): ONE `elle test` invocation covers the vm
-# and jit policies and cross-tier divergence. The featured builds run the SAME
-# corpus through the runner (smoke-mlir/smoke-wasm — the binary's extra tier
-# joins the matrix and its divergence rows land in the session DB), plus one
-# whole-file pass in the process-global mode the runner cannot vary per file
-# (--mlir=eager / --wasm=full). smoke-vm/smoke-jit/smoke-noffi are direct-run
-# debug targets for isolating a single backend.
+# `make test` exists to predict the PR gate, so it runs what the gate runs. A
+# target the workflow requires and `make test` skips is a failure a branch can
+# only discover in CI.
+#
+# The default-build elle scripts get TWO corpus passes, because they are two
+# different tests of the same files:
+#
+#   smoke-elle  ONE `elle test` invocation, whole corpus. It drives each file's
+#               forms from inside one long-lived process under a per-form
+#               budget, covering the vm and jit policies and cross-tier
+#               divergence in that one run (see docs/testing.md).
+#   smoke-vm    One process PER FILE, `--jit=off --mlir=off`, under a wall-clock
+#   smoke-jit   TIMEOUT. Each file has to start, run as a whole program, and
+#               EXIT. Program teardown, process-global config, and anything
+#               wall-clock-sensitive are reachable only here.
+#
+# The featured builds run the SAME corpus through the runner
+# (smoke-mlir/smoke-wasm — the binary's extra tier joins the matrix and its
+# divergence rows land in the session DB), plus one whole-file pass in the
+# process-global mode the runner cannot vary per file (--mlir=eager /
+# --wasm=full). smoke-noffi is the same per-file shape for a build with no
+# features.
 
 # The agent-first runner: ONE process, the whole corpus, ONE SQLite session DB.
 # `elle test` (docs/testing.md, docs/test-runner.md) compiles + runs every file
@@ -206,11 +249,7 @@ smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + diverg
 
 smoke-vm: elle
 	@echo "=== elle tests (VM, no JIT) ==="
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_VM) | grep -v $(ORACLE_FILE) | \
-		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=off --mlir=off {}' \
-		|| { echo "FAILED: elle tests VM-only pass (no JIT)"; exit 1; }
+	$(call RUN_PER_FILE,$(ELLE_SKIP_VM),--jit=off --mlir=off,VM-only pass (no JIT),vm)
 	$(call RUN_ORACLE,--jit=off --mlir=off)
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)
@@ -219,20 +258,12 @@ elle-noffi:           ## Build elle with no features (for smoke-noffi)
 
 smoke-noffi: elle-noffi
 	@echo "=== elle tests (VM, no features) ==="
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | grep -v $(ORACLE_FILE) | \
-		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
-		|| { echo "FAILED: elle tests VM-only pass (no features)"; exit 1; }
+	$(call RUN_PER_FILE,$(ELLE_SKIP_VM) $(ELLE_SKIP_FFI),--jit=off,VM-only pass (no features),noffi)
 	$(call RUN_ORACLE,--jit=off)
 
 smoke-jit: elle
 	@echo "=== elle tests (eager JIT) ==="
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_JIT) | grep -v $(ORACLE_FILE) | \
-		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=eager {}' \
-		|| { echo "FAILED: elle tests JIT pass (eager)"; exit 1; }
+	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--jit=eager,JIT pass (eager),jit)
 	$(call RUN_ORACLE,--jit=eager)
 
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
@@ -300,7 +331,15 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
-smoke: smoke-elle doctest embedding  ## Run the elle test corpus + docs + embedding
+# The two corpus passes are not the same test, so the gate runs both.
+# `smoke-elle` drives every file's forms from inside one long-lived `elle test`
+# process, under a per-form budget. `smoke-vm`/`smoke-jit` run each file as its
+# own process that has to start, run as a whole program, and EXIT, under a
+# wall-clock `TIMEOUT`. Program teardown, process-global config and anything
+# wall-clock-sensitive are only reachable the second way, which is why the PR
+# workflow's "VM+JIT Tests" job gates on those two targets. A `make smoke` that
+# skipped them was weaker than the gate it exists to predict.
+smoke: smoke-elle smoke-vm smoke-jit doctest embedding  ## Run the elle test corpus (runner + per-file VM and JIT passes) + docs + embedding
 	@echo "=== all smoke tests passed ==="
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install

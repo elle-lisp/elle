@@ -268,6 +268,19 @@ impl FiberHeap {
         self.region_store.region_tags(id)
     }
 
+    /// How many times this heap has freed the region filed under `id` — the
+    /// counter that tells one incarnation of a recycled id from the next
+    /// (docs/impl/region/generations.md § "Region generations").
+    ///
+    /// Read it beside a region id to record where a value lives, and read it
+    /// again later to ask whether that region is still the one it was: a
+    /// changed generation says the region was freed, whatever the id now names.
+    /// The store's own counter, not the value's page header — a freed page that
+    /// has been re-claimed carries its new owner's stamp.
+    pub fn region_generation(&self, id: u32) -> u32 {
+        self.region_store.generation_raw(id)
+    }
+
     /// Check if a value is owned by any region in the RegionStore.
     pub fn value_in_region_store(&self, value: Value) -> bool {
         if !value.is_heap() {

@@ -1,14 +1,12 @@
 (elle/epoch 12)
-# Ten thousand messages on one bidi stream.
+# Many messages on one bidi stream, outgrowing the connection window.
 #
 # A bidi stream is opened, written to many times, half-closed, and then
 # read — so the client holds a send side and a receive side of the same
 # stream at once, and every message crosses two flow-control windows: the
-# stream's and the connection's. This case pushes the message count as
-# far as one stream goes: ten thousand round trips of stream state, and a
-# megabyte of payload, which is more than the connection window holds at
-# the start. The response only completes if WINDOW_UPDATEs keep returning
-# credit while it is in flight.
+# stream's and the connection's. The payload is sized to outgrow the
+# connection window several times over, so the response completes only if
+# WINDOW_UPDATEs keep returning credit while it is in flight.
 #
 # The assertion is the count of framed messages that came back, not the
 # byte total: a window that stalls mid-stream and a stream that ends
@@ -25,6 +23,24 @@
 
 # A budget no unblocked case here can reach.
 (def deadline 120)
+
+# The connection's flow-control window at the start — `DEFAULT-INITIAL-
+# WINDOW-SIZE` in lib/http2/frame.lisp, which std/http2 does not export. The
+# assertion below is what keeps this copy honest.
+(def initial-window 65535)
+
+(def msg-bytes 100)
+(def wire-bytes (+ 5 msg-bytes))
+(def n-msgs 2000)
+(def windows-crossed 3)
+
+# What the case rests on. A count that stops outgrowing the window measures
+# framing and nothing else, so a reduction that costs the claim fails here
+# rather than passing quietly. The cost is per-message and steep — this many
+# takes about two and a half seconds, ten thousand takes ten, and ten thousand
+# on a CI runner outran a 30 s budget.
+(assert (>= (* n-msgs wire-bytes) (* windows-crossed initial-window))
+        "the payload must outgrow the connection window several times over")
 
 (defn listen-ephemeral []
   "A listening socket on a kernel-chosen port, with that port."
@@ -139,24 +155,26 @@
 
 # ── One stream, ten thousand messages ────────────────────────────────
 
-(defn bidi-ten-thousand []
-  "10000 messages of 100 bytes on one stream — a megabyte of payload
-   through both windows, and ten thousand round trips of stream state."
+(defn bidi-many-messages []
+  "N-MSGS messages of MSG-BYTES on one stream — a payload through both
+   windows, and that many round trips of stream state."
   (with-server echo-handler
                (fn [session]
-                 (let [messages (bidi-messages session "/test.Svc/Bidi10k"
-                       (grpc-frame (make-body 100)) 10000)]
-                   (assert (= (length messages) 10000)
-                           (string "bidi 10k: 10000 messages, got "
+                 (let [messages (bidi-messages session "/test.Svc/Bidi"
+                       (grpc-frame (make-body msg-bytes)) n-msgs)]
+                   (assert (= (length messages) n-msgs)
+                           (string "bidi: " (string n-msgs) " messages, got "
                                    (string (length messages)))))
-                 (settled session "bidi 10k")
-                 (no-stream-leak session "bidi 10k")
+                 (settled session "bidi")
+                 (no-stream-leak session "bidi")
                  true)))
 
 # ── Run ──────────────────────────────────────────────────────────────
 
-(println "ten thousand messages on one bidi stream...")
+(println "many messages on one bidi stream...")
 
-(timed "10000 messages on one stream" bidi-ten-thousand)
+# The label reads the same constant the loop does, so it cannot report a
+# count that did not run.
+(timed (concat (string n-msgs) " messages on one stream") bidi-many-messages)
 
 (println "h2 bidi messages: the stream returned every message it was sent")

@@ -1,17 +1,22 @@
 (elle/epoch 12)
 # One h2 server under connection churn.
 #
-# Closing a session discards a connection whose stream ids and
-# flow-control window are half spent, and the server has to retire the
-# reader, the stream table and the socket that went with it. A single
-# connect/close pair exercises none of that. Twenty of them, each
-# carrying real traffic, do — and what a failure produces is a stall
-# rather than an error: a later connect answers with a hang.
+# Closing a session discards a connection part-way through its stream ids,
+# and the server has to retire the reader, the stream table and the socket
+# that went with it. A single connect/close pair exercises none of that.
+# Twenty of them, each carrying traffic, do — and what a failure produces
+# is a stall rather than an error: a later connect answers with a hang.
 #
-# So the case below connects, sends 50 requests, closes, and repeats,
-# all against one long-lived listener. Every request must be answered
-# 200, including the ones on the last connection — those are the check
-# that nineteen retirements left the server able to serve a twentieth.
+# So the case below connects, sends several requests, closes, and repeats,
+# all against one long-lived listener. Every request must be answered 200,
+# including the ones on the last connection — those are the check that
+# nineteen retirements left the server able to serve a twentieth.
+#
+# CYCLES is the axis the claim rests on, and REQUESTS only has to leave a
+# connection carrying more than one stream when it is discarded. The cost
+# is almost all per-request — 20x50 takes about nine seconds unloaded and
+# more than twenty under a parallel corpus run, against a 30 s budget,
+# while 20x10 takes two. Raise REQUESTS only for a reason that needs it.
 #
 # See lib/http2/session.lisp and docs/scheduler.md.
 
@@ -19,6 +24,9 @@
 
 # A budget no unblocked case here can reach.
 (def deadline 60)
+
+(def cycles 20)
+(def requests 10)
 
 (defn listen-ephemeral []
   "A listening socket on a kernel-chosen port, with that port."
@@ -48,7 +56,7 @@
 # ── Connection churn under load ──────────────────────────────────────
 
 (defn reconnect-cycles []
-  "Twenty times: connect, send 50 requests, close."
+  "CYCLES times: connect, send REQUESTS requests, close."
   (let* [[listener lport] (listen-ephemeral)
          handler (make-handler)
          sf (ev/spawn (fn [] (protect (http2:serve listener handler))))
@@ -57,9 +65,9 @@
       (begin
         (protect (port/close listener))
         (protect (ev/abort sf)))
-      (each cycle in (range 0 20)
+      (each cycle in (range 0 cycles)
         (let [session (http2:connect url)]
-          (each i in (range 0 50)
+          (each i in (range 0 requests)
             (let [resp (http2:send session "GET"
                                    (concat "/fixed?c=" (string cycle) "&i="
                                    (string i)))]
@@ -73,6 +81,9 @@
 
 (println "one server under connection churn...")
 
-(timed "20 connect/close cycles of 50 requests" reconnect-cycles)
+# The label is built from the same constants the loops read, so it cannot
+# report a shape that did not run.
+(timed (concat (string cycles) " connect/close cycles of " (string requests)
+               " requests") reconnect-cycles)
 
 (println "h2 load churn: every connection was served to its last request")

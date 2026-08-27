@@ -95,12 +95,24 @@ Two invariants govern delivery:
   raises `fiber/resume: cannot resume completed fiber` out of the event
   loop, which reaches the program as a runtime error with no connection
   to the fiber that died.
+
+  A `fiber/cancel` ends the same way and releases more. It gives the fiber
+  no chance to recover, so the regions holding the operation's operands —
+  the port, the buffer the read reserved — go with it. The backend then
+  retires the entry unread and answers with an error built from nothing it
+  held (`src/io/AGENTS.md` § "An operation whose operands are gone has no
+  reader either"). The scheduler drops that error exactly as it would a
+  result. An abort retains those regions instead, because the unwinding it
+  starts can suspend and be resumed (`docs/signals/primitives.md`
+  § "Unwinding that suspends").
 - **A finished fiber holds no operation.** Completing a fiber cancels the
   submission it still waits on. Otherwise that submission keeps a worker
   and a descriptor for a fiber that can never read the result, and the
   loop keeps waiting on a completion nobody wants.
 
-`tests/elle/io-late-completion.lisp` pins both.
+`tests/elle/io-late-completion.lisp` pins both over a portless timer, and
+`tests/elle/io-stale-operation-ends.lisp` over a port operation whose
+operands are gone — the case where the entry holds values to read.
 
 ## Completion records
 

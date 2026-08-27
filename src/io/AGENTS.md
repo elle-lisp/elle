@@ -236,6 +236,95 @@ A cancel for an id that is no longer in flight marks nothing. The operation
 completed and its result already reached the fiber that asked; a mark left
 behind would meet a later submission.
 
+### An operation whose operands are gone has no reader either
+
+A cancel is something a caller must remember to issue, and one caller cannot: a
+fiber that terminates by a path the scheduler did not route. `fiber/cancel`
+leaves such a fiber `:error` with its operation still submitted, and the regions
+holding that operation's operands are released as it unwinds. Nothing marks the
+id. The scheduler finds out when it next looks at that fiber — which is after
+the completion has been assembled, because assembling happens inside `io/wait`.
+
+So the reader-gone question is not asked of the canceller alone. Every entry
+records, at the moment it is filed, **where each of its operands lives**: the
+region, and the incarnation of that region that was current then. A completion
+compares those against the store's generation counter, and an operand whose
+incarnation is gone retires the entry unread, exactly as a cancelled one is.
+
+The generation is what makes the answer exact rather than a guess. Region ids
+are recycled, so an id alone cannot distinguish this incarnation from the next,
+and reading the value's own page header cannot either — a freed page that has
+been re-claimed carries its new owner's stamp. The store's counter only ever
+moves on a free, so a match means the very region the operand was born in is
+still there.
+
+Unlike a cancelled operation, this one **answers**. A cancel is issued by a
+caller that has already dropped its record of the submission, so silence leaves
+nothing behind. Nobody dropped this id. The scheduler still pairs it with the
+fiber that asked, and retires that pairing only on a completion, so silence here
+would leave the event loop waiting on an operation that already finished. The
+answer is an error built from nothing the entry held; the scheduler retires the
+pairing and drops the error, because the fiber it would have gone to is what
+went away.
+
+`PendingOp::operands` is the list this rests on: the port an operation names,
+the buffer or result struct the caller reserved, the payload a write hands
+over, the process handle, the watcher, the receiver. None of them are the
+operation's own allocations, and assembling a result dereferences them.
+
+A payload a write already copied at submit is listed too, though no completion
+reads it back. An entry holding a dead value is itself the evidence that the
+fiber which asked is gone, and that is the fact the check wants — a result
+assembled for a fiber that ended reaches nobody either way.
+
+A variant that gains a value field and does not name it in `operands` loses
+this protection silently, which is why the match there is exhaustive over both
+`PendingOp` and `PortOp`.
+
+Pinned by `a_completion_is_withheld_when_its_operands_region_is_gone`
+(`src/io/aio/tests/park.rs`), which builds the state directly and asserts on the
+answer. No corpus file pins it end to end: the answer goes to a fiber that is
+gone, so nothing in the program can observe it.
+`tests/elle/io-stale-operation-ends.lisp` reaches the same state and asserts on
+what a program CAN see, which is the operation ending.
+
+### Ending an operation whose operands are gone
+
+Withholding the result is half the answer. The completion still has to arrive,
+and an operation that parks arrives only when something outside this process
+acts. A read waits for a peer that may never write, an accept for a connection
+nobody makes. The fiber that would have received the result is gone, so nothing
+in the program is left to make that event happen.
+
+The backend therefore ends these operations itself.
+`PendingTable::stale_to_stop` reports the in-flight ids whose operands' regions
+have gone, and every drain asks each of them to stop before it waits. The ask
+goes through the stop pipe on the pool and through `IORING_OP_ASYNC_CANCEL` on
+the ring, the two halves `io/cancel` also uses. The operation completes with
+`-ECANCELED`, `take` reports it `Stale`, and the entry is retired and answered
+as above.
+
+The ask is deliberately not a cancel. A cancel marks the id, and a marked id
+falls silent; this one must answer, because the scheduler still holds the
+pairing and lets go only on a completion. The table records each id it has
+reported, so each worker is asked once — a drain runs on every loop tick, and
+the completion takes a moment to come back.
+
+Operations that end on their own are asked too, and the ask reaches nothing. A
+`Write` runs to the end of its payload and `Resolve` runs to the resolver's own
+end, so neither carries a stop pipe; their completions arrive as they always
+would.
+
+The runtime does not lean on the platform to deliver these. `poll(2)` on Linux
+holds a reference to the file it waits on, so a socket can outlive the close
+its fiber's release performed, and a peer writing afterwards still reaches the
+parked worker. That is one kernel's behavior rather than a promise, and an
+operation whose reader is gone must end whether or not any peer ever acts.
+
+Pinned by `an_operation_that_parks_ends_when_its_operands_region_is_gone`
+(`src/io/aio/tests/park.rs`), which gives the operation no peer at all, and end
+to end by `tests/elle/io-stale-operation-ends.lisp`.
+
 ### The stop pipe
 
 An operation that can wait indefinitely carries a **stop pipe**, and that
@@ -297,7 +386,7 @@ waiting for.
 `port/close` therefore hands the port's `OwnedFd` to the backend rather
 than dropping it whenever `pending` still holds an operation on that key.
 The port reports closed immediately, so Elle's semantics do not change;
-the descriptor itself is closed by `retire_fd_if_drained` once the last
+the descriptor itself is closed by `close_drained_fds` once the last
 operation naming it has completed. `fd_states` for the key is dropped at
 the same moment, so per-fd buffering never spans two ports either.
 
