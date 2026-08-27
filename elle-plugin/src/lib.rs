@@ -319,9 +319,15 @@ impl Api {
         }
     }
 
+    /// Raise an I/O request for the scheduler to service.
+    ///
+    /// `SIG_IO` alone. The request does suspend the calling fiber, but that
+    /// follows from raising a signal at all, not from `SIG_YIELD` — and
+    /// `SIG_YIELD` is the keyword a generator's fiber mask names, so a request
+    /// carrying it would be swallowed by every such mask on its way out.
     pub fn yield_io(&self, request: ElleValue) -> ElleResult {
         ElleResult {
-            signal: SIG_YIELD | SIG_IO,
+            signal: SIG_IO,
             value: request,
         }
     }

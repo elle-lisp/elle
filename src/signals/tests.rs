@@ -265,14 +265,15 @@ fn test_squelch_all_bits_leaves_error() {
 // primitive that uses it.
 
 #[test]
-fn io_yields_errors_names_all_three_bits() {
+fn io_yields_errors_names_io_and_error_only() {
     let sig = Signal::io_yields_errors();
     assert!(sig.bits.intersects(SIG_IO), "must name :io");
-    assert!(
-        sig.bits.intersects(SIG_YIELD),
-        "an I/O request suspends its fiber, so it must name :yield"
-    );
     assert!(sig.bits.intersects(SIG_ERROR), "must name :error");
+    assert!(
+        !sig.bits.intersects(SIG_YIELD),
+        "the request suspends its fiber, but suspension follows from raising \
+         any signal — :yield is the keyword a generator's mask names"
+    );
     assert_eq!(sig.propagates, 0);
 }
 
@@ -301,8 +302,8 @@ fn subprocess_names_the_dispatch_bit_and_the_capability_bit() {
         sig.bits.intersects(SIG_EXEC),
         ":exec is what a fiber mask denies to forbid spawning"
     );
-    assert!(sig.bits.intersects(SIG_YIELD));
     assert!(sig.bits.intersects(SIG_ERROR));
+    assert!(!sig.bits.intersects(SIG_YIELD), "and it claims no :yield");
 }
 
 // ── squelched_bits: what a squelch/attune boundary enforces ─────────
@@ -390,8 +391,8 @@ fn fs_io_yields_errors_is_deniable_from_either_side() {
     let s = Signal::fs_io_yields_errors();
     assert!(s.bits.intersects(SIG_FS));
     assert!(s.may_io());
-    assert!(s.may_yield());
     assert!(s.may_error());
+    assert!(!s.may_yield(), "a request does not claim :yield");
 }
 
 /// The three async constructors share one base, so a change to what a
@@ -401,6 +402,36 @@ fn capability_gated_io_constructors_extend_the_same_base() {
     let base = Signal::io_yields_errors().bits;
     assert_eq!(Signal::subprocess().bits, base.union(SIG_EXEC));
     assert_eq!(Signal::fs_io_yields_errors().bits, base.union(SIG_FS));
+}
+
+/// A scheduler round trip does not claim `:yield`.
+///
+/// `:yield` is the cooperative suspension `(yield v)` raises and a `|:yield|`
+/// mask catches. An I/O request suspends too, but suspension follows from
+/// raising any signal (`signals::dispatch::is_suspending`), not from that bit —
+/// so carrying it here would make one keyword mean two things, and a mask
+/// naming it could not say which it wanted.
+///
+/// The counter-factual is a generator: `port/lines` masks `|:yield|` around a
+/// body that calls `port/read-line`. With `:yield` on the request, that mask
+/// swallows the read and it never reaches the scheduler
+/// (tests/elle/io-request-carries-no-yield.lisp).
+#[test]
+fn a_scheduler_round_trip_does_not_carry_yield() {
+    for sig in [
+        Signal::io_yields_errors(),
+        Signal::fs_io_yields_errors(),
+        Signal::subprocess(),
+    ] {
+        assert!(
+            !sig.bits.intersects(SIG_YIELD),
+            "an async signal must not carry :yield — got {}",
+            sig.bits
+        );
+        assert!(sig.bits.intersects(SIG_IO), "but it must carry :io");
+    }
+    // `(yield v)` still does, and is the only constructor that should.
+    assert!(Signal::yields().bits.intersects(SIG_YIELD));
 }
 
 /// Every signal bit is a capability bit: a fiber mask can withhold `:fs`

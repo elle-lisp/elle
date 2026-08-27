@@ -336,7 +336,7 @@ pub(super) fn prim_subprocess_exec(
             stderr: stderr_disp,
         }),
     );
-    (SIG_YIELD | SIG_IO | SIG_EXEC, request)
+    (SIG_IO | SIG_EXEC, request)
 }
 
 /// Wait for a subprocess to exit, returning an IoRequest that the scheduler executes.
@@ -360,7 +360,7 @@ pub(super) fn prim_subprocess_wait(
         );
     }
     let request = IoRequest::new(ctx, IoOp::ProcessWait, handle_val);
-    (SIG_YIELD | SIG_IO | SIG_EXEC, request)
+    (SIG_IO | SIG_EXEC, request)
 }
 
 /// Send a signal to a subprocess.

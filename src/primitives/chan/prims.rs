@@ -538,7 +538,7 @@ pub(super) fn prim_chan_wait_ready(
         };
         let cell = ChanSelectGuardCell::new(guard);
         let req = IoRequest::with_timeout(ctx, IoOp::ChanSelectPark(cell), Value::NIL, timeout);
-        (SIG_YIELD | SIG_IO, req)
+        (SIG_IO, req)
     }) {
         Ok(v) => v,
         Err(e) => e,

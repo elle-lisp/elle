@@ -58,7 +58,7 @@ pub(super) fn prim_tcp_accept(
         ),
     );
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             PortOp::Accept {
@@ -125,7 +125,7 @@ pub(super) fn prim_tcp_connect_ip(
         Port::new_unopened(PortKind::TcpStream, Direction::ReadWrite, encoding, peer),
     );
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             IoOp::Connect {
@@ -173,7 +173,7 @@ pub(super) fn prim_tcp_shutdown(
         Err(e) => return e,
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::new(ctx, PortOp::Shutdown { how }.into(), port_val),
     )
 }

@@ -1,24 +1,33 @@
 use crate::common::{eval_source, eval_source_unscheduled};
 
+// An I/O primitive raises `:io` and nothing else names the scheduler round
+// trip, so both tests below read the reported keyword rather than the fact of
+// failure. The counter-factual: assert only `is_err()`, and the two pass
+// unchanged when the request arrives at the root as an unreadable bitmask.
+
 #[test]
 fn test_stream_write_outside_scheduler_errors() {
-    // port/write yields SIG_IO, which can't be caught by protect in Elle.
-    // Run WITHOUT a scheduler (eval_source now wraps in ev/run) so the yield
-    // has nothing to service it and errors at top level.
+    // Run WITHOUT a scheduler (eval_source wraps in ev/run) so the request has
+    // nothing to service it and reaches the root.
     eval_source_unscheduled("(port/write (port/stdout) \"hello\")", |result| {
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains(":io"),
+            "an unserviced port/write must report :io, got: {}",
+            err
+        );
     });
 }
 
 #[test]
 fn test_stream_read_line_outside_scheduler_errors() {
-    // port/read-line yields SIG_IO, which should error at top level (no scheduler).
     eval_source_unscheduled("(port/read-line (port/open \"/dev/null\" :read))", |result| {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.contains("SIG_IO") || err.contains("outside scheduler") || err.contains("yield"),
-            "expected SIG_IO error, got: {}",
+            err.contains(":io"),
+            "an unserviced port/read-line must report :io, got: {}",
             err
         );
     });

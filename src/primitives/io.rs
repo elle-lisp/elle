@@ -7,7 +7,7 @@ use crate::io::AnyBackend;
 use crate::io::SubmissionId;
 use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -242,10 +242,7 @@ fn prim_ev_sleep(
         );
     };
 
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::portless(ctx, IoOp::Sleep { duration }),
-    )
+    (SIG_IO, IoRequest::portless(ctx, IoOp::Sleep { duration }))
 }
 
 /// Poll a raw fd for readiness — yields to the scheduler.
@@ -326,11 +323,8 @@ fn prim_ev_poll_fd(
     };
 
     match timeout {
-        Some(t) => (
-            SIG_YIELD | SIG_IO,
-            IoRequest::poll_fd_with_timeout(ctx, fd, events, t),
-        ),
-        None => (SIG_YIELD | SIG_IO, IoRequest::poll_fd(ctx, fd, events)),
+        Some(t) => (SIG_IO, IoRequest::poll_fd_with_timeout(ctx, fd, events, t)),
+        None => (SIG_IO, IoRequest::poll_fd(ctx, fd, events)),
     }
 }
 

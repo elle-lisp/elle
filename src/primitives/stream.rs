@@ -1,7 +1,7 @@
-//! Stream primitives — yield SIG_YIELD | SIG_IO with IoRequest descriptors.
+//! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! These primitives do not perform I/O themselves. They build an
-//! IoRequest and return (SIG_YIELD | SIG_IO, request), which suspends
+//! IoRequest and return (SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
 
 use crate::io::request::{IoRequest, PortOp};
@@ -10,7 +10,7 @@ use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -47,7 +47,7 @@ fn prim_stream_read_line(
     };
     let buffer = ctx.bytes(vec![0u8; READ_LINE_BUF_SIZE]);
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::ReadLine { buffer }.into(), port, timeout),
     )
 }
@@ -87,7 +87,7 @@ fn prim_stream_read(
     };
     let buffer = ctx.bytes(vec![0u8; count]);
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::Read { count, buffer }.into(), port, timeout),
     )
 }
@@ -140,7 +140,7 @@ fn prim_stream_read_exact(
     };
     let buffer = ctx.bytes(vec![0u8; buf_len]);
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             PortOp::ReadExact { count, buffer }.into(),
@@ -164,7 +164,7 @@ fn prim_stream_read_all(
         Err(e) => return e,
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::ReadAll.into(), port, timeout),
     )
 }
@@ -192,7 +192,7 @@ fn prim_stream_write(
         Err(e) => return e,
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::Write { data }.into(), port, timeout),
     )
 }
@@ -211,7 +211,7 @@ fn prim_stream_flush(
         Err(e) => return e,
     };
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(ctx, PortOp::Flush.into(), port, timeout),
     )
 }

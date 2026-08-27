@@ -400,6 +400,30 @@ fn an_unjoined_fibers_error_names_the_form_that_raised_it() {
     );
 }
 
+// ============================================================================
+// A signal that reaches the root — which signal the report names
+// ============================================================================
+
+#[test]
+fn an_unhandled_signal_at_the_root_is_named_by_its_keyword() {
+    // A signal no fiber masks travels to the root of the program, where the
+    // report is all the author gets. The trap: the root holds `SignalBits`,
+    // whose `Display` is hex — and a user signal's bit is above 32, so the
+    // report reads `0x100000000`. The counter-factual: assert only `is_err()`,
+    // and that hex passes for a signal the author named `:root-unhandled`.
+    crate::common::eval_source_unscheduled(
+        "(signal :root-unhandled) (emit :root-unhandled 1)",
+        |result| {
+            let err = result.expect_err("nothing masks the signal, so it reaches the root");
+            assert!(
+                err.contains(":root-unhandled"),
+                "the root must name the unhandled signal, got: {}",
+                err
+            );
+        },
+    );
+}
+
 #[test]
 fn test_closure_has_location_map() {
 

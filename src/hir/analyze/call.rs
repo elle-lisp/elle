@@ -59,11 +59,18 @@ impl<'a> Analyzer<'a> {
                     HirKind::Keyword(kw) => {
                         let reg = crate::signals::registry::global_registry().lock().unwrap();
                         if let Some(bit_pos) = reg.lookup(kw) {
-                            // User signals are emitted via the yield mechanism.
-                            // Include SIG_YIELD so may_suspend() returns true,
-                            // enabling correct signal inference for the enclosing lambda.
-                            // Also include the specific user signal bit for accurate
-                            // squelch checking at the static type level.
+                            // The user bit alone carries the squelch analysis.
+                            // SIG_YIELD is added for the LIR lowering: a call
+                            // gets a resumable continuation only when its signal
+                            // meets `SIG_YIELD | SIG_DEBUG | SIG_IO | SIG_WAIT`
+                            // (src/lir/lower/control/call.rs), and a user bit is
+                            // in none of them — so without this, the code after
+                            // `(emit :my-signal v)` would be lost on resume.
+                            //
+                            // Compile-time only: the runtime bits come from
+                            // `prim_emit` resolving the keyword set the program
+                            // actually passed, so this never reaches `fiber/bits`
+                            // and never widens what a mask catches.
                             Signal {
                                 bits: crate::value::fiber::SignalBits::from_bit(bit_pos)
                                     .union(crate::signals::SIG_YIELD),

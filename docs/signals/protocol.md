@@ -78,8 +78,7 @@ infrastructure bit on both sides; see its doc comment.
 Examples of valid composed signals:
 
 - `|:yield|` — suspend, return a value to the caller
-- `|:yield :io|` — suspend AND request I/O; the scheduler sees both bits and
-  handles accordingly
+- `|:io|` — request I/O; the scheduler catches the bit and services the request
 - `|:io :error|` — I/O error; a scheduler might log it and halt
 - `|:io :error :halt|` — I/O error, halt the VM; the scheduler interprets all
   three bits
@@ -124,6 +123,26 @@ This is O(1) dispatch — a single AND operation. No handler chain traversal.
 When a handler catches a signal, it can walk the fiber chain to inspect the
 propagation path. Every fiber in the chain is suspended and can be resumed
 independently for non-unwinding recovery.
+
+### Reaching the root
+
+The root of the program is where propagation stops. `:error` and `:halt`
+have answers there: the error prints with the location of the form that
+raised it, and the halt ends the program with its value. Every other
+signal reaches the root with no handler left to run, so the program stops
+and reports which signal went unhandled:
+
+```text
+Unhandled signal {:io} outside fiber context
+```
+
+The report names the emitted bits through the signal registry. A raw mask
+names no signal: the reader would have to know which bit position each
+primitive raises. `:io` at the root means the program ran no scheduler. A
+user-defined keyword at the root means no fiber masked it.
+
+One message answers for every bit. Nothing caught the signal, and that is
+the whole condition, so `:yield` gets no report of its own.
 
 ### The Fiber Structure
 
@@ -335,29 +354,37 @@ Stream primitives (`port/read-line`, `port/read`, `port/read-all`,
 perform I/O themselves. Instead, they:
 
 1. Build an `IoRequest` (typed descriptor of the I/O operation)
-2. Return `(|:yield :io|, request)` to suspend the fiber and signal I/O
-3. Let the scheduler catch the fiber (because `:yield` is in its mask), see
-   the `:io` bit, and dispatch the `IoRequest` payload to a backend
+2. Return `(|:io|, request)` to raise the request
+3. Let the scheduler catch the fiber on the `:io` bit and dispatch the
+   `IoRequest` payload to a backend
 
 The backend (`AsyncBackend`) performs the actual I/O and returns
 `(|:ok|, result)` or `(|:error|, error)`. The scheduler resumes the fiber
 with the result.
 
-### Signal Composition in I/O
+### `:io` does not imply `:yield`
 
-The `:io` bit is just a bit — it has no special relationship with `:yield`.
-A fiber can signal:
+An I/O request raises `|:io|` and nothing else. It does suspend the calling
+fiber — but so does every signal. Suspension follows from raising a signal at
+all, not from any particular bit: `signals::dispatch::is_suspending` parks on
+anything that is neither empty, nor an error, nor a halt, and the VM and the
+WASM tier both ask it.
 
-- `|:yield|` — suspend without I/O
-- `|:yield :io|` — suspend and request I/O (the common case)
-- `|:io :error|` — I/O error; a scheduler might log it and halt
-- `|:yield :io :audit|` — suspend, request I/O, and emit an audit signal
+So `:yield` means one thing, the cooperative suspension `(yield v)` raises and
+a `|:yield|` mask catches. Bundling it onto I/O requests made it mean two, and
+a mask naming it could no longer say which one it wanted:
 
-The scheduler's job is to check the bits it cares about. A scheduler that
-catches `:yield` will see fibers signaling `|:yield :io|` and can inspect the
-`:io` bit to decide how to handle the I/O request. A different scheduler might
-catch `|:yield :io|` directly. The semantics of combinations are defined by
-the scheduler, not by the language.
+- `|:io|` — an I/O request
+- `|:yield|` — a generator yielding a value
+- `|:io :error|` — an I/O error; a scheduler might log it and halt
+- `|:io :audit|` — an I/O request that also emits an audit signal
+
+This is what lets a generator masked `|:yield|` do I/O in its body:
+`port/lines` (`src/stdlib.lisp`), `tls/lines` (`lib/tls.lisp`), and the SSE
+streams in `lib/http.lisp` all have that shape. Their `(yield line)` is caught
+by the consumer; their `port/read-line` raises `|:io|`, which the mask does not
+name, so it travels out to the scheduler. Pinned by
+`tests/elle/io-request-carries-no-yield.lisp`.
 
 
 ## Signal Registry

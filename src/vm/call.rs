@@ -360,7 +360,7 @@ impl VM {
             self.fiber.signal.take();
             Err(format!(
                 "Unexpected signal from macro transformer: {}",
-                bits
+                crate::signals::registry::format_bits(bits)
             ))
         }
     }

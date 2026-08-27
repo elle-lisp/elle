@@ -215,7 +215,7 @@ pub(super) fn prim_port_seek(
     };
 
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::new(ctx, IoOp::Seek { offset, whence }, args[0]),
     )
 }
@@ -244,5 +244,5 @@ pub(super) fn prim_port_tell(
         );
     }
 
-    (SIG_YIELD | SIG_IO, IoRequest::new(ctx, IoOp::Tell, args[0]))
+    (SIG_IO, IoRequest::new(ctx, IoOp::Tell, args[0]))
 }

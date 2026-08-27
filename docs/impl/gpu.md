@@ -92,9 +92,9 @@ a `VkComputePipeline` with one storage buffer per binding.
 2. Builds a Send closure that allocates GPU buffers, uploads input
    data, records the dispatch, submits to the queue, waits on a
    fence FD.
-3. Returns `(SIG_YIELD | SIG_IO, IoRequest::task(closure))` — the
-   fiber suspends, the thread pool runs the closure, the fiber
-   resumes with the result bytes.
+3. Returns `(SIG_IO, IoRequest::task(closure))` — the fiber suspends,
+   the thread pool runs the closure, the fiber resumes with the result
+   bytes.
 
 Numeric data is extracted from Elle arrays into `Vec<f32>` (or
 `Vec<i64>`, etc., per `dtype`) **before** the closure is built — the

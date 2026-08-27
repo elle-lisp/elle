@@ -26,7 +26,7 @@ fn mode_to_flags(mode: &str) -> Option<(i32, Direction)> {
 /// Helper: open a file with the given encoding.
 ///
 /// Shared implementation for `port/open` and `port/open-bytes`.
-/// Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Open`.
+/// Yields `SIG_IO` with an `IoRequest` containing `IoOp::Open`.
 /// Argument validation (path type, mode keyword, timeout) happens here before yielding.
 fn open_file(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -94,7 +94,7 @@ fn open_file(
         Port::new_unopened(PortKind::File, direction, encoding, path.clone()),
     );
     (
-        SIG_YIELD | SIG_IO,
+        SIG_IO,
         IoRequest::with_timeout(
             ctx,
             IoOp::Open {
@@ -166,10 +166,7 @@ pub(super) fn prim_port_close(
     // it can cancel pending operations / shut down the stdin worker
     // before the fd is dropped (or, for stdin, the port is marked
     // closed and any in-flight read is woken).
-    (
-        SIG_YIELD | SIG_IO,
-        IoRequest::new(ctx, IoOp::Close, args[0]),
-    )
+    (SIG_IO, IoRequest::new(ctx, IoOp::Close, args[0]))
 }
 
 /// (port/stdin) → port

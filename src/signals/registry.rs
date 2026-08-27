@@ -1,13 +1,15 @@
+//! Signal registry for mapping signal keywords to bit positions.
+//!
+//! The registry maintains a global mapping of signal keywords (`:error`,
+//! `:yield`, etc.) to their corresponding bit positions. Built-in signals
+//! occupy bits 0-17, bits 18-31 are runtime-reserved, and user-defined signals
+//! are allocated from bits 32-63.
+
 use super::{
     SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO,
     SIG_OS_SIGNAL, SIG_WAIT, SIG_YIELD,
 };
-/// Signal registry for mapping signal keywords to bit positions.
-///
-/// The registry maintains a global mapping of signal keywords (`:error`, `:yield`, etc.)
-/// to their corresponding bit positions. Built-in signals occupy bits 0-17,
-/// bits 18-31 are runtime-reserved, and user-defined signals are allocated
-/// from bits 32-63.
+use crate::value::fiber::SignalBits;
 use std::sync::{Mutex, OnceLock};
 
 /// An entry in the signal registry mapping a keyword name to its bit position.
@@ -149,19 +151,15 @@ impl SignalRegistry {
     /// Convert an signal keyword to its signal bits representation.
     ///
     /// Returns `Some(SignalBits)` if the signal is registered, `None` otherwise.
-    pub fn to_signal_bits(&self, name: &str) -> Option<crate::value::fiber::SignalBits> {
-        self.lookup(name)
-            .map(crate::value::fiber::SignalBits::from_bit)
+    pub fn to_signal_bits(&self, name: &str) -> Option<SignalBits> {
+        self.lookup(name).map(SignalBits::from_bit)
     }
 
     /// Convert signal bits to a Vec of keyword Values.
     ///
     /// Used by `fiber/caps` and capability denial payloads to produce
     /// keyword sets from signal bitmasks.
-    pub fn bits_to_keywords(
-        &self,
-        bits: crate::value::fiber::SignalBits,
-    ) -> Vec<crate::value::Value> {
+    pub fn bits_to_keywords(&self, bits: SignalBits) -> Vec<crate::value::Value> {
         self.entries
             .iter()
             .filter(|e| bits.has_bit(e.bit_position))
@@ -171,13 +169,22 @@ impl SignalRegistry {
 
     /// Format signal bits as a human-readable string.
     ///
-    /// Returns a string like `"{:error, :yield}"` for multiple bits, or `"{}"` for empty.
-    pub fn format_signal_bits(&self, bits: crate::value::fiber::SignalBits) -> String {
+    /// Returns a string like `"{:error, :yield}"` for multiple bits, or `"{}"`
+    /// for empty. A bit the registry does not carry — the VM-internal ones,
+    /// which no program declares — is reported as a raw mask alongside the
+    /// names, because a signal that is not empty must not read as `{}`.
+    pub fn format_signal_bits(&self, bits: SignalBits) -> String {
         let mut names = Vec::new();
+        let mut named = SignalBits::EMPTY;
         for entry in &self.entries {
             if bits.has_bit(entry.bit_position) {
                 names.push(format!(":{}", entry.name));
+                named = named.union(SignalBits::from_bit(entry.bit_position));
             }
+        }
+        let unnamed = bits.subtract(named);
+        if !unnamed.is_empty() {
+            names.push(unnamed.to_string());
         }
 
         if names.is_empty() {
@@ -186,6 +193,18 @@ impl SignalRegistry {
             format!("{{{}}}", names.join(", "))
         }
     }
+}
+
+/// Format signal bits through the global registry — the one way an error
+/// message names a signal.
+///
+/// Every diagnostic that mentions signal bits reaches for the same two steps:
+/// take the process-global registry, then format. Sharing them keeps one
+/// rendering of a signal across the interpreter, the JIT, and signal
+/// inference, and takes the registry the poison-tolerant way
+/// ([`with_registry`]).
+pub fn format_bits(bits: SignalBits) -> String {
+    with_registry(|registry| registry.format_signal_bits(bits))
 }
 
 impl Default for SignalRegistry {

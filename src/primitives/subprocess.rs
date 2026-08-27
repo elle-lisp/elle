@@ -2,7 +2,7 @@
 use crate::io::request::{IoOp, IoRequest, ProcessHandle, SpawnRequest, StdioDisposition};
 use crate::primitives::def::RegionEffect;
 use crate::signals::{Signal, SIG_EXEC};
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::{sorted_struct_get, Value};

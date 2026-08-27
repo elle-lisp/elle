@@ -33,7 +33,7 @@ use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::error::LocationMap;
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH, SIG_YIELD};
+use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 impl VM {
@@ -266,11 +266,18 @@ impl VM {
                 break Err(self.format_error_with_location(err_value));
             } else if bits == SIG_SWITCH {
                 bits = self.handle_sig_switch();
-            } else if bits.intersects(SIG_YIELD) {
-                break Err("Unexpected yield outside fiber context".to_string());
             } else {
+                // Everything that is not an error, a halt, or the switch
+                // trampoline arrives here with no handler left to run, and one
+                // report answers for all of it: `:yield` is not privileged
+                // among the bits that reach the root (docs/signals/protocol.md
+                // § "Reaching the root"). The keywords are what the author of
+                // the emitting call can act on; the mask alone is not.
                 self.fiber.signal.take();
-                break Err(format!("Unexpected signal outside fiber context: {}", bits));
+                break Err(format!(
+                    "Unhandled signal {} outside fiber context",
+                    crate::signals::registry::format_bits(bits)
+                ));
             }
         };
         // The root activation's clean break: release the base slot's owner node

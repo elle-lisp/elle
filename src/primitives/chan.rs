@@ -27,7 +27,7 @@ use crossbeam_channel::{self, TryRecvError, TrySendError};
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 
