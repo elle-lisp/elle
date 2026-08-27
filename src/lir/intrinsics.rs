@@ -141,6 +141,14 @@ impl PrimitiveClassification {
             // structurally: a fiber-body producer and its resume consumer.
             fiber_new: symbols.get("fiber/new"),
             fiber_resume: symbols.get("fiber/resume"),
+            // The emit primitive under each name it answers to: a dynamic `emit`
+            // compiles to a call on it, and that call parks and yields exactly as
+            // the `Emit` terminator does (`CallClassification::emit_natives`).
+            // Ordinary code reaches it through the alias, so both belong here.
+            emit_natives: ["fiber/emit", "emit"]
+                .iter()
+                .filter_map(|name| symbols.get(name))
+                .collect(),
             ..Default::default()
         };
         PrimitiveClassification {

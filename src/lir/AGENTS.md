@@ -333,6 +333,13 @@ register is consumed by the `Emit`. That gives a fiber body one reference of eve
 value it yields, which is what a discarded fiber's discharge releases
 (docs/impl/region/owner.md § "Park/unpark symmetry").
 
+A **dynamic** emit has no `Emit` terminator to wrap — its first argument is not a
+literal keyword set, so it lowers as an ordinary call — and `lower_call` carries the
+same obligation there. In non-tail position it takes the mint at the payload
+argument and releases it after the call, which is where the resume lands; in tail
+position the borrowed-argument retain already is that reference (docs/impl/region/
+owner.md § "What yields is the emit OPERATION, not the `Emit` node").
+
 The emitter preserves stack state across the emit boundary via
 `yield_stack_state`. This ensures intermediate values computed before emit
 (e.g., the `1` in `(+ 1 (emit :yield 2) 3)`) survive into the resume block.

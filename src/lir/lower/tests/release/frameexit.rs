@@ -951,3 +951,21 @@ fn an_owned_tail_argument_is_not_named_on_the_call() {
          releasing it at a signal exit drops the reference the move handed over",
     );
 }
+
+#[test]
+fn a_tail_dynamic_emit_names_its_payload_as_a_borrowed_argument() {
+    // A dynamic `emit` in tail position is an ordinary native tail call, and its
+    // borrowed payload takes the ordinary borrowed-argument retain. That retain is
+    // the body reference the park owes (docs/impl/region/owner.md § "What yields is
+    // the emit OPERATION, not the `Emit` node"), so no second mint is owed here —
+    // and the suspending exit's payload exemption has a slot to leave standing.
+    let module =
+        compile_to_lir("(let [s :yield] (fn () (let [x (string \"a\")] (fn () (emit s x)))))");
+    let slots = tail_call_borrowed_slots(&module);
+    assert!(
+        slots.iter().any(|s| !s.is_empty()),
+        "a tail dynamic emit must name its borrowed payload on the call \
+         (slots={slots:?}) — the suspending exit can spare only what the \
+         instruction names",
+    );
+}

@@ -7,6 +7,13 @@ use crate::value::SymbolId;
 
 use rustc_hash::FxHashSet;
 
+/// The 0-based index of the emit primitive's **payload** argument. `(emit bits
+/// value)` takes its signal first and the value it yields second, so this is the
+/// one position both the region walk — which records the payload's regions
+/// against a dynamic emit's call node — and the lowerer — which mints the body
+/// reference the park owes for it — have to name.
+pub const EMIT_PAYLOAD_ARG: usize = 1;
+
 /// Call classification data for region inference.
 ///
 /// Tells the region inference walk which calls return immediates
@@ -98,4 +105,14 @@ pub struct CallClassification {
     /// completing resume hands back the body's terminal value). `None` under
     /// the default empty classification.
     pub fiber_resume: Option<SymbolId>,
+    /// The SymbolIds the **emit primitive** answers to. A first argument the
+    /// compiler cannot read as a keyword set compiles to an ordinary call on it
+    /// rather than to the `Emit` terminator (docs/signals/emit.md § "Dynamic
+    /// emit"), and such a call parks and yields exactly as the terminator does —
+    /// so the borrowed-payload reading must recognize it structurally
+    /// (docs/impl/region/owner.md § "What yields is the emit OPERATION, not the
+    /// `Emit` node"). A set rather than one id because the primitive is reachable
+    /// under its canonical name and its alias, and ordinary code uses the alias.
+    /// Empty under the default classification, which disables the reading.
+    pub emit_natives: FxHashSet<SymbolId>,
 }

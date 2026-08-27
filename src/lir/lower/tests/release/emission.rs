@@ -90,6 +90,72 @@ fn park_mints_nothing_for_a_body_allocated_payload() {
     );
 }
 
+/// The `(retains, releases)` a NON-TAIL dynamic emit is wrapped in — retains
+/// before the `SuspendingCall` in its block, releases after it. The park is an
+/// ordinary call here, so the resume lands at the next instruction rather than in
+/// a block of its own (docs/impl/region/owner.md § "What yields is the emit
+/// OPERATION, not the `Emit` node").
+fn dynamic_park_borrow_ops(module: &crate::lir::LirModule) -> (usize, usize) {
+    fn in_func(func: &LirFunction) -> Option<(usize, usize)> {
+        for b in &func.blocks {
+            let Some(at) = b
+                .instructions
+                .iter()
+                .position(|i| matches!(i.instr, LirInstr::SuspendingCall { .. }))
+            else {
+                continue;
+            };
+            let count = |r: &[crate::lir::types::SpannedInstr], f: fn(&LirInstr) -> bool| {
+                r.iter().filter(|i| f(&i.instr)).count()
+            };
+            return Some((
+                count(&b.instructions[..at], |i| {
+                    matches!(i, LirInstr::IncrefValueRegion { .. })
+                }),
+                count(&b.instructions[at + 1..], |i| {
+                    matches!(i, LirInstr::DecrefValueRegion { .. })
+                }),
+            ));
+        }
+        None
+    }
+    in_func(&module.entry)
+        .or_else(|| module.closures.iter().find_map(in_func))
+        .expect("a function containing a SuspendingCall")
+}
+
+#[test]
+fn dynamic_park_mints_a_body_reference_for_a_borrowed_payload() {
+    // A non-literal first argument makes the park an ordinary call, so there is no
+    // `Emit` terminator for `lower_emit` to mint at — and no borrowed-argument
+    // retain either, the call not being in tail position. The emitting lambda
+    // closes over a value the enclosing one allocates and releases, so `lower_call`
+    // owes the reference the discard discharge stands in for.
+    let module = compile_to_lir(
+        "(let [s :yield] (fn () (let [x (string \"a\")] (fn () (begin (emit s x) 0)))))",
+    );
+    let (retains, releases) = dynamic_park_borrow_ops(&module);
+    assert!(
+        retains >= 1 && releases >= 1,
+        "a borrowed dynamic-emit payload must be retained across the park and \
+         released after the call; got {retains} retain(s) and {releases} release(s)",
+    );
+}
+
+#[test]
+fn dynamic_park_mints_nothing_for_a_body_allocated_payload() {
+    // The contrast, exactly as for the literal park: the body allocates what it
+    // emits, so its own release is already the one the discharge stands in for.
+    let module =
+        compile_to_lir("(let [s :yield] (fn () (let [x (string \"a\")] (begin (emit s x) 0))))");
+    let (retains, _) = dynamic_park_borrow_ops(&module);
+    assert_eq!(
+        retains, 0,
+        "a body-allocated dynamic-emit payload already carries the body's \
+         reference; minting a second strands it per abandoned park",
+    );
+}
+
 #[test]
 fn release_emitted_for_unbound_call_result() {
     // An unbound Call result — `(f "a")` whose result flows

@@ -163,6 +163,26 @@ impl RegionInference {
         }
     }
 
+    /// Is the callee the **emit primitive** — the callee a dynamic `emit` falls
+    /// through to when its first argument is not a literal keyword set
+    /// (docs/signals/emit.md § "Dynamic emit")? Under the same
+    /// unshadowed-immutable-primitive condition as `call_effect`. Such a call parks
+    /// and yields exactly as the `Emit` terminator does, so the walk records its
+    /// payload argument's regions the same way and the borrowed-payload reading
+    /// covers both shapes (docs/impl/region/owner.md § "What yields is the emit
+    /// OPERATION, not the `Emit` node").
+    pub(super) fn is_emit_native(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return false;
+            }
+            self.call_class.emit_natives.contains(&bi.name)
+        } else {
+            false
+        }
+    }
+
     /// May this callee's heap result BE one of its arguments, or a value living inside
     /// one? Only a declaration that the result lives in the call's OWN minted region
     /// answers no: [`Fresh`](crate::primitives::def::RegionEffect::Fresh),

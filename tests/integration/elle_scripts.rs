@@ -510,6 +510,28 @@ fn region_fiber_yield_borrow_uaf() {
     );
 }
 
+// Guard — what yields is the emit OPERATION, not the `Emit` node
+// (docs/impl/region/owner.md § "What yields is the emit OPERATION, not the `Emit`
+// node"). A first argument the compiler cannot read as a keyword set falls through
+// to the `emit` primitive, so the park is an ordinary call and the body reference
+// the discard discharge stands in for has to come from the call: a NON-TAIL one
+// mints it at the payload argument, a TAIL one already holds the borrowed-argument
+// retain and the suspending exit leaves it standing. Withhold either and the
+// discharge releases the delivery reference the resumer already consumed, freeing
+// the payload under every holder that outlives the fiber. This drives each borrow
+// shape — a module-level binding in both positions, a captured local, a captured
+// parameter, a second park of the same value — past an abandoned fiber and reads it
+// afterwards, through the holder, through `fiber/value`, and through a container, so
+// an over-free faults under guardfree. Four controls must stay clean without an extra
+// reference, and a growth gauge refuses a mint-everywhere fix.
+#[test]
+fn region_dynamic_emit_borrow_uaf() {
+    run_elle_script_with_args(
+        "region-dynamic-emit-borrow-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a resume value delivered into a frame parked at a suspending PRIMITIVE
 // call carries one owning reference (docs/impl/region/owner.md § "A delivery into
 // a replayed frame carries one owning reference"). The replayed frame re-enters at

@@ -137,6 +137,71 @@ fn own_parameter_yield_payload_is_not_borrowed() {
     );
 }
 
+// ── the same question, asked of the emit OPERATION ──────────────────────────
+//
+// A first argument the compiler cannot read as a keyword set falls through to the
+// `emit` primitive, so the park is an ordinary call and there is no `Emit` node to
+// key on. The walk records the payload argument's regions against the CALL, so the
+// borrowed-payload reading covers both shapes (docs/impl/region/owner.md
+// § "What yields is the emit OPERATION, not the `Emit` node"). Both need the real
+// classification: `emit_natives` is empty under the default one.
+
+#[test]
+fn dynamic_emit_of_a_captured_payload_is_borrowed() {
+    // `s` makes the signal a runtime value, so `(emit s x)` is a Call. `x` belongs
+    // to the enclosing lambda, so the emitting body releases it nowhere and the
+    // discharge would release the resumer's reference.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(let [s :yield] (fn () (let [x (string \"a\")] (fn () (emit s x)))))");
+    let calls = find_calls_to_primitive(&hir, "emit", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one dynamic (emit …) call");
+    assert!(
+        info.borrowed_emit_payloads.contains(&calls[0]),
+        "a dynamic emit of a captured value borrows it: the emitting body releases \
+         it nowhere, so the reference is owed; borrowed_emit_payloads = {:?}, call @{}",
+        info.borrowed_emit_payloads,
+        calls[0].0,
+    );
+}
+
+#[test]
+fn dynamic_emit_of_a_body_allocated_payload_is_not_borrowed() {
+    // The contrast that keeps the reading about the emitting BODY rather than about
+    // the call: the body allocates what it emits, so its `decref_point` sits in the
+    // emitting lambda and a second reference would be stranded at every abandoned
+    // park.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(let [s :yield] (fn () (let [x (string \"a\")] (emit s x))))");
+    let calls = find_calls_to_primitive(&hir, "emit", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one dynamic (emit …) call");
+    assert!(
+        !info.borrowed_emit_payloads.contains(&calls[0]),
+        "a body-allocated dynamic emit payload owns its own reference; \
+         borrowed_emit_payloads = {:?}, call @{}",
+        info.borrowed_emit_payloads,
+        calls[0].0,
+    );
+}
+
+#[test]
+fn a_non_emit_delivers_call_records_no_emit_payload() {
+    // The recording is keyed on the emit primitive, not on the `Delivers` effect it
+    // shares with the other fiber value installers: `fiber/resume` hands its value
+    // to a fiber that is already parked and yields nothing of its own, so naming its
+    // argument here would mint a reference no park consumes.
+    let (hir, arena, symbols, info) =
+        analyze_with_class("(fn () (let [x (string \"a\")] (fn (h) (fiber/resume h x))))");
+    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
+    assert_eq!(calls.len(), 1, "expected one (fiber/resume …) call");
+    assert!(
+        !info.borrowed_emit_payloads.contains(&calls[0]),
+        "only the emit primitive delivers a value the emitting body yields; \
+         borrowed_emit_payloads = {:?}, call @{}",
+        info.borrowed_emit_payloads,
+        calls[0].0,
+    );
+}
+
 #[test]
 fn funnel_containment_recorded_for_push() {
     // `%array-push` compiles as a native funnel Call: the store is runtime-counted,

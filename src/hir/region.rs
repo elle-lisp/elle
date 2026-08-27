@@ -23,7 +23,7 @@ mod stats;
 // Re-export at the crate::hir::region root so every path that resolved as
 // `crate::hir::region::<Item>` before the split still resolves, and so the
 // test module's `use super::*;` keeps seeing these names.
-pub use classify::CallClassification;
+pub use classify::{CallClassification, EMIT_PAYLOAD_ARG};
 pub use data::{OutlivesConstraint, Region, RegionData};
 pub use id::{MappedRegion, RuntimeRegion, StaticRegion};
 pub use info::{CellContainer, CellStore, CellStores, RegionInfo, TailCalleeFacts};

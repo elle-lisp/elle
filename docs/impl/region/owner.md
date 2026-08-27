@@ -232,6 +232,29 @@ parked fiber's accounting symmetric with its unpark:
   region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
   the releases it still owes"). A halt takes neither the retain nor the record — a halted
   fiber is promoted to `:dead` and never resumed, so its delivery has no consumer.
+- **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
+  cannot read as a keyword set falls through to the `emit` primitive
+  ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way
+  and owes the same body reference — so the question above is asked of the operation. The
+  walk records the payload argument's regions against a call whose callee is the emit
+  primitive exactly as its `Emit` arm records them against the node
+  (`CallClassification::emit_natives` names that primitive under each of its names), and
+  `borrowed_emit_payloads` answers over both.
+  What supplies the reference differs by position, because a call already mints one for an
+  argument the frame does not own. In **tail** position that borrowed-argument retain IS the
+  body reference: it is taken before the `TailCall` and released by the post-`TailCall`
+  block, which the resume replays ([mechanism.md](mechanism.md) § "What the fall-through
+  owes, a signal exit owes too"). In **non-tail** position no such retain exists, so
+  `lower_call` takes one at the payload argument — the same `IncrefValueRegion`, private
+  stash slot, and `DecrefValueRegion` shape `lower_emit` uses, the resume landing at the
+  instruction after the call.
+  The signal is a runtime value here, so the mint cannot be gated on `suspends` the way the
+  literal path gates it. It is taken whatever the signal turns out to be, and a TERMINAL one
+  reaches the same consumer by another route: the raise leaves through the mask that catches
+  it, which delivers the payload as the resumer's result, and the resumer's release of that
+  result consumes one reference exactly as it consumes the delivery of a park. Pinned by
+  `tests/elle/region-dynamic-emit-borrow-uaf.lisp`, and gauged per op by the `emit-dyn-*`
+  probes in `tests/elle/oracle.lisp`.
 - **A delivery into a replayed frame carries one owning reference.** A parked
   `BytecodeFrame` re-enters at its suspending call's continuation, whose
   compiler-emitted result release consumes one owning reference of the value the
