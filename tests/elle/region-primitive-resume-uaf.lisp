@@ -116,29 +116,11 @@
   (assert (= (get r 3) 1)
           "capability denial: mediated value freed under the resumed body"))
 
-# ── the leak face: the delivery mints exactly one reference ──────────────────
-# One reference per park, balanced by the continuation's own result release, so
-# steady-state region growth over the emit witnesses stays flat.
-
-(defn drive-emit (reps)
-  (var i 0)
-  (var a 0)
-  (while (%lt i reps)
-    (assign a (w-bind i))
-    (assign a (w-tail i))
-    (assign a (w-keep i))
-    (assign a (c-bind i))
-    (assign a (c-tail i))
-    (assign i (%add i 1)))
-  a)
-
-(drive-emit 100)
-(let [before (arena/region-count)]
-  (drive-emit 400)
-  (let [growth (%sub (arena/region-count) before)]
-    (assert (%lt growth 40)
-            (string "primitive-park resume accounting strands regions: live count "
-                    "grew by " growth " over 400 iterations of five parks each "
-                    "(expected flat)"))))
+# The leak face — that the delivery mints exactly one reference per park — is the
+# `primitive-resume-bind`/`-tail`/`-keep` probes in tests/elle/oracle.lisp, read
+# against the `emit-resume-literal` control. Each measures a per-op rate with a
+# confidence interval rather than comparing two heap samples: a surplus mint
+# strands the resume value per park, and a two-point integer delta floors a
+# sub-integer rate to zero.
 
 (println "region-primitive-resume-uaf: ok")

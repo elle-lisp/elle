@@ -14,10 +14,11 @@
 # Two halves, pinned separately, because each fix direction alone breaks the
 # other: routing the release to the env without correcting the space brings the
 # free back, and dropping the mis-routed release without adding an env-routed
-# one strands the init's region on every execution.
-#
-#   1. the def and its holder both survive (the free);
-#   2. repeating the shape does not grow the live region count (the leak).
+# one strands the init's region on every execution. This file owns the first —
+# the def and its holder both survive. The second is the `env-cell-def-capture`
+# probe in tests/elle/oracle.lisp, read against the `env-cell-let-twin` control:
+# a `let`-bound immutable local is captured by value and never gets a cell, so
+# the gap between the two isolates the env route.
 #
 # `tests/elle/defer-def.lisp` is the same defect through `defer`, which runs its
 # body in a fiber — so a `def` in a defer scope is a `def` inside a lambda, and
@@ -26,7 +27,7 @@
 (defn increment [x]
   (+ x 1))
 
-# ── 1. The def and its holder both survive ──
+# ── The def and its holder both survive ──
 #
 # The `def`'s initializer must be a CALL — a constant is folded and allocates
 # nothing to mis-release. The sibling closure must capture a SECOND binding
@@ -54,37 +55,3 @@
 
 (assert (= :built (builds-an-uncalled-closure))
         "constructing an uncalled sibling closure frees nothing")
-
-# ── 2. Nothing is stranded ──
-#
-# The init's reference has exactly one release. Without it the region survives
-# every execution, so the count climbs by one per cycle rather than settling.
-
-(defn growth [thunk]
-  (var n 0)
-  (while (< n 50)
-    (thunk)
-    (assign n (+ n 1)))
-  (let [base (arena/region-count)]
-    (assign n 0)
-    (while (< n 200)
-      (thunk)
-      (assign n (+ n 1)))
-    (- (arena/region-count) base)))
-
-(assert (= 0 (growth reads-through-the-closure))
-        "a def captured by a sibling closure strands no region per execution")
-
-# The `let` twin is the discriminator for the leak half only. It is NOT a
-# discriminator for the free half: a `let`-bound immutable local is captured by
-# value and never gets a cell at all, so it never had an env index to confuse.
-# `def` is always mutable, hence always celled, which is why only `def` reaches
-# the defect.
-(defn let-twin []
-  (let [root "/x"]
-    ((fn []
-       (let [let-path (path/join root "a")]
-         (let [reader (fn [] (list (string? let-path) (increment 1)))]
-           (reader)))))))
-
-(assert (= 0 (growth let-twin)) "the let twin strands nothing either")

@@ -607,3 +607,36 @@
   (assert (> after-count before-count)
           ":object-count increases after allocation")
   (assert (= (first p) 1) "pair survives measurement"))
+
+# ── the id dimension: arena/region-ids and arena/region-table ───────
+# The primitive surface only. What the gauges are FOR — the bound on physical id
+# issuance per call — is measured by the `id-*` probes of tests/elle/oracle.lisp
+# (docs/impl/region/model.md § "Physical id recycling").
+#
+# Both are high-water marks, so neither ever goes down: a burst of allocation and
+# release leaves each where it was or higher. That is the property a delta
+# measurement rests on — it lets a reading be subtracted from a later one — and
+# nothing else about the pair is a caller's business here.
+(let* [ids-before (arena/region-ids)
+       table-before (arena/region-table)]
+  (assert (int? ids-before) "arena/region-ids returns int")
+  (assert (int? table-before) "arena/region-table returns int")
+  (assert (> ids-before 0) "arena/region-ids is positive after stdlib load")
+  (assert (> table-before 0) "arena/region-table is positive after stdlib load")
+  (var n 0)
+  (while (< n 200)
+    (pair n n)
+    (assign n (+ n 1)))
+  (assert (>= (arena/region-ids) ids-before)
+          "arena/region-ids fell after a burst of allocation and release")
+  (assert (>= (arena/region-table) table-before)
+          "arena/region-table fell after a burst of allocation and release"))
+
+# Both are Immediate, so sampling them allocates nothing and cannot perturb the
+# measurement a caller is taking around them.
+(let* [a (arena/region-ids)
+       b (arena/region-ids)]
+  (assert (= a b) "arena/region-ids allocates nothing"))
+(let* [a (arena/region-table)
+       b (arena/region-table)]
+  (assert (= a b) "arena/region-table allocates nothing"))

@@ -166,60 +166,10 @@
   (assert (> (get r 6) 0) "control: completing body mis-read")
   (assert (> (get r 7) 0) "control: immediate payload mis-read"))
 
-# ── the leak face: the mint must fund exactly one consumer, per park ─────────
-# A mint no release answers strands one region per propagate, so the gauge is
-# DIFFERENTIAL in propagate depth, not absolute: raise the same payload through
-# zero, one, and three propagates and compare the growth of each.
-#
-# The trap: absolute flatness is not available to measure against. `(protect
-# (error {...}))` already strands two regions per iteration with no propagate
-# anywhere in it — the raising body's own reference to the payload it allocated,
-# whose release lives in a continuation an error unwind never runs. That leak
-# predates this mint and is identical with and without it. Asserting a flat
-# region count here would pin that unrelated leak and fail forever.
-#
-# The counter-factual: an unconsumed mint makes growth scale with depth, so
-# `d3` would exceed `d0` by three regions per iteration and the slack below
-# would not absorb it.
-
-(defn d0 [n]
-  (let [[ok? err] (protect (error {:reason :bang :tag (string "z" n)}))]
-    (length err:tag)))
-(defn d1 [n]
-  (let [[ok? err] (protect (defer
-                             nil
-                             (error {:reason :bang :tag (string "z" n)})))]
-    (length err:tag)))
-(defn d3 [n]
-  (let [[ok? err] (protect (defer
-                             nil
-                             (defer
-                               nil
-                               (defer
-                                 nil
-                                 (error {:reason :bang :tag (string "z" n)})))))]
-    (length err:tag)))
-
-(defn growth-of [f reps]
-  (var i 0)
-  (while (%lt i 50)
-    (f i)
-    (assign i (%add i 1)))
-  (let [before (arena/region-count)]
-    (assign i 0)
-    (while (%lt i reps)
-      (f i)
-      (assign i (%add i 1)))
-    (%sub (arena/region-count) before)))
-
-(let [g0 (growth-of d0 400)
-      g1 (growth-of d1 400)
-      g3 (growth-of d3 400)]
-  (assert (%lt (%sub g1 g0) 40)
-          (string "one propagate strands regions: growth " g1 " vs " g0
-                  " with no propagate, over 400 iterations"))
-  (assert (%lt (%sub g3 g0) 40)
-          (string "each propagate strands a region: growth " g3
-                  " at depth three vs " g0 " at depth zero, over 400 iterations")))
+# The leak face — that the mint funds exactly one consumer per park — is the
+# `propagate-none`/`propagate-one`/`propagate-three` probes in
+# tests/elle/oracle.lisp, which measure a per-op rate with a confidence interval
+# rather than comparing two heap samples: a surplus mint strands one region per
+# park, and a two-point integer delta floors a sub-integer rate to zero.
 
 (println "region-fiber-propagate-uaf: ok")

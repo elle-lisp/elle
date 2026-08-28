@@ -80,8 +80,16 @@ the region rules ([rules.md](rules.md)) honest.
     can leak ids at full rate and leave this gauge flat, which is why it is the
     wrong one to assert on.
 
-  `tests/elle/region-id-recycle.lisp` reads both. Both are Immediate, so
-  sampling allocates nothing.
+  The `id-*` probes of `tests/elle/oracle.lisp` read `region-ids`, beside a
+  live-growth discriminator that proves it moves. They do not read
+  `region-table`, and the reason is stronger than the lag: physical ids reach
+  the store from two independent sources — the per-heap `next_physical` counter
+  and raw static-slot ids (`RegionStore::new_runtime_region`) — and the table is
+  sized by the largest id ever made live from *either*. The static range sits
+  far above the counter, so the table's high-water mark is already past anything
+  a loop driving the counter can reach, and it cannot move for such a loop at
+  all. Reach for it to *size* a leak `region-ids` has already found. Both are
+  Immediate, so sampling allocates nothing.
 - **Direct vs cascade free** — the two have different fixes. A *direct* free of a
   still-live value is a liveness bug: a `decref_point` fired while the value was still
   reachable. A *cascade* free of a still-referenced region is a missing incref on
@@ -122,9 +130,10 @@ every variant is what makes the recorded-`outgoing`-vs-scan assertion at free a
 recorder forgot is caught the moment that region frees.
 
 The **leak state** lives in one runnable dashboard, `tests/elle/oracle.lisp`. It runs
-one representative shape per residual class in a loop with `arena/count` (and
-`arena/bytes`) sampled *by the program*, each beside a known-live-growth discriminator,
-and prints a per-class **closed (bounded) / open (leaking)** verdict with a measured
+one representative shape per residual class in a loop with a heap gauge sampled *by
+the program* — `arena/count`, `arena/region-count`, `arena/bytes` or
+`arena/region-ids`, chosen for the dimension the class leaks in — and prints a
+per-class **closed (bounded) / open (leaking)** verdict with a measured
 per-op rate. The former scattered per-pattern leak files are folded into it, so leak
 state is read in one place, not a scattered suite.
 
@@ -133,7 +142,11 @@ iterations: a reclaimed class is **bounded** — its `arena/count` slope is 0 �
 leaking class grows per iteration, slope k > 0 meaning k objects leaked per iteration.
 A built-in **discriminator** (a shape that legitimately retains every iteration) must
 itself read *open*: a near-zero rate is real reclamation only when the discriminator
-slopes up, proving the gauge is not dead. The estimator is variance-adaptive (an
+slopes up, proving the gauge is not dead. There is one per gauge, and the count is
+gated, because a discriminator answers for the gauge it was measured on and for no
+other: a module-level sink moves the object count and the physical-id counter on
+different events, so either can be dead while the other is live. The estimator is
+variance-adaptive (an
 empirical-Bernstein sequential bound) and block-size invariant, so a reported rate is a
 true per-op rate, not a block-boundary artifact — no two-scale warmup subtraction needed.
 

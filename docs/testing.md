@@ -199,11 +199,11 @@ result set from a truncated run is partial coverage, not green
 ## Correctness the leak and UAF oracles cannot see
 
 The two automated memory oracles each have a blind spot. `tests/elle/oracle.lisp`
-measures region/object *growth* — it sees a leak, never a wrong answer.
-`--trace=guardfree` faults on a *use-after-free* — it sees a dangling read, never a
-live read of the wrong live value. A computation that returns a **wrong-but-well-typed
-value** slips past both: no region leaked, no freed page was touched, the result is
-just silently incorrect.
+measures heap *growth* — in objects, regions, bytes, or physical region ids — so it
+sees a leak, never a wrong answer. `--trace=guardfree` faults on a *use-after-free*
+— it sees a dangling read, never a live read of the wrong live value. A computation
+that returns a **wrong-but-well-typed value** slips past both: no region leaked, no
+freed page was touched, the result is just silently incorrect.
 
 Self-recursion across a control-flow boundary is exactly that kind of hazard. A
 self-recursive local function must recurse to *itself* — the same body, with its own
@@ -225,6 +225,20 @@ and under `--trace=guardfree`), with deterministic peers in
 self-identity survived the boundary, so a stale self-reference flips the assertion red.
 They are the regression guard for any change to how a self-reference is resolved or how
 an activation is carried across yield, tail call, or value handoff.
+
+The **order of two correctly-counted releases** is the other hazard of this kind, and
+it needs a third detector rather than a behavioral pin. A captured binding's value and
+its env cell are two regions addressed by one env index; the value's release loads the
+box raw and unwraps it, so it reads the page the box's release frees
+([`docs/impl/region/bindings.md`](impl/region/bindings.md) § "A cell's release lands at
+or after every release routed through that cell"). Emit the two in the wrong order and
+both counts are still right: nothing leaks, so the leak oracle reads flat, and no count
+reaches zero early, so guardfree unmaps nothing to fault on. What catches it is a
+debug-only walk of every finished block
+(`lir::lower::assert_cells_outlive_their_readers`), which runs in any debug build over
+every block it lowers — so `cargo test` and a debug corpus run cover it and a release
+`make smoke` does not. Two mechanisms hold one half of the order each and neither can
+see the other, which is why the claim is stated once more over the finished emission.
 
 ## The Rust suite
 

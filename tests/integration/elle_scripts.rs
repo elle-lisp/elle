@@ -520,12 +520,34 @@ fn region_fiber_yield_borrow_uaf() {
 // held across a further park, and a mediated capability denial — each paired with
 // the literal `Emit`, whose resume block mints the reference in bytecode and is
 // therefore correct without the delivery's. Freeing the delivered value early
-// faults on the read below — SIGSEGV under guardfree — and a growth gauge over the
-// emit witnesses refuses a delivery that mints more than one.
+// faults on the read below — SIGSEGV under guardfree. The leak face is the
+// `primitive-resume-*` closed-control family in `tests/elle/oracle.lisp`, which
+// refuses a delivery that mints more than one.
 #[test]
 fn region_primitive_resume_uaf() {
     run_elle_script_with_args(
         "region-primitive-resume-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — `fiber/propagate` installs the child's parked payload as this fiber's
+// own `signal`, which is a fresh park and owes its own delivery reference
+// (docs/impl/region/owner.md § "Park/unpark symmetry"). The propagating fiber's
+// resumer reads that payload as its resume result and runs the compiler-emitted
+// release on it; the child's park funded its own resumer's release, not this one.
+// One propagate hides the shortfall — an error unwind runs no continuation, so
+// the raising body's stranded reference is what the release eats instead — so the
+// witnesses remove that cover, by propagating twice or three times and by raising
+// from a native, whose payload reaches `fiber.signal` owning nothing. Each reads a
+// HEAP field of the payload after the carrying fibers are gone; a bare status
+// check passes over a freed payload. Freeing it early faults on that read —
+// SIGSEGV under guardfree. The leak face is the `propagate-*` closed-control
+// family in `tests/elle/oracle.lisp`.
+#[test]
+fn region_fiber_propagate_uaf() {
+    run_elle_script_with_args(
+        "region-fiber-propagate-uaf",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
@@ -1450,8 +1472,9 @@ fn region_squelch_fiber_uaf() {
 // reaches (docs/impl/region/effects.md § `Delivers`). Under-mint and the payload's
 // region is freed while a fiber and the caller still point into it — a stale read the
 // harness's ordinary vm/jit policies see as an intact recycled page, and which only
-// guardfree faults on deterministically. Over-mint never faults, so the file carries a
-// churn face per route as well. The bounded-growth face of the same declaration is
+// guardfree faults on deterministically. Over-mint never faults, so the leak face is
+// the `abort-*` probe family in `tests/elle/oracle.lisp`, one probe per route and per
+// recorded mint. The bounded-growth face of the same declaration is
 // tests/elle/region-fiber-install-clique-leak.lisp.
 #[test]
 fn region_fiber_abort_delivery_uaf() {
