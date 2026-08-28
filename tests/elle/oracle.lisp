@@ -963,6 +963,10 @@
 (def heap-mod (make-heap-module))
 (def @t19s @{:x 0})
 (def @t20c 0)
+# A signal the compiler cannot read as a keyword set, and a payload no fiber body
+# allocates — the two ingredients a dynamic emit's borrowed park needs.
+(def emit-sig :yield)
+(def emit-subject (string "emit-subject"))
 
 # Direct-loop class. Each entry: [label (fn [j] body) rate].
 # j varies the input (faithful to the originals' loop variable i). Pins are the
@@ -1470,7 +1474,46 @@
                            (yield j)
                            9) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 0]  # An emit-raised error's payload keeps
+        (protect (fiber/abort f "boom")))) 0]  # An abandoned park through the DYNAMIC
+   # emit path: a first argument the compiler cannot read as a keyword set falls
+   # through to the `emit` primitive, so the park is an ordinary call rather than the
+   # `Emit` terminator and the body reference the discharge stands in for comes from
+   # the call rather than from `lower_emit` (docs/impl/region/owner.md § "What yields
+   # is the emit OPERATION, not the `Emit` node"). Each gauges the reference's ARITY,
+   # not its presence — withholding it over-frees, which no leak gauge sees and
+   # `tests/elle/region-dynamic-emit-borrow-uaf.lisp` reports. The four must stay
+   # together: the two witnesses differ only in POSITION, which decides where the
+   # reference comes from — a non-tail park mints one at the payload argument, a tail
+   # park already has the borrowed-argument retain and the suspending exit leaves it
+   # standing (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
+   # exit owes too") — and each has a control that removes one ingredient:
+   # `emit-lit-discard` takes the literal path with the same borrow, and
+   # `emit-dyn-fresh` takes the dynamic path with a payload the body allocates, where
+   # nothing is owed and a mint would strand one per park. CLOSED controls
+   # (undeclared, like `rest-array-copy`), so a regression to open trips the
+   # completeness gate loudly rather than being absorbed under F2.
+   ["emit-dyn-discard"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (emit emit-sig emit-subject)
+                           9) |:yield|)]
+        (fiber/resume f))) 0]
+   ["emit-dyn-tail"
+    (fn [j]
+      (let [f (fiber/new (fn [] (emit emit-sig emit-subject)) |:yield|)]
+        (fiber/resume f))) 0]
+   ["emit-lit-discard"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (emit :yield emit-subject)
+                           9) |:yield|)]
+        (fiber/resume f))) 0]
+   ["emit-dyn-fresh"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (emit emit-sig (string "v" j))
+                           9) |:yield|)]
+        (fiber/resume f))) 0]  # An emit-raised error's payload keeps
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the
    # raise records the mint and the abandoned-frame walk and the parked frame's

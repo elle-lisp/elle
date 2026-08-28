@@ -316,6 +316,20 @@ impl<'a> Lowerer<'a> {
                 .current_hir_id
                 .and_then(|id| self.region_info.tail_callee_facts.get(&id))
                 .map(|f| f.fixed_params);
+            // A dynamic `emit` whose payload this body releases nowhere. The park
+            // owes the body one reference of every value it yields, and the shape
+            // that carries it depends on position (docs/impl/region/owner.md
+            // § "What yields is the emit OPERATION, not the `Emit` node"): a TAIL
+            // call already mints one for a borrowed argument, which the suspending
+            // exit leaves standing and the replayed fall-through releases, so only
+            // a non-tail call owes a mint of its own. Routed through `borrowed`
+            // below, whose retain / private stash / post-call release is the exact
+            // shape `lower_emit` uses at the terminator.
+            let emit_payload_arg = (!is_tail
+                && self
+                    .current_hir_id
+                    .is_some_and(|id| self.region_info.borrowed_emit_payloads.contains(&id)))
+            .then_some(crate::hir::region::EMIT_PAYLOAD_ARG);
             for (index, arg) in args.iter().enumerate() {
                 // For a tail call, a BORROWED arg must be handed the callee a
                 // fresh owning reference (see the move-on-tail-call comment at
@@ -347,7 +361,7 @@ impl<'a> Lowerer<'a> {
                 if takes_the_move && !repeated {
                     moved_arg_regions.extend(leaf_regions);
                 }
-                let borrowed = borrowed_leaf || repeated;
+                let borrowed = borrowed_leaf || repeated || emit_payload_arg == Some(index);
                 if borrowed {
                     self.deferred_decref_points.insert(arg.expr.id);
                 }
@@ -649,6 +663,20 @@ impl<'a> Lowerer<'a> {
                         args: arg_regs,
                         arity_checked,
                     });
+                }
+                // The body reference a dynamic `emit` park owes, released here:
+                // the primitive parks at the instruction after this call, so this
+                // is the continuation past the suspend — the release a fiber
+                // abandoned while suspended never reaches and the discard discharge
+                // stands in for (docs/impl/region/owner.md § "Park/unpark
+                // symmetry"). The stash is private to this site, and the
+                // `LoadLocal`/`DecrefValueRegion` pair is push-pop-neutral around
+                // the result the call left on top. Empty for every other non-tail
+                // call: only the emit payload sets `borrowed` off tail position.
+                for &slot in &borrowed_arg_slots {
+                    let v = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal { dst: v, slot });
+                    self.emit(LirInstr::DecrefValueRegion { src: v });
                 }
                 // After ANF (`src/hir/anf.rs`), every consumer position
                 // for a Call has a synthetic `Let` binding owning the

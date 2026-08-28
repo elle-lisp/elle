@@ -21,23 +21,37 @@ impl VM {
     /// handler: the handler may install the very value as the signal's payload
     /// (a fiber carrier hands over its own fiber argument) or swap the live
     /// fiber out from under the frame whose locals name it.
+    ///
+    /// `spare` is the value a SUSPENDING exit parks, and it is left standing: that
+    /// exit's continuation is parked at the post-`TailCall` ip, so the release the
+    /// retain answers to still runs on the resume, and the retain is the one
+    /// reference the park owes the body for what it yields (owner.md § "A fiber
+    /// body owns one reference of every value it yields"). Its slot keeps its
+    /// value, so the replay releases it rather than no-opping on a stamp. `None`
+    /// everywhere else, where nothing reaches the block again.
     fn take_borrowed_arg_retains(
         &mut self,
         slots: &[u16],
+        spare: Option<Value>,
     ) -> Vec<crate::hir::region::RuntimeRegion> {
         if slots.is_empty() {
             return Vec::new();
         }
         let frame_base = self.current_frame_base();
         let heap = unsafe { &mut *self.heap_ptr };
+        let spared = spare.and_then(|v| crate::value::arena::region_of(heap, v));
         let mut regions = Vec::with_capacity(slots.len());
         for &slot in slots {
             let Some(cell) = self.fiber.stack.get_mut(frame_base + slot as usize) else {
                 continue;
             };
             let value = *cell;
+            let region = crate::value::arena::result_region_of(heap, value);
+            if spared.is_some() && region == spared {
+                continue;
+            }
             *cell = Value::NIL;
-            regions.extend(crate::value::arena::result_region_of(heap, value));
+            regions.extend(region);
         }
         regions
     }
@@ -74,9 +88,12 @@ impl VM {
     /// borrowed-argument retains. That retain has exactly one consumer per path:
     /// a frame-replacing closure callee's owned-param release, or the
     /// post-`TailCall` fall-through block, which runs on one outcome only — the
-    /// native's normal completion. Every SIGNAL exit reaches neither, so it
-    /// consumes the retain here instead (docs/impl/region/mechanism.md § "What
-    /// the fall-through owes, a signal exit owes too").
+    /// native's normal completion. A SIGNAL exit reaches neither, so it consumes
+    /// the retain here instead — except at a SUSPEND, which parks the
+    /// continuation at the post-`TailCall` ip, so the block does run on resume and
+    /// the retain naming the parked payload is the reference that park owes the
+    /// body (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
+    /// exit owes too").
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tail_call_inner(
         &mut self,
@@ -97,13 +114,15 @@ impl VM {
             if !blocked.is_empty() {
                 // The denial never runs the native at all, so the fall-through
                 // block is abandoned exactly as it is on any other signal exit.
-                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
+                // Its park spares nothing: the payload is a struct the denial
+                // built, which names no argument of this call.
+                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, None);
                 let bits = self.handle_capability_denial_tail(def, blocked, &args);
                 self.run_borrowed_arg_retains(owed);
                 return Some(bits);
             }
             if !checked && !def.arity.matches(args.len()) {
-                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
+                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, None);
                 self.set_error(
                     "arity-error",
                     format!(
@@ -170,7 +189,21 @@ impl VM {
             // and the regions released after it, so a payload that carries one
             // of these values (a fiber carrier's own argument, an `IoRequest`
             // embedding a port) is still held while the handler installs it.
-            let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
+            //
+            // A SUSPEND is the exit that does not abandon the block: the driver it
+            // unwinds to parks the continuation at the post-`TailCall` ip and the
+            // resume replays it. So the retain naming the value this park delivers
+            // is spared — it is the one reference the body owes for what it yields,
+            // released by that replayed block or, for a fiber abandoned while
+            // suspended, by the discard discharge that stands in for it. Only that
+            // one: a park delivers ONE payload and the discharge releases ONE
+            // reference of it, so a retain on any other region has no stand-in.
+            let spare = matches!(
+                crate::signals::dispatch::classify(bits, &value),
+                crate::signals::dispatch::SignalAction::Suspend
+            )
+            .then_some(value);
+            let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, spare);
             let bits = self.handle_primitive_signal_tail(bits, value);
             self.run_borrowed_arg_retains(owed);
             return Some(bits);

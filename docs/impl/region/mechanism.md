@@ -1379,8 +1379,8 @@ cannot decide is whether the block ever runs. The block belongs to the native
 fall-through, and a native reaches it on exactly one outcome: **normal completion**
 (`bits.is_empty()`, the `SignalAction::Ok` classification). Every other outcome — an
 error, a suspend, a fiber carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate`), a
-capability denial — leaves through the signal machinery, which abandons this frame's
-continuation.
+capability denial — leaves through the signal machinery, which does not run the block
+before returning to the dispatch loop.
 
 One release in that block is the frame's own **extra** reference, and it is the one the
 signal exit runs. A tail call hands its callee one fresh owning reference per **borrowed**
@@ -1392,6 +1392,25 @@ not being replaced by a native, the fall-through block's own `DecrefValueRegion`
 exit reaches neither, so it consumes the retain itself. The count argument is the
 borrowedness: the value has a holder that is not this frame, by the definition of the
 class, so dropping the extra reference frees nothing.
+
+**Except the retain that names the parked payload.** A SUSPEND does not abandon the
+continuation: the driver the tail suspend unwinds to parks it at the post-`TailCall` ip and
+the resume replays the block (owner.md § "A suspending native tail call parks its
+continuation"). So on that exit the fall-through's `DecrefValueRegion` is still a consumer,
+and the retain it consumes is exactly what the park owes — a fiber body owns one reference
+of every value it yields, and a borrowed payload has no other (owner.md § "A fiber body owns
+one reference of every value it yields"). The suspending exit therefore leaves standing each
+retain whose region is the payload's, and consumes the rest as before: a park delivers ONE
+payload and the discharge of an abandoned fiber releases ONE reference of it, so a retain on
+any other region has no such stand-in and would be stranded once per abandoned park. The
+test is the payload's region against the stash's, the same reading the abandoned-frame walk
+makes of its own tables (§ "An abandoned frame runs the releases it still owes"). A
+capability denial parks too, but its payload is a struct the denial built, which names no
+argument — so its retains keep the ordinary consume.
+
+That exemption is what carries a **dynamic** `emit` in tail position, whose non-literal
+first argument makes it an ordinary native call rather than the `Emit` terminator: the
+borrowed-argument retain is the body reference the park owes, and there is no second mint.
 
 **Every OTHER release in that block stays.** They divide in two and neither half has that
 argument. An **argument's** own release is the ownership move, and a signal exit is exactly
@@ -1437,7 +1456,10 @@ an_owned_tail_argument_is_not_named_on_the_call}` (the naming pins, both faces),
 `tests/elle/region-tail-signal-exit-uaf.lisp` (the soundness complement — a value the signal
 payload carries, a restarted `:error` fiber that replays the block, a suspending handoff, and
 a caught error whose handler reads the released value's holder must all survive the exit's
-release).
+release). The payload exemption is pinned by
+`tests/elle/region-dynamic-emit-borrow-uaf.lisp` (a tail dynamic `emit` of a borrowed value,
+driven past an abandoned park) and gauged by the `emit-dyn-tail` probe in
+`tests/elle/oracle.lisp`.
 
 ## An abandoned frame runs the releases it still owes
 

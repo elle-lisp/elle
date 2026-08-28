@@ -1,5 +1,6 @@
 use super::*;
 use crate::hir::region::infer::walk::inline::Inlined;
+use crate::hir::region::EMIT_PAYLOAD_ARG;
 
 impl RegionInference {
     pub(super) fn walk_call(&mut self, hir: &Hir) -> Vec<Region> {
@@ -25,6 +26,20 @@ impl RegionInference {
         }
         let _ = self.walk(func);
         let arg_regions: Vec<Vec<Region>> = args.iter().map(|a| self.walk(&a.expr)).collect();
+
+        // A dynamic `emit` — a first argument the compiler could not read as a
+        // keyword set — parks and yields exactly as the `Emit` terminator does, so
+        // its payload argument's regions are recorded against this call exactly as
+        // the `Emit` arm records them against the node. What reads them is the
+        // borrowed-payload pass, which asks whether the emitting body releases the
+        // payload anywhere (docs/impl/region/owner.md § "What yields is the emit
+        // OPERATION, not the `Emit` node"). The signal is arg0 and the payload arg1,
+        // the primitive's fixed arity.
+        if self.is_emit_native(func) {
+            if let Some(payload) = arg_regions.get(EMIT_PAYLOAD_ARG) {
+                self.emit_payload_regions.insert(hir.id, payload.clone());
+            }
+        }
 
         // Always register the Call node so the lowerer has a
         // region for the bytecode Call instruction.
