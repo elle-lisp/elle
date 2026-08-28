@@ -206,6 +206,34 @@ impl VM {
             let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, spare);
             let bits = self.handle_primitive_signal_tail(bits, value);
             self.run_borrowed_arg_retains(owed);
+            // A fiber CARRIER (`fiber/resume`/`fiber/abort`/`fiber/propagate`/
+            // `fiber/refuse`)
+            // leaves the primitive as a signal because it is a request: drive
+            // this child fiber and report what happened. Where this fiber's own
+            // mask ABSORBS the child's outcome the request is answered here, so
+            // the value is the call's result and the frame never left — it takes
+            // the fall-through, exactly as a native that completed normally does
+            // (docs/impl/region/mechanism.md § "A carrier that comes back with a
+            // result never left the frame"). The post-`TailCall` block then runs
+            // the releases it holds for this call: one per owned argument, plus
+            // the result's own, plus the return mint. Handing the value out
+            // through `fiber.signal` instead reaches none of them, and no other
+            // path does either — an absorbed outcome is not an error, so the
+            // abandoned-frame walk does not fire, and not a suspend, so no replay
+            // arrives. The Call position and the JIT tier already read it this
+            // way (`handle_fiber_abort_signal`, `handle_fiber_abort_signal_jit`).
+            //
+            // The borrowed-argument retains are consumed above on this path too,
+            // and the block's own `DecrefValueRegion` for each then loads the
+            // `nil` the take stamped and no-ops: one release either way.
+            if bits.is_empty() {
+                let (_, result) =
+                    self.fiber.signal.take().expect(
+                        "VM bug: a tail signal handler that answers SIG_OK sets fiber.signal",
+                    );
+                self.fiber.stack.push(result);
+                return None;
+            }
             return Some(bits);
         }
 

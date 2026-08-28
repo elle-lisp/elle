@@ -1461,6 +1461,64 @@ release). The payload exemption is pinned by
 driven past an abandoned park) and gauged by the `emit-dyn-tail` probe in
 `tests/elle/oracle.lisp`.
 
+### A carrier that comes back with a result never left the frame
+
+The section above divides a native tail call's outcomes into normal completion, which
+runs the post-`TailCall` block, and a signal exit, which abandons it. A **fiber
+carrier** — `fiber/resume`, `fiber/abort`, `fiber/propagate`, `fiber/refuse` —
+belongs to neither
+half until the VM has driven the child. It leaves the primitive as a signal because it
+is a *request*: the VM is asked to run another fiber and report what happened. Where
+this fiber's own mask **absorbs** the child's outcome, the request is answered here,
+the value is the call's result, and nothing has left. So the carrier takes the
+fall-through — push the result, continue into the post-`TailCall` block — exactly as a
+native that returned `SIG_OK` does.
+
+Reading the absorbed outcome as an exit instead is what strands the block. The block
+holds every release the frame still owes for this call: one `DecrefValueRegion` per
+**owned argument** (the ownership move a native callee never runs in the caller's
+place), the return mint, and the result's own release. Handing the value out through
+`fiber.signal` and returning `SIG_OK` reaches none of them, and no other path runs them
+either — an absorbed outcome is not an error, so the abandoned-frame walk does not
+fire, and it is not a suspend, so no replay arrives.
+
+The count argument the exemptions in the section above make is *why the fall-through
+is the answer rather than a walk*. That section keeps an argument's release in the
+dead block because a signal exit is where the payload may BE that argument, and keeps
+the result's release because it names a local the fall-through would have stored.
+Absorption removes both premises at once: the frame runs on, so the block stores its
+own result before releasing anything, and it runs the compiler's exact per-argument
+ownership rather than a runtime guess about which argument the signal took.
+
+The **other two positions already read it this way**, so this is one rule stated in
+three places rather than a new one. In Call position `handle_fiber_abort_signal` pushes
+the absorbed result and returns `None`, and the compiler's post-call code runs. On the
+JIT tier `handle_fiber_abort_signal_jit` hands it back in the return register and the
+compiled caller's post-`TailCall` block runs. The interpreter's tail position was the
+one that treated the answer as an exit.
+
+What funds the result's release is unchanged by the position. `dispatch_native_call`
+withholds the pass-through retain from a value a native returns as a signal payload
+(effects.md § "The dispatch pass-through retain"), and for an absorbed carrier the seam that
+produced the value has already counted one: the injection's `AbortDelivery` where an
+abort's mask catches (effects.md § `Delivers`), and for a resume the reference the
+crossing itself counted — the park's `EmitEscape` retain for a yielded value, the
+child's `Return` mint for a terminal one. That is the same reference the Call position
+consumes, so the two positions cannot drift apart.
+
+Where the payload is *also* an owned argument — a literal materialized straight into
+`(fiber/abort f "boom")` whose caller reads the result back — the frame owes **two**
+releases on one region, and holds two references to fund them: the one its allocation
+minted and the one the delivery did. Running one is what a skipped block looks like
+from the outside: a rate of one region per abort, flat in the payload's size.
+
+Pinned by the `abort-tail-result`, `abort-mask-caught-literal` and
+`refuse-tail-result` probes in `tests/elle/oracle.lisp` (the per-op rates, each beside
+the control that removes the tail position), and by
+`tests/elle/region-fiber-abort-delivery-uaf.lisp` (the soundness complement — the block
+frees the fiber and the payload at the call the carrier returned through, so every
+reader that outlives it must still find them).
+
 ## An abandoned frame runs the releases it still owes
 
 The section above places one release in the block a signal exit skips. That block is
