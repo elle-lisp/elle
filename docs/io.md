@@ -77,9 +77,10 @@ the edges. Two things come back when it does, on either backend:
   written out rather than run here; `tests/elle/io-cancel-releases.lisp`
   builds the peer and asserts both lines.
 
-  And a port closed while an operation still runs keeps its descriptor
-  number until that operation ends, so the number cannot be handed to a
-  new port while a worker holds it.
+  And a port that goes away while an operation still runs — closed, or
+  released with the regions of the fiber that opened it — keeps its
+  descriptor number until that operation ends, so the number cannot be
+  handed to a new port while a worker holds it.
 
 `tests/elle/io-cancel-releases.lisp` pins both. See `src/io/AGENTS.md`
 § "I/O Cancellation" for how the thread pool delivers them.

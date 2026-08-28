@@ -137,7 +137,6 @@ impl AsyncBackend {
                     })
                     .collect();
 
-                let still_running = !ids_to_cancel.is_empty();
                 // A CONNECTED stream socket is woken by shutdown(2): the worker's
                 // poll reports the fd readable, its read returns 0, and the fiber
                 // sees a clean EOF. Every other descriptor needs the operation's
@@ -145,8 +144,8 @@ impl AsyncBackend {
                 // parked accept only on Linux — macOS and the BSDs return
                 // ENOTCONN and wake nothing — and an unconnected UDP socket, a
                 // pipe, or a file is not a connected socket anywhere. A worker
-                // left unwoken polls the retired descriptor forever, and the
-                // fiber waiting on it is never resumed (pinned by
+                // left unwoken polls the closed port's descriptor forever, and
+                // the fiber waiting on it is never resumed (pinned by
                 // `closing_a_listener_ends_its_parked_pool_accept`).
                 let stream_socket =
                     matches!(port.kind(), PortKind::TcpStream | PortKind::UnixStream);
@@ -169,34 +168,18 @@ impl AsyncBackend {
                     }
                 }
 
-                // A pool worker resolves its descriptor when it runs, so the
-                // number must not go back to the OS while an operation still
-                // names it — a new socket handed that number would be read by
-                // the stale operation, and its bytes would reach no fiber.
-                // Hold the descriptor here instead; `close_drained_fds` closes
-                // it, and drops its `fd_states` entry, once the last operation
-                // naming it has completed.
-                let retired =
-                    if still_running && matches!(inner.platform, PlatformBackend::ThreadPool) {
-                        match port.retire_fd() {
-                            Some(owned) => {
-                                inner.retired.insert(*fd, owned);
-                                true
-                            }
-                            None => false,
-                        }
-                    } else {
-                        false
-                    };
-                if !retired {
-                    crate::io::types::discard_fd_state(&mut inner.fd_states, *fd);
-                }
+                // The remainder a read left behind belongs to the port that
+                // produced it, and that port is what this close ends.
+                crate::io::types::discard_fd_state(&mut inner.fd_states, *fd);
 
                 drop(inner);
             }
 
-            // Close the port. Already a no-op when the descriptor was retired:
-            // `retire_fd` marked the port closed when it took the descriptor.
+            // Close the port: it stops answering at once, so Elle's semantics
+            // are those of a close. What it gives up is its SHARE of the
+            // descriptor — an operation still in flight holds one of its own,
+            // and the number goes back to the OS with the last of them
+            // (src/io/AGENTS.md § "Descriptor retirement").
             port.close();
 
             // Queue immediate completion.
@@ -240,6 +223,12 @@ impl AsyncBackend {
 
         // Determine fd
         let fd = port_key.raw_fd();
+
+        // The operation's own share of that descriptor, held until its entry is
+        // retired. `fd` is resolved again when the worker runs, so the number
+        // must stay this port's for as long as the operation names it — see
+        // src/io/AGENTS.md § "Descriptor retirement".
+        let descriptor = port.fd_share();
 
         let buf_handle = match op {
             PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. } => None,
@@ -415,6 +404,7 @@ impl AsyncBackend {
                         op: op.clone(),
                         port_key,
                         port: request.port,
+                        descriptor,
                         buffer_handle: buf_handle,
                         listener_kind: None,
                         filled: 0,

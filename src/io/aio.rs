@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use convert::cook_raw;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -38,11 +38,6 @@ struct AsyncBackendInner {
     /// The operations in flight, and which of them no fiber will receive a
     /// result for. See src/io/AGENTS.md § "I/O Cancellation".
     pending: PendingTable,
-    /// Descriptors kept open past their port's close because a submitted
-    /// operation still names them. A worker resolves its fd when it runs, so a
-    /// number handed back to the OS while an operation holds it can be given
-    /// to a new socket that the stale operation then reads.
-    retired: HashMap<RawFd, std::os::unix::io::OwnedFd>,
     completions: VecDeque<Completion>,
     next_id: u64,
     // `platform` is declared before `buffer_pool` so it drops first: tearing
@@ -122,7 +117,6 @@ impl AsyncBackend {
                 unicode_generation: gen,
                 fd_states: HashMap::new(),
                 pending: PendingTable::new(),
-                retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
                 buffer_pool: BufferPool::new(),
@@ -155,7 +149,6 @@ impl AsyncBackend {
                 unicode_generation: crate::config::get().unicode_generation(),
                 fd_states: HashMap::new(),
                 pending: PendingTable::new(),
-                retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
                 buffer_pool: BufferPool::new(),
@@ -501,7 +494,6 @@ impl AsyncBackendInner {
         let AsyncBackendInner {
             ref mut hub,
             ref mut pending,
-            ref mut retired,
             ref mut fd_states,
             ref mut buffer_pool,
             ref mut completions,
@@ -518,33 +510,6 @@ impl AsyncBackendInner {
                 completions.push_back(c);
             }
         }
-        Self::close_drained_fds(pending, fd_states, retired);
-    }
-
-    /// Close every retired descriptor no submitted operation names any more.
-    ///
-    /// A descriptor reaches `retired` when its port was closed while an
-    /// operation still held it; this is where it is finally handed back to the
-    /// OS. Its `fd_states` entry goes with it, so per-fd buffering never spans
-    /// two ports that happened to share a number.
-    fn close_drained_fds(
-        pending: &PendingTable,
-        fd_states: &mut HashMap<PortKey, FdState>,
-        retired: &mut HashMap<RawFd, std::os::unix::io::OwnedFd>,
-    ) {
-        if retired.is_empty() {
-            return;
-        }
-        retired.retain(|fd, _owned| {
-            let still_named = pending
-                .values()
-                .any(|op| matches!(op, PendingOp::Port { port_key, .. } if port_key.names_fd(*fd)));
-            if !still_named {
-                crate::io::types::discard_fd_state(fd_states, *fd);
-            }
-            // Dropping the `OwnedFd` with the entry is what closes it.
-            still_named
-        });
     }
 
     /// Submit a stdin operation.
@@ -582,6 +547,10 @@ impl AsyncBackendInner {
                 op: op.clone(),
                 port_key: PortKey::Stdin,
                 port: Value::NIL,
+                // Descriptor 0 is process-wide: it outlives every `Port` that
+                // names it, so there is no number here to keep out of the OS's
+                // hands.
+                descriptor: None,
                 buffer_handle: Some(buf_handle),
                 listener_kind: None,
                 filled: 0,

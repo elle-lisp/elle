@@ -7,7 +7,8 @@ use crate::io::SubmissionId;
 use crate::port::PortKind;
 use crate::value::Value;
 use std::collections::{HashMap, HashSet};
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{OwnedFd, RawFd};
+use std::rc::Rc;
 use std::time::Duration;
 
 /// What kind of operation a worker ran.
@@ -52,6 +53,20 @@ pub(crate) enum PendingOp {
         op: PortOp,
         port_key: PortKey,
         port: Value,
+        /// This operation's share of the descriptor it names.
+        ///
+        /// A worker resolves the number when it runs rather than when the
+        /// operation was submitted, so the number must not go back to the OS
+        /// while this entry exists: a new socket handed it would be the one the
+        /// worker reads. The share is what holds it — the number is given back
+        /// with the last share, which is this one whenever the port has gone
+        /// first (src/io/AGENTS.md § "Descriptor retirement").
+        ///
+        /// `None` for an operation on a port that owns no descriptor: the
+        /// stdio numbers are process-wide and outlive every `Port` that names
+        /// them.
+        #[allow(dead_code)] // kept alive for its Drop side effect
+        descriptor: Option<Rc<OwnedFd>>,
         /// BufferPool handle for non-read operations. `None` for Read/ReadLine
         /// (which use pre-allocated fiber-heap buffers instead).
         buffer_handle: Option<BufferHandle>,
@@ -609,10 +624,6 @@ impl PendingTable {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&SubmissionId, &PendingOp)> {
         self.ops.iter().map(|(id, e)| (id, &e.op))
-    }
-
-    pub(crate) fn values(&self) -> impl Iterator<Item = &PendingOp> {
-        self.ops.values().map(|e| &e.op)
     }
 }
 

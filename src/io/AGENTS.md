@@ -98,7 +98,7 @@ What one in-flight operation's completion needs, one variant per operation
 shape. Every variant carries a `BufferHandle`; the rest is what that operation
 alone must remember:
 
-- `Port { op, port_key, port, buffer_handle, listener_kind, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `listener_kind` is `Some(PortKind)` for Accept only.
+- `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, filled, timeout }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see § "Descriptor retirement". `listener_kind` is `Some(PortKind)` for Accept only.
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
@@ -394,14 +394,26 @@ handed to a new socket before that worker runs — and the worker then
 reads the new socket, and its bytes go to a completion no fiber is
 waiting for.
 
-`port/close` therefore hands the port's `OwnedFd` to the backend rather
-than dropping it whenever `pending` still holds an operation on that key.
-The port reports closed immediately, so Elle's semantics do not change;
-the descriptor itself is closed by `close_drained_fds` once the last
-operation naming it has completed. `fd_states` for the key is dropped at
-the same moment, so per-fd buffering never spans two ports either.
+A descriptor is therefore **shared** rather than owned outright. A `Port`
+holds its `OwnedFd` behind an `Rc`, and every `PendingOp::Port` filed
+against that port takes a share of its own at submit (`Port::fd_share`).
+The number goes back to the OS when the last share drops, which is the
+moment the last operation naming it is retired. Nothing has to remember
+anything for that to hold, and it holds however the port goes away:
+`port/close`, a port dropped without one, or the release that frees the
+regions of a fiber which terminated by a route the scheduler did not take.
 
-Pinned by `tests/elle/io-cancel-releases.lisp`.
+`port/close` reports closed the moment it is asked, so Elle's semantics
+are unchanged — the port stops answering, and what it gives up is its
+share. The `fd_states` entry goes at the same moment: a remainder belongs
+to the port that produced it, and that port is what the close ended.
+
+Pinned by `tests/elle/io-cancel-releases.lisp`, by
+`a_descriptor_share_holds_the_number_until_it_drops` (`src/port/tests.rs`)
+for the share itself, and — for a port that goes with its fiber's regions
+rather than through a close — by
+`a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number`
+(`src/io/aio/tests/park.rs`).
 
 ### How a close wakes the operations it retires
 

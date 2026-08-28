@@ -7,6 +7,7 @@
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::os::unix::io::OwnedFd;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The kind of underlying OS resource.
@@ -71,16 +72,18 @@ impl PortId {
 ///
 /// # Lifecycle
 ///
-/// File ports own their fd via `OwnedFd` in `RefCell<Option<OwnedFd>>`.
-/// `port/close` takes the fd out (dropping it closes the fd). Default
-/// Drop does the same if close wasn't called explicitly.
+/// A file port holds a **share** of its descriptor rather than owning it
+/// outright, because an in-flight I/O operation holds a share of its own
+/// ([`Port::fd_share`]). `port/close` drops the port's share, and default Drop
+/// does the same if close wasn't called explicitly; the number goes back to the
+/// OS when the last share goes.
 ///
 /// Stdio ports do NOT own their fd — `fd` is `None` from construction.
 /// `port/close` on a stdio port just sets the `closed` flag. Drop is
 /// a no-op (nothing to drop when `fd` is `None`).
 pub(crate) struct Port {
     id: PortId,
-    fd: RefCell<Option<OwnedFd>>,
+    fd: RefCell<Option<Rc<OwnedFd>>>,
     kind: PortKind,
     direction: Direction,
     encoding: Encoding,
@@ -104,7 +107,7 @@ impl Port {
     ) -> Self {
         Port {
             id: PortId::next(),
-            fd: RefCell::new(fd),
+            fd: RefCell::new(fd.map(Rc::new)),
             kind,
             direction,
             encoding,
@@ -137,7 +140,7 @@ impl Port {
 
     /// Set the fd on an unopened port (called by IO completion).
     pub fn set_fd(&self, fd: OwnedFd) {
-        *self.fd.borrow_mut() = Some(fd);
+        *self.fd.borrow_mut() = Some(Rc::new(fd));
     }
 
     /// Create a stdin port. Does not own the fd.
@@ -236,30 +239,34 @@ impl Port {
 
     /// Close the port. Idempotent.
     ///
-    /// For file ports: takes the `OwnedFd` out, dropping it (closes fd).
+    /// For file ports: drops the port's share of the descriptor. The number
+    /// goes back to the OS with the last share, which is this one whenever no
+    /// operation is in flight on the port.
     /// For stdio ports: sets `closed` flag only (does NOT close the OS fd).
     pub fn close(&self) {
         if !self.closed.get() {
-            // For file ports, take the OwnedFd out (drop closes it).
+            // For file ports, drop the share (the last one closes the fd).
             // For stdio ports, fd is already None — take() is a no-op.
             self.fd.borrow_mut().take();
             self.closed.set(true);
         }
     }
 
-    /// Mark the port closed and hand its descriptor to the caller instead of
-    /// dropping it. The caller then decides when the descriptor is handed back
-    /// to the OS — which the I/O backend delays while an operation still names
-    /// it, so the number cannot be given to a new port under a running worker.
-    /// Returns `None` for a port that owns no descriptor (stdio) or is already
-    /// closed.
-    pub(crate) fn retire_fd(&self) -> Option<OwnedFd> {
+    /// A share of this port's descriptor, for an operation that names it.
+    ///
+    /// A descriptor number goes back to the OS when the last share of it drops.
+    /// An in-flight operation resolves the number when it runs rather than when
+    /// it was submitted, so it takes a share of its own and holds it for its
+    /// whole lifetime: the number cannot be handed to a new port under a
+    /// running worker, however the port itself goes away
+    /// (src/io/AGENTS.md § "Descriptor retirement").
+    ///
+    /// `None` for a port that owns no descriptor (stdio) or is already closed.
+    pub(crate) fn fd_share(&self) -> Option<Rc<OwnedFd>> {
         if self.closed.get() {
             return None;
         }
-        let fd = self.fd.borrow_mut().take()?;
-        self.closed.set(true);
-        Some(fd)
+        self.fd.borrow().clone()
     }
 
     /// Whether this port has been closed.
@@ -325,7 +332,7 @@ impl Port {
             return None;
         }
         let borrow = self.fd.borrow();
-        borrow.as_ref().map(f)
+        borrow.as_ref().map(|fd| f(fd))
     }
 }
 

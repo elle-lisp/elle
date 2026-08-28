@@ -16,6 +16,7 @@
 //! The last test is the exception: it holds both backends to one answer.
 
 use super::*;
+use std::os::unix::io::RawFd;
 use std::time::Duration;
 
 /// A pipe whose ends close with it.
@@ -42,6 +43,21 @@ impl Drop for Pipe {
             libc::close(self.write_fd);
         }
     }
+}
+
+/// What descriptor number `fd` currently names — its device and inode — or
+/// `None` when the number is not open.
+///
+/// Two numbers duplicated from one another answer alike, which is what makes
+/// this an identity rather than a liveness check: it says WHICH file a number
+/// refers to, so a number handed back to the OS and taken by something else is
+/// distinguishable from one that never moved.
+fn file_identity(fd: RawFd) -> Option<(u64, u64)> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return None;
+    }
+    Some((st.st_dev as u64, st.st_ino as u64))
 }
 
 /// A fifo that unlinks with itself.
@@ -414,12 +430,10 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
 /// dropped this id — the scheduler still pairs it with the fiber that asked,
 /// and retires the pairing on a completion.
 ///
-/// The operand freed below is a write's payload rather than a read's port,
-/// because freeing the port's region would also close the descriptor: a worker
-/// that has not reached its syscall would then run on a number the OS has
-/// handed to somebody else, and this test would be measuring that instead. The
-/// payload is a fair stand-in — `operands` is one list, and `take` asks the
-/// same question of every entry in it.
+/// The operand freed below is a write's payload rather than its port, so that
+/// the port stays available for the assertions about the answer. `operands` is
+/// one list and `take` asks the same question of every entry in it, so which
+/// one goes decides nothing.
 ///
 /// Counter-factual: with the operand-site check removed from
 /// `PendingTable::take`, the write below resolves `Live` and answers with a
@@ -442,8 +456,8 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
             // valid for the whole test.
             let heap = unsafe { &mut *heap_ptr };
 
-            // The port outlives the operation, so its descriptor is nobody
-            // else's to reuse while a worker still names it.
+            // The port lives in a region of its own, so the free below reaches
+            // the payload alone.
             let port_region = heap.new_runtime_region();
             let file = std::fs::File::create(&path).expect("create the file");
             let port = crate::value::build::external(
@@ -510,6 +524,124 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
     });
 }
 
+/// A descriptor number stays out of the OS's hands while a submitted operation
+/// names it, even when the port that owned it goes with its fiber's regions.
+///
+/// `port/close` is not the only way a port ends. A fiber can terminate by a
+/// route the scheduler did not take — `fiber/abort` injects an error the
+/// fiber's own `protect` catches — so it runs to `:dead` with its operation
+/// still submitted and releases the regions holding its port on the way out.
+/// Nothing cancels, and nothing asks the backend to hold anything.
+///
+/// The trap: a worker resolves its fd at syscall entry, not at submit time. A
+/// number handed back before the worker gets there can be given to a new
+/// socket, and the worker reads that socket instead — its bytes going to a
+/// completion no fiber is waiting for. The stale sweep narrows that window and
+/// does not close it: between the free and the worker observing its stop, the
+/// number belongs to the OS.
+///
+/// The trap in measuring it: an fd-number count cannot say this. The suite
+/// shares a process and runs in parallel, so the number moves under the
+/// measurement. What is stable is what the number REFERS to — the port takes a
+/// duplicate of the pipe's read end, so the pipe's own end stays behind as a
+/// witness of the file description both name.
+///
+/// Counter-factual: with the port owning its descriptor outright, the region
+/// release closes the number and the first assertion reads `None` — or reads
+/// whatever else in the process was handed the number in the meantime, which
+/// is the defect itself.
+#[test]
+fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
+    use std::os::unix::io::FromRawFd;
+    crate::value::arena::with_test_region(|| {
+        for (backend, which) in [
+            (AsyncBackend::new().unwrap(), "the platform default"),
+            (AsyncBackend::new_thread_pool().unwrap(), "the thread pool"),
+        ] {
+            // A pipe nobody writes: the read parks, so the operation is still
+            // in flight when the region goes.
+            let pipe = Pipe::new();
+            let port_fd = unsafe { libc::dup(pipe.read_fd) };
+            assert!(port_fd >= 0, "{which}: dup(2) failed");
+            let pipe_identity = file_identity(pipe.read_fd)
+                .unwrap_or_else(|| panic!("{which}: fstat on the pipe's read end failed"));
+
+            let heap_ptr = crate::value::arena::leaked_test_heap();
+            // SAFETY: the heap is leaked for the process, so this borrow is
+            // valid for the whole test.
+            let heap = unsafe { &mut *heap_ptr };
+
+            // The asking fiber's own region, holding the port itself — which is
+            // what makes the release that ends the fiber the thing that ends
+            // the port.
+            let region = heap.new_runtime_region();
+            let port = crate::value::build::external(
+                heap,
+                "port",
+                Port::new_file(
+                    // SAFETY: `dup(2)` handed this number over above and
+                    // nothing else holds it.
+                    unsafe { std::os::unix::io::OwnedFd::from_raw_fd(port_fd) },
+                    Direction::Read,
+                    Encoding::Binary,
+                    "<pipe>".into(),
+                ),
+                region,
+            );
+
+            let id = backend
+                .submit(
+                    &IoRequest {
+                        op: PortOp::ReadAll.into(),
+                        port,
+                        timeout: None,
+                    },
+                    heap_ptr,
+                )
+                .unwrap();
+
+            // The interesting order: the worker is already parked on the number
+            // when the fiber ends under it.
+            wait_for_worker(&backend);
+
+            // The fiber ends: its region goes, and the port with it.
+            heap.decref_region(region);
+
+            assert_eq!(
+                file_identity(port_fd),
+                Some(pipe_identity),
+                "{which}: descriptor {port_fd} no longer names the pipe the \
+                 submitted read is on — the number went back to the OS with the \
+                 port's region, so the next socket to take it is the one that \
+                 read's worker reads",
+            );
+
+            // The operation ends on its own once its operands are gone, and the
+            // number goes back with the entry that held the last share of it.
+            let mut delivered = Vec::new();
+            for _ in 0..40 {
+                delivered.extend(backend.wait(50).unwrap().into_iter().map(|c| c.id));
+                if !backend.has_pending() && backend.workers() == 0 {
+                    break;
+                }
+            }
+            assert_eq!(
+                delivered,
+                vec![id],
+                "{which}: the read must answer once — the scheduler holds this \
+                 id against the fiber that asked and lets go on a completion",
+            );
+            assert_ne!(
+                file_identity(port_fd),
+                Some(pipe_identity),
+                "{which}: descriptor {port_fd} still names the pipe after the \
+                 operation holding it was retired — a share that outlives its \
+                 operation costs one descriptor per operation",
+            );
+        }
+    });
+}
+
 /// An operation that PARKS must end when its operands' region is gone, with no
 /// peer ever acting.
 ///
@@ -519,14 +651,12 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
 /// received it is what went away, so nothing in the program is left to make
 /// that event happen.
 ///
-/// The trap: give the operation a peer and this passes on Linux whatever the
-/// runtime does. `poll(2)` there holds a reference to the file it waits on, so
-/// the socket outlives a close performed under it and the peer's act still
-/// reaches the parked worker. Nobody connects here, deliberately.
+/// The trap: give the operation a peer and this passes whatever the runtime
+/// does — the connection wakes the parked worker and the completion arrives on
+/// its own. Nobody connects here, deliberately.
 ///
-/// The listener's port lives in a region of its own, which outlives the
-/// operation. Freeing it would close the descriptor under a worker that has
-/// not reached its syscall, and this would be measuring that instead.
+/// The listener's port lives in a region of its own, so the free below reaches
+/// the accept's own operand alone.
 ///
 /// Counter-factual: without the stale sweep the accept keeps its `pending`
 /// entry and, on the pool, its worker thread; the bounded loop below then runs
