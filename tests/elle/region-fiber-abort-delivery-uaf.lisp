@@ -181,6 +181,101 @@
               "the literal materialized into the abort argument reaches the catch")))
   (assign i (%add i 1)))
 
+# ── Route 1 in TAIL position: the frame releases at the call it returned through
+# An absorbed carrier answers its request in this frame, so the frame falls
+# through to the post-`TailCall` block and runs the releases that block holds —
+# the fiber argument's, the payload argument's, and the result's
+# (docs/impl/region/mechanism.md § "A carrier that comes back with a result never
+# left the frame"). Those frees never ran before, so each face below reads a value
+# the block has just released a reference of.
+#
+# The trap: the payload is BOTH an owned argument and the result here, so the
+# block releases the same region twice on one path. It survives because the frame
+# holds two references — its allocation's and the injection's delivery mint — and
+# the counter-factual is one release short of that, which reads as a per-abort
+# leak rather than a fault.
+(defn tail-abort-literal [f]
+  (fiber/abort f "boom"))
+
+(defn tail-abort-payload [f p]
+  (fiber/abort f p))
+
+(def @i 0)
+(while (%lt i 200)
+  (let [f (fiber/new (fn []
+                       (yield 1)
+                       2) |:yield :error|)]
+    (fiber/resume f)
+    (assert (= (length (tail-abort-literal f)) 4)
+            "a tail abort's caller reads the payload the block released"))
+  (assign i (%add i 1)))
+
+# The payload is a heap value the caller keeps naming after the tail abort
+# returns, so the argument release must leave the enclosing binding's reference
+# standing.
+(def @i 0)
+(while (%lt i 200)
+  (let [payload [1 2 3]
+        f (fiber/new (fn []
+                       (yield 1)
+                       2) |:yield :error|)]
+    (fiber/resume f)
+    (assert (= (get (tail-abort-payload f payload) 2) 3)
+            "the tail abort hands back a payload an outer binding still owns")
+    (assert (= (get payload 0) 1)
+            "the outer binding reads its payload after the tail abort"))
+  (assign i (%add i 1)))
+
+# The fiber ARGUMENT is what the block releases first, and the aborted fiber is
+# still readable through the caller's own binding afterwards.
+(def @i 0)
+(while (%lt i 200)
+  (let [f (fiber/new (fn []
+                       (yield 1)
+                       2) |:yield :error|)]
+    (fiber/resume f)
+    (tail-abort-literal f)
+    (assert (= (fiber/status f) :error)
+            "the aborted fiber survives the tail block's release of its argument")
+    (assert (= (length (fiber/value f)) 4)
+            "the aborted fiber's terminal value survives with it"))
+  (assign i (%add i 1)))
+
+# The RESUME carrier reaches the same fall-through: a tail `fiber/resume` whose
+# child yields a value this fiber's mask absorbs.
+(defn tail-resume [f]
+  (fiber/resume f))
+
+(def @i 0)
+(while (%lt i 200)
+  (let [f (fiber/new (fn []
+                       (yield [7 8 9])
+                       2) |:yield|)]
+    (assert (= (get (tail-resume f) 1) 8)
+            "a tail resume's caller reads the value the block released")
+    (assert (= (fiber/status f) :paused)
+            "the resumed fiber survives the tail block's release of its argument"))
+  (assign i (%add i 1)))
+
+# `fiber/refuse` shares the injection seam and the `SIG_ABORT` exit, so it reaches
+# the same fall-through. A refused fiber that catches keeps running, so its own
+# binding reads it after the block released the argument.
+(defn tail-refuse [f p]
+  (fiber/refuse f p))
+
+(def @i 0)
+(while (%lt i 200)
+  (let [payload {:denied 1}
+        f (fiber/new (fn []
+                       (let [r (protect (yield 1))]
+                         (get (get r 1) :denied))) |:yield :error|)]
+    (fiber/resume f)
+    (assert (= (tail-refuse f payload) 1)
+            "a tail refusal's caller reads the value the block released")
+    (assert (= (get payload :denied) 1)
+            "the outer binding reads its payload after the tail refusal"))
+  (assign i (%add i 1)))
+
 # ── Churn: repeated abort delivery must not accumulate stale pages ───────
 (def @i 0)
 (while (%lt i 200)

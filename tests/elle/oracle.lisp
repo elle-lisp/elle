@@ -262,8 +262,16 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard" "abort-tail-result"
-                   "abort-mask-caught-literal"])
+                   "cancel-discard"])
+# `abort-tail-result` and `abort-mask-caught-literal` are CLOSED controls now
+# (undeclared, like `rest-array-copy`, so a regression to open trips the
+# completeness gate loudly rather than being absorbed back under F2). What they
+# measured was a fiber carrier in TAIL position whose outcome this fiber's mask
+# absorbs: the request is answered here, so the value is the call's result and the
+# frame never left — it takes the fall-through into the post-`TailCall` block, which
+# runs the compiler's owned-argument releases and the return mint, exactly as the
+# Call position and the JIT tier already did (docs/impl/region/mechanism.md § "A
+# carrier that comes back with a result never left the frame").
 # `abort-discard` is a CLOSED control now (undeclared, like `rest-array-copy`, so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # back under F2): what it measured was the borrowed-argument
@@ -2266,59 +2274,54 @@
                                      nil)
                                    (catch e nil))
                                  nil))) count-gauge 100 6 60 0.4 0.5) 0)
-# The TAIL-position face of the same abort, and the one that reads open. The
-# nine controls above all discard the abort's result; this one RETURNS it, which
-# is the whole difference — `abort-tail-discarded` is the identical body with a
-# `nil` after the call, so the gap between the pair isolates the tail position
-# rather than the abort. `fiber/abort` in tail position is a NATIVE tail call
-# that leaves by a signal, so the post-`TailCall` block holding the call's
-# compiler-emitted result release is reached on no path, and the delivery the
-# injection minted keeps a whole fiber alive behind it
-# (docs/impl/region/mechanism.md § "What the fall-through owes, a signal exit
-# owes too" states the rule for the borrowed-argument retain; a native tail
-# call's own RESULT release is the obligation this measures and it names a local
-# the fall-through would have stored). Declared under F2 — the dead
-# continuation's residual — and shrink-only, so a fix lowers it. An IMMEDIATE
-# payload, which has no region at all, still strands two regions here, and a
-# payload an enclosing binding owns changes nothing: what this counts is not the
-# payload. That is the discriminator against `abort-mask-caught-literal` below,
-# which the same two controls take to 0. Tracked as issue #945.
+# The TAIL-position face of the same abort. The nine controls above all discard
+# the abort's result; this one RETURNS it, which is the whole difference —
+# `abort-tail-discarded` is the identical body with a `nil` after the call, so
+# the gap between the pair isolates the tail position rather than the abort.
+# `fiber/abort` in tail position is a NATIVE tail call that leaves by a signal,
+# but an ABSORBED outcome is the carrier's answer rather than an exit: the frame
+# is still there, so it falls through to the post-`TailCall` block and runs the
+# owned-argument releases that block holds (docs/impl/region/mechanism.md § "A
+# carrier that comes back with a result never left the frame"). A closed control
+# now. The counter-factual — reading the answer as an exit — strands the fiber
+# argument, the closure behind it, and the payload: three regions, of which an
+# IMMEDIATE payload removes one and a payload an enclosing binding owns removes
+# none. That is the discriminator against `abort-mask-caught-literal` below,
+# whose whole strand IS the payload, and it is why the two must stay a pair.
 #
-# The pin is a cross-tier RANGE because the strand is interpreter machinery: the
-# post-`TailCall` block is what the interpreter never reaches, and a compiled
-# frame reaches the same release by another route. So the shape measures 0 under
-# `--jit=eager` and the whole strand under `--jit=off`, and the pinned range is
-# that gap's gauge. Closing the interpreter side collapses it to 0.
+# It reads 0 on every tier, and did so under `--jit=eager` before the fall-through
+# landed: a compiled frame reaches the same releases through its own
+# post-`TailCall` block, so the strand was interpreter machinery alone.
 (pin (measure-core "abort-tail-result"
                    (stmt-run (fn []
                                (let [f (ab-mk-caught)]
                                  (fiber/resume f)
                                  (fiber/abort f [1 2 3])))) count-gauge 100 6 60
-                   0.4 0.5) [0 4])
+                   0.4 0.5) 0)
 (pin (measure-core "abort-tail-discarded"
                    (stmt-run (fn []
                                (let [f (ab-mk-caught)]
                                  (fiber/resume f)
                                  (fiber/abort f [1 2 3])
                                  nil))) count-gauge 100 6 60 0.4 0.5) 0)
-# The payload's OWN region, stranded where one frame both allocates it and
-# consumes the abort's result: the two releases the frame owes land in one region
-# slot and it emits one. `abort-mask-caught-literal` needs all three — the
-# fiber's MASK catches (so the caller receives the payload back), the payload is a
-# literal materialized in the aborting frame, and that frame consumes the result —
-# and `abort-mask-caught-bound` is the pair-control that removes the second, the
-# same abort over a payload an enclosing binding owns, whose own release then
-# covers it. Open, declared under F2, tracked as issue #942.
+# The payload's OWN region, where one frame both allocates it and consumes the
+# abort's result. The frame owes TWO releases on that one region — the argument
+# and the result — and holds two references to fund them: its allocation's, and
+# the injection's delivery mint. The post-`TailCall` block carries both, which is
+# what a skipped block costs one region per abort. This probe needs all three
+# ingredients — the fiber's MASK catches (so the caller receives the payload
+# back), the payload is a literal materialized in the aborting frame, and that
+# frame consumes the result — and `abort-mask-caught-bound` is the pair-control
+# that removes the second, the same abort over a payload an enclosing binding
+# owns, whose own release then covers it. A closed control now.
 #
 # It is NOT `abort-tail-result` seen smaller, and the two must stay a pair because
 # resemblance is all there is to go on otherwise: both need the result in tail
-# position and both flatten when it is bound. What separates them is an IMMEDIATE
-# payload, which has no region at all — this probe reads 0 there, since the
-# payload's region is the whole strand, while `abort-tail-result` still strands
-# two regions, since its strand is not the payload. So neither fix closes the
-# other. `abort-discard` above sits one mask bit away from this shape: with
-# `|:yield|` the injected error escapes the fiber instead of being caught by the
-# mask, and that route reclaims.
+# position and both flatten when it is bound. An IMMEDIATE payload separates them
+# — it has no region at all, so this shape reads 0 there while
+# `abort-tail-result` still counts the fiber. `abort-discard` above sits one mask
+# bit away: with `|:yield|` the injected error escapes the fiber instead of being
+# caught by the mask, and that route reclaims.
 (defn ab-mk-mask-caught []
   (fiber/new (fn []
                (yield 1)
@@ -2328,7 +2331,7 @@
                                (let [f (ab-mk-mask-caught)]
                                  (fiber/resume f)
                                  (protect (fiber/abort f "boom"))))) count-gauge
-                   100 6 60 0.4 0.5) 1)
+                   100 6 60 0.4 0.5) 0)
 (pin (measure-core "abort-mask-caught-bound"
                    (stmt-run (fn []
                                (let [p "boom"
@@ -2336,6 +2339,24 @@
                                  (fiber/resume f)
                                  (protect (fiber/abort f p))))) count-gauge 100
                    6 60 0.4 0.5) 0)
+# `fiber/refuse` shares the injection seam with `fiber/abort`
+# (`inject_error_at_suspension`) and leaves by the same `SIG_ABORT`, so it reaches
+# the absorbed-carrier fall-through by the same route and needs its own reading:
+# nothing about the seam distinguishes the two, so a change that reintroduces the
+# strand for one reintroduces it for both. The pair is the same as the abort's —
+# the result RETURNED, and the identical body with a `nil` after the call.
+(pin (measure-core "refuse-tail-result"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-caught)]
+                                 (fiber/resume f)
+                                 (fiber/refuse f [1 2 3])))) count-gauge 100 6
+                   60 0.4 0.5) 0)
+(pin (measure-core "refuse-tail-discarded"
+                   (stmt-run (fn []
+                               (let [f (ab-mk-caught)]
+                                 (fiber/resume f)
+                                 (fiber/refuse f [1 2 3])
+                                 nil))) count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── The physical-id dimension ─────────────────────────────────────────
 # What a CALL costs in physical region ids, the dimension every probe above is
