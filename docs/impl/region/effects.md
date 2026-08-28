@@ -167,6 +167,33 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   declaration costs a read like this is that seed: a fiber named in one arm of a
   branch and read in another loses the branch-arm release window and strands per
   call (`tests/elle/region-fiber-child-effect.lisp`).
+
+  **The child-chain WIRING is `Opaque` too — that write holds nothing.**
+  `fiber/propagate` returns `SIG_PROPAGATE` carrying its fiber argument, and
+  `handle_fiber_propagate_signal` writes that value into the propagating fiber's
+  own `child`/`child_value` fields. The `Mixed` rule below asks whether a handler's
+  write creates a **holder**, and this pair is not one. The free-time walk's Fiber
+  arm enumerates the closure, its env and template, the terminal `signal`,
+  `closure_value` and the seeded parameter baseline — never the child chain
+  (`find_object_cross_refs`). A field no walk consults owes no reference, so
+  nothing is under-counted by leaving it undeclared.
+
+  `fiber/resume` settles the same question the same way. Its handler performs the
+  identical two writes on every resume — `with_child_fiber` step 2 when it
+  descends, `seed_child_inheritance` when it suspends instead — and its
+  `Delivers { args: &[1] }` lists the resume value alone. The fiber argument has
+  never been a store there, and the two wiring natives agree. What keeps the
+  cache honest is not a reference but its consumer: `fiber/child` reads it only
+  while the wiring call's own frame is live or parked, and absorbing the child's
+  signal clears both fields (`VM::absorbs`'s callers).
+
+  The cost of `Mixed` here is the branch-arm seed the read rule above describes,
+  and `defer` is where it lands. `defer` reads its fiber with `fiber/status`, with
+  `fiber/value` in one arm and with `fiber/propagate` in the other, so a store
+  facet on the propagate argument leaves the branch's only release in the arm the
+  success path never takes. Every evaluation then strands the fiber value and its
+  body closure, and a loop whose body is wrapped in `defer` grows without bound
+  (the `defer-while` and `defer-error` probes in `tests/elle/oracle.lisp`).
 - **`Delivers { args }`** — the listed (0-based) arguments are handed to
   **another fiber** by installing them in its signal slot, and the result is
   unbounded. The fiber value installers are the declarants: `fiber/resume`'s
@@ -257,17 +284,18 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 
   **A signal a handler stores for is a store.** A primitive whose work is done by
   the VM's handler for its signal is judged on what that handler does with the
-  argument. `fiber/propagate` returns `SIG_PROPAGATE` carrying its fiber argument,
-  and `handle_fiber_propagate_signal` writes that value into the propagating
-  fiber's own `child`/`child_value` fields — a fiber field, not a fiber frontier,
-  and with no counting seam of its own. So the store is real and uncounted, which
-  is `Mixed`'s property, and the argument stays a store-facet escape seed. The
-  clique is empty either way (one heap argument), so that seed is the whole content
-  of the declaration here — and nothing else would catch its loss: a `PassThrough`
-  claim reads true on the result side (the result IS arg0) and the oracle exempts
-  a signal-carrying return anyway, so the store side is the only thing the
-  declaration is deciding. Pinned solver-side by
-  `fiber_child_declares_opaque_and_propagate_keeps_the_hard_edge`.
+  argument. `git` returns `SIG_QUERY` carrying the closure it is asked to compile,
+  and the handler caches the SPIR-V on that closure's template — a retention that
+  outlives the call, shared by every closure over that template, and recorded by no
+  seam. So the store is real and uncounted, which is `Mixed`'s property, and the
+  argument stays a store-facet escape seed.
+
+  The rule asks for a **holder**, not merely for a write. A handler that writes an
+  argument into a field the free-time walk never enumerates creates no second
+  holder of the region and can under-count nothing, so the strongest true claim is
+  the one that says so — `Opaque`, the child-chain wiring's answer (§ `Opaque`,
+  "The child-chain WIRING is `Opaque` too"). Both halves are pinned solver-side by
+  `fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge`.
 - **`Unknown`** — nobody has looked. The default for unexamined
   primitives, every plugin-supplied definition (the plugin ABI cannot
   carry a claim yet), and the standing classification of user-supplied

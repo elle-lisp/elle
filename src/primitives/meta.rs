@@ -399,6 +399,11 @@ primitive! {
         params: &["f", "workgroup-size"],
         category: "fn",
         example: "(git (fn [a b] (+ a b)))",
+        // Mixed: the SIG_QUERY return hands the closure to the VM's handler, which
+        // caches the compiled SPIR-V on that closure's TEMPLATE — a retention that
+        // outlives the call, is shared by every closure over the template, and is
+        // recorded by no seam. Real, uncounted store (docs/impl/region/effects.md
+        // § "A signal a handler stores for is a store").
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
