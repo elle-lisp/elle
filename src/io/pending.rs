@@ -399,8 +399,8 @@ impl Submitter {
     }
 }
 
-/// The reference a submitted operation holds on the regions its operands live
-/// in, for as long as it is in flight.
+/// The reference a submitted operation holds on the regions that keep its
+/// operands allocated, for as long as it is in flight.
 ///
 /// The pending table is runtime-side state that no free-time cascade reaches, so
 /// nothing counts a reference held by it unless the seam counts its own — the
@@ -411,11 +411,14 @@ struct OperandHold {
     /// The store the regions below belong to. Null once released, which is what
     /// makes a second release a no-op.
     heap: *mut crate::value::fiberheap::FiberHeap,
+    /// The reclamation root of each held value's region — not the region the
+    /// value sits in, which for an adopted operand has no count to hold. See
+    /// [`take`](Self::take).
     regions: [Option<crate::hir::region::RuntimeRegion>; HELD_VALUES],
 }
 
 impl OperandHold {
-    /// Retain the region each of the entry's held values lives in: `op`'s
+    /// Retain what keeps each of the entry's held values allocated: `op`'s
     /// operands, and the fiber that asked.
     ///
     /// The fiber is held for the same reason the operands are, and it is read
@@ -443,23 +446,24 @@ impl OperandHold {
             if !h.value_in_region_store(v) {
                 return None;
             }
-            let region = crate::value::arena::region_of(h, v);
-            // An `Owned` region is reclaimed by its owner's subtree drop however
-            // many references point at it, so a retain on one is inert
-            // (docs/impl/region/ownership.md). A held value that reached this
-            // state would be freed under the completion that reads it, which is
-            // the defect this hold exists to make impossible — so say so here,
-            // at the retain, rather than at the eventual read.
+            // What is retained is the region reclamation listens to, not the one
+            // the value sits in: an operand adopted into an activation's subtree
+            // has no count of its own for a retain to raise (src/io/AGENTS.md §
+            // "A hold retains what reclamation listens to"). The root is what
+            // `release` gives back, so the two are the same region by
+            // construction.
+            let root = crate::value::arena::region_of(h, v).map(|r| h.reclaim_root(r));
             debug_assert!(
-                region.is_none_or(|r| !h.region_is_owned(r)),
-                "an I/O operand lives in an Owned region, which a retain cannot hold",
+                root.is_none_or(|r| !h.region_is_owned(r)),
+                "a reclamation root is Counted by definition — an Owned one means \
+                 the owner walk stopped short of the region that reclaims",
             );
             crate::value::arena::incref_for_escape(
                 h,
-                region,
+                root,
                 crate::value::arena::EscapeSite::IoSubmit,
             );
-            region
+            root
         });
         OperandHold { heap, regions }
     }
@@ -946,6 +950,60 @@ mod tests {
             h.region_generation(region.get()),
             born,
             "disposing of the entry must let the region go",
+        );
+    }
+
+    /// An operand that lives in an `Owned` region is held through the region
+    /// whose count reclamation actually listens to.
+    ///
+    /// The trap: `incref` on an `Owned` region is a no-op by construction — that
+    /// region has no count left, and its owner's subtree drop frees it however
+    /// many references point at it. A hold that retained the operand's own
+    /// region would compile, run, and hold nothing.
+    ///
+    /// The counter-factual: retain the operand's own region instead of its root,
+    /// and the owner's release below frees the subtree — `region_generation`
+    /// moves for the member, and the completion assembles from freed memory.
+    /// `tests/elle/process-io.lisp` § 10 is the program that gets there: a
+    /// connection accepted inside a process, adopted into the per-connection
+    /// `ev/spawn`'s subtree, written to by a `handle-io-forward` submission.
+    #[test]
+    fn an_owned_operand_is_held_through_its_reclamation_root() {
+        let mut pool = BufferPool::new();
+        let mut table = PendingTable::new();
+        let (heap, member, watcher) = value_in_fresh_region();
+        // SAFETY: the heap is leaked for the process.
+        let h = unsafe { &mut *heap };
+        // The owner: a Counted region that adopts the operand's, exactly as an
+        // activation adopts what it captures.
+        let owner = h.new_runtime_region();
+        h.adopt_region(owner, member);
+        let born = h.region_generation(member.get());
+
+        table.insert(
+            id(1),
+            watch_op(&mut pool, watcher),
+            Submitter::detached(heap),
+        );
+        // The owner's last reference goes while the operation is in flight. Only
+        // a count on the owner can stop the subtree drop taking the member.
+        h.decref_region(owner);
+
+        assert_eq!(
+            h.region_generation(member.get()),
+            born,
+            "the operand's owner was released under a submitted operation — a \
+             retain on the operand's own region cannot hold an Owned member",
+        );
+
+        match table.take(id(1)) {
+            Taken::Live(op) => op.retire(0, &mut pool),
+            _ => panic!("a detached submission is never withheld"),
+        }
+        assert_ne!(
+            h.region_generation(member.get()),
+            born,
+            "disposing of the entry must let the subtree go",
         );
     }
 

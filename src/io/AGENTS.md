@@ -278,6 +278,31 @@ Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
 (`src/io/aio/tests/park.rs`) and, for the fiber itself, by
 `a_held_fiber_survives_the_release_of_its_region` (`src/io/pending.rs`).
 
+### A hold retains what reclamation listens to
+
+A retain on an `Owned` region is inert: that region is reclaimed by its owner's
+subtree drop however many references point at it
+(docs/impl/region/ownership.md). So the hold does not retain the operand's own
+region — it retains the operand's **reclamation root**, the ancestor whose count
+the subtree's fate hangs on. For a `Counted` operand the root is the region
+itself and nothing changes; for an `Owned` one the root is what a count can
+still reach. `FiberHeap::reclaim_root` is the walk, and `release` lets go of the
+root it recorded, not of the region it started from.
+
+An operand really does arrive `Owned`. A connection accepted inside a process
+and handed to a per-connection `ev/spawn` is adopted into that activation's
+subtree, and `handle-io-forward` then submits a write on it for the child
+scheduler. `tests/elle/process-io.lisp` § 10 is that program, and the retain on
+the port's own region there holds nothing at all.
+
+Retaining the root keeps the whole subtree for the operation's lifetime, which
+is more than the operand needs. That is the same trade the list of operands
+already makes for a write's copied payload: one seam, one rule, and a reference
+costs until the operation ends.
+
+Pinned by `an_owned_operand_is_held_through_its_reclamation_root`
+(`src/io/pending.rs`).
+
 ### A hold is let go while its store is still there
 
 A release names a region in a store, so every release must run before that store
