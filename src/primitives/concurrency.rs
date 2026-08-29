@@ -115,6 +115,9 @@ fn spawn_closure_impl(
     // The worker inherits the spawning VM's Unicode generation: a program is
     // one set of string semantics, whichever VM computes a length.
     let unicode_generation = ctx.unicode_generation();
+    // Moved into the worker thread beside the generation: a worker's stdlib is a
+    // stdlib, so it caches too, and it must cache where its parent was told to.
+    let stdlib_cache = ctx.stdlib_cache();
     // Capabilities flow down across a thread, as they do across a fiber
     // (docs/signals/capabilities.md § Transitivity). The worker runs in a fresh
     // VM whose root fiber is what the capability gate reads, so without this the
@@ -194,11 +197,12 @@ fn spawn_closure_impl(
                 // above are in place, which init_stdlib needs (gensym during load).
                 // The light worker (`sys/spawn-vm`) skips this — primitives only.
                 if load_stdlib {
+                    vm.set_stdlib_cache(stdlib_cache.clone());
                     crate::primitives::module_init::init_stdlib(
                         &mut vm,
                         &mut symbols,
                         &mut compile,
-                        &crate::compiler::stdlib_cache::StdlibCache::Process,
+                        &stdlib_cache,
                     );
                 }
 

@@ -125,6 +125,10 @@ impl RuntimeCore {
         &mut self,
         cache: &crate::compiler::stdlib_cache::StdlibCache,
     ) -> crate::primitives::module_init::StdlibSource {
+        // Record it on the VM so a `sys/spawn` worker, which reaches the
+        // spawning instance only through `ctx.vm()`, inherits this directory
+        // instead of falling back to the process-wide one.
+        self.vm.set_stdlib_cache(cache.clone());
         let (vm, symbols, compile) = self.parts();
         init_stdlib(vm, symbols, compile, cache)
     }

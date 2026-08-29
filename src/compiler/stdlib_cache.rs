@@ -392,4 +392,42 @@ mod tests {
         let _ = probe(&mut a);
         let _ = probe(&mut b);
     }
+
+    /// A `sys/spawn` worker runs `init_stdlib` on its own thread, so it reads
+    /// and writes a cache of its own. It must use the directory its parent was
+    /// given: a worker that falls back to the process-wide one writes megabytes
+    /// into a place nobody named, which is the leak the construction parameter
+    /// exists to close.
+    #[test]
+    fn a_spawned_worker_caches_where_its_parent_was_told_to() {
+        use crate::pipeline::compile_file_repl;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Dir(dir.path().to_path_buf()));
+
+        // The parent's own store already filled the directory, and the worker
+        // writes the same key. Clear it, so anything present afterwards can
+        // only have been written by the worker.
+        let entries = |p: &std::path::Path| -> usize {
+            std::fs::read_dir(p).expect("read cache dir").count()
+        };
+        for entry in std::fs::read_dir(dir.path()).expect("read cache dir") {
+            std::fs::remove_file(entry.expect("entry").path()).expect("clear");
+        }
+        assert_eq!(entries(dir.path()), 0, "cleared");
+
+        let (vm, symbols, cctx) = rt.parts();
+        let result =
+            compile_file_repl("(sys/join (sys/spawn (fn [] 1)))", symbols, cctx, "<spawn>")
+                .expect("spawn form compiles");
+        vm.execute_scheduled(&result.0.bytecode, symbols, cctx)
+            .expect("spawn runs");
+
+        assert_eq!(
+            entries(dir.path()),
+            1,
+            "the worker must cache into the directory its parent was given, \
+             not the process-wide one"
+        );
+    }
 }

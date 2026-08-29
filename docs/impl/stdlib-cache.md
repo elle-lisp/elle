@@ -63,6 +63,13 @@ instance that wrote a cache from the instance that read it.
 cache that silently never hits still yields a working runtime, so behaviour
 alone cannot distinguish the two; the tests assert on this instead.
 
+A `sys/spawn` worker builds its own runtime on a new thread and runs
+`init_stdlib` there, so it caches too. It reaches the spawning instance only
+through `ctx.vm()`, so the policy is recorded on the VM by
+`RuntimeCore::load_stdlib` and moved into the worker thread beside the Unicode
+generation — a worker caches where its parent was told to, never in the
+process-wide directory.
+
 ## Serialization format
 
 The on-disk format is a single `StoredBytecode` struct
