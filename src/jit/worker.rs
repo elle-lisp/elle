@@ -11,7 +11,7 @@ use crate::jit::{JitCode, JitCompiler, JitError};
 use crate::lir::LirFunction;
 use crate::value::SymbolId;
 /// Cumulative Cranelift compilation time (ns) and task count across the
-/// process, readable by embedders for profiling (`ELLE_PROFILE=1`).
+/// process, readable by embedders for profiling.
 pub static JIT_COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static JIT_COMPILE_TASKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 

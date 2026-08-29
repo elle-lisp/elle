@@ -253,16 +253,13 @@ pub fn load_bytecode(
         &mut alloc,
         symbols,
     )?;
-    if std::env::var("ELLE_PROFILE").is_ok() {
-        eprintln!("[stdlib-cache] deserialize_templates: {:?}", t0.elapsed());
-    }
+    let tracing = crate::trace::compile();
+    crate::trace::phase(tracing, "compile", "stdlib deserialize_templates", t0);
     let t1 = std::time::Instant::now();
     let entry = templates
         .pop()
         .expect("deserialize_templates returns one per input");
-    if std::env::var("ELLE_PROFILE").is_ok() {
-        eprintln!("[stdlib-cache] pop+extract: {:?}", t1.elapsed());
-    }
+    crate::trace::phase(tracing, "compile", "stdlib pop+extract", t1);
     // Restore the cross-unit registries the skipped stdlib compile would have
     // populated.
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
