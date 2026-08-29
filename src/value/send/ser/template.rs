@@ -66,5 +66,7 @@ pub(super) fn sendable_from_template(
         lir_value_pool,
         child_protos,
         merged_slots: t.merged_slots.iter().copied().collect(),
+        frame_release_slots: (*t.frame_release_slots).clone(),
+        frame_release_regions: (*t.frame_release_regions).clone(),
     })
 }

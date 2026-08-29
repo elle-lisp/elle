@@ -285,3 +285,58 @@ fn parameter_holding_stdout_port_is_sendable() {
         );
     });
 }
+
+// ── an abandoned frame's release tables cross the boundary ───────────
+
+#[test]
+fn closure_round_trips_preserving_frame_release_tables() {
+    // `frame_release_slots`/`frame_release_regions` are the table an error
+    // exit walks to run the releases the abandoned frame still owed
+    // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
+    // it still owes"). A closure keeps its body across the boundary, so it
+    // keeps that obligation: reconstruct it with empty tables and every
+    // region an erroring worker frame owed is stranded.
+    crate::value::arena::with_test_region(|| {
+        let heap_ptr = crate::value::arena::leaked_test_heap();
+        let template = Rc::new(ClosureTemplate {
+            num_locals: 1,
+            num_params: 1,
+            frame_release_slots: Rc::new(vec![3u16, 7]),
+            frame_release_regions: Rc::new(vec![11u32, 13]),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
+        });
+        let val = crate::value::heap::alloc(
+            unsafe { &mut *heap_ptr },
+            HeapObject::Closure {
+                closure: Closure {
+                    template: crate::value::TemplateRef::new(template),
+                    env: crate::value::region_slice::RegionSlice::empty(),
+                    squelch_mask: SignalBits::EMPTY,
+                },
+                traits: Value::NIL,
+            },
+        );
+
+        let bundle = SendBundle::from_value(
+            val,
+            unsafe { &*heap_ptr },
+            &crate::symbol::SymbolTable::new(),
+        )
+        .expect("a plain closure is sendable");
+        let restored = into_value_in_region(|ctx, symbols| bundle.into_value(ctx, symbols));
+
+        let closure = restored.as_closure().expect("restored value is a closure");
+        assert_eq!(
+            &closure.template.frame_release_slots[..],
+            &[3u16, 7],
+            "the value-routed release slots must cross the boundary — an empty \
+             table silently strands every region an erroring worker frame owed"
+        );
+        assert_eq!(
+            &closure.template.frame_release_regions[..],
+            &[11u32, 13],
+            "the slot-routed release regions must cross with them; the two \
+             halves of one table are useless apart"
+        );
+    });
+}
