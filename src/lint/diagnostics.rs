@@ -21,6 +21,41 @@ impl fmt::Display for Severity {
     }
 }
 
+/// A warning the linter can raise: its code and the rule name that always
+/// travels with it.
+///
+/// The pair has one home, so a rule cannot pick up a second code — or a code a
+/// second name — by being spelled out again at a new emission site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LintCode {
+    pub code: &'static str,
+    pub rule: &'static str,
+}
+
+impl LintCode {
+    pub const fn new(code: &'static str, rule: &'static str) -> Self {
+        Self { code, rule }
+    }
+}
+
+pub const ARITY_MISMATCH: LintCode = LintCode::new("W002", "arity-mismatch");
+pub const MUTABLE_BINDING_NEVER_ASSIGNED: LintCode =
+    LintCode::new("W003", "mutable-binding-never-assigned");
+pub const UNUSED_BINDING: LintCode = LintCode::new("W004", "unused-binding");
+pub const NON_TAIL_SELF_RECURSION: LintCode = LintCode::new("W005", "non-tail-self-recursion");
+
+/// Every warning the linter raises, in code order.
+///
+/// `docs/cookbook/lint-rules.md` publishes this table to rule authors as the
+/// index of codes already taken, and `diagnostics/tests.rs` holds the two in
+/// step. A rule that lands without its row in the cookbook fails that test.
+pub const WARNINGS: &[LintCode] = &[
+    ARITY_MISMATCH,
+    MUTABLE_BINDING_NEVER_ASSIGNED,
+    UNUSED_BINDING,
+    NON_TAIL_SELF_RECURSION,
+];
+
 /// A linter diagnostic with source location
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -54,6 +89,12 @@ impl Diagnostic {
             suggestions: Vec::new(),
             function: None,
         }
+    }
+
+    /// A warning built from its registry entry, which is how every rule raises
+    /// one: the code and the rule name arrive together and cannot disagree.
+    pub fn warn(lint: LintCode, message: impl Into<String>, location: Option<SourceLoc>) -> Self {
+        Self::new(Severity::Warning, lint.code, lint.rule, message, location)
     }
 
     /// Format as human-readable output

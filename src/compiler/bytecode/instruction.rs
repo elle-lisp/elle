@@ -69,13 +69,13 @@ pub enum Instruction {
     /// Array set (index)
     ArrayMutSet,
 
-    /// Specialized arithmetic operations
+    /// Integer-only arithmetic (`docs/impl/bytecode.md` § Arithmetic)
     AddInt,
     SubInt,
     MulInt,
     DivInt,
 
-    /// Generic arithmetic (handles floats)
+    /// Polymorphic arithmetic (int or float operands)
     Add,
     Sub,
     Mul,

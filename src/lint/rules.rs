@@ -1,6 +1,9 @@
 //! Linting rules for Elle code
 
-use super::diagnostics::{Diagnostic, Severity};
+use super::diagnostics::{
+    Diagnostic, ARITY_MISMATCH, MUTABLE_BINDING_NEVER_ASSIGNED, NON_TAIL_SELF_RECURSION,
+    UNUSED_BINDING,
+};
 use crate::primitives::registration::ALL_TABLES;
 use crate::reader::SourceLoc;
 use crate::value::types::Arity;
@@ -17,10 +20,8 @@ pub(crate) fn check_call_arity(
     if let Some(func_name) = symbol_table.name(func_sym) {
         if let Some(arity) = builtin_arity(func_name) {
             if !arity.matches(arg_count) {
-                let diag = Diagnostic::new(
-                    Severity::Warning,
-                    "W002",
-                    "arity-mismatch",
+                let diag = Diagnostic::warn(
+                    ARITY_MISMATCH,
                     format!(
                         "function '{}' expects {} argument(s) but got {}",
                         func_name, arity, arg_count
@@ -87,10 +88,8 @@ pub(crate) fn check_unused_binding(
     let Some(name) = reportable_name(arena.get(binding), symbol_table) else {
         return;
     };
-    let mut diag = Diagnostic::new(
-        Severity::Warning,
-        "W004",
-        "unused-binding",
+    let mut diag = Diagnostic::warn(
+        UNUSED_BINDING,
         format!("binding '{name}' is never used"),
         location.clone(),
     );
@@ -127,10 +126,8 @@ pub(crate) fn check_non_tail_self_recursion(
     let Some(name) = reportable_name(arena.get(enclosing), symbol_table) else {
         return;
     };
-    let mut diag = Diagnostic::new(
-        Severity::Warning,
-        "W005",
-        "non-tail-self-recursion",
+    let mut diag = Diagnostic::warn(
+        NON_TAIL_SELF_RECURSION,
         format!("'{name}' calls itself outside tail position, so the stack grows with the recursion depth"),
         location.clone(),
     );
@@ -174,10 +171,8 @@ pub(crate) fn check_mutable_never_assigned(
     let Some(name) = reportable_name(inner, symbol_table) else {
         return;
     };
-    let mut diag = Diagnostic::new(
-        Severity::Warning,
-        "W003",
-        "mutable-binding-never-assigned",
+    let mut diag = Diagnostic::warn(
+        MUTABLE_BINDING_NEVER_ASSIGNED,
         format!("mutable binding '{name}' is never reassigned"),
         location.clone(),
     );

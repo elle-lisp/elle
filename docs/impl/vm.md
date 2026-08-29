@@ -37,8 +37,13 @@ The main loop in `execute.rs`:
 5. Push result
 6. Advance instruction pointer
 
-Specialized fast paths exist for common sequences (e.g., `LoadLocal` +
-`AddInt` + `StoreLocal` for counter increments).
+The loop dispatches one instruction at a time; no fused sequences exist.
+Specialization lives inside the handlers instead. The polymorphic
+arithmetic ops test their two operands for integers and take a wrapping
+integer path before falling back to the general one
+(`src/vm/arithmetic.rs`). The integer-only `AddInt`/`SubInt`/`MulInt`/
+`DivInt` handlers skip even that test, but no emitter produces those
+bytecodes — see [impl/bytecode.md](bytecode.md) § Arithmetic.
 
 ## Fiber integration
 
