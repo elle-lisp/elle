@@ -56,6 +56,43 @@ impl VM {
         regions
     }
 
+    /// Mint the DELIVERY reference of a payload this tail call is RAISING, where
+    /// the payload is one of the call's own arguments — the shape a dynamic
+    /// `emit` takes, its non-literal first argument making the raise an ordinary
+    /// native call (docs/impl/region/mechanism.md § "What the fall-through owes,
+    /// a signal exit owes too").
+    ///
+    /// The catcher's read of the signal consumes exactly one reference, and every
+    /// reference this frame holds answers to the frame's own release routes: the
+    /// borrowed-argument retain is consumed by the exit (and no-oped at a
+    /// restart's replay by its nil stamp), an owned argument's release sits in the
+    /// abandoned block for the walk or that same replay to run. So the delivery is
+    /// minted here, exactly as `handle_emit` mints it on the literal path — and
+    /// recorded with it (`Fiber::emit_delivery`), so the abandoned-frame walk and
+    /// the parked frame's discharge stop exempting the payload's region and
+    /// reclaim the frame's own reference to a payload it allocated.
+    ///
+    /// A payload the native BUILT — a fresh error struct — is nobody's argument
+    /// and funds the delivery with its birth reference, so the identity test is
+    /// what keeps this off every ordinary native raise.
+    fn mint_raised_argument_delivery(&mut self, args: &[Value], payload: Value) {
+        if !args.iter().any(|a| a.bit_identical(payload)) {
+            return;
+        }
+        let heap = unsafe { &mut *self.heap_ptr };
+        // An immediate payload crosses no region, so there is nothing to fund and
+        // nothing for the record to say stands.
+        let Some(region) = crate::value::arena::region_of(heap, payload) else {
+            return;
+        };
+        crate::value::arena::incref_for_escape(
+            heap,
+            Some(region),
+            crate::value::arena::EscapeSite::EmitEscape,
+        );
+        self.fiber.emit_delivery = Some(payload);
+    }
+
     /// Release the regions [`Self::take_borrowed_arg_retains`] resolved. Split
     /// from the resolution so the signal handler runs between the two — see that
     /// method for why.
@@ -93,7 +130,9 @@ impl VM {
     /// continuation at the post-`TailCall` ip, so the block does run on resume and
     /// the retain naming the parked payload is the reference that park owes the
     /// body (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
-    /// exit owes too").
+    /// exit owes too"). A terminal `:error` consumes them like any other exit and
+    /// mints the payload's delivery instead
+    /// ([`Self::mint_raised_argument_delivery`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tail_call_inner(
         &mut self,
@@ -198,12 +237,20 @@ impl VM {
             // suspended, by the discard discharge that stands in for it. Only that
             // one: a park delivers ONE payload and the discharge releases ONE
             // reference of it, so a retain on any other region has no stand-in.
-            let spare = matches!(
-                crate::signals::dispatch::classify(bits, &value),
-                crate::signals::dispatch::SignalAction::Suspend
-            )
-            .then_some(value);
+            let action = crate::signals::dispatch::classify(bits, &value);
+            let spare =
+                matches!(action, crate::signals::dispatch::SignalAction::Suspend).then_some(value);
             let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, spare);
+            // A terminal :error hands the payload to a catcher, whose read
+            // consumes one reference the frame's own routes do not fund — so the
+            // raise mints it here where the payload is an argument of this call.
+            // A HALT takes none for the reason `handle_emit` takes none: the
+            // fiber is promoted to `:dead`, so that delivery has no consumer.
+            // Minted before the handler, which is where this fiber stops being
+            // the one whose frames hold the payload.
+            if action == crate::signals::dispatch::SignalAction::Error {
+                self.mint_raised_argument_delivery(&args, value);
+            }
             let bits = self.handle_primitive_signal_tail(bits, value);
             self.run_borrowed_arg_retains(owed);
             // A fiber CARRIER (`fiber/resume`/`fiber/abort`/`fiber/propagate`/

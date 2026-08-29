@@ -141,10 +141,13 @@ pub struct Fiber {
     /// same value is `signal`'s.
     pub error_loc: Option<(Value, crate::error::SourceLoc)>,
     /// The `SIG_ERROR` payload whose DELIVERY reference something OTHER than this
-    /// fiber's frames minted. Two raises record here, for one reason:
+    /// fiber's frames minted. Three raises record here, for one reason:
     ///
     /// - an `emit` raise — the `EmitEscape` retain `handle_emit` (and its JIT
     ///   mirror) takes, which the resumer's release of the resume result consumes;
+    /// - the same raise leaving the emit PRIMITIVE in tail position, where the
+    ///   signal exit takes that retain in `handle_emit`'s place
+    ///   (`VM::mint_raised_argument_delivery`);
     /// - an injected `fiber/abort` / `fiber/refuse` payload — the `AbortDelivery`
     ///   retain the injection takes, recorded on the aborted fiber
     ///   (`do_fiber_abort`) and on the aborting one where the error escapes it
