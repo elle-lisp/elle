@@ -168,4 +168,49 @@
 (assert (empty? (get (portrait:module a5) :false-mutable))
         "immutable binding of a mutable value is not a false-mutable")
 
+# ── Unused-binding advisory ─────────────────────────────────────────────
+
+# `spare` is bound and never read. The linter flags it and the portrait
+# reflects the flag, at both granularities.
+(def a7 (compile/analyze "
+(defn tidy [] (let [spare 1] 2))
+(tidy)
+"))
+(def ub (get (portrait:module a7) :unused-binding))
+(assert (array? ub) "module portrait has an unused-binding list")
+(assert (not (empty? ub)) "spare is flagged unused")
+(assert (contains? (get (first ub) :message) "'spare'")
+        "advisory names the binding spare")
+
+(def tidy-obs (get (portrait:function a7 :tidy) :observations))
+(assert (not (empty? (filter (fn [o] (= (get o :kind) :unused-binding)) tidy-obs)))
+        "tidy's portrait observes its own unused binding")
+
+(assert (contains? (portrait:render-module (portrait:module a7)) "never used")
+        "module render shows the unused-binding section")
+
+# ── Non-tail-recursion advisory ─────────────────────────────────────────
+
+(def a8
+  (compile/analyze "
+(defn depth [n] (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+"))
+(def ntr (get (portrait:module a8) :non-tail-recursion))
+(assert (not (empty? ntr)) "depth's self-call is flagged")
+
+(def depth-obs (get (portrait:function a8 :depth) :observations))
+(assert (not (empty? (filter (fn [o] (= (get o :kind) :non-tail-recursion))
+                             depth-obs)))
+        "depth's portrait observes its own non-tail recursion")
+
+# Attribution is exact — the accumulator form inherits nothing.
+(def a9
+  (compile/analyze "
+(defn depth [n] (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+(defn total [n acc] (if (= n 0) acc (total (- n 1) (+ acc 1))))
+"))
+(def total-obs (get (portrait:function a9 :total) :observations))
+(assert (empty? (filter (fn [o] (= (get o :kind) :non-tail-recursion)) total-obs))
+        "total does not inherit depth's advisory")
+
 (println "all portrait tests passed")

@@ -69,11 +69,19 @@ HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
 
 ### Diagnostic codes
 
-- `W001` — naming-kebab-case
-- `W002` — arity-mismatch
-- `W003` — retired (was reserved for non-exhaustive-match; unreachable
-  match arms are a compile error in the analyzer, not a lint)
-- Use `W004+` for new warnings, `E00x` for errors, `I00x` for info.
+| Code | Rule | Fires on |
+|------|------|----------|
+| `W001` | — | Unclaimed. |
+| `W002` | `arity-mismatch` | A call to a built-in with the wrong argument count. |
+| `W003` | `mutable-binding-never-assigned` | A `var`/`@` binding that no `assign` targets. |
+| `W004` | `unused-binding` | A `def`/`let`/`letrec` binding with zero uses. |
+| `W005` | `non-tail-self-recursion` | A function whose self-call is not in tail position. |
+
+Use `W006+` for new warnings, `E00x` for errors, `I00x` for info.
+
+`W004` reads the def-use chains `src/hir/defuse.rs` builds, and `W005`
+reads the `is_tail` flag `src/hir/tailcall.rs` sets. Neither rule tracks
+its own state, and neither adds a field to `BindingInner`.
 
 ### How linting runs
 

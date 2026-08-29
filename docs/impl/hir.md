@@ -34,8 +34,10 @@ signal profiles.
    [impl/escape.md](escape.md))
 3. **Signal inference** — interprocedural: traces call chains to
    determine whether a function can yield, error, or is silent
-4. **Tail position marking** — identifies calls in tail position for
-   TCO
+4. **Tail position marking** — sets `is_tail` on the calls in tail position,
+   for TCO. Analysis runs it, so every `AnalyzeResult` carries honest flags:
+   the linter and the call-graph builder both read `is_tail` off the analyzed
+   tree, and `regularize` marks again after map fusion introduces new nodes
 5. **Special form analysis** — `if`, `let`, `begin`, `block`,
    `match`, `defmacro`, etc. each have dedicated handlers
 
@@ -49,6 +51,59 @@ Three signal categories:
 
 `silence` constrains a parameter to be silent at compile time.
 The inference propagates through call chains interprocedurally.
+
+## Dead binding elimination
+
+`src/hir/dead.rs` removes a `let`/`letrec` binding when two facts hold: the
+binding has zero uses, and its initializer is provably effect-free. Removing
+the binding removes the initializer with it, so a dead call to an effect-free
+function never reaches LIR.
+
+The pass runs from `regularize`, after dead-arm pruning and map fusion, and
+before `functionalize`. That altitude is the same one `prune_typeof_match_arms`
+uses, for the same reason: the region solver runs after the HIR transforms, so
+a call deleted here never mints a region and strands no release obligation.
+
+### A silent function is not a pure function
+
+`Signal::silent()` says a function emits no signal bits. It does **not** say the
+function has no effect. Every `%`-intrinsic is registered silent, and
+`%push-array-mut` appends to its argument in place. A rule that eliminated any
+silent call would delete that append and change the program's output.
+
+So the pass proves effect-freedom, not silence, and it proves it from two
+facts that cannot lie:
+
+- **The node's signal is `Signal::silent()`.** The analyzer combines the callee
+  signal with every argument's signal, so a silent call node also means every
+  argument is silent, and that a polymorphic callee got silent arguments. A
+  yielding callback handed to an otherwise-silent higher-order function shows up
+  here and blocks elimination.
+- **The callee stores nothing.** For a primitive, `RegionEffect::Immediate` and
+  `RegionEffect::Fresh` are the two declarations that state no argument is
+  stored anywhere outliving the call, and `moves_out` marks the natives that
+  remove an element from a container argument. In-place mutation is a store into
+  an argument, so `Funnel`, `Stores`, `Sends`, `Mixed`, and `PassThrough` are all
+  rejected. For a user-defined callee, the same predicate runs over its lambda
+  body, to a fixpoint.
+
+The fixpoint starts with nothing proven pure and grows. A self-recursive
+function therefore never proves pure, which keeps the pass out of the
+termination question: it can only delete calls that provably return.
+
+### What the pass declines to touch
+
+- **File-scope bindings** (`is_file_scope`). A module's value is its body's last
+  expression, but the top-level names are also what `(environment)` reflects.
+- **`Define` nodes.** A `Define` evaluates to its own value, so it can be the
+  result of the enclosing body. Deleting one can change that result; deleting a
+  `let` binding cannot.
+- **Mutated, synthetic, primitive, and cell-materialized bindings.** An `assign`
+  records a def rather than a use, so a mutated binding can read as unused while
+  an `Assign` node still names it.
+- **Lambda initializers.** Binding an unused closure allocates and does nothing
+  else, so removing it would be sound. The pass leaves it for now; the win is
+  small and the blast radius across the corpus is not.
 
 ## Kernel and sugar (design target)
 
@@ -132,6 +187,8 @@ src/hir/analyze/mod.rs    Main analysis entry point
 src/hir/analyze/binding.rs  Binding resolution
 src/hir/analyze/forms.rs  Special form handlers
 src/hir/analyze/special.rs  More special forms
+src/hir/tailcall.rs       Tail position marking
+src/hir/dead.rs           Dead binding elimination
 ```
 
 ---

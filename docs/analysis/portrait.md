@@ -54,22 +54,33 @@ structured reports.
 ## Advisories
 
 A portrait reflects the compiler's lint diagnostics as advisories — it does not
-re-derive them. The relevant rule here is `mutable-binding-never-assigned`: a
-binding declared mutable (`var`/`@`) yet never reassigned via `assign`. This
-surfaces the common conflation of a mutable **binding** with a mutable
-**value**: `(let [buf @""] (push buf x))` mutates the *value* but the *binding*
-never changes, so `buf` should stay immutable. Because the advisory is read from
-`compile/diagnostics`, portrait and `elle lint` always agree.
+re-derive them. Three rules reach a portrait:
 
-The advisory appears at two granularities:
+| Rule | Advisory | What it says |
+|---|---|---|
+| `mutable-binding-never-assigned` | `:false-mutable` | A binding declared mutable (`var`/`@`) that no `assign` targets. |
+| `unused-binding` | `:unused-binding` | A `def`/`let`/`letrec` binding nothing reads. |
+| `non-tail-self-recursion` | `:non-tail-recursion` | A function whose self-call sits outside tail position. |
+
+The false-mutable advisory surfaces the common conflation of a mutable
+**binding** with a mutable **value**: `(let [buf @""] (push buf x))` mutates the
+*value* but the *binding* never changes, so `buf` should stay immutable. Because
+every advisory is read from `compile/diagnostics`, portrait and `elle lint`
+always agree.
+
+Each advisory appears at two granularities:
 
 - **Module** — `(get (portrait:module a) :false-mutable)` lists every flagged
-  binding across the module (including top-level ones).
-- **Function** — `(portrait:function a :f)` includes a `:false-mutable`
-  observation for each flag *inside* `f`. Per-function attribution is exact, not
-  by line range: the linter tags each diagnostic with its nearest enclosing
-  named function (the `:function` field on a diagnostic), and the observation
-  filters on it. A flag in a nested closure is attributed to the inner function.
+  binding across the module (including top-level ones). `:unused-binding` and
+  `:non-tail-recursion` list theirs the same way.
+- **Function** — `(portrait:function a :f)` includes one observation for each
+  flag *inside* `f`. Per-function attribution is exact, not by line range: the
+  linter tags each diagnostic with its nearest enclosing named function (the
+  `:function` field on a diagnostic), and the observation filters on it. A flag
+  in a nested closure is attributed to the inner function.
+
+Adding a rule to a portrait is one row in `lint-kinds` (`lib/portrait.lisp`),
+which both granularities read.
 
 ## Phases
 
