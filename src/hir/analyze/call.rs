@@ -120,7 +120,7 @@ impl<'a> Analyzer<'a> {
                             // analysis — the import keeps the conservative
                             // `Polymorphic` projection.
                             self.last_import_projection = self.import_ctx.and_then(|ptr| unsafe {
-                                (*ptr).get_or_compile_projection(&resolved)
+                                (*ptr).get_or_compile_projection(&resolved, self.symbols)
                             });
                         }
                     }

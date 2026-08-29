@@ -242,3 +242,54 @@ fn test_projection_yields_function() {
         ":producer should be yields"
     );
 }
+
+// ============================================================================
+// 4. THE PROBE COMPILES IN THE CALLER'S SYMBOL TABLE
+// ============================================================================
+
+#[test]
+fn import_projection_probe_interns_into_the_callers_symbol_table() {
+    // `((import "…"))` makes the analyzer compile the imported file to read its
+    // signal projection (src/hir/analyze/call.rs § "Import projection
+    // detection"). Which symbol table that compile runs in is not an internal
+    // detail: macro transformers compile lazily on first expansion and cache on
+    // the shared expander, and a transformer's quoted literals bind to the table
+    // that compiled it. A probe running in a throwaway table therefore caches
+    // transformers whose ids mean nothing in the instance's table, and a later
+    // expansion comparing against an instance-table symbol takes the wrong
+    // branch — `each`'s `(= (syntax->datum iter-or-in) 'in)` is the shape that
+    // bites.
+    //
+    // The caller's table learning the module's quoted symbol is the observable
+    // form of the invariant: `compile_file` never executes the import, so the
+    // probe is the only thing that could have interned it.
+    let dir = std::env::temp_dir().join(format!(
+        "elle-projection-probe-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let module = dir.join("probe_module.lisp");
+    // A quoted symbol is runtime data, so compiling this file must intern
+    // `probe-only-marker` — unlike a binding name, which analysis resolves into
+    // the binding arena instead.
+    std::fs::write(
+        &module,
+        "(fn [] (def marker 'probe-only-marker) {:marker marker})\n",
+    )
+    .expect("write module");
+
+    let mut symbols = SymbolTable::new();
+    let source = format!("(def m ((import \"{}\")))\nm\n", module.display());
+    let _ = compile_file(&source, &mut symbols, "<probe-main>");
+
+    let learned = symbols.get("probe-only-marker");
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(
+        learned.is_some(),
+        "the import projection probe must compile in the caller's symbol table; \
+         compiling in a throwaway one leaves the instance's table without the \
+         module's symbols and caches transformers bound to a table nothing else \
+         can read"
+    );
+}
