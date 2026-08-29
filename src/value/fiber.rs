@@ -180,6 +180,26 @@ pub struct Fiber {
     /// with the parked signal, so every delivery route consumes it exactly once
     /// and a later park of a different shape starts from `false`.
     pub resume_value_unfunded: bool,
+    /// The capability-denial payload parked in [`Self::signal`], whose region the
+    /// resume owes one decref.
+    ///
+    /// A park's payload carries two references and the resume consumes both: the
+    /// delivery, which the resumer's release of the resume result takes, and the
+    /// suspending body's own, released by the continuation past the suspend. A
+    /// denial has no body reference to release — the denied primitive never ran, so
+    /// the replayed frame's result release targets the mediating parent's resume
+    /// value — and the payload's birth reference is left over
+    /// (docs/impl/region/owner.md § "A park with no body reference owes one release
+    /// at the resume"). Only the denial site knows a park has that shape, so it
+    /// records the payload here and `prim_fiber_resume` runs the decref.
+    ///
+    /// Carried as the payload rather than a flag so the release is gated on
+    /// representation identity with the live parked signal, exactly as
+    /// [`Self::emit_delivery`] is: an install that displaces the denial payload
+    /// without resuming — `fiber/abort`'s injection, a hard kill's terminal error —
+    /// leaves a record that names a value no longer in the slot, and the mismatch
+    /// withholds a decref that install did not owe.
+    pub denial_payload: Option<Value>,
     /// Suspended execution frames. Set when the fiber suspends; consumed
     /// when it resumes.
     ///
@@ -419,6 +439,13 @@ impl Fiber {
             }
             _ => None,
         };
+        // A discharged park is over, and the discharge below already runs its one
+        // decref — so the record must not survive to a later resume of this fiber
+        // (a hard kill leaves an `:error` fiber resumable). See
+        // [`Fiber::denial_payload`].
+        if signal.is_some() {
+            self.denial_payload = None;
+        }
         // The signal's payload leaves with the fiber's result — read through
         // `fiber/value`, or accounted by the signal discharge below — so a slot
         // naming its region is not this discharge's to release. Reported rather
@@ -459,6 +486,7 @@ impl Fiber {
             error_loc: None,
             emit_delivery: None,
             resume_value_unfunded: false,
+            denial_payload: None,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],
@@ -496,6 +524,7 @@ impl Fiber {
             error_loc: None,
             emit_delivery: None,
             resume_value_unfunded: false,
+            denial_payload: None,
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],

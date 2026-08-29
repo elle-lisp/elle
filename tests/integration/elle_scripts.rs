@@ -574,6 +574,23 @@ fn region_primitive_resume_uaf() {
     );
 }
 
+// Guard — the resume of a mediated capability denial releases the one reference
+// the park has no body to release, and that decref answers for the payload's own
+// left-over reference, never for a holder's (docs/impl/region/owner.md § "A park
+// with no body reference owes one release at the resume"). The witness binds the
+// payload in the mediating parent, resumes the fiber past the denial, churns the
+// heap, then reads three payload fields; taking the holder's reference instead
+// frees the struct under those reads — SIGSEGV under guardfree. The leak face is
+// the region-count bound in the same file, which the object gauge in
+// `tests/elle/oracle.lisp` cannot see.
+#[test]
+fn region_capability_denial_resume_uaf() {
+    run_elle_script_with_args(
+        "region-capability-denial-resume-leak",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `fiber/propagate` installs the child's parked payload as this fiber's
 // own `signal`, which is a fresh park and owes its own delivery reference
 // (docs/impl/region/owner.md § "Park/unpark symmetry"). The propagating fiber's

@@ -198,10 +198,10 @@ parked fiber's accounting symmetric with its unpark:
 - **The parked signal's escape retain has a release on every path.** A suspending signal's
   payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
   `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume
-  path consumes it (the resumed body's own pending release, or `release_parked_signal` for
-  an io request); a fiber that can never run again consumes it at its terminal teardown or
-  free-path discharge instead (`release_discarded_signal` via `Fiber::take_parked_state`) —
-  the `yield-discard`/`denied-discard` probes pin both faces.
+  path consumes it (the resumed body's own pending release, or `release_parked_signal` where
+  the park has no body reference — below); a fiber that can never run again consumes it at
+  its terminal teardown or free-path discharge instead (`release_discarded_signal` via
+  `Fiber::take_parked_state`) — the `yield-discard`/`denied-discard` probes pin both faces.
 - **A fiber body owns one reference of every value it yields.** Two references answer for a
   parked payload, and they answer to different consumers. The escape retain above is the
   **delivery** reference: the resumer's compiler-emitted release of the resume result consumes
@@ -232,6 +232,19 @@ parked fiber's accounting symmetric with its unpark:
   region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
   the releases it still owes"). A halt takes neither the retain nor the record — a halted
   fiber is promoted to `:dead` and never resumed, so its delivery has no consumer.
+- **A park with no body reference owes one release at the resume.** The rule above names a
+  consumer for each of a park's two references, and the second consumer is the body's own
+  release past the suspend. Two parks have no body reference to release. A yielding io op
+  parks a request the native built, whose birth reference the scheduler's `fiber/value` read
+  consumes as it submits. A capability denial parks a payload the VM built in place of a
+  call that never ran (`VM::build_denial_payload`), and the replayed frame's result release
+  targets the mediating parent's resume value instead. Either way one reference is left over
+  at the resume, and one decref of the payload's region answers for it
+  (`release_parked_signal`) — the same single decref the discard face runs
+  (`release_discarded_signal`), so both faces of a park reclaim alike. Which shape a park has
+  is known only where it parks, so the denial sites record the payload on the fiber
+  (`Fiber::denial_payload`) and the resume matches the record against the parked signal
+  before releasing. Pinned by `tests/elle/region-capability-denial-resume-leak.lisp`.
 - **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
   cannot read as a keyword set falls through to the `emit` primitive
   ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way

@@ -149,6 +149,10 @@ impl VM {
                 inner_handle.with_mut(|f| {
                     f.signal = Some((SIG_OK, resume_value));
                     f.emit_delivery = None;
+                    // …nor a denial park's left-over payload reference, whose
+                    // record lives exactly as long as the park does
+                    // (`Fiber::denial_payload`).
+                    f.denial_payload = None;
                 });
 
                 // Set up the trampoline to descend into the inner fiber.

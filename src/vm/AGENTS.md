@@ -233,6 +233,13 @@ primitive never returns, so nothing mints the reference that release consumes:
 `handle_primitive_signal` and the denial path record the shape on the fiber
 (`resume_value_unfunded`) and `do_fiber_resume_single` mints it as it delivers.
 
+A denial park owes a release in the other direction too. Its payload is the VM's,
+built in place of a call that never ran, so no body reference answers for it and
+the resume releases the one left over — `prim_fiber_resume` runs the decref, gated
+on the payload the denial recorded (`Fiber::denial_payload`). See
+docs/impl/region/owner.md § "A park with no body reference owes one release at the
+resume".
+
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls

@@ -238,6 +238,11 @@ impl VM {
         // parent's resume value takes the place of its result — and the frame's
         // continuation releases that result (see the `SignalAction::Suspend` arm).
         self.fiber.resume_value_unfunded = true;
+        // Which is why the payload's own birth reference reaches no consumer past
+        // the park: the continuation's release names the resume value, not this
+        // struct. Record it so the resume runs the one decref the park is left
+        // owing (`Fiber::denial_payload`).
+        self.fiber.denial_payload = Some(payload);
 
         // Save the stack and build a suspended frame (same as suspending signals)
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -292,8 +297,10 @@ impl VM {
             crate::value::arena::EscapeSite::SuspendEscape,
         );
         // Tail-position mirror of the Call-position denial park (see
-        // `handle_capability_denial`).
+        // `handle_capability_denial`), delivery obligation and left-over payload
+        // reference alike.
         self.fiber.resume_value_unfunded = true;
+        self.fiber.denial_payload = Some(payload);
         self.fiber.signal = Some((blocked, payload));
         blocked
     }
