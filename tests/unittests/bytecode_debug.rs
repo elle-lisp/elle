@@ -14,7 +14,7 @@ fn compile(
     let _ = elle::register_primitives(&mut vm, symbols);
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut SymbolTable);
-    elle::init_stdlib(&mut vm, symbols, &mut cctx);
+    elle::init_stdlib(&mut vm, symbols, &mut cctx, &elle::compiler::stdlib_cache::StdlibCache::Off);
     elle::pipeline::compile(source, symbols, &mut cctx, source_name)
 }
 

@@ -153,7 +153,7 @@ fn eval_with_cache(
                 // `RuntimeCore::bare` already points the VM at this instance's own
                 // symbol table, so stdlib-load gensym (and all name resolution)
                 // resolves through it.
-                core.load_stdlib();
+                core.load_stdlib(&elle::compiler::stdlib_cache::StdlibCache::Off);
             }
             core
         });

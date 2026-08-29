@@ -44,8 +44,24 @@ cache_key = hash(stdlib source, elle version, FORMAT_VERSION,
   that minted it, so any addition, removal, rename, or reorder must
   invalidate the cache.
 
-Cache directory defaults to `$XDG_CACHE_HOME/elle/stdlib-cache`
-(`~/.cache` without XDG); override with `ELLE_CACHE_DIR`.
+## Where the cache lives
+
+The directory is a **construction parameter**, `StdlibCache`, passed to
+`Runtime::with_stdlib_cache` and threaded to `try_load`/`try_store`. It is not
+read from process-global state: the suite builds many runtimes across threads,
+and a directory that travels with the instance is what keeps one runtime's
+cache invisible to the runtime beside it — and what lets a test tell the
+instance that wrote a cache from the instance that read it.
+
+| Variant | Directory |
+|---------|-----------|
+| `Process` (the default) | `stdlib-cache` beneath the `--cache=<dir>` directory; `--cache=` turns caching off for the process |
+| `Dir(path)` | `path`, whatever the process-wide choice is |
+| `Off` | none — always compile |
+
+`Runtime::stdlib_source()` reports which side of the fork an instance took. A
+cache that silently never hits still yields a working runtime, so behaviour
+alone cannot distinguish the two; the tests assert on this instead.
 
 ## Serialization format
 

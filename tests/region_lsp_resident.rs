@@ -39,7 +39,12 @@ fn lsp_resident_analyze_is_region_clean_under_guardfree() {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_compile_ctx(&mut cctx as *mut elle::pipeline::CompileCtx);
     vm.set_symbols(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols, &mut cctx);
+    init_stdlib(
+        &mut vm,
+        &mut symbols,
+        &mut cctx,
+        &elle::compiler::stdlib_cache::StdlibCache::Off,
+    );
 
     // Mirror compile_document(): re-analyze on every "change", reusing the
     // resident VM and its per-instance compile context across iterations.

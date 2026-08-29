@@ -35,7 +35,12 @@ fn run(source: &str) -> String {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_compile_ctx(&mut cctx as *mut elle::pipeline::CompileCtx);
     vm.set_symbols(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols, &mut cctx);
+    init_stdlib(
+        &mut vm,
+        &mut symbols,
+        &mut cctx,
+        &elle::compiler::stdlib_cache::StdlibCache::Off,
+    );
     match elle::eval_all(source, &mut symbols, &mut vm, &mut cctx, "<cell-release>") {
         Ok(v) => format!("{}", v.display_with(Some(&symbols))),
         Err(e) => format!("error: {e}"),

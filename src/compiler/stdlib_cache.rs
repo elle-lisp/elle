@@ -63,19 +63,37 @@ pub struct StoredBytecode {
     /// difference on the cached path.
     pub(crate) fn_inline: crate::hir::typeinfer::StoredFnInlineRegistry,
 }
-/// Cache directory, honoring `ELLE_CACHE_DIR` override (used in tests).
-fn cache_dir() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("ELLE_CACHE_DIR") {
-        return std::path::PathBuf::from(dir);
+/// Where a runtime caches its compiled stdlib.
+///
+/// This is a construction parameter, not process-global state. A `Runtime` is
+/// built per instance and the suite builds many of them across threads, so the
+/// directory has to travel with the instance that uses it: a global would make
+/// one test's cache visible to every other test running beside it, and the
+/// runtime that wrote it indistinguishable from the runtime that read it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum StdlibCache {
+    /// The process-wide choice: `stdlib-cache` beneath the `--cache=<dir>`
+    /// directory. `--cache=` (empty) turns caching off for the process.
+    #[default]
+    Process,
+    /// Cache in this directory, whatever the process-wide choice is.
+    Dir(std::path::PathBuf),
+    /// Never read or write a cache file; compile every time.
+    Off,
+}
+
+impl StdlibCache {
+    /// The directory to cache in, or `None` when caching is off.
+    fn dir(&self) -> Option<std::path::PathBuf> {
+        match self {
+            StdlibCache::Off => None,
+            StdlibCache::Dir(d) => Some(d.clone()),
+            StdlibCache::Process => crate::config::get()
+                .cache
+                .as_ref()
+                .map(|base| std::path::PathBuf::from(base).join("stdlib-cache")),
+        }
     }
-    let base = std::env::var("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::var("HOME")
-                .map(|h| std::path::PathBuf::from(h).join(".cache"))
-                .unwrap_or_else(|_| std::path::PathBuf::from(".cache"))
-        });
-    base.join("elle").join("stdlib-cache")
 }
 
 /// Content hash of the stdlib source + elle version + primitive-table
@@ -106,11 +124,12 @@ fn cache_key(stdlib_source: &str) -> String {
 /// the caller recompiles, and the next store overwrites the bad file.
 pub fn try_load(
     stdlib_source: &str,
+    cache: &StdlibCache,
     vm: &mut crate::vm::VM,
     symbols: &mut crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Option<Result<Bytecode, String>> {
-    let path = cache_dir().join(cache_key(stdlib_source));
+    let path = cache.dir()?.join(cache_key(stdlib_source));
     let bytes = std::fs::read(&path).ok()?;
     let stored: StoredBytecode = match bincode::deserialize(&bytes) {
         Ok(s) => s,
@@ -123,12 +142,13 @@ pub fn try_load(
 /// cache is an optimization; a fresh compile is always valid.
 pub fn try_store(
     stdlib_source: &str,
+    cache: &StdlibCache,
     bytecode: &Bytecode,
     vm: &mut crate::vm::VM,
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) {
-    let dir = cache_dir();
+    let Some(dir) = cache.dir() else { return };
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("[stdlib-cache] mkdir failed: {e}");
         return;
@@ -266,6 +286,7 @@ pub fn load_bytecode(
 mod tests {
     use super::*;
     use crate::pipeline::compile_file;
+    use crate::primitives::module_init::StdlibSource;
     use crate::runtime::Runtime;
 
     /// Compile a snippet through the full pipeline, then assert that
@@ -273,9 +294,10 @@ mod tests {
     /// and constants, closures rebuilt, LIR preserved).
     #[test]
     fn bytecode_roundtrip_preserves_lir_and_closures() {
-        let _dir = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("ELLE_CACHE_DIR", _dir.path());
-        let mut rt = Runtime::new(); // full stdlib: `map` is a stdlib fn
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Its own directory: this test writes a cache and must not read, write,
+        // or be read by whatever else the suite is running beside it.
+        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Dir(dir.path().to_path_buf()));
         let (result, loaded) = {
             let (vm, symbols, cctx) = rt.parts();
             let src = r#"
@@ -330,22 +352,36 @@ mod tests {
         let r_loaded = run(&loaded);
         assert_eq!(r_orig, r_loaded, "original and reloaded bytecode agree");
         eprintln!("roundtrip ok: {r_orig} == {r_loaded}");
-        std::env::remove_var("ELLE_CACHE_DIR");
     }
 
-    /// Two Runtime instances: the first compiles stdlib and writes the cache,
-    /// the second must hit it (cache-load path) and produce working stdlib.
+    /// Two runtimes over one cache directory: the first compiles stdlib and
+    /// writes the cache, the second must load from it — and must still have a
+    /// working stdlib afterwards.
     #[test]
-    fn stdlib_cache_hit_produces_working_runtime() {
+    fn second_runtime_on_a_shared_cache_dir_loads_stdlib_from_it() {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("ELLE_CACHE_DIR", dir.path());
-        let mut a = Runtime::new(); // compiles stdlib, writes cache
-                                    // The second runtime must hit the disk cache (not recompile) and
-                                    // produce a fully working stdlib. Functional check only — timing is
-                                    // asserted in the release-mode boot benchmark instead (debug builds
-                                    // skew it).
-        let mut b = Runtime::new(); // must load from cache
-        let probe = |rt: &mut Runtime| {
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        let mut a = Runtime::with_stdlib_cache(cache.clone());
+        assert_eq!(
+            a.stdlib_source(),
+            StdlibSource::Compiled,
+            "the first runtime meets an empty directory, so it must compile"
+        );
+
+        let mut b = Runtime::with_stdlib_cache(cache);
+        assert_eq!(
+            b.stdlib_source(),
+            StdlibSource::Cache,
+            "the second runtime must load what the first wrote; a cache that \
+             silently never hits still yields a working runtime, so behaviour \
+             alone cannot tell the two apart"
+        );
+
+        // Working stdlib on both sides. Functional check only — timing is
+        // asserted in the release-mode boot benchmark instead (debug builds
+        // skew it).
+        let probe = |rt: &mut Runtime| -> crate::value::Value {
             use crate::pipeline::compile_file_repl;
             let (vm, symbols, cctx) = rt.parts();
             let src = "(map (fn [x] (* x 2)) (quote (1 2 3)))";
@@ -355,6 +391,5 @@ mod tests {
         };
         let _ = probe(&mut a);
         let _ = probe(&mut b);
-        std::env::remove_var("ELLE_CACHE_DIR");
     }
 }
