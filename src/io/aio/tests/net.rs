@@ -80,7 +80,7 @@ fn test_accept_wait_does_not_return_zero_completions_spuriously() {
                     port: listener_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -191,7 +191,7 @@ fn test_accept_via_uring() {
             timeout: None,
         };
         let accept_id = backend
-            .submit(&accept_req, crate::value::arena::leaked_test_heap())
+            .submit(&accept_req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         // Connect from a background thread
@@ -269,7 +269,7 @@ fn test_connect_via_uring() {
             timeout: None,
         };
         let connect_id = backend
-            .submit(&connect_req, crate::value::arena::leaked_test_heap())
+            .submit(&connect_req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         // Wait for the connect completion
@@ -365,7 +365,7 @@ fn test_accept_and_connect_concurrent() {
                     port: listener_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -392,7 +392,7 @@ fn test_accept_and_connect_concurrent() {
                     port: connect_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -551,7 +551,7 @@ fn a_cancelled_pool_accept_ends_rather_than_being_abandoned() {
                     port: listener_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -628,7 +628,7 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
                     port: listener_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -653,7 +653,7 @@ fn closing_a_listener_ends_its_parked_pool_accept() {
                     port: listener_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -745,7 +745,7 @@ fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
                     port: sock_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -827,7 +827,7 @@ fn a_cancelled_pool_write_ends_rather_than_being_abandoned() {
                     port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -875,7 +875,7 @@ fn a_cancelled_pool_tcp_connect_ends_rather_than_being_abandoned() {
                     port: connect_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -928,7 +928,7 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
                     port: connect_port,
                     timeout: Some(std::time::Duration::from_millis(200)),
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -1062,7 +1062,7 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
                     port: connect_port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -1144,7 +1144,7 @@ fn a_retired_accept_closes_the_connection_it_took() {
                         port: listener_port,
                         timeout: None,
                     },
-                    heap_ptr,
+                    crate::io::pending::Submitter::detached(heap_ptr),
                 )
                 .unwrap();
 

@@ -59,6 +59,11 @@ struct AsyncBackendInner {
     /// builds is born on it (`crate::io::completion_heap_ptr`). Set on the first
     /// `submit` that carries a heap.
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    /// Who the submission currently being dispatched is on behalf of, recorded
+    /// at `submit` entry so each `pending.insert` files its entry against it.
+    /// Read only between that entry and the insert, so what a completed
+    /// submission leaves behind here is never consulted.
+    submitter: crate::io::pending::Submitter,
 }
 
 // --- Platform backend dispatch ---
@@ -124,6 +129,7 @@ impl AsyncBackend {
                 platform,
                 hub,
                 origin_heap: std::ptr::null_mut(),
+                submitter: crate::io::pending::Submitter::detached(std::ptr::null_mut()),
             }),
         })
     }
@@ -156,6 +162,7 @@ impl AsyncBackend {
                 platform: PlatformBackend::ThreadPool,
                 hub: CompletionHub::new(),
                 origin_heap: std::ptr::null_mut(),
+                submitter: crate::io::pending::Submitter::detached(std::ptr::null_mut()),
             }),
         })
     }
@@ -212,6 +219,12 @@ impl AsyncBackend {
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
+            // Whatever the drain could not finish will never complete, so
+            // nothing else will dispose of its entry and let go of the regions
+            // it holds. This is the last moment the store is reachable: a heap
+            // that strands its backend calls `quiesce` before its free sweep,
+            // and the `Drop` that calls this again reaches an empty hold.
+            inner.pending.release_holds();
         }
     }
 
@@ -253,9 +266,9 @@ impl crate::io::IoBackend for AsyncBackend {
     fn submit(
         &self,
         request: &IoRequest,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String> {
-        self.submit(request, origin_heap)
+        self.submit(request, submitter)
     }
 
     fn poll(&self) -> Vec<Completion> {
@@ -409,20 +422,19 @@ impl AsyncBackendInner {
     fn drain_ready(&mut self) {
         self.drain_uring_completions();
         self.drain_hub();
-        self.stop_stale();
+        self.stop_orphaned();
     }
 
-    /// Ask every in-flight operation whose operands' regions are gone to stop.
+    /// Ask every in-flight operation whose asking fiber has ended to stop.
     ///
     /// Such an operation waits for an event outside this process — a peer that
     /// writes, a client that connects — and the fiber that would have received
     /// the result is what went away, so nothing here is left to make that event
-    /// happen. See src/io/AGENTS.md § "Ending an operation whose operands are
-    /// gone" for why the ask is not a cancel: the id stays unmarked, so the
+    /// happen. See src/io/AGENTS.md § "Ending an operation whose fiber is gone"
+    /// for why the ask is not a cancel: the id stays unmarked, so the
     /// completion still answers and the scheduler retires the pairing it holds.
-    fn stop_stale(&mut self) {
-        let heap = self.origin_heap;
-        for id in self.pending.stale_to_stop(heap) {
+    fn stop_orphaned(&mut self) {
+        for id in self.pending.orphaned_to_stop() {
             match self.platform {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ref mut ring) => {
@@ -558,7 +570,7 @@ impl AsyncBackendInner {
                 // resubmits through the ring, so there is no link to re-arm.
                 timeout: None,
             },
-            self.origin_heap,
+            self.submitter,
         );
         Ok(id)
     }

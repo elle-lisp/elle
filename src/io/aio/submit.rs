@@ -3,18 +3,25 @@ use super::*;
 impl AsyncBackend {
     /// Submit an I/O request. Returns a submission ID.
     ///
-    /// `origin_heap` is the requesting fiber's heap; results and errors are
-    /// allocated on it.
+    /// `submitter` is who the submission is on behalf of: the heap results and
+    /// errors are allocated on, and the fiber that will read them.
     pub(crate) fn submit(
         &self,
         request: &IoRequest,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String> {
+        let origin_heap = submitter.heap();
         // Record the requesting instance's heap so the scheduler-thread completion
         // harvest builds every result/error value on it. Constant per backend (one
-        // instance per scheduler).
-        if !origin_heap.is_null() {
-            self.inner.borrow_mut().origin_heap = origin_heap;
+        // instance per scheduler). The submitter is recorded beside it because
+        // every `pending.insert` below files an entry against it, and the dispatch
+        // helpers between here and there take no argument for it.
+        {
+            let mut inner = self.inner.borrow_mut();
+            if !origin_heap.is_null() {
+                inner.origin_heap = origin_heap;
+            }
+            inner.submitter = submitter;
         }
 
         // Portless operations — handle before port extraction.
@@ -321,7 +328,7 @@ impl AsyncBackend {
             | PortOp::ReadAll
             | PortOp::Write { .. }
             | PortOp::Flush => {
-                let origin_heap = inner.origin_heap;
+                let submitter = inner.submitter;
                 let AsyncBackendInner {
                     ref mut platform,
                     ref mut hub,
@@ -410,7 +417,7 @@ impl AsyncBackend {
                         filled: 0,
                         timeout: request.timeout,
                     },
-                    origin_heap,
+                    submitter,
                 );
                 Ok(id)
             }

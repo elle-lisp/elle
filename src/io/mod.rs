@@ -231,10 +231,13 @@ impl Completion {
 /// Implemented by `AsyncBackend` (real I/O via io_uring or thread pool)
 /// and `MockBackend` (in-memory, deterministic).
 pub(crate) trait IoBackend {
+    /// Submit `request` on behalf of `submitter` — the heap its results are
+    /// born on, and the fiber that will read them. See
+    /// [`Submitter`](crate::io::pending::Submitter).
     fn submit(
         &self,
         request: &IoRequest,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String>;
     fn poll(&self) -> Vec<Completion>;
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;

@@ -66,9 +66,13 @@ fn prim_io_backend(
 
 /// `(io/submit backend request [fiber])` → submission-id
 ///
-/// Optional third arg: the fiber that issued the I/O request. When present,
-/// spawn results are allocated on the fiber's heap (eliminating cross-heap
-/// references). Without a fiber arg, the current heap is used.
+/// Optional third arg: the fiber that issued the request, and the one its result
+/// is for. The backend asks that fiber what became of it before it assembles a
+/// completion, and ends an operation the fiber can no longer receive
+/// (src/io/AGENTS.md § "An operation whose fiber is gone has no reader"). A call
+/// that names no fiber is submitting for a reader that is not a fiber of this
+/// scheduler — `handle-io-forward` submits for a child scheduler's queue — and
+/// nothing about such a submission is ever withheld.
 fn prim_io_submit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -89,12 +93,21 @@ fn prim_io_submit(
         Some(r) => r,
         None => return type_error!(ctx, args[1], "io/submit", "io-request"),
     };
-    // The requesting instance's own heap (the ctx's). The backend records it and
-    // builds every completion value on it — immediate (spawn) or harvested on the
-    // scheduler thread — so results live where the issuing fiber lives, never on a
-    // per-thread slot a second instance could share.
+    // Who this submission is on behalf of. The heap is the requesting instance's
+    // own (the ctx's): the backend records it and builds every completion value
+    // on it — immediate (spawn) or harvested on the scheduler thread — so results
+    // live where the issuing fiber lives, never on a per-thread slot a second
+    // instance could share. The fiber is what says whether a result still has
+    // anywhere to go; a call that names none is submitting for a reader that is
+    // not a fiber of this scheduler (`handle-io-forward`).
     let origin_heap = ctx.heap_mut() as *mut crate::value::fiberheap::FiberHeap;
-    match backend.0.submit(request, origin_heap) {
+    let submitter = match args.get(2) {
+        Some(fiber) if fiber.as_fiber().is_some() => {
+            crate::io::pending::Submitter::new(origin_heap, *fiber)
+        }
+        _ => crate::io::pending::Submitter::detached(origin_heap),
+    };
+    match backend.0.submit(request, submitter) {
         Ok(id) => (SIG_OK, Value::int(id.as_u64() as i64)),
         Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
     }
@@ -357,7 +370,7 @@ primitive! {
     "io/submit" => prim_io_submit {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
-        doc: "Submit an I/O request to an async backend. Optional third arg is the origin fiber for heap-correct spawn allocation. Returns submission ID.",
+        doc: "Submit an I/O request to an async backend. Optional third arg is the fiber the result is for, which the backend asks about before it assembles a completion. Returns submission ID.",
         params: &["backend", "request"],
         category: "io",
         example: "(io/submit backend request)",

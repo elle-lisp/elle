@@ -16,6 +16,7 @@
 //! The last test is the exception: it holds both backends to one answer.
 
 use super::*;
+use crate::value::fiber::FiberStatus;
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
@@ -109,7 +110,7 @@ fn a_cancelled_pool_process_wait_ends_rather_than_being_abandoned() {
                     port: handle,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -147,7 +148,7 @@ fn a_cancelled_pool_poll_fd_ends_rather_than_being_abandoned() {
                     port: Value::NIL,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -184,7 +185,7 @@ fn a_pool_poll_fd_does_not_touch_the_descriptor_it_watches() {
                     port: Value::NIL,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -226,7 +227,7 @@ fn a_cancelled_pool_watch_next_ends_rather_than_being_abandoned() {
                     port: watcher_val,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -269,7 +270,7 @@ fn a_cancelled_pool_open_of_a_fifo_ends_rather_than_being_abandoned() {
                     port,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -316,16 +317,19 @@ fn a_cancelled_operation_delivers_no_completion_on_either_backend() {
                     "<pipe>".into(),
                 ),
             );
-            let id = backend
-                .submit(
-                    &IoRequest {
-                        op: PortOp::ReadAll.into(),
-                        port,
-                        timeout: None,
-                    },
-                    crate::value::arena::leaked_test_heap(),
-                )
-                .unwrap();
+            let id =
+                backend
+                    .submit(
+                        &IoRequest {
+                            op: PortOp::ReadAll.into(),
+                            port,
+                            timeout: None,
+                        },
+                        crate::io::pending::Submitter::detached(
+                            crate::value::arena::leaked_test_heap(),
+                        ),
+                    )
+                    .unwrap();
 
             // The pool cancels a worker that is already waiting; give it the
             // thread before asking. The ring has no worker to wait for.
@@ -382,19 +386,22 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
             // A pipe nobody writes: the read end never becomes readable, so the
             // deadline is the only thing that can end the wait.
             let pipe = Pipe::new();
-            let id = backend
-                .submit(
-                    &IoRequest {
-                        op: IoOp::PollFd {
-                            fd: pipe.read_fd,
-                            events: libc::POLLIN as u32,
+            let id =
+                backend
+                    .submit(
+                        &IoRequest {
+                            op: IoOp::PollFd {
+                                fd: pipe.read_fd,
+                                events: libc::POLLIN as u32,
+                            },
+                            port: Value::NIL,
+                            timeout: Some(Duration::from_millis(200)),
                         },
-                        port: Value::NIL,
-                        timeout: Some(Duration::from_millis(200)),
-                    },
-                    crate::value::arena::leaked_test_heap(),
-                )
-                .unwrap();
+                        crate::io::pending::Submitter::detached(
+                            crate::value::arena::leaked_test_heap(),
+                        ),
+                    )
+                    .unwrap();
 
             let mut completions = backend.wait(-1).unwrap();
             assert_eq!(completions.len(), 1, "{which}: one completion");
@@ -412,36 +419,27 @@ fn a_poll_fd_that_reaches_its_deadline_reports_no_events_on_either_backend() {
     });
 }
 
-/// A completion is withheld when the region its operands live in is gone.
+/// A completion is withheld when the fiber that asked for it has gone.
 ///
 /// A cancel is something a caller must remember to issue, and one caller
 /// cannot: a fiber that terminates by a path the scheduler did not route runs
-/// to `:dead` with its operation still submitted and nothing marking the id.
-/// The completion then resolves `Live`, and assembling it dereferences the port
-/// the entry holds — a value in a region that fiber released on its way out.
+/// to `:dead` with its operation still submitted and nothing marking the id. The
+/// entry still holds everything a result would be assembled from, so the
+/// question is not whether the assembly is safe — it is whether the result has
+/// anywhere to go, and it does not.
 ///
-/// The trap: reading freed memory is not what a test can assert on. By the
-/// time the completion runs, the slot has been recycled and reads as whatever
-/// its new owner wrote, so a regression comes back with a plausible result
-/// rather than a fault. What IS deterministic is the answer, so that is what
-/// this asserts: an error, carrying nothing the entry held.
+/// The answer is an error, carrying nothing the entry held. An answer rather
+/// than silence, unlike a cancelled operation, because nobody dropped this id —
+/// the scheduler still pairs it with the fiber that asked, and retires the
+/// pairing on a completion.
 ///
-/// An answer rather than silence, unlike a cancelled operation, because nobody
-/// dropped this id — the scheduler still pairs it with the fiber that asked,
-/// and retires the pairing on a completion.
-///
-/// The operand freed below is a write's payload rather than its port, so that
-/// the port stays available for the assertions about the answer. `operands` is
-/// one list and `take` asks the same question of every entry in it, so which
-/// one goes decides nothing.
-///
-/// Counter-factual: with the operand-site check removed from
-/// `PendingTable::take`, the write below resolves `Live` and answers with a
-/// byte count instead. This is the only place that counter-factual can be run:
-/// a program reaching the same state has no fiber left to receive the answer,
-/// so nothing there can tell an error from a result.
+/// Counter-factual: with the fiber check removed from `PendingTable::take`, the
+/// write below resolves `Live` and answers with a byte count instead. This is
+/// the only place that counter-factual can be run: a program reaching the same
+/// state has no fiber left to receive the answer, so nothing there can tell an
+/// error from a result.
 #[test]
-fn a_completion_is_withheld_when_its_operands_region_is_gone() {
+fn a_completion_is_withheld_when_the_fiber_that_asked_is_gone() {
     crate::value::arena::with_test_region(|| {
         for (backend, which) in [
             (AsyncBackend::new().unwrap(), "the platform default"),
@@ -449,15 +447,13 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
         ] {
             // A regular file, so the write runs to its end on its own. An
             // operation that parks would leave which of the two happened first
-            // — the completion or the free — up to the machine.
-            let path = temp_path("operand-region");
+            // — the completion or the fiber's end — up to the machine.
+            let path = temp_path("orphaned-asker");
             let heap_ptr = crate::value::arena::leaked_test_heap();
             // SAFETY: the heap is leaked for the process, so this borrow is
             // valid for the whole test.
             let heap = unsafe { &mut *heap_ptr };
 
-            // The port lives in a region of its own, so the free below reaches
-            // the payload alone.
             let port_region = heap.new_runtime_region();
             let file = std::fs::File::create(&path).expect("create the file");
             let port = crate::value::build::external(
@@ -472,7 +468,9 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
                 port_region,
             );
 
-            // The asking fiber's own region, holding the payload it handed over.
+            // The asking fiber, parked in its write when the submission is made.
+            let (fiber, handle) =
+                crate::value::fiber::test_fiber_in_region(heap, FiberStatus::Paused);
             let region = heap.new_runtime_region();
             let data = crate::primitives::ctx::Alloc::with_region(region, heap).string("late\n");
             let id = backend
@@ -482,11 +480,13 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
                         port,
                         timeout: None,
                     },
-                    heap_ptr,
+                    crate::io::pending::Submitter::new(heap_ptr, fiber),
                 )
                 .unwrap();
 
-            // The fiber ends: its region goes, and with it the payload.
+            // The fiber ends by a route that told nobody, and releases the
+            // region its payload lived in on the way out.
+            handle.with_mut(|f| f.status = FiberStatus::Error);
             heap.decref_region(region);
 
             let mut delivered = Vec::new();
@@ -507,9 +507,8 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
             let completion = delivered.pop().unwrap();
             assert_eq!(completion.id, id, "{which}: the submitted id came back");
             completion.result.expect_err(
-                "an operation whose operand region is gone must answer with an \
-                 error: a value could only have been assembled by reading that \
-                 region",
+                "an operation whose fiber has gone must answer with an error: a \
+                 value would be assembled for a reader that is not there",
             );
             assert!(
                 !backend.has_pending(),
@@ -521,6 +520,87 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
                 "{which}: the retired operation never gave its worker back",
             );
         }
+    });
+}
+
+/// A submitted operation's operands outlive the fiber that asked for them.
+///
+/// The entry holds `Value`s, and a `Value` is a bare pointer that keeps nothing
+/// alive. Nothing else counts a reference held by the pending table, so without
+/// the entry's own retain the payload below goes when the fiber releases its
+/// region, and every later read of it is a read of freed memory.
+///
+/// The trap in measuring it: reading freed memory is not what a test can assert
+/// on. By the time the read happens the slot has been recycled and reads as
+/// whatever its new owner wrote, so a regression comes back with a plausible
+/// answer rather than a fault. The store's generation counter moves only on a
+/// free, so it says exactly what the release did, and that is what this reads.
+///
+/// Counter-factual: with the retain removed from `PendingTable::insert`, the
+/// generation moves on the release below.
+#[test]
+fn a_submitted_operations_operands_outlive_the_fiber_that_asked() {
+    crate::value::arena::with_test_region(|| {
+        let path = temp_path("operand-hold");
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let heap_ptr = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process, so this borrow is valid
+        // for the whole test.
+        let heap = unsafe { &mut *heap_ptr };
+
+        let port_region = heap.new_runtime_region();
+        let file = std::fs::File::create(&path).expect("create the file");
+        let port = crate::value::build::external(
+            heap,
+            "port",
+            Port::new_file(
+                file.into(),
+                Direction::Write,
+                Encoding::Binary,
+                path.clone(),
+            ),
+            port_region,
+        );
+
+        // The asking fiber's own region, holding the payload it handed over.
+        let region = heap.new_runtime_region();
+        let born = heap.region_generation(region.get());
+        let data = crate::primitives::ctx::Alloc::with_region(region, heap).string("held\n");
+        backend
+            .submit(
+                &IoRequest {
+                    op: PortOp::Write { data }.into(),
+                    port,
+                    timeout: None,
+                },
+                crate::io::pending::Submitter::detached(heap_ptr),
+            )
+            .unwrap();
+
+        // The fiber ends: its region is released while the write still names
+        // the payload that lived in it.
+        heap.decref_region(region);
+
+        assert_eq!(
+            heap.region_generation(region.get()),
+            born,
+            "the payload's region went with the fiber that asked, while the \
+             submitted write still names it",
+        );
+
+        // Draining disposes of the entry, which is what lets the hold go.
+        for _ in 0..40 {
+            let _ = backend.wait(50).unwrap();
+            if !backend.has_pending() && backend.workers() == 0 {
+                break;
+            }
+        }
+        std::fs::remove_file(&path).ok();
+        assert_ne!(
+            heap.region_generation(region.get()),
+            born,
+            "the completed operation kept holding its operands' region",
+        );
     });
 }
 
@@ -536,8 +616,8 @@ fn a_completion_is_withheld_when_its_operands_region_is_gone() {
 /// The trap: a worker resolves its fd at syscall entry, not at submit time. A
 /// number handed back before the worker gets there can be given to a new
 /// socket, and the worker reads that socket instead — its bytes going to a
-/// completion no fiber is waiting for. The stale sweep narrows that window and
-/// does not close it: between the free and the worker observing its stop, the
+/// completion no fiber is waiting for. The sweep narrows that window and does
+/// not close it: between the release and the worker observing its stop, the
 /// number belongs to the OS.
 ///
 /// The trap in measuring it: an fd-number count cannot say this. The suite
@@ -589,6 +669,8 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
                 region,
             );
 
+            let (fiber, handle) =
+                crate::value::fiber::test_fiber_in_region(heap, FiberStatus::Paused);
             let id = backend
                 .submit(
                     &IoRequest {
@@ -596,7 +678,7 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
                         port,
                         timeout: None,
                     },
-                    heap_ptr,
+                    crate::io::pending::Submitter::new(heap_ptr, fiber),
                 )
                 .unwrap();
 
@@ -604,7 +686,8 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
             // when the fiber ends under it.
             wait_for_worker(&backend);
 
-            // The fiber ends: its region goes, and the port with it.
+            // The fiber ends: its region is released, and the port with it.
+            handle.with_mut(|f| f.status = FiberStatus::Error);
             heap.decref_region(region);
 
             assert_eq!(
@@ -616,7 +699,7 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
                  read's worker reads",
             );
 
-            // The operation ends on its own once its operands are gone, and the
+            // The operation ends on its own once its fiber has gone, and the
             // number goes back with the entry that held the last share of it.
             let mut delivered = Vec::new();
             for _ in 0..40 {
@@ -642,8 +725,110 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
     });
 }
 
-/// An operation that PARKS must end when its operands' region is gone, with no
-/// peer ever acting.
+/// A watcher's descriptor number stays out of the OS's hands while a submitted
+/// read names it, even when the watcher goes with its fiber's regions.
+///
+/// The port case above is the same invariant on the thing that owns a
+/// descriptor most often. This is the other owner: `WatchNext` reads the inotify
+/// (Linux) or kqueue (macOS) descriptor an `FsWatcher` owns, and the external
+/// hands out no share of it the way a `Port` does. What keeps the number is the
+/// entry's hold on the region the watcher lives in — a live external has not
+/// dropped its `OwnedFd`.
+///
+/// The trap in measuring it: as in the port case, an fd-number count cannot say
+/// this, because the suite shares a process and runs in parallel. A duplicate of
+/// the watcher's descriptor, taken before the region is released, is the witness
+/// of the file description both numbers name.
+///
+/// Counter-factual: with the operand hold removed, the release frees the region,
+/// the `FsWatcher` drops its `OwnedFd`, and the first assertion reads `None` —
+/// or reads whatever else in the process was handed the number meanwhile, which
+/// is the defect itself.
+#[test]
+fn a_watcher_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
+    crate::value::arena::with_test_region(|| {
+        let dir = temp_path("watch-hold");
+        std::fs::create_dir(&dir).unwrap();
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let heap_ptr = crate::value::arena::leaked_test_heap();
+        // SAFETY: the heap is leaked for the process, so this borrow is valid
+        // for the whole test.
+        let heap = unsafe { &mut *heap_ptr };
+
+        let watcher = crate::io::watch::FsWatcher::new().unwrap();
+        watcher.add(&dir, false).unwrap();
+        let watch_fd = watcher.raw_fd().expect("an open watcher has a descriptor");
+        let watch_identity =
+            file_identity(watch_fd).expect("fstat on the watcher's descriptor failed");
+        // The witness: a second number for the same file description, so the
+        // identity survives the watcher letting go of its own.
+        let witness = unsafe { libc::dup(watch_fd) };
+        assert!(witness >= 0, "dup(2) failed");
+
+        // The asking fiber's own region, holding the watcher itself.
+        let (fiber, handle) = crate::value::fiber::test_fiber_in_region(heap, FiberStatus::Paused);
+        let region = heap.new_runtime_region();
+        let watcher_val = crate::value::build::external(heap, "fs-watcher", watcher, region);
+
+        let id = backend
+            .submit(
+                &IoRequest {
+                    op: IoOp::WatchNext,
+                    port: watcher_val,
+                    timeout: None,
+                },
+                crate::io::pending::Submitter::new(heap_ptr, fiber),
+            )
+            .unwrap();
+
+        // The interesting order: the worker is already parked on the number
+        // when the fiber ends under it.
+        wait_for_worker(&backend);
+
+        // The fiber ends: its region is released, and the watcher with it.
+        handle.with_mut(|f| f.status = FiberStatus::Error);
+        heap.decref_region(region);
+
+        assert_eq!(
+            file_identity(watch_fd),
+            Some(watch_identity),
+            "descriptor {watch_fd} no longer names the watcher the submitted \
+             read is on — the number went back to the OS with the watcher's \
+             region, so the next file to take it is the one that read's worker \
+             reads",
+        );
+
+        // The operation ends on its own once its fiber has gone, and the number
+        // goes back with the hold that kept the watcher alive.
+        let mut delivered = Vec::new();
+        for _ in 0..40 {
+            delivered.extend(backend.wait(50).unwrap().into_iter().map(|c| c.id));
+            if !backend.has_pending() && backend.workers() == 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            delivered,
+            vec![id],
+            "the watch must answer once — the scheduler holds this id against \
+             the fiber that asked and lets go on a completion",
+        );
+        assert_ne!(
+            file_identity(watch_fd),
+            Some(watch_identity),
+            "descriptor {watch_fd} still names the watcher after the operation \
+             holding it was retired — a hold that outlives its operation costs \
+             one descriptor per operation",
+        );
+
+        unsafe { libc::close(witness) };
+        std::fs::remove_dir(&dir).ok();
+    });
+}
+
+/// An operation that PARKS must end when the fiber that asked for it has gone,
+/// with no peer ever acting.
 ///
 /// The test above pins the answer such an operation gets. This one is about
 /// the completion arriving at all: an accept on a listener nobody connects to
@@ -655,14 +840,11 @@ fn a_port_freed_with_its_fibers_regions_keeps_its_descriptor_number() {
 /// does — the connection wakes the parked worker and the completion arrives on
 /// its own. Nobody connects here, deliberately.
 ///
-/// The listener's port lives in a region of its own, so the free below reaches
-/// the accept's own operand alone.
-///
-/// Counter-factual: without the stale sweep the accept keeps its `pending`
-/// entry and, on the pool, its worker thread; the bounded loop below then runs
-/// to its end and delivers nothing.
+/// Counter-factual: without the sweep the accept keeps its `pending` entry and,
+/// on the pool, its worker thread; the bounded loop below then runs to its end
+/// and delivers nothing.
 #[test]
-fn an_operation_that_parks_ends_when_its_operands_region_is_gone() {
+fn an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone() {
     use std::os::unix::io::FromRawFd;
     crate::value::arena::with_test_region(|| {
         for (backend, which) in [
@@ -709,8 +891,10 @@ fn an_operation_that_parks_ends_when_its_operands_region_is_gone() {
                 listener_region,
             );
 
-            // The asking fiber's own region, holding the port the accept would
-            // have filled in.
+            // The asking fiber, and its own region holding the port the accept
+            // would have filled in.
+            let (fiber, handle) =
+                crate::value::fiber::test_fiber_in_region(heap, FiberStatus::Paused);
             let region = heap.new_runtime_region();
             let accept_port = crate::value::build::external(
                 heap,
@@ -736,7 +920,7 @@ fn an_operation_that_parks_ends_when_its_operands_region_is_gone() {
                         port: listener,
                         timeout: None,
                     },
-                    heap_ptr,
+                    crate::io::pending::Submitter::new(heap_ptr, fiber),
                 )
                 .unwrap();
 
@@ -744,7 +928,9 @@ fn an_operation_that_parks_ends_when_its_operands_region_is_gone() {
             // when the fiber ends under it.
             wait_for_worker(&backend);
 
-            // The fiber ends: its region goes, and the accept's operand with it.
+            // The fiber ends by a route that told nobody, releasing the region
+            // its accept's operand lived in on the way out.
+            handle.with_mut(|f| f.status = FiberStatus::Error);
             heap.decref_region(region);
 
             let mut delivered = Vec::new();
@@ -764,9 +950,8 @@ fn an_operation_that_parks_ends_when_its_operands_region_is_gone() {
             let completion = delivered.pop().unwrap();
             assert_eq!(completion.id, id, "{which}: the submitted id came back");
             completion.result.expect_err(
-                "an operation whose operand region is gone must answer with an \
-                 error: a value could only have been assembled by reading that \
-                 region",
+                "an operation whose fiber has gone must answer with an error: a \
+                 value would be assembled for a reader that is not there",
             );
             assert!(
                 !backend.has_pending(),

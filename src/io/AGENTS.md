@@ -105,7 +105,7 @@ alone must remember:
 - `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing. Null on the thread-pool path, where the worker reports the exit code itself.
 - `Task { buffer_handle }` — background task running on thread pool.
 - `Resolve { buffer_handle }` — getaddrinfo(3) on the thread pool.
-- `WatchNext { watcher, buffer_handle }` / `SigNext { receiver, buffer_handle }` — a read on the inotify / signalfd descriptor. The external is held so it outlives the read.
+- `WatchNext { watcher, buffer_handle }` / `SigNext { receiver, buffer_handle }` — a read on the inotify / signalfd descriptor the external owns. Both are operands, so the entry's hold keeps the external — and therefore the descriptor it owns — for the read's lifetime; see § "Descriptor retirement".
 - `PollFd { buffer_handle }` — readiness wait on a bare descriptor.
 - `ChanSelectPark { buffer_handle, guard }` — readiness wait on a `chan/wait-ready` wake fd. The guard owns the fd(s) and the wake-list registrations, so dropping this entry deregisters exactly once.
 
@@ -236,27 +236,73 @@ A cancel for an id that is no longer in flight marks nothing. The operation
 completed and its result already reached the fiber that asked; a mark left
 behind would meet a later submission.
 
-### An operation whose operands are gone has no reader either
+### A submitted operation holds the values its completion reads
+
+`PendingOp` holds `Value`s the completion dereferences when it assembles a
+result: the port an operation names, the buffer or result struct the caller
+reserved, the payload a write hands over, the process handle, the watcher, the
+receiver. None of them are the operation's own allocations. Each was born in a
+region of the fiber that asked, and the pending table is runtime-side state that
+no free-time cascade reaches — the same position a message in a channel buffer
+is in (`docs/impl/region/effects.md` § `Sends`).
+
+So the entry **retains** each of these regions when it is filed, and lets go
+when the entry is disposed. That is the seam-counted reference the send/receive
+pair uses, for the reason it uses one: nothing else counts a reference held by
+state outside the region system, so the seam counts its own.
+`PendingOp::operands` is the list, and `OperandHold` is the reference.
+
+The **fiber that asked** is held on the same terms, and it is the one held value
+read on every drain rather than once at the completion: the sweep below reads its
+status each time it runs. So it is the last value that may be assumed present —
+the check that exists to notice a fiber is gone cannot itself be the thing that
+reads that fiber after it went.
+
+The hold **travels with the operation**. `take` hands it out alongside the
+entry's `PendingOp`, so the completion reads the operands under it, and it is
+let go once the result is built rather than when the entry leaves the table. A
+read that needs another syscall carries its hold back in through `restore`
+rather than releasing one and taking another. Releasing at the take instead
+would free the port under the very assembly that reads it, whenever the entry's
+hold is the last reference — which is exactly the case this exists for.
+
+This is what makes assembling a completion safe by construction. A variant that
+gains a value field and does not name it in `operands` still loses that, which
+is why the match there is exhaustive over both `PendingOp` and `PortOp`.
+
+A payload a write already copied at submit is listed too, though no completion
+reads it back: `operands` is one list, and holding a value nobody will read
+costs a reference until the operation ends.
+
+Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
+(`src/io/aio/tests/park.rs`) and, for the fiber itself, by
+`a_held_fiber_survives_the_release_of_its_region` (`src/io/pending.rs`).
+
+### An operation whose fiber is gone has no reader
 
 A cancel is something a caller must remember to issue, and one caller cannot: a
 fiber that terminates by a path the scheduler did not route. `fiber/cancel`
-leaves such a fiber `:error` with its operation still submitted, and the regions
-holding that operation's operands are released as it unwinds. Nothing marks the
-id. The scheduler finds out when it next looks at that fiber — which is after
-the completion has been assembled, because assembling happens inside `io/wait`.
+leaves such a fiber `:error` with its operation still submitted. Nothing marks
+the id, and the scheduler finds out when it next looks at that fiber — which is
+after the completion has been assembled, because assembling happens inside
+`io/wait`.
 
 So the reader-gone question is not asked of the canceller alone. Every entry
-records, at the moment it is filed, **where each of its operands lives**: the
-region, and the incarnation of that region that was current then. A completion
-compares those against the store's generation counter, and an operand whose
-incarnation is gone retires the entry unread, exactly as a cancelled one is.
+records **the fiber that asked**, which `io/submit` is handed at the call site
+(`src/stdlib.lisp`), and a completion asks that fiber what became of it. A fiber
+in a terminal state — `:dead` or `:error` — is one no result can reach, so the
+entry is retired unread, exactly as a cancelled one is.
 
-The generation is what makes the answer exact rather than a guess. Region ids
-are recycled, so an id alone cannot distinguish this incarnation from the next,
-and reading the value's own page header cannot either — a freed page that has
-been re-claimed carries its new owner's stamp. The store's counter only ever
-moves on a free, so a match means the very region the operand was born in is
-still there.
+The fiber is a sound thing to ask because the entry holds it — see above — so it
+is there to be asked for as long as the operation is.
+
+**Why the entry withholds rather than assembling and letting the scheduler
+drop the result.** The scheduler does drop it — `process-completions` delivers
+only to a fiber `get-completion` reports as still running. But a result
+assembled for a fiber that has gone holds values whose only remaining reference
+is this entry's hold, and disposing of the entry is what lets that hold go.
+Withholding keeps one fact in one place: nothing is built, so nothing outlives
+the hold.
 
 Unlike a cancelled operation, this one **answers**. A cancel is issued by a
 caller that has already dropped its record of the submission, so silence leaves
@@ -267,28 +313,19 @@ answer is an error built from nothing the entry held; the scheduler retires the
 pairing and drops the error, because the fiber it would have gone to is what
 went away.
 
-`PendingOp::operands` is the list this rests on: the port an operation names,
-the buffer or result struct the caller reserved, the payload a write hands
-over, the process handle, the watcher, the receiver. None of them are the
-operation's own allocations, and assembling a result dereferences them.
+A submission made on behalf of no fiber is never withheld. `handle-io-forward`
+submits for a child scheduler, whose reader is a queue and a wake box rather
+than a fiber in this one, and `io/cancel` through `handle-io-forward-cancel` is
+how that reader lets go.
 
-A payload a write already copied at submit is listed too, though no completion
-reads it back. An entry holding a dead value is itself the evidence that the
-fiber which asked is gone, and that is the fact the check wants — a result
-assembled for a fiber that ended reaches nobody either way.
-
-A variant that gains a value field and does not name it in `operands` loses
-this protection silently, which is why the match there is exhaustive over both
-`PendingOp` and `PortOp`.
-
-Pinned by `a_completion_is_withheld_when_its_operands_region_is_gone`
+Pinned by `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
 (`src/io/aio/tests/park.rs`), which builds the state directly and asserts on the
 answer. No corpus file pins it end to end: the answer goes to a fiber that is
 gone, so nothing in the program can observe it.
 `tests/elle/io-stale-operation-ends.lisp` reaches the same state and asserts on
 what a program CAN see, which is the operation ending.
 
-### Ending an operation whose operands are gone
+### Ending an operation whose fiber is gone
 
 Withholding the result is half the answer. The completion still has to arrive,
 and an operation that parks arrives only when something outside this process
@@ -297,12 +334,18 @@ nobody makes. The fiber that would have received the result is gone, so nothing
 in the program is left to make that event happen.
 
 The backend therefore ends these operations itself.
-`PendingTable::stale_to_stop` reports the in-flight ids whose operands' regions
-have gone, and every drain asks each of them to stop before it waits. The ask
-goes through the stop pipe on the pool and through `IORING_OP_ASYNC_CANCEL` on
-the ring, the two halves `io/cancel` also uses. The operation completes with
-`-ECANCELED`, `take` reports it `Stale`, and the entry is retired and answered
-as above.
+`PendingTable::orphaned_to_stop` reports the in-flight ids whose asking fiber
+has reached a terminal state, and every drain asks each of them to stop before
+it waits. The ask goes through the stop pipe on the pool and through
+`IORING_OP_ASYNC_CANCEL` on the ring, the two halves `io/cancel` also uses. The
+operation completes with `-ECANCELED`, `take` reports it `Orphaned`, and the
+entry is retired and answered as above.
+
+Asking the fiber rather than its memory is what keeps an unwinding fiber out of
+this. `fiber/abort` resumes a fiber to unwind, and that unwinding can suspend
+and be resumed again (`docs/signals/primitives.md` § "Unwinding that suspends"),
+so such a fiber is `:paused` and still has a result to come back for. It reaches
+a terminal state when it is genuinely finished, and not before.
 
 The ask is deliberately not a cancel. A cancel marks the id, and a marked id
 falls silent; this one must answer, because the scheduler still holds the
@@ -322,7 +365,7 @@ on are exactly the ones that may never act. Nor does it lean on the close of the
 descriptor, which is the platform's choice rather than a promise (§ "The stop
 pipe").
 
-Pinned by `an_operation_that_parks_ends_when_its_operands_region_is_gone`
+Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
 (`src/io/aio/tests/park.rs`), which gives the operation no peer at all, and end
 to end by `tests/elle/io-stale-operation-ends.lisp`.
 
@@ -407,6 +450,19 @@ regions of a fiber which terminated by a route the scheduler did not take.
 are unchanged — the port stops answering, and what it gives up is its
 share. The `fd_states` entry goes at the same moment: a remainder belongs
 to the port that produced it, and that port is what the close ended.
+
+A port is not the only thing that owns a descriptor an operation names.
+`WatchNext` reads the inotify (Linux) or kqueue (macOS) descriptor an
+`FsWatcher` owns, and `SigNext` reads the signalfd (Linux) or kqueue
+descriptor a `SignalReceiver` owns. Neither external hands out a share,
+and neither needs to: both are operands, so the entry's hold on their
+region keeps the external itself alive, and a live external has not
+dropped its `OwnedFd`. The number is the OS's again only once the last
+operation naming it has let its hold go.
+
+Pinned for the watcher by
+`a_watcher_freed_with_its_fibers_regions_keeps_its_descriptor_number`
+(`src/io/aio/tests/park.rs`).
 
 Pinned by `tests/elle/io-cancel-releases.lisp`, by
 `a_descriptor_share_holds_the_number_until_it_drops` (`src/port/tests.rs`)

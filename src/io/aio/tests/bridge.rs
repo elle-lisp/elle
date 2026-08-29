@@ -36,7 +36,7 @@ fn uring_pool_task_wakes_the_single_wait_past_old_cap() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         let completions = backend.wait(5000).unwrap();

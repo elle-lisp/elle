@@ -25,10 +25,10 @@ fn test_submit_returns_monotonic_ids() {
         };
 
         let id1 = backend
-            .submit(&req1, crate::value::arena::leaked_test_heap())
+            .submit(&req1, crate::io::pending::Submitter::for_test())
             .unwrap();
         let id2 = backend
-            .submit(&req2, crate::value::arena::leaked_test_heap())
+            .submit(&req2, crate::io::pending::Submitter::for_test())
             .unwrap();
         assert!(id2 > id1, "IDs must be monotonically increasing");
 
@@ -50,7 +50,7 @@ fn test_submit_closed_port_errors() {
             port: port_val,
             timeout: None,
         };
-        let result = backend.submit(&req, crate::value::arena::leaked_test_heap());
+        let result = backend.submit(&req, crate::io::pending::Submitter::for_test());
         assert!(result.is_err());
 
         std::fs::remove_file(&path).ok();
@@ -77,7 +77,7 @@ fn test_submit_and_wait_read() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         let completions = backend.wait(-1).unwrap();
@@ -106,7 +106,7 @@ fn test_submit_and_wait_write() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         let completions = backend.wait(-1).unwrap();

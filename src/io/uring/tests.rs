@@ -256,7 +256,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
             filled: 0,
             timeout: None,
         },
-        crate::value::arena::leaked_test_heap(),
+        crate::io::pending::Submitter::for_test(),
     );
     let mut fd_states: HashMap<PortKey, FdState> = HashMap::new();
     let mut completions: VecDeque<Completion> = VecDeque::new();

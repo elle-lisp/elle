@@ -524,5 +524,30 @@ impl std::fmt::Debug for Fiber {
     }
 }
 
+/// A fiber value on `heap`, in its own region, with `status` — and the handle
+/// that can change it.
+///
+/// Built rather than run, because what a test using this asks a fiber is only
+/// its status: a fiber that reached `:dead` by running and one stamped `:dead`
+/// here answer that question identically. The alternative is standing up a VM
+/// and a scheduler to reach one state.
+#[cfg(test)]
+pub fn test_fiber_in_region(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    status: FiberStatus,
+) -> (Value, FiberHandle) {
+    let handle = FiberHandle::new(Fiber::new(noop_closure(), SignalBits::EMPTY));
+    handle.with_mut(|f| f.status = status);
+    let region = heap.new_runtime_region();
+    let value = heap.alloc_in_region(
+        crate::value::heap::HeapObject::Fiber {
+            handle: handle.clone(),
+            traits: Value::NIL,
+        },
+        region,
+    );
+    (value, handle)
+}
+
 #[cfg(test)]
 mod tests;
