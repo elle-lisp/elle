@@ -105,6 +105,7 @@ Tests are organized by feature area in separate files:
 | `glob.rs` | Glob patterns |
 | `elle_scripts.rs` | Process-global runtime-mode pins (guardfree/no-uring/mlir-off); the corpus itself runs via `elle test` |
 | `paths.rs` | The paths and URLs the Makefile and the doc generator name in text, checked against the tree |
+| `bytecode_doc.rs` | The instruction names and source paths the bytecode documents spell, checked against the `Instruction` enum |
 | `environment.rs` | Environment variables |
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |

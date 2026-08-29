@@ -165,6 +165,9 @@ mod unicode_generation {
 mod paths {
     include!("paths.rs");
 }
+mod bytecode_doc {
+    include!("bytecode_doc.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
