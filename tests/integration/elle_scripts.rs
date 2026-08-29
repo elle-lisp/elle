@@ -553,6 +553,30 @@ fn region_dynamic_emit_terminal_uaf() {
     );
 }
 
+// Guard — the same raised delivery where the raise leaves the emit PRIMITIVE OFF
+// TAIL POSITION (docs/impl/region/owner.md § "What yields is the emit OPERATION, not
+// the `Emit` node"). There the site takes the retain, so the exit mints the delivery
+// and leaves that retain to the continuation past the call. An `:error` fiber is
+// resumable, so a RESTART replays that continuation: without the mint the replay
+// releases the very reference the catcher already consumed, and every holder that
+// outlives the fiber reads freed memory. Nine witnesses drive one raise each past a
+// restart — a module-level binding, a captured local, a captured parameter, a
+// body-allocated payload, a `fiber/value` read, a container, an uncaught propagation,
+// a second restart, and one region named through both arguments — and read the
+// payload afterwards, so an over-free faults under guardfree. Six controls remove one
+// ingredient each and must stay clean, the sharpest being the same body resumed ONCE:
+// with no replay the site's retain reaches only the catcher, which is why the shape
+// reads correct until a restart claims it twice. A growth gauge refuses the trade in
+// the other direction — a mint whose retain no route reaches strands one region per
+// raise.
+#[test]
+fn region_dynamic_emit_statement_uaf() {
+    run_elle_script_with_args(
+        "region-dynamic-emit-statement-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a resume value delivered into a frame parked at a suspending PRIMITIVE
 // call carries one owning reference (docs/impl/region/owner.md § "A delivery into
 // a replayed frame carries one owning reference"). The replayed frame re-enters at

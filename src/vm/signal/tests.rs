@@ -297,3 +297,66 @@ fn an_ordinary_suspend_records_no_payload_to_release() {
         );
     })
 }
+
+// -- the raised delivery's identity gate --
+
+/// A raised payload that IS one of the call's arguments gets the delivery minted
+/// and recorded; a payload the native BUILT does not. Both positions raise through
+/// this, so the gate is what keeps the mint off every ordinary native raise — a
+/// fresh error struct funds its delivery with its birth reference, and a second
+/// one is stranded per raised-and-caught error.
+#[test]
+fn a_raised_argument_takes_the_delivery_and_a_built_payload_does_not() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (payload, region) = crate::value::arena::alloc_in_fresh_region(
+            unsafe { &mut *vm.heap_ptr },
+            crate::value::heap::HeapObject::Pair(crate::value::heap::Pair::new(
+                Value::int(1),
+                Value::NIL,
+            )),
+        );
+        let before = vm.heap().region_rc(region);
+
+        // Nobody's argument: the native built it, so its birth reference is the
+        // delivery and a mint here would out-count the catcher's single release.
+        vm.mint_raised_argument_delivery(&[Value::int(9)], payload);
+        assert_eq!(
+            vm.heap().region_rc(region),
+            before,
+            "a payload the native built funds its own delivery",
+        );
+        assert!(
+            vm.fiber.emit_delivery.is_none(),
+            "an unminted delivery must leave the frames' payload exemption standing",
+        );
+
+        // The call's own argument handed back: the frame's references all answer
+        // to the frame's own routes, so the catcher's read needs one of its own.
+        vm.mint_raised_argument_delivery(&[Value::int(9), payload], payload);
+        assert_eq!(
+            vm.heap().region_rc(region),
+            before + 1,
+            "a raised argument's delivery is minted at the signal exit",
+        );
+        assert_eq!(
+            vm.fiber.emit_delivery,
+            Some(payload),
+            "the record is what withdraws the walk's payload exemption",
+        );
+    })
+}
+
+/// An IMMEDIATE payload crosses no region, so there is nothing to fund — and
+/// recording it would withdraw the exemption for a value no walk can release.
+#[test]
+fn an_immediate_raised_argument_takes_no_delivery() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        vm.mint_raised_argument_delivery(&[Value::int(9)], Value::int(9));
+        assert!(
+            vm.fiber.emit_delivery.is_none(),
+            "an immediate payload has no region for the record to speak for",
+        );
+    })
+}

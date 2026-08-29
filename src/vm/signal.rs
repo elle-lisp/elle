@@ -18,6 +18,47 @@ mod modules;
 mod config;
 
 impl VM {
+    /// Mint the DELIVERY reference of a payload a native call is RAISING, where
+    /// the payload is one of the call's own arguments — the shape a dynamic
+    /// `emit` takes, its non-literal first argument making the raise an ordinary
+    /// native call (docs/impl/region/owner.md § "What yields is the emit
+    /// OPERATION, not the `Emit` node").
+    ///
+    /// The catcher's read of the signal consumes exactly one reference, and every
+    /// other reference the raising frame holds answers to that frame's own release
+    /// routes. So the delivery is minted here, exactly as `handle_emit` mints it on
+    /// the literal path — and recorded with it (`Fiber::emit_delivery`), so the
+    /// abandoned-frame walk and the parked frame's discharge stop exempting the
+    /// payload's region and run those routes in full.
+    ///
+    /// Both positions raise through this. Which route the frame's own reference
+    /// then takes is theirs to arrange: a tail exit consumes its borrowed-argument
+    /// retains and nil-stamps their stashes, while a Call-position site's payload
+    /// stash is a recorded value route the replay or the walk runs
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes").
+    ///
+    /// A payload the native BUILT — a fresh error struct — is nobody's argument
+    /// and funds the delivery with its birth reference, so the identity test is
+    /// what keeps this off every ordinary native raise.
+    pub(crate) fn mint_raised_argument_delivery(&mut self, args: &[Value], payload: Value) {
+        if !args.iter().any(|a| a.bit_identical(payload)) {
+            return;
+        }
+        let heap = unsafe { &mut *self.heap_ptr };
+        // An immediate payload crosses no region, so there is nothing to fund and
+        // nothing for the record to say stands.
+        let Some(region) = crate::value::arena::region_of(heap, payload) else {
+            return;
+        };
+        crate::value::arena::incref_for_escape(
+            heap,
+            Some(region),
+            crate::value::arena::EscapeSite::EmitEscape,
+        );
+        self.fiber.emit_delivery = Some(payload);
+    }
+
     /// Handle signal bits returned by a primitive in a Call position.
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to

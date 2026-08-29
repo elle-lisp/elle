@@ -145,7 +145,7 @@ pub struct Fiber {
     ///
     /// - an `emit` raise — the `EmitEscape` retain `handle_emit` (and its JIT
     ///   mirror) takes, which the resumer's release of the resume result consumes;
-    /// - the same raise leaving the emit PRIMITIVE in tail position, where the
+    /// - the same raise leaving the emit PRIMITIVE, in either position, where the
     ///   signal exit takes that retain in `handle_emit`'s place
     ///   (`VM::mint_raised_argument_delivery`);
     /// - an injected `fiber/abort` / `fiber/refuse` payload — the `AbortDelivery`
