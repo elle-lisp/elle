@@ -191,6 +191,24 @@
 (let [f (flatten @[1 @[2 3] @[4]])]
   (assert (array? f) "flatten: array returns array")
   (assert (= (length f) 4) "flatten: array length"))
+## Length and depth are the two axes that can drive `flatten` past the
+## call-depth limit. Every case above stays under five elements, so these
+## are the ones that pin the flat native stack.
+(let [long-list (reduce (fn (acc i) (pair i acc)) () (range 1000))]
+  (assert (= (length (flatten long-list)) 1000)
+          "flatten: 1000-element list does not exhaust the call stack"))
+(assert (= (length (flatten (range 1000))) 1000)
+        "flatten: 1000-element array does not exhaust the call stack")
+## Depth: one cursor per nested sequence.
+(let [deep (reduce (fn (acc i) (list acc)) (list 42) (range 500))]
+  (assert (= (flatten deep) (list 42)) "flatten: 500 levels of nesting"))
+## Arrays nested inside a list expand too.
+(assert (= (flatten (list 1 @[2 3] (list 4 @[5]))) (list 1 2 3 4 5))
+        "flatten: arrays nested in a list")
+## An array result accepts `push`, which `->array` would not allow.
+(let [f (flatten @[1 @[2 3]])]
+  (push f 99)
+  (assert (= (length f) 4) "flatten: array result is mutable"))
 
 ## ── take-while ──────────────────────────────────────────────────────
 (assert (= (take-while even? (list 2 4 5 6)) (list 2 4)) "take-while: list")
