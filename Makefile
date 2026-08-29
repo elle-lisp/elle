@@ -1,4 +1,4 @@
-.PHONY: all elle docs docgen smoke test crosscheck clean space help \
+.PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir \
        doctest elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
@@ -115,7 +115,8 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 
 # Approximate runtimes (for guidance — vary by machine):
 #   make smoke    docs + the elle test corpus (runner + per-file passes) + embedding
-#   make test     smoke + rust fmt/clippy/rustdoc/unit/integration
+#   make qa       ~2min: the PR gate's QA job (rustfmt, workspace clippy, crosscheck, rustdoc)
+#   make test     smoke + qa + rust unit/integration
 #   cargo test    ~60min full suite (unit + integration + property)
 #
 # `make test` exists to predict the PR gate, so it runs what the gate runs. A
@@ -350,10 +351,12 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
 # CI documents private items too, and most of this crate is private — without
 # the flag rustdoc never resolves a link into a `pub(crate)` item, so a broken
 # one reaches CI unseen. Keep the flag here and in .github/workflows in step.
-test: smoke crosscheck  ## Rust unit + integration tests + clippy + fmt + crosscheck + rustdoc after smoke
+qa: crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc
 	cargo fmt --check
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
+
+test: smoke qa  ## Rust unit + integration tests + QA (fmt/clippy/crosscheck/rustdoc) after smoke
 	$(MLIR_ENV) cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 

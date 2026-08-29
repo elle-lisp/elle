@@ -181,7 +181,8 @@ It takes ~30 minutes.
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
 | `make smoke` | ~30min release | corpus + doctests + embedding |
-| `make test` | smoke + ~5min | smoke, then fmt, clippy, macOS cross-check, rustdoc, unit and integration tests |
+| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, macOS cross-check, rustdoc. Run before every push |
+| `make test` | smoke + ~5min | smoke, then qa, then unit and integration tests |
 | `make crosscheck` | ~1min | Clippy over the macOS `cfg(target_os)` arms — needs `rustup target add x86_64-apple-darwin` |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
 
