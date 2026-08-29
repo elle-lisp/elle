@@ -868,6 +868,9 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   (cons 1)                    # Error: cons expects 2 arguments, got 1
   (defn f [x] x)
   (f 1 2)                     # Error: f expects 1 argument, got 2
+  (let [reuslt 1] result)     # Warning: binding 'reuslt' is never used
+  (defn len [xs]              # Warning: 'len' calls itself outside tail position
+    (if (empty? xs) 0 (+ 1 (len (rest xs)))))
   ```
 
 - **Unreachable match arms are compile-time errors.** The compiler builds the decision tree for every `match` and rejects arms no value can reach — a duplicated literal, or anything after a guardless catch-all. The same analysis runs inside or-patterns at any depth: an alternative that earlier arms and alternatives already cover is rejected. A `match` that no arm covers raises a structured `:match-error` at runtime carrying the unmatched value; no mandatory wildcard arm.

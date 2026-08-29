@@ -35,11 +35,9 @@ pub fn analyze(
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
     drop(analyzer);
-    Ok(AnalyzeResult {
-        hir: analysis.hir,
-        arena,
-        errors,
-    })
+    let mut hir = analysis.hir;
+    crate::hir::tailcall::mark_tail_calls(&mut hir);
+    Ok(AnalyzeResult { hir, arena, errors })
 }
 
 /// Analyze a file as a single synthetic letrec (no bytecode).
@@ -88,9 +86,10 @@ pub fn analyze_file(
     );
     analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
-    let hir = analyzer.analyze_file_letrec(forms, span)?;
+    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let errors = analyzer.take_errors();
     drop(analyzer);
 
+    crate::hir::tailcall::mark_tail_calls(&mut hir);
     Ok(AnalyzeResult { hir, arena, errors })
 }

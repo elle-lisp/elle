@@ -26,6 +26,11 @@ pub struct CompileResult {
 /// Used by linter and LSP which need HIR but not bytecode
 #[derive(Debug)]
 pub struct AnalyzeResult {
+    /// The analyzed tree, with tail calls already marked. Consumers that read
+    /// `is_tail` off an analysis — the linter's non-tail-self-recursion rule, the
+    /// `compile/callees` call-graph builder — read a flag the analysis set, not a
+    /// default. `regularize` marks again on the compile path, because map fusion
+    /// mints call nodes after this point.
     pub hir: crate::hir::Hir,
     pub arena: crate::hir::BindingArena,
     /// Accumulated non-fatal analysis errors
