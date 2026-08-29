@@ -252,8 +252,14 @@ parked fiber's accounting symmetric with its unpark:
   literal path gates it. It is taken whatever the signal turns out to be, and a TERMINAL one
   reaches the same consumer by another route: the raise leaves through the mask that catches
   it, which delivers the payload as the resumer's result, and the resumer's release of that
-  result consumes one reference exactly as it consumes the delivery of a park. Pinned by
-  `tests/elle/region-dynamic-emit-borrow-uaf.lisp`, and gauged per op by the `emit-dyn-*`
+  result consumes one reference exactly as it consumes the delivery of a park. What supplies
+  that reference in TAIL position is not the borrowed-argument retain, which a restart's
+  replay of the post-`TailCall` block still claims: the exit consumes the retain and mints the
+  delivery itself, recording it so the frames' owed releases stop standing in for a delivery
+  this call now funds ([mechanism.md](mechanism.md) § "What the fall-through owes, a signal
+  exit owes too"). Pinned by
+  `tests/elle/region-dynamic-emit-borrow-uaf.lisp` and
+  `tests/elle/region-dynamic-emit-terminal-uaf.lisp`, and gauged per op by the `emit-dyn-*`
   probes in `tests/elle/oracle.lisp`.
 - **A delivery into a replayed frame carries one owning reference.** A parked
   `BytecodeFrame` re-enters at its suspending call's continuation, whose

@@ -974,6 +974,7 @@
 # A signal the compiler cannot read as a keyword set, and a payload no fiber body
 # allocates — the two ingredients a dynamic emit's borrowed park needs.
 (def emit-sig :yield)
+(def emit-error-sig :error)
 (def emit-subject (string "emit-subject"))
 
 # Direct-loop class. Each entry: [label (fn [j] body) rate].
@@ -1521,6 +1522,54 @@
       (let [f (fiber/new (fn []
                            (emit emit-sig (string "v" j))
                            9) |:yield|)]
+        (fiber/resume f))) 0]  # The same operation raising a TERMINAL signal, where
+   # the reference the tail call holds answers to a different consumer: the payload's
+   # DELIVERY, released by whoever catches the signal. The exit consumes its
+   # borrowed-argument retains — the block that would have consumed them is abandoned,
+   # and an `:error` fiber's restart replays it — so it mints the delivery and records
+   # it, the pair `handle_emit` performs on the literal path
+   # (docs/impl/region/mechanism.md § "What the fall-through owes, a signal exit owes
+   # too"). CLOSED controls (undeclared, like `rest-array-copy`), so a regression to
+   # open trips the completeness gate loudly rather than being absorbed under F2.
+   # Each reads the mint's ARITY: withholding it over-frees, which no leak gauge sees
+   # and tests/elle/region-dynamic-emit-terminal-uaf.lisp reports. The six must stay
+   # together, because only the gaps between them separate the mint from the record.
+   # `emit-dyn-error-fresh` allocates its payload in the body, so the frame's own
+   # reference is what the record reclaims and a mint per reference reads 1;
+   # `emit-dyn-error-repeat` names one region through BOTH arguments, so the frame
+   # holds a moved reference and a retain and the walk must run the release the
+   # exemption used to skip; `emit-dyn-error-restart` resumes the raised fiber, so the
+   # replayed block releases the frame's reference where the discharge otherwise
+   # would. `emit-dyn-error-discard` and `emit-lit-tail-error` remove one ingredient
+   # each — the tail position, and the primitive itself.
+   ["emit-dyn-tail-error"
+    (fn [j]
+      (let [f (fiber/new (fn [] (emit emit-error-sig emit-subject)) |:error|)]
+        (fiber/resume f))) 0]
+   ["emit-dyn-error-discard"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (emit emit-error-sig emit-subject)
+                           9) |:error|)]
+        (fiber/resume f))) 0]
+   ["emit-lit-tail-error"
+    (fn [j]
+      (let [f (fiber/new (fn [] (emit :error emit-subject)) |:error|)]
+        (fiber/resume f))) 0]
+   ["emit-dyn-error-fresh"
+    (fn [j]
+      (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
+        (fiber/resume f))) 0]
+   ["emit-dyn-error-repeat"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (let [t (set :error)]
+                             (emit t t))) |:error|)]
+        (fiber/resume f))) 0]
+   ["emit-dyn-error-restart"
+    (fn [j]
+      (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
+        (fiber/resume f)
         (fiber/resume f))) 0]  # An emit-raised error's payload keeps
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the

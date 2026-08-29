@@ -1412,6 +1412,33 @@ That exemption is what carries a **dynamic** `emit` in tail position, whose non-
 first argument makes it an ordinary native call rather than the `Emit` terminator: the
 borrowed-argument retain is the body reference the park owes, and there is no second mint.
 
+**A terminal `:error` mints instead of exempting.** The same operation raising a terminal
+signal hands its payload to a **catcher**, whose read of the signal consumes one reference —
+the payload's **delivery** (§ "An abandoned frame runs the releases it still owes"). The
+suspend exemption cannot supply that one. An `:error` fiber is resumable, so a restart replays
+this block too, and the stash release then reaches a retain the catcher has already consumed.
+So the exit consumes its retains like any other — the nil stamp makes the replay a no-op — and
+mints the delivery itself, exactly as `handle_emit` mints it on the literal path, recording it
+in the same `Fiber::emit_delivery`.
+
+The mint is taken only where the payload is one of the call's **own arguments**. A payload the
+native BUILT funds the delivery with its birth reference, so an ordinary native raise — a fresh
+error struct — must not receive one. The identity test is what tells the two apart, and the
+`emit` primitive handing back its second argument is the shape that needs it.
+
+**The record travels with the mint**, as it does on the literal path. Once the mint funds the
+delivery, every reference the frame holds is owed to the frame's own routes, so the walk and
+the discharge must stop exempting the payload's region. Two references are reclaimed that way:
+a payload the body ALLOCATED, whose owned-argument release sits in the abandoned block, and the
+second name of a payload that reaches the call twice — the first occurrence moves the frame's
+reference and the second takes a retain of its own (rules.md Rule 5), as `(emit s s)` does.
+Where the fiber is restarted rather than discharged, the replayed block runs that same release,
+so the accounting is the same either way.
+
+A **halt** takes neither mint nor record, for the reason `handle_emit` withholds its own retain
+there: the fiber is promoted to `:dead` and never resumed, so that delivery has no consumer and
+a reference taken for it is stranded (owner.md § "Park/unpark symmetry").
+
 **Every OTHER release in that block stays.** They divide in two and neither half has that
 argument. An **argument's** own release is the ownership move, and a signal exit is exactly
 where the payload may BE that argument — a fiber carrier returns its fiber argument, a
@@ -1456,10 +1483,16 @@ an_owned_tail_argument_is_not_named_on_the_call}` (the naming pins, both faces),
 `tests/elle/region-tail-signal-exit-uaf.lisp` (the soundness complement — a value the signal
 payload carries, a restarted `:error` fiber that replays the block, a suspending handoff, and
 a caught error whose handler reads the released value's holder must all survive the exit's
-release). The payload exemption is pinned by
+release). The suspend half of the payload exemption is pinned by
 `tests/elle/region-dynamic-emit-borrow-uaf.lisp` (a tail dynamic `emit` of a borrowed value,
 driven past an abandoned park) and gauged by the `emit-dyn-tail` probe in
-`tests/elle/oracle.lisp`.
+`tests/elle/oracle.lisp`; the terminal half by
+`tests/elle/region-dynamic-emit-terminal-uaf.lisp` (a tail dynamic `(emit sig v)` raise of a
+borrowed value, read back through every holder that outlives the fiber) and gauged by the
+`emit-dyn-*-error*` probes there, whose `emit-dyn-error-fresh` and `emit-dyn-error-repeat`
+faces are the ones that read the RECORD — a payload the body allocated, and one region named
+through both arguments, each holding a frame reference the walk must stop exempting once the
+mint funds the delivery.
 
 ### A carrier that comes back with a result never left the frame
 
@@ -1579,6 +1612,11 @@ walk may release, and the two raise paths differ:
   would strand one region per raised-and-caught error whose payload the raise chain
   owns. The raise records the mint (`Fiber::emit_delivery`), and a walk whose live
   signal payload matches it skips nothing.
+- A **dynamic `emit` in tail position** reads like the `Emit` case with the mint moved to
+  the exit: the raise is an ordinary native call, so the signal exit mints the delivery of
+  a payload the call received as an argument and records it there (§ "What the fall-through
+  owes, a signal exit owes too"). What the walk then reclaims is the frame's own reference,
+  wherever the payload is one the body allocated.
 - An **injected** `fiber/abort` / `fiber/refuse` payload reads like the `Emit` case,
   for the same reason: the injection mints the delivery
   ([effects.md](effects.md) § `Delivers`) and records it on every fiber whose frames
