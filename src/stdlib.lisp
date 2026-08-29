@@ -846,26 +846,41 @@
                                        (reverse acc)
                                        (loop (+ i 1) (pair (get c i) acc))))]
                        (loop 0 ())))
-           flat (fn (lst)
-                  (if (empty? lst)
-                    ()
-                    (let [x (first lst)]
-                      (cond
-                        (pair? x)
-                          (append (flat x) (flat (rest lst)))
-                        (or (array? x) (array? x))
-                          (append (flat (to-list x)) (flat (rest lst)))
-                        true
-                          (pair x (flat (rest lst)))))))]
+           ## Deep flatten over an explicit cursor stack.
+           ##
+           ## `stack` is a list of cursors, innermost first; each cursor is the
+           ## not-yet-visited tail of one open sequence. `acc` collects output in
+           ## reverse. Descending into a nested sequence pushes a cursor, and
+           ## exhausting one pops it.
+           ##
+           ## The shape buys two properties. Every `walk` call sits in tail
+           ## position, so the trampoline in `execute_bytecode_saving_stack`
+           ## reuses a single frame and the native stack stays flat however long
+           ## the input is. And carrying the remaining work as a stack keeps the
+           ## whole walk O(n) — appending each expansion onto that work instead
+           ## would copy the tail once per nested sequence.
+           walk (fn (stack acc)
+                  (if (empty? stack)
+                    (reverse acc)
+                    (let [cur (first stack)]
+                      (if (empty? cur)
+                        (walk (rest stack) acc)
+                        (let [x (first cur)
+                              rest-stack (pair (rest cur) (rest stack))]
+                          (cond
+                            (pair? x) (walk (pair x rest-stack) acc)
+                            (array? x)
+                              (walk (pair (to-list x) rest-stack) acc)
+                            true (walk rest-stack (pair x acc))))))))]
     (cond
-      (or (pair? coll) (empty? coll)) (flat coll)
+      (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
+      ## An `@[]` literal filled by `push`, so an array input yields a
+      ## *mutable* array. `->array` would hand back an immutable one.
       (array? coll)
         (let [result @[]]
-          (each x in (flat (to-list coll))
+          (each x in (walk (pair (to-list coll) ()) ())
             (push result x))
           result)
-      (array? coll)
-        (apply array (flat (to-list coll)))
       true (error {:error :type-error
                    :reason :not-a-sequence
                    :message "not a sequence"}))))
