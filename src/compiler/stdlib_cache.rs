@@ -6,9 +6,9 @@
 //! same stdlib source, same elle binary → same bytecode. This module turns that
 //! work into a one-time cost by serializing the compiled `Bytecode` (plus the
 //! per-closure `ClosureTemplate`s and their LIR, so the JIT keeps working) to a
-//! content-addressed cache file, keyed by elle version + stdlib source hash +
-//! the canonical primitive-table identity (the last because serialized
-//! native-fn immediates carry process-local `prim_id`s).
+//! content-addressed cache file, keyed by the running binary's identity +
+//! stdlib source hash + the canonical primitive-table identity (the last
+//! because serialized native-fn immediates carry process-local `prim_id`s).
 //!
 //! Serialization strategy: the cache format is a plain `StoredBytecode` struct
 //! that is 100% owned data — no `Rc`, no pointers, no symbol-table ids. Symbols
@@ -96,17 +96,43 @@ impl StdlibCache {
     }
 }
 
-/// Content hash of the stdlib source + elle version + primitive-table
-/// identity, forming the cache key.
-fn cache_key(stdlib_source: &str) -> String {
+/// Identity of the running binary — its length and modification time.
+///
+/// Returns `None` when the executable cannot be located or measured. A binary
+/// that cannot identify itself must not share a cache with one that can, and
+/// falling back to the version string would restore the very confusion this
+/// exists to prevent, so the caller declines to cache instead.
+fn build_identity() -> Option<(u64, u128)> {
+    let exe = std::env::current_exe().ok()?;
+    let meta = std::fs::metadata(exe).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some((meta.len(), mtime))
+}
+
+/// Content hash of the stdlib source, the running binary's identity,
+/// `FORMAT_VERSION`, and the primitive-table identity — the cache key.
+///
+/// `None` when the binary cannot be identified; the caller then neither reads
+/// nor writes a cache file.
+fn cache_key(stdlib_source: &str) -> Option<String> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     stdlib_source.hash(&mut hasher);
-    // Include the binary/format identity so a changed elle (e.g. a compiler
-    // change that alters emitted bytecode) naturally invalidates the cache.
-    std::env::var("ELLE_CACHE_VERSION")
-        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
-        .hash(&mut hasher);
+    // The binary itself, not its version string. Two builds of one version
+    // compile stdlib differently the moment the emitter or a pass changes, and
+    // a key that cannot see the rebuild hands every `Runtime::new()` — the one
+    // in each test included — bytecode the previous binary produced. A test
+    // failure would then stop implicating the branch that caused it.
+    //
+    // It also covers what the primitive-table identity below cannot see: the
+    // ids `prim_id_of` appends outside the canonical tables (trait methods,
+    // FFI callbacks) are minted by the running binary, not listed in it.
+    build_identity()?.hash(&mut hasher);
     FORMAT_VERSION.hash(&mut hasher);
     // A serialized native-fn immediate carries a `prim_id`, which is only
     // valid against the exact primitive table that minted it. Mix the table
@@ -114,7 +140,7 @@ fn cache_key(stdlib_source: &str) -> String {
     // binary) invalidates the cache instead of deserializing a foreign id
     // into `panic!("unknown prim id")`.
     crate::primitives::registration::hash_prim_table_identity(&mut hasher);
-    format!("{:016x}.bin", hasher.finish())
+    Some(format!("{:016x}.bin", hasher.finish()))
 }
 
 /// Try to load the compiled stdlib from the disk cache.
@@ -129,7 +155,7 @@ pub fn try_load(
     symbols: &mut crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Option<Result<Bytecode, String>> {
-    let path = cache.dir()?.join(cache_key(stdlib_source));
+    let path = cache.dir()?.join(cache_key(stdlib_source)?);
     let bytes = std::fs::read(&path).ok()?;
     let stored: StoredBytecode = match bincode::deserialize(&bytes) {
         Ok(s) => s,
@@ -162,7 +188,10 @@ pub fn try_store(
     };
     match bincode::serialize(&stored) {
         Ok(bytes) => {
-            let path = dir.join(cache_key(stdlib_source));
+            let Some(key) = cache_key(stdlib_source) else {
+                return;
+            };
+            let path = dir.join(key);
             if let Err(e) = std::fs::write(&path, bytes) {
                 eprintln!("[stdlib-cache] write failed: {e}");
             }
@@ -349,6 +378,27 @@ mod tests {
         let r_loaded = run(&loaded);
         assert_eq!(r_orig, r_loaded, "original and reloaded bytecode agree");
         eprintln!("roundtrip ok: {r_orig} == {r_loaded}");
+    }
+
+    /// The key must follow the binary, not its version string: two builds of
+    /// one version compile stdlib differently the moment a pass changes. This
+    /// pins that the identity is read from the executable — an edit that put a
+    /// constant back would leave every rebuild sharing one key, and every test
+    /// that boots a runtime reading bytecode the previous binary produced.
+    ///
+    /// Characterization, not a failing-first regression: "a different build
+    /// yields a different key" is observable only across builds.
+    #[test]
+    fn the_build_identity_is_read_from_the_running_executable() {
+        let (len, _mtime) = build_identity().expect("the test binary can identify itself");
+        let exe = std::env::current_exe().expect("current_exe");
+        let meta = std::fs::metadata(&exe).expect("exe metadata");
+        assert_eq!(
+            len,
+            meta.len(),
+            "the identity must be the binary's own size"
+        );
+        assert!(len > 0, "a zero-length identity separates nothing");
     }
 
     /// Two runtimes over one cache directory: the first compiles stdlib and

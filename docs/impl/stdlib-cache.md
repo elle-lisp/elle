@@ -27,15 +27,21 @@ recompile, and store failures are silently ignored.
 ## Cache key and invalidation
 
 ```
-cache_key = hash(stdlib source, elle version, FORMAT_VERSION,
+cache_key = hash(stdlib source, build identity, FORMAT_VERSION,
                  primitive-table identity) + ".bin"
 ```
 
 - **stdlib source**: the text embedded via `include_str!`; a source change
   naturally invalidates it.
-- **elle version**: `CARGO_PKG_VERSION`. Compiler changes alter emitted
-  bytecode, so the version is part of the key; override with the
-  `ELLE_CACHE_VERSION` env var (tests and debugging).
+- **build identity**: the running executable's length and modification time
+  (`std::env::current_exe`). Not the version string: two builds of one version
+  compile stdlib differently the moment the emitter or a pass changes, and a
+  key blind to the rebuild hands every `Runtime::new()` — the one in each test
+  included — bytecode the previous binary produced, so a test failure stops
+  implicating the branch that caused it. It also covers the ids `prim_id_of`
+  appends outside the canonical tables (trait methods, FFI callbacks), which
+  the table identity below cannot see. A binary that cannot identify itself
+  gets no cache at all rather than sharing one.
 - **FORMAT_VERSION**: a hard version number bumped manually on incompatible
   layout changes; validated on load.
 - **primitive-table identity**: the ordered names and aliases of every
