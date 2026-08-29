@@ -112,7 +112,11 @@ fn loop_with_pair_alloc_is_live() {
 fn let_with_pair_body_immediate_is_live() {
     // %pair allocates in the let scope; body returns 42 (immediate).
     // The pair stays local → the let scope is live.
-    let (hir, _, info) = pipeline("(let [x (%pair 1 2)] 42)");
+    //
+    // The body reads `x` so that the binding survives dead binding elimination
+    // (`hir::dead`), which would otherwise delete an unread `%pair` before the
+    // region solver ever sees the allocation this test is about.
+    let (hir, _, info) = pipeline("(let [x (%pair 1 2)] (if x 42 0))");
     let lets = find_lets(&hir);
     let any_live = lets.iter().any(|id| info.scope_has_local_allocs(*id));
     assert!(any_live, "let with %pair and immediate body should be live");

@@ -209,3 +209,18 @@ Lowerer (&BindingArena) — read-only access to binding metadata
      set via the arena. File-level `def` bindings shadow primitives. The lowerer
      emits upvalue loads for both — compile-time checks (e.g., `(set + 42)` is
      an error) use the `Binding` identity.
+
+ 22. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze` and
+     `analyze_file` run `mark_tail_calls` before returning, so `is_tail` is a
+     fact on the analyzed tree rather than a default. The linter's
+     non-tail-self-recursion rule and the `compile/callees` call graph both read
+     it there. `regularize` marks again, because map fusion mints call nodes
+     after that point.
+
+ 23. **A dead binding takes its initializer with it.** `hir::dead` removes a
+     `let`/`letrec` binding with zero uses whose initializer is provably
+     effect-free, which deletes the initializer's call. It runs inside
+     `regularize`, before `functionalize`, so the region solver never sees the
+     deleted call. A silent callee is not enough: silence means no signal bits,
+     and `%push-array-mut` is silent and mutates. See
+     [docs/impl/hir.md](../../docs/impl/hir.md) § "Dead binding elimination".

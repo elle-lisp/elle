@@ -40,6 +40,11 @@ pub(crate) fn regularize(
     // untouched) and before tail-call marking, so the fused loop's `freeze` tail
     // is marked in place of the collapsed `map` call.
     fuse_map_chains(hir, arena, symbols, fn_inline);
+    // Dead binding elimination runs after pruning and fusion, which both make
+    // bindings unused, and before functionalize, for the same reason pruning
+    // does: the region solver runs after these transforms, so a call deleted
+    // here mints no region and strands no release obligation.
+    crate::hir::dead::eliminate_dead_bindings(hir, arena, symbols);
     crate::hir::tailcall::mark_tail_calls(hir);
     crate::hir::functionalize::functionalize(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
