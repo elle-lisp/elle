@@ -409,7 +409,7 @@ impl VM {
     /// and `protect` delivers it to the catcher as data — the raising frame's
     /// reference IS the delivery, so a slot naming the payload's region is
     /// skipped and its release stays owed. An emit-raised error minted the
-    /// delivery itself (`Fiber::emit_delivery`), so nothing is exempt and the
+    /// delivery itself (the ledger's `record_mint`), so nothing is exempt and the
     /// frame's reference is reclaimed here.
     ///
     /// Both tiers walk here. The compiled tier arrives through
@@ -448,7 +448,7 @@ impl VM {
     }
     /// The payload region the abandoned-frame walk must leave standing, or
     /// `None` when nothing is exempt: an immediate payload has no region, and an
-    /// emit-raised error minted its own delivery (`Fiber::emit_delivery`
+    /// emit-raised error minted its own delivery (the ledger's `mint_names`
     /// matches), so the frame's reference funds nothing and every owed release
     /// runs.
     fn unminted_payload_region(
@@ -456,11 +456,7 @@ impl VM {
         heap: &mut crate::value::fiberheap::FiberHeap,
         payload: Value,
     ) -> Option<RuntimeRegion> {
-        if self
-            .fiber
-            .emit_delivery
-            .is_some_and(|m| m.bit_identical(payload))
-        {
+        if self.fiber.delivery.mint_names(payload) {
             return None;
         }
         crate::value::arena::region_of(heap, payload)

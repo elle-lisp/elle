@@ -74,7 +74,7 @@ impl VM {
             // (docs/impl/region/mechanism.md § "An abandoned frame runs the
             // releases it still owes").
             if signal_bits.intersects(SIG_ERROR) {
-                self.fiber.emit_delivery = Some(value);
+                self.fiber.delivery.record_mint(value);
             }
         }
 

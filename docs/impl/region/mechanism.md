@@ -1417,9 +1417,9 @@ carry one. An `:error` fiber is resumable, so a restart replays this block, and 
 release then reaches a retain the **catcher** has already consumed as the payload's delivery
 (§ "An abandoned frame runs the releases it still owes"). What funds the catcher is a delivery
 the raise mints for itself at the signal exit — in either position, under the identity gate and
-the record that travel with it ([owner.md](owner.md) § "What yields is the emit OPERATION, not
-the `Emit` node"). So this exit consumes its retains as on any other path, and the nil stamp
-makes the replay a no-op.
+the ledger record that travel with it (`Fiber::delivery`, `record_mint`;
+[owner.md](owner.md) § "What yields is the emit OPERATION, not the `Emit` node"). So this exit
+consumes its retains as on any other path, and the nil stamp makes the replay a no-op.
 
 **What the record frees is this block's own releases.** With the delivery funded, every
 reference the frame holds answers to the frame's own routes, so the walk and the discharge stop
@@ -1612,8 +1612,8 @@ walk may release, and the two raise paths differ:
   retain `handle_emit` takes, consumed by the resumer's release of the resume result.
   The frame's own reference funds nothing, so the skip has nothing to stand in for and
   would strand one region per raised-and-caught error whose payload the raise chain
-  owns. The raise records the mint (`Fiber::emit_delivery`), and a walk whose live
-  signal payload matches it skips nothing.
+  owns. The raise records the mint in the ledger (`Fiber::delivery`, `record_mint`),
+  and a walk whose live signal payload matches it (`mint_names`) skips nothing.
 - A **dynamic `emit`** reads like the `Emit` case with the mint moved to the exit: the
   raise is an ordinary native call, so the signal exit mints the delivery of a payload
   the call received as an argument and records it there ([owner.md](owner.md) § "What

@@ -45,7 +45,9 @@ fn parked_fiber(bits: SignalBits, parked: Value, record: Option<Value>) -> Fiber
     let handle = FiberHandle::new(Fiber::new(test_closure(), SignalBits::ALL));
     handle.with_mut(|f| {
         f.signal = Some((bits, parked));
-        f.denial_payload = record;
+        if let Some(payload) = record {
+            f.delivery.park_denial(payload);
+        }
     });
     handle
 }

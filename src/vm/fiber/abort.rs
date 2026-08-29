@@ -25,7 +25,7 @@ impl VM {
     pub(in crate::vm::fiber) fn park_propagating_abort(&mut self, bits: SignalBits, value: Value) {
         self.fiber.signal = Some((bits, value));
         if bits.intersects(SIG_ERROR) {
-            self.fiber.emit_delivery = Some(value);
+            self.fiber.delivery.record_mint(value);
         }
     }
 
