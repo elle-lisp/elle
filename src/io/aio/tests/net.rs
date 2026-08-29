@@ -935,11 +935,22 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
             }
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
             unsafe { libc::close(c) };
+            // A full AF_UNIX backlog names itself differently per platform:
+            // `EAGAIN` on Linux, `ECONNREFUSED` on macOS and the BSDs. Each
+            // platform is pinned to its own answer rather than to the union of
+            // both, so a platform that changes its answer still fails here.
+            #[cfg(target_os = "linux")]
+            let (expected, expected_name): (&[libc::c_int], &str) =
+                (&[libc::EAGAIN, libc::EWOULDBLOCK], "EAGAIN/EWOULDBLOCK");
+            #[cfg(not(target_os = "linux"))]
+            let (expected, expected_name): (&[libc::c_int], &str) =
+                (&[libc::ECONNREFUSED], "ECONNREFUSED");
             assert!(
-                errno == libc::EAGAIN || errno == libc::EWOULDBLOCK,
-                "connect({}) failed with errno {}",
+                expected.contains(&errno),
+                "connect({}) failed with errno {}, expected {}",
                 path,
-                errno
+                errno,
+                expected_name
             );
             full = true;
             break;

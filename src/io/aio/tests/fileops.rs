@@ -185,7 +185,11 @@ fn test_async_submit_process_wait_uring() {
 #[test]
 fn a_failed_pool_process_wait_names_waitpid() {
     crate::value::arena::with_test_region(|| {
-        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+        // Resolved through `PATH`, not hardcoded: no absolute path is right
+        // everywhere. macOS ships no `/bin/true`, and a busybox image ships no
+        // `/usr/bin/true`. Either way the spawn would fail with `ENOENT` before
+        // this test reaches what it pins.
+        let mut child = std::process::Command::new("true").spawn().unwrap();
         let pid = child.id();
         // Reaped here, so the pool worker's own `waitpid` has no child left.
         child.wait().unwrap();
@@ -230,7 +234,7 @@ fn a_failed_pool_process_wait_names_waitpid() {
 /// `try_wait`, so the stand-in is a process that has already exited.
 #[cfg(test)]
 fn child_stub() -> std::process::Child {
-    let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+    let mut child = std::process::Command::new("true").spawn().unwrap();
     child.wait().unwrap();
     child
 }
