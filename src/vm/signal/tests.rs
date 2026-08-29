@@ -218,3 +218,81 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
         );
     })
 }
+
+// -- which parks owe their own payload a release --
+
+/// A capability denial parks a payload the VM built in place of a call that never
+/// ran, so no body reference answers for it and the resume owes its region one
+/// decref (docs/impl/region/owner.md § "A park with no body reference owes one
+/// release at the resume"). Only the denial site can tell a park has that shape,
+/// so it records the payload for `prim_fiber_resume` to match against the live
+/// parked signal.
+#[test]
+fn a_capability_denial_park_records_the_payload_it_leaves_over() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (code, env) = test_fixtures();
+        let mut ip = 0usize;
+        let blocked = SIG_IO;
+
+        let result = vm.handle_capability_denial(
+            &crate::primitives::def::NOOP_PRIM,
+            blocked,
+            &[],
+            &code,
+            &env,
+            &mut ip,
+        );
+
+        assert_eq!(result, Some(blocked));
+        let (_, payload) = vm.fiber.signal.expect("the denial parks its payload");
+        assert_eq!(
+            vm.fiber.denial_payload.map(|p| p.bit_identical(payload)),
+            Some(true),
+            "the denial records the very payload it parked, so the resume can \
+             match the record against the live signal",
+        );
+    })
+}
+
+/// The tail-position mirror. A tail denial builds no frame of its own, so the
+/// record — like the delivery obligation beside it — must ride the fiber.
+#[test]
+fn a_tail_capability_denial_park_records_the_payload_it_leaves_over() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let blocked = SIG_IO;
+
+        let result =
+            vm.handle_capability_denial_tail(&crate::primitives::def::NOOP_PRIM, blocked, &[]);
+
+        assert_eq!(result, blocked);
+        let (_, payload) = vm.fiber.signal.expect("the tail denial parks its payload");
+        assert_eq!(
+            vm.fiber.denial_payload.map(|p| p.bit_identical(payload)),
+            Some(true),
+            "a tail denial records its payload too — the frame it resumes into is \
+             built by a driver that never saw the denied call",
+        );
+    })
+}
+
+/// The counter-factual for the two above: an ordinary suspend parks a payload the
+/// resumed body releases itself. Recording it would make the resume run a second
+/// release and free the value under every holder that outlives the fiber.
+#[test]
+fn an_ordinary_suspend_records_no_payload_to_release() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (code, env) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result = vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+
+        assert_eq!(result, Some(SIG_YIELD));
+        assert!(
+            vm.fiber.denial_payload.is_none(),
+            "a yielded payload is body-owned — the resume owes it no release",
+        );
+    })
+}

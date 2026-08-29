@@ -532,6 +532,27 @@ fn region_dynamic_emit_borrow_uaf() {
     );
 }
 
+// Guard — a raised payload's delivery reference, where the raise leaves the emit
+// PRIMITIVE in tail position (docs/impl/region/mechanism.md § "What the fall-through
+// owes, a signal exit owes too"). The exit consumes the call's borrowed-argument
+// retains, the block that would have consumed them being abandoned, so it mints the
+// payload's delivery and records it — the same pair `handle_emit` performs on the
+// literal path. Withhold the mint and the catcher's read of the delivered payload
+// frees it under every holder that outlives the fiber; withhold the record and the
+// frame's own reference to a payload it allocated is stranded. This drives every
+// holder shape past a raise — a module-level binding, a captured local, a captured
+// parameter, a `fiber/value` read, a container, an uncaught propagation, and a
+// restarted fiber that replays the abandoned block — and reads each afterwards, so
+// an over-free faults under guardfree. Six controls must stay clean with no mint,
+// and a growth gauge refuses a mint-per-reference fix.
+#[test]
+fn region_dynamic_emit_terminal_uaf() {
+    run_elle_script_with_args(
+        "region-dynamic-emit-terminal-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a resume value delivered into a frame parked at a suspending PRIMITIVE
 // call carries one owning reference (docs/impl/region/owner.md § "A delivery into
 // a replayed frame carries one owning reference"). The replayed frame re-enters at
@@ -549,6 +570,23 @@ fn region_dynamic_emit_borrow_uaf() {
 fn region_primitive_resume_uaf() {
     run_elle_script_with_args(
         "region-primitive-resume-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — the resume of a mediated capability denial releases the one reference
+// the park has no body to release, and that decref answers for the payload's own
+// left-over reference, never for a holder's (docs/impl/region/owner.md § "A park
+// with no body reference owes one release at the resume"). The witness binds the
+// payload in the mediating parent, resumes the fiber past the denial, churns the
+// heap, then reads three payload fields; taking the holder's reference instead
+// frees the struct under those reads — SIGSEGV under guardfree. The leak face is
+// the region-count bound in the same file, which the object gauge in
+// `tests/elle/oracle.lisp` cannot see.
+#[test]
+fn region_capability_denial_resume_uaf() {
+    run_elle_script_with_args(
+        "region-capability-denial-resume-leak",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }

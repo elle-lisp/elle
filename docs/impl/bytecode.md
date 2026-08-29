@@ -25,11 +25,9 @@ JumpIfFalse offset branch if top is falsy
 
 ### Arithmetic
 ```text
-Add                generic addition (any numeric type)
-AddInt             specialized integer addition
-Sub, Mul, Div      arithmetic ops
-Mod, Rem           modulo and remainder
-Neg                unary negation
+Add, Sub, Mul, Div              generic arithmetic (any numeric type)
+Rem                             remainder
+AddInt, SubInt, MulInt, DivInt  integer-specialized arithmetic
 ```
 
 ### Comparison
@@ -47,15 +45,27 @@ IsArray            test for array
 
 ### Collections
 ```text
-MakeArray n        construct array from n stack values
-MakeStruct n       construct struct from n key-value pairs
+Pair rid            construct a pair in region rid from two stack values
+EmptyList           push the empty list
+First, Rest         pair accessors
+MakeArrayMut rid n  construct an @array in region rid from n stack values
+ArrayMutRef         read an @array element; the index comes off the stack
+ArrayMutSet         write an @array element; index and value come off the stack
+ArrayMutLen         @array length
+StructRest count    copy a struct minus count excluded keys
 ```
+`MakeArrayMut` is the only instruction that builds an array from stack values,
+and no instruction builds a struct. An immutable array or struct reaches the
+stack from `MaterializeConst`, which materializes a literal into a fresh region,
+or from `IntrFreeze`, which copies a mutable collection.
 
 ### Fiber operations
 ```text
-Yield              yield current fiber
-Emit bits          emit a signal; value comes off the stack
+Emit bits          emit a signal; the value comes off the stack
 ```
+`Emit` is the only instruction that suspends a fiber. The operand selects the
+signal: `(emit :yield v)` emits `SIG_YIELD`, and `(emit :io v)` emits `SIG_IO`.
+See [impl/vm.md](vm.md) — *Fiber integration*.
 
 ### Self-reference
 ```text
@@ -99,7 +109,9 @@ how a mask silently loses its high half.
 ## Files
 
 ```text
-src/compiler/bytecode.rs   Instruction enum and encoding
+src/compiler/bytecode.rs              Bytecode struct, encoding, disassembly entry points
+src/compiler/bytecode/instruction.rs  Instruction enum and opcode decoding
+src/compiler/bytecode/disasm.rs       the disassembler
 ```
 
 ---

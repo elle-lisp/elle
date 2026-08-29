@@ -24,6 +24,32 @@
       (assign result (pair x result)))
     result)
 
+  # ── Lint advisories ─────────────────────────────────────────────────────
+  #
+  # A portrait REFLECTS the linter's findings; it never re-derives them. Both
+  # granularities read compile/diagnostics through the one accessor below, so
+  # portrait and `elle lint` cannot disagree, and a new rule reaches both by
+  # gaining a row in `lint-kinds`.
+
+  (def lint-kinds
+    [["mutable-binding-never-assigned" :false-mutable]
+     ["unused-binding" :unused-binding]
+     ["non-tail-self-recursion" :non-tail-recursion]])
+
+  (defn diagnostics-for [analysis rule function]
+    "The linter's `rule` diagnostics. With a `function` name, only those the
+    linter attributed to that function; with nil, every one in the module."
+    (filter (fn [d]
+              (and (= (get d :rule) rule)
+                   (or (nil? function) (= (get d :function) function))))
+            (compile/diagnostics analysis)))
+
+  (defn advisories-for [analysis rule kind]
+    "Module-wide advisories for one rule, tagged with the portrait's `kind`."
+    (freeze (map (fn [d]
+                   {:kind kind :line (get d :line) :message (get d :message)})
+                 (diagnostics-for analysis rule nil))))
+
   # ── Phase classification ────────────────────────────────────────────────
 
   (defn classify-phase [sig]
@@ -153,14 +179,12 @@
                    :message (string/format "Captures '{}' by value, but '{}' is mutated elsewhere. This closure sees the value at capture time, not later mutations."
                    (get cap :name) (get cap :name))})))))
 
-    # 6. Mutable binding never reassigned (false-mutable), in THIS function.
-    # Reflects the linter's diagnostics, attributed by the :function the linter
-    # stamped — so a mutable BINDING that never changes is distinguished from a
-    # mutable VALUE held by an immutable binding.
-    (each d in (compile/diagnostics analysis)
-      (when (and (= (get d :rule) "mutable-binding-never-assigned")
-                 (= (get d :function) (string name)))
-        (push obs {:kind :false-mutable :message (get d :message)})))
+    # 6-8. Lint advisories raised inside THIS function. Attribution is by the
+    # :function the linter stamped on each diagnostic, so a finding in a nested
+    # closure belongs to the closure, not to its host.
+    (each pair in lint-kinds
+      (each d in (diagnostics-for analysis (get pair 0) (string name))
+        (push obs {:kind (get pair 1) :message (get d :message)})))
 
     (freeze obs))
 
@@ -186,20 +210,17 @@
        :callers callers
        :callees callees}))
 
-  # ── Lint advisories ─────────────────────────────────────────────────────
-
   (defn false-mutable-advisories [analysis]
-    "Reflect the linter's `mutable-binding-never-assigned` diagnostics — a
-    binding declared mutable (var/@) yet never reassigned via `assign`. Read
-    from compile/diagnostics so portrait and `elle lint` never disagree."
-    (def @out @[])
-    (each d in (compile/diagnostics analysis)
-      (when (= (get d :rule) "mutable-binding-never-assigned")
-        (push out
-              {:kind :false-mutable
-               :line (get d :line)
-               :message (get d :message)})))
-    (freeze out))
+    "A binding declared mutable (var/@) yet never reassigned via `assign`."
+    (advisories-for analysis "mutable-binding-never-assigned" :false-mutable))
+
+  (defn unused-binding-advisories [analysis]
+    "A binding that is defined and never read."
+    (advisories-for analysis "unused-binding" :unused-binding))
+
+  (defn non-tail-recursion-advisories [analysis]
+    "A function whose self-call sits outside tail position."
+    (advisories-for analysis "non-tail-self-recursion" :non-tail-recursion))
 
   # ── Module portrait ─────────────────────────────────────────────────────
 
@@ -253,6 +274,8 @@
        :yielding (freeze yielding)
        :boundaries (freeze boundaries)
        :false-mutable (false-mutable-advisories analysis)
+       :unused-binding (unused-binding-advisories analysis)
+       :non-tail-recursion (non-tail-recursion-advisories analysis)
        :graph (compile/call-graph analysis)}))
 
   # ── Text rendering ──────────────────────────────────────────────────────
@@ -348,11 +371,17 @@
               (string/format "    {} → {} ({})\n" (get b :caller)
                              (get b :callee) (get b :transition)))))
 
-    (when (not (empty? (get portrait :false-mutable)))
-      (push out "\n  Mutable bindings never reassigned:\n")
-      (each m in (get portrait :false-mutable)
-        (push out
-              (string/format "    line {}: {}\n" (get m :line) (get m :message)))))
+    (each section in [[:false-mutable "Mutable bindings never reassigned"]
+                      [:unused-binding "Bindings never used"]
+                      [:non-tail-recursion
+                       "Self-recursion outside tail position"]]
+      (let [advisories (get portrait (get section 0))]
+        (when (not (empty? advisories))
+          (push out (string/format "\n  {}:\n" (get section 1)))
+          (each m in advisories
+            (push out
+                  (string/format "    line {}: {}\n" (get m :line)
+                                 (get m :message)))))))
 
     (let [graph (get portrait :graph)]
       (when (not (empty? (get graph :roots)))
@@ -376,5 +405,7 @@
    :failures detect-failure-modes
    :composition assess-composition
    :observations find-observations
-   :false-mutable false-mutable-advisories})
+   :false-mutable false-mutable-advisories
+   :unused-binding unused-binding-advisories
+   :non-tail-recursion non-tail-recursion-advisories})
 # end closure

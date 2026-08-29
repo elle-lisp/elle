@@ -152,20 +152,32 @@ pub(crate) fn prim_fiber_resume(
     // request (or any value) holds it here, and its region carries the
     // suspend-time escape references that must be balanced before the resume
     // value replaces it.
-    let (status, parked) = handle.with(|fiber| (fiber.status, fiber.signal));
+    let (status, parked, denial_payload) =
+        handle.with(|fiber| (fiber.status, fiber.signal, fiber.denial_payload));
     match status {
         FiberStatus::New | FiberStatus::Paused | FiberStatus::Error => {
-            // Release the references the now-completing yielding call left on its
+            // Release the reference the now-completing yielding call left on its
             // parked value's region — otherwise every yielding io op leaks its
-            // IoRequest region (see `release_parked_signal`).
-            crate::vm::fiber::release_parked_signal(ctx.heap_mut(), parked, resume_value);
+            // IoRequest region, and every mediated capability denial its payload's
+            // (see `release_parked_signal`).
+            crate::vm::fiber::release_parked_signal(
+                ctx.heap_mut(),
+                parked,
+                denial_payload,
+                resume_value,
+            );
             // And a parked TERMINAL result this resume displaces (a restarted
             // `:error` fiber, a re-resumed drained stream source): its
             // park-retain + recorded content edge counted on the free-time
             // signal scan, which will never see it once the resume value
             // replaces it (see `release_displaced_terminal_signal`).
             crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), args[0], parked);
-            handle.with_mut(|fiber| fiber.signal = Some((SIG_OK, resume_value)));
+            handle.with_mut(|fiber| {
+                fiber.signal = Some((SIG_OK, resume_value));
+                // The record's whole life is the park it names, whose payload has
+                // just left the slot (`Fiber::denial_payload`).
+                fiber.denial_payload = None;
+            });
         }
         FiberStatus::Alive => {
             return (

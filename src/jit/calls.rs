@@ -151,8 +151,10 @@ pub(crate) fn jit_capability_denial(
     crate::value::arena::incref_for_escape(heap, r, crate::value::arena::EscapeSite::SuspendEscape);
     // The denied primitive never runs, so the mediating parent's resume value
     // stands in for its result — the same park classification the interpreter's
-    // `handle_capability_denial` records.
+    // `handle_capability_denial` records, and the same left-over payload reference
+    // for the resume to release (`Fiber::denial_payload`).
     vm.fiber.resume_value_unfunded = true;
+    vm.fiber.denial_payload = Some(payload);
     vm.fiber.signal = Some((blocked, payload));
     YIELD_SENTINEL
 }

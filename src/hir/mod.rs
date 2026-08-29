@@ -14,6 +14,7 @@ pub mod anf;
 pub mod arena;
 pub mod binding;
 pub mod dataflow;
+mod dead;
 pub(crate) mod decision;
 mod defuse;
 pub mod display;

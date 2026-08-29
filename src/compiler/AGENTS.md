@@ -12,13 +12,14 @@ Bytecode instruction definitions and debug formatting.
 
 | Module | Purpose |
 |--------|---------|
-| `bytecode.rs` | `Instruction` enum, `Bytecode` struct |
-| `bytecode_debug.rs` | Debug formatting for bytecode disassembly |
+| `bytecode.rs` | `Bytecode` struct, encoding, disassembly entry points |
+| `bytecode/instruction.rs` | `Instruction` enum, opcode decoding |
+| `bytecode/disasm.rs` | Debug formatting for bytecode disassembly |
 
 ## Dependents
 
-- `pipeline.rs` - uses `Bytecode`
-- `lir/emit.rs` - emits `Instruction` bytes
+- `pipeline/` - uses `Bytecode`
+- `lir/emit/` - emits `Instruction` bytes
 - `vm/` - executes bytecode
 
 ## Invariants
@@ -32,7 +33,7 @@ Bytecode instruction definitions and debug formatting.
 
 | Type | Location | Purpose |
 |------|----------|---------|
-| `Instruction` | `bytecode.rs` | Bytecode opcodes |
+| `Instruction` | `bytecode/instruction.rs` | Bytecode opcodes |
 | `Bytecode` | `bytecode.rs` | Instructions + constants |
 ## Type guard instructions
 

@@ -132,13 +132,20 @@ pub(crate) fn release_displaced_terminal_signal(
     crate::value::arena::decref_region(heap, Some(sig_r));
 }
 
-/// Release the `SuspendEscape` an io op left on its IoRequest's region when a
-/// parked fiber is resumed and that request — held in `fiber.signal` across the
-/// park — is replaced by `resume_value`. This reclaims the IoRequest region of a
-/// yielding io op; the gauge is `oracle.lisp`'s `io-yield ev/sleep` probe, which
-/// measures the whole suspend/pump/resume round bounded.
+/// Release the one reference a park with **no body reference** leaves over when
+/// the resume replaces its payload with `resume_value`.
 ///
-/// A yielding io op (`ev/sleep`, `port/read`, …) returns its `IoRequest` with
+/// A park's payload carries two references, and the resume consumes both: the
+/// delivery — the escape retain — which the resumer's release of the resume
+/// result takes, and the suspending body's own, released by the continuation past
+/// the suspend. Two parks have no body reference for that second consumer to
+/// take, so one is left over at every resume and one decref here answers for it
+/// (docs/impl/region/owner.md § "A park with no body reference owes one release at
+/// the resume"). A user `(yield v)` / `(emit …)` value is body-owned and must not
+/// reach the decref: releasing it double-frees the payload under every holder that
+/// outlives the fiber.
+///
+/// **A yielding io op** (`ev/sleep`, `port/read`, …) returns its `IoRequest` with
 /// `SIG_IO`, whereupon the suspend adds a
 /// [`SuspendEscape`](crate::value::arena::EscapeSite::SuspendEscape) retain so the
 /// scheduler can read the request out of `fiber.signal`. The request's own
@@ -147,43 +154,52 @@ pub(crate) fn release_displaced_terminal_signal(
 /// remaining reference. On resume the io call "returns" `resume_value` (the
 /// completion), so the caller's `DecrefValueRegion` targets THAT region, never
 /// the request's — orphaning the `SuspendEscape` and leaking the request region,
-/// unbounded in a long-running io loop. One decref here, the symmetric
-/// counterpart of the suspend-time incref, frees it: the request is dead (the
-/// scheduler already consumed it), so its region holds nothing live.
+/// unbounded in a long-running io loop. The gauge is `oracle.lisp`'s `io-yield
+/// ev/sleep` probe, which measures the whole suspend/pump/resume round bounded.
 ///
 /// **Skip when `resume_value` shares the region** — the `Fresh` io ops
 /// (`port/read`/`accept`) build their completion buffer *in* the IoRequest's
 /// region and hand it back as the resume value, so that region is still live;
 /// there the caller's `DecrefValueRegion` on the buffer balances the
 /// `SuspendEscape`, and a decref here would free the buffer out from under the
-/// caller (a use-after-free).
+/// caller (a use-after-free). The skip is the io arm's alone: a denial payload's
+/// region is the denied call's own, and the mediating parent's resume value comes
+/// from outside the denied fiber entirely.
 ///
-/// Gated on `SIG_IO`. A user `(yield v)` / `(emit …)` value is **body-owned** —
-/// the resumed body itself releases the reference it held across the suspend, and
-/// the resumer's release of the resume result consumes the delivery reference —
-/// so releasing it here would double-free; only an io op's request is the
-/// orphaned, transient native-call result this balances.
-/// A no-op for a non-io signal, an immediate / `None` value, or a region-0 value.
+/// **A capability denial** parks the payload the VM builds in place of a call it
+/// refuses to run. The denied primitive never returns, so the replayed frame's
+/// result release targets `resume_value` and the payload's birth reference is the
+/// one left over. Only the denial site knows a park has that shape, so it records
+/// the payload in `denial_payload` ([`crate::value::fiber::Fiber::denial_payload`])
+/// and the decref is gated on that record still naming the parked value.
+///
+/// A no-op for a park of neither shape, an immediate / `None` value, or a
+/// region-0 value.
 pub(crate) fn release_parked_signal(
     heap: &mut crate::value::fiberheap::FiberHeap,
     parked: Option<(SignalBits, Value)>,
+    denial_payload: Option<Value>,
     resume_value: Value,
 ) {
     let Some((bits, value)) = parked else {
         return;
     };
-    if !bits.intersects(crate::value::SIG_IO) {
-        return;
-    }
     let region = crate::value::arena::region_of(heap, value);
     if region.is_none() {
         return;
     }
-    // The resume value sharing the request's region is the `Fresh`-io-op signature
-    // (the completion buffer is built there): that region is still live, so leave
-    // it to the caller's `DecrefValueRegion`.
-    if crate::value::arena::region_of(heap, resume_value) == region {
+    if bits.intersects(crate::value::SIG_IO) {
+        // The resume value sharing the request's region is the `Fresh`-io-op
+        // signature (the completion buffer is built there): that region is still
+        // live, so leave it to the caller's `DecrefValueRegion`.
+        if crate::value::arena::region_of(heap, resume_value) == region {
+            return;
+        }
+    } else if !denial_payload.is_some_and(|p| p.bit_identical(value)) {
         return;
     }
     crate::value::arena::decref_region(heap, region);
 }
+
+#[cfg(test)]
+mod tests;
