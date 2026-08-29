@@ -898,7 +898,12 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
 /// to poll for, so the operation paces its retries and watches for the stop
 /// between them. A blocking one waits inside the kernel until the listener
 /// accepts, which a listener that has stopped accepting never does.
+///
+/// Linux-only: macOS and the BSDs report a full backlog as `ECONNREFUSED`,
+/// which the connect does not pace, so a parked Unix connect cannot be
+/// arranged there.
 #[test]
+#[cfg(target_os = "linux")]
 fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
@@ -937,7 +942,7 @@ fn a_cancelled_pool_unix_connect_ends_rather_than_being_abandoned() {
             unsafe { libc::close(c) };
             assert!(
                 errno == libc::EAGAIN || errno == libc::EWOULDBLOCK,
-                "connect({}) failed with errno {}",
+                "connect({}) failed with errno {}, expected EAGAIN/EWOULDBLOCK",
                 path,
                 errno
             );

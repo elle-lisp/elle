@@ -185,10 +185,9 @@ fn test_async_submit_process_wait_uring() {
 #[test]
 fn a_failed_pool_process_wait_names_waitpid() {
     crate::value::arena::with_test_region(|| {
-        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
-        let pid = child.id();
-        // Reaped here, so the pool worker's own `waitpid` has no child left.
-        child.wait().unwrap();
+        // Already reaped by `child_stub`, so the pool worker's own `waitpid`
+        // has no child left.
+        let pid = child_stub().id();
 
         let h = crate::primitives::ctx::TestHeap::new();
         let handle_val = h
@@ -230,7 +229,10 @@ fn a_failed_pool_process_wait_names_waitpid() {
 /// `try_wait`, so the stand-in is a process that has already exited.
 #[cfg(test)]
 fn child_stub() -> std::process::Child {
-    let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+    // Resolved through `PATH`, not hardcoded: no absolute path is right
+    // everywhere. macOS ships no `/bin/true`, and a busybox image ships no
+    // `/usr/bin/true`.
+    let mut child = std::process::Command::new("true").spawn().unwrap();
     child.wait().unwrap();
     child
 }
