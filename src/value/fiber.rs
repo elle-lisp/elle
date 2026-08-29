@@ -180,25 +180,31 @@ pub struct Fiber {
     /// with the parked signal, so every delivery route consumes it exactly once
     /// and a later park of a different shape starts from `false`.
     pub resume_value_unfunded: bool,
-    /// The capability-denial payload parked in [`Self::signal`], whose region the
-    /// resume owes one decref.
+    /// The CAPABILITY-DENIAL payload this fiber has parked, if its innermost
+    /// suspension is a denial.
     ///
-    /// A park's payload carries two references and the resume consumes both: the
-    /// delivery, which the resumer's release of the resume result takes, and the
-    /// suspending body's own, released by the continuation past the suspend. A
-    /// denial has no body reference to release — the denied primitive never ran, so
-    /// the replayed frame's result release targets the mediating parent's resume
-    /// value — and the payload's birth reference is left over
-    /// (docs/impl/region/owner.md § "A park with no body reference owes one release
-    /// at the resume"). Only the denial site knows a park has that shape, so it
-    /// records the payload here and `prim_fiber_resume` runs the decref.
+    /// A park leaves two references on its payload's region — the delivery, and
+    /// the body's own, released by the continuation past the suspend — but a
+    /// denial's `{:error :capability-denied …}` struct is built by the denial
+    /// path, so the body never names it and no `decref_point` names its region.
+    /// The reference the allocation left is owed by whatever displaces the
+    /// payload: a resume's delivery, or an abort's / refusal's injected error
+    /// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the
+    /// RUNTIME built is released by the install that displaces it").
     ///
-    /// Carried as the payload rather than a flag so the release is gated on
-    /// representation identity with the live parked signal, exactly as
-    /// [`Self::emit_delivery`] is: an install that displaces the denial payload
-    /// without resuming — `fiber/abort`'s injection, a hard kill's terminal error —
-    /// leaves a record that names a value no longer in the slot, and the mismatch
-    /// withholds a decref that install did not owe.
+    /// A record is needed because the bits cannot say so. An io park is its
+    /// `SIG_IO` bit, but a denial parks under the WITHHELD capability's bits,
+    /// which an `(emit :fs v)` of a body-allocated value carries too — and only
+    /// the classifier (`handle_capability_denial`, its tail twin, and the JIT's
+    /// `jit_capability_denial`) knows which of the two it built.
+    ///
+    /// Like `emit_delivery`, this is an UNCOUNTED marker: only ever compared
+    /// bit-wise against the parked signal, never dereferenced, so it takes no
+    /// retain and the Fiber content scan records no edge for it. The counted
+    /// edge for the same value is `signal`'s. The comparison is what bounds a
+    /// stale record — a record that no longer names the parked payload releases
+    /// nothing — and the displacing install TAKES it, so no second install can
+    /// release the same reference.
     pub denial_payload: Option<Value>,
     /// Suspended execution frames. Set when the fiber suspends; consumed
     /// when it resumes.

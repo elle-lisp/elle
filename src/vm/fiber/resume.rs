@@ -145,7 +145,14 @@ impl VM {
                 // Deliver the resume value to the inner fiber (matches what
                 // resume_suspended does at the FiberResume arm). The install
                 // displaces any parked signal, so a recorded emit-minted
-                // delivery no longer names the slot's payload.
+                // delivery no longer names the slot's payload — and a park whose
+                // payload the RUNTIME built is owed the release its body has
+                // none for, exactly as at `fiber/resume` itself. This is the
+                // route a `protect`ed body's denial takes: the denial parks in
+                // the inner fiber, which the outer one awaits through a
+                // `FiberResume` frame (docs/impl/region/owner.md § "Park/unpark
+                // symmetry").
+                crate::vm::fiber::release_displaced_denial_payload(self.heap(), &inner_handle);
                 inner_handle.with_mut(|f| {
                     f.signal = Some((SIG_OK, resume_value));
                     f.emit_delivery = None;
@@ -366,6 +373,11 @@ impl VM {
 
                     // Abort the inner fiber (e.g. protect child blocked on I/O).
                     // Store the error on the inner fiber so do_fiber_abort picks it up.
+                    // The install displaces the inner fiber's park, so a payload
+                    // the RUNTIME built there is owed its release first — the
+                    // `protect`ed face of the injection's own (see
+                    // `inject_error_at_suspension`).
+                    crate::vm::fiber::release_displaced_denial_payload(vm.heap(), &inner_handle);
                     inner_handle.with_mut(|f| {
                         f.signal = Some((SIG_ERROR, error_value));
                     });

@@ -51,7 +51,8 @@ mod borrow_tests;
 pub(crate) use owned::{kill_fiber, parked_owner_nodes, release_fiber_owned, take_fiber_owned};
 use refcount::{incref_signal_region, release_discarded_signal};
 pub(crate) use refcount::{
-    is_terminal_signal, release_displaced_terminal_signal, release_parked_signal,
+    is_terminal_signal, release_displaced_denial_payload, release_displaced_terminal_signal,
+    release_parked_signal,
 };
 // Re-exported for the WASM resume path (`crate::vm::fiber::record_terminal_signal_park`),
 // the only external caller; `owned::kill_fiber` reaches it by module path. Unused

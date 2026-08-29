@@ -176,6 +176,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
 | `resume_value_unfunded` | `bool` | Whether the innermost suspension is a PRIMITIVE call, so the next delivery owes its resume value one reference (docs/impl/region/owner.md § "A delivery into a replayed frame carries one owning reference") |
+| `denial_payload` | `Option<Value>` | The capability-denial payload this fiber has parked. The runtime built it, so no continuation of the body releases it and the install that displaces the park owes that release; the bits cannot say so, a denial parking under the withheld capability's own bits (docs/impl/region/owner.md § "A payload the RUNTIME built is released by the install that displaces it") |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
@@ -233,12 +234,15 @@ primitive never returns, so nothing mints the reference that release consumes:
 `handle_primitive_signal` and the denial path record the shape on the fiber
 (`resume_value_unfunded`) and `do_fiber_resume_single` mints it as it delivers.
 
-A denial park owes a release in the other direction too. Its payload is the VM's,
-built in place of a call that never ran, so no body reference answers for it and
-the resume releases the one left over — `prim_fiber_resume` runs the decref, gated
-on the payload the denial recorded (`Fiber::denial_payload`). See
-docs/impl/region/owner.md § "A park with no body reference owes one release at the
-resume".
+The denial owes one more, in the other direction. Its payload is the RUNTIME's,
+so the body names it nowhere and no continuation releases it — the install that
+displaces the park does, through `release_displaced_denial_payload` off the
+`denial_payload` record: `fiber/resume`, the `fiber/abort` / `fiber/refuse`
+injection, and the three `FiberResume` deliveries that reach an inner fiber
+directly. `fiber/resume` asks the record before `release_parked_signal`'s io arm
+and skips that arm when the record claims the park, a fiber denied `:io` parking
+under the same `SIG_IO` bit an io request does. See docs/impl/region/owner.md
+§ "A payload the RUNTIME built is released by the install that displaces it".
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants

@@ -193,11 +193,19 @@ fn inject_error_at_suspension(
 ) -> (SignalBits, Value) {
     // A parked TERMINAL result this install displaces carries a park-retain +
     // recorded content edge the free-time signal scan will never see
-    // (`release_displaced_terminal_signal`); a parked non-terminal signal's
-    // strand here is the dead-continuation residual (docs/impl/region/owner.md
-    // § "Park/unpark symmetry"), not released blind.
+    // (`release_displaced_terminal_signal`). A parked non-terminal signal is
+    // released only where the RUNTIME built its payload (below); a body-allocated
+    // one keeps its body reference, which the unwinding frames' own owed-release
+    // tables claim (docs/impl/region/owner.md § "Park/unpark symmetry").
     let parked = handle.with(|fiber| fiber.signal);
     crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), fiber_value, parked);
+    // A parked CAPABILITY-DENIAL payload is the one non-terminal park this
+    // install does answer for: the runtime built it, so the child's continuation
+    // releases nothing for it, and refusing the denied call displaces it exactly
+    // as a resume would (docs/impl/region/owner.md § "Park/unpark symmetry" —
+    // "A payload the RUNTIME built is released by the install that displaces
+    // it").
+    crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
     handle.with_mut(|fiber| {
         fiber.signal = Some((SIG_ERROR, error_value));
         // The park this record named is over, and the strand above is what the

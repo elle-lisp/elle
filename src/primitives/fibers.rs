@@ -152,32 +152,27 @@ pub(crate) fn prim_fiber_resume(
     // request (or any value) holds it here, and its region carries the
     // suspend-time escape references that must be balanced before the resume
     // value replaces it.
-    let (status, parked, denial_payload) =
-        handle.with(|fiber| (fiber.status, fiber.signal, fiber.denial_payload));
+    let (status, parked) = handle.with(|fiber| (fiber.status, fiber.signal));
     match status {
         FiberStatus::New | FiberStatus::Paused | FiberStatus::Error => {
-            // Release the reference the now-completing yielding call left on its
-            // parked value's region — otherwise every yielding io op leaks its
-            // IoRequest region, and every mediated capability denial its payload's
-            // (see `release_parked_signal`).
-            crate::vm::fiber::release_parked_signal(
-                ctx.heap_mut(),
-                parked,
-                denial_payload,
-                resume_value,
-            );
+            // The park's payload is the RUNTIME's, not the body's, in two shapes,
+            // and each owes one release as this resume displaces it: a
+            // capability-denial struct, named by the classifier's record, and a
+            // yielding io op's `IoRequest`, named by its `SIG_IO` bit. They are
+            // asked in that order because a fiber denied `:io` parks under
+            // `SIG_IO` too, so the bit alone cannot tell that one denial from a
+            // real io park — the record can, and one reference is owed, not two
+            // (docs/impl/region/owner.md § "Park/unpark symmetry").
+            if !crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle) {
+                crate::vm::fiber::release_parked_signal(ctx.heap_mut(), parked, resume_value);
+            }
             // And a parked TERMINAL result this resume displaces (a restarted
             // `:error` fiber, a re-resumed drained stream source): its
             // park-retain + recorded content edge counted on the free-time
             // signal scan, which will never see it once the resume value
             // replaces it (see `release_displaced_terminal_signal`).
             crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), args[0], parked);
-            handle.with_mut(|fiber| {
-                fiber.signal = Some((SIG_OK, resume_value));
-                // The record's whole life is the park it names, whose payload has
-                // just left the slot (`Fiber::denial_payload`).
-                fiber.denial_payload = None;
-            });
+            handle.with_mut(|fiber| fiber.signal = Some((SIG_OK, resume_value)));
         }
         FiberStatus::Alive => {
             return (

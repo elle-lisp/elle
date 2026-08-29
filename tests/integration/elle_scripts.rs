@@ -576,17 +576,41 @@ fn region_primitive_resume_uaf() {
 
 // Guard — the resume of a mediated capability denial releases the one reference
 // the park has no body to release, and that decref answers for the payload's own
-// left-over reference, never for a holder's (docs/impl/region/owner.md § "A park
-// with no body reference owes one release at the resume"). The witness binds the
-// payload in the mediating parent, resumes the fiber past the denial, churns the
-// heap, then reads three payload fields; taking the holder's reference instead
-// frees the struct under those reads — SIGSEGV under guardfree. The leak face is
-// the region-count bound in the same file, which the object gauge in
-// `tests/elle/oracle.lisp` cannot see.
+// left-over reference, never for a holder's (docs/impl/region/owner.md § "A
+// payload the RUNTIME built is released by the install that displaces it"). The
+// witness binds the payload in the mediating parent, resumes the fiber past the
+// denial, churns the heap, then reads three payload fields; taking the holder's
+// reference instead frees the struct under those reads — SIGSEGV under guardfree.
+// This file's faces are the denial POSITIONS (call and tail); the per-install
+// faces are `region_denial_park_uaf` below. The leak face is the region-count
+// bound in the same file, which the object gauge in `tests/elle/oracle.lisp`
+// cannot see.
 #[test]
 fn region_capability_denial_resume_uaf() {
     run_elle_script_with_args(
         "region-capability-denial-resume-leak",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — a park payload the RUNTIME built is released by the install that
+// displaces it (docs/impl/region/owner.md § "Park/unpark symmetry"). A capability
+// denial's payload is built by the denial path, so the body never names it and no
+// continuation releases it; `fiber/resume`, `fiber/refuse` and `fiber/abort` each
+// replace it in the slot and each owe that release. Every one of those releases
+// fires on a path where none fired before, and the mediator is precisely the
+// reader that may still hold the payload — `fiber/value` is pass-through, so a
+// binding of it carries a counted reference the release must not consume. Each
+// witness therefore reads a HEAP field (`:primitive`, `:args`) AFTER the install,
+// including the shape whose resume value is read OUT of the payload's own region;
+// a bare status check passes over a freed payload. Two controls drive a
+// body-allocated `emit` payload through the same installs, where a release added
+// would free it under these reads. The leak face is
+// `tests/elle/region-denial-park.lisp`.
+#[test]
+fn region_denial_park_uaf() {
+    run_elle_script_with_args(
+        "region-denial-park-uaf",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }
