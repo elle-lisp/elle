@@ -65,7 +65,8 @@ the edges. Two things come back when it does, on either backend:
   released; only the result is thrown away. `(ev/report):workers` counts
   the threads currently out.
 - **The descriptor.** A cancelled read stops rather than going on
-  reading. Whatever arrives next belongs to whoever reads the port next:
+  reading, and so does a cancelled write whose peer stopped taking bytes.
+  Whatever arrives next belongs to whoever reads the port next:
 
   ```text
   (ev/timeout 0.1 (fn [] (port/read p 64)))   # the deadline wins

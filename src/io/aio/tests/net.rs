@@ -753,6 +753,90 @@ fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
     });
 }
 
+/// A cancelled write must END on the thread-pool backend.
+///
+/// The full-write invariant makes a write run to the end of its payload, and a
+/// payload larger than the send buffer only gets there as the peer takes what is
+/// already in it. So a write waits on a peer exactly as an accept and a
+/// `recvfrom` do, and a peer that stops reading is the wait that never ends.
+/// `ev/timeout` around a `port/write` is the caller that meets it.
+///
+/// The trap: the peer socket must stay OPEN. Closing it ends the write with
+/// `EPIPE` for a reason that has nothing to do with cancellation, and the test
+/// would then pass with the stop pipe taken away again.
+///
+/// Counter-factual: with the write submitted under `Bounds::new(timeout, None)`,
+/// `OpBound::new` finds neither a deadline nor a stop to enforce and leaves the
+/// descriptor blocking, so the worker sits inside `write(2)` where no poll and no
+/// stop can reach it. `assert_cancel_retires` then fails on the worker that never
+/// comes back.
+#[test]
+fn a_cancelled_pool_write_ends_rather_than_being_abandoned() {
+    crate::value::arena::with_test_region(|| {
+        let h = crate::primitives::ctx::TestHeap::new();
+        use std::os::unix::io::FromRawFd;
+
+        // A socketpair is the smallest peer that can stop reading: one end is
+        // the port, the other is a peer this test simply never touches.
+        let mut fds = [0 as libc::c_int; 2];
+        assert_eq!(
+            unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) },
+            0,
+            "socketpair() failed"
+        );
+        let (write_fd, peer_fd) = (fds[0], fds[1]);
+
+        // Shrink the send buffer so the payload below cannot fit in it whatever
+        // the platform's default happens to be. The kernel is free to round this
+        // up, which is why the payload is larger than any plausible rounding.
+        let want: libc::c_int = 4096;
+        unsafe {
+            libc::setsockopt(
+                write_fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &want as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+            libc::setsockopt(
+                peer_fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &want as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+
+        let port = h.ctx().external(
+            "port",
+            Port::new_unix_stream(
+                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(write_fd) },
+                "socketpair".to_string(),
+            ),
+        );
+
+        let backend = AsyncBackend::new_thread_pool().unwrap();
+        let data = h.ctx().bytes(vec![b'x'; 4 << 20]);
+        let write_id = backend
+            .submit(
+                &IoRequest {
+                    // No `:timeout`: the deadline is the ending this test must
+                    // not be able to reach for. Cancellation is the only one
+                    // left, and it is the one under test.
+                    op: PortOp::Write { data }.into(),
+                    port,
+                    timeout: None,
+                },
+                crate::value::arena::leaked_test_heap(),
+            )
+            .unwrap();
+
+        assert_cancel_retires(&backend, write_id, "write");
+
+        unsafe { libc::close(peer_fd) };
+    });
+}
+
 /// A cancelled TCP connect must END on the thread-pool backend.
 ///
 /// The stall is a listener whose accept queue is full: the kernel drops further

@@ -360,12 +360,12 @@ impl AsyncBackend {
                         // rather than abandon it, or the abandoned read goes on
                         // consuming bytes meant for whoever reads the port next.
                         //
-                        // A write takes the deadline without one. Nothing it
-                        // holds is contended — stopping one would only cut the
-                        // payload short, and a peer decoding a stream cannot
-                        // use half a message. It runs to the end of its payload
-                        // as the full-write invariant promises, and gives its
-                        // worker back then.
+                        // A write takes one for the peer it waits on. The
+                        // full-write invariant runs it to the end of its
+                        // payload, and a payload past the send buffer only gets
+                        // there as the peer takes what is already in it — so a
+                        // peer that stops reading parks the write with nothing
+                        // else able to end it.
                         //
                         // `Flush` waits on nobody: `fsync(2)` transfers what
                         // this process already handed the kernel.
@@ -373,8 +373,8 @@ impl AsyncBackend {
                             PortOp::Read { .. }
                             | PortOp::ReadExact { .. }
                             | PortOp::ReadLine { .. }
-                            | PortOp::ReadAll => hub.bounds(id, request.timeout),
-                            PortOp::Write { .. } => Bounds::new(request.timeout, None),
+                            | PortOp::ReadAll
+                            | PortOp::Write { .. } => hub.bounds(id, request.timeout),
                             _ => Bounds::prompt(),
                         };
                         // Each read asks the kernel for its whole count. The

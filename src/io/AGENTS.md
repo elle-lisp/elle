@@ -310,16 +310,17 @@ pairing and lets go only on a completion. The table records each id it has
 reported, so each worker is asked once — a drain runs on every loop tick, and
 the completion takes a moment to come back.
 
-Operations that end on their own are asked too, and the ask reaches nothing. A
-`Write` runs to the end of its payload and `Resolve` runs to the resolver's own
-end, so neither carries a stop pipe; their completions arrive as they always
+Operations that end on their own are asked too, and the ask reaches nothing.
+`Resolve` runs to the resolver's own end and `Task` runs until its closure
+returns, so neither carries a stop pipe; their completions arrive as they always
 would.
 
-The runtime does not lean on the platform to deliver these. `poll(2)` on Linux
-holds a reference to the file it waits on, so a socket can outlive the close
-its fiber's release performed, and a peer writing afterwards still reaches the
-parked worker. That is one kernel's behavior rather than a promise, and an
-operation whose reader is gone must end whether or not any peer ever acts.
+The runtime does not lean on a peer to deliver these. A peer that writes wakes
+the parked worker, and the completion then arrives without the sweep having
+asked for anything — but that needs a peer, and the peers these operations wait
+on are exactly the ones that may never act. Nor does it lean on the close of the
+descriptor, which is the platform's choice rather than a promise (§ "The stop
+pipe").
 
 Pinned by `an_operation_that_parks_ends_when_its_operands_region_is_gone`
 (`src/io/aio/tests/park.rs`), which gives the operation no peer at all, and end
@@ -342,18 +343,28 @@ holds; a signal would land on whichever thread the kernel chose.
 
 Two conditions decide which operations carry one:
 
-- **It can wait for something that may never happen.** The reads, `Sleep`,
-  `Accept`, `RecvFrom`, both connects, `PollFd`, `WatchRead`, the signal reads,
-  `ProcessWait` and `Open` all wait on something outside this process — a peer,
-  an event, a child, a fifo's other end. A `Write` runs to the end of its
-  payload as the full-write invariant promises, and `Flush`, `SendTo` and
-  `Shutdown` transfer what the process already handed over, so those four take
-  no pipe (`Bounds::prompt`).
+- **It can wait for something that may never happen.** The reads, the write,
+  `Sleep`, `Accept`, `RecvFrom`, both connects, `PollFd`, `WatchRead`, the
+  signal reads, `ProcessWait` and `Open` all wait on something outside this
+  process — a peer, an event, a child, a fifo's other end. The write's peer is
+  the one that reads: the full-write invariant makes the operation run to the
+  end of its payload, and a payload larger than the send buffer only gets there
+  as the peer takes what is already in it. A peer that stops reading fills the
+  buffer and parks the write in `bound.wait(POLLOUT)`, so the write carries a
+  pipe like the reads do. `Flush`, `SendTo` and `Shutdown` transfer what the
+  process already handed over, so those three take no pipe (`Bounds::prompt`).
 - **Stopping it must not park it instead.** `OpBound` takes the descriptor
   non-blocking for the operation's lifetime, so the syscall reports
   `EAGAIN` and hands the wait back to the poll where the stop is visible. A
   worker that calls the blocking syscall first is unreachable: closing the
   listener does not wake a thread already inside `accept(2)`.
+
+Closing the descriptor is not the second ending it looks like. Whether a close
+wakes a thread parked in `poll(2)` on that descriptor is the platform's choice:
+macOS and the BSDs wake it, and Linux does not, because `poll` holds a reference
+to the file it waits on. So an operation that can park carries a pipe on every
+platform, and a close ends such an operation by writing to that pipe rather than
+by being a close (§ "How a close wakes the operations it retires").
 
 Two operations meet the first condition and cannot meet the second, because the
 kernel reports no readiness for what they wait on: an `Open` of a fifo for
