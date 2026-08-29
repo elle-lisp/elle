@@ -29,6 +29,15 @@ Add, Sub, Mul, Div              generic arithmetic (any numeric type)
 Rem                             remainder
 AddInt, SubInt, MulInt, DivInt  integer-specialized arithmetic
 ```
+The integer-only forms are implemented but unemitted. The interpreter runs
+them (`src/vm/arithmetic.rs`), and nothing produces them: the emitter maps
+every LIR `BinOp` to the polymorphic bytecode
+(`src/lir/emit/instr/ops.rs`), so a program never reaches an `AddInt`.
+Wiring them up is tracked as issue #957, which carries the compiler's
+operand-type proofs across the HIR→LIR boundary and spends them here.
+
+There is no negation instruction, and no modulo instruction. The emitter
+lowers unary minus to a `Mul` by the constant `-1`.
 
 ### Comparison
 ```text

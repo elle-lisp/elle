@@ -14,7 +14,11 @@ provides the shared types and rule implementations.
 |------|---------|
 | `Diagnostic` | Lint finding with severity, code, message, location |
 | `Severity` | `Info`, `Warning`, `Error` |
-| `DiagnosticContext` | Optional source text for context display |
+| `LintCode` | A warning code and the rule name it travels with |
+
+| Constant | Purpose |
+|----------|---------|
+| `WARNINGS` | Every warning code the linter raises, in code order |
 
 | Function | Code | Purpose |
 |----------|------|---------|
@@ -23,8 +27,13 @@ provides the shared types and rule implementations.
 | `check_unused_binding` | `W004` | Warns on a `def`/`let`/`letrec` binding with zero uses |
 | `check_non_tail_self_recursion` | `W005` | Warns on a self-call outside tail position |
 
+Each code above names a `LintCode` in `diagnostics::WARNINGS`, which the
+emission site passes to `Diagnostic::warn` rather than spelling out.
+
 Every binding rule shares one exemption set — synthetic, primitive, and
 `_`-prefixed names — through `reportable_name`.
+
+Adding a rule: see [`docs/cookbook/lint-rules.md`](../../docs/cookbook/lint-rules.md).
 
 ## Dependents
 
