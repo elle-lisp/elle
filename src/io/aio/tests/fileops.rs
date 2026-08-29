@@ -229,6 +229,9 @@ fn a_failed_pool_process_wait_names_waitpid() {
 /// `try_wait`, so the stand-in is a process that has already exited.
 #[cfg(test)]
 fn child_stub() -> std::process::Child {
+    // Resolved through `PATH`, not hardcoded: no absolute path is right
+    // everywhere. macOS ships no `/bin/true`, and a busybox image ships no
+    // `/usr/bin/true`.
     let mut child = std::process::Command::new("true").spawn().unwrap();
     child.wait().unwrap();
     child
