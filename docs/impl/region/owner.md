@@ -171,7 +171,7 @@ the same clean-break discipline as the trampoline's tail-call-adopted closure re
 frame-replacing tail call likewise keeps the activation — and its node — alive to the
 recursion's completion.
 
-**Park/unpark symmetry — what a park retains, and who releases it.** Three rules keep a
+**Park/unpark symmetry — what a park retains, and who releases it.** These rules keep a
 parked fiber's accounting symmetric with its unpark:
 
 - **The resume carrier is never retained.** `prim_fiber_resume` (and `fiber/abort` /
@@ -198,9 +198,9 @@ parked fiber's accounting symmetric with its unpark:
 - **The parked signal's escape retain has a release on every path.** A suspending signal's
   payload is retained once as it escapes into `fiber.signal` (`EmitEscape` for
   `yield`/`emit`, `SuspendEscape` for a yielding io op or a capability denial). The resume
-  path consumes it (the resumed body's own pending release, or `release_parked_signal` where
-  the park has no body reference — below); a fiber that can never run again consumes it at
-  its terminal teardown or free-path discharge instead (`release_discarded_signal` via
+  path consumes it (the resumed body's own pending release, or — where the body has none —
+  the displacing install's, below); a fiber that can never run again consumes it at its
+  terminal teardown or free-path discharge instead (`release_discarded_signal` via
   `Fiber::take_parked_state`) — the `yield-discard`/`denied-discard` probes pin both faces.
 - **A fiber body owns one reference of every value it yields.** Two references answer for a
   parked payload, and they answer to different consumers. The escape retain above is the
@@ -232,19 +232,40 @@ parked fiber's accounting symmetric with its unpark:
   region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
   the releases it still owes"). A halt takes neither the retain nor the record — a halted
   fiber is promoted to `:dead` and never resumed, so its delivery has no consumer.
-- **A park with no body reference owes one release at the resume.** The rule above names a
-  consumer for each of a park's two references, and the second consumer is the body's own
-  release past the suspend. Two parks have no body reference to release. A yielding io op
-  parks a request the native built, whose birth reference the scheduler's `fiber/value` read
-  consumes as it submits. A capability denial parks a payload the VM built in place of a
-  call that never ran (`VM::build_denial_payload`), and the replayed frame's result release
-  targets the mediating parent's resume value instead. Either way one reference is left over
-  at the resume, and one decref of the payload's region answers for it
-  (`release_parked_signal`) — the same single decref the discard face runs
-  (`release_discarded_signal`), so both faces of a park reclaim alike. Which shape a park has
-  is known only where it parks, so the denial sites record the payload on the fiber
-  (`Fiber::denial_payload`) and the resume matches the record against the parked signal
-  before releasing. Pinned by `tests/elle/region-capability-denial-resume-leak.lisp`.
+- **A payload the RUNTIME built is released by the install that displaces it.** The second
+  of the two references above — the body's own, released by the continuation past the
+  suspend — exists only where the BODY allocated the value. Two parks build their payload
+  in the runtime instead: a yielding io op, whose `IoRequest` the native returned, and a
+  capability denial, whose `{:error :capability-denied …}` struct the denial path builds
+  for the parent to mediate. Neither body ever named the value, so no `decref_point` names
+  its region and the continuation releases nothing. The reference the allocation left is
+  therefore the discharge's on a fiber that never runs again, and the DISPLACING install's
+  on one that does: `fiber/resume`'s delivery and `fiber/abort` / `fiber/refuse`'s injected
+  error each replace the payload in the slot, and each owes it a release as it does.
+  Which parks are that shape is read two ways, because the bits answer for only one of
+  them. An io park is its `SIG_IO` bit, and its release is
+  `release_parked_signal` — resume-only, because a `Fresh` io op builds its completion
+  buffer IN the request's region and hands that back as the resume value, where the
+  resumer's release of the resume result is the second consumer and a release here would
+  free the buffer under the caller. A denial parks under the WITHHELD capability's bits,
+  which say nothing about who built the payload and are indistinguishable from an
+  `(emit :fs v)` of a body-allocated value — so the classifier records the payload
+  (`Fiber::denial_payload`, an uncounted marker compared bit-wise like
+  `Fiber::emit_delivery`) and `release_displaced_denial_payload` releases exactly what the
+  record names, on both installs. The injected error takes no skip: it is not a delivery,
+  and the abort's own `AbortDelivery` mint funds the consumer it does have.
+
+  **The two readings overlap on one denial, and the record wins it.** `:io` is a
+  withheld capability like any other, so a fiber denied `:io` parks under `SIG_IO` —
+  the very bit the io arm reads — and there the denial payload and an `IoRequest`
+  cannot be told apart by bits at all. One reference is owed, so `fiber/resume` asks
+  the record first and skips the io arm when it claims the park; running both frees
+  the payload under the mediator that is still reading it. Every other install
+  displaces on the record alone, the io arm never having reached them. Gauged by
+  `tests/elle/region-denial-park.lisp` per install and by
+  `tests/elle/region-capability-denial-resume-leak.lisp` per denial position, and pinned
+  guardfree by `tests/elle/region-denial-park-uaf.lisp`, whose `:io` witnesses are the
+  collision.
 - **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
   cannot read as a keyword set falls through to the `emit` primitive
   ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way

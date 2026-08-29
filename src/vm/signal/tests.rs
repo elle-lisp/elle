@@ -222,11 +222,11 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
 // -- which parks owe their own payload a release --
 
 /// A capability denial parks a payload the VM built in place of a call that never
-/// ran, so no body reference answers for it and the resume owes its region one
-/// decref (docs/impl/region/owner.md § "A park with no body reference owes one
-/// release at the resume"). Only the denial site can tell a park has that shape,
-/// so it records the payload for `prim_fiber_resume` to match against the live
-/// parked signal.
+/// ran, so no body reference answers for it and the install that displaces it owes
+/// its region one decref (docs/impl/region/owner.md § "A payload the RUNTIME built
+/// is released by the install that displaces it"). Only the denial site can tell a
+/// park has that shape, so it records the payload for
+/// `release_displaced_denial_payload` to match against the live parked signal.
 #[test]
 fn a_capability_denial_park_records_the_payload_it_leaves_over() {
     with_test_region(|| {
@@ -278,8 +278,9 @@ fn a_tail_capability_denial_park_records_the_payload_it_leaves_over() {
 }
 
 /// The counter-factual for the two above: an ordinary suspend parks a payload the
-/// resumed body releases itself. Recording it would make the resume run a second
-/// release and free the value under every holder that outlives the fiber.
+/// resumed body releases itself. Recording it would make the displacing install
+/// run a second release and free the value under every holder that outlives the
+/// fiber.
 #[test]
 fn an_ordinary_suspend_records_no_payload_to_release() {
     with_test_region(|| {

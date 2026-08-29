@@ -44,6 +44,12 @@ impl VM {
                     // would recurse on the Rust stack), set pending_fiber_resume
                     // and return SIG_SWITCH. The trampoline in do_fiber_resume
                     // will handle the fiber transition iteratively.
+                    //
+                    // The install displaces this inner fiber's park, so a payload
+                    // the RUNTIME built there is owed the release its body has
+                    // none for, exactly as at `fiber/resume` itself
+                    // (docs/impl/region/owner.md § "Park/unpark symmetry").
+                    crate::vm::fiber::release_displaced_denial_payload(self.heap(), handle);
                     handle.with_mut(|f| {
                         f.signal = Some((SIG_OK, current_value));
                     });

@@ -149,10 +149,12 @@ pub(crate) fn jit_capability_denial(
     let heap = unsafe { &mut *vm.heap_ptr };
     let r = crate::value::arena::region_of(heap, payload);
     crate::value::arena::incref_for_escape(heap, r, crate::value::arena::EscapeSite::SuspendEscape);
-    // The denied primitive never runs, so the mediating parent's resume value
-    // stands in for its result — the same park classification the interpreter's
-    // `handle_capability_denial` records, and the same left-over payload reference
-    // for the resume to release (`Fiber::denial_payload`).
+    // The same two records the interpreter's `handle_capability_denial` writes:
+    // the park classification, because the denied primitive never runs so the
+    // mediating parent's resume value stands in for its result, and the payload,
+    // because the RUNTIME built it and the install that displaces the park owes
+    // the reference the allocation left (docs/impl/region/owner.md § "Park/unpark
+    // symmetry").
     vm.fiber.resume_value_unfunded = true;
     vm.fiber.denial_payload = Some(payload);
     vm.fiber.signal = Some((blocked, payload));

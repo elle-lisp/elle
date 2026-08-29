@@ -223,9 +223,7 @@ impl VM {
         // its region: the resumer's `DecrefValueRegion` at the denied call's
         // decref_point would otherwise drop this freshly-built struct's only
         // reference (rc=1, the owning activation scope) and free it out from
-        // under `fiber/value`. The release is symmetric with `Suspend`: the
-        // value's region is this (child) activation's, freed when the fiber is
-        // torn down, or consumed by normal value flow if the fiber is resumed.
+        // under `fiber/value`.
         let heap = unsafe { &mut *self.heap_ptr };
         let r = crate::value::arena::region_of(heap, payload);
         crate::value::arena::incref_for_escape(
@@ -233,15 +231,16 @@ impl VM {
             r,
             crate::value::arena::EscapeSite::SuspendEscape,
         );
-
         // The denied primitive never runs, let alone returns, so the mediating
         // parent's resume value takes the place of its result — and the frame's
         // continuation releases that result (see the `SignalAction::Suspend` arm).
         self.fiber.resume_value_unfunded = true;
         // Which is why the payload's own birth reference reaches no consumer past
         // the park: the continuation's release names the resume value, not this
-        // struct. Record it so the resume runs the one decref the park is left
-        // owing (`Fiber::denial_payload`).
+        // struct. Record it, because the install that displaces the park owes that
+        // reference and only this classifier can tell a denial from an `(emit …)`
+        // under the same withheld bits (docs/impl/region/owner.md § "Park/unpark
+        // symmetry").
         self.fiber.denial_payload = Some(payload);
 
         // Save the stack and build a suspended frame (same as suspending signals)
