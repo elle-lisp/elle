@@ -190,3 +190,58 @@ fn test_wait_timeout_zero_returns_empty() {
     let completions = backend.wait(0).unwrap();
     assert!(completions.is_empty());
 }
+
+/// A backend the program never let go of lets go of its own holds before the
+/// heap that carries it tears its regions down.
+///
+/// The trap: `RegionStore::teardown_all` frees regions in id order, not
+/// lifetime order. A backend reached only through the heap has its destructor
+/// run from inside that sweep, so a release there names regions the same sweep
+/// may already have freed. The fiber below lives in a region minted before the
+/// backend's, which is what makes the order deterministic rather than a race
+/// against id assignment.
+///
+/// Counter-factual: with the heap's pre-teardown drain removed, the release
+/// runs from the destructor instead and trips the phantom-region assertion in
+/// `RegionStore::decref_reaches_zero` — the shape `docs/concurrency.md`
+/// reached at process exit on the thread-pool platform.
+#[test]
+fn a_stranded_backend_lets_go_before_its_heap_tears_down() {
+    // An owned heap, not `TestHeap`: that one's heap is leaked for the process,
+    // so it never reaches the teardown this test is about.
+    let mut owned = Box::new(crate::value::fiberheap::FiberHeap::new());
+    let heap: *mut crate::value::fiberheap::FiberHeap = &mut *owned;
+    // SAFETY: the box outlives every use below, and nothing else names it.
+    let h = unsafe { &mut *heap };
+    let (fiber, _handle) =
+        crate::value::fiber::test_fiber_in_region(h, crate::value::fiber::FiberStatus::Paused);
+
+    // The thread-pool platform on every host: its `quiesce_pending` reaps
+    // nothing, so the entry is still filed when the heap goes and the release
+    // is the only thing that can let the fiber's region go. The ring would reap
+    // the sleep at the drain and hide the question.
+    let backend = AsyncBackend::new_thread_pool().unwrap();
+    let req = IoRequest {
+        op: IoOp::Sleep {
+            duration: std::time::Duration::from_secs(30),
+        },
+        port: Value::NIL,
+        timeout: None,
+    };
+    backend
+        .submit(&req, crate::io::pending::Submitter::new(heap, fiber))
+        .unwrap();
+    assert!(backend.has_pending(), "the sleep must still be in flight");
+
+    // Reachable only from the heap, and from a region minted after the fiber's:
+    // this is the backend nobody dropped.
+    let region = h.new_runtime_region();
+    crate::value::build::external(
+        h,
+        "io-backend",
+        crate::io::AnyBackend(Box::new(backend)),
+        region,
+    );
+
+    drop(owned);
+}

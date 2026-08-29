@@ -480,8 +480,8 @@ impl OperandHold {
         }
         // SAFETY: the store this hold named at the retain. Every route that
         // disposes of an entry runs while that store is live — a completion is
-        // resolved on it, and the teardown release runs before the store can go
-        // (`AsyncBackend::quiesce`).
+        // resolved on it, and the teardown release runs before the store tears
+        // its regions down (`FiberHeap::quiesce_io_backends`).
         let h = unsafe { &mut *self.heap };
         for region in self.regions.iter_mut() {
             crate::value::arena::decref_region(h, region.take());
@@ -674,9 +674,9 @@ impl PendingTable {
     ///
     /// Backend teardown: the operations left here will never complete, so
     /// nothing else will dispose of their entries. This runs while the store is
-    /// still live — `AsyncBackend::quiesce` is called before a heap that strands
-    /// its backend is swept — and is idempotent, so the `Drop` that calls it a
-    /// second time reaches nothing.
+    /// still live — a heap quiesces every backend it carries before its region
+    /// sweep — and is idempotent, so the `Drop` that calls it a second time from
+    /// inside that sweep reaches nothing.
     pub(crate) fn release_holds(&mut self) {
         for e in self.ops.values_mut() {
             e.hold.release();

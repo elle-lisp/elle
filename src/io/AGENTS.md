@@ -278,6 +278,30 @@ Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
 (`src/io/aio/tests/park.rs`) and, for the fiber itself, by
 `a_held_fiber_survives_the_release_of_its_region` (`src/io/pending.rs`).
 
+### A hold is let go while its store is still there
+
+A release names a region in a store, so every release must run before that store
+tears its regions down. `AsyncBackend::quiesce` is the release
+(`PendingTable::release_holds`), and a heap runs it on every io-backend it still
+carries before `RegionStore::teardown_all` — `FiberHeap::quiesce_io_backends`,
+called from both `FiberHeap::drop` and `FiberHeap::clear`.
+
+A backend reaches that teardown whenever the program that made it ends without
+letting it go: a top-level `(io/backend :async)`, the scheduler's own backend,
+and every value on the full-module WASM tier, which reclaims no region while it
+runs. The sweep frees regions in id order rather than lifetime order, so a
+backend destructor running inside it lets go of regions the same sweep may
+already have freed — a phantom-region panic under debug assertions, a double
+free without them. Draining first, while every region is still there, leaves
+that destructor a hold that reaches nothing.
+
+The same order is what lets a drain assemble a completion at teardown: the
+values it reads are still allocated. That is why the WASM tier drained here
+before there was a hold to release, and the rule now covers both.
+
+Pinned by `a_stranded_backend_lets_go_before_its_heap_tears_down`
+(`src/io/aio/tests/backend.rs`).
+
 ### An operation whose fiber is gone has no reader
 
 A cancel is something a caller must remember to issue, and one caller cannot: a

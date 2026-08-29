@@ -54,6 +54,14 @@ in flight when the backend value goes out of scope. Thread-pool and stdin
 operations need no such handling — their workers copy results through
 channels and never write into a freed pooled buffer.
 
+A backend the program never lets go of — a top-level `(io/backend :async)`,
+or the scheduler's own — is still there when the heap that carries it is torn
+down. The heap brings each one to a quiescent state before it frees its
+regions, so the drain reads values that are still allocated and the
+operations still in flight let go of what they hold while there is something
+to let go of. Without that order the backend's own drop would run inside the
+teardown sweep, after the sweep had freed part of what it holds.
+
 ### Cancelling an operation
 
 `ev/timeout` cancels an operation on every call — the body's or the

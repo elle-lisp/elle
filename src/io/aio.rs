@@ -222,8 +222,9 @@ impl AsyncBackend {
             // Whatever the drain could not finish will never complete, so
             // nothing else will dispose of its entry and let go of the regions
             // it holds. This is the last moment the store is reachable: a heap
-            // that strands its backend calls `quiesce` before its free sweep,
-            // and the `Drop` that calls this again reaches an empty hold.
+            // runs this on every backend it still carries before its region
+            // sweep (`FiberHeap::quiesce_io_backends`), and the `Drop` that
+            // calls this again from inside that sweep reaches an empty hold.
             inner.pending.release_holds();
         }
     }

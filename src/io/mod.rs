@@ -242,20 +242,18 @@ pub(crate) trait IoBackend {
     fn poll(&self) -> Vec<Completion>;
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
     fn cancel(&self, id: SubmissionId) -> Result<(), String>;
-    /// Cancel and drain every in-flight kernel op so no kernel-owned buffer and
-    /// no submitted-but-unreaped completion outlives the backend. Idempotent and
-    /// a no-op once nothing is pending. The backend's own `Drop` also runs this,
-    /// but a caller tearing down a heap that STRANDS the backend (the full-module
-    /// WASM tier reclaims no region during execution — see docs/impl/wasm.md § the
-    /// posix gap) must call it BEFORE the region free-sweep: the drain's semantic
-    /// completion dereferences the op's `Port`/`ProcessHandle` heap values, which
-    /// the id-ordered sweep may already have freed. Default no-op for a backend
-    /// with no kernel state (the mock). Canonical reference:
-    /// `tests/elle/posix.lisp` under `--wasm=full`.
+    /// Cancel and drain every in-flight kernel op, and let go of every region
+    /// the operations still filed are holding. Idempotent and a no-op once
+    /// nothing is pending. Default no-op for a backend with no kernel state and
+    /// no pending table (the mock).
     ///
-    /// Only the full-module WASM tier (which strands its backend to teardown)
-    /// calls this; other builds compile it but never invoke it.
-    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+    /// The backend's own `Drop` runs this, but a heap that STRANDS a backend —
+    /// one the program never let go of — must run it BEFORE the region sweep:
+    /// the drain reads the op's `Port`/`ProcessHandle` heap values and releases
+    /// their regions, and the id-ordered sweep may already have freed them.
+    /// `FiberHeap::quiesce_io_backends` is that caller. See src/io/AGENTS.md §
+    /// "A hold is let go while its store is still there"; canonical reference
+    /// `tests/elle/posix.lisp` under `--wasm=full`.
     fn quiesce(&self) {}
 
     /// Background worker operations submitted but not yet reaped — the OS
