@@ -338,5 +338,13 @@ fn closure_round_trips_preserving_frame_release_tables() {
             "the slot-routed release regions must cross with them; the two \
              halves of one table are useless apart"
         );
+        let child = &closure.template.child_protos[0];
+        assert_eq!(
+            &child.frame_release_slots[..],
+            &[21u16],
+            "a nested-lambda blueprint crosses via sendable_from_template and \
+             template_from_sendable, not send_closure — its tables must cross too"
+        );
+        assert_eq!(&child.frame_release_regions[..], &[23u32]);
     });
 }
