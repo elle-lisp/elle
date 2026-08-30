@@ -76,9 +76,27 @@ through `ctx.vm()`, so the policy is recorded on the VM by
 generation — a worker caches where its parent was told to, never in the
 process-wide directory.
 
+## File layout
+
+A cache file is an 8-byte little-endian hash of its payload, then the payload:
+
+```
+[u64 payload hash][bincode StoredBytecode]
+```
+
+`bincode` reports that bytes *decoded*, never that they are the bytes this
+binary wrote. Without the prefix, eight flipped bytes decode "successfully" and
+arrive at the VM as instructions (`invalid opcode 0xff`), and a flip deeper in
+a payload is absorbed into stdlib and reported as a hit. A hash mismatch, or a
+file shorter than the prefix, is a **miss**: the loader says so and the caller
+compiles.
+
+This detects corruption and truncation, not forgery. A writable cache directory
+is a code-execution surface like any other loadable artifact.
+
 ## Serialization format
 
-The on-disk format is a single `StoredBytecode` struct
+The payload is a single `StoredBytecode` struct
 (`src/compiler/stdlib_cache.rs`), **100% owned data** — no `Rc`, no pointers,
 no process-local symbol-table ids:
 

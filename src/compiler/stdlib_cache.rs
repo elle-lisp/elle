@@ -32,7 +32,27 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
+
+/// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
+const PAYLOAD_HASH_BYTES: usize = 8;
+
+/// Hash of a cache file's payload, stored in its prefix and re-checked on load.
+///
+/// `bincode` reports that bytes *decoded*, never that they are the bytes this
+/// binary wrote: eight flipped bytes decode "successfully" and arrive at the VM
+/// as instructions, and a flip deeper in a payload is absorbed into stdlib and
+/// reported as a hit. The prefix is what distinguishes the two.
+///
+/// This detects corruption and truncation, not forgery. A writable cache
+/// directory is a code-execution surface like any other loadable artifact; the
+/// hash is not a defence against someone who can write there.
+fn payload_hash(bytes: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
+}
 
 /// The on-disk form of a compiled module's entry `Bytecode`.
 ///
@@ -157,7 +177,15 @@ pub fn try_load(
 ) -> Option<Result<Bytecode, String>> {
     let path = cache.dir()?.join(cache_key(stdlib_source)?);
     let bytes = std::fs::read(&path).ok()?;
-    let stored: StoredBytecode = match bincode::deserialize(&bytes) {
+    if bytes.len() < PAYLOAD_HASH_BYTES {
+        return Some(Err("cache file shorter than its hash prefix".into()));
+    }
+    let (prefix, payload) = bytes.split_at(PAYLOAD_HASH_BYTES);
+    let recorded = u64::from_le_bytes(prefix.try_into().expect("split at 8"));
+    if recorded != payload_hash(payload) {
+        return Some(Err("cache payload does not match its recorded hash".into()));
+    }
+    let stored: StoredBytecode = match bincode::deserialize(payload) {
         Ok(s) => s,
         Err(e) => return Some(Err(format!("cache decode: {e}"))),
     };
@@ -192,7 +220,9 @@ pub fn try_store(
                 return;
             };
             let path = dir.join(key);
-            if let Err(e) = std::fs::write(&path, bytes) {
+            let mut file = payload_hash(&bytes).to_le_bytes().to_vec();
+            file.extend_from_slice(&bytes);
+            if let Err(e) = std::fs::write(&path, file) {
                 eprintln!("[stdlib-cache] write failed: {e}");
             }
         }
@@ -476,5 +506,51 @@ mod tests {
             "the worker must cache into the directory its parent was given, \
              not the process-wide one"
         );
+    }
+
+    /// A cache file is bytes on a disk any process can write. `bincode` reports
+    /// only that the bytes *decoded*, never that they are the bytes this binary
+    /// wrote — so a flipped byte reaches the VM as instructions, and a deeper
+    /// one is absorbed into stdlib and reported as a hit. Every corruption must
+    /// come out as a miss: the cache is an optimization, and a full compile is
+    /// always available.
+    #[test]
+    fn a_corrupt_cache_file_is_a_miss_not_a_panic_or_a_silent_edit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        // Seed a good cache, then keep its bytes to restore between rounds.
+        drop(Runtime::with_stdlib_cache(cache.clone()));
+        let path = std::fs::read_dir(dir.path())
+            .expect("read cache dir")
+            .next()
+            .expect("the seeding runtime wrote a cache file")
+            .expect("entry")
+            .path();
+        let good = std::fs::read(&path).expect("read cache file");
+        assert!(
+            good.len() > 8192,
+            "cache file too small to corrupt meaningfully"
+        );
+
+        // Two offsets, because there are two failure modes: a shallow one
+        // lands in the decoded structure and reaches the VM as instructions, a
+        // deep one lands in a payload and passes unnoticed. More offsets in the
+        // shallow band would repeat a mode rather than add one, and each round
+        // costs a runtime boot.
+        for offset in [64usize, good.len() / 2] {
+            let mut bad = good.clone();
+            for byte in &mut bad[offset..offset + 8] {
+                *byte = 0xFF;
+            }
+            std::fs::write(&path, &bad).expect("write corrupt cache");
+
+            let rt = Runtime::with_stdlib_cache(cache.clone());
+            assert_eq!(
+                rt.stdlib_source(),
+                StdlibSource::Compiled,
+                "eight corrupt bytes at offset {offset} must be a miss"
+            );
+        }
     }
 }
