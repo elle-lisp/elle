@@ -25,16 +25,51 @@ use crate::value::{TableKey, Value};
 /// enum so the bincode encoding is identical (a hand-written `Serialize` that
 /// emitted tuples would not round-trip against a derived `Deserialize`, which
 /// expects bincode's enum encoding).
+/// Which sequence a `Mirror::Seq` came from. Eight `SendValue` variants share
+/// three shapes — a sequence, a map, a byte run — and the shape alone does not
+/// say which. Derived, not hand-written, so both directions read one encoding.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
+enum SeqKind {
+    Array,
+    Tuple,
+    LSet,
+    LSetMut,
+}
+
+/// Which map a `Mirror::Map` came from: mutability is the difference.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
+enum MapKind {
+    Struct,
+    StructMut,
+}
+
+/// Which byte run a `Mirror::Buffer` came from. `Buffer` is a mutable
+/// `@string` and `Bytes` an immutable one, so dropping the tag turns a mutable
+/// value immutable on reload.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
+enum BytesKind {
+    Buffer,
+    Bytes,
+    Blob,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 enum Mirror {
     Immediate(Value),
     Keyword(String),
-    Symbol { name: String, id: u32 },
+    Symbol {
+        name: String,
+        id: u32,
+    },
     String(String),
     Pair(Box<Mirror>, Box<Mirror>, Box<Mirror>),
-    Seq(Vec<Mirror>, Box<Mirror>),
-    Map(std::collections::BTreeMap<TableKey, Mirror>, Box<Mirror>),
-    Buffer(Vec<u8>, Box<Mirror>),
+    Seq(SeqKind, Vec<Mirror>, Box<Mirror>),
+    Map(
+        MapKind,
+        std::collections::BTreeMap<TableKey, Mirror>,
+        Box<Mirror>,
+    ),
+    Buffer(BytesKind, Vec<u8>, Box<Mirror>),
     Float(f64),
     Closure(Box<SendableClosure>),
     Ref(usize),
@@ -65,19 +100,36 @@ impl serde::Serialize for SendValue {
                     Box::new(to_mirror(t)?),
                 ),
                 SV::Array(v, t) | SV::Tuple(v, t) | SV::LSet(v, t) | SV::LSetMut(v, t) => {
+                    let kind = match sv {
+                        SV::Array(..) => SeqKind::Array,
+                        SV::Tuple(..) => SeqKind::Tuple,
+                        SV::LSet(..) => SeqKind::LSet,
+                        _ => SeqKind::LSetMut,
+                    };
                     Mirror::Seq(
+                        kind,
                         v.iter().map(to_mirror).collect::<Result<_, _>>()?,
                         Box::new(to_mirror(t)?),
                     )
                 }
                 SV::Struct(m, t) | SV::StructMut(m, t) => Mirror::Map(
+                    if matches!(sv, SV::Struct(..)) {
+                        MapKind::Struct
+                    } else {
+                        MapKind::StructMut
+                    },
                     m.iter()
                         .map(|(k, v)| Ok((k.clone(), to_mirror(v)?)))
                         .collect::<Result<_, String>>()?,
                     Box::new(to_mirror(t)?),
                 ),
                 SV::Buffer(v, t) | SV::Bytes(v, t) | SV::Blob(v, t) => {
-                    Mirror::Buffer(v.clone(), Box::new(to_mirror(t)?))
+                    let kind = match sv {
+                        SV::Buffer(..) => BytesKind::Buffer,
+                        SV::Bytes(..) => BytesKind::Bytes,
+                        _ => BytesKind::Blob,
+                    };
+                    Mirror::Buffer(kind, v.clone(), Box::new(to_mirror(t)?))
                 }
                 SV::LBox(..) => return Err("LBox not needed by stdlib cache".into()),
                 SV::CaptureCell(a, b) => {
@@ -107,21 +159,38 @@ impl<'de> serde::Deserialize<'de> for SendValue {
                     Box::new(from_mirror(*b)?),
                     Box::new(from_mirror(*t)?),
                 ),
-                Mirror::Seq(v, t) => {
+                Mirror::Seq(kind, v, t) => {
                     let vals = v
                         .into_iter()
                         .map(from_mirror)
                         .collect::<Result<Vec<_>, _>>()?;
-                    SV::Array(vals, Box::new(from_mirror(*t)?))
+                    let traits = Box::new(from_mirror(*t)?);
+                    match kind {
+                        SeqKind::Array => SV::Array(vals, traits),
+                        SeqKind::Tuple => SV::Tuple(vals, traits),
+                        SeqKind::LSet => SV::LSet(vals, traits),
+                        SeqKind::LSetMut => SV::LSetMut(vals, traits),
+                    }
                 }
-                Mirror::Map(m, t) => {
+                Mirror::Map(kind, m, t) => {
                     let map = m
                         .into_iter()
                         .map(|(k, v)| Ok((k, from_mirror(v)?)))
                         .collect::<Result<_, String>>()?;
-                    SV::Struct(map, Box::new(from_mirror(*t)?))
+                    let traits = Box::new(from_mirror(*t)?);
+                    match kind {
+                        MapKind::Struct => SV::Struct(map, traits),
+                        MapKind::StructMut => SV::StructMut(map, traits),
+                    }
                 }
-                Mirror::Buffer(v, t) => SV::Bytes(v, Box::new(from_mirror(*t)?)),
+                Mirror::Buffer(kind, v, t) => {
+                    let traits = Box::new(from_mirror(*t)?);
+                    match kind {
+                        BytesKind::Buffer => SV::Buffer(v, traits),
+                        BytesKind::Bytes => SV::Bytes(v, traits),
+                        BytesKind::Blob => SV::Blob(v, traits),
+                    }
+                }
                 Mirror::Float(f) => SV::Float(f),
                 Mirror::Closure(c) => SV::Closure(c),
                 Mirror::Ref(r) => SV::Ref(r),

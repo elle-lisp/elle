@@ -454,3 +454,59 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
         assert_eq!(receiver.keyword_name(kw_hash), Some("kw-send-xt"));
     });
 }
+
+// ── the serde mirror keeps container kinds apart ────────────────────
+
+/// `SendValue`'s serde is the stdlib cache's wire format, and eight variants
+/// share three shapes: a sequence, a map, a byte run. Collapsing them loses
+/// which one it was, so a `Tuple` returns as an `Array`, an `LSet` as an
+/// `Array`, and a `Buffer` — a *mutable* @string — as immutable `Bytes`. The
+/// value would be silently the wrong type on every reload.
+#[test]
+fn serde_round_trip_keeps_each_container_kind_distinct() {
+    use super::SendValue as SV;
+
+    fn nil() -> Box<SV> {
+        Box::new(SV::Immediate(Value::NIL))
+    }
+    fn name(sv: &SV) -> &'static str {
+        match sv {
+            SV::Array(..) => "Array",
+            SV::Tuple(..) => "Tuple",
+            SV::LSet(..) => "LSet",
+            SV::LSetMut(..) => "LSetMut",
+            SV::Struct(..) => "Struct",
+            SV::StructMut(..) => "StructMut",
+            SV::Buffer(..) => "Buffer",
+            SV::Bytes(..) => "Bytes",
+            SV::Blob(..) => "Blob",
+            _ => panic!("unexpected variant in this test"),
+        }
+    }
+
+    let empty = std::collections::BTreeMap::new();
+    let cases = vec![
+        SV::Array(vec![], nil()),
+        SV::Tuple(vec![], nil()),
+        SV::LSet(vec![], nil()),
+        SV::LSetMut(vec![], nil()),
+        SV::Struct(empty.clone(), nil()),
+        SV::StructMut(empty, nil()),
+        SV::Buffer(vec![1, 2, 3], nil()),
+        SV::Bytes(vec![1, 2, 3], nil()),
+        SV::Blob(vec![1, 2, 3], nil()),
+    ];
+
+    for case in cases {
+        let bytes = bincode::serialize(&case).expect("serializes");
+        let back: SV = bincode::deserialize(&bytes).expect("deserializes");
+        assert_eq!(
+            name(&back),
+            name(&case),
+            "a {} must not come back as a {} — the cache would hand the runtime \
+             a value of the wrong type on every reload",
+            name(&case),
+            name(&back)
+        );
+    }
+}
