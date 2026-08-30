@@ -175,7 +175,7 @@ pub extern "C" fn elle_jit_yield(
     // exactly as `handle_emit` does, so the walk and the parked frame's
     // discharge reclaim the raise chain's own reference.
     if sig.intersects(crate::value::fiber::SIG_ERROR) {
-        vm.fiber.emit_delivery = Some(yielded);
+        vm.fiber.delivery.record_mint(yielded);
     }
     vm.fiber.signal = Some((sig, yielded));
 

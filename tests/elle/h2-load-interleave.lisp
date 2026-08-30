@@ -1,23 +1,18 @@
 (elle/epoch 12)
-# One h2 session under a load of large request bodies.
+# One h2 session serving large bodies and concurrent rounds in turn.
 #
 # A body larger than a DATA frame is split across frames and spends the
 # connection's flow-control window until a WINDOW_UPDATE returns the
-# credit. Send hundreds of them on one session and the window, not the
-# request, becomes the thing that can stall: the session stops answering
-# and the caller cannot tell a slow server from a wedged one.
+# credit. h2-load-bodies.lisp drives that one way — deep, one large
+# request after another. This file puts a wide round between the deep
+# ones: twenty requests at once, so the window has to serve both shapes
+# alternately and the credit returned by one round is what the next
+# spends.
 #
-# The case here drives 50 KB bodies through one session and then asserts
-# two things: every request was answered 200, and the stream table came
-# back empty. An entry left behind is a stream the session will never
-# close, and it is what turns into a stall a few hundred requests later.
-#
-# Its twin is h2-load-interleave.lisp, which puts concurrent requests
-# between the large ones so the window has to serve a wide round and a
-# deep one in turn. The two are separate files because each is a whole
-# program under a wall-clock budget: run together they are the slowest
-# file in the corpus on the thread-pool I/O backend, which is the one
-# every non-Linux build uses.
+# It asserts what its twin does: every request was answered 200, and the
+# stream table came back empty. An entry left behind is a stream the
+# session will never close, and it is what turns into a stall a few
+# hundred requests later.
 #
 # See lib/http2/session.lisp and docs/scheduler.md.
 
@@ -71,6 +66,16 @@
   (assert (= (length (keys session:streams)) 0)
           (string label ": the stream table came back empty")))
 
+(defn parallel-get [session paths]
+  "Issue every path at once and join the results in order."
+  (map ev/join
+       (map (fn [p] (ev/spawn (fn [] (http2:send session "GET" p)))) paths)))
+
+(defn all-200 [results label]
+  "Every response in `results` is a 200."
+  (each r in results
+    (assert (= r:status 200) (string label ": every response was 200"))))
+
 (defn timed [label thunk]
   "Run `thunk` under the file's budget and name it."
   (let* [t0 (clock/monotonic)
@@ -81,27 +86,34 @@
     (println "  " label ": " (string (round elapsed)) " s")
     r))
 
-# ── Volume with a large body on every request ────────────────────────
+# ── Large sequential sends interleaved with concurrent ones ──────────
 
-(defn sequential-large-bodies []
-  "200 requests of 50 KB, one after another on one session."
+(defn large-then-concurrent []
+  "Five cycles of: 20 sequential 50 KB requests, then 20 at once."
   (let [body (make-body 50000)]
     (with-server (make-handler)
                  (fn [session _]
-                   (each i in (range 0 200)
-                     (let [resp (http2:send session "POST" "/echo" :body body)]
-                       (assert (= resp:status 200)
-                               (string "large bodies: request " (string i)))
-                       (assert (= (length resp:body) (length body))
-                               (string "large bodies: request " (string i)
-                                       " echoed the whole body"))))
-                   (no-stream-leak session "large bodies")
+                   (each cycle in (range 0 5)
+                     (each i in (range 0 20)
+                       (let [resp (http2:send session "POST" "/echo" :body body)]
+                         (assert (= resp:status 200)
+                                 (string "interleave: cycle " (string cycle)
+                                 " large request " (string i)))))
+                     (let [results (parallel-get session
+                           (map (fn [i]
+                                  (concat "/fixed?c=" (string cycle) "&i="
+                                  (string i))) (range 0 20)))]
+                       (all-200 results "interleave")
+                       (assert (= (length results) 20)
+                               (string "interleave: 20 results in cycle "
+                                       (string cycle)))))
+                   (no-stream-leak session "interleave")
                    true))))
 
 # ── Run ──────────────────────────────────────────────────────────────
 
-(println "one session under a load of large bodies...")
+(println "one session serving deep and wide rounds in turn...")
 
-(timed "200 sequential requests of 50 KB" sequential-large-bodies)
+(timed "20 large then 20 concurrent, five cycles" large-then-concurrent)
 
-(println "h2 load bodies: the session answered and left no stream behind")
+(println "h2 load interleave: the session answered and left no stream behind")

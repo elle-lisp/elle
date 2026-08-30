@@ -172,7 +172,7 @@ fn a_suspending_primitive_park_owes_its_resume_value_a_reference() {
 
         assert_eq!(result, Some(SIG_YIELD));
         assert!(
-            vm.fiber.resume_value_unfunded,
+            vm.fiber.delivery.resume_unfunded(),
             "the park at a suspending primitive call owes its resume value a reference",
         );
     })
@@ -190,7 +190,7 @@ fn a_tail_suspending_primitive_park_owes_its_resume_value_a_reference() {
 
         assert_eq!(result, SIG_YIELD);
         assert!(
-            vm.fiber.resume_value_unfunded,
+            vm.fiber.delivery.resume_unfunded(),
             "a tail suspend at a primitive owes its resume value a reference too",
         );
     })
@@ -213,7 +213,7 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
             "a completing primitive continues dispatch"
         );
         assert!(
-            !vm.fiber.resume_value_unfunded,
+            !vm.fiber.delivery.resume_unfunded(),
             "a primitive that returns funds its own result — nothing is owed",
         );
     })
@@ -247,7 +247,10 @@ fn a_capability_denial_park_records_the_payload_it_leaves_over() {
         assert_eq!(result, Some(blocked));
         let (_, payload) = vm.fiber.signal.expect("the denial parks its payload");
         assert_eq!(
-            vm.fiber.denial_payload.map(|p| p.bit_identical(payload)),
+            vm.fiber
+                .delivery
+                .bodyless()
+                .map(|p| p.bit_identical(payload)),
             Some(true),
             "the denial records the very payload it parked, so the resume can \
              match the record against the live signal",
@@ -269,7 +272,10 @@ fn a_tail_capability_denial_park_records_the_payload_it_leaves_over() {
         assert_eq!(result, blocked);
         let (_, payload) = vm.fiber.signal.expect("the tail denial parks its payload");
         assert_eq!(
-            vm.fiber.denial_payload.map(|p| p.bit_identical(payload)),
+            vm.fiber
+                .delivery
+                .bodyless()
+                .map(|p| p.bit_identical(payload)),
             Some(true),
             "a tail denial records its payload too — the frame it resumes into is \
              built by a driver that never saw the denied call",
@@ -292,8 +298,115 @@ fn an_ordinary_suspend_records_no_payload_to_release() {
 
         assert_eq!(result, Some(SIG_YIELD));
         assert!(
-            vm.fiber.denial_payload.is_none(),
+            vm.fiber.delivery.bodyless().is_none(),
             "a yielded payload is body-owned — the resume owes it no release",
+        );
+    })
+}
+
+// -- the raised delivery's identity gate --
+
+/// A raised payload that IS one of the call's arguments gets the delivery minted
+/// and recorded; a payload the native BUILT does not. Both positions raise through
+/// this, so the gate is what keeps the mint off every ordinary native raise — a
+/// fresh error struct funds its delivery with its birth reference, and a second
+/// one is stranded per raised-and-caught error.
+#[test]
+fn a_raised_argument_takes_the_delivery_and_a_built_payload_does_not() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (payload, region) = crate::value::arena::alloc_in_fresh_region(
+            unsafe { &mut *vm.heap_ptr },
+            crate::value::heap::HeapObject::Pair(crate::value::heap::Pair::new(
+                Value::int(1),
+                Value::NIL,
+            )),
+        );
+        let before = vm.heap().region_rc(region);
+
+        // Nobody's argument: the native built it, so its birth reference is the
+        // delivery and a mint here would out-count the catcher's single release.
+        vm.mint_raised_argument_delivery(&[Value::int(9)], payload);
+        assert_eq!(
+            vm.heap().region_rc(region),
+            before,
+            "a payload the native built funds its own delivery",
+        );
+        assert!(
+            !vm.fiber.delivery.mint_names(payload),
+            "an unminted delivery must leave the frames' payload exemption standing",
+        );
+
+        // The call's own argument handed back: the frame's references all answer
+        // to the frame's own routes, so the catcher's read needs one of its own.
+        vm.mint_raised_argument_delivery(&[Value::int(9), payload], payload);
+        assert_eq!(
+            vm.heap().region_rc(region),
+            before + 1,
+            "a raised argument's delivery is minted at the signal exit",
+        );
+        assert!(
+            vm.fiber.delivery.mint_names(payload),
+            "the record is what withdraws the walk's payload exemption",
+        );
+    })
+}
+
+/// An IMMEDIATE payload crosses no region, so there is nothing to fund — and
+/// recording it would withdraw the exemption for a value no walk can release.
+#[test]
+fn an_immediate_raised_argument_takes_no_delivery() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        vm.mint_raised_argument_delivery(&[Value::int(9)], Value::int(9));
+        assert!(
+            !vm.fiber.delivery.mint_names(Value::int(9)),
+            "an immediate payload has no region for the record to speak for",
+        );
+    })
+}
+
+// -- a host that refuses a suspend-class signal abandons the park's funding --
+
+/// A host driving a thunk on the current fiber (`eval`, `import`,
+/// `compile/run-on`, the root driver) can refuse a suspend-class signal it
+/// cannot host: the park is dead, and its funding must not survive into the
+/// fiber's next park — a stale record there would mint a `ResumeDelivery`
+/// retain no consumer ever releases, one region per refused park.
+#[test]
+fn a_refused_hosted_park_leaves_no_funding() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (code, env) = test_fixtures();
+        let mut ip = 0usize;
+
+        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        assert!(vm.fiber.delivery.resume_unfunded());
+
+        vm.abandon_hosted_park(SIG_YIELD);
+        assert!(
+            !vm.fiber.delivery.resume_unfunded(),
+            "the refused park's funding is consumed by the abandonment",
+        );
+    })
+}
+
+/// The counter-factual: an error is not an abandonment — an `:error` fiber is
+/// resumable and its payload-named records are identity-gated — so the
+/// abandonment seam leaves an error's ledger alone.
+#[test]
+fn an_error_exit_abandons_no_funding() {
+    with_test_region(|| {
+        let mut vm = VM::new();
+        let (code, env) = test_fixtures();
+        let mut ip = 0usize;
+
+        vm.handle_primitive_signal(SIG_YIELD, Value::int(1), &code, &env, &mut ip);
+        vm.abandon_hosted_park(crate::value::SIG_ERROR);
+        assert!(
+            vm.fiber.delivery.resume_unfunded(),
+            "an error exit is not a refusal of the park — the funding stays for \
+             the delivery funnel",
         );
     })
 }

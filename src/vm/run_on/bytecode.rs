@@ -66,6 +66,10 @@ impl VM {
             return self.fiber.signal.take().unwrap();
         }
 
+        // A suspend-class signal leaves this forced-tier entry as a value; the
+        // park it names is abandoned with its host (`abandon_hosted_park`).
+        self.abandon_hosted_park(bits);
+
         // Other errors: extract from fiber signal.
         if let Some((sig_bits, val)) = self.fiber.signal.take() {
             return (sig_bits, val);

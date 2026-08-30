@@ -429,25 +429,6 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
     let t5 = std::time::Instant::now();
 
-    // Quiesce every io-backend the program left on the heap BEFORE it is dropped.
-    // This tier makes every region instruction a structural no-op, so a scheduler
-    // backend and the `Port`/`ProcessHandle` values of its submitted-but-unreaped
-    // ops (a POSIX signal waiter, a spawned-process waiter) are never reclaimed
-    // during execution — they strand to `RegionStore::teardown_all`, which frees
-    // regions in id order, not lifetime order. The backend's own `Drop` runs the
-    // same quiesce, but by then the free-sweep may already have dropped an op's
-    // `Port`, so the drain's semantic completion dereferences freed memory
-    // (`complete_port_op`). Draining here, while every value is still live, leaves
-    // the backend's `Drop` a no-op (pending is empty). Idempotent and a no-op for
-    // a program with nothing pending. Canonical reference:
-    // `tests/elle/posix.lisp` under `--wasm=full` (segfaults on teardown without
-    // this drain).
-    for data in heap.collect_external_data("io-backend") {
-        if let Some(backend) = data.downcast_ref::<crate::io::AnyBackend>() {
-            backend.0.quiesce();
-        }
-    }
-
     // Materialize the result's display form NOW, while the heap is still alive.
     // A heap-valued result (an array, a list, a string) is a pointer into this
     // function's heap, which drops on return — so returning the `Value` would hand

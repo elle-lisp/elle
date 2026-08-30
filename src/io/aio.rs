@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use convert::cook_raw;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -38,11 +38,6 @@ struct AsyncBackendInner {
     /// The operations in flight, and which of them no fiber will receive a
     /// result for. See src/io/AGENTS.md § "I/O Cancellation".
     pending: PendingTable,
-    /// Descriptors kept open past their port's close because a submitted
-    /// operation still names them. A worker resolves its fd when it runs, so a
-    /// number handed back to the OS while an operation holds it can be given
-    /// to a new socket that the stale operation then reads.
-    retired: HashMap<RawFd, std::os::unix::io::OwnedFd>,
     completions: VecDeque<Completion>,
     next_id: u64,
     // `platform` is declared before `buffer_pool` so it drops first: tearing
@@ -64,6 +59,11 @@ struct AsyncBackendInner {
     /// builds is born on it (`crate::io::completion_heap_ptr`). Set on the first
     /// `submit` that carries a heap.
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    /// Who the submission currently being dispatched is on behalf of, recorded
+    /// at `submit` entry so each `pending.insert` files its entry against it.
+    /// Read only between that entry and the insert, so what a completed
+    /// submission leaves behind here is never consulted.
+    submitter: crate::io::pending::Submitter,
 }
 
 // --- Platform backend dispatch ---
@@ -122,7 +122,6 @@ impl AsyncBackend {
                 unicode_generation: gen,
                 fd_states: HashMap::new(),
                 pending: PendingTable::new(),
-                retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
                 buffer_pool: BufferPool::new(),
@@ -130,6 +129,7 @@ impl AsyncBackend {
                 platform,
                 hub,
                 origin_heap: std::ptr::null_mut(),
+                submitter: crate::io::pending::Submitter::detached(std::ptr::null_mut()),
             }),
         })
     }
@@ -155,7 +155,6 @@ impl AsyncBackend {
                 unicode_generation: crate::config::get().unicode_generation(),
                 fd_states: HashMap::new(),
                 pending: PendingTable::new(),
-                retired: HashMap::new(),
                 completions: VecDeque::new(),
                 next_id: 1,
                 buffer_pool: BufferPool::new(),
@@ -163,6 +162,7 @@ impl AsyncBackend {
                 platform: PlatformBackend::ThreadPool,
                 hub: CompletionHub::new(),
                 origin_heap: std::ptr::null_mut(),
+                submitter: crate::io::pending::Submitter::detached(std::ptr::null_mut()),
             }),
         })
     }
@@ -219,6 +219,13 @@ impl AsyncBackend {
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
+            // Whatever the drain could not finish will never complete, so
+            // nothing else will dispose of its entry and let go of the regions
+            // it holds. This is the last moment the store is reachable: a heap
+            // runs this on every backend it still carries before its region
+            // sweep (`FiberHeap::quiesce_io_backends`), and the `Drop` that
+            // calls this again from inside that sweep reaches an empty hold.
+            inner.pending.release_holds();
         }
     }
 
@@ -260,9 +267,9 @@ impl crate::io::IoBackend for AsyncBackend {
     fn submit(
         &self,
         request: &IoRequest,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String> {
-        self.submit(request, origin_heap)
+        self.submit(request, submitter)
     }
 
     fn poll(&self) -> Vec<Completion> {
@@ -416,20 +423,19 @@ impl AsyncBackendInner {
     fn drain_ready(&mut self) {
         self.drain_uring_completions();
         self.drain_hub();
-        self.stop_stale();
+        self.stop_orphaned();
     }
 
-    /// Ask every in-flight operation whose operands' regions are gone to stop.
+    /// Ask every in-flight operation whose asking fiber has ended to stop.
     ///
     /// Such an operation waits for an event outside this process — a peer that
     /// writes, a client that connects — and the fiber that would have received
     /// the result is what went away, so nothing here is left to make that event
-    /// happen. See src/io/AGENTS.md § "Ending an operation whose operands are
-    /// gone" for why the ask is not a cancel: the id stays unmarked, so the
+    /// happen. See src/io/AGENTS.md § "Ending an operation whose fiber is gone"
+    /// for why the ask is not a cancel: the id stays unmarked, so the
     /// completion still answers and the scheduler retires the pairing it holds.
-    fn stop_stale(&mut self) {
-        let heap = self.origin_heap;
-        for id in self.pending.stale_to_stop(heap) {
+    fn stop_orphaned(&mut self) {
+        for id in self.pending.orphaned_to_stop() {
             match self.platform {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ref mut ring) => {
@@ -501,7 +507,6 @@ impl AsyncBackendInner {
         let AsyncBackendInner {
             ref mut hub,
             ref mut pending,
-            ref mut retired,
             ref mut fd_states,
             ref mut buffer_pool,
             ref mut completions,
@@ -518,33 +523,6 @@ impl AsyncBackendInner {
                 completions.push_back(c);
             }
         }
-        Self::close_drained_fds(pending, fd_states, retired);
-    }
-
-    /// Close every retired descriptor no submitted operation names any more.
-    ///
-    /// A descriptor reaches `retired` when its port was closed while an
-    /// operation still held it; this is where it is finally handed back to the
-    /// OS. Its `fd_states` entry goes with it, so per-fd buffering never spans
-    /// two ports that happened to share a number.
-    fn close_drained_fds(
-        pending: &PendingTable,
-        fd_states: &mut HashMap<PortKey, FdState>,
-        retired: &mut HashMap<RawFd, std::os::unix::io::OwnedFd>,
-    ) {
-        if retired.is_empty() {
-            return;
-        }
-        retired.retain(|fd, _owned| {
-            let still_named = pending
-                .values()
-                .any(|op| matches!(op, PendingOp::Port { port_key, .. } if port_key.names_fd(*fd)));
-            if !still_named {
-                crate::io::types::discard_fd_state(fd_states, *fd);
-            }
-            // Dropping the `OwnedFd` with the entry is what closes it.
-            still_named
-        });
     }
 
     /// Submit a stdin operation.
@@ -582,6 +560,10 @@ impl AsyncBackendInner {
                 op: op.clone(),
                 port_key: PortKey::Stdin,
                 port: Value::NIL,
+                // Descriptor 0 is process-wide: it outlives every `Port` that
+                // names it, so there is no number here to keep out of the OS's
+                // hands.
+                descriptor: None,
                 buffer_handle: Some(buf_handle),
                 listener_kind: None,
                 filled: 0,
@@ -589,7 +571,7 @@ impl AsyncBackendInner {
                 // resubmits through the ring, so there is no link to re-arm.
                 timeout: None,
             },
-            self.origin_heap,
+            self.submitter,
         );
         Ok(id)
     }

@@ -56,18 +56,18 @@ pub(super) fn stdin_to_completion(
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(sc.id);
-    let pending_op = match pending.take(id, origin_heap) {
+    let pending_op = match pending.take(id) {
         Taken::Live(op) => op,
         // The stdin worker reports no descriptor, so there is none to close.
         Taken::Cancelled(op) => {
             op.retire(0, buffer_pool);
             return None;
         }
-        // Nothing left to read a result from, but the scheduler still holds
+        // Nobody is left to read a result from, but the scheduler still holds
         // this id against the fiber that asked; answer so it can let go.
-        Taken::Stale(op) => {
+        Taken::Orphaned(op) => {
             op.retire(0, buffer_pool);
-            return Some(PendingTable::stale_operand_error(id, origin_heap));
+            return Some(PendingTable::orphaned_asker_error(id, origin_heap));
         }
         Taken::Unknown => return None,
     };
@@ -92,7 +92,7 @@ pub(super) fn stdin_to_completion(
                 op: PortOp::ReadLine { ref buffer } | PortOp::Read { ref buffer, .. },
                 ref port,
                 ..
-            } = &pending_op
+            } = &*pending_op
             {
                 let enc = port
                     .as_external::<Port>()
@@ -104,7 +104,7 @@ pub(super) fn stdin_to_completion(
                     std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_len);
                     // For ReadLine, trim trailing \r\n
                     let final_len = if matches!(
-                        &pending_op,
+                        &*pending_op,
                         PendingOp::Port {
                             op: PortOp::ReadLine { .. },
                             ..
@@ -126,11 +126,11 @@ pub(super) fn stdin_to_completion(
                 if let PendingOp::Port {
                     op: PortOp::ReadLine { buffer } | PortOp::Read { buffer, .. },
                     ..
-                } = &pending_op
+                } = &*pending_op
                 {
                     // ReadLine always returns string; Read depends on encoding
                     let result = if matches!(
-                        &pending_op,
+                        &*pending_op,
                         PendingOp::Port {
                             op: PortOp::ReadLine { .. },
                             ..
@@ -168,7 +168,7 @@ pub(super) fn pool_to_completion(
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(pc.id);
-    let mut pending_op = match pending.take(id, origin_heap) {
+    let mut pending_op = match pending.take(id) {
         Taken::Live(op) => op,
         Taken::Cancelled(op) => {
             op.retire(pc.result_code, buffer_pool);
@@ -176,9 +176,9 @@ pub(super) fn pool_to_completion(
         }
         // As above: retire the entry unread, and answer so the scheduler can
         // retire the pairing it still holds under this id.
-        Taken::Stale(op) => {
+        Taken::Orphaned(op) => {
             op.retire(pc.result_code, buffer_pool);
-            return Some(PendingTable::stale_operand_error(id, origin_heap));
+            return Some(PendingTable::orphaned_asker_error(id, origin_heap));
         }
         Taken::Unknown => return None,
     };
@@ -187,8 +187,9 @@ pub(super) fn pool_to_completion(
         // nothing it holds can be trusted to be what it claims. The entry is let
         // go unread rather than retired: retiring reclaims exactly the payload
         // in question — a `Box<siginfo_t>`, a descriptor, a pooled buffer — and
-        // that is the free this check exists to prevent. Leaking those is the
-        // cheap half of the trade.
+        // that is the free this check exists to prevent. The operand hold goes
+        // the same way, so the regions it named stay retained too. Leaking all
+        // of it is the cheap half of the trade.
         std::mem::forget(pending_op);
         return Some(Completion::err(
             id,
@@ -197,7 +198,7 @@ pub(super) fn pool_to_completion(
     }
     if let PendingOp::Connect {
         ref mut connect_fd, ..
-    } = pending_op
+    } = &mut *pending_op
     {
         if pc.result_code > 0 {
             *connect_fd = Some(pc.result_code);

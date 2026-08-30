@@ -213,10 +213,14 @@ fn eval_inner(
             let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
             Err(LError::generic(vm.format_error_with_location(err_value)))
         }
-        _ => Err(LError::generic(format!(
-            "eval: unexpected signal: {}",
-            bits
-        ))),
+        _ => {
+            // The refused suspend-class park is abandoned with its host.
+            vm.abandon_hosted_park(bits);
+            Err(LError::generic(format!(
+                "eval: unexpected signal: {}",
+                bits
+            )))
+        }
     }
 }
 

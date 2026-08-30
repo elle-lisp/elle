@@ -143,19 +143,24 @@ impl AsyncBackend {
             }
         }
 
-        let origin_heap = inner.origin_heap;
+        let submitter = inner.submitter;
         inner.pending.insert(
             id,
             PendingOp::Port {
                 op: op.clone(),
                 port_key,
                 port: request.port,
+                // Held until the entry is retired: the worker resolves `fd`
+                // again when it runs, so the number must stay this port's for
+                // as long as the operation names it (src/io/AGENTS.md
+                // § "Descriptor retirement").
+                descriptor: port.fd_share(),
                 buffer_handle: buf_handle,
                 listener_kind,
                 filled: 0,
                 timeout: request.timeout,
             },
-            origin_heap,
+            submitter,
         );
         Ok(id)
     }

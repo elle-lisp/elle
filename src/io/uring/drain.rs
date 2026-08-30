@@ -64,9 +64,9 @@ pub(crate) fn drain_cqes(
 ) {
     // Collect ReadLine and short-Read ops that need re-submission (can't
     // submit SQEs while iterating the CQ ring).
-    let mut read_resubmits: Vec<(SubmissionId, RawFd, usize, PendingOp)> = Vec::new();
+    let mut read_resubmits: Vec<(SubmissionId, RawFd, usize, TakenOp)> = Vec::new();
     // Short writes needing re-submission, collected for the same reason.
-    let mut write_resubmits: Vec<(SubmissionId, RawFd, PendingOp)> = Vec::new();
+    let mut write_resubmits: Vec<(SubmissionId, RawFd, TakenOp)> = Vec::new();
 
     for cqe in ring.completion() {
         let user_data = cqe.user_data();
@@ -90,26 +90,27 @@ pub(crate) fn drain_cqes(
         // Everything below reads what the operation held — the port, the
         // process handle, the fiber's pre-allocated buffer — and the fiber that
         // owned all three is gone in both of the arms that skip it.
-        let taken = pending.take(id, origin_heap);
+        let taken = pending.take(id);
         // Cancelled: whoever cancelled dropped its record of the submission
         // first, so there is nobody left to tell.
         if let Taken::Cancelled(op) = taken {
             op.retire(result_code, buffer_pool);
             continue;
         }
-        // Operands gone: nobody dropped this id, so the scheduler still pairs
-        // it with the fiber that asked and clears the pairing on a completion.
-        // Retire the entry and answer with an error that reads none of it.
-        if let Taken::Stale(op) = taken {
+        // The fiber that asked has ended: nobody dropped this id, so the
+        // scheduler still pairs it with that fiber and clears the pairing on a
+        // completion. Retire the entry and answer with an error that reads none
+        // of it.
+        if let Taken::Orphaned(op) = taken {
             op.retire(result_code, buffer_pool);
-            completions.push_back(PendingTable::stale_operand_error(id, origin_heap));
+            completions.push_back(PendingTable::orphaned_asker_error(id, origin_heap));
             continue;
         }
         if let Taken::Live(mut pending_op) = taken {
             // Connect: on failure, close the pre-created socket.
             if let PendingOp::Connect {
                 ref mut connect_fd, ..
-            } = pending_op
+            } = &mut *pending_op
             {
                 if let Some(fd) = *connect_fd {
                     if result_code < 0 {
@@ -133,7 +134,7 @@ pub(crate) fn drain_cqes(
             // `:addr`/`:port` from this. (The thread-pool path appends the
             // payload after the sockaddr; the completion copies it in then.)
             let buf_handle = pending_op.buffer_handle();
-            let data = match &pending_op {
+            let data = match &*pending_op {
                 PendingOp::Port { op, .. } => match op {
                     PortOp::RecvFrom { .. } if result_code > 0 => {
                         let msghdr_size = std::mem::size_of::<libc::msghdr>();
@@ -188,7 +189,7 @@ pub(crate) fn drain_cqes(
                 ref port_key,
                 ref mut filled,
                 ..
-            } = pending_op
+            } = &mut *pending_op
             {
                 if result_code > 0 {
                     let total_in_fiber = *filled + result_code as usize;
@@ -221,7 +222,7 @@ pub(crate) fn drain_cqes(
                 port_for_resubmit,
                 filled_for_resubmit,
                 is_exact,
-            ) = match &mut pending_op {
+            ) = match &mut *pending_op {
                 PendingOp::Port {
                     op: PortOp::Read { count, buffer },
                     port_key,
@@ -318,7 +319,7 @@ pub(crate) fn drain_cqes(
                 op: PortOp::ReadAll,
                 ref port_key,
                 ..
-            } = pending_op
+            } = &mut *pending_op
             {
                 if result_code > 0 {
                     let state = fd_states
@@ -347,7 +348,7 @@ pub(crate) fn drain_cqes(
                 ref port_key,
                 ref mut filled,
                 ..
-            } = pending_op
+            } = &mut *pending_op
             {
                 // The pooled buffer holds the whole payload (copied there at
                 // submission), so its length is what the write owes.
@@ -420,7 +421,7 @@ pub(crate) fn drain_cqes(
         // buffer (`assemble_read`), which leaves the buffer free to serve as a
         // whole chunk every round however long the stash grows.
         let grapheme_counted = matches!(
-            &pending_op,
+            &*pending_op,
             PendingOp::Port {
                 op: PortOp::ReadExact { .. },
                 port,
@@ -438,7 +439,7 @@ pub(crate) fn drain_cqes(
             ref mut filled,
             ref port_key,
             ..
-        } = pending_op
+        } = &mut *pending_op
         {
             let buffered = if grapheme_counted {
                 0
@@ -481,7 +482,7 @@ pub(crate) fn drain_cqes(
                 .build()
                 .user_data(id.as_u64())
             };
-            pending.restore(id, pending_op, origin_heap);
+            pending.restore(id, pending_op);
             link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         } else {
             // `ReadAll` lands here: it has no pre-allocated fiber buffer to
@@ -503,12 +504,12 @@ pub(crate) fn drain_cqes(
                 ref mut buffer_handle,
                 ref mut filled,
                 ..
-            } = pending_op
+            } = &mut *pending_op
             {
                 *buffer_handle = Some(new_buf);
                 *filled = 0;
             }
-            pending.restore(id, pending_op, origin_heap);
+            pending.restore(id, pending_op);
             link_timeouts.extend(push_resubmit(ring, id, sqe, op_timeout));
         }
     }
@@ -517,7 +518,7 @@ pub(crate) fn drain_cqes(
     // in the pooled buffer the original submission copied it into, so the tail
     // needs no second copy — only a pointer past the bytes already accepted.
     for (id, fd, pending_op) in write_resubmits {
-        let (bh, filled, timeout) = match &pending_op {
+        let (bh, filled, timeout) = match &*pending_op {
             PendingOp::Port {
                 buffer_handle: Some(bh),
                 filled,
@@ -545,7 +546,7 @@ pub(crate) fn drain_cqes(
         // payload larger than one syscall would otherwise be unbounded from
         // its second chunk on, and a peer that stops reading would hang a
         // write that asked for a timeout.
-        pending.restore(id, pending_op, origin_heap);
+        pending.restore(id, pending_op);
         link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));
     }
 

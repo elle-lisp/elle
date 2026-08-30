@@ -18,6 +18,47 @@ mod modules;
 mod config;
 
 impl VM {
+    /// Mint the DELIVERY reference of a payload a native call is RAISING, where
+    /// the payload is one of the call's own arguments — the shape a dynamic
+    /// `emit` takes, its non-literal first argument making the raise an ordinary
+    /// native call (docs/impl/region/owner.md § "What yields is the emit
+    /// OPERATION, not the `Emit` node").
+    ///
+    /// The catcher's read of the signal consumes exactly one reference, and every
+    /// other reference the raising frame holds answers to that frame's own release
+    /// routes. So the delivery is minted here, exactly as `handle_emit` mints it on
+    /// the literal path — and recorded with it (the ledger's `record_mint`), so the
+    /// abandoned-frame walk and the parked frame's discharge stop exempting the
+    /// payload's region and run those routes in full.
+    ///
+    /// Both positions raise through this. Which route the frame's own reference
+    /// then takes is theirs to arrange: a tail exit consumes its borrowed-argument
+    /// retains and nil-stamps their stashes, while a Call-position site's payload
+    /// stash is a recorded value route the replay or the walk runs
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes").
+    ///
+    /// A payload the native BUILT — a fresh error struct — is nobody's argument
+    /// and funds the delivery with its birth reference, so the identity test is
+    /// what keeps this off every ordinary native raise.
+    pub(crate) fn mint_raised_argument_delivery(&mut self, args: &[Value], payload: Value) {
+        if !args.iter().any(|a| a.bit_identical(payload)) {
+            return;
+        }
+        let heap = unsafe { &mut *self.heap_ptr };
+        // An immediate payload crosses no region, so there is nothing to fund and
+        // nothing for the record to say stands.
+        let Some(region) = crate::value::arena::region_of(heap, payload) else {
+            return;
+        };
+        crate::value::arena::incref_for_escape(
+            heap,
+            Some(region),
+            crate::value::arena::EscapeSite::EmitEscape,
+        );
+        self.fiber.delivery.record_mint(payload);
+    }
+
     /// Handle signal bits returned by a primitive in a Call position.
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to
@@ -95,7 +136,7 @@ impl VM {
                 // release — is funded by the delivery instead of by a `Return`
                 // mint (docs/impl/region/owner.md § "A delivery into a replayed
                 // frame carries one owning reference").
-                self.fiber.resume_value_unfunded = true;
+                self.fiber.delivery.park_primitive();
                 let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                 let activation_region_map = self
                     .fiber
@@ -185,7 +226,7 @@ impl VM {
                 // the delivery. The frame that driver parks resumes into the
                 // post-`TailCall` block, whose result release the missing `Return`
                 // mint would have funded.
-                self.fiber.resume_value_unfunded = true;
+                self.fiber.delivery.park_primitive();
                 self.fiber.signal = Some((bits, value));
                 bits
             }
@@ -234,14 +275,14 @@ impl VM {
         // The denied primitive never runs, let alone returns, so the mediating
         // parent's resume value takes the place of its result — and the frame's
         // continuation releases that result (see the `SignalAction::Suspend` arm).
-        self.fiber.resume_value_unfunded = true;
         // Which is why the payload's own birth reference reaches no consumer past
         // the park: the continuation's release names the resume value, not this
-        // struct. Record it, because the install that displaces the park owes that
-        // reference and only this classifier can tell a denial from an `(emit …)`
+        // struct. The park records both facts — the delivery mint the resume
+        // owes, and the payload whose release the displacing install owes —
+        // because only this classifier can tell a denial from an `(emit …)`
         // under the same withheld bits (docs/impl/region/owner.md § "Park/unpark
         // symmetry").
-        self.fiber.denial_payload = Some(payload);
+        self.fiber.delivery.park_denial(payload);
 
         // Save the stack and build a suspended frame (same as suspending signals)
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -298,8 +339,7 @@ impl VM {
         // Tail-position mirror of the Call-position denial park (see
         // `handle_capability_denial`), delivery obligation and left-over payload
         // reference alike.
-        self.fiber.resume_value_unfunded = true;
-        self.fiber.denial_payload = Some(payload);
+        self.fiber.delivery.park_denial(payload);
         self.fiber.signal = Some((blocked, payload));
         blocked
     }

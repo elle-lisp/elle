@@ -132,6 +132,14 @@ impl FiberHeap {
         self.region_store.region_is_owned(id)
     }
 
+    /// The region whose count decides whether `id` is still there: `id` itself
+    /// when `Counted`, else the owner whose subtree drop reclaims it. A seam
+    /// outside the region system retains this rather than `id`, because a retain
+    /// on an `Owned` region holds nothing (`RegionStore::reclaim_root`).
+    pub fn reclaim_root(&self, id: RuntimeRegion) -> RuntimeRegion {
+        self.region_store.reclaim_root(id)
+    }
+
     /// Link `child`'s region as an Owned member of `parent`'s region's subtree —
     /// the runtime `AdoptRegion` of the ownership forest (docs/impl/region/ownership.md
     /// § "Adoption and subtree drop"). Delegates to the region store, which freezes

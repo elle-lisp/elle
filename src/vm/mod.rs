@@ -272,7 +272,9 @@ impl VM {
                 // report answers for all of it: `:yield` is not privileged
                 // among the bits that reach the root (docs/signals/protocol.md
                 // § "Reaching the root"). The keywords are what the author of
-                // the emitting call can act on; the mask alone is not.
+                // the emitting call can act on; the mask alone is not. The
+                // refused park is abandoned with its host.
+                self.abandon_hosted_park(bits);
                 self.fiber.signal.take();
                 break Err(format!(
                     "Unhandled signal {} outside fiber context",

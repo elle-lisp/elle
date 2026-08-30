@@ -402,13 +402,17 @@ impl VM {
                 let (_, e) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                 (SIG_ERROR, e)
             }
-            other => (
-                SIG_ERROR,
-                ctx.error(
-                    "barrier-error",
-                    format!("compile/whole-module-syntax: unexpected signal {}", other),
-                ),
-            ),
+            other => {
+                // The refused suspend-class park is abandoned with its host.
+                self.abandon_hosted_park(other);
+                (
+                    SIG_ERROR,
+                    ctx.error(
+                        "barrier-error",
+                        format!("compile/whole-module-syntax: unexpected signal {}", other),
+                    ),
+                )
+            }
         }
     }
     /// `(compile/dumps source name)` — compile a module once and return its

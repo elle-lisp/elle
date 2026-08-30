@@ -353,22 +353,20 @@ The full-module tier runs the whole corpus under `make smoke-wasm` except
 must uphold are worth calling out, because each is invisible on the VM/JIT path
 and each is pinned by a specific corpus file run under `--wasm=full`.
 
-- **io-backend externals are quiesced before the heap's teardown free-sweep.**
-  Every region instruction is a structural no-op on this tier (its emitter
-  lowers each to nothing — `src/wasm/instruction/dispatch.rs`), so a scheduler
-  I/O backend — a
-  heap `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map
-  holds `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a
-  POSIX signal waiter, a spawned-process waiter) — is never reclaimed during
-  execution. It strands to `RegionStore::teardown_all`, which frees regions in id
-  order, not lifetime order. If the backend's `Drop` ran the cancel-and-drain
-  there, `drain_cqes` → `complete_port_op` would dereference a `Port` an earlier
-  region in the same sweep already freed. So `eval_wasm_raw` drains every
-  io-backend (`FiberHeap::collect_external_data("io-backend")` →
-  `IoBackend::quiesce`) after execution returns and *before* the heap drops, when
-  every value is still live; the backend's own `Drop` then finds nothing pending.
-  The VM never hits this — its live region reclamation drops the backend while its
-  `Port`s are still valid. Canonical reference: `tests/elle/posix.lisp`.
+- **every io-backend strands to the heap's teardown.** Every region instruction
+  is a structural no-op on this tier (its emitter lowers each to nothing —
+  `src/wasm/instruction/dispatch.rs`), so a scheduler I/O backend — a heap
+  `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map holds
+  `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a POSIX
+  signal waiter, a spawned-process waiter) — is never reclaimed during execution.
+  Where the VM strands one backend, this tier strands every one.
+
+  What handles them is not this tier's: `FiberHeap::quiesce_io_backends` drains
+  each before the region sweep, on every tier, because the VM reaches the same
+  state whenever a program ends without dropping its backend (src/io/AGENTS.md §
+  "A hold is let go while its store is still there"). This tier is where it
+  shows up on the widest range of programs, so it is the coverage that pins it.
+  Canonical reference: `tests/elle/posix.lisp`.
 
 - **a fn-local reassigned mutable binding's slot is never value-route decref'd +
   nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack

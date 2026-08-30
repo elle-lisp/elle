@@ -221,9 +221,9 @@ impl FiberHeap {
     }
 
     /// Clone the `data` handle of every live `External` object whose Elle-side
-    /// type name is `type_name`. The full-module WASM tier uses this to quiesce
-    /// stranded io-backend externals before the region free-sweep
-    /// (`RegionStore::collect_external_data`, docs/impl/wasm.md § the posix gap).
+    /// type name is `type_name`. `quiesce_io_backends` uses this to reach the
+    /// backends stranded on this heap before its region sweep
+    /// (`RegionStore::collect_external_data`).
     pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
         self.region_store.collect_external_data(type_name)
     }

@@ -811,9 +811,10 @@ fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
 /// that call's compiler-emitted result release. A bytecode callee funds the
 /// reference that release consumes with its `Return` mint; a primitive that
 /// suspends never returns, so the delivery mints it instead. Which shape a park
-/// has is the classifier's answer, recorded on the fiber, so the two arms below
-/// park IDENTICAL frames and differ only in `Fiber::resume_value_unfunded` — the
-/// flag is the counter-factual. Both arms then complete and park the same value
+/// has is the classifier's answer, recorded in the delivery ledger, so the two
+/// arms below park IDENTICAL frames and differ only in the ledger's
+/// resume-funding fact — the record is the counter-factual. Both arms then
+/// complete and park the same value
 /// as their terminal result, which is worth its own single retain
 /// (`a_parked_terminal_payload_is_worth_one_retain_at_every_stage`), so the whole
 /// difference between the arms is the delivery's one reference.
@@ -872,7 +873,9 @@ fn a_primitive_park_delivery_is_worth_one_retain() {
             // What `prim_fiber_resume` installs: the value to deliver, plus the
             // park shape the classifier recorded when the fiber suspended.
             f.signal = Some((crate::value::fiber::SIG_OK, payload));
-            f.resume_value_unfunded = unfunded;
+            if unfunded {
+                f.delivery.park_primitive();
+            }
         });
         rc!("after the park is installed — the delivery has not run", 1);
 

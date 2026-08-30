@@ -38,13 +38,11 @@ impl VM {
         let (resume_value, is_first_resume, child_params_seeded, unfunded) =
             child_handle.with_mut(|child| {
                 let rv = child.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
-                // The resume consumes the parked signal, and with it any recorded
-                // emit-minted delivery: the payload this record named is gone from
-                // the slot, and a later raise records its own.
-                child.emit_delivery = None;
-                // …and with it the park's delivery obligation, so a park of a
-                // different shape later starts from `false`.
-                let unfunded = std::mem::take(&mut child.resume_value_unfunded);
+                // The resume consumes the parked signal, and with it the park's
+                // funding: the payload the mint record named is gone from the
+                // slot, and a later park of a different shape starts from
+                // nothing (the delivery funnel's take).
+                let unfunded = child.delivery.take_resume_funding();
                 let first = child.status == FiberStatus::New;
                 (rv, first, !child.param_frames.is_empty(), unfunded)
             });
@@ -144,22 +142,20 @@ impl VM {
 
                 // Deliver the resume value to the inner fiber (matches what
                 // resume_suspended does at the FiberResume arm). The install
-                // displaces any parked signal, so a recorded emit-minted
-                // delivery no longer names the slot's payload — and a park whose
-                // payload the RUNTIME built is owed the release its body has
-                // none for, exactly as at `fiber/resume` itself. This is the
-                // route a `protect`ed body's denial takes: the denial parks in
-                // the inner fiber, which the outer one awaits through a
-                // `FiberResume` frame (docs/impl/region/owner.md § "Park/unpark
-                // symmetry").
+                // displaces any parked signal, so the payload-named funding
+                // records leave with it: a park whose payload the RUNTIME built
+                // is owed the release its body has none for, exactly as at
+                // `fiber/resume` itself — this is the route a `protect`ed
+                // body's denial takes, the denial parking in the inner fiber
+                // the outer one awaits through a `FiberResume` frame
+                // (docs/impl/region/owner.md § "Park/unpark symmetry") — and
+                // the displace clears the mint record. The resume funding
+                // survives for the delivery funnel that runs when the
+                // trampoline descends.
                 crate::vm::fiber::release_displaced_denial_payload(self.heap(), &inner_handle);
                 inner_handle.with_mut(|f| {
                     f.signal = Some((SIG_OK, resume_value));
-                    f.emit_delivery = None;
-                    // …nor a denial park's left-over payload reference, whose
-                    // record lives exactly as long as the park does
-                    // (`Fiber::denial_payload`).
-                    f.denial_payload = None;
+                    f.delivery.displace();
                 });
 
                 // Set up the trampoline to descend into the inner fiber.
@@ -340,15 +336,13 @@ impl VM {
             // (docs/impl/region/mechanism.md § "An abandoned frame runs the
             // releases it still owes"). A fiber handed the same value it is
             // aborted with is the shape that reaches this — the record is what
-            // keeps its release owed.
-            vm.fiber.emit_delivery = Some(error_value);
-            // An abort delivers no resume value — the replayed frame re-enters
-            // with `SIG_ERROR` set and leaves before the parked call's result
-            // release — so the park's delivery obligation goes with the signal it
-            // rode in on. Each arm below funds what it does hand over
-            // (docs/impl/region/owner.md § "A delivery into a replayed frame
-            // carries one owning reference").
-            vm.fiber.resume_value_unfunded = false;
+            // keeps its release owed. An abort delivers no resume value — the
+            // replayed frame re-enters with `SIG_ERROR` set and leaves before the
+            // parked call's result release — so the displaced park's funding goes
+            // with the signal it rode in on; each arm below funds what it does
+            // hand over (docs/impl/region/owner.md § "A delivery into a replayed
+            // frame carries one owning reference").
+            vm.fiber.delivery.install_abort(error_value);
 
             let frames = match vm.fiber.suspended.take() {
                 Some(frames) => frames,

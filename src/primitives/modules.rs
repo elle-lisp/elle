@@ -352,12 +352,16 @@ pub(crate) fn prim_import_file(
                     path = ctx.string(path.as_str()),
                 )
             }
-            bits => crate::rich_error!(
-                ctx,
-                "eval-error",
-                format!("import: unexpected signal {} in {}", bits, path),
-                path = ctx.string(path.as_str()),
-            ),
+            bits => {
+                // The refused suspend-class park is abandoned with its host.
+                vm.abandon_hosted_park(bits);
+                crate::rich_error!(
+                    ctx,
+                    "eval-error",
+                    format!("import: unexpected signal {} in {}", bits, path),
+                    path = ctx.string(path.as_str()),
+                )
+            }
         }
     }
 }

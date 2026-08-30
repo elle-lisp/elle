@@ -94,7 +94,7 @@ impl Value {
     /// object — never structural equality (`PartialEq` compares immutable heap
     /// contents, so two distinct allocations can be `==` while living in
     /// different regions). Use this where a match stands for "the very value
-    /// recorded earlier", e.g. `Fiber::emit_delivery`.
+    /// recorded earlier", e.g. the delivery ledger's records (`Fiber::delivery`).
     #[inline]
     pub(crate) fn bit_identical(self, other: Value) -> bool {
         self.tag == other.tag && self.payload == other.payload

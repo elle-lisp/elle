@@ -248,12 +248,15 @@ fn short_write_resubmits_until_the_payload_is_gone() {
             op: PortOp::Write { data },
             port_key: PortKey::Fd(write_fd, crate::port::PortId::fresh()),
             port: Value::NIL,
+            // The pipe below owns the descriptor for the whole test, so there
+            // is no port for a share to come from.
+            descriptor: None,
             buffer_handle: Some(buf_handle),
             listener_kind: None,
             filled: 0,
             timeout: None,
         },
-        crate::value::arena::leaked_test_heap(),
+        crate::io::pending::Submitter::for_test(),
     );
     let mut fd_states: HashMap<PortKey, FdState> = HashMap::new();
     let mut completions: VecDeque<Completion> = VecDeque::new();

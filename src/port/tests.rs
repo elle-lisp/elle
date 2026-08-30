@@ -155,64 +155,92 @@ fn test_pipe_display_closed() {
     assert!(format!("{}", p).contains("[closed]"));
 }
 
-/// Retiring a port hands its descriptor out instead of closing it.
+/// A share holds the descriptor number past the port's close, and gives it back
+/// when it goes.
 ///
-/// The I/O backend uses this to keep a descriptor number out of circulation
-/// while a worker still holds it — a number reissued under a running worker
-/// gets read by that worker, and its bytes reach no fiber. So the port must
-/// report closed at once while the descriptor stays open in the caller's
-/// hands. See src/io/AGENTS.md § "Descriptor retirement".
+/// This is what keeps a number out of circulation while a worker still holds it
+/// — a number reissued under a running worker gets read by that worker, and its
+/// bytes reach no fiber. The port must report closed at once even so, because
+/// that is what Elle promised the caller. See src/io/AGENTS.md § "Descriptor
+/// retirement".
+///
+/// The trap: `F_GETFD` on a number a test just gave up says nothing on its own.
+/// The suite shares a process and runs in parallel, so another thread can be
+/// handed the number between the drop and the check, and the number reads open
+/// either way. `fstat` says WHICH file the number names, and the file here is a
+/// scratch file of this test's own so no other thread can be holding it.
 #[test]
-fn retire_fd_hands_out_the_descriptor_and_closes_the_port() {
+fn a_descriptor_share_holds_the_number_until_it_drops() {
     use std::os::unix::io::AsRawFd;
 
-    let file = File::open("/dev/null").unwrap();
+    let path = std::env::temp_dir().join(format!("elle-port-share-{}", std::process::id()));
+    let file = File::create(&path).expect("create the scratch file");
     let fd: OwnedFd = file.into();
     let raw = fd.as_raw_fd();
-    let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+    let scratch = file_identity(raw).expect("fstat the scratch file");
+    let port = Port::new_file(
+        fd,
+        Direction::Read,
+        Encoding::Text,
+        path.display().to_string(),
+    );
 
-    let retired = port
-        .retire_fd()
-        .expect("an open port yields its descriptor");
-    assert_eq!(retired.as_raw_fd(), raw, "the same descriptor comes back");
-    assert!(port.is_closed(), "the port reports closed once retired");
+    let share = port.fd_share().expect("an open port shares its descriptor");
+    assert_eq!(
+        share.as_raw_fd(),
+        raw,
+        "the share names the same descriptor"
+    );
+
+    port.close();
+    assert!(port.is_closed(), "the port reports closed at once");
     assert!(
         port.with_fd(|_| ()).is_none(),
-        "the port no longer holds it"
+        "and stops answering with it"
+    );
+    assert_eq!(
+        file_identity(raw),
+        Some(scratch),
+        "the number went back to the OS while a share of it was still out"
     );
 
-    // Still open: the caller owns it now, and closing is the caller's to do.
-    let flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
-    assert!(flags >= 0, "the descriptor is still open after retirement");
+    drop(share);
+    assert_ne!(
+        file_identity(raw),
+        Some(scratch),
+        "the number stayed out of circulation after its last share went — a \
+         share that outlives every holder costs one descriptor per port"
+    );
+    std::fs::remove_file(&path).ok();
 }
 
+/// Stdio ports do not own their descriptor, so there is no share to give.
 #[test]
-fn retire_fd_yields_nothing_twice_or_after_close() {
-    let file = File::open("/dev/null").unwrap();
-    let fd: OwnedFd = file.into();
-    let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
-    assert!(port.retire_fd().is_some());
-    assert!(
-        port.retire_fd().is_none(),
-        "a retired port has no second descriptor to give"
-    );
+fn a_stdio_port_shares_no_descriptor() {
+    assert!(Port::stdin().fd_share().is_none());
+}
 
-    let file = File::open("/dev/null").unwrap();
+/// A closed port shares nothing: the number may already belong to somebody
+/// else, and a share minted from it would name whatever that is.
+#[test]
+fn a_closed_port_shares_no_descriptor() {
     let closed = Port::new_file(
-        file.into(),
+        File::open("/dev/null").unwrap().into(),
         Direction::Read,
         Encoding::Text,
         "/dev/null".to_string(),
     );
     closed.close();
-    assert!(
-        closed.retire_fd().is_none(),
-        "a closed port's descriptor is already gone"
-    );
+    assert!(closed.fd_share().is_none());
 }
 
-/// Stdio ports do not own their descriptor, so there is nothing to retire.
-#[test]
-fn retire_fd_yields_nothing_for_a_stdio_port() {
-    assert!(Port::stdin().retire_fd().is_none());
+/// What descriptor number `fd` currently names — its device and inode — or
+/// `None` when the number is not open. Two numbers naming one file answer
+/// alike, which is what makes this an identity rather than a liveness check.
+fn file_identity(fd: std::os::unix::io::RawFd) -> Option<(u64, u64)> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return None;
+    }
+    Some((st.st_dev as u64, st.st_ino as u64))
 }

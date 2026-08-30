@@ -31,38 +31,53 @@ pub(super) fn read(bound: OpBound, fd: RawFd, size: usize) -> (i32, Vec<u8>) {
 /// Read exactly `size` units, looping until full or EOF/error. Units are bytes
 /// unless `graphemes`, in which case they are grapheme clusters counted under
 /// `gen`.
+///
+/// `held` is what the port already has toward this read, and it counts toward
+/// `size` — see `PoolOp::ReadExact`. Only the shortfall is asked of the
+/// kernel, and only the shortfall comes back: the completion joins the two
+/// (`assemble_read`), so returning the remainder here would double it.
+///
+/// A `held` that already meets `size` never reaches a worker — `submit` answers
+/// that read from the port without a backend — so the shortfall is non-zero
+/// whenever this runs.
 pub(super) fn read_exact(
     bound: OpBound,
     fd: RawFd,
     size: usize,
     graphemes: bool,
     gen: crate::segment::Generation,
+    held: &[u8],
 ) -> (i32, Vec<u8>) {
     // Buffer grows as we go — graphemes mode can't preallocate because we
-    // don't know the byte count in advance.  In bytes mode we still grow into
-    // a `size`-capacity Vec so the loop's tail-read writes into one buffer.
+    // don't know the byte count in advance.  In bytes mode the shortfall is
+    // exactly known, so the loop's tail-read writes into one buffer that size.
     let mut buf: Vec<u8> = if graphemes {
         Vec::with_capacity(size)
     } else {
-        vec![0u8; size]
+        vec![0u8; size.saturating_sub(held.len())]
     };
     let mut total = 0usize;
     // `want` is how many bytes we ask the kernel for on each iteration.  Bytes
-    // mode knows exactly (size - total); graphemes mode estimates one byte per
-    // missing grapheme (ASCII best case) and loops on undershoot.
+    // mode knows exactly (the shortfall, less what we have); graphemes mode
+    // estimates one byte per missing grapheme (ASCII best case) and loops on
+    // undershoot.
     loop {
         let want = if graphemes {
-            // Re-evaluate progress every iteration.
-            let g = grapheme_count_in_valid_prefix(&buf[..total], gen);
+            // Re-evaluate progress every iteration, over the remainder AND
+            // what we have read: a cluster can straddle the two, so counting
+            // either alone would miscount the boundary one.
+            let mut combined = held.to_vec();
+            combined.extend_from_slice(&buf[..total]);
+            let g = grapheme_count_in_valid_prefix(&combined, gen);
             if g >= size {
                 return (total as i32, buf[..total].to_vec());
             }
             (size - g).max(1)
         } else {
-            if total >= size {
+            if total >= buf.len() {
                 return (total as i32, buf);
             }
-            size - total
+            buf.len() - total
         };
         // Make room for the next read if we're in graphemes mode (bytes mode
         // preallocated).

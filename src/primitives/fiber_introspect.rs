@@ -208,10 +208,10 @@ fn inject_error_at_suspension(
     crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
     handle.with_mut(|fiber| {
         fiber.signal = Some((SIG_ERROR, error_value));
-        // The park this record named is over, and the strand above is what the
-        // install leaves of it — so a later resume of the fiber must not read the
-        // record as a release it owes (`Fiber::denial_payload`).
-        fiber.denial_payload = None;
+        // The park the payload-named records described is over, and the strand
+        // above is what the install leaves of it — so a later resume of the
+        // fiber must not read a record as a release it owes.
+        fiber.delivery.displace();
     });
     // The DELIVERY reference. Every other install of a terminal payload into a
     // signal slot funds itself — a raise mints, a re-park mints — but this one

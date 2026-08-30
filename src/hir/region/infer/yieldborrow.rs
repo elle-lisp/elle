@@ -20,7 +20,7 @@
 //! a halt promotes the fiber to `:dead` and its delivery has no consumer at
 //! all, and an error's body-owned reference is reclaimed through the frames'
 //! own release tables instead — the raise records its minted delivery
-//! (`Fiber::emit_delivery`), so the abandoned-frame walk and the parked frame's
+//! (the delivery ledger's `record_mint`), so the abandoned-frame walk and the parked frame's
 //! discharge run the payload's owed releases with their receipts, where a
 //! blanket discharge could not tell a borrowed payload from an owned one.
 //!

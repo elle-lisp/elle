@@ -1412,32 +1412,23 @@ That exemption is what carries a **dynamic** `emit` in tail position, whose non-
 first argument makes it an ordinary native call rather than the `Emit` terminator: the
 borrowed-argument retain is the body reference the park owes, and there is no second mint.
 
-**A terminal `:error` mints instead of exempting.** The same operation raising a terminal
-signal hands its payload to a **catcher**, whose read of the signal consumes one reference —
-the payload's **delivery** (§ "An abandoned frame runs the releases it still owes"). The
-suspend exemption cannot supply that one. An `:error` fiber is resumable, so a restart replays
-this block too, and the stash release then reaches a retain the catcher has already consumed.
-So the exit consumes its retains like any other — the nil stamp makes the replay a no-op — and
-mints the delivery itself, exactly as `handle_emit` mints it on the literal path, recording it
-in the same `Fiber::emit_delivery`.
+**A terminal `:error` consumes its retains like any other exit.** The exemption above cannot
+carry one. An `:error` fiber is resumable, so a restart replays this block, and the stash
+release then reaches a retain the **catcher** has already consumed as the payload's delivery
+(§ "An abandoned frame runs the releases it still owes"). What funds the catcher is a delivery
+the raise mints for itself at the signal exit — in either position, under the identity gate and
+the ledger record that travel with it (`Fiber::delivery`, `record_mint`;
+[owner.md](owner.md) § "What yields is the emit OPERATION, not the `Emit` node"). So this exit
+consumes its retains as on any other path, and the nil stamp makes the replay a no-op.
 
-The mint is taken only where the payload is one of the call's **own arguments**. A payload the
-native BUILT funds the delivery with its birth reference, so an ordinary native raise — a fresh
-error struct — must not receive one. The identity test is what tells the two apart, and the
-`emit` primitive handing back its second argument is the shape that needs it.
-
-**The record travels with the mint**, as it does on the literal path. Once the mint funds the
-delivery, every reference the frame holds is owed to the frame's own routes, so the walk and
-the discharge must stop exempting the payload's region. Two references are reclaimed that way:
-a payload the body ALLOCATED, whose owned-argument release sits in the abandoned block, and the
-second name of a payload that reaches the call twice — the first occurrence moves the frame's
-reference and the second takes a retain of its own (rules.md Rule 5), as `(emit s s)` does.
-Where the fiber is restarted rather than discharged, the replayed block runs that same release,
-so the accounting is the same either way.
-
-A **halt** takes neither mint nor record, for the reason `handle_emit` withholds its own retain
-there: the fiber is promoted to `:dead` and never resumed, so that delivery has no consumer and
-a reference taken for it is stranded (owner.md § "Park/unpark symmetry").
+**What the record frees is this block's own releases.** With the delivery funded, every
+reference the frame holds answers to the frame's own routes, so the walk and the discharge stop
+exempting the payload's region and the releases in the abandoned block run. Two references are
+reclaimed that way, both of them this position's: a payload the body ALLOCATED, whose
+owned-argument release sits in the block, and the second name of a payload that reaches the
+call twice — the first occurrence moves the frame's reference and the second takes a retain of
+its own (rules.md Rule 5), as `(emit s s)` does. A restart runs those same releases at the
+replay, so the accounting is the same either way.
 
 **Every OTHER release in that block stays.** They divide in two and neither half has that
 argument. An **argument's** own release is the ownership move, and a signal exit is exactly
@@ -1587,6 +1578,17 @@ rather than a new one:
   cell release naming the box, and a transfer adopt each record nothing. The walk can
   only run a release the frame genuinely had.
 
+**One other site records, on the same three facts.** A dynamic `emit` off tail position
+takes a retain at its payload argument and releases it in the continuation past the call
+([owner.md](owner.md) § "What yields is the emit OPERATION, not the `Emit` node"). That
+release is a value route in every respect the walk reads: a slot the site allocates for
+itself, writes once before the call and reads once after it, and clears as it releases. What
+records it is the **terminal** raise. There the catcher consumes the delivery and this retain
+answers to the continuation alone — which a fiber nobody restarts never runs, so the table is
+the only route to it. A suspending raise records the slot too and is unaffected: its parked
+payload is what the walk protects, so the walk passes the slot over and the discharge answers
+for the retain instead.
+
 **Two routes, two receipts.** The slot-resolved release (`DecrefRegion`) is named the
 same way, by the static region slot it carries, and its receipt is the activation map
 itself: the alloc mints the mapping and the release TAKES it
@@ -1610,13 +1612,15 @@ walk may release, and the two raise paths differ:
   retain `handle_emit` takes, consumed by the resumer's release of the resume result.
   The frame's own reference funds nothing, so the skip has nothing to stand in for and
   would strand one region per raised-and-caught error whose payload the raise chain
-  owns. The raise records the mint (`Fiber::emit_delivery`), and a walk whose live
-  signal payload matches it skips nothing.
-- A **dynamic `emit` in tail position** reads like the `Emit` case with the mint moved to
-  the exit: the raise is an ordinary native call, so the signal exit mints the delivery of
-  a payload the call received as an argument and records it there (§ "What the fall-through
-  owes, a signal exit owes too"). What the walk then reclaims is the frame's own reference,
-  wherever the payload is one the body allocated.
+  owns. The raise records the mint in the ledger (`Fiber::delivery`, `record_mint`),
+  and a walk whose live signal payload matches it (`mint_names`) skips nothing.
+- A **dynamic `emit`** reads like the `Emit` case with the mint moved to the exit: the
+  raise is an ordinary native call, so the signal exit mints the delivery of a payload
+  the call received as an argument and records it there ([owner.md](owner.md) § "What
+  yields is the emit OPERATION, not the `Emit` node"). What the walk then reclaims is the
+  frame's own reference to the payload — in TAIL position wherever the body allocated it,
+  and off tail position the site's own payload retain, which the table names for exactly
+  this reason.
 - An **injected** `fiber/abort` / `fiber/refuse` payload reads like the `Emit` case,
   for the same reason: the injection mints the delivery
   ([effects.md](effects.md) § `Delivers`) and records it on every fiber whose frames
@@ -1697,8 +1701,12 @@ frame stack, and the payload exemption reads the same) and
 `jit::dispatch::tests::release_abandoned_frame_runs_both_routes_off_the_compiled_exits_buffers`
 (the two tables reach the runtime as separate buffers of different widths),
 `lir::lower::tests::release::emission::{frame_release_tables_name_exactly_the_routes_emitted,
-a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so a route
-the emitter declined has no entry), and `tests/elle/region-error-unwind-uaf.lisp` (the
+a_reassigned_binding_records_no_value_route,
+a_non_tail_dynamic_emit_payload_release_carries_its_receipt}` (the tables are the emit
+sites, so a route the emitter declined has no entry and the one other site that records
+carries both halves of a value route's receipt), with
+`tests/elle/region-dynamic-emit-statement-uaf.lisp` as that site's guardfree complement,
+and `tests/elle/region-error-unwind-uaf.lisp` (the
 soundness complement — the payload the raising native builds while the frame holds its
 argument, a value the frame stored into a container that outlives it, a parked frame the
 restarts system replays, and a catching frame's own values, all under

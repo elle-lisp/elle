@@ -1570,6 +1570,33 @@
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-error-sig (string "v" j))) |:error|)]
         (fiber/resume f)
+        (fiber/resume f))) 0]  # The same raise OFF TAIL POSITION, where the site
+   # takes the retain instead of the call's argument convention and the exit leaves
+   # it standing for the continuation past the call (docs/impl/region/owner.md
+   # § "What yields is the emit OPERATION, not the `Emit` node"). CLOSED controls
+   # (undeclared, like `rest-array-copy`). What each reads is where that retain's one
+   # consumer is: `emit-dyn-error-discard` above resumes once, so no replay arrives
+   # and the frames' own release table is the only route to it — the face that goes
+   # open by one region per op if the site's stash stops recording there, or if the
+   # raise stops recording its mint. `emit-dyn-stmt-error-restart` resumes twice, so
+   # the replay runs that release instead, and `emit-dyn-stmt-error-fresh` allocates
+   # its payload in the body, where the site mints nothing and the body's own release
+   # is what the two routes carry. All three read the mint's ARITY: withholding it
+   # over-frees, which no leak gauge sees and
+   # tests/elle/region-dynamic-emit-statement-uaf.lisp reports.
+   ["emit-dyn-stmt-error-restart"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (emit emit-error-sig emit-subject)
+                           9) |:error|)]
+        (fiber/resume f)
+        (fiber/resume f))) 0]
+   ["emit-dyn-stmt-error-fresh"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (emit emit-error-sig (string "v" j))
+                           9) |:error|)]
+        (fiber/resume f)
         (fiber/resume f))) 0]  # An emit-raised error's payload keeps
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the

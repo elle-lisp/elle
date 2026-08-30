@@ -432,6 +432,32 @@ impl VM {
                 self.heap().decref_region_if_present(node);
             }
         }
+        // The abandoned park's funding has no consumer — the delivery funnel
+        // that would have taken it will never run for these frames.
+        self.fiber.delivery.discharge();
+    }
+
+    /// A host that drives a thunk on the CURRENT fiber (`eval`, `import`,
+    /// `arena/allocs`, `compile/run-on`, the root driver) refuses a
+    /// suspend-class signal it cannot host: it extracts the signal as a value
+    /// or reports it, and the fiber runs on. The park that raised the signal
+    /// is dead at that moment, so its funding record must not survive into
+    /// the fiber's next park — the delivery funnel that would consume it
+    /// belongs to a resume no host will ever run (docs/impl/region/owner.md
+    /// § "A park names its funding in the delivery ledger"). A no-op for a
+    /// completion, an error (an `:error` fiber is resumable and its records
+    /// are identity-gated), a halt, or the switch trampoline — none of those
+    /// abandons a suspend-class park.
+    pub(crate) fn abandon_hosted_park(&mut self, bits: SignalBits) {
+        use crate::value::{SIG_ERROR, SIG_HALT, SIG_SWITCH};
+        if bits.is_empty()
+            || bits.intersects(SIG_ERROR)
+            || bits.intersects(SIG_HALT)
+            || bits == SIG_SWITCH
+        {
+            return;
+        }
+        self.fiber.delivery.discharge();
     }
 
     /// Record a closure call and return whether it's "hot" (called N+ times,

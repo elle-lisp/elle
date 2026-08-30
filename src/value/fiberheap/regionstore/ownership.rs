@@ -9,6 +9,11 @@
 
 use super::*;
 
+/// How far [`RegionStore::reclaim_root`] follows owner edges before it calls the
+/// forest malformed. Nesting is bounded by the lexical nesting of the
+/// activations that adopt, which no real program takes anywhere near this deep.
+const MAX_OWNER_DEPTH: usize = 64;
+
 impl RegionStore {
     /// Link `child` as an Owned member of `parent`'s subtree — the runtime
     /// `AdoptRegion` (docs/impl/region/ownership.md § "Adoption and subtree drop").
@@ -74,6 +79,43 @@ impl RegionStore {
             .get(id.get() as usize)
             .and_then(|s| s.as_ref())
             .is_some_and(|e| matches!(e.reclaim, Reclaim::Owned { .. }))
+    }
+
+    /// The region whose count `id`'s fate hangs on: `id` itself when it is
+    /// `Counted`, otherwise the ancestor whose subtree drop reclaims it.
+    ///
+    /// A retain on an `Owned` region holds nothing — it has no count left to
+    /// raise (§ [`Self::adopt_region`]). A seam outside the region system that
+    /// must keep a value alive therefore counts against this instead: the root
+    /// is `Counted`, so a reference on it does stop the subtree drop that would
+    /// take the member. The pending table is that seam (src/io/AGENTS.md § "A
+    /// hold retains what reclamation listens to").
+    ///
+    /// The walk is bounded rather than trusting termination: `adopt_region`
+    /// gives each region at most one owner and `reparent_owned_children` moves
+    /// whole sets, so the forest is acyclic and a chain this deep is a
+    /// forward/back edge bug. Returning the last region reached keeps a release
+    /// site balanced against its retain either way.
+    pub(crate) fn reclaim_root(&self, id: RuntimeRegion) -> RuntimeRegion {
+        let mut cur = id;
+        for _ in 0..MAX_OWNER_DEPTH {
+            let Some(Reclaim::Owned { owner }) = self
+                .regions
+                .get(cur.get() as usize)
+                .and_then(|s| s.as_ref())
+                .map(|e| &e.reclaim)
+            else {
+                return cur;
+            };
+            cur = *owner;
+        }
+        debug_assert!(
+            false,
+            "ownership chain from region {id} is longer than {MAX_OWNER_DEPTH} — \
+             a region has at most one owner, so the forest cannot be this deep \
+             (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
+        );
+        cur
     }
 
     /// Extract `child` from its owner's subtree — the moves-out counterpart of
