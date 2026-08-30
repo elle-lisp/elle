@@ -1,5 +1,5 @@
 .PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
-       smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir \
+       smoke-elle smoke-vm smoke-noffi smoke-jit smoke-nouring smoke-wasm smoke-mlir \
        doctest elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
 
@@ -267,6 +267,33 @@ smoke-jit: elle
 	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--jit=eager,JIT pass (eager),jit)
 	$(call RUN_ORACLE,--jit=eager)
 
+# The thread-pool I/O backend, on a Linux box. `create_platform_backend` picks
+# the ring here and the pool on every other platform, so a Linux-only gate runs
+# the whole corpus against the ring and none of it against the pool. This is the
+# runtime half of the argument `crosscheck` makes below for the macOS `cfg`
+# arms: that one compiles the code a Linux build never compiles, this one runs
+# the code a Linux build never runs.
+#
+# Without it the pool's only sampler was the macOS job — once per PR, on the
+# slowest runner, against failure modes that hang rather than fail. A hang
+# spends the whole per-file budget, so it reads as a flaky timeout rather than
+# as the defect it is, and two pool-only defects reached main that way.
+#
+# The per-file passes rather than the runner: whole-program teardown and
+# anything wall-clock-sensitive are reachable only there (see the pass
+# descriptions above), and that is where both defects surfaced.
+#
+# `tests/integration/elle_scripts.rs` § "I/O backend selection" pins a handful
+# of corpus files under this flag one at a time, which is what this target
+# generalises; those stay, because they also run under debug assertions.
+smoke-nouring: elle  ## Corpus per-file passes on the thread-pool backend (what every non-Linux build runs)
+	@echo "=== elle tests (thread-pool backend, VM) ==="
+	$(call RUN_PER_FILE,$(ELLE_SKIP_VM),--no-uring --jit=off --mlir=off,thread-pool VM pass,nouring-vm)
+	$(call RUN_ORACLE,--no-uring --jit=off --mlir=off)
+	@echo "=== elle tests (thread-pool backend, eager JIT) ==="
+	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--no-uring --jit=eager,thread-pool JIT pass,nouring-jit)
+	$(call RUN_ORACLE,--no-uring --jit=eager)
+
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
 	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
@@ -356,7 +383,7 @@ qa: crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, wor
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 
-test: smoke qa  ## Rust unit + integration tests + QA (fmt/clippy/crosscheck/rustdoc) after smoke
+test: smoke smoke-nouring qa  ## Rust unit + integration tests + QA (fmt/clippy/crosscheck/rustdoc) after smoke
 	$(MLIR_ENV) cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 
