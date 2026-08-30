@@ -266,9 +266,8 @@ impl CompileCtx {
     /// macros: a transformer compiles lazily on its first expansion and caches
     /// on the shared expander, and its quoted literals bind to whichever table
     /// compiled it. A throwaway table here would cache transformers carrying ids
-    /// no later expansion can read — `each` compares
-    /// `(= (syntax->datum iter-or-in) 'in)`, and a stale `'in` silently drops
-    /// the `in` form's collection argument.
+    /// no later expansion can read (pinned by
+    /// `import_projection_probe_interns_into_the_callers_symbol_table`).
     pub fn get_or_compile_projection(
         &mut self,
         resolved_path: &str,
