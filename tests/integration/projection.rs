@@ -277,10 +277,9 @@ fn import_projection_probe_interns_into_the_callers_symbol_table() {
 
     let mut symbols = SymbolTable::new();
     let source = format!("(def m ((import \"{}\")))\nm\n", module.display());
-    let _ = compile_file(&source, &mut symbols, "<probe-main>");
+    compile_file(&source, &mut symbols, "<probe-main>").expect("main file compiles");
 
     let learned = symbols.get("probe-only-marker");
-    std::fs::remove_dir_all(&dir).ok();
 
     assert!(
         learned.is_some(),
