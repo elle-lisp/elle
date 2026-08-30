@@ -53,7 +53,9 @@ pub(super) fn send_closure(
         lir_function: None,
         lir_value_pool: Vec::new(),
         child_protos: Vec::new(),
-        merged_slots: Vec::new(), // placeholder; replaced below
+        merged_slots: Vec::new(),          // placeholder; replaced below
+        frame_release_slots: Vec::new(),   // placeholder; replaced below
+        frame_release_regions: Vec::new(), // placeholder; replaced below
     });
     ctx.visited.insert(key, idx);
 
@@ -130,6 +132,8 @@ pub(super) fn send_closure(
         lir_value_pool,
         child_protos,
         merged_slots: closure_rc.template.merged_slots.iter().copied().collect(),
+        frame_release_slots: (*closure_rc.template.frame_release_slots).clone(),
+        frame_release_regions: (*closure_rc.template.frame_release_regions).clone(),
     };
 
     Ok(SendValue::Ref(idx))

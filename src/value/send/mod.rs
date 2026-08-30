@@ -77,6 +77,11 @@ pub struct SendableClosure {
     /// § Merging), serialized so the worker mint-or-reuses them and its region count
     /// matches the sender's. Empty unless a merge fired.
     pub merged_slots: Vec<u32>,
+    /// Value-routed release slots (`ClosureTemplate.frame_release_slots`), so an
+    /// abandoned frame on the worker runs the releases it still owes.
+    pub frame_release_slots: Vec<u16>,
+    /// Slot-routed release regions (`ClosureTemplate.frame_release_regions`).
+    pub frame_release_regions: Vec<u32>,
 }
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
