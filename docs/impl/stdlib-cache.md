@@ -246,6 +246,6 @@ bincode.
   automatically; the cost is one recompile after upgrading elle. Acceptable.
 - **Fate of `Value` scalar serde**: entry constants now go entirely through
   `SendableClosure`, no longer through `StoredValue`; but LIR `ValueConst`
-  still uses the scalar serde, so it stays for now.
-- **Silent store failure**: the cache is only a speedup; a failed write does
+- **Store failure does not block startup**: the cache is only a speedup; a
+  failed write is reported on stderr and the fresh compile proceeds.
   not block startup.
