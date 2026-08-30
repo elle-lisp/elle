@@ -663,7 +663,7 @@ impl LirInstr {
             | AdoptIntoActivation { .. }
             | AssertRegionMatches { .. }
             | PushParamFrame { .. }
-            | PopParamFrame { .. }
+            | PopParamFrame
             | CheckSignalBound { .. }
             | IsEmpty { .. }
             | IsBool { .. }
