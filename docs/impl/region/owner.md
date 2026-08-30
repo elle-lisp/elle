@@ -227,9 +227,9 @@ parked fiber's accounting symmetric with its unpark:
   `:error` emit needs no compiler mint for the same invariant: its `EmitEscape` retain is
   the delivery reference exactly as above, and the body's own reference — where the raise
   chain holds one — is claimed through the frames' release tables instead of a blanket
-  discharge, because the raise records its minted delivery (`Fiber::emit_delivery`) and
-  the abandoned-frame walk and the parked frame's discharge stop exempting the payload's
-  region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
+  discharge, because the raise records its minted delivery in the ledger
+  (`Fiber::delivery`, `record_mint`) and the abandoned-frame walk and the parked frame's
+  discharge stop exempting the payload's region where the record matches ([mechanism.md](mechanism.md) § "An abandoned frame runs
   the releases it still owes"). A halt takes neither the retain nor the record — a halted
   fiber is promoted to `:dead` and never resumed, so its delivery has no consumer.
 - **A payload the RUNTIME built is released by the install that displaces it.** The second
@@ -249,11 +249,12 @@ parked fiber's accounting symmetric with its unpark:
   resumer's release of the resume result is the second consumer and a release here would
   free the buffer under the caller. A denial parks under the WITHHELD capability's bits,
   which say nothing about who built the payload and are indistinguishable from an
-  `(emit :fs v)` of a body-allocated value — so the classifier records the payload
-  (`Fiber::denial_payload`, an uncounted marker compared bit-wise like
-  `Fiber::emit_delivery`) and `release_displaced_denial_payload` releases exactly what the
-  record names, on both installs. The injected error takes no skip: it is not a delivery,
-  and the abort's own `AbortDelivery` mint funds the consumer it does have.
+  `(emit :fs v)` of a body-allocated value — so the classifier records the payload in the
+  ledger (`park_denial`, an uncounted marker compared bit-wise like the mint record) and
+  `release_displaced_denial_payload` releases exactly what the record names, taking it
+  (`take_bodyless`) as the receipt, on both installs. The injected error takes no skip: it
+  is not a delivery, and the abort's own `AbortDelivery` mint funds the consumer it does
+  have.
 
   **The two readings overlap on one denial, and the record wins it.** `:io` is a
   withheld capability like any other, so a fiber denied `:io` parks under `SIG_IO` —
@@ -335,10 +336,10 @@ parked fiber's accounting symmetric with its unpark:
   `Emit` terminator, and a capability denial, which parks a denied primitive call
   for the parent to mediate — and neither can be told from an `Emit` park at the
   delivery, where the frame is already built and, for a tail suspend, was built by a
-  driver that never saw the primitive. So the classifier records the shape on the
-  fiber (`Fiber::resume_value_unfunded`) and `do_fiber_resume_single` takes it with
-  the parked signal, minting one `ResumeDelivery` retain on every route into the
-  fiber. What needs no mint is an `Emit` park, whose resume block mints in bytecode
+  driver that never saw the primitive. So the classifier records the shape in the
+  ledger (`Fiber::delivery`, `park_primitive`) and `do_fiber_resume_single` takes it
+  with the parked signal (`take_resume_funding`), minting one `ResumeDelivery` retain
+  on every route into the fiber. What needs no mint is an `Emit` park, whose resume block mints in bytecode
   (above), and an io completion, which the scheduler allocates fresh and hands over
   carrying its own birth reference. Pinned by
   `tests/elle/region-primitive-resume-uaf.lisp`.
@@ -404,6 +405,43 @@ parked fiber's accounting symmetric with its unpark:
   the count holds. Pinned by `tests/elle/param-fiber-inherit.lisp` and the
   `region_param_fiber_inherit_uaf` integration pin (debug builds panic at the resume
   boundary when the count is missing).
+- **A park names its funding in the delivery ledger, and a consume seam takes it.** The
+  three rules above each leave one funding fact on the fiber, written where the park is
+  built and read where the park ends: the parked payload whose delivery the raise or
+  injection minted, the parked payload with no body reference, and whether the resume
+  value owes a mint at the delivery. One record carries all three — `Fiber::delivery`
+  (`src/value/fiber/delivery.rs`), whose fields are private to its module — so a park
+  names its funding through a method or not at all. The park writes are
+  `park_primitive()` (a suspending primitive or io park), `park_denial(payload)` (a
+  capability denial: a primitive park whose payload also has no body reference),
+  `record_mint(payload)` (a raise minted the payload's delivery), and
+  `install_abort(payload)` (an abort injection: the mint is recorded, no resume value is
+  owed, and the displaced park's records leave with its payload). The consume seams are
+  `take_resume_funding()` at each tier's one delivery funnel (`do_fiber_resume_single`,
+  the WASM `handle_fiber_resume`), which clears the mint record with the parked signal
+  and answers whether to mint the `ResumeDelivery` retain; `take_bodyless()`, run by
+  `release_displaced_denial_payload` at every install that replaces the parked signal —
+  taking is the receipt, so a second install releases nothing; `displace()`, where the
+  trampoline's `FiberResume` short-circuit replaces the parked payload without
+  delivering it (the unfunded flag survives a displace, because the funnel that consumes
+  it has not run yet); and `discharge()`, where the park is over with no delivery to
+  fund: `take_parked_state` consuming the park of a fiber that can never run again, the
+  squelch/abort discard chokepoint (`discard_suspended_frames`), and
+  `VM::abandon_hosted_park` — the seam every host that drives a thunk on the current
+  fiber (`eval`, `import`, `arena/allocs`, `compile/run-on`, the root driver) crosses
+  when it refuses a suspend-class signal it cannot host and the fiber runs on. After a
+  discharge no funding survives, so a later park starts from nothing and a later
+  (invalid) resume of a killed fiber mints nothing. The gated read is
+  `mint_names(payload)` for the abandoned-frame walk and the parked frame's discharge —
+  compared by representation identity against the live parked signal, so a stale record
+  withholds nothing; the bodyless take's consumers gate the same way before releasing. The record is uncounted
+  throughout: the payloads it names are only ever compared bit-wise, never dereferenced,
+  so it takes no retain and the Fiber content scan records no edge for them (the counted
+  edge for the same value is `signal`'s). The method surface is the enforcement: a park
+  write asserts (debug builds) that the previous park's funding was consumed, so a new
+  park shape wired without a consume seam panics at its first park instead of leaking one
+  region per cycle. Pinned by `value::fiber::delivery::tests` (each transition, the
+  displace/discharge split, and the double-park panic).
 - **A parked TERMINAL result displaced by a resume or abort install is released as it is
   displaced.** A terminal result parked in `fiber.signal` carries the park-retain and a
   recorded `fiber-region → result-region` content edge, both counting on the fiber's

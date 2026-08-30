@@ -172,13 +172,15 @@ pub(crate) fn release_displaced_terminal_signal(
 /// bit that arm reads, so there the io request and the denial payload cannot be
 /// told apart by bits — and one reference is owed, not two.
 ///
-/// [`Fiber::denial_payload`]: crate::value::fiber::Fiber::denial_payload
+/// The record is the delivery ledger's (`park_denial` writes it, this take
+/// consumes it; docs/impl/region/owner.md § "A park names its funding in the
+/// delivery ledger").
 pub(crate) fn release_displaced_denial_payload(
     heap: &mut crate::value::fiberheap::FiberHeap,
     handle: &crate::value::fiber::FiberHandle,
 ) -> bool {
     let displaced = handle.with_mut(|fiber| {
-        let record = fiber.denial_payload.take()?;
+        let record = fiber.delivery.take_bodyless()?;
         let (_, payload) = fiber.signal?;
         record.bit_identical(payload).then_some(payload)
     });

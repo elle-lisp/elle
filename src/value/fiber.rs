@@ -18,6 +18,9 @@ pub use frame::*;
 pub use handle::*;
 pub use status::*;
 
+mod delivery;
+pub use delivery::Delivery;
+
 mod signalbits;
 pub use signalbits::SignalBits;
 
@@ -130,82 +133,25 @@ pub struct Fiber {
     /// location comes from").
     ///
     /// The payload is carried so the reader can tell that the location still
-    /// describes the error being re-raised — representation identity, as for
-    /// `emit_delivery`, never structural equality. A fiber that goes on to
+    /// describes the error being re-raised — representation identity, as in
+    /// the delivery ledger, never structural equality. A fiber that goes on to
     /// park a different error (an injected abort, a second raise that recorded
     /// no location) therefore lends its old location to nothing.
     ///
-    /// Like `emit_delivery`, the payload is an UNCOUNTED marker: it is only
-    /// ever compared bit-wise, never dereferenced, so it takes no retain and
-    /// the Fiber content scan records no edge for it. The counted edge for the
-    /// same value is `signal`'s.
+    /// Like the ledger's records, the payload is an UNCOUNTED marker: it is
+    /// only ever compared bit-wise, never dereferenced, so it takes no retain
+    /// and the Fiber content scan records no edge for it. The counted edge for
+    /// the same value is `signal`'s. Kept beside the ledger rather than in it:
+    /// this is a diagnostics record with a life of its own (it survives the
+    /// resume take, waiting for a matching re-raise), not a funding fact.
     pub error_loc: Option<(Value, crate::error::SourceLoc)>,
-    /// The `SIG_ERROR` payload whose DELIVERY reference something OTHER than this
-    /// fiber's frames minted. Three raises record here, for one reason:
-    ///
-    /// - an `emit` raise — the `EmitEscape` retain `handle_emit` (and its JIT
-    ///   mirror) takes, which the resumer's release of the resume result consumes;
-    /// - the same raise leaving the emit PRIMITIVE, in either position, where the
-    ///   signal exit takes that retain in `handle_emit`'s place
-    ///   (`VM::mint_raised_argument_delivery`);
-    /// - an injected `fiber/abort` / `fiber/refuse` payload — the `AbortDelivery`
-    ///   retain the injection takes, recorded on the aborted fiber
-    ///   (`do_fiber_abort`) and on the aborting one where the error escapes it
-    ///   (`VM::park_propagating_abort`).
-    ///
-    /// While this matches the live signal's payload (representation identity,
-    /// never structural equality), the payload exemption on the abandoned-frame
-    /// walk and the parked frame's discharge is withdrawn: a frame's own
-    /// reference funds no delivery, so every release the tables name is genuinely
-    /// owed (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-    /// it still owes"). A native install leaves this untouched — its delivery is
-    /// the payload's birth reference or the frame's left-standing one, which the
-    /// exemption preserves. Cleared at the resume's signal take, where the parked
-    /// payload this record named leaves the slot.
-    pub emit_delivery: Option<Value>,
-    /// Whether this fiber's innermost suspension is a PRIMITIVE call, whose
-    /// resume value therefore arrives owing one reference.
-    ///
-    /// A parked frame re-enters at its suspending call's continuation, which
-    /// runs that call's compiler-emitted result release. A bytecode callee funds
-    /// the reference that release consumes with its `Return` mint; a primitive
-    /// that suspends never returns, so the delivery mints it instead
-    /// (docs/impl/region/owner.md § "A delivery into a replayed frame carries one
-    /// owning reference"). The classifier — `handle_primitive_signal` and the
-    /// capability-denial path, in call and tail position and in their JIT twins
-    /// (`src/jit/calls.rs`) — is the only place that knows which shape a park has,
-    /// and the park itself may be built later
-    /// and elsewhere (a tail suspend leaves no frame of its own), so the answer
-    /// rides the fiber rather than the frame. `do_fiber_resume_single` takes it
-    /// with the parked signal, so every delivery route consumes it exactly once
-    /// and a later park of a different shape starts from `false`.
-    pub resume_value_unfunded: bool,
-    /// The CAPABILITY-DENIAL payload this fiber has parked, if its innermost
-    /// suspension is a denial.
-    ///
-    /// A park leaves two references on its payload's region — the delivery, and
-    /// the body's own, released by the continuation past the suspend — but a
-    /// denial's `{:error :capability-denied …}` struct is built by the denial
-    /// path, so the body never names it and no `decref_point` names its region.
-    /// The reference the allocation left is owed by whatever displaces the
-    /// payload: a resume's delivery, or an abort's / refusal's injected error
-    /// (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the
-    /// RUNTIME built is released by the install that displaces it").
-    ///
-    /// A record is needed because the bits cannot say so. An io park is its
-    /// `SIG_IO` bit, but a denial parks under the WITHHELD capability's bits,
-    /// which an `(emit :fs v)` of a body-allocated value carries too — and only
-    /// the classifier (`handle_capability_denial`, its tail twin, and the JIT's
-    /// `jit_capability_denial`) knows which of the two it built.
-    ///
-    /// Like `emit_delivery`, this is an UNCOUNTED marker: only ever compared
-    /// bit-wise against the parked signal, never dereferenced, so it takes no
-    /// retain and the Fiber content scan records no edge for it. The counted
-    /// edge for the same value is `signal`'s. The comparison is what bounds a
-    /// stale record — a record that no longer names the parked payload releases
-    /// nothing — and the displacing install TAKES it, so no second install can
-    /// release the same reference.
-    pub denial_payload: Option<Value>,
+    /// The delivery ledger: how the current park's delivery references are
+    /// funded — the raise-minted payload, the bodyless (denial) payload, and
+    /// whether the resume value owes a mint. Written where a park is built,
+    /// consumed where the park ends, through a method-only surface
+    /// ([`Delivery`]; docs/impl/region/owner.md § "A park names its funding in
+    /// the delivery ledger").
+    pub delivery: Delivery,
     /// Suspended execution frames. Set when the fiber suspends; consumed
     /// when it resumes.
     ///
@@ -348,7 +294,7 @@ pub struct ParkedState {
     /// `elle test` harness dies on its own first file. What a terminal EMIT
     /// owes — the raise chain's own reference to a payload it allocated — is
     /// settled through [`Self::protect`] instead: the emit records its minted
-    /// delivery (`Fiber::emit_delivery`), the protection is withheld where the
+    /// delivery (the ledger's `record_mint`), the protection is withheld where the
     /// record matches, and the frames' owed-release tables carry the reference
     /// with their own receipts.
     pub signal: Option<(SignalBits, Value)>,
@@ -380,7 +326,7 @@ pub struct ParkedState {
     /// well hold the very value the payload names.
     ///
     /// `None` also where the raise MINTED the payload's delivery itself
-    /// (`Fiber::emit_delivery` matches the live signal): the frame's reference
+    /// (the ledger's `mint_names` answers for the live signal): the frame's reference
     /// funds nothing there, so the owed-release tables run in full and the one
     /// reference the raise chain held is reclaimed rather than stranded
     /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
@@ -445,13 +391,6 @@ impl Fiber {
             }
             _ => None,
         };
-        // A discharged park is over, and the discharge below already runs its one
-        // decref — so the record must not survive to a later resume of this fiber
-        // (a hard kill leaves an `:error` fiber resumable). See
-        // [`Fiber::denial_payload`].
-        if signal.is_some() {
-            self.denial_payload = None;
-        }
         // The signal's payload leaves with the fiber's result — read through
         // `fiber/value`, or accounted by the signal discharge below — so a slot
         // naming its region is not this discharge's to release. Reported rather
@@ -462,7 +401,14 @@ impl Fiber {
         let protect = signal
             .or(self.signal)
             .map(|(_, v)| v)
-            .filter(|v| !self.emit_delivery.is_some_and(|m| m.bit_identical(*v)));
+            .filter(|v| !self.delivery.mint_names(*v));
+        // A discharged park is over, and the discharge below already runs its one
+        // decref — so no funding record survives to a later resume of this fiber
+        // (a hard kill leaves an `:error` fiber resumable, and it must find
+        // nothing to mint or release).
+        if signal.is_some() {
+            self.delivery.discharge();
+        }
         ParkedState {
             nodes,
             signal,
@@ -490,9 +436,7 @@ impl Fiber {
             param_borrows: Vec::new(),
             signal: None,
             error_loc: None,
-            emit_delivery: None,
-            resume_value_unfunded: false,
-            denial_payload: None,
+            delivery: Delivery::new(),
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],
@@ -528,9 +472,7 @@ impl Fiber {
             param_borrows: Vec::new(),
             signal: None,
             error_loc: None,
-            emit_delivery: None,
-            resume_value_unfunded: false,
-            denial_payload: None,
+            delivery: Delivery::new(),
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
             activation_owner_nodes: vec![None],

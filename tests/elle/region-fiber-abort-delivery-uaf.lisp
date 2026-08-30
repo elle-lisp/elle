@@ -133,8 +133,8 @@
 # The fiber holds the very value it is aborted with — handed to it as an owned
 # parameter — so its abandoned frame owes that value a release. With the
 # delivery minted at the injection the frame's reference funds nothing, so the
-# injection records the mint (`Fiber::emit_delivery`) and the abandoned-frame
-# walk stops exempting the payload's region.
+# injection records the mint in the delivery ledger (`Fiber::delivery`) and the
+# abandoned-frame walk stops exempting the payload's region.
 (defn hold-then-yield [q]
   (yield q)
   2)

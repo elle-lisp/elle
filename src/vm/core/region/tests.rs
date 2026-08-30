@@ -223,7 +223,6 @@ fn a_compiled_frames_spilled_walk_skips_an_unminted_payload() {
         let spill = [payload];
         // A native raise installs the payload with no retain of its own, so the
         // frame's reference IS the delivery and its release stays owed.
-        vm.fiber.emit_delivery = None;
         vm.release_abandoned(&[0], &[], payload, FrameLocals::Spilled(&spill));
         assert_eq!(
             vm.heap().region_rc(region),
@@ -231,7 +230,7 @@ fn a_compiled_frames_spilled_walk_skips_an_unminted_payload() {
             "the skipped release is the delivery the catcher reads the payload by",
         );
         // An emit-raised error minted the delivery itself, so nothing is exempt.
-        vm.fiber.emit_delivery = Some(payload);
+        vm.fiber.delivery.record_mint(payload);
         vm.release_abandoned(&[0], &[], payload, FrameLocals::Spilled(&spill));
         assert_eq!(
             vm.heap().region_rc(region),

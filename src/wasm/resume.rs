@@ -361,10 +361,11 @@ pub(super) fn handle_fiber_resume(
         let closure = fiber.closure.clone();
         let resume_value = fiber.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
         let status = fiber.status;
-        // The park's delivery obligation travels with the parked signal, exactly
-        // as it does in the VM's fiber driver (`do_fiber_resume_single`), so every
-        // delivery route consumes it once.
-        let unfunded = std::mem::take(&mut fiber.resume_value_unfunded);
+        // The park's funding travels with the parked signal, taken through the
+        // same delivery funnel the VM's fiber driver uses
+        // (`do_fiber_resume_single`), so every delivery route consumes it once
+        // and the two tiers cannot drift.
+        let unfunded = fiber.delivery.take_resume_funding();
         (closure, resume_value, status, unfunded)
     });
 
