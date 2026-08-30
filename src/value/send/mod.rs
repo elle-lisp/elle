@@ -417,29 +417,51 @@ fn remap_sendable_symbols(
 /// `name` has in the *loading* process's symbol table. Symbol ids are
 /// per-process: the JIT materializes them into `Value::symbol(id)` directly.
 fn remap_lir_symbols(lir: &mut crate::lir::LirFunction, old_to_new: &HashMap<u32, u32>) {
-    use crate::lir::{LirConst, LirInstr};
+    use crate::lir::LirConst;
     for block in &mut lir.blocks {
         for si in &mut block.instructions {
-            let fix = |c: &mut LirConst| {
+            // Through the visitor rather than a list of instruction shapes: a
+            // shape this missed would keep the storing process's id, and the
+            // JIT materializes that id straight into a `Value::symbol`.
+            si.instr.for_each_const_mut(|c| {
                 if let LirConst::Symbol(sid) = c {
                     if let Some(&new_id) = old_to_new.get(&sid.0) {
                         *sid = crate::value::SymbolId(new_id);
                     }
                 }
-            };
-            match &mut si.instr {
-                LirInstr::Const { value, .. } => fix(value),
-                LirInstr::StructGetOrNil { key, .. } => fix(key),
-                LirInstr::StructGetDestructure { key, .. } => fix(key),
-                LirInstr::StructRest { exclude_keys, .. } => {
-                    for k in exclude_keys.iter_mut() {
-                        fix(k);
-                    }
-                }
-                _ => {}
-            }
+            });
         }
     }
+}
+
+/// The `LirConst::Symbol` ids in `lir` that `names` cannot translate.
+///
+/// The remap above is a lookup, so an id absent from `symbol_names` survives
+/// untouched into the loading process — where it names whatever symbol happens
+/// to hold that id, silently. A storer that would produce one refuses instead.
+pub(crate) fn untranslatable_lir_symbols(
+    lir: &crate::lir::LirFunction,
+    names: &HashMap<u32, String>,
+) -> Vec<u32> {
+    use crate::lir::LirConst;
+    let mut missing = Vec::new();
+    // `for_each_const_mut` needs `&mut`, and this reads; clone the block's
+    // instruction to inspect it rather than duplicate the exhaustive match.
+    for block in &lir.blocks {
+        for si in &block.instructions {
+            let mut probe = si.instr.clone();
+            probe.for_each_const_mut(|c| {
+                if let LirConst::Symbol(sid) = c {
+                    if !names.contains_key(&sid.0) {
+                        missing.push(sid.0);
+                    }
+                }
+            });
+        }
+    }
+    missing.sort_unstable();
+    missing.dedup();
+    missing
 }
 
 #[cfg(test)]

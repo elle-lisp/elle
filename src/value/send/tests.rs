@@ -510,3 +510,43 @@ fn serde_round_trip_keeps_each_container_kind_distinct() {
         );
     }
 }
+
+// ── every LIR symbol must be translatable on load ───────────────────
+
+/// The load-path remap is a lookup, so an id absent from `symbol_names`
+/// survives into the loading process untouched and names whatever symbol holds
+/// that id there. The storer refuses rather than write such a file; this pins
+/// that the check sees a missing id and passes a present one.
+///
+/// Characterization, not a failing-first regression: today's four
+/// `LirConst`-bearing instructions are all reachable by the remap, so nothing
+/// currently produces an untranslatable id. The guard is for the next one.
+#[test]
+fn an_untranslatable_lir_symbol_is_reported() {
+    use crate::lir::{LirConst, LirInstr, Reg, Terminator};
+    use crate::value::SymbolId;
+
+    let lir = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Symbol(SymbolId(4242)),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+
+    let mut names = HashMap::new();
+    assert_eq!(
+        super::untranslatable_lir_symbols(&lir, &names),
+        vec![4242],
+        "an id with no name cannot be remapped, and must be reported"
+    );
+
+    names.insert(4242u32, "answerish".to_string());
+    assert!(
+        super::untranslatable_lir_symbols(&lir, &names).is_empty(),
+        "an id its closure can name is translatable"
+    );
+}

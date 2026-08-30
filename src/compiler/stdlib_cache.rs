@@ -259,6 +259,26 @@ fn store_atomically(
         .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
+/// Refuse a `SendableClosure` whose LIR names a symbol its `symbol_names`
+/// cannot translate. Recurses through `child_protos`.
+fn check_lir_symbols_are_translatable(
+    sc: &crate::value::send::SendableClosure,
+) -> Result<(), String> {
+    if let Some(lir) = sc.lir_function.as_ref() {
+        let missing = crate::value::send::untranslatable_lir_symbols(lir, &sc.symbol_names);
+        if !missing.is_empty() {
+            return Err(format!(
+                "LIR of {} names symbol ids absent from its symbol_names: {missing:?}",
+                sc.name.as_deref().unwrap_or("<anonymous>")
+            ));
+        }
+    }
+    for child in &sc.child_protos {
+        check_lir_symbols_are_translatable(child)?;
+    }
+    Ok(())
+}
+
 /// Remove every cache file in `dir` except `keep`.
 ///
 /// The key follows the binary, so every rebuild mints a new one and orphans
@@ -328,6 +348,15 @@ pub fn store_bytecode(
     let (templates, intern_table) =
         crate::value::send::serialize_templates(std::slice::from_ref(&entry), vm.heap(), symbols)?;
     let entry = templates.into_iter().next().expect("one template");
+    // Every LIR symbol must be translatable on load. The load-path remap is a
+    // lookup: an id absent from `symbol_names` survives untouched into the
+    // loading process, where the JIT materializes it as whatever symbol happens
+    // to hold that id. Refuse to write a file that would do that — a missing
+    // cache costs a compile, a wrong symbol costs a wrong program.
+    check_lir_symbols_are_translatable(&entry)?;
+    for sc in &intern_table {
+        check_lir_symbols_are_translatable(sc)?;
+    }
     Ok(StoredBytecode {
         format_version: FORMAT_VERSION,
         entry,
