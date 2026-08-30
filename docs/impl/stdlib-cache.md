@@ -242,8 +242,8 @@ bincode.
 
 ## Trade-offs
 
-- **Cache key includes the elle version**: compiler changes invalidate
-  automatically; the cost is one recompile after upgrading elle. Acceptable.
+- **Cache key follows the binary**: any rebuild invalidates automatically; the
+  cost is one recompile per new binary. Acceptable.
 - **Fate of `Value` scalar serde**: entry constants now go entirely through
   `SendableClosure`, no longer through `StoredValue`; but LIR `ValueConst`
 - **Store failure does not block startup**: the cache is only a speedup; a
