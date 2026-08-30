@@ -739,4 +739,49 @@ mod tests {
             "a store must leave only the file it just wrote; found {left:?}"
         );
     }
+
+    /// `ClosureTemplate.syntax` does not cross the cache, and `(meta/origin f)`
+    /// — its only reader — reports a closure's source location from it. So a
+    /// stdlib closure has an origin on the compiled path and none on the cached
+    /// one. Nothing in the tree depends on that; it is pinned here rather than
+    /// left to be rediscovered as a surprise.
+    ///
+    /// The second half is what bounds it: a closure the hit runtime compiles
+    /// itself still knows where it came from, so the loss stays with the values
+    /// the cache restored and does not reach user code.
+    #[test]
+    fn a_cached_stdlib_closure_has_no_origin_but_user_code_keeps_its_own() {
+        fn origin_is_nil(rt: &mut Runtime, src: &str) -> bool {
+            use crate::pipeline::compile_file_repl;
+            let (vm, symbols, cctx) = rt.parts();
+            let result = compile_file_repl(src, symbols, cctx, "<origin>").expect("compiles");
+            vm.execute_scheduled(&result.0.bytecode, symbols, cctx)
+                .expect("runs")
+                .is_nil()
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        let mut compiled = Runtime::with_stdlib_cache(cache.clone());
+        assert_eq!(compiled.stdlib_source(), StdlibSource::Compiled);
+        assert!(
+            !origin_is_nil(&mut compiled, "(meta/origin map)"),
+            "a compiled stdlib closure carries its syntax, so it has an origin"
+        );
+        drop(compiled);
+
+        let mut hit = Runtime::with_stdlib_cache(cache);
+        assert_eq!(hit.stdlib_source(), StdlibSource::Cache);
+        assert!(
+            origin_is_nil(&mut hit, "(meta/origin map)"),
+            "the cache does not carry syntax, so a restored closure has no \
+             origin — a known difference between the two paths"
+        );
+        assert!(
+            !origin_is_nil(&mut hit, "(meta/origin (fn [] nil))"),
+            "the loss must stay with the restored values: a closure this \
+             runtime compiled itself still knows where it came from"
+        );
+    }
 }

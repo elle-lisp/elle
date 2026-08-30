@@ -111,6 +111,26 @@ is ordinary, and writing the path directly lets one read the other's
 half-written file, or edits an inode a reader already holds open. Same
 directory because a rename is atomic only within one filesystem.
 
+## What the cached path does not restore
+
+`ClosureTemplate.syntax` — the original lambda node, captured for eval
+environment reconstruction — does not cross the cache. Its only reader is
+`(meta/origin f)`, which reports a closure's `{:file :line :col}` from that
+node's span, so a stdlib closure has an origin on the compiled path and `nil`
+on the cached one.
+
+Nothing in the tree depends on it: the corpus exercises `meta/origin` only on
+closures it compiles itself. The loss is bounded to values the cache restored —
+a closure a cache-hit runtime compiles still carries its syntax — and
+`a_cached_stdlib_closure_has_no_origin_but_user_code_keeps_its_own` pins both
+halves.
+
+Carrying it would mean shipping a syntax tree per template through
+`SendSyntax`, which cannot represent `SyntaxLiteral` (the macro-template symbol
+quasiquote embeds) and would grow the file substantially. The image work in
+docs/impl/image.md makes syntax region-native, at which point it is ordinary
+body data rather than a codec's problem.
+
 ## Serialization format
 
 The payload is a single `StoredBytecode` struct
