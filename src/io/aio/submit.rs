@@ -334,6 +334,7 @@ impl AsyncBackend {
                     ref mut hub,
                     ref mut buffer_pool,
                     ref mut pending,
+                    ref fd_states,
                     ..
                 } = *inner;
 
@@ -373,13 +374,21 @@ impl AsyncBackend {
                             | PortOp::Write { .. } => hub.bounds(id, request.timeout),
                             _ => Bounds::prompt(),
                         };
-                        // Each read asks the kernel for its whole count. The
+                        // A `Read` asks the kernel for its whole count. The
                         // remainder the port is holding is short of that count
                         // — a remainder that met it answered above — but by how
                         // much is a question in the port's own unit, and only
                         // the completion, holding the join, can answer it. So
                         // the worker may bring back more than the request needs,
                         // and the completion gives the surplus to the port.
+                        //
+                        // A `ReadExact` cannot be left to that. It is the one
+                        // read that will not answer short, so a worker asked for
+                        // the whole count waits for the remainder a second time
+                        // — from a peer that has already sent it once. The
+                        // remainder goes with the operation instead, and the
+                        // worker reads only the shortfall; the ring counts the
+                        // same bytes in its resubmit test (`uring/drain.rs`).
                         let pool_op = match op {
                             PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             PortOp::ReadAll => PoolOp::ReadAll { fd },
@@ -389,6 +398,10 @@ impl AsyncBackend {
                                 size: *count,
                                 graphemes: matches!(port.encoding(), Encoding::Text),
                                 gen,
+                                held: fd_states
+                                    .get(&port_key)
+                                    .map(|s| s.buffer.clone())
+                                    .unwrap_or_default(),
                             },
                             PortOp::Write { data } => PoolOp::Write {
                                 fd,

@@ -36,6 +36,17 @@ pub(super) enum PoolOp {
         /// The generation that segments cluster-counted reads; captured at
         /// request build on the VM thread, applied on the worker thread.
         gen: crate::segment::Generation,
+        /// What the port is already holding toward this read — bytes an
+        /// earlier read took from the kernel and did not answer with. They
+        /// count toward `size`, so the wire is short of the caller's count by
+        /// exactly this much and a worker that asked for all of it would wait
+        /// for bytes the peer has already sent. The ring counts the same
+        /// remainder in its resubmit test (`uring/drain.rs`).
+        ///
+        /// The bytes rather than their length, because a text `ReadExact`
+        /// counts grapheme clusters and one can straddle the boundary between
+        /// the remainder and what this read returns.
+        held: Vec<u8>,
     },
     /// Write every byte of `data`, looping over short writes.
     Write {
@@ -230,11 +241,15 @@ pub(super) struct CompletionHub {
     receiver: crossbeam_channel::Receiver<RawCompletion>,
     /// Combined count of submitted-but-unreaped worker ops (pool + stdin): +1
     /// per worker submit, −1 once per `RawCompletion` reaped at the single drain
-    /// site. Read to decide whether the scheduler should block at all, and to
-    /// cap concurrency — a submission that meets the cap reaps first, since a
-    /// finished operation counts here until its completion is taken. A
+    /// site. A finished operation counts here until its completion is taken. A
     /// cancelled op reports completion like any other and decrements here;
     /// `io/cancel` marks the id and must not also touch this counter.
+    ///
+    /// Two readers, and neither caps anything: `AsyncBackend::wait` asks whether
+    /// there is any worker out before it blocks on the channel, and `io/workers`
+    /// reports it. Concurrency is uncapped by design — `submit` spawns a thread
+    /// per operation and lets the OS say how many may run (see its doc), so
+    /// there is no cap for this count to enforce.
     in_flight: usize,
     /// Linux/uring bridge fd. `None` on the pool-only platforms, where the hub
     /// channel is itself the sole waitable. When `Some`, a worker writes it
