@@ -166,8 +166,10 @@ fn cache_key(stdlib_source: &str) -> Option<String> {
 /// Try to load the compiled stdlib from the disk cache.
 ///
 /// Returns `None` when no cache is enabled or the file is absent; `Some(Err)`
-/// when the cache file exists but fails to parse (corrupt / version drift) —
-/// the caller recompiles, and the next store overwrites the bad file.
+/// when the file exists but is rejected (hash mismatch, truncation, format
+/// drift), naming the reason. `init_stdlib` treats a rejection exactly like an
+/// absence — it compiles *and stores* — so the rejected file is replaced rather
+/// than rejected again by every later start.
 pub fn try_load(
     stdlib_source: &str,
     cache: &StdlibCache,
@@ -552,5 +554,40 @@ mod tests {
                 "eight corrupt bytes at offset {offset} must be a miss"
             );
         }
+    }
+
+    /// Falling back is half the job. A rejected file that stays on disk is
+    /// rejected again by every later start, so one bad write costs the cache
+    /// permanently — the recompile it forces is invisible, because a working
+    /// runtime is what a miss produces too.
+    #[test]
+    fn a_rejected_cache_file_is_replaced_not_left_to_win() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        drop(Runtime::with_stdlib_cache(cache.clone()));
+        let path = std::fs::read_dir(dir.path())
+            .expect("read cache dir")
+            .next()
+            .expect("the seeding runtime wrote a cache file")
+            .expect("entry")
+            .path();
+        std::fs::write(&path, b"not a cache file").expect("plant a rejected file");
+
+        let first = Runtime::with_stdlib_cache(cache.clone());
+        assert_eq!(
+            first.stdlib_source(),
+            StdlibSource::Compiled,
+            "the planted file must be rejected"
+        );
+        drop(first);
+
+        let second = Runtime::with_stdlib_cache(cache);
+        assert_eq!(
+            second.stdlib_source(),
+            StdlibSource::Cache,
+            "the runtime that rejected the file must also replace it, or every \
+             later start pays the full compile again"
+        );
     }
 }

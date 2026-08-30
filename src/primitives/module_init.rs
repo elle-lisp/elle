@@ -28,61 +28,54 @@ pub fn init_stdlib(
     // Try the disk cache first: same stdlib source + same elle binary → same
     // compiled bytecode. On hit we skip the entire ~2.4s front end.
     //
-    // Both arms report `stdlib-compile`: the boot mark attributes the cost of
-    // OBTAINING the compiled stdlib, and a run that loads it has to be
-    // comparable with a run that compiles it. `tests/integration/trace_boot.rs`
-    // pins the mark, and it must not disappear the moment the cache warms.
-    if let Some(cached) = crate::compiler::stdlib_cache::try_load(STDLIB, cache, vm, symbols, cctx)
-    {
-        let mut source = StdlibSource::Cache;
-        let bytecode = match cached {
-            Ok(bc) => {
+    // One fork, two arms, one tail. A rejected file falls into the compiling
+    // arm along with a plain absence, so it is *replaced* rather than left to
+    // be rejected again by every later start; and the execute → exports tail
+    // exists once, so the two paths cannot drift apart.
+    //
+    // Both arms mark `stdlib-compile`: the boot mark attributes the cost of
+    // OBTAINING the compiled stdlib, so a run that loads it stays comparable
+    // with a run that compiles it.
+    let (bytecode, source) =
+        match crate::compiler::stdlib_cache::try_load(STDLIB, cache, vm, symbols, cctx) {
+            Some(Ok(bc)) => {
                 crate::trace::phase(boot, "boot", "stdlib-compile (cache hit)", t);
-                bc
+                (bc, StdlibSource::Cache)
             }
-            Err(e) => {
-                source = StdlibSource::Compiled;
-                crate::trace::phase(
-                    boot,
-                    "boot",
-                    &format!("stdlib-cache-miss ({e}); recompiling"),
-                    t,
-                );
+            absent_or_rejected => {
+                if let Some(Err(e)) = absent_or_rejected {
+                    crate::trace::phase(
+                        boot,
+                        "boot",
+                        &format!("stdlib-cache-rejected ({e}); recompiling"),
+                        t,
+                    );
+                }
                 let t = std::time::Instant::now();
-                let bc = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
-                    Ok(r) => r.bytecode,
+                let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
+                    Ok(r) => r,
                     Err(e) => panic!("stdlib compilation failed: {}", e),
                 };
                 crate::trace::phase(boot, "boot", "stdlib-compile", t);
-                bc
+                let t = std::time::Instant::now();
+                // Persist so the next process start skips the front end. A write
+                // failure is not fatal — the cache is a speedup, and a fresh
+                // compile is always the fallback.
+                crate::compiler::stdlib_cache::try_store(
+                    STDLIB,
+                    cache,
+                    &result.bytecode,
+                    vm,
+                    symbols,
+                    cctx,
+                );
+                crate::trace::phase(boot, "boot", "stdlib-cache-store", t);
+                (result.bytecode, StdlibSource::Compiled)
             }
         };
-        let t = std::time::Instant::now();
-        // Execute stdlib — returns the last expression (a closure).
-        let closure_val = match vm.execute(&bytecode) {
-            Ok(v) => v,
-            Err(e) => panic!("stdlib execution failed: {}", e),
-        };
-        crate::trace::phase(boot, "boot", "stdlib-execute", t);
-        // Call the returned closure to get the exports struct.
-        let exports_val = call_closure(vm, closure_val);
-        register_exports(vm, symbols, cctx, closure_val, exports_val);
-        return source;
-    }
-    let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
-        Ok(r) => r,
-        Err(e) => panic!("stdlib compilation failed: {}", e),
-    };
-    crate::trace::phase(boot, "boot", "stdlib-compile", t);
-    let t = std::time::Instant::now();
-    // Persist the compiled bytecode so the next process start skips the front
-    // end entirely. A write failure is not fatal — the cache is a speedup, and
-    // a fresh compile is always the fallback.
-    crate::compiler::stdlib_cache::try_store(STDLIB, cache, &result.bytecode, vm, symbols, cctx);
-    crate::trace::phase(boot, "boot", "stdlib-cache-store", t);
     let t = std::time::Instant::now();
     // Execute stdlib — returns the last expression (a closure).
-    let closure_val = match vm.execute(&result.bytecode) {
+    let closure_val = match vm.execute(&bytecode) {
         Ok(v) => v,
         Err(e) => panic!("stdlib execution failed: {}", e),
     };
@@ -90,7 +83,7 @@ pub fn init_stdlib(
     // Call the returned closure to get the exports struct.
     let exports_val = call_closure(vm, closure_val);
     register_exports(vm, symbols, cctx, closure_val, exports_val);
-    StdlibSource::Compiled
+    source
 }
 
 /// Where a runtime's stdlib bytecode came from. Returned by `init_stdlib` so a
