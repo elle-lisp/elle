@@ -298,11 +298,17 @@ fn closure_round_trips_preserving_frame_release_tables() {
     // region an erroring worker frame owed is stranded.
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();
+        let child = Rc::new(ClosureTemplate {
+            frame_release_slots: Rc::new(vec![21u16]),
+            frame_release_regions: Rc::new(vec![23u32]),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
+        });
         let template = Rc::new(ClosureTemplate {
             num_locals: 1,
             num_params: 1,
             frame_release_slots: Rc::new(vec![3u16, 7]),
             frame_release_regions: Rc::new(vec![11u32, 13]),
+            child_protos: Rc::new(vec![child]),
             ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
         });
         let val = crate::value::heap::alloc(
