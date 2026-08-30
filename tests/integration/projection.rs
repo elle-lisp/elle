@@ -263,11 +263,8 @@ fn import_projection_probe_interns_into_the_callers_symbol_table() {
     // The caller's table learning the module's quoted symbol is the observable
     // form of the invariant: `compile_file` never executes the import, so the
     // probe is the only thing that could have interned it.
-    let dir = std::env::temp_dir().join(format!(
-        "elle-projection-probe-{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let tmp = tempfile::tempdir().expect("scratch dir");
+    let dir = tmp.path();
     let module = dir.join("probe_module.lisp");
     // A quoted symbol is runtime data, so compiling this file must intern
     // `probe-only-marker` — unlike a binding name, which analysis resolves into
