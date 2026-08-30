@@ -94,6 +94,12 @@ compiles.
 This detects corruption and truncation, not forgery. A writable cache directory
 is a code-execution surface like any other loadable artifact.
 
+A store never writes the final path. It writes a temporary file in the same
+directory and renames it over the target: two elle processes starting at once
+is ordinary, and writing the path directly lets one read the other's
+half-written file, or edits an inode a reader already holds open. Same
+directory because a rename is atomic only within one filesystem.
+
 ## Serialization format
 
 The payload is a single `StoredBytecode` struct

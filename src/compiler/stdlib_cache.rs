@@ -224,12 +224,37 @@ pub fn try_store(
             let path = dir.join(key);
             let mut file = payload_hash(&bytes).to_le_bytes().to_vec();
             file.extend_from_slice(&bytes);
-            if let Err(e) = std::fs::write(&path, file) {
+            // Write beside the target and rename over it. Two elle processes
+            // starting at once is ordinary, and writing the final path directly
+            // lets one read the other's half-written file — or edits the inode a
+            // reader already holds open. A rename is one atomic step within a
+            // directory, so the name refers to a complete file or the old one.
+            if let Err(e) = store_atomically(&dir, &path, &file) {
                 eprintln!("[stdlib-cache] write failed: {e}");
             }
         }
         Err(e) => eprintln!("[stdlib-cache] serialize failed: {e}"),
     }
+}
+
+/// Write `bytes` to `path` by way of a temporary file in the same directory.
+///
+/// Same directory because a rename is atomic only within one filesystem; a
+/// temp file elsewhere would fall back to a copy and reintroduce the torn read.
+fn store_atomically(
+    dir: &std::path::Path,
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(bytes)?;
+    tmp.flush()?;
+    // `persist` renames; on failure the temp file is removed with the error, so
+    // a failed store leaves the directory as it found it.
+    tmp.persist(path)
+        .map(|_| ())
+        .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
 /// Serialize compiled stdlib bytecode into the cache format.
@@ -588,6 +613,50 @@ mod tests {
             StdlibSource::Cache,
             "the runtime that rejected the file must also replace it, or every \
              later start pays the full compile again"
+        );
+    }
+
+    /// Two elle processes starting at once is an ordinary event, and a store
+    /// that writes the final path directly lets one of them read the other's
+    /// half-written file. The store must land whole or not at all.
+    ///
+    /// A held descriptor is the observable: writing the path in place edits the
+    /// inode the reader already has, while a rename leaves that inode alone and
+    /// swings the name to a new one.
+    #[test]
+    fn a_store_replaces_the_cache_file_instead_of_rewriting_it() {
+        use std::io::Read;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        drop(Runtime::with_stdlib_cache(cache.clone()));
+        let path = std::fs::read_dir(dir.path())
+            .expect("read cache dir")
+            .next()
+            .expect("the seeding runtime wrote a cache file")
+            .expect("entry")
+            .path();
+
+        // Unreadable, so the next runtime rejects it and must store over it.
+        const SENTINEL: &[u8] = b"the inode a reader already holds";
+        std::fs::write(&path, SENTINEL).expect("plant a rejected file");
+        let mut held = std::fs::File::open(&path).expect("hold the old inode open");
+
+        drop(Runtime::with_stdlib_cache(cache));
+
+        let mut seen = Vec::new();
+        held.read_to_end(&mut seen)
+            .expect("read through the held fd");
+        // Compared as a bool: the rewritten file is megabytes, and dumping it
+        // into the failure would bury the one fact that matters.
+        assert!(
+            seen == SENTINEL,
+            "the store must rename a complete file into place; rewriting the \
+             path edits the inode another process is already reading — the \
+             held descriptor saw {} bytes, not the {}-byte sentinel",
+            seen.len(),
+            SENTINEL.len()
         );
     }
 }
