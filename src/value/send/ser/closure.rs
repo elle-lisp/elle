@@ -53,7 +53,7 @@ pub(super) fn send_closure(
         lir_function: None,
         lir_value_pool: Vec::new(),
         child_protos: Vec::new(),
-        merged_slots: Vec::new(), // placeholder; replaced below
+        merged_slots: Vec::new(),          // placeholder; replaced below
         frame_release_slots: Vec::new(),   // placeholder; replaced below
         frame_release_regions: Vec::new(), // placeholder; replaced below
     });
