@@ -283,17 +283,34 @@ parked fiber's accounting symmetric with its unpark:
   stash slot, and `DecrefValueRegion` shape `lower_emit` uses, the resume landing at the
   instruction after the call.
   The signal is a runtime value here, so the mint cannot be gated on `suspends` the way the
-  literal path gates it. It is taken whatever the signal turns out to be, and a TERMINAL one
-  reaches the same consumer by another route: the raise leaves through the mask that catches
-  it, which delivers the payload as the resumer's result, and the resumer's release of that
-  result consumes one reference exactly as it consumes the delivery of a park. What supplies
-  that reference in TAIL position is not the borrowed-argument retain, which a restart's
-  replay of the post-`TailCall` block still claims: the exit consumes the retain and mints the
-  delivery itself, recording it so the frames' owed releases stop standing in for a delivery
-  this call now funds ([mechanism.md](mechanism.md) § "What the fall-through owes, a signal
-  exit owes too"). Pinned by
-  `tests/elle/region-dynamic-emit-borrow-uaf.lisp` and
-  `tests/elle/region-dynamic-emit-terminal-uaf.lisp`, and gauged per op by the `emit-dyn-*`
+  literal path gates it: the site takes its retain whatever the signal turns out to be. A
+  SUSPEND hands that retain to the consumer it was made for, the continuation past the park,
+  which the resume replays. A TERMINAL `:error` adds a second consumer beside it. The raise
+  leaves through the mask that catches it, which delivers the payload as the resumer's
+  result, and the resumer's release of that result consumes a reference of its own; and an
+  `:error` fiber is resumable, so the continuation runs as well — at a restart's replay, or
+  at the walk that stands in for a replay no resume will bring
+  ([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes"). One
+  retain, two consumers. So the raise mints the DELIVERY at its signal exit, in either
+  position and for the reason `handle_emit` mints it on the literal path, and records it
+  (`Fiber::emit_delivery`) so the frames' owed releases stop standing in for a delivery this
+  call now funds. The site's retain then answers to the continuation alone.
+  The mint is taken only where the payload is one of the call's own ARGUMENTS. A payload the
+  native BUILT funds the delivery with its birth reference, so an ordinary native raise — a
+  fresh error struct — must not receive one, and the identity test is what tells the two
+  apart. A HALT takes neither mint nor record, for the reason `handle_emit` withholds its own
+  retain there: the fiber is promoted to `:dead` and never resumed, so that delivery has no
+  consumer and a reference taken for it is stranded.
+  Which route carries the continuation's release on a TERMINAL raise is what differs by
+  position, and the difference is what the signal exit can NAME. A tail call carries its
+  stash slots on the `TailCall` itself, so the exit consumes the retain there and nil-stamps
+  the slot, and the replay reloads an immediate and no-ops ([mechanism.md](mechanism.md)
+  § "What the fall-through owes, a signal exit owes too"). A non-tail site's stash is the
+  lowerer's own slot and no instruction names it — but the frame's release table is a table
+  of exactly such slots, so the site records there instead, and the replay or the walk runs
+  the release whole. Pinned by `tests/elle/region-dynamic-emit-borrow-uaf.lisp`,
+  `tests/elle/region-dynamic-emit-terminal-uaf.lisp` and
+  `tests/elle/region-dynamic-emit-statement-uaf.lisp`, and gauged per op by the `emit-dyn-*`
   probes in `tests/elle/oracle.lisp`.
 - **A delivery into a replayed frame carries one owning reference.** A parked
   `BytecodeFrame` re-enters at its suspending call's continuation, whose

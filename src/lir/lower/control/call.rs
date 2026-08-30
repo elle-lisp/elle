@@ -673,10 +673,27 @@ impl<'a> Lowerer<'a> {
                 // `LoadLocal`/`DecrefValueRegion` pair is push-pop-neutral around
                 // the result the call left on top. Empty for every other non-tail
                 // call: only the emit payload sets `borrowed` off tail position.
+                //
+                // The nil stamp and the table entry are what make this release run
+                // ONCE when the signal turns out to be terminal. There the catcher
+                // consumes the delivery the raise minted and this retain answers to
+                // the continuation alone — reached by a restart's replay, or, for a
+                // fiber nobody restarts, by the abandoned-frame walk off exactly
+                // this table (docs/impl/region/mechanism.md § "An abandoned frame
+                // runs the releases it still owes"). A frame that takes both routes
+                // reloads the stamp on the second and no-ops. A SUSPENDING raise
+                // records the slot too and is unaffected: its parked payload is what
+                // the walk protects, so the walk passes the slot over.
                 for &slot in &borrowed_arg_slots {
                     let v = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal { dst: v, slot });
                     self.emit(LirInstr::DecrefValueRegion { src: v });
+                    if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
+                        self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                    }
+                    if !self.current_func.frame_release_slots.contains(&slot) {
+                        self.current_func.frame_release_slots.push(slot);
+                    }
                 }
                 // After ANF (`src/hir/anf.rs`), every consumer position
                 // for a Call has a synthetic `Let` binding owning the

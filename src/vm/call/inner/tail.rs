@@ -56,43 +56,6 @@ impl VM {
         regions
     }
 
-    /// Mint the DELIVERY reference of a payload this tail call is RAISING, where
-    /// the payload is one of the call's own arguments — the shape a dynamic
-    /// `emit` takes, its non-literal first argument making the raise an ordinary
-    /// native call (docs/impl/region/mechanism.md § "What the fall-through owes,
-    /// a signal exit owes too").
-    ///
-    /// The catcher's read of the signal consumes exactly one reference, and every
-    /// reference this frame holds answers to the frame's own release routes: the
-    /// borrowed-argument retain is consumed by the exit (and no-oped at a
-    /// restart's replay by its nil stamp), an owned argument's release sits in the
-    /// abandoned block for the walk or that same replay to run. So the delivery is
-    /// minted here, exactly as `handle_emit` mints it on the literal path — and
-    /// recorded with it (`Fiber::emit_delivery`), so the abandoned-frame walk and
-    /// the parked frame's discharge stop exempting the payload's region and
-    /// reclaim the frame's own reference to a payload it allocated.
-    ///
-    /// A payload the native BUILT — a fresh error struct — is nobody's argument
-    /// and funds the delivery with its birth reference, so the identity test is
-    /// what keeps this off every ordinary native raise.
-    fn mint_raised_argument_delivery(&mut self, args: &[Value], payload: Value) {
-        if !args.iter().any(|a| a.bit_identical(payload)) {
-            return;
-        }
-        let heap = unsafe { &mut *self.heap_ptr };
-        // An immediate payload crosses no region, so there is nothing to fund and
-        // nothing for the record to say stands.
-        let Some(region) = crate::value::arena::region_of(heap, payload) else {
-            return;
-        };
-        crate::value::arena::incref_for_escape(
-            heap,
-            Some(region),
-            crate::value::arena::EscapeSite::EmitEscape,
-        );
-        self.fiber.emit_delivery = Some(payload);
-    }
-
     /// Release the regions [`Self::take_borrowed_arg_retains`] resolved. Split
     /// from the resolution so the signal handler runs between the two — see that
     /// method for why.

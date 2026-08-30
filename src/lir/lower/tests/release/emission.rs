@@ -157,6 +157,83 @@ fn dynamic_park_mints_nothing_for_a_body_allocated_payload() {
 }
 
 #[test]
+fn a_non_tail_dynamic_emit_payload_release_carries_its_receipt() {
+    // The site's payload release is a recorded value route, not a bare pair
+    // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    // still owes"). Two things make it one, and both are load-bearing where the
+    // signal turns out to be TERMINAL: the nil stamp, so a restart's replay of the
+    // continuation cannot run the release the walk already ran, and the table
+    // entry, so a fiber nobody restarts reaches the release at all.
+    //
+    // Counterfactual — with the pair alone the same programs read correct on a
+    // restart and strand one region per raise without one, which is what the
+    // `emit-dyn-error-discard` probe measures.
+    let module = compile_to_lir(
+        "(let [s :yield] (fn () (let [x (string \"a\")] (fn () (begin (emit s x) 0)))))",
+    );
+    // Scoped to what follows the park in its own block — the site's own releases,
+    // not some other route's elsewhere in the body, which stamps and records for
+    // reasons of its own and would let this pass vacuously.
+    let (func, released): (&LirFunction, Vec<(u16, bool)>) =
+        std::iter::once(&module.entry)
+            .chain(module.closures.iter())
+            .find_map(|f| {
+                let b = f.blocks.iter().find(|b| {
+                    b.instructions
+                        .iter()
+                        .any(|i| matches!(i.instr, LirInstr::SuspendingCall { .. }))
+                })?;
+                let at = b
+                    .instructions
+                    .iter()
+                    .position(|i| matches!(i.instr, LirInstr::SuspendingCall { .. }))?;
+                let instrs: Vec<&LirInstr> =
+                    b.instructions[at + 1..].iter().map(|i| &i.instr).collect();
+                Some((
+                    f,
+                    (0..instrs.len())
+                        .filter_map(|i| {
+                            let (
+                                LirInstr::LoadLocal { dst, slot },
+                                LirInstr::DecrefValueRegion { src },
+                            ) = (instrs.get(i)?, instrs.get(i + 1)?)
+                            else {
+                                return None;
+                            };
+                            if dst != src {
+                                return None;
+                            }
+                            // The stamp is `StoreLocal slot <nil>`, and
+                            // materializing the nil takes an instruction of its
+                            // own, so look past it.
+                            let stamped = instrs[i + 2..].iter().take(2).any(
+                                |n| matches!(n, LirInstr::StoreLocal { slot: back, .. } if back == slot),
+                            );
+                            Some((*slot, stamped))
+                        })
+                        .collect(),
+                ))
+            })
+            .expect("a function containing a SuspendingCall");
+    assert!(
+        !released.is_empty(),
+        "the park's own block must carry the payload release for this to be about",
+    );
+    for (slot, stamped) in released {
+        assert!(
+            stamped,
+            "the payload release at slot {slot} must stamp the slot it read, or a \
+             restart's replay runs it a second time",
+        );
+        assert!(
+            func.frame_release_slots.contains(&slot),
+            "slot {slot} carries a stamped value route but is absent from \
+             frame_release_slots, so an abandoned frame never runs it",
+        );
+    }
+}
+
+#[test]
 fn release_emitted_for_unbound_call_result() {
     // An unbound Call result — `(f "a")` whose result flows
     // directly into Begin's discard position — must have a

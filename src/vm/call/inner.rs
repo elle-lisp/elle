@@ -98,6 +98,24 @@ impl VM {
             // pass-through retain. Shared with the JIT (`elle_jit_call`) so both
             // tiers account identically; see `VM::dispatch_native_call`.
             let (bits, value) = self.dispatch_native_call(def, args.as_slice(), region_id);
+            // A terminal :error hands the payload to a catcher, whose read
+            // consumes one reference this frame's own routes do not fund — so the
+            // raise mints it here where the payload is an argument of this call,
+            // the Call-position twin of the tail exit's mint (`tail_call_inner`).
+            // The site's own payload retain, where the compiler took one, is left
+            // standing for the continuation past this call: a restart replays it,
+            // and a fiber nobody restarts reaches it through the frame's release
+            // table. A HALT takes no mint, for the reason `handle_emit` takes none.
+            // Minted before the handler, which is where this fiber stops being the
+            // one whose frames hold the payload. The `is_empty` test keeps the
+            // classification off the ordinary-completion path, which every native
+            // call takes.
+            if !bits.is_empty()
+                && crate::signals::dispatch::classify(bits, &value)
+                    == crate::signals::dispatch::SignalAction::Error
+            {
+                self.mint_raised_argument_delivery(args.as_slice(), value);
+            }
             return self.handle_primitive_signal(bits, value, code, closure_env, ip);
         }
 
