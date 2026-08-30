@@ -94,6 +94,17 @@ compiles.
 This detects corruption and truncation, not forgery. A writable cache directory
 is a code-execution surface like any other loadable artifact.
 
+A store prunes: after the rename, every other `.bin` in the directory is
+removed. The key follows the binary, so every rebuild mints a new one and
+orphans the last one's file — at ~16 MB each, a day of rebuilds fills a
+directory nobody looks at. Pruning runs *after* the rename, never before, so a
+store that fails leaves the directory as it found it. A removal that fails is
+ignored; it is disk hygiene, not correctness.
+
+One consequence worth knowing: a debug and a release binary sharing one
+directory evict each other, so alternating between them costs one stdlib
+compile per switch. Give them separate directories (`--cache=`) if that matters.
+
 A store never writes the final path. It writes a temporary file in the same
 directory and renames it over the target: two elle processes starting at once
 is ordinary, and writing the path directly lets one read the other's

@@ -231,7 +231,9 @@ pub fn try_store(
             // directory, so the name refers to a complete file or the old one.
             if let Err(e) = store_atomically(&dir, &path, &file) {
                 eprintln!("[stdlib-cache] write failed: {e}");
+                return;
             }
+            prune_superseded(&dir, &path);
         }
         Err(e) => eprintln!("[stdlib-cache] serialize failed: {e}"),
     }
@@ -255,6 +257,28 @@ fn store_atomically(
     tmp.persist(path)
         .map(|_| ())
         .map_err(|e| std::io::Error::other(e.to_string()))
+}
+
+/// Remove every cache file in `dir` except `keep`.
+///
+/// The key follows the binary, so every rebuild mints a new one and orphans
+/// the file the last one wrote. At ~16 MB each, a day of rebuilds fills a
+/// directory nobody thinks to look at. Run after the rename, never before: a
+/// store that fails must leave the directory as it found it, still holding a
+/// file some other process may be about to read.
+///
+/// A removal that fails is ignored. It is disk hygiene, not correctness, and
+/// the next store tries again.
+fn prune_superseded(dir: &std::path::Path, keep: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path != keep && path.extension().is_some_and(|e| e == "bin") {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// Serialize compiled stdlib bytecode into the cache format.
@@ -657,6 +681,33 @@ mod tests {
              held descriptor saw {} bytes, not the {}-byte sentinel",
             seen.len(),
             SENTINEL.len()
+        );
+    }
+
+    /// Every key that stops being current orphans a file, and the key follows
+    /// the binary — so an ordinary day of rebuilds leaves one 16 MB file per
+    /// build, forever, in a directory nobody thinks to look at.
+    #[test]
+    fn a_store_prunes_the_files_its_key_supersedes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        // Two files under keys this binary will never mint again.
+        for name in ["deadbeefdeadbeef.bin", "0123456789abcdef.bin"] {
+            std::fs::write(dir.path().join(name), b"an earlier build's cache")
+                .expect("plant a superseded file");
+        }
+
+        drop(Runtime::with_stdlib_cache(cache));
+
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read cache dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(
+            left.len(),
+            1,
+            "a store must leave only the file it just wrote; found {left:?}"
         );
     }
 }
