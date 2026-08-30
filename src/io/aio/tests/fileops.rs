@@ -16,7 +16,7 @@ fn test_async_seek_returns_immediate_completion() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         // Seek is immediate — no wait needed
@@ -43,7 +43,7 @@ fn test_async_tell_returns_immediate_completion() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         let completions = backend.poll();
@@ -73,7 +73,7 @@ fn test_async_seek_non_file_port_errors() {
         };
         // stdin has PortKind::Stdin — seek must fail immediately
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = backend.poll();
         assert_eq!(completions.len(), 1);
@@ -101,7 +101,7 @@ fn test_async_submit_spawn_echo() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
@@ -139,7 +139,7 @@ fn test_async_submit_process_wait_uring() {
             port: handle_val,
             timeout: None,
         };
-        let id = backend.submit(&req, crate::value::arena::leaked_test_heap());
+        let id = backend.submit(&req, crate::io::pending::Submitter::for_test());
 
         match id {
             Err(e) if e.contains("thread-pool") => {
@@ -202,7 +202,7 @@ fn a_failed_pool_process_wait_names_waitpid() {
                     port: handle_val,
                     timeout: None,
                 },
-                crate::value::arena::leaked_test_heap(),
+                crate::io::pending::Submitter::for_test(),
             )
             .unwrap();
 
@@ -268,7 +268,7 @@ fn test_async_open_regular_file_returns_port() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
@@ -343,7 +343,7 @@ fn test_drop_with_inflight_read_cancels_and_drains() {
             timeout: None,
         };
         backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         assert!(
             backend.has_pending(),
@@ -380,7 +380,7 @@ fn test_async_open_nonexistent_path_errors() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
@@ -421,7 +421,7 @@ fn test_async_open_with_timeout_succeeds_on_regular_file() {
             timeout: Some(std::time::Duration::from_millis(5000)),
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);

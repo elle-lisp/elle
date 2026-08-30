@@ -54,6 +54,14 @@ in flight when the backend value goes out of scope. Thread-pool and stdin
 operations need no such handling — their workers copy results through
 channels and never write into a freed pooled buffer.
 
+A backend the program never lets go of — a top-level `(io/backend :async)`,
+or the scheduler's own — is still there when the heap that carries it is torn
+down. The heap brings each one to a quiescent state before it frees its
+regions, so the drain reads values that are still allocated and the
+operations still in flight let go of what they hold while there is something
+to let go of. Without that order the backend's own drop would run inside the
+teardown sweep, after the sweep had freed part of what it holds.
+
 ### Cancelling an operation
 
 `ev/timeout` cancels an operation on every call — the body's or the
@@ -65,7 +73,8 @@ the edges. Two things come back when it does, on either backend:
   released; only the result is thrown away. `(ev/report):workers` counts
   the threads currently out.
 - **The descriptor.** A cancelled read stops rather than going on
-  reading. Whatever arrives next belongs to whoever reads the port next:
+  reading, and so does a cancelled write whose peer stopped taking bytes.
+  Whatever arrives next belongs to whoever reads the port next:
 
   ```text
   (ev/timeout 0.1 (fn [] (port/read p 64)))   # the deadline wins
@@ -76,9 +85,10 @@ the edges. Two things come back when it does, on either backend:
   written out rather than run here; `tests/elle/io-cancel-releases.lisp`
   builds the peer and asserts both lines.
 
-  And a port closed while an operation still runs keeps its descriptor
-  number until that operation ends, so the number cannot be handed to a
-  new port while a worker holds it.
+  And a port that goes away while an operation still runs — closed, or
+  released with the regions of the fiber that opened it — keeps its
+  descriptor number until that operation ends, so the number cannot be
+  handed to a new port while a worker holds it.
 
 `tests/elle/io-cancel-releases.lisp` pins both. See `src/io/AGENTS.md`
 § "I/O Cancellation" for how the thread pool delivers them.

@@ -210,6 +210,13 @@ pub enum EscapeSite {
     /// docs/impl/region/owner.md § "A child's inherited parameter baseline is
     /// a counted holder").
     ParamBaseline,
+    /// An operand of a submitted I/O operation, retained by the pending table
+    /// for as long as the operation is in flight. The table is runtime-side
+    /// state no free-time cascade reaches — the position a channel buffer is in
+    /// — so this retain IS the operand's reference while the operation runs;
+    /// the entry's disposal lowers it (`OperandHold`, src/io/AGENTS.md
+    /// § "A submitted operation holds the values its completion reads").
+    IoSubmit,
 }
 
 impl EscapeSite {
@@ -231,6 +238,7 @@ impl EscapeSite {
             EscapeSite::TerminalSignal => "terminal-signal",
             EscapeSite::ResumeDelivery => "resume-delivery",
             EscapeSite::ParamBaseline => "param-baseline",
+            EscapeSite::IoSubmit => "io-submit",
         }
     }
 }

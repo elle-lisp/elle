@@ -234,6 +234,13 @@ is a correctness defect, not a tuning knob.
      it rides the buffer, and each receive (`chan/recv`/`chan/try-select`/
      `chan/wait-ready`) decrefs it as the message leaves
      (`release_received_message`);
+   - *submitted I/O operand* — the port, buffer, payload, handle or external a
+     pending I/O operation names is increfed when its entry is filed
+     (`EscapeSite::IoSubmit`); the backend's pending table is external to the
+     region system in the same way a channel buffer is, so this retain is the
+     operand's reference while the operation is in flight, and disposing of the
+     entry decrefs it (`OperandHold`, src/io/AGENTS.md § "A submitted operation
+     holds the values its completion reads");
    - *terminal fiber signal* — a child's set-once return/error/halt result, read
      later via `fiber/value`, is park-retained when the fiber goes terminal and
      released by the signal scan when the fiber is freed.

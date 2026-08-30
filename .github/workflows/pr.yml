@@ -128,6 +128,32 @@ jobs:
       - name: make smoke-jit
         run: make smoke-jit
 
+  # The corpus against the thread-pool I/O backend. Every other Linux job runs
+  # io_uring, and every non-Linux build runs the pool, so without this job the
+  # pool's only sampler is the macOS one below: one run per PR, on the slowest
+  # runner, against defects that hang rather than fail. Redis is installed for
+  # the same reason it is in `tests` — `redis-short-read.lisp` gates itself on a
+  # live server, and it is a pool-only hang, so a job without Redis would skip
+  # the very file that proves the point.
+  nouring:
+    name: Thread-Pool I/O Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: make smoke-nouring
+        run: make smoke-nouring
+
   tests-combined:
     name: Rust Tests
     needs: changes
@@ -346,7 +372,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, tests-combined, tests, wasm, mlir, aarch64, aarch64-noffi, android, macos]
+    needs: [changes, qa, tests-combined, tests, nouring, wasm, mlir, aarch64, aarch64-noffi, android, macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -358,6 +384,9 @@ jobs:
         run: exit 1
       - name: Check tests
         if: needs.tests.result == 'failure'
+        run: exit 1
+      - name: Check thread-pool I/O tests
+        if: needs.nouring.result == 'failure'
         run: exit 1
       - name: Check MLIR
         if: needs.mlir.result == 'failure'

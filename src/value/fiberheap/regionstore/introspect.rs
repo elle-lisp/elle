@@ -200,13 +200,12 @@ impl RegionStore {
     /// type name is `type_name`, across all regions. Type-agnostic here (the
     /// value layer never downcasts) — the caller downcasts and acts on each.
     ///
-    /// The full-module WASM tier strands io-backend externals to teardown (it
-    /// reclaims no region during execution, so the backend and its in-flight
-    /// ops' `Port`/`ProcessHandle` values all survive to the id-ordered free
-    /// sweep). Quiescing each backend BEFORE that sweep — while every value is
-    /// still live — keeps the drain's semantic completion from dereferencing a
-    /// heap value an earlier region in the same sweep already freed
-    /// (docs/impl/wasm.md § the posix teardown gap).
+    /// A program that ends without letting go of an io-backend strands it to
+    /// teardown, with its in-flight ops' `Port`/`ProcessHandle` values still
+    /// filed. Quiescing each backend BEFORE the id-ordered free sweep — while
+    /// every value is still there — keeps the drain from reading, and releasing,
+    /// what an earlier region in the same sweep already freed (src/io/AGENTS.md
+    /// § "A hold is let go while its store is still there").
     pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
         let mut out = Vec::new();
         for slot in self.regions.iter() {

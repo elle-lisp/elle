@@ -18,7 +18,7 @@ use crate::io::request::{SpawnRequest, StdioDisposition, TaskFn};
 fn submit_pending(backend: &AsyncBackend, req: &IoRequest, label: &str) -> SubmissionId {
     let before = backend.pending_ids();
     let id = backend
-        .submit(req, crate::value::arena::leaked_test_heap())
+        .submit(req, crate::io::pending::Submitter::for_test())
         .unwrap_or_else(|e| panic!("{label}: submit failed: {e}"));
     let after = backend.pending_ids();
     assert_eq!(
@@ -204,7 +204,7 @@ fn a_spawn_completes_inside_the_submit_call() {
             timeout: None,
         };
         let id = backend
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         assert!(
             backend.pending_ids().is_empty(),
@@ -245,7 +245,7 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
             timeout: None,
         };
         backend
-            .submit(&spawn, crate::value::arena::leaked_test_heap())
+            .submit(&spawn, crate::io::pending::Submitter::for_test())
             .unwrap();
         let spawned = backend.poll().pop().unwrap().result.unwrap();
         let handle = sorted_struct_get(
@@ -357,7 +357,7 @@ fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
                 handle_val: Value::NIL,
                 siginfo,
             },
-            heap,
+            crate::io::pending::Submitter::detached(heap),
         );
 
         // The witness shape: a read reports a failure under an id whose entry
@@ -387,7 +387,7 @@ fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
              found, so it cannot read as a subprocess failure: {msg}",
         );
         assert!(
-            matches!(pending.take(id, heap), crate::io::pending::Taken::Unknown),
+            matches!(pending.take(id), crate::io::pending::Taken::Unknown),
             "the entry is consumed either way",
         );
 

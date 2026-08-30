@@ -15,7 +15,7 @@ fn test_mock_read() {
             timeout: None,
         };
         let id = mock
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         assert_eq!(id.as_u64(), 1);
 
@@ -40,7 +40,7 @@ fn test_mock_write() {
             timeout: None,
         };
         let id = mock
-            .submit(&req, crate::value::arena::leaked_test_heap())
+            .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
@@ -61,7 +61,7 @@ fn test_mock_error_injection() {
             port: Value::NIL,
             timeout: None,
         };
-        mock.submit(&req, crate::value::arena::leaked_test_heap())
+        mock.submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
 
         let completions = mock.poll();
@@ -82,7 +82,7 @@ fn test_mock_call_log() {
                 port: Value::NIL,
                 timeout: None,
             },
-            crate::value::arena::leaked_test_heap(),
+            crate::io::pending::Submitter::for_test(),
         );
         let _ = mock.submit(
             &IoRequest {
@@ -90,7 +90,7 @@ fn test_mock_call_log() {
                 port: Value::NIL,
                 timeout: None,
             },
-            crate::value::arena::leaked_test_heap(),
+            crate::io::pending::Submitter::for_test(),
         );
 
         let log = mock.take_log();
@@ -111,7 +111,7 @@ fn test_mock_eof_no_data() {
             port: Value::NIL,
             timeout: None,
         };
-        mock.submit(&req, crate::value::arena::leaked_test_heap())
+        mock.submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
@@ -129,7 +129,7 @@ fn test_mock_monotonic_ids() {
                 port: Value::NIL,
                 timeout: None,
             },
-            crate::value::arena::leaked_test_heap(),
+            crate::io::pending::Submitter::for_test(),
         )
         .unwrap();
     let id2 = mock
@@ -139,7 +139,7 @@ fn test_mock_monotonic_ids() {
                 port: Value::NIL,
                 timeout: None,
             },
-            crate::value::arena::leaked_test_heap(),
+            crate::io::pending::Submitter::for_test(),
         )
         .unwrap();
     assert!(id2 > id1);
@@ -156,7 +156,7 @@ fn test_mock_latency_poll_before_deadline() {
             port: Value::NIL,
             timeout: None,
         },
-        crate::value::arena::leaked_test_heap(),
+        crate::io::pending::Submitter::for_test(),
     )
     .unwrap();
 
@@ -176,7 +176,7 @@ fn test_mock_latency_wait() {
             port: Value::NIL,
             timeout: None,
         },
-        crate::value::arena::leaked_test_heap(),
+        crate::io::pending::Submitter::for_test(),
     )
     .unwrap();
 
@@ -196,7 +196,7 @@ fn test_mock_latency_wait_timeout() {
             port: Value::NIL,
             timeout: None,
         },
-        crate::value::arena::leaked_test_heap(),
+        crate::io::pending::Submitter::for_test(),
     )
     .unwrap();
 
@@ -217,7 +217,7 @@ fn test_mock_cancel() {
                 port: Value::NIL,
                 timeout: None,
             },
-            crate::value::arena::leaked_test_heap(),
+            crate::io::pending::Submitter::for_test(),
         )
         .unwrap();
 
@@ -239,7 +239,7 @@ fn test_mock_sleep_uses_duration() {
         port: Value::NIL,
         timeout: None,
     };
-    mock.submit(&req, crate::value::arena::leaked_test_heap())
+    mock.submit(&req, crate::io::pending::Submitter::for_test())
         .unwrap();
 
     // Poll immediately — Sleep's 10ms hasn't elapsed

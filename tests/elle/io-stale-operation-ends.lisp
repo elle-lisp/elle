@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # An operation whose asking fiber is gone ends without its peer acting.
 #
-# `a_completion_is_withheld_when_its_operands_region_is_gone`
+# `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
 # (src/io/aio/tests/park.rs) holds the other half of the rule: the completion
 # for such an operation is retired unread and answered with an error. That half
 # is only assertable there, because the answer goes to a fiber that is gone.
@@ -11,22 +11,20 @@
 # end the operation.
 #
 # The trap: with a peer write this file would pass whether or not the runtime
-# ends anything. `poll(2)` on Linux holds a reference to the file it waits on,
-# so the victim's socket outlives the close its release performed and a peer's
-# bytes still reach the parked worker. Writing nothing is what makes the
-# assertion mean what it says.
+# ends anything, because the peer's bytes wake the parked worker on their own.
+# Writing nothing is what makes the assertion mean what it says.
 #
-# The counter-factual: with the stale sweep removed, the loop keeps the read
+# The counter-factual: with the sweep removed, the loop keeps the read
 # (`:io` stays 1) and, on the thread-pool backend, keeps the worker thread
 # (`:workers` stays 1) for as long as the program is pumped.
 #
 # The other trap: `fiber/cancel` is the route, and `fiber/abort` is not
 # interchangeable with it. An abort resumes the fiber to unwind, and that
 # unwinding can suspend and be resumed again (docs/signals/primitives.md
-# § "Unwinding that suspends"), so the regions its operands live in have to
-# survive — the sweep then finds nothing gone and the read stays submitted,
-# which is the same red this file reports for a missing sweep, from the
-# opposite cause. Cancel gives the fiber no such chance and releases them.
+# § "Unwinding that suspends"), so the fiber is `:paused` rather than terminal
+# and still has a result to come back for — the sweep leaves it alone and the
+# read stays submitted, which is the same red this file reports for a missing
+# sweep, from the opposite cause. Cancel gives the fiber no such chance.
 #
 # The victim is also `:paused` in its CONNECT before it is in its read, and
 # cancelling the connect would measure that instead. So the victim says when it

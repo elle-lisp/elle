@@ -3,18 +3,25 @@ use super::*;
 impl AsyncBackend {
     /// Submit an I/O request. Returns a submission ID.
     ///
-    /// `origin_heap` is the requesting fiber's heap; results and errors are
-    /// allocated on it.
+    /// `submitter` is who the submission is on behalf of: the heap results and
+    /// errors are allocated on, and the fiber that will read them.
     pub(crate) fn submit(
         &self,
         request: &IoRequest,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String> {
+        let origin_heap = submitter.heap();
         // Record the requesting instance's heap so the scheduler-thread completion
         // harvest builds every result/error value on it. Constant per backend (one
-        // instance per scheduler).
-        if !origin_heap.is_null() {
-            self.inner.borrow_mut().origin_heap = origin_heap;
+        // instance per scheduler). The submitter is recorded beside it because
+        // every `pending.insert` below files an entry against it, and the dispatch
+        // helpers between here and there take no argument for it.
+        {
+            let mut inner = self.inner.borrow_mut();
+            if !origin_heap.is_null() {
+                inner.origin_heap = origin_heap;
+            }
+            inner.submitter = submitter;
         }
 
         // Portless operations — handle before port extraction.
@@ -137,7 +144,6 @@ impl AsyncBackend {
                     })
                     .collect();
 
-                let still_running = !ids_to_cancel.is_empty();
                 // A CONNECTED stream socket is woken by shutdown(2): the worker's
                 // poll reports the fd readable, its read returns 0, and the fiber
                 // sees a clean EOF. Every other descriptor needs the operation's
@@ -145,8 +151,8 @@ impl AsyncBackend {
                 // parked accept only on Linux — macOS and the BSDs return
                 // ENOTCONN and wake nothing — and an unconnected UDP socket, a
                 // pipe, or a file is not a connected socket anywhere. A worker
-                // left unwoken polls the retired descriptor forever, and the
-                // fiber waiting on it is never resumed (pinned by
+                // left unwoken polls the closed port's descriptor forever, and
+                // the fiber waiting on it is never resumed (pinned by
                 // `closing_a_listener_ends_its_parked_pool_accept`).
                 let stream_socket =
                     matches!(port.kind(), PortKind::TcpStream | PortKind::UnixStream);
@@ -169,34 +175,18 @@ impl AsyncBackend {
                     }
                 }
 
-                // A pool worker resolves its descriptor when it runs, so the
-                // number must not go back to the OS while an operation still
-                // names it — a new socket handed that number would be read by
-                // the stale operation, and its bytes would reach no fiber.
-                // Hold the descriptor here instead; `close_drained_fds` closes
-                // it, and drops its `fd_states` entry, once the last operation
-                // naming it has completed.
-                let retired =
-                    if still_running && matches!(inner.platform, PlatformBackend::ThreadPool) {
-                        match port.retire_fd() {
-                            Some(owned) => {
-                                inner.retired.insert(*fd, owned);
-                                true
-                            }
-                            None => false,
-                        }
-                    } else {
-                        false
-                    };
-                if !retired {
-                    crate::io::types::discard_fd_state(&mut inner.fd_states, *fd);
-                }
+                // The remainder a read left behind belongs to the port that
+                // produced it, and that port is what this close ends.
+                crate::io::types::discard_fd_state(&mut inner.fd_states, *fd);
 
                 drop(inner);
             }
 
-            // Close the port. Already a no-op when the descriptor was retired:
-            // `retire_fd` marked the port closed when it took the descriptor.
+            // Close the port: it stops answering at once, so Elle's semantics
+            // are those of a close. What it gives up is its SHARE of the
+            // descriptor — an operation still in flight holds one of its own,
+            // and the number goes back to the OS with the last of them
+            // (src/io/AGENTS.md § "Descriptor retirement").
             port.close();
 
             // Queue immediate completion.
@@ -240,6 +230,12 @@ impl AsyncBackend {
 
         // Determine fd
         let fd = port_key.raw_fd();
+
+        // The operation's own share of that descriptor, held until its entry is
+        // retired. `fd` is resolved again when the worker runs, so the number
+        // must stay this port's for as long as the operation names it — see
+        // src/io/AGENTS.md § "Descriptor retirement".
+        let descriptor = port.fd_share();
 
         let buf_handle = match op {
             PortOp::ReadLine { .. } | PortOp::Read { .. } | PortOp::ReadExact { .. } => None,
@@ -332,12 +328,13 @@ impl AsyncBackend {
             | PortOp::ReadAll
             | PortOp::Write { .. }
             | PortOp::Flush => {
-                let origin_heap = inner.origin_heap;
+                let submitter = inner.submitter;
                 let AsyncBackendInner {
                     ref mut platform,
                     ref mut hub,
                     ref mut buffer_pool,
                     ref mut pending,
+                    ref fd_states,
                     ..
                 } = *inner;
 
@@ -360,12 +357,12 @@ impl AsyncBackend {
                         // rather than abandon it, or the abandoned read goes on
                         // consuming bytes meant for whoever reads the port next.
                         //
-                        // A write takes the deadline without one. Nothing it
-                        // holds is contended — stopping one would only cut the
-                        // payload short, and a peer decoding a stream cannot
-                        // use half a message. It runs to the end of its payload
-                        // as the full-write invariant promises, and gives its
-                        // worker back then.
+                        // A write takes one for the peer it waits on. The
+                        // full-write invariant runs it to the end of its
+                        // payload, and a payload past the send buffer only gets
+                        // there as the peer takes what is already in it — so a
+                        // peer that stops reading parks the write with nothing
+                        // else able to end it.
                         //
                         // `Flush` waits on nobody: `fsync(2)` transfers what
                         // this process already handed the kernel.
@@ -373,17 +370,25 @@ impl AsyncBackend {
                             PortOp::Read { .. }
                             | PortOp::ReadExact { .. }
                             | PortOp::ReadLine { .. }
-                            | PortOp::ReadAll => hub.bounds(id, request.timeout),
-                            PortOp::Write { .. } => Bounds::new(request.timeout, None),
+                            | PortOp::ReadAll
+                            | PortOp::Write { .. } => hub.bounds(id, request.timeout),
                             _ => Bounds::prompt(),
                         };
-                        // Each read asks the kernel for its whole count. The
+                        // A `Read` asks the kernel for its whole count. The
                         // remainder the port is holding is short of that count
                         // — a remainder that met it answered above — but by how
                         // much is a question in the port's own unit, and only
                         // the completion, holding the join, can answer it. So
                         // the worker may bring back more than the request needs,
                         // and the completion gives the surplus to the port.
+                        //
+                        // A `ReadExact` cannot be left to that. It is the one
+                        // read that will not answer short, so a worker asked for
+                        // the whole count waits for the remainder a second time
+                        // — from a peer that has already sent it once. The
+                        // remainder goes with the operation instead, and the
+                        // worker reads only the shortfall; the ring counts the
+                        // same bytes in its resubmit test (`uring/drain.rs`).
                         let pool_op = match op {
                             PortOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             PortOp::ReadAll => PoolOp::ReadAll { fd },
@@ -393,6 +398,10 @@ impl AsyncBackend {
                                 size: *count,
                                 graphemes: matches!(port.encoding(), Encoding::Text),
                                 gen,
+                                held: fd_states
+                                    .get(&port_key)
+                                    .map(|s| s.buffer.clone())
+                                    .unwrap_or_default(),
                             },
                             PortOp::Write { data } => PoolOp::Write {
                                 fd,
@@ -415,12 +424,13 @@ impl AsyncBackend {
                         op: op.clone(),
                         port_key,
                         port: request.port,
+                        descriptor,
                         buffer_handle: buf_handle,
                         listener_kind: None,
                         filled: 0,
                         timeout: request.timeout,
                     },
-                    origin_heap,
+                    submitter,
                 );
                 Ok(id)
             }

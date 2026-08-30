@@ -111,8 +111,12 @@ impl crate::io::IoBackend for MockBackend {
     fn submit(
         &self,
         request: &IoRequest,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+        submitter: crate::io::pending::Submitter,
     ) -> Result<SubmissionId, String> {
+        // The mock completes inline and files no pending entry, so it has no
+        // operands to hold and no fiber to ask about — only the heap its
+        // results are born on.
+        let origin_heap = submitter.heap();
         let mut inner = self.inner.borrow_mut();
         let id = inner.mint_id();
 
