@@ -204,6 +204,27 @@ pub struct Lowerer<'a> {
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
     upvalue_bindings: std::collections::HashSet<Binding>,
+    /// Bindings bound to a BORROWED SUBVIEW of a scrutinee by destructuring:
+    /// a `(a & rest)` list pattern, a `(entry & rest)` head, an array element,
+    /// a struct value — every binding a structural ELEMENT load (`First`/`Rest`/
+    /// `Index`/`Key`) reaches reads a pointer aliased into the scrutinee's
+    /// region pages with NO owning reference (the region solver only registers
+    /// counted container reads for *call-site* `rest()`/`first()`/`get()`, never
+    /// for pattern loads). Marking them borrowed makes
+    /// `arg_leaf_is_borrowed`/`tail_arg_is_borrowed` treat a call arg naming one
+    /// like any other borrowed arg: the caller mints a fresh owning reference at
+    /// the call that the callee's release balances, leaving the scrutinee's own
+    /// reference untouched. `Slice`/`StructRest` (array/struct `& rest`) are
+    /// excluded: they mint fresh owned containers.
+    ///
+    /// Computed ONCE over the whole HIR at `lower()` entry by
+    /// [`Self::precompute_destructure_aliases`] — before any body lowering — so
+    /// a `match` compound used as a tail argument has its aliases registered
+    /// before `tail_arg_is_borrowed` consults them (a call's arguments are
+    /// classified before they are lowered). The decision-tree / seq / destructure
+    /// walks also insert as they go; both routes fill the same set, and an
+    /// insert is idempotent.
+    destructure_alias_bindings: std::collections::HashSet<Binding>,
     /// Current span for emitted instructions
     current_span: Span,
     /// Intrinsic operations for operator specialization.
@@ -439,6 +460,7 @@ impl<'a> Lowerer<'a> {
             num_captures: 0,
             num_local_params: 0,
             upvalue_bindings: std::collections::HashSet::new(),
+            destructure_alias_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
             call_classification: crate::hir::CallClassification::default(),
@@ -741,6 +763,32 @@ impl<'a> Lowerer<'a> {
         self.region_info.scope_has_local_allocs(hir_id)
     }
 
+    /// Collect, over the whole HIR, the bindings each `match`/`destructure`
+    /// pattern binds to a BORROWED subview of its scrutinee — the structural
+    /// element positions (`First`/`Rest`/`Index`/`Key`), excluding fresh-owned
+    /// collectors (`Slice`/`StructRest`, the `& rest` of array/struct patterns).
+    ///
+    /// Runs once at `lower()` entry, before any body lowering, so a `match`
+    /// compound in tail-argument position has its aliases registered before the
+    /// call site classifies that argument. `Hir::for_each_child` deliberately
+    /// does NOT enumerate pattern bindings (patterns are not HIR children), so
+    /// this walk enumerates `Match` arms / `Destructure` patterns itself and
+    /// recurses through `for_each_child` for the ordinary expression tree.
+    fn precompute_destructure_aliases(&mut self, hir: &Hir) {
+        match &hir.kind {
+            HirKind::Match { arms, .. } => {
+                for (pat, _, _) in arms {
+                    collect_pattern_aliases(pat, &mut self.destructure_alias_bindings, false);
+                }
+            }
+            HirKind::Destructure { pattern, .. } => {
+                collect_pattern_aliases(pattern, &mut self.destructure_alias_bindings, false);
+            }
+            _ => {}
+        }
+        hir.for_each_child(|c| self.precompute_destructure_aliases(c));
+    }
+
     /// Lower a HIR expression to an LIR module.
     ///
     /// Returns an `LirModule` with the entry function and a flat list of
@@ -752,6 +800,16 @@ impl<'a> Lowerer<'a> {
         // closures. Computing it here keeps the pass on every real lowering path
         // through a single chokepoint; `tail_callee_defers_release` reads it.
         self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
+
+        // Same whole-module contract: compute the destructure-alias set once
+        // over the full HIR before body lowering begins, so a `match` compound
+        // used as a tail argument has its aliases registered before the call
+        // site classifies that argument (arguments are classified, then
+        // lowered). The decision-tree/seq/destructure walks re-insert as they
+        // go; that stays idempotent and covers any pattern the walk reaches
+        // that the precompute pass did not enumerate.
+        self.destructure_alias_bindings.clear();
+        self.precompute_destructure_aliases(hir);
 
         self.current_func = LirFunction::new(Arity::Exact(0));
         self.current_block = BasicBlock::new(Label(0));
@@ -877,6 +935,83 @@ fn assert_cells_outlive_their_readers(module: &LirModule) {
                 }
             }
         }
+    }
+}
+
+/// Collect the bindings one pattern binds to a BORROWED subview of its
+/// scrutinee into `out` — the structural ELEMENT positions, mirroring
+/// `access_is_borrowed_element`'s access-path gate over the source pattern
+/// shape. `in_element` is true when this pattern is itself reached through an
+/// element load (so a bare `Var` at that position is an element binding, while
+/// a `Var` pattern at the top bound to the whole scrutinee is not).
+///
+/// Fresh-owned collectors are excluded: the `& rest` of a `Tuple`/`Array`
+/// compiles to `Slice` (a new owned array), and of a `Struct`/`Table` to
+/// `StructRest` (a new owned struct) — a binding reached under one owns its
+/// new container. The cons `rest` of a `List`/`Pair` is NOT excluded: it is
+/// `AccessPath::Rest`, a borrowed view into the scrutinee's cells.
+fn collect_pattern_aliases(
+    pat: &HirPattern,
+    out: &mut std::collections::HashSet<Binding>,
+    in_element: bool,
+) {
+    match pat {
+        HirPattern::Var(b) => {
+            if in_element {
+                out.insert(*b);
+            }
+        }
+        HirPattern::Pair { head, tail } => {
+            // head = First, tail = Rest — both borrowed cell views.
+            collect_pattern_aliases(head, out, true);
+            collect_pattern_aliases(tail, out, true);
+        }
+        HirPattern::List { elements, rest } => {
+            // list element N = First of N rests — borrowed; the cons rest
+            // itself is AccessPath::Rest — borrowed.
+            for e in elements {
+                collect_pattern_aliases(e, out, true);
+            }
+            if let Some(r) = rest {
+                collect_pattern_aliases(r, out, true);
+            }
+        }
+        HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
+            // array element = Index — borrowed. The & rest (Slice) mints a
+            // fresh owned array; a binding under it owns the slice.
+            for e in elements {
+                collect_pattern_aliases(e, out, true);
+            }
+            let _ = rest; // slice rest: fresh-owned, not a borrower
+        }
+        HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+            // entry value = Key — borrowed. The & rest (StructRest) mints a
+            // fresh owned struct; a binding under it owns the rest-struct.
+            for (_, v) in entries {
+                collect_pattern_aliases(v, out, true);
+            }
+            let _ = rest; // struct rest: fresh-owned, not a borrower
+        }
+        HirPattern::NamedStruct { entries } => {
+            for (_, v) in entries {
+                collect_pattern_aliases(v, out, true);
+            }
+        }
+        HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+            // A set pattern binds the WHOLE value (type-guard only) — Root, not
+            // an element — but if it sits inside an element load (e.g. an array
+            // of sets), the set value itself is that element: pass in_element
+            // through so a Var at that depth is marked when reached sideways.
+            collect_pattern_aliases(binding, out, in_element);
+        }
+        HirPattern::Or(alternatives) => {
+            // An or-pattern binds the same names in every arm, each reached
+            // through the same access path — collect each arm identically.
+            for alt in alternatives {
+                collect_pattern_aliases(alt, out, in_element);
+            }
+        }
+        HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
     }
 }
 

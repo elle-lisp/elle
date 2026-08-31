@@ -1,12 +1,36 @@
 //! Pattern matching lowering
 
 use super::*;
-use crate::hir::decision::{Constructor, DecisionTree};
+use crate::hir::decision::{AccessPath, Constructor, DecisionTree};
 use crate::hir::{HirPattern, PatternKey, PatternLiteral};
 
 mod keyed;
 mod matching;
 mod seq;
+
+/// Does an access path reach a binding through a BORROWED structural element
+/// load — `First`/`Rest`/`Index`/`Key`? The match decision tree loads these
+/// with intrinsics that carry NO owning reference: the region solver only
+/// registers a counted container read for *call-site* `rest()`/`first()`/`get()`,
+/// never for pattern loads. A binding reached this way is a BORROWED subview of
+/// the scrutinee — passing it as an owned-param call argument lets
+/// the callee's release free the caller's still-live scrutinee region.
+///
+/// `Slice` and `StructRest` (array/struct `& rest` patterns) are excluded: they
+/// mint a FRESH OWNED container (`vm/data.rs::handle_array_slice_from`), so a
+/// path through them is not a borrow of the scrutinee — a binding reached under
+/// one owns its new container, and the charged cascade frees it.
+pub(super) fn access_is_borrowed_element(access: &AccessPath) -> bool {
+    match access {
+        AccessPath::Root => false,
+        AccessPath::First(_inner) | AccessPath::Rest(_inner) => true,
+        AccessPath::Index(_inner, _) | AccessPath::Key(_inner, _) => true,
+        // Slice/StructRest mint a fresh owned container — a path through
+        // them (and whatever element loads sit beneath them) is not a
+        // borrow of the scrutinee.
+        AccessPath::Slice(..) | AccessPath::StructRest(..) => false,
+    }
+}
 
 impl<'a> Lowerer<'a> {
     // ── Decision tree lowering ─────────────────────────────────────
@@ -69,6 +93,11 @@ impl<'a> Lowerer<'a> {
                 // and keeping it on the operand stack would leak intermediates.
                 for (binding, access) in bindings {
                     let val_reg = self.load_access_path(access, scrutinee_slot)?;
+                    // A borrowed subview of the scrutinee — mark it
+                    // (see `destructure_alias_bindings`).
+                    if access_is_borrowed_element(access) {
+                        self.destructure_alias_bindings.insert(*binding);
+                    }
                     let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
                         existing
                     } else {
@@ -129,6 +158,11 @@ impl<'a> Lowerer<'a> {
                 // Establish bindings — pop after each store (same as Leaf).
                 for (binding, access) in bindings {
                     let val_reg = self.load_access_path(access, scrutinee_slot)?;
+                    // A borrowed subview of the scrutinee — mark it
+                    // (see `destructure_alias_bindings`).
+                    if access_is_borrowed_element(access) {
+                        self.destructure_alias_bindings.insert(*binding);
+                    }
                     let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
                         existing
                     } else {

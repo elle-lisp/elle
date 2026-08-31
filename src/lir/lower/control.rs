@@ -96,6 +96,7 @@ impl<'a> Lowerer<'a> {
             // route is position-independent (the frame never owns a constant).
             HirKind::Var(binding) => {
                 (self.in_lambda && self.upvalue_bindings.contains(binding))
+                    || self.destructure_alias_bindings.contains(binding)
                     || self
                         .immutable_values
                         .get(binding)
