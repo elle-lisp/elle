@@ -150,12 +150,30 @@ process-local, so a persisted sorted container is correct only where it was
 built.
 
 The fix is the identity model keywords already use: the id is a 64-bit
-FNV-1a hash of the name, stable across tables, processes, and builds, with a
-global hash→name registry for display and a collision panic. Then symbol
-values are as portable as keyword values; sort orders are stable by
+FNV-1a hash of the name, stable across tables, processes, and builds. Then
+symbol values are as portable as keyword values; sort orders are stable by
 construction; the image needs no symbol remap pass, no re-sort pass, no
 symbol watermark; templates lose their `symbol_names` maps; `send` stops
-re-interning; the `CompileCtx` ordering invariant dissolves.
+re-interning for identity; the `CompileCtx` ordering invariant dissolves.
+
+No global registry backs this. Minting an id consults nothing — the hash
+is the id — so the only remaining jobs are display (hash→name) and
+collision detection, and both stay per instance. `SymbolTable` survives as
+an instance-local hash→name **display memo** on the plumbing it rides
+today: no lock, because no structure is shared; teardown drops the memo
+with its instance, so the leak guarantee holds without a carve-out. The
+memo learns names at the boundaries where names already travel — the
+reader, `send`'s name field (now display-only data the receiver records),
+hydration's name-table replay, `ConstTemplate` decode — and every learning
+site doubles as the collision check: recording a hash the memo maps to a
+different name is the panic. That catches cross-thread, cross-image, and
+cross-build collisions at the moment they would first confuse a reader,
+which one process-wide table cannot. A CI test hashes every static name —
+the primitive tables and aliases, every symbol read from core, prelude,
+and stdlib — and asserts distinctness, so the built-in vocabulary is
+proven collision-free per build; the runtime panic covers dynamic names,
+where the 64-bit birthday bound is ~3×10⁻¹⁰ at 10⁵ symbols. The keyword
+registry takes the same demotion in this migration.
 
 Migration notes: `SymbolId(u32)` widens to `u64` (the `Value` payload
 already is one); the `SYNTHETIC` sentinel survives as a reserved hash;
@@ -320,7 +338,7 @@ One image is one file (or one embedded blob):
 | relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval (Hydration step 3), so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | primitive names in dump-time `prim_id` order |
-| name table | symbol and keyword names in the body — hashes are stable, but the process-global hash→name display registries must learn them |
+| name table | symbol and keyword names in the body — hashes are stable, but the hydrating instance's display memos must learn them |
 | signal table | user-defined signal names in dump-time bit order |
 | watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
 | manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
@@ -374,7 +392,8 @@ migration.
 
 1. Validate the fingerprint; on failure, fall back (boot: compile sources;
    environment: report the mismatch).
-2. Register the name table in the symbol and keyword display registries.
+2. Register the name table in the hydrating instance's symbol and keyword
+   display memos.
    Replay the signal table so user signal bits land where the dump minted
    them. Check the primitive table against the live registry.
 3. Mint a region and map the page section: reserve an aligned `PROT_NONE`
@@ -774,9 +793,9 @@ Then the image milestones:
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the lazy LIR decode feeds `submit_jit_task`
   and the compiled result executes.
-- Names: print an image keyword and an image symbol (the display registries
-  learned them) and raise an image-defined signal (the replayed bit matches
-  the baked profile).
+- Names: print an image keyword and an image symbol (the instance's display
+  memos learned them) and raise an image-defined signal (the replayed bit
+  matches the baked profile).
 - Macros: a macro whose transformer cache was empty at dump expands
   correctly after hydration (the lazy fill still works).
 - Parameters: after image boot, `println` writes to the process's real
