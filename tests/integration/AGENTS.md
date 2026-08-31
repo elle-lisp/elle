@@ -108,6 +108,7 @@ Tests are organized by feature area in separate files:
 | `bytecode_doc.rs` | The instruction names and source paths the bytecode documents spell, checked against the `Instruction` enum |
 | `workflows.rs` | The PR workflow's merge gate: every job needed and enforced by `all-checks`, no job serializing the corpus and the Rust suite, no shared cache key |
 | `budget.rs` | The wall-clock budget the Makefile's per-file corpus passes give one file |
+| `doctest.rs` | The plugins the literate documents load, checked against what the Makefile's `doctest` target builds |
 | `environment.rs` | Environment variables |
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |

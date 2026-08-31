@@ -174,6 +174,9 @@ mod workflows {
 mod budget {
     include!("budget.rs");
 }
+mod doctest {
+    include!("doctest.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

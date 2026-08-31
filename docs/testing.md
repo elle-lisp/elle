@@ -107,10 +107,16 @@ lists for the runner. Re-raise a missing dependency as `:gated` so the runner
 records a reasoned `skip` (and a direct `elle FILE` run exits 0 cleanly):
 
 ```lisp
-(def [ok? lib] (protect (import-file "target/release/libfoo.so")))
+(def [ok? plugin] (protect (import "plugin/myplugin")))
 (unless ok?
-  (error (struct :error :gated :reason "libfoo plugin not built")))
+  (error (struct :error :gated :reason "myplugin plugin not built")))
 ```
+
+Name a plugin through `import`, not through an `import-file` path. `import`
+resolves `plugin/X` against the running binary's own build profile
+([`modules.md`](modules.md) § "Module search path"); a written-out
+`target/release/…` names a file only a release build has, so under a debug
+binary that test gates itself out and reports nothing.
 
 For backend-specific assertions, gate on the live policy/tier
 (`(vm/config :jit)`, `(backend? :jit)`). **Never** `(exit 0)` to skip — under the

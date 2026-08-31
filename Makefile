@@ -1,6 +1,6 @@
 .PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-nouring smoke-wasm smoke-mlir \
-       doctest elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
+       doctest myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
 
 .DEFAULT_GOAL := all
@@ -396,7 +396,18 @@ smoke-wasm: elle-wasm  ## Corpus via elle test (+ wasm tier) + whole-file --wasm
 # other file still fails fast on a hang. Read the budget from a timed run.
 DOCTEST_TIMEOUT ?= 180s
 
-doctest:   ## Test code examples in documentation (literate mode)
+# The plugin two literate documents load. docs/cookbook/plugins.md is the
+# authoring guide and demos/myplugin is the crate it walks through, so the
+# document's own test imports it as `plugin/myplugin`; docs/testing.md gates its
+# example on the same import. Nothing else in the tree builds it — the
+# `plugins/` submodule is a separate workspace, and it is not even checked out
+# in CI — so without this every form below either import is dead: the guide
+# fails its import, the gating example gates itself out, and `doctest` reports
+# both as passing. tests/integration/doctest.rs pins the agreement.
+myplugin:  ## Build the plugin the literate documents load
+	cargo build $(CARGO_PROFILE) -p elle-myplugin -q
+
+doctest: myplugin  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' docs/*.md docs/regions/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
 		parallel -j $(JOBS) --tag \

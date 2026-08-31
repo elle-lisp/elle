@@ -3,6 +3,7 @@ members = [
     ".",
     "elle-plugin",
     "demos/embedding",
+    "demos/myplugin",
 ]
 resolver = "2"
 
