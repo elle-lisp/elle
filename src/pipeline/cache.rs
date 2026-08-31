@@ -257,21 +257,29 @@ impl CompileCtx {
 
     /// Look up or compute the signal projection for an imported file.
     ///
-    /// On a miss, compiles the file (with a throwaway `SymbolTable`, in THIS
-    /// instance's context) and caches the projection from the resulting
+    /// On a miss, compiles the file in the caller's `SymbolTable` and this
+    /// instance's context, then caches the projection from the resulting
     /// bytecode. Returns `None` if the file's return value is not a projectable
     /// struct (cached as `None` to avoid recompiling).
+    ///
+    /// The table is the caller's, not a fresh one, because this compile expands
+    /// macros: a transformer compiles lazily on its first expansion and caches
+    /// on the shared expander, and its quoted literals bind to whichever table
+    /// compiled it. A throwaway table here would cache transformers carrying ids
+    /// no later expansion can read (pinned by
+    /// `import_projection_probe_interns_into_the_callers_symbol_table` and
+    /// `each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first`).
     pub fn get_or_compile_projection(
         &mut self,
         resolved_path: &str,
+        symbols: &mut SymbolTable,
     ) -> Option<HashMap<String, Signal>> {
         if let Some(proj) = self.projections.get(resolved_path) {
             return proj.clone();
         }
 
         let source = std::fs::read_to_string(resolved_path).ok()?;
-        let mut symbols = SymbolTable::new();
-        let projection = super::compile::compile_file(&source, &mut symbols, self, resolved_path)
+        let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
             .ok()
             .and_then(|result| result.bytecode.signal_projection);
 
