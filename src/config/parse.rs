@@ -203,10 +203,15 @@ impl Config {
                 let n: usize = rest
                     .parse()
                     .map_err(|_| format!("--region-page-size: expected integer, got '{}'", rest))?;
-                if n < 4096 || !n.is_power_of_two() {
+                // The floor is the OS page, not a fixed 4096: a smaller page
+                // costs a whole OS page anyway, and the size-class ladder is
+                // rooted at the OS page (docs/impl/region/model.md § "The base
+                // page is the OS page").
+                let floor = crate::value::fiberheap::pagepool::base_page();
+                if n < floor || !n.is_power_of_two() {
                     return Err(format!(
-                        "--region-page-size: must be a power of two >= 4096, got {}",
-                        n
+                        "--region-page-size: must be a power of two >= {}, got {}",
+                        floor, n
                     ));
                 }
                 config.region_page_size = n;

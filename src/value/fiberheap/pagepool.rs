@@ -12,15 +12,35 @@
 //! read through a pointer that outlived its region detonates instead of
 //! returning plausible bytes. See docs/impl/region/model.md § "Page recycling".
 
+/// The smallest base page this runtime uses, and the floor
+/// `--region-page-size` applies. No supported host reports an OS page below
+/// this.
+const MIN_BASE_PAGE: usize = 4096;
+
 /// The OS base page size — the smallest region page and the unit that `mmap`,
 /// `munmap`, `mprotect`, and RSS accounting all work in. Region pages never go
 /// below this: a sub-page "page" would still cost a full OS page (no RSS win),
 /// and would break per-region `munmap` and the guardfree `mprotect` (both
 /// OS-page-granular). Size classes are powers-of-two multiples of it.
-pub(crate) const BASE_PAGE: usize = 4096;
+///
+/// Asked of the OS once and cached. Both accounting gauges the pool keeps
+/// (`cached_bytes` and [`mapped_bytes`]) count the length a page records, so
+/// that length has to be the length the kernel charges — see
+/// docs/impl/region/model.md § "The base page is the OS page".
+pub(crate) fn base_page() -> usize {
+    static BASE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *BASE.get_or_init(|| derive_base_page(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }))
+}
 
-/// `log2(BASE_PAGE)` — the size-class shift (class 0 == `BASE_PAGE`).
-const BASE_PAGE_BITS: u32 = BASE_PAGE.trailing_zeros();
+/// The base page for an OS-reported page size. An answer the size-class
+/// arithmetic cannot use — a `sysconf` failure (`-1`), a page below
+/// [`MIN_BASE_PAGE`], or a non-power-of-two — takes the floor instead.
+fn derive_base_page(os_page: libc::c_long) -> usize {
+    match usize::try_from(os_page) {
+        Ok(n) if n >= MIN_BASE_PAGE && n.is_power_of_two() => n,
+        _ => MIN_BASE_PAGE,
+    }
+}
 
 /// What a dying region wrote into one of its pages: the object slots it filled,
 /// bumping up, and the inline-data suffix it filled, bumping down. The gap
@@ -73,6 +93,52 @@ impl PageDirty {
     }
 }
 
+/// The cut that turns an over-allocated mapping into a self-aligned page: the
+/// aligned base to keep, and the two runs to give back.
+struct Trim {
+    /// Base of the `len`-byte, `len`-aligned page to keep.
+    base: usize,
+    /// Bytes below `base`, unmapped.
+    prefix: usize,
+    /// Bytes above the page, unmapped.
+    suffix: usize,
+}
+
+impl Trim {
+    /// The first `len`-aligned `len`-byte window inside `alloc` bytes at `raw`.
+    ///
+    /// All three pieces are whole OS pages: `len` is a power-of-two multiple of
+    /// [`base_page()`], and `mmap` answers with an OS-page-aligned address.
+    /// `munmap` refuses any other address.
+    fn new(raw: usize, alloc: usize, len: usize) -> Self {
+        debug_assert!(len.is_power_of_two() && alloc >= 2 * len);
+        let base = (raw + len - 1) & !(len - 1);
+        let prefix = base - raw;
+        Trim {
+            base,
+            prefix,
+            suffix: alloc - prefix - len,
+        }
+    }
+}
+
+/// Give `len` bytes at `addr` back to the OS, and check the kernel took them.
+///
+/// # Safety
+/// `addr` must name a mapping this process owns, of at least `len` bytes.
+unsafe fn unmap(addr: usize, len: usize) {
+    if len == 0 {
+        return;
+    }
+    let rc = libc::munmap(addr as *mut libc::c_void, len);
+    debug_assert_eq!(
+        rc,
+        0,
+        "munmap({addr:#x}, {len}) failed: {}",
+        std::io::Error::last_os_error(),
+    );
+}
+
 /// An mmap-backed page of memory with a known size.
 ///
 /// On Drop, the page is munmapped — the OS reclaims the physical memory
@@ -89,12 +155,12 @@ impl MmapPage {
     /// This is required by `region_of_page_ptr`, which masks a pointer
     /// with `!(len - 1)` to find the page base.
     ///
-    /// For 4K pages, `mmap` already guarantees 4K alignment. For larger
-    /// pages we over-allocate 2× and trim (munmap prefix/suffix) to get
-    /// a `len`-aligned sub-range.
+    /// For a base page, `mmap` already answers with a page-aligned address.
+    /// For larger pages we over-allocate 2× and trim (munmap prefix/suffix) to
+    /// get a `len`-aligned sub-range.
     fn new(len: usize) -> Option<Self> {
-        debug_assert!(len >= BASE_PAGE && len.is_power_of_two());
-        if len == BASE_PAGE {
+        debug_assert!(len >= base_page() && len.is_power_of_two());
+        if len == base_page() {
             return Self::new_raw(len);
         }
         // Over-allocate to guarantee len-alignment.
@@ -112,26 +178,19 @@ impl MmapPage {
         if raw == libc::MAP_FAILED {
             return None;
         }
-        let addr = raw as usize;
-        let aligned = (addr + len - 1) & !(len - 1);
-        let prefix = aligned - addr;
-        let suffix = alloc - prefix - len;
+        let trim = Trim::new(raw as usize, alloc, len);
         unsafe {
-            if prefix > 0 {
-                libc::munmap(raw, prefix);
-            }
-            if suffix > 0 {
-                libc::munmap((aligned + len) as *mut libc::c_void, suffix);
-            }
+            unmap(raw as usize, trim.prefix);
+            unmap(trim.base + len, trim.suffix);
         }
         MAPPED_BYTES.fetch_add(len as u64, Ordering::Relaxed);
         Some(MmapPage {
-            ptr: aligned as *mut u8,
+            ptr: trim.base as *mut u8,
             len,
         })
     }
 
-    /// Raw mmap without alignment trimming (used for 4K pages).
+    /// Raw mmap without alignment trimming (used for base pages).
     fn new_raw(len: usize) -> Option<Self> {
         let ptr = unsafe {
             libc::mmap(
@@ -201,9 +260,7 @@ impl MmapPage {
 
 impl Drop for MmapPage {
     fn drop(&mut self) {
-        unsafe {
-            libc::munmap(self.ptr as *mut libc::c_void, self.len);
-        }
+        unsafe { unmap(self.ptr as usize, self.len) };
         MAPPED_BYTES.fetch_sub(self.len as u64, Ordering::Relaxed);
     }
 }
@@ -226,19 +283,25 @@ static MAPPED_BYTES: AtomicU64 = AtomicU64::new(0);
 // SAFETY: MmapPage owns its virtual memory exclusively.
 unsafe impl Send for MmapPage {}
 
-/// Size class index for a given page size.
-/// Classes are powers of two: 4K=0, 8K=1, 16K=2, 32K=3, 64K=4, etc.
+/// Size class index for a given page size. Class 0 is [`base_page()`]; each
+/// class above it doubles.
 fn size_class(size: usize) -> usize {
-    debug_assert!(size >= BASE_PAGE && size.is_power_of_two());
-    (size.trailing_zeros() - BASE_PAGE_BITS) as usize // class 0 == BASE_PAGE
+    size_class_of(base_page(), size)
 }
 
-#[allow(dead_code)]
-fn class_size(class: usize) -> usize {
-    BASE_PAGE << class
+/// [`size_class`] against an explicit base — the ladder as a pure function, so
+/// its arithmetic is checkable for a page size this host does not have.
+pub(crate) fn size_class_of(base: usize, size: usize) -> usize {
+    debug_assert!(size >= base && size.is_power_of_two());
+    (size.trailing_zeros() - base.trailing_zeros()) as usize
 }
 
-/// Number of size classes to track (4K through 4MB = 11 classes).
+/// The page size of class `class` on a ladder rooted at `base`.
+pub(crate) fn class_size_of(base: usize, class: usize) -> usize {
+    base << class
+}
+
+/// Number of size classes to track: the base page through `base << 10`.
 const NUM_CLASSES: usize = 11;
 
 // ── Page-claim histogram (a `--stats` exit summary, for page-size analysis) ──
@@ -246,7 +309,7 @@ const NUM_CLASSES: usize = 11;
 // Under `--stats`, every `claim` records its (power-of-two) size into a global
 // per-size-class histogram, printed at process exit alongside the other
 // `[stats]` lines. It measures how often geometric growth escalates past
-// `BASE_PAGE` across a run — the precondition for the large-page
+// `base_page()` across a run — the precondition for the large-page
 // region-attribution cost (a large page is the only place `region_of_ptr`'s
 // sub-alignment search can be fooled; see docs/impl/region/diagnostics.md).
 // Off by default and zero-cost then: the per-claim path is a single config-flag
@@ -299,7 +362,11 @@ pub(crate) fn dump_page_hist() {
             continue;
         }
         let bytes = PAGE_CLAIM_BYTES[c].load(Ordering::Relaxed);
-        let size = if c < NUM_CLASSES { BASE_PAGE << c } else { 0 };
+        let size = if c < NUM_CLASSES {
+            class_size_of(base_page(), c)
+        } else {
+            0
+        };
         eprintln!("[stats] page-claim size={size} claims={n} bytes={bytes}");
     }
 }
@@ -379,7 +446,7 @@ impl PagePool {
     /// fault on memory that is already resident. The caller stamps the header,
     /// which until then still carries the dead region's stamp.
     pub fn claim(&mut self, size: usize) -> MmapPage {
-        let size = size.next_power_of_two().max(BASE_PAGE);
+        let size = size.next_power_of_two().max(base_page());
         record_claim(size);
         self.counters.claims += 1;
         let class = size_class(size);
@@ -413,7 +480,7 @@ impl PagePool {
             return;
         }
         let size = page.len();
-        let class = size_class(size.next_power_of_two().max(BASE_PAGE));
+        let class = size_class(size.next_power_of_two().max(base_page()));
         if class < NUM_CLASSES && self.cached_bytes + size <= self.max_cached {
             self.cached_bytes += size;
             if crate::value::fiberheap::freelog::scrub_armed() {
@@ -434,14 +501,14 @@ impl PagePool {
     #[cfg(test)]
     pub fn peek_cached(&mut self, size: usize) -> Option<&mut MmapPage> {
         self.free_lists
-            .get_mut(size_class(size.next_power_of_two().max(BASE_PAGE)))?
+            .get_mut(size_class(size.next_power_of_two().max(base_page())))?
             .last_mut()
     }
 }
 
 impl Default for PagePool {
     fn default() -> Self {
-        Self::new(BASE_PAGE, 4 * 1024 * 1024)
+        Self::new(base_page(), 4 * 1024 * 1024)
     }
 }
 

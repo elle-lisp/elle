@@ -259,7 +259,7 @@ impl Drop for RegionStore {
 impl Default for RegionStore {
     fn default() -> Self {
         Self::new(
-            super::pagepool::BASE_PAGE,
+            super::pagepool::base_page(),
             4 * 1024 * 1024,
             std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         )

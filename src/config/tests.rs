@@ -1,6 +1,7 @@
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
+use crate::value::fiberheap::pagepool::base_page;
 
 /// Trace state is per-instance: a `RuntimeConfig` reads and writes its own
 /// [`TraceCell`], so a diagnostic toggle on one instance never reaches another.
@@ -110,4 +111,45 @@ fn trace_keywords_are_known() {
             kw
         );
     }
+}
+
+// ── `--region-page-size` (docs/impl/region/model.md § "The base page is the OS
+// page") ──
+
+fn parse_args(args: &[&str]) -> Result<Config, String> {
+    let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    Config::parse(&owned).map(|(c, _)| c)
+}
+
+/// A region's first page is one OS page, so a program that sets nothing gets
+/// the page the kernel charges for rather than a fraction of it.
+#[test]
+fn region_page_size_defaults_to_the_base_page() {
+    assert_eq!(Config::default().region_page_size, base_page());
+    assert_eq!(parse_args(&[]).unwrap().region_page_size, base_page());
+}
+
+/// The floor is the OS page, not a fixed 4096. A smaller page still costs a
+/// whole OS page, and `MmapPage::new` would trim it to an address `munmap`
+/// refuses.
+#[test]
+fn region_page_size_below_the_base_page_is_rejected() {
+    let err = parse_args(&["--region-page-size=2048"]).unwrap_err();
+    assert!(
+        err.contains(&base_page().to_string()),
+        "the rejection must name the floor it applied, got {err:?}",
+    );
+    assert!(parse_args(&["--region-page-size=6000"]).is_err());
+    assert_eq!(
+        parse_args(&[&format!("--region-page-size={}", base_page())])
+            .unwrap()
+            .region_page_size,
+        base_page(),
+    );
+    assert_eq!(
+        parse_args(&[&format!("--region-page-size={}", 4 * base_page())])
+            .unwrap()
+            .region_page_size,
+        4 * base_page(),
+    );
 }
