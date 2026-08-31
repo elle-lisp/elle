@@ -82,9 +82,9 @@ it instead, and the program dies with a byte count and no diagnosis.
 
 Those two requirements pull in opposite directions, and what leaves room between
 them is a ratio rather than any absolute size. A live region owns at least one
-4 KiB page (Rule 6), so a program holding N regions at once already holds at
-least 4N KiB of pages, while the table for those ids costs
-N × `size_of::<Option<RegionEntry>>()` — about a twentieth as much. Set
+OS page (Rule 6), which is 4 KiB at the smallest, so a program holding N regions
+at once already holds at least 4N KiB of pages, while the table for those ids
+costs N × `size_of::<Option<RegionEntry>>()` — about a twentieth as much. Set
 `MAX_PLAUSIBLE_REGION_ID` past the live-region count a machine's memory permits,
 and the table at that bound stays within what the same machine can allocate. At
 `1 << 28` that is 1 TiB of pages against a ~56 GB table.

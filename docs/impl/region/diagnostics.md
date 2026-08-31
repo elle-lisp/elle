@@ -100,16 +100,19 @@ the region rules ([rules.md](rules.md)) honest.
 - `--stats`: prints exit-time statistics, including a **page-claim size
   histogram** — one `[stats] page-claim size=<bytes> claims=<n> bytes=<n>` line
   per size class (`size=0` = the oversized one-off bucket). It measures how often
-  geometric page growth (4 KiB doubling up to 4 MiB) escalates past `BASE_PAGE` —
-  the precondition for the only place region attribution can be misled, a pointer
-  deep inside a page larger than `BASE_PAGE` (`region_of_ptr`'s sub-alignment
-  walk; the page-header magic and ownership validation make that search sound, so
-  this is for *policy* analysis, not correctness). Off by default and zero-cost
-  then. Each `elle test` worker aggregates into the one process-wide histogram
-  (`elle test --stats …`); sum the lines across batched runs for a corpus-wide
-  distribution. Measured baseline: ~99.9 % of claims are 4 KiB; large pages come
-  overwhelmingly from large *single* allocations (`alloc_data` right-sizing a
-  buffer), not from the doubling ladder.
+  geometric page growth (the base page doubling up to 4 MiB) escalates past
+  `base_page()` — the precondition for the only place region attribution can be
+  misled, a pointer deep inside a page larger than `base_page()`
+  (`region_of_ptr`'s sub-alignment walk; the page-header magic and ownership
+  validation make that search sound, so this is for *policy* analysis, not
+  correctness). Off by default and zero-cost then. Each `elle test` worker
+  aggregates into the one process-wide histogram (`elle test --stats …`); sum the
+  lines across batched runs for a corpus-wide distribution. The size classes
+  scale with the host page, so compare distributions across hosts by class, not
+  by byte count ([model.md](model.md) § "The base page is the OS page").
+  Measured baseline on a 4 KiB-page host: ~99.9 % of claims are one base page;
+  large pages come overwhelmingly from large *single* allocations (`alloc_data`
+  right-sizing a buffer), not from the doubling ladder.
 
 ## Validation
 

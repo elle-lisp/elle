@@ -1,6 +1,6 @@
 //! Unit tests (`super` is the parent impl module).
 
-use super::super::pagepool::BASE_PAGE;
+use super::super::pagepool::{base_page, class_size_of};
 use super::*;
 use crate::value::heap::Pair;
 
@@ -11,7 +11,7 @@ fn pool_for(region_id: u32) -> RegionPool {
     RegionPool::new(
         region_id,
         PageStamp::default(),
-        BASE_PAGE,
+        base_page(),
         std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
     )
 }
@@ -63,7 +63,7 @@ fn dual_ended_layout() {
     // Then an object.
     let v = rp.alloc_obj(cons_obj(), &mut pool);
 
-    // Both should be on the same page (single 4K page).
+    // Both should be on the same page.
     assert_eq!(rp.pages.len(), 1);
     assert_eq!(s.as_slice(), b"test data");
     assert!(v.is_heap());
@@ -74,13 +74,15 @@ fn page_growth_when_full() {
     let mut pool = PagePool::default();
     let mut rp = pool_for(1);
 
-    // Fill a 4K page: (4096 - 8) / 48 = ~85 objects max
-    // Allocate enough to spill into a second page.
-    for _ in 0..100 {
+    // One object slot per `HeapObject`, so a page holds at most
+    // `base_page() / size_of::<HeapObject>()` of them. Ask for one more than a
+    // full page's worth, on whatever page size the host uses.
+    let spill = base_page() / size_of::<HeapObject>() + 1;
+    for _ in 0..spill {
         rp.alloc_obj(cons_obj(), &mut pool);
     }
     assert!(rp.pages.len() >= 2, "should have claimed multiple pages");
-    assert_eq!(rp.obj_count(), 100);
+    assert_eq!(rp.obj_count(), spill);
 }
 
 #[test]
@@ -148,9 +150,9 @@ fn teardown_returns_a_page_that_still_names_its_region() {
     rp.teardown(&mut pool);
 
     let cached = pool
-        .peek_cached(BASE_PAGE)
+        .peek_cached(base_page())
         .expect("teardown must return the page to the cache");
-    let rid = unsafe { region_of_page_ptr(cached.as_ptr() as *const (), BASE_PAGE) };
+    let rid = unsafe { region_of_page_ptr(cached.as_ptr() as *const (), base_page()) };
     assert_eq!(
         rid, 42,
         "the cached page lost the stamp of the region that died on it, so a \
@@ -209,7 +211,7 @@ fn page_header_region_id() {
 
     // Read region_id from the page header.
     let ptr = v.as_heap_ptr().unwrap();
-    let rid = unsafe { region_of_page_ptr(ptr, 4096) };
+    let rid = unsafe { region_of_page_ptr(ptr, base_page()) };
     assert_eq!(rid, 42);
 }
 
@@ -225,12 +227,12 @@ fn page_header_stamp_roundtrip() {
     let mut rp = RegionPool::new(
         42,
         stamp,
-        4096,
+        base_page(),
         std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
     );
     let v = rp.alloc_obj(cons_obj(), &mut pool);
     let ptr = v.as_heap_ptr().unwrap();
-    let (rid, read_back) = unsafe { header_of_page_ptr(ptr, 4096) };
+    let (rid, read_back) = unsafe { header_of_page_ptr(ptr, base_page()) };
     assert_eq!(rid, 42);
     assert_eq!(read_back, stamp);
 }
@@ -239,29 +241,34 @@ fn page_header_stamp_roundtrip() {
 fn large_inline_data_claims_bigger_page() {
     let mut pool = PagePool::default();
     let mut rp = pool_for(1);
-    // Allocate data larger than a 4K page.
-    let big_data = vec![0xABu8; 8000];
+    // Allocate data larger than the region's first page.
+    let big_data = vec![0xABu8; 2 * base_page()];
     let s = rp.alloc_region_slice(&big_data, &mut pool);
     assert_eq!(s.as_slice(), &big_data[..]);
 }
 
 #[test]
 fn region_of_page_ptr_on_grown_page() {
-    // After geometric growth, objects may be on pages larger than 4K.
-    // region_of_page_ptr must still find the correct region ID.
+    // After geometric growth, objects may be on pages larger than the base
+    // page. region_of_page_ptr must still find the correct region ID.
     let mut pool = PagePool::default();
     let mut rp = pool_for(99);
 
-    // Fill the first 4K page to force a second (8K) page.
-    for _ in 0..100 {
+    // Fill the first page to force a second, double-sized one.
+    let mut allocated = 0;
+    while rp.pages.len() < 2 {
         rp.alloc_obj(cons_obj(), &mut pool);
+        allocated += 1;
+        assert!(
+            allocated < 100_000,
+            "the region never claimed a second page"
+        );
     }
-    assert!(rp.pages.len() >= 2, "should have grown to multiple pages");
 
     // Allocate on the grown page.
     let v = rp.alloc_obj(cons_obj(), &mut pool);
     let ptr = v.as_heap_ptr().unwrap();
-    let rid = unsafe { region_of_page_ptr(ptr, 4096) };
+    let rid = unsafe { region_of_page_ptr(ptr, base_page()) };
     assert_eq!(rid, 99, "region_of_page_ptr must work on grown pages");
 }
 
@@ -276,14 +283,15 @@ fn header_lookup_rejects_mid_page_false_match() {
     // header — region id 0xffffff45 — which then drove `ensure_raw` to a 584 GB
     // resize. The `size_tag` magic rejects the mid-page match.
     //
-    // Counterfactual: pre-magic, `header_of_page_ptr` matched the forged 8 KiB
-    // sub-base (its byte 12 equals log2 8192) and returned the forged region id;
-    // post-magic the forged tag lacks the magic, so the walk reaches the true
-    // 16 KiB base and returns region 42.
-    let mut pool = PagePool::new(BASE_PAGE, 8 * 1024 * 1024);
-    // A 16 KiB page (log2 = 14), self-aligned by `claim`.
-    let page = pool.claim(4 * BASE_PAGE);
-    assert_eq!(page.len(), 4 * BASE_PAGE);
+    // Counterfactual: pre-magic, `header_of_page_ptr` matched the forged
+    // half-size sub-base (its byte 12 equals that size's log2) and returned the
+    // forged region id; post-magic the forged tag lacks the magic, so the walk
+    // reaches the true base and returns region 42.
+    let mut pool = PagePool::new(base_page(), 8 * 1024 * 1024);
+    // A class-2 page, self-aligned by `claim`.
+    let big = class_size_of(base_page(), 2);
+    let page = pool.claim(big);
+    assert_eq!(page.len(), big);
     let base = page.as_ptr() as usize;
     // Stamp the real header at the true base (region 42).
     let _rp = RegionPage::new(
@@ -294,18 +302,19 @@ fn header_lookup_rejects_mid_page_false_match() {
             store: 7,
         },
     );
-    // Forge a "smaller page" header mid-page, at the 8 KiB-aligned sub-base: a
-    // garbage region id, and a bare `log2(8192)` at the `size_tag` offset (12)
-    // WITHOUT the magic — exactly the mid-page object data that fooled the old
-    // single-byte check.
-    let sub_base = base + 2 * BASE_PAGE; // 8 KiB in — 8 KiB-aligned
+    // Forge a "smaller page" header mid-page, at the class-1-aligned sub-base:
+    // a garbage region id, and a bare `log2(half)` at the `size_tag` offset
+    // (12) WITHOUT the magic — exactly the mid-page object data that fooled the
+    // old single-byte check.
+    let half = class_size_of(base_page(), 1);
+    let sub_base = base + half; // half a page in — half-page-aligned
     unsafe {
         *(sub_base as *mut u32) = 0xDEAD_BEEF; // forged region_id
-        *((sub_base + 12) as *mut u32) = (2 * BASE_PAGE).trailing_zeros(); // bare log2, no magic
+        *((sub_base + 12) as *mut u32) = half.trailing_zeros(); // bare log2, no magic
     }
-    // A pointer deep in the page, past the forged 8 KiB sub-base.
+    // A pointer deep in the page, past the forged sub-base.
     let deep = (sub_base + 0x620) as *const ();
-    let rid = unsafe { region_of_page_ptr(deep, BASE_PAGE) };
+    let rid = unsafe { region_of_page_ptr(deep, base_page()) };
     assert_eq!(
         rid, 42,
         "region_of_page_ptr resolved a deep pointer to a mid-page false header \

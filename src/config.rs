@@ -242,7 +242,8 @@ pub struct Config {
     pub trace_keywords: Vec<String>,
 
     /// Initial page size for region allocation (CLI: --region-page-size).
-    /// Must be a power of two >= 4096. Default: 4096.
+    /// Must be a power of two >= the OS page size, which is also the default
+    /// (docs/impl/region/model.md § "The base page is the OS page").
     pub region_page_size: usize,
 
     /// Maximum bytes to cache in the per-thread page pool
@@ -282,7 +283,7 @@ impl Default for Config {
             anf: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
-            region_page_size: 4096,
+            region_page_size: crate::value::fiberheap::pagepool::base_page(),
             page_pool_max: 4 * 1024 * 1024,
             unicode: None,
         }

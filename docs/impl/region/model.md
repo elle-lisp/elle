@@ -117,6 +117,39 @@ consumer-facing performance account is in
 - **sibling page-amortization** — collapse sibling regions with coincident
   lifetimes and no edge between them. A later rider, not yet implemented.
 
+### The base page is the OS page
+
+`base_page()` (`pagepool.rs`) asks the OS for its page size once and caches the
+answer. Class 0 of the size-class ladder is that page, and every larger class is
+a power-of-two multiple of it, so a region page is always a whole number of OS
+pages. `--region-page-size` rejects anything below `base_page()`.
+
+The rejected alternative is a fixed 4096. It is right on Linux x86-64 and wrong
+on every host with a larger page — macOS aarch64 uses 16384, and Linux aarch64
+can be built for 4096, 16384, or 65536. On such a host a fixed 4096 costs four
+things at once, and the OS query removes all four together:
+
+- **The ladder splits one physical page across three free lists.** Classes 0, 1
+  and 2 name 4096, 8192 and 16384 bytes, but the kernel charges a full
+  16384-byte page for each. `release` files a page by its recorded length, so a
+  released class-0 page — physically 16384 bytes — cannot serve a class-2 claim,
+  and the pool maps a fresh page instead.
+- **`cached_bytes` undercounts, so `--page-pool-max` does not bound what it
+  names.** `release` adds the page's recorded length. A class-0 page records
+  4096 and holds 16384, so a 4 MB pool retains up to 16 MB per thread.
+- **The trim `munmap` gets an address the kernel refuses.** A class-1 page
+  over-allocates 16384 bytes and unmaps the suffix at `base + 8192`, which lands
+  half an OS page past a page boundary, so `munmap` answers `EINVAL`. The
+  mapping survives to `Drop`, which unmaps the whole rounded-up range, but until
+  then the page holds 16384 bytes and records 8192.
+- **`mapped_bytes` reports the same understatement.** It records the length each
+  `mmap` asked for, not the mapping the kernel made, so the gauge that says
+  whether a worker gave its heap back is short by 4× for every class-0 page.
+
+Every accounting claim the pool makes rests on one identity: the size a page
+records is the size the kernel charges. That holds only when class 0 is the OS
+page.
+
 ## Page recycling: a claim is a free-list pop
 
 **A page moves between a region and the pool untouched, in both directions.**
