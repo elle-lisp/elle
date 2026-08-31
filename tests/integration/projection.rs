@@ -289,3 +289,78 @@ fn import_projection_probe_interns_into_the_callers_symbol_table() {
          can read"
     );
 }
+
+#[test]
+fn each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first() {
+    // The trap: `each` decides whether it was written in `in` form with
+    // `(= (syntax->datum iter-or-in) 'in)` (src/prelude.lisp § each). That `'in`
+    // is a quoted literal in the transformer's own bytecode, so it carries the
+    // `SymbolId` of whichever table compiled the transformer — and a transformer
+    // compiles once, lazily, on its first expansion, then caches on the shared
+    // expander (`ensure_transformer`, src/syntax/expand/macro_expand.rs). The
+    // first expansion in an instance therefore fixes the id every later
+    // expansion compares against.
+    //
+    // Here the import projection probe expands `each` first: this runtime loads
+    // no stdlib, so nothing has warmed the transformer against the instance's
+    // table, and compiling the main file runs the probe over a module that uses
+    // `each`. The second compile, on the same context, is the one that must
+    // still read its `in`.
+    //
+    // The counter-factual: with the probe compiling in a throwaway table, the
+    // comparison against the instance table's `in` is false, so `each` takes the
+    // symbol `in` itself as the collection and shifts `'(1 2 3)` into the body —
+    // the second compile then fails with `undefined variable: in`. The assertion
+    // names the elements the loop visited rather than settling for a successful
+    // compile, because the same shift is silent wherever `in` is bound.
+    //
+    // Both files define `pair?` themselves: `each`'s `:list` arm calls it, it is
+    // the one name in the expansion that is not a primitive, and no stdlib is
+    // loaded here. Prelude template symbols carry `ScopeId(0)`, so this
+    // file-scope definition is what the expansion resolves.
+    const PAIR_P: &str = "(defn pair? [x] (%pair? x))\n";
+
+    let tmp = tempfile::tempdir().expect("scratch dir");
+    let module = tmp.path().join("each_module.lisp");
+    std::fs::write(
+        &module,
+        format!(
+            "{PAIR_P}\
+             (fn []\n  \
+             {{:visit (fn [xs]\n    \
+             (def @seen ())\n    \
+             (each x in xs (assign seen (%pair x seen)))\n    \
+             seen)}})\n"
+        ),
+    )
+    .expect("write module");
+
+    let mut rt = elle::runtime::Runtime::without_stdlib();
+    let (vm, symbols, cctx) = rt.parts();
+
+    let main = format!("(def m ((import \"{}\")))\nm\n", module.display());
+    elle::pipeline::compile_file(&main, symbols, cctx, "<each-probe-main>")
+        .expect("main file compiles");
+
+    let visited = elle::eval_all(
+        &format!(
+            "{PAIR_P}\
+             (def @seen ())\n\
+             (each x in '(1 2 3) (assign seen (%pair x seen)))\n\
+             seen\n"
+        ),
+        symbols,
+        vm,
+        cctx,
+        "<each-after-probe>",
+    );
+
+    assert_eq!(
+        visited.as_ref().map(|v| v.to_string()).as_deref(),
+        Ok("(3 2 1)"),
+        "`each` must still read its `in` form after the import projection probe \
+         expanded the macro; a probe in a throwaway table caches a transformer \
+         whose quoted `'in` no instance-table expansion can match, and the \
+         collection is dropped from the loop"
+    );
+}

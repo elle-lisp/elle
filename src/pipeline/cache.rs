@@ -267,7 +267,8 @@ impl CompileCtx {
     /// on the shared expander, and its quoted literals bind to whichever table
     /// compiled it. A throwaway table here would cache transformers carrying ids
     /// no later expansion can read (pinned by
-    /// `import_projection_probe_interns_into_the_callers_symbol_table`).
+    /// `import_projection_probe_interns_into_the_callers_symbol_table` and
+    /// `each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first`).
     pub fn get_or_compile_projection(
         &mut self,
         resolved_path: &str,
