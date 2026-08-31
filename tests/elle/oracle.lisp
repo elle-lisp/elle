@@ -43,6 +43,20 @@
 # true per-op rate and not a per-block-boundary artifact; together they keep the
 # instrument honest about both whether it measures and what the number means.
 #
+# ── The dual-read rule — where a second dimension is representable ────
+# The object count cannot see a region entry that holds no object: a pages-less
+# owner node, or a region emptied of objects but pinned by an unbalanced count.
+# A probe family whose machinery can strand one is read on the object count AND
+# the region count in one drive (`measure-2`). The AUTHORITY for membership is
+# the `@dual-read` table, which the completeness gate enforces — an entry with
+# no region verdict recorded fails the run, so coverage cannot rot into
+# silence. Every other family is object-only: a strand that holds an object
+# already moves the object count, and none of their shapes reaches the
+# owner-node machinery. Each dimension is its own dashboard line under a
+# suffixed label (`label@regions`) with its own pin, declaration, and verdict —
+# a probe open on two dimensions is two defects, two verdicts from two
+# instruments.
+#
 # The failure-accumulating runner. Each (check …) evaluates its body under
 # protect and RECORDS a blown assertion instead of aborting the file, so one red
 # probe never masks the rest; (report) at the end re-raises ONE assertion naming
@@ -152,6 +166,12 @@
 (defn bytes-gauge []
   (arena/bytes))
 # bump-arena bytes gauge
+(defn region-gauge []
+  (arena/region-count))
+# live-region-entry gauge — every active RegionEntry counts, a pages-less owner
+# node included. What the object count cannot see is a ZERO-OBJECT entry: an
+# owner node (docs/impl/region/owner.md § "Owner nodes"), or a region emptied
+# of objects but pinned by an unbalanced count.
 (defn ids-gauge []
   (arena/region-ids))
 # physical-id issuance gauge — `next_physical`, the dimension every other gauge
@@ -196,11 +216,93 @@
     (put (put c :alt-rate (get a :rate))
          :verdict (if (agree? a c) (get c :verdict) :contaminated))))
 
+# ── The two-gauge reading — one drive, one verdict per (probe, gauge) ─
+# Both gauges sample around the SAME blocks, so the two verdicts price the same
+# ops and the second reading adds two primitive calls per block, never a second
+# run of the probe. Both gauges are Immediate, so one gauge's read inside the
+# other's [before, after] window moves nothing. Each gauge keeps its own
+# estimator state, epsilon, and tau, and blocks continue until BOTH half-widths
+# are under their own epsilon (bounded by maxb); each verdict comes from its
+# own gauge's interval. δ is spent once per gauge per measurement — at 1e-6 the
+# union over the whole run stays below 2e-4.
+(defn measure-2 [label run-block ga ea ta suffix gb eb tb block minb maxb]
+  "Drive RUN-BLOCK once per block, sampling gauges GA and GB before and after;
+   return [result-a result-b]. Result b is labelled label@SUFFIX — a full label
+   of its own everywhere (`@by-design`, `declare-root`, the pins), so each
+   dimension is independently a closed control or a declared defect."
+  (run-block block)  # warmup block, discarded
+  (def @ma 0)
+  (def @meana 0.0)
+  (def @m2a 0.0)
+  (def @loa (math/inf))
+  (def @hia (math/-inf))
+  (def @halfa (math/inf))
+  (def @mb 0)
+  (def @meanb 0.0)
+  (def @m2b 0.0)
+  (def @lob (math/inf))
+  (def @hib (math/-inf))
+  (def @halfb (math/inf))
+  (def @blk 0)
+  (while (and (%lt blk maxb)
+              (or (%lt blk minb) (not (and (< halfa ea) (< halfb eb)))))
+    (let [before-a (ga)
+          before-b (gb)]
+      (run-block block)
+      (let [after-a (ga)
+            after-b (gb)]
+        # gauge results arrive through closure values (untyped); the diverging
+        # %int? guards prove them for %sub, placed after ALL FOUR reads so
+        # nothing they do can land inside either measurement window.
+        (when (%not (%int? before-a)) (error :gauge-not-integer))
+        (when (%not (%int? before-b)) (error :gauge-not-integer))
+        (when (%not (%int? after-a)) (error :gauge-not-integer))
+        (when (%not (%int? after-b)) (error :gauge-not-integer))
+        (let [xa (/ (float (%sub after-a before-a)) (float block))
+              xb (/ (float (%sub after-b before-b)) (float block))]
+          (assign ma (%add ma 1))
+          (let [da (- xa meana)]
+            (assign meana (+ meana (/ da ma)))
+            (assign m2a (+ m2a (* da (- xa meana)))))
+          (when (< xa loa) (assign loa xa))
+          (when (> xa hia) (assign hia xa))
+          (assign
+            halfa
+            (eb-halfwidth ma (if (< ma 2) 0.0 (/ m2a (- ma 1))) (- hia loa)))
+          (assign mb (%add mb 1))
+          (let [db (- xb meanb)]
+            (assign meanb (+ meanb (/ db mb)))
+            (assign m2b (+ m2b (* db (- xb meanb)))))
+          (when (< xb lob) (assign lob xb))
+          (when (> xb hib) (assign hib xb))
+          (assign
+            halfb
+            (eb-halfwidth mb (if (< mb 2) 0.0 (/ m2b (- mb 1))) (- hib lob))))))
+    (assign blk (%add blk 1)))
+  [{:label label
+    :rate meana
+    :half halfa
+    :blocks blk
+    :ops (%mul blk block)
+    :verdict (cond
+               (< (+ meana halfa) ta) :closed
+               (> (- meana halfa) ta) :open
+               :inconclusive)}
+   {:label (string label "@" suffix)
+    :rate meanb
+    :half halfb
+    :blocks blk
+    :ops (%mul blk block)
+    :verdict (cond
+               (< (+ meanb halfb) tb) :closed
+               (> (- meanb halfb) tb) :open
+               :inconclusive)}])
+
 # ── The defect / by-design split — the instrument owns the burndown headline ──
 # Every leak class has a ROOT (F1a/F1b/F2/F3/F4/F5), declared below. A small fixed set
-# of probes read open BY DESIGN — one live-growth discriminator per gauge (object count
-# and physical id), and the sub-integer estimator self-test — and are NOT counted as
-# defects. The open/closed
+# of probes read open BY DESIGN — one live-growth discriminator per gauge (object
+# count, physical id, region count, bytes), and the sub-integer estimator
+# self-test — and are NOT counted as defects. The open/closed
 # split and the defect-vs-by-design breakdown used to be
 # recovered from this dashboard by `grep -c` minus a hand count of them; the
 # classifier below prints it directly AND refuses to be silently wrong: every
@@ -223,6 +325,8 @@
 (def @by-design
   @{"discriminator (live-growth)" true
     "id discriminator (live-growth)" true
+    "region discriminator (live-growth)" true
+    "bytes discriminator (live-growth)" true
     "sub-integer (1-in-3 retain)" true})
 (def @root-of @{})
 (defn declare-root [root labels]
@@ -262,7 +366,10 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "cancel-discard"])
+                   "denied-discard@regions" "cancel-discard" "adopt-park-drop"
+                   "adopt-park-drop@regions" "adopt-park-abort"
+                   "adopt-park-abort@regions" "adopt-park-cancel"
+                   "adopt-park-cancel@regions"])
 # `abort-tail-result` and `abort-mask-caught-literal` are CLOSED controls now
 # (undeclared, like `rest-array-copy`, so a regression to open trips the
 # completeness gate loudly rather than being absorbed back under F2). What they
@@ -379,6 +486,34 @@
 # routes the init's producer reference can take — so a regression of either trips
 # the completeness gate rather than hiding behind its sibling.
 
+# ── The dual-read table — the authority for two-dimension coverage ────
+# label → pinned region rate (shrink-only, like every pin). The runner reads a
+# listed probe on the object count AND the region count in one drive
+# (`measure-2`), pinning the region dimension under `label@regions`; the
+# completeness gate fails the run when an entry recorded no region verdict, so
+# membership cannot rot into silence (see the header's dual-read rule). The
+# initial set is the park families — the machinery that moves whole region
+# entries between fibers and frames — plus the adopt-park family, the one
+# probe set whose activation MINTS an owner node. Region declarations ride
+# `declare-root`/`@by-design` under the suffixed label, independent of the
+# object dimension's.
+(def @dual-read
+  @{"fiber-nested" 0
+    "multi-resume" 0
+    "yield-discard" 0
+    "denied-discard" 2
+    "abort-discard" 0
+    "cancel-discard" 0
+    "adopt-park-drop" 2
+    "adopt-park-abort" 2
+    "adopt-park-cancel" 2
+    "adopt-complete" 0
+    "adopt-nopark" 0
+    "plain-park-drop" 0
+    "adopt-before-park-drop" 0
+    "adopt-before-park-cancel" 0})
+(def @dual-read-seen @{})
+
 (def @n-defects 0)
 (def @n-by-design 0)
 (def @roots-seen @{})
@@ -429,6 +564,22 @@
 (def @id-disc-sink @[])
 (defn probe-id-disc [j]
   (push id-disc-sink (pair j j)))
+
+# The region gauge's own live-growth discriminator, and the byte gauge's. The
+# object-count discriminator proves nothing about either: the gauges move on
+# different events, and a region gauge frozen — or filtered down to
+# object-holding entries — would read flat for every region pin below and
+# paint each one green; a dead byte gauge likewise. The same genuine retain
+# moves both: regions never share pages, so each struct a sink keeps forever
+# is a live region entry (~1/op) holding one page (~4096 b/op). One sink EACH,
+# for the reason the id discriminator states: two gauges sharing one sink
+# would let either probe's ops satisfy the other's gate.
+(def @region-disc-sink @[])
+(defn probe-region-disc [j]
+  (push region-disc-sink {:k j}))
+(def @bytes-disc-sink @[])
+(defn probe-bytes-disc [j]
+  (push bytes-disc-sink {:k j}))
 
 # Bounded shape: an immutable struct built and immediately dropped — the
 # reclaimed baseline (the leak suite pins this at slope 0). Should read :closed.
@@ -481,6 +632,32 @@
                (string "ID GAUGE DEAD: id discriminator read "
                        (get id-disc :verdict)
                        " — every id-gauge 'closed' verdict this run is void")))
+
+# 1c. The same gate for the region gauge, which neither gate above covers.
+(def region-disc
+  (measure-core "region discriminator (live-growth)"
+                (fn [b] (run-thunk-block probe-region-disc b)) region-gauge 200
+                6 60 0.4 0.5))
+(show region-disc)
+(check (assert (= (get region-disc :verdict) :open)
+               (string "REGION GAUGE DEAD: region discriminator read "
+                       (get region-disc :verdict)
+                       " — every region-gauge 'closed' verdict this run is "
+                       "void")))
+
+# 1d. The byte gauge's gate. Epsilon and tau are sized in BYTES: a retained
+# region costs one page, so a 512 b/op floor against a 1000 b/op tau separates
+# a live gauge from a dead one with page-granular noise to spare.
+(def bytes-disc
+  (measure-core "bytes discriminator (live-growth)"
+                (fn [b] (run-thunk-block probe-bytes-disc b)) bytes-gauge 200 6
+                60 512.0 1000.0))
+(show bytes-disc)
+(check (assert (= (get bytes-disc :verdict) :open)
+               (string "BYTES GAUGE DEAD: bytes discriminator read "
+                       (get bytes-disc :verdict)
+                       " — every bytes-gauge 'closed' verdict this run is "
+                       "void")))
 
 # 2. Bounded baseline — must reclaim.
 (def bnd
@@ -976,6 +1153,55 @@
 (def emit-sig :yield)
 (def emit-error-sig :error)
 (def emit-subject (string "emit-subject"))
+# The activation-adopt scope crossed by a park. `ap-adopting-body` is the
+# capture-back-edge shape (`capture-backedge` below) with a `(yield j)` INSIDE
+# the scope enclosing the members' allocations — the adopt site is the
+# innermost structural scope enclosing every member's allocation
+# (docs/impl/region/owner.md § "Owner nodes"), so the park sits between the
+# allocations and the adopt. The members' own decrefs are suppressed under the
+# suppress ⊆ adopt contract, so a route that abandons the park holds members
+# no release table names and a node that never adopted them: the whole SCC
+# strands, on the handle drop, the abort, and the cancel alike. The set must
+# stay together, because only its gaps attribute the strand: `ap-before-body`
+# differs ONLY in the yield's position (after the scope closes, so the adopt
+# runs before the park — every abandonment route reclaims), `ap-plain-body`
+# removes the SCC, `ap-nopark-body` removes the park, and `adopt-complete`
+# removes the abandonment. The completion control also settles admission: the
+# Shared baseline leaks this cycle per call, so completion at 0 proves the
+# activation cut is active for the shape.
+(defn ap-adopting-body [j]
+  (let [root @[]
+        m @[]]
+    (let [c (fn [] (length m))]
+      (push m c)
+      (c)
+      (push root m)
+      (yield j)
+      (length root))))
+(defn ap-plain-body [j]
+  (let [root @[]
+        m @[]]
+    (push root m)
+    (yield j)
+    (length root)))
+(defn ap-nopark-body [j]
+  (let [root @[]
+        m @[]]
+    (let [c (fn [] (length m))]
+      (push m c)
+      (c)
+      (push root m)
+      (length root))))
+(defn ap-before-body [j]
+  (begin
+    (let [root @[]
+          m @[]]
+      (let [c (fn [] (length m))]
+        (push m c)
+        (c)
+        (push root m)))
+    (yield j)
+    j))
 
 # Direct-loop class. Each entry: [label (fn [j] body) rate].
 # j varies the input (faithful to the originals' loop variable i). Pins are the
@@ -1455,7 +1681,46 @@
     (fn [j]
       (let [f (fiber/new (fn [] (println "blocked")) |:error :io| :deny |:io|)]
         (fiber/resume f)
-        (get (fiber/value f) :error))) 2]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
+        (get (fiber/value f) :error))) 2]
+   # The adopt-park family and its controls — the `ap-*` defns above hold the
+   # attribution set. Open on both dimensions; the region pins live in
+   # `@dual-read`.
+   ["adopt-park-drop"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
+        (fiber/resume f))) 3]
+   ["adopt-park-abort"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
+        (fiber/resume f)
+        (protect (fiber/abort f "boom")))) 3]
+   ["adopt-park-cancel"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
+        (fiber/resume f)
+        (fiber/cancel f :dead))) 3]
+   ["adopt-complete"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
+        (fiber/resume f)
+        (fiber/resume f))) 0]
+   ["adopt-nopark"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-nopark-body j)) 1)]
+        (fiber/resume f))) 0]
+   ["plain-park-drop"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-plain-body j)) |:yield|)]
+        (fiber/resume f))) 0]
+   ["adopt-before-park-drop"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-before-body j)) |:yield|)]
+        (fiber/resume f))) 0]
+   ["adopt-before-park-cancel"
+    (fn [j]
+      (let [f (fiber/new (fn [] (ap-before-body j)) |:yield|)]
+        (fiber/resume f)
+        (fiber/cancel f :dead))) 0]  # A parked fiber hard-killed by `fiber/cancel` reclaims fully: the kill
    # frees everything the fiber owns (owner nodes, the parked signal's park
    # escape retain), and no carrier retain pins the fiber region
    # (docs/impl/region/owner.md § "Park/unpark symmetry").
@@ -1684,7 +1949,17 @@
 
 (println "── folded suite: direct-loop class ──")
 (each entry suite-classes
-  (pin (measure (get entry 0) (get entry 1) 100 6 60 0.4 0.5) (get entry 2)))
+  (let [label (get entry 0)
+        probe (get entry 1)
+        rpin (get dual-read label)]
+    (if (nil? rpin)
+      (pin (measure label probe 100 6 60 0.4 0.5) (get entry 2))
+      (let [[r rr] (measure-2 label (fn [b] (run-thunk-block probe b))
+                              count-gauge 0.4 0.5 "regions" region-gauge 0.4 0.5
+                              100 6 60)]
+        (put dual-read-seen label true)
+        (pin r (get entry 2))
+        (pin rr rpin)))))
 
 # ── Tail-call rotation ────────────────────────────────────────────────
 # The loop IS the recursion, so the run-block is the recursive call itself: one
@@ -2008,12 +2283,10 @@
 # read in one place). Each pin is the TRUE CURRENT rate, shrink-only: a fix LOWERS
 # it.
 #
-# `region-gauge` (arena/region-count) is the second heap dimension — a class can
+# These canaries read `region-gauge`, the second heap dimension — a class can
 # leak whole REGIONS without growing the object count (a native fresh-result
 # region whose contents are few). `stmt-run` drives a thunk b times as a discarded
 # STATEMENT (non-tail), the while-loop shape a per-call leak needs to surface.
-(defn region-gauge []
-  (arena/region-count))
 (defn stmt-run [thunk]
   (fn [b]
     (when (%not (%int? b)) (error :block-not-int))
@@ -3337,11 +3610,24 @@
                (string "unclassified open probe(s): " unclassified
                        " — every open probe must be a declared root or by-design "
                        "(the split ledger is stale)")))
-(check (assert (= n-by-design 3)
+# The dual-read half of the same gate: the table is the coverage authority, so
+# an entry that recorded no region verdict this run — a renamed probe, a
+# deleted block, a row added without a probe — must fail loudly rather than
+# read as coverage the dashboard does not have.
+(def @dual-unread @[])
+(each l in (keys dual-read)
+  (unless (get dual-read-seen l) (push dual-unread l)))
+(check (assert (= (length dual-unread) 0)
+               (string "dual-read entries with no region verdict this run: "
+                       dual-unread
+                       " — the coverage table names probes the runner never "
+                       "read on the region dimension")))
+(check (assert (= n-by-design 5)
                (string "by-design tally " n-by-design
-                       " ≠ 3 — the growth probes (the object-count and "
-                       "physical-id live-growth discriminators, the sub-integer "
-                       "estimator self-test) must each read open")))
+                       " ≠ 5 — the growth probes (the object-count, "
+                       "physical-id, region, and bytes live-growth "
+                       "discriminators, the sub-integer estimator self-test) "
+                       "must each read open")))
 
 (report)
 (println "oracle: ok")
