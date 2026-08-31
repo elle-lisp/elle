@@ -383,6 +383,10 @@ impl ElleHost {
             Some(_) => self.io_backend.as_ref().unwrap(),
             None => match crate::io::aio::AsyncBackend::new_with_unicode(
                 unsafe { &*self.vm }.unicode_generation(),
+                // This backend serves inline I/O for a WASM module rather than
+                // a scheduler a program parameterized, so nothing named a
+                // keepalive for it: the default stands.
+                None,
             ) {
                 Ok(be) => {
                     self.io_backend = Some(AnyBackend(Box::new(be)));

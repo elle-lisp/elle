@@ -42,6 +42,16 @@ redirects output:
 #   (println "goes to my-port, not terminal"))
 ```
 
+`*io-keepalive*` is how long an idle I/O worker thread waits for another
+operation before it retires, in seconds. `nil` takes the runtime's own
+default; `0` turns worker reuse off. A scheduler reads it when it makes
+its backend, so bind it around the `ev/run` whose I/O it should govern:
+
+```lisp
+# (parameterize ((*io-keepalive* 0))
+#   (ev/run (fn [] ...)))
+```
+
 ---
 
 ## See also

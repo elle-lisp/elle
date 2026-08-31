@@ -1,5 +1,48 @@
 use super::super::*;
 
+/// The macOS signal read leaves the thread's mask as it found it.
+///
+/// The trap: `EVFILT_SIGNAL` only fires when the kernel can pick a thread to
+/// deliver to, so the read unblocks the watched signals on its own worker. A
+/// worker runs the operations submitted after that one too, and every one of
+/// them needs the thread unselectable for delivery — so the unblock has to end
+/// with the read rather than with the thread.
+///
+/// The counter-factual: without the restore this test's second assertion is the
+/// only thing that fails. Everything the signal path itself does still works —
+/// the leak shows up in some later operation's thread being chosen for a signal
+/// nobody meant it to take.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_macos_signal_read_blocks_again_what_it_unblocked() {
+    fn blocked(signum: libc::c_int) -> bool {
+        let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, std::ptr::null(), &mut set) };
+        unsafe { libc::sigismember(&set, signum) == 1 }
+    }
+
+    // Stand this thread up as a worker does: the signal blocked to start with.
+    let mut usr1: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(&mut usr1) };
+    unsafe { libc::sigaddset(&mut usr1, libc::SIGUSR1) };
+    let mut previous: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, &usr1, &mut previous) };
+
+    {
+        let _unblocked = super::super::event::Unblocked::on_this_thread(&[libc::SIGUSR1]);
+        assert!(
+            !blocked(libc::SIGUSR1),
+            "the read must make this thread selectable for delivery"
+        );
+    }
+    assert!(
+        blocked(libc::SIGUSR1),
+        "the read must block again what it unblocked"
+    );
+
+    unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut()) };
+}
+
 /// Bounds for a signal read in a forked child. Every case here sends the signal
 /// it waits for, so the deadline is only there to make a regression a failed
 /// assertion rather than a child that hangs until the parent's own timeout.

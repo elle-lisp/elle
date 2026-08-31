@@ -171,8 +171,10 @@ process killer.
    `pthread_sigmask`-unblocking the watched signals on the
    threadpool worker thread that calls `kevent()`. The kernel picks
    that worker as the delivery target, runs the no-op, and the
-   knote activates so `kevent()` returns. None of this is visible to
-   Lisp.
+   knote activates so `kevent()` returns. The unblock lasts for that
+   read alone: a worker runs the operations submitted after it too,
+   and every other one needs the thread unselectable for delivery.
+   None of this is visible to Lisp.
 
 `(os/sig-mask)` always reflects the actual `pthread_sigmask` on the
 calling thread — i.e. the main thread (and other elle-spawned
@@ -223,7 +225,7 @@ kernel fd based on platform and CLI flags:
 | Platform | Default | `--no-uring` |
 |----------|---------|--------------|
 | Linux | `IORING_OP_READ` on the signalfd, via the dedicated `submit_uring_sig_next` SQE helper. The read is queued on the io_uring instance and the kernel completes a CQE when one or more `signalfd_siginfo` records become available. No worker thread is involved on the elle side. | The threadpool worker waits for the signalfd and for the operation's stop pipe together, then `read(2)`s the signalfd. Uses one OS thread per outstanding `os/sig-next`, given back when the read completes or is cancelled. |
-| macOS | n/a — io_uring is Linux-only | A threadpool worker waits for the kqueue and the stop pipe together, then calls `kevent()` with a zero timeout on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker temporarily `pthread_sigmask`-unblocks the watched signals on itself so the kernel can pick it as the delivery target (see "macOS: per-receive worker unblock + no-op handler" above). |
+| macOS | n/a — io_uring is Linux-only | A threadpool worker waits for the kqueue and the stop pipe together, then calls `kevent()` with a zero timeout on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker `pthread_sigmask`-unblocks the watched signals on itself for that read so the kernel can pick it as the delivery target, and blocks them again before it takes another operation (see "macOS: per-receive worker unblock + no-op handler" above). |
 
 The threadpool path on Linux is exercised only when `--no-uring` is
 passed on the CLI or `io_uring_setup(2)` fails on the host kernel

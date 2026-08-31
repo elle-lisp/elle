@@ -75,6 +75,39 @@
 (let [[ok? _] (protect ((fn () (io/backend :invalid))))]
   (assert (not ok?) "io/backend :invalid errors"))
 
+# === worker keepalive ===
+#
+# The second argument is how long an idle I/O worker waits for another
+# operation before it retires, in seconds; nil takes the runtime's default and
+# 0 turns reuse off. Nothing a program can observe distinguishes the crews —
+# `io/workers` counts operations, not threads — so what is asserted here is
+# that each form is accepted, refused, and still does the I/O it was given.
+
+(assert (parameter? *io-keepalive*) "*io-keepalive* is a parameter")
+(assert (nil? (*io-keepalive*)) "*io-keepalive* defaults to the runtime's own")
+
+(assert (io-backend? (io/backend :async nil)) "nil keepalive builds a backend")
+(assert (io-backend? (io/backend :async 0)) "a zero keepalive builds a backend")
+(assert (io-backend? (io/backend :async 0.25))
+        "a fractional keepalive builds a backend")
+
+(let [[ok? _] (protect ((fn () (io/backend :async "soon"))))]
+  (assert (not ok?) "a keepalive that is not a number errors"))
+(let [[ok? _] (protect ((fn () (io/backend :async -1))))]
+  (assert (not ok?) "a negative keepalive errors"))
+
+# A scheduler reads the parameter when it makes its backend, so this whole
+# program's I/O runs on a crew that retires every worker at once.
+(assert (= "reuse off"
+           (parameterize ((*io-keepalive* 0))
+             (ev/run (fn []
+                       (with-temp-dir dir
+                                      (let [fpath (path/join dir "keepalive")]
+                                        (spit fpath "reuse off")
+                                        (string (port/read-all (port/open fpath
+                                        :read)))))))))
+        "I/O works with worker reuse turned off")
+
 # === stream I/O ===
 
 (with-temp-dir dir

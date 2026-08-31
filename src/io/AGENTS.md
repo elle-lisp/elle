@@ -22,7 +22,8 @@ to a backend for execution.
 | `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
 | `threadpool.rs` | `CompletionHub` (the one shared completion channel), `RawCompletion`, `PoolOp`, `PoolCompletion`, `StdinThread` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
 | `threadpool/opbound.rs` | `Bounds` and `OpBound` — the declared and the live half of one operation's bound — plus `Wake`, the stop pipe, `take_when_ready` and `pace_retry`. |
-| `threadpool/submitop.rs` | `CompletionHub::submit`: spawn the worker, run the operation, publish the result. The `match` there names each operation's runner and the descriptor its bound watches. |
+| `threadpool/submitop.rs` | `CompletionHub::submit`: hand the operation to a worker, run it, publish the result. The `match` there names each operation's runner and the descriptor its bound watches. |
+| `threadpool/pool.rs` | `WorkerPool`, `Crew` and `Job` — the parked workers' handoffs, and the choice between handing a job to one of them and starting a thread. See § "How a worker is reused". |
 | `threadpool/{stream,net,event,child,open}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open. |
 | `uring.rs` | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
 | `eventfd.rs` | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
@@ -122,7 +123,7 @@ Typed thread-pool submission and completion:
   cooked `Completion` (the cook fns need main-thread `pending`/`fd_states`/
   `buffer_pool`/`origin_heap`), so it sends its raw result; the receiver matches
   once and dispatches to `pool_to_completion` / `stdin_to_completion`.
-- `CompletionHub { sender, receiver, in_flight, eventfd }` — the **one** completion
+- `CompletionHub { sender, receiver, in_flight, eventfd, stops, pool }` — the **one** completion
   channel all background work feeds: every thread-pool worker and the stdin worker
   holds a `Sender<RawCompletion>` clone. Collapsing the former platform-pool,
   network-pool, and stdin channels into one means the scheduler's blocking wait
@@ -133,7 +134,8 @@ Typed thread-pool submission and completion:
   cancelled op's reaped completion still decrements; `io/cancel` must not also
   decrement). `eventfd` is the Linux/uring bridge fd (`None` on the pool-only
   platforms) a worker writes after `send` so the ring's single wait observes the
-  edge.
+  edge. `stops` is the write end of each submitted operation's stop pipe, by id.
+  `pool` is the crew that runs the operations — see § "How a worker is reused".
 
 ### ConnectAddr
 
@@ -546,22 +548,105 @@ exit cleanly. Pinned by `closing_a_listener_ends_its_parked_pool_accept`
 
 ### How many operations run at once
 
-The OS decides. A pool operation is one `std::thread::Builder::spawn`, so
-the ceiling is `RLIMIT_NPROC`, `kernel.threads-max` and the memory for the
-stacks — limits the operator set, on a machine the runtime cannot survey.
+The OS decides. A pool operation runs on a worker thread, and a thread is
+started whenever no idle worker is there to take the job, so the ceiling is
+`RLIMIT_NPROC`, `kernel.threads-max` and the memory for the stacks — limits
+the operator set, on a machine the runtime cannot survey.
 `Builder::spawn` rather than `thread::spawn` is what makes deferring to
 them possible: `thread::spawn` panics when the OS refuses, while a
 `Builder` refusal becomes the error `io/submit` returns and the calling
 fiber can handle.
 
+Nothing caps the count, and nothing may. An operation can wait for an event
+outside this process — an accept nobody connects to, a read whose peer never
+writes — and such an operation ends only through its deadline or its stop
+pipe. Under a cap the next submission would queue behind that wait, and the
+fiber that would issue the write ending it is a fiber the cap is holding up.
+So the crew grows to whatever is asked of it.
+
 `io/workers` reports how many operations are submitted and not yet reaped
-— the threads out right now — and `ev/report` carries it as `:workers`.
-That is a measurement, not a budget: nothing consults it to decide whether
-a submission may proceed.
+— the workers busy right now, not the ones parked waiting for work — and
+`ev/report` carries it as `:workers`. That is a measurement, not a budget:
+nothing consults it to decide whether a submission may proceed.
 
 io_uring has no equivalent count. Its operations run in the kernel, so
 `workers()` is zero there and the only limit is the 256-entry submission
 queue, which drains as it is submitted.
+
+### How a worker is reused
+
+A worker that finishes an operation waits for another instead of exiting, so
+the next submission costs a channel send rather than a thread. `WorkerPool`
+(`threadpool/pool.rs`) is the crew and the handoffs that reach it.
+What reuse buys is wall clock under contention: starting and tearing down a
+thread costs kernel work that scales with how many elle processes are doing it
+at once, while the operation itself costs the same either way.
+
+Each parked worker posts a **handoff** — a channel of its own — and a
+submission takes one out of the list and sends the job through it, or starts a
+thread when the list is empty. A worker leaves only by withdrawing its own
+handoff under the same lock, so a claimed worker is committed to the job it was
+handed. That is what keeps the handover from becoming the cap the section above
+forbids: a job never waits behind a parked operation, because a job is only
+ever handed to a worker that is already waiting for one.
+
+**A worker sleeps rather than spins, and that is measured.** The handoff is a
+condition variable, not a channel, because a channel receiver spins before it
+sleeps and this wait happens once per operation. Where there are more cores
+than threads that spin is free and often saves the sleep; where there are
+fewer, it burns the cores the rest of the program is waiting for. On a
+three-core runner the channel cost the heaviest corpus files **twice the user
+CPU** they cost with no pool at all — 2.4s → 5.5s on one of them — while the
+same files on a thirty-two-core box were unchanged either way. That is the
+whole reason this is a `Condvar` and a slot rather than four lines of
+crossbeam, and why a machine with spare cores cannot measure it.
+
+**The list is a stack.** A submission takes the worker that parked most
+recently: it is the one still warm, and the workers the traffic no longer
+reaches sit at the bottom and age out of the keepalive instead of being woken
+in turn. This is a reasoned default rather than a measured win — the wake order
+was not what the three-core runner was punishing — but it is the order the crew
+is built on, so a test pins it.
+
+A worker that parks for the keepalive without being handed a job retires, so a
+program that stops doing I/O stops paying for threads. It retires only if it can
+withdraw its own handoff. Finding nothing to withdraw means a submission took it
+already and a job is on its way, so the worker waits on without a deadline
+rather than leaving and stranding it. Under the stack, the workers that age out
+this way are the ones the traffic no longer reaches.
+
+The keepalive is the program's, not the process's: `*io-keepalive*` binds the
+seconds, a scheduler reads that parameter when it builds its backend, and
+`(io/backend :async k)` carries it to the hub. `nil` takes `DEFAULT_KEEPALIVE`,
+which is where the default number and the two costs it trades off are written
+down. `0` retires a worker as soon as it has nothing to do — the
+counter-factual switch, one thread per operation, and what makes the difference
+reuse buys measurable rather than asserted. Two schedulers in one process can
+answer differently, so this is a parameter rather than a dialect.
+
+Pinned by `a_backend_takes_the_keepalive_it_was_given`
+(`src/io/aio/tests/backend.rs`) for the path from the argument to the crew, and
+by `tests/elle/io.lisp` § "worker keepalive" for the parameter and the forms
+`io/backend` accepts.
+
+Dropping the backend drops every posted handoff, so each parked worker's wait
+reports the disconnect, and it sets the flag that a worker still running an
+operation reads when it goes to park. The crew winds down on both paths with
+nothing to join.
+
+A worker outlives the operations it runs, so what an operation does to its
+thread must not survive it. Blocking every asynchronous signal is therefore
+what a worker is started with rather than what each job does
+(`mask_all_signals_on_this_thread`), and the one operation that needs a
+different mask — the macOS `EVFILT_SIGNAL` read, which must be selectable for
+delivery — puts back what it found
+(`the_macos_signal_read_blocks_again_what_it_unblocked`,
+`src/io/threadpool/tests/signals.rs`).
+
+Pinned by `src/io/threadpool/tests/pool.rs`: a second submission runs on the
+first one's thread, the next job goes to the worker that parked last, a parked
+operation delays no other submission, an idle worker retires, and a zero
+keepalive gives every operation its own thread.
 
 ## One id, one operation
 

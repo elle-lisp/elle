@@ -97,19 +97,13 @@ pub(super) fn kq_sig_read(
         trace,
         format_args!("macos: kq_sig_read entered kq={} signals={:?}", kq, signals),
     );
-    // Unblock the watched signals on this thread for the lifetime of the
-    // worker. The worker is single-use (each PoolOp spawns a fresh thread that
-    // exits after sending the completion), so we don't restore on return.
-    let mut to_unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
-    unsafe { libc::sigemptyset(&mut to_unblock) };
-    for &s in signals {
-        unsafe { libc::sigaddset(&mut to_unblock, s) };
-    }
-    let unblock_ret =
-        unsafe { libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut()) };
+    // Unblock the watched signals on this thread for this read, and no longer:
+    // a worker runs the operations that come after this one too, and every
+    // other operation needs the thread unselectable for delivery.
+    let unblocked = Unblocked::on_this_thread(signals);
     posix_trace(
         trace,
-        format_args!("macos: kq_sig_read SIG_UNBLOCK ret={}", unblock_ret),
+        format_args!("macos: kq_sig_read SIG_UNBLOCK ret={}", unblocked.ret),
     );
 
     let mut eventlist: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
@@ -130,6 +124,38 @@ pub(super) fn kq_sig_read(
         data.extend_from_slice(&count.to_le_bytes());
     }
     (data.len() as i32, data)
+}
+
+/// A set of signals this thread has unblocked, blocked again when dropped.
+///
+/// Restoring is a plain `SIG_BLOCK` of the same set because a worker starts
+/// with every asynchronous signal blocked (`mask_all_signals_on_this_thread`),
+/// so blocking what this unblocked is exactly the mask it found.
+#[cfg(target_os = "macos")]
+pub(super) struct Unblocked {
+    set: libc::sigset_t,
+    /// What `pthread_sigmask` reported, for the operation's trace.
+    ret: libc::c_int,
+}
+
+#[cfg(target_os = "macos")]
+impl Unblocked {
+    pub(super) fn on_this_thread(signals: &[libc::c_int]) -> Self {
+        let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigemptyset(&mut set) };
+        for &s in signals {
+            unsafe { libc::sigaddset(&mut set, s) };
+        }
+        let ret = unsafe { libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut()) };
+        Unblocked { set, ret }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Unblocked {
+    fn drop(&mut self) {
+        unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, &self.set, std::ptr::null_mut()) };
+    }
 }
 
 /// Take one batch of events from `kq` under the operation's bound.

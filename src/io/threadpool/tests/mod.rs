@@ -1,6 +1,7 @@
 // Unit tests for the threadpool backend, split by concern:
 //   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
 //   - `opbound`:  the per-operation timeout bound, on a pipe
+//   - `pool`:     worker reuse: the crew's handover, growth, and retirement
 //   - `process`:  ProcessWait completion encoding
 //   - `openfile`: Open op fd/errno results
 //   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
@@ -8,6 +9,7 @@
 mod hub;
 mod opbound;
 mod openfile;
+mod pool;
 mod process;
 mod signals;
 mod stdin;

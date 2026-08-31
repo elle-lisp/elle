@@ -220,9 +220,16 @@ mod opbound;
 pub(super) use opbound::Bounds;
 use opbound::*;
 
-// `submitop` is the frame every operation shares — spawn, run, publish. The
-// rest are the runners it dispatches to, grouped by what they wait on.
+// `submitop` is the frame every operation shares — hand over, run, publish.
+// The rest are the runners it dispatches to, grouped by what they wait on.
 mod submitop;
+
+mod pool;
+/// The wait a backend that named no keepalive of its own takes, so a test can
+/// tell "the default" from a value a caller asked for.
+#[cfg(test)]
+pub(in crate::io) use pool::DEFAULT_KEEPALIVE;
+use pool::{Job, WorkerPool};
 
 mod child;
 mod event;
@@ -247,9 +254,9 @@ pub(super) struct CompletionHub {
     ///
     /// Two readers, and neither caps anything: `AsyncBackend::wait` asks whether
     /// there is any worker out before it blocks on the channel, and `io/workers`
-    /// reports it. Concurrency is uncapped by design — `submit` spawns a thread
-    /// per operation and lets the OS say how many may run (see its doc), so
-    /// there is no cap for this count to enforce.
+    /// reports it. Concurrency is uncapped by design — the pool starts a worker
+    /// whenever none is free and lets the OS say how many may run (see
+    /// `WorkerPool`), so there is no cap for this count to enforce.
     in_flight: usize,
     /// Linux/uring bridge fd. `None` on the pool-only platforms, where the hub
     /// channel is itself the sole waitable. When `Some`, a worker writes it
@@ -260,10 +267,23 @@ pub(super) struct CompletionHub {
     /// ends the operation without disturbing the descriptor — which a port the
     /// caller still holds would not survive.
     stops: HashMap<u64, RawFd>,
+    /// The worker threads the operations run on. A finished worker parks here
+    /// for the next submission instead of ending, and the pool starts a thread
+    /// only when none is parked.
+    pool: WorkerPool,
 }
 
 impl CompletionHub {
+    /// A hub whose workers wait `DEFAULT_KEEPALIVE` for another job. This is
+    /// what a backend that was given no keepalive of its own takes.
     pub(super) fn new() -> Self {
+        Self::with_keepalive(pool::DEFAULT_KEEPALIVE)
+    }
+
+    /// A hub whose workers retire after `keepalive` without a job — what the
+    /// program asked for through `*io-keepalive*`, and what a test that wants
+    /// to watch a worker retire names rather than sitting out the default.
+    pub(super) fn with_keepalive(keepalive: Duration) -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
         CompletionHub {
             sender,
@@ -271,6 +291,7 @@ impl CompletionHub {
             in_flight: 0,
             eventfd: None,
             stops: HashMap::new(),
+            pool: WorkerPool::new(keepalive),
         }
     }
 
@@ -329,6 +350,13 @@ impl CompletionHub {
     /// True when any pool/stdin op is submitted-but-unreaped.
     pub(super) fn in_flight(&self) -> usize {
         self.in_flight
+    }
+
+    /// How long this hub's workers wait for another job before retiring. The
+    /// test that pins `*io-keepalive*` reaching the crew reads it here.
+    #[cfg(test)]
+    pub(crate) fn keepalive(&self) -> Duration {
+        self.pool.keepalive()
     }
 
     /// Account one submitted worker op (a pool submit or a stdin request).

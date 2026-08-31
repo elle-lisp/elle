@@ -101,17 +101,30 @@ impl AsyncBackend {
     ///
     /// On Linux with the `io-uring` feature, attempts io_uring first.
     /// Falls back to thread-pool on failure or on non-Linux platforms.
-    /// Uses the process-default Unicode generation; a backend serving a VM
-    /// with an explicit generation is built via [`Self::new_with_unicode`].
+    /// Uses the process-default Unicode generation and the default worker
+    /// keepalive; a backend serving a VM with an explicit generation, or a
+    /// program that asked for a keepalive of its own, is built via
+    /// [`Self::new_with_unicode`].
     pub fn new() -> Result<Self, String> {
-        Self::new_with_unicode(crate::config::get().unicode_generation())
+        Self::new_with_unicode(crate::config::get().unicode_generation(), None)
     }
 
     /// Create a new async backend serving a VM with the given Unicode
     /// generation.
-    pub fn new_with_unicode(gen: crate::segment::Generation) -> Result<Self, String> {
+    ///
+    /// `keepalive` is how long an idle pool worker waits for another operation
+    /// before it retires — what the submitting program bound `*io-keepalive*`
+    /// to. `None` takes `DEFAULT_KEEPALIVE`. It reaches the pool platform only;
+    /// io_uring runs its operations in the kernel and keeps no workers.
+    pub fn new_with_unicode(
+        gen: crate::segment::Generation,
+        keepalive: Option<Duration>,
+    ) -> Result<Self, String> {
         let mut platform = Self::create_platform_backend();
-        let mut hub = CompletionHub::new();
+        let mut hub = match keepalive {
+            Some(d) => CompletionHub::with_keepalive(d),
+            None => CompletionHub::new(),
+        };
         // On the uring platform, wire the eventfd bridge: a hub worker raises
         // the eventfd after publishing, and a standing POLL_ADD on the ring
         // turns that edge into a CQE so the scheduler's single io_uring wait
@@ -150,6 +163,15 @@ impl AsyncBackend {
     /// comes up with.
     #[cfg(test)]
     pub(crate) fn new_thread_pool() -> Result<Self, String> {
+        Self::new_thread_pool_with_keepalive(None)
+    }
+
+    /// A thread-pool backend whose workers retire after `keepalive` without a
+    /// job, as `*io-keepalive*` asks of one. `None` takes the default.
+    #[cfg(test)]
+    pub(crate) fn new_thread_pool_with_keepalive(
+        keepalive: Option<Duration>,
+    ) -> Result<Self, String> {
         Ok(AsyncBackend {
             inner: RefCell::new(AsyncBackendInner {
                 unicode_generation: crate::config::get().unicode_generation(),
@@ -160,7 +182,10 @@ impl AsyncBackend {
                 buffer_pool: BufferPool::new(),
                 stdin_thread: None,
                 platform: PlatformBackend::ThreadPool,
-                hub: CompletionHub::new(),
+                hub: match keepalive {
+                    Some(d) => CompletionHub::with_keepalive(d),
+                    None => CompletionHub::new(),
+                },
                 origin_heap: std::ptr::null_mut(),
                 submitter: crate::io::pending::Submitter::detached(std::ptr::null_mut()),
             }),
@@ -234,6 +259,13 @@ impl AsyncBackend {
     #[cfg(all(target_os = "linux", test))]
     pub(crate) fn is_uring(&self) -> bool {
         matches!(self.inner.borrow().platform, PlatformBackend::Uring(_))
+    }
+
+    /// How long this backend's idle pool workers wait for another operation
+    /// before retiring — what `*io-keepalive*` asked for, or the default.
+    #[cfg(test)]
+    pub(crate) fn keepalive(&self) -> Duration {
+        self.inner.borrow().hub.keepalive()
     }
 
     /// The ids of every operation still in flight, ascending. Tests pin the
