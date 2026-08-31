@@ -33,19 +33,59 @@ fn prim_is_io_backend(
     )
 }
 
-/// (io/backend kind) → backend
+/// A span of seconds an argument names, as an int or a float.
+///
+/// Three primitives take one — `ev/sleep`, `ev/poll-fd` and `io/backend` — and
+/// all three refuse the same values: not a number, negative, or infinite. The
+/// error names the caller and its kind, so a refusal reads as that primitive's.
+fn seconds(value: &Value, what: &str) -> Result<std::time::Duration, (&'static str, String)> {
+    let secs = if let Some(n) = value.as_int() {
+        n as f64
+    } else if let Some(f) = value.as_float() {
+        f
+    } else {
+        return Err((
+            "type-error",
+            format!("{}: expected a number of seconds", what),
+        ));
+    };
+    if secs < 0.0 || !secs.is_finite() {
+        return Err((
+            "argument-error",
+            format!("{}: seconds must be finite and non-negative", what),
+        ));
+    }
+    Ok(std::time::Duration::from_secs_f64(secs))
+}
+
+/// `(io/backend kind)` or `(io/backend kind keepalive)` → backend
+///
+/// `keepalive` is how long an idle worker thread waits for another operation
+/// before it retires, in seconds — what the program bound `*io-keepalive*` to.
+/// `nil` (or a call that omits it) takes the runtime's own default. It reaches
+/// the thread-pool platform only; io_uring keeps no workers to retire.
 fn prim_io_backend(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    match args[0].as_keyword_name().as_deref() {
-        Some("async") => match AsyncBackend::new_with_unicode(ctx.unicode_generation()) {
-            Ok(backend) => {
-                let any = AnyBackend(Box::new(backend));
-                (SIG_OK, ctx.external("io-backend", any))
-            }
-            Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
+    let keepalive = match args.get(1) {
+        None => None,
+        Some(v) if v.is_nil() => None,
+        Some(v) => match seconds(v, "io/backend") {
+            Ok(d) => Some(d),
+            Err((kind, msg)) => return (SIG_ERROR, ctx.error(kind, msg)),
         },
+    };
+    match args[0].as_keyword_name().as_deref() {
+        Some("async") => {
+            match AsyncBackend::new_with_unicode(ctx.unicode_generation(), keepalive) {
+                Ok(backend) => {
+                    let any = AnyBackend(Box::new(backend));
+                    (SIG_OK, ctx.external("io-backend", any))
+                }
+                Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
+            }
+        }
         Some("mock") => {
             let any = AnyBackend(Box::new(MockBackend::new()));
             (SIG_OK, ctx.external("io-backend", any))
@@ -227,32 +267,10 @@ fn prim_ev_sleep(
     args: &[Value],
 ) -> (SignalBits, Value) {
     use crate::io::request::IoOp;
-    use std::time::Duration;
 
-    let duration = if let Some(n) = args[0].as_int() {
-        if n < 0 {
-            return (
-                SIG_ERROR,
-                ctx.error("argument-error", "ev/sleep: duration must be non-negative"),
-            );
-        }
-        Duration::from_secs(n as u64)
-    } else if let Some(f) = args[0].as_float() {
-        if f < 0.0 || !f.is_finite() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "argument-error",
-                    "ev/sleep: duration must be a finite non-negative number",
-                ),
-            );
-        }
-        Duration::from_secs_f64(f)
-    } else {
-        return (
-            SIG_ERROR,
-            ctx.error("type-error", "ev/sleep: argument must be a number"),
-        );
+    let duration = match seconds(&args[0], "ev/sleep") {
+        Ok(d) => d,
+        Err((kind, msg)) => return (SIG_ERROR, ctx.error(kind, msg)),
     };
 
     (SIG_IO, IoRequest::portless(ctx, IoOp::Sleep { duration }))
@@ -267,8 +285,6 @@ fn prim_ev_poll_fd(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    use std::time::Duration;
-
     let fd = match args[0].as_int() {
         Some(n) if n >= 0 => n as std::os::unix::io::RawFd,
         _ => {
@@ -305,32 +321,10 @@ fn prim_ev_poll_fd(
     };
 
     let timeout = if args.len() == 3 {
-        let secs = if let Some(n) = args[2].as_int() {
-            if n < 0 {
-                return (
-                    SIG_ERROR,
-                    ctx.error("argument-error", "ev/poll-fd: timeout must be non-negative"),
-                );
-            }
-            n as f64
-        } else if let Some(f) = args[2].as_float() {
-            if f < 0.0 || !f.is_finite() {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "argument-error",
-                        "ev/poll-fd: timeout must be a finite non-negative number",
-                    ),
-                );
-            }
-            f
-        } else {
-            return (
-                SIG_ERROR,
-                ctx.error("type-error", "ev/poll-fd: timeout must be a number"),
-            );
-        };
-        Some(Duration::from_secs_f64(secs))
+        match seconds(&args[2], "ev/poll-fd") {
+            Ok(d) => Some(d),
+            Err((kind, msg)) => return (SIG_ERROR, ctx.error(kind, msg)),
+        }
     } else {
         None
     };
@@ -360,9 +354,9 @@ primitive! {
     }
     "io/backend" => prim_io_backend {
         signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Create an I/O backend. :async for asynchronous, :mock for testing.",
-        params: &["kind"],
+        arity: Arity::Range(1, 2),
+        doc: "Create an I/O backend. :async for asynchronous, :mock for testing. Optional second arg is the worker keepalive in seconds (nil for the default): how long an idle I/O worker thread waits for another operation before it retires.",
+        params: &["kind", "keepalive"],
         category: "io",
         example: "(io/backend :async)",
         effect: RegionEffect::Fresh,

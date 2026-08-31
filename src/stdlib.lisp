@@ -1705,6 +1705,13 @@
 (def *scheduler* (make-parameter nil))
 (def *io-backend* (make-parameter nil))
 
+## How long an idle I/O worker thread waits for another operation before it
+## retires, in seconds. nil takes the runtime's default; 0 turns worker reuse
+## off, so every operation starts and ends a thread of its own. A scheduler
+## reads this when it makes its backend, so bind it around the `ev/run` whose
+## I/O it should govern.
+(def *io-keepalive* (make-parameter nil))
+
 ## ── Output ──────────────────────────────────────────────────────────
 
 (defn print [& args]
@@ -1745,7 +1752,7 @@
    :spawn — (fn [fiber]) registers fiber for async execution.
    :pump — (fn []) pumps event loop until all fibers complete.
    :shutdown — (fn [timeout-ms]) signal shutdown; pump-fn executes it."
-  (let [backend (io/backend :async)
+  (let [backend (io/backend :async (*io-keepalive*))
         runnable @[]
         pending @{}  # id → fiber (I/O submissions)
         fiber-io @{}  # fiber → id (reverse lookup for io/cancel)
@@ -2758,6 +2765,7 @@
    :*spawn* *spawn*
    :*scheduler* *scheduler*
    :*io-backend* *io-backend*
+   :*io-keepalive* *io-keepalive*
    :ev/spawn ev/spawn
    :make-async-scheduler make-async-scheduler
    :ev/run ev/run

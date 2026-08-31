@@ -6,6 +6,34 @@ fn test_async_backend_new() {
     assert!(backend.is_ok());
 }
 
+/// The keepalive a program names reaches the crew that reads it.
+///
+/// `(io/backend :async k)` is the whole path from `*io-keepalive*` to the
+/// worker that parks: the primitive turns the seconds into a `Duration`, the
+/// backend hands it to the hub, and the hub's pool is what waits. Nothing a
+/// completion carries reports the wait, so the plumbing is pinned here and the
+/// behavior it buys is pinned in `src/io/threadpool/tests/pool.rs`.
+///
+/// The counter-factual: a backend that dropped the argument and built its hub
+/// with `CompletionHub::new()` passes every other test in this file.
+#[test]
+fn a_backend_takes_the_keepalive_it_was_given() {
+    let named = AsyncBackend::new_thread_pool_with_keepalive(Some(Duration::from_millis(250)))
+        .expect("a pool backend");
+    assert_eq!(named.keepalive(), Duration::from_millis(250));
+
+    let off =
+        AsyncBackend::new_thread_pool_with_keepalive(Some(Duration::ZERO)).expect("a pool backend");
+    assert!(off.keepalive().is_zero(), "zero turns worker reuse off");
+
+    let unnamed = AsyncBackend::new_thread_pool().expect("a pool backend");
+    assert_eq!(
+        unnamed.keepalive(),
+        crate::io::threadpool::DEFAULT_KEEPALIVE,
+        "a backend given no keepalive takes the default"
+    );
+}
+
 #[test]
 fn test_submit_returns_monotonic_ids() {
     crate::value::arena::with_test_region(|| {

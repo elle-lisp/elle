@@ -1,7 +1,7 @@
 use super::*;
 
 impl CompletionHub {
-    /// Submit a blocking I/O operation on a background worker thread; the worker
+    /// Submit a blocking I/O operation to a background worker thread; the worker
     /// reports its result back through the hub channel as a `RawCompletion::Pool`.
     ///
     /// `bounds` is how long the operation may wait and how `io/cancel` ends it.
@@ -10,13 +10,11 @@ impl CompletionHub {
     /// `src/io/AGENTS.md` § "The stop pipe" for the two conditions that decide
     /// which kind an operation needs.
     ///
-    /// How many operations may run at once is the OS's to say. The worker is
-    /// started with `Builder::spawn` rather than `thread::spawn` for exactly
-    /// that reason: `thread::spawn` panics when the OS refuses a thread, and a
-    /// refusal is something the calling fiber can be told about and handle.
-    /// So the ceiling here is `RLIMIT_NPROC`, `threads-max` and the memory for
-    /// the stacks — the limits the operator set — reported where they bind
-    /// rather than guessed at in advance.
+    /// How many operations may run at once is the OS's to say: the pool hands
+    /// the job to a worker that is already there or starts one, and the ceiling
+    /// is `RLIMIT_NPROC`, `threads-max` and the memory for the stacks — the
+    /// limits the operator set — reported where they bind rather than guessed
+    /// at in advance.
     pub(in crate::io) fn submit(
         &mut self,
         id: SubmissionId,
@@ -27,43 +25,28 @@ impl CompletionHub {
         // travels with it so the completion can be checked against the entry the
         // id resolves through — a submission table that has drifted is then a
         // report rather than a wrong-arm free (see `OpKind`).
-        let raw_id = id.as_u64();
-        let kind = op.kind();
-        let sender = self.sender();
-        let eventfd = self.eventfd();
-        let started = std::thread::Builder::new().spawn(move || {
-            let id = raw_id;
-            // Block every asynchronous signal on this worker so the kernel
-            // never selects it as the delivery target for a watched POSIX
-            // signal. The fault set stays deliverable.
-            // See src/io/sigfd.rs and docs/posix-signals.md.
-            crate::io::sigfd::mask_all_signals_on_this_thread();
-            let (result_code, data) = run(op, bounds);
-            publish_completion(
-                &sender,
-                eventfd,
-                RawCompletion::Pool(PoolCompletion {
-                    id,
-                    kind,
-                    result_code,
-                    data,
-                }),
-            );
-        });
-        match started {
-            Ok(_) => {
-                // Counted only once the worker exists, so a refused spawn
+        let job = Job {
+            id: id.as_u64(),
+            kind: op.kind(),
+            op,
+            bounds,
+            sender: self.sender(),
+            eventfd: self.eventfd(),
+        };
+        match self.pool.run(job) {
+            Ok(()) => {
+                // Counted only once a worker has the job, so a refused spawn
                 // leaves nothing behind to reap. Nothing can reap between the
                 // two either: the drain runs on this thread.
                 self.note_submit();
                 Ok(())
             }
             Err(e) => {
-                // A refused spawn drops the closure it was given, and the
-                // `Bounds` inside close the stop pipe's read end with them. The
-                // write end is the hub's, so retire it here.
+                // A refused spawn drops the job it was given, and the `Bounds`
+                // inside close the stop pipe's read end with them. The write
+                // end is the hub's, so retire it here.
                 self.forget_stop(id);
-                Err(format!("async I/O: cannot start a worker thread: {}", e))
+                Err(e)
             }
         }
     }
@@ -81,7 +64,7 @@ impl CompletionHub {
 /// `Task` and `Resolve` take no bound because nothing can bound them; their
 /// submissions say so with `Bounds::uninterruptible`, and dropping the bounds
 /// here is what disposes of them.
-fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
+pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
         PoolOp::Read { fd, size } => stream::read(OpBound::new(fd, bounds), fd, size),
         PoolOp::ReadExact {

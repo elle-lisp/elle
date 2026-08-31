@@ -68,10 +68,10 @@ teardown sweep, after the sweep had freed part of what it holds.
 timer's, whichever lost — so cancellation runs constantly rather than at
 the edges. Two things come back when it does, on either backend:
 
-- **The worker.** A thread-pool operation runs on an OS thread. A
-  cancelled operation reports completion like any other, so its thread is
-  released; only the result is thrown away. `(ev/report):workers` counts
-  the threads currently out.
+- **The worker.** A thread-pool operation runs on a worker thread. A
+  cancelled operation reports completion like any other, so its worker
+  goes back to the pool for the next operation; only the result is thrown
+  away. `(ev/report):workers` counts the operations out right now.
 - **The descriptor.** A cancelled read stops rather than going on
   reading, and so does a cancelled write whose peer stopped taking bytes.
   Whatever arrives next belongs to whoever reads the port next:
@@ -96,14 +96,31 @@ the edges. Two things come back when it does, on either backend:
 ### How many operations run at once
 
 However many the OS allows. The thread-pool backend runs each operation
-on its own thread, so the ceiling is `RLIMIT_NPROC`, `kernel.threads-max`
-and the memory for the stacks; when the OS refuses a thread, `port/read`
-and friends signal that refusal rather than the runtime pre-empting it
-with a smaller number of its own. io_uring runs its operations in the
-kernel and has no such ceiling.
+on a worker thread and starts one whenever no worker is free, so the
+ceiling is `RLIMIT_NPROC`, `kernel.threads-max` and the memory for the
+stacks; when the OS refuses a thread, `port/read` and friends signal that
+refusal rather than the runtime pre-empting it with a smaller number of
+its own. io_uring runs its operations in the kernel and has no such
+ceiling.
 
-`(io/workers backend)` reports how many worker threads a backend has out,
-and `ev/report` carries the running scheduler's count as `:workers`.
+A worker that finishes an operation waits for the next one instead of
+exiting, and retires after ten idle seconds. So a program that keeps
+asking for I/O pays for a thread once rather than per operation, and one
+that stops asking stops paying.
+
+`*io-keepalive*` is that wait, in seconds. A scheduler reads it when it
+makes its backend, so bind it around the `ev/run` whose I/O it should
+govern; `0` turns reuse off, and every operation then starts and ends a
+thread of its own.
+
+```lisp
+# (parameterize ((*io-keepalive* 0))
+#   (ev/run (fn [] ...)))    # a thread per operation, nothing kept
+```
+
+`(io/workers backend)` reports how many operations a backend has out —
+the workers busy right now, not the ones waiting for work — and
+`ev/report` carries the running scheduler's count as `:workers`.
 
 ## Ports
 
