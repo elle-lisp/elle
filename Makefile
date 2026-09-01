@@ -40,6 +40,16 @@ define RUN_ORACLE
 		|| { echo "FAILED: oracle.lisp ($(1))"; exit 1; }
 endef
 
+# The io leak dashboard rides the same shape: pulled out of every batch, run
+# under its own timed budget (io probes cost wall-clock; read the number from
+# a timed run, as with ORACLE_TIMEOUT above).
+PLUMB_TIMEOUT ?= 60s
+PLUMB_FILE    := tests/elle/plumb.lisp
+define RUN_PLUMB
+	@timeout $(PLUMB_TIMEOUT) $(ELLE) $(1) $(PLUMB_FILE) \
+		|| { echo "FAILED: plumb.lisp ($(1))"; exit 1; }
+endef
+
 # One corpus pass with ONE PROCESS PER FILE, under a wall-clock TIMEOUT. Each
 # file starts, runs as a whole program, and exits — the shape `elle test` never
 # takes, and the only one that covers program teardown and process-global modes.
@@ -57,7 +67,7 @@ define RUN_PER_FILE
 	@mkdir -p target
 	@rm -f target/smoke-$(4).joblog
 	@printf '%s\n' tests/elle/*.lisp \
-		| grep -v $(1) | grep -v $(ORACLE_FILE) \
+		| grep -v $(1) | grep -v $(ORACLE_FILE) | grep -v $(PLUMB_FILE) \
 		| parallel -j $(JOBS) --tag --joblog target/smoke-$(4).joblog \
 			'timeout $(TIMEOUT) $(ELLE) $(2) {}' \
 		|| { \
@@ -172,7 +182,7 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # the worker's all-blocked signal mask across fork/exec, so SIGTERM never landed
 # and subprocess/wait wedged. Fixed by resetting the child's mask in pre_exec;
 # see src/io/request.rs reset_child_signals + docs/posix-signals.md.)
-ELLE_TEST_SKIP := $(ORACLE_FILE)
+ELLE_TEST_SKIP := $(ORACLE_FILE) $(PLUMB_FILE)
 
 # Per-pass skip lists for the DIRECT-RUN tier targets only (smoke-vm/jit/noffi).
 # jit-rejections    — requires JIT active (tests rejection tracking)
@@ -242,6 +252,8 @@ define RUN_CORPUS
 		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 	$(call RUN_ORACLE,--jit=off)
 	$(call RUN_ORACLE,--jit=eager)
+	$(call RUN_PLUMB,--jit=off)
+	$(call RUN_PLUMB,--jit=eager)
 endef
 
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)
@@ -252,6 +264,7 @@ smoke-vm: elle
 	@echo "=== elle tests (VM, no JIT) ==="
 	$(call RUN_PER_FILE,$(ELLE_SKIP_VM),--jit=off --mlir=off,VM-only pass (no JIT),vm)
 	$(call RUN_ORACLE,--jit=off --mlir=off)
+	$(call RUN_PLUMB,--jit=off --mlir=off)
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)
 	@echo "=== build elle with no features ==="
@@ -261,11 +274,13 @@ smoke-noffi: elle-noffi
 	@echo "=== elle tests (VM, no features) ==="
 	$(call RUN_PER_FILE,$(ELLE_SKIP_VM) $(ELLE_SKIP_FFI),--jit=off,VM-only pass (no features),noffi)
 	$(call RUN_ORACLE,--jit=off)
+	$(call RUN_PLUMB,--jit=off)
 
 smoke-jit: elle
 	@echo "=== elle tests (eager JIT) ==="
 	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--jit=eager,JIT pass (eager),jit)
 	$(call RUN_ORACLE,--jit=eager)
+	$(call RUN_PLUMB,--jit=eager)
 
 # The thread-pool I/O backend, on a Linux box. `create_platform_backend` picks
 # the ring here and the pool on every other platform, so a Linux-only gate runs
@@ -290,9 +305,11 @@ smoke-nouring: elle  ## Corpus per-file passes on the thread-pool backend (what 
 	@echo "=== elle tests (thread-pool backend, VM) ==="
 	$(call RUN_PER_FILE,$(ELLE_SKIP_VM),--no-uring --jit=off --mlir=off,thread-pool VM pass,nouring-vm)
 	$(call RUN_ORACLE,--no-uring --jit=off --mlir=off)
+	$(call RUN_PLUMB,--no-uring --jit=off --mlir=off)
 	@echo "=== elle tests (thread-pool backend, eager JIT) ==="
 	$(call RUN_PER_FILE,$(ELLE_SKIP_JIT),--no-uring --jit=eager,thread-pool JIT pass,nouring-jit)
 	$(call RUN_ORACLE,--no-uring --jit=eager)
+	$(call RUN_PLUMB,--no-uring --jit=eager)
 
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
@@ -303,11 +320,12 @@ smoke-mlir: elle-mlir  ## Corpus via elle test (+ mlir-cpu tier) + whole-file --
 	$(RUN_CORPUS)
 	@echo "=== elle tests (eager MLIR, whole-file) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ORACLE_FILE) | \
+		grep -v $(ORACLE_FILE) | grep -v $(PLUMB_FILE) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
 		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
 	$(call RUN_ORACLE,--mlir=eager)
+	$(call RUN_PLUMB,--mlir=eager)
 
 elle-wasm:   ## Build elle with WASM support (for check-wasm/smoke-wasm)
 	@echo "=== build elle with WASM ==="
