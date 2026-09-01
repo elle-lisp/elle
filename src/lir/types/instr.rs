@@ -450,8 +450,9 @@ pub enum LirInstr {
     /// JIT (`elle_jit_adopt_into_activation`); handled structurally (no-op)
     /// on WASM; GPU-ineligible. Emitted by the ownership forest for the
     /// capture-back-edge SCC (a container captured by a closure it holds —
-    /// `RegionInfo::activation_adopt_sites`, one adopt per member at the SCC's
-    /// enclosing-scope site) and for the transferred returned subtree (a
+    /// `RegionInfo::activation_adopt_sites`, one adopt per member per site: the
+    /// SCC's enclosing scope, plus an early key ahead of any park — the park
+    /// split) and for the transferred returned subtree (a
     /// summarized producer's consumer sites — `RegionInfo::transfer_adopt_regions`,
     /// where this replaces the result's `DecrefValueRegion`). The handlers are
     /// idempotent on an already-Owned child (a re-delivered region keeps its

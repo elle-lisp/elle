@@ -814,13 +814,16 @@ pub struct RegionInfo {
     /// `region::infer::ownership::compute_transfer_adopts`.
     pub transfer_adopt_regions: FxHashSet<Region>,
     /// Ownership forest, **activation-owner** cut, populated by the ownership pass;
-    /// empty when no capture-back-edge SCC is present. Adopt-site HirId — the innermost
-    /// structural scope enclosing every member's allocation — → the member regions of
-    /// a capture-back-edge SCC (a container captured by a closure it holds:
-    /// `m ⊇ c` by store, `c ⊇ m` by capture — the cycle no region root can own;
-    /// docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC").
-    /// At the site the lowerer emits one value-resolved `AdoptIntoActivation` per
-    /// member (`emit_adopt_into_activation`), moving it `Counted → Owned` under the
+    /// empty when no capture-back-edge SCC is present. Adopt-site HirId → the member
+    /// regions of a capture-back-edge SCC (a container captured by a closure it
+    /// holds: `m ⊇ c` by store, `c ⊇ m` by capture — the cycle no region root can
+    /// own; docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge
+    /// SCC"). The primary site is the innermost structural scope enclosing every
+    /// member's allocation; an SCC whose scope can park carries a SECOND entry for
+    /// the same members, keyed ahead of every park (the park split — the channel's
+    /// idempotence absorbs the double adopt). At each site the lowerer emits one
+    /// value-resolved `AdoptIntoActivation` per member
+    /// (`emit_adopt_into_activation`), moving it `Counted → Owned` under the
     /// executing activation's owner node; each member's own compiler decref is
     /// suppressed (`suppressed_decref_regions`, the suppress ⊆ adopt contract), so
     /// the node's completion release is the members' sole demise — the interior

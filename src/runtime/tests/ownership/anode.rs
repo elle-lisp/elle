@@ -2,9 +2,11 @@ use super::*;
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the interpreter
 /// (docs/impl/region/owner.md § "Owner nodes — an activation as a forest root").
-/// No production lowering emits `AdoptIntoActivation` yet, so the activation body
-/// is hand-emitted bytecode: load a fresh-region member from the constant pool,
-/// adopt it into the current activation's (lazily-minted) owner node, return nil.
+/// The body is hand-emitted bytecode — isolating the runtime node mechanism
+/// from the compiler's adopt siting (the production emitters are the
+/// capture-back-edge and transfer cuts): load a fresh-region member from the
+/// constant pool, adopt it into the current activation's (lazily-minted) owner
+/// node, return nil.
 /// The activation's NORMAL completion — the trampoline's clean break — must free
 /// the node, whose subtree drop reclaims the member: its generation bumps (pages
 /// returned) and the live region count stays bounded across 50 activations. The

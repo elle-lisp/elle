@@ -178,6 +178,161 @@ fn activation_adopt_refuses_escaping_hull() {
     );
 }
 
+/// The Emit node of a shape carrying exactly one `(emit …)` — the park whose
+/// position the park-split pins compare against.
+fn sole_emit(hir: &Hir) -> HirId {
+    fn walk(h: &Hir, out: &mut Vec<HirId>) {
+        if matches!(h.kind, HirKind::Emit { .. }) {
+            out.push(h.id);
+        }
+        h.for_each_child(|c| walk(c, out));
+    }
+    let mut emits = Vec::new();
+    walk(hir, &mut emits);
+    assert_eq!(emits.len(), 1, "shape must carry exactly one emit");
+    emits[0]
+}
+
+/// The allocation HirId of `r`, from the walk's `alloc_region` inversion.
+fn alloc_site_of(info: &RegionInfo, r: Region) -> HirId {
+    info.alloc_region
+        .iter()
+        .find(|(_, &reg)| reg == r)
+        .map(|(&h, _)| h)
+        .expect("member has an allocation site")
+}
+
+#[test]
+fn activation_adopt_sites_ahead_of_park() {
+    // The park split (docs/impl/region/owner.md § "Owner nodes" — "The park
+    // split"): a park inside the adopt scope, AFTER the members' allocations,
+    // keeps the SCC admitted — the walk keys a SECOND, earlier adopt after the
+    // last member allocation, so the members are Owned (riding the parked
+    // frame's owner node) before the park can strand them. The scope-exit site
+    // stays beside it (the channel is idempotent on an Owned member).
+    let (hir, info) = analyze_full(
+        "(begin (let [root (@array) m (@array)] \
+                  (let [c (fn [] (length m))] \
+                    (begin (%array-push m c) (c) (%array-push root m) \
+                           (emit :yield 0) nil))) \
+                nil)",
+    );
+    let c = sole_closure_region(&hir, &info);
+    let m = info
+        .containment_edges
+        .iter()
+        .find(|(_, s, _)| *s == c)
+        .map(|&(_, _, d)| d)
+        .expect("precondition: a funnel-recovered store edge m ⊇ c");
+    assert_eq!(
+        info.activation_adopt_sites.len(),
+        2,
+        "a parking adopt scope carries the early key AND the scope-exit site; \
+         got {:?}",
+        info.activation_adopt_sites,
+    );
+    let expected: rustc_hash::FxHashSet<Region> = [m, c].into_iter().collect();
+    for members in info.activation_adopt_sites.values() {
+        let set: rustc_hash::FxHashSet<Region> = members.iter().copied().collect();
+        assert_eq!(
+            set, expected,
+            "both sites adopt the whole m↔c SCC (the second adopt is a no-op \
+             on an Owned member)",
+        );
+    }
+    for &r in &[m, c] {
+        assert!(
+            info.suppressed_decref_regions.contains(&r),
+            "member r{}'s own decref stays suppressed under the park split",
+            r.0,
+        );
+    }
+    // The ordering that closes the leak: every member allocation completes at
+    // or before the early key, and the early key precedes the park; the
+    // scope-exit site post-dominates the park. Post-order agrees with
+    // execution order here — the compared nodes sit in sibling constituents.
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().expect("ordered node");
+    let emit = ord(sole_emit(&hir));
+    let mut sites: Vec<u32> = info
+        .activation_adopt_sites
+        .keys()
+        .map(|&s| ord(s))
+        .collect();
+    sites.sort_unstable();
+    let (early, late) = (sites[0], sites[1]);
+    assert!(
+        early < emit && emit < late,
+        "the early key must precede the park and the scope-exit site must \
+         follow it (early={early}, emit={emit}, late={late})",
+    );
+    for &r in &[m, c] {
+        assert!(
+            ord(alloc_site_of(&info, r)) <= early,
+            "member r{}'s allocation must complete by the early key",
+            r.0,
+        );
+    }
+
+    // A park ordered BEFORE every member allocation strands nothing (no member
+    // exists when it parks). Multi-binding `let` desugars to nested
+    // single-binding lets (hir/AGENTS.md invariant 10), so this park sits in
+    // an ENCLOSING scope's init, outside the adopt site's subtree: the SCC
+    // stays admitted with the single scope-exit site, exactly as with no park.
+    let (_, info) = analyze_full(
+        "(begin (let [z (emit :yield 0) root (@array) m (@array)] \
+                  (let [c (fn [] (length m))] \
+                    (begin (%array-push m c) (c) (%array-push root m) nil))) \
+                nil)",
+    );
+    assert_eq!(
+        info.activation_adopt_sites.len(),
+        1,
+        "a park before every member allocation must not refuse or double-site \
+         the SCC; got {:?}",
+        info.activation_adopt_sites,
+    );
+}
+
+#[test]
+fn activation_adopt_refuses_park_between_allocations() {
+    // A park BETWEEN two members' allocations: no adopt point covers the
+    // already-allocated member across the park, so the park split cannot order
+    // the shape and the SCC refuses to Shared — no site, no suppression (the
+    // members keep their baseline releases).
+    let (hir, info) = analyze_full(
+        "(begin (let [m (@array)] \
+                  (begin (emit :yield 0) \
+                         (let [c (fn [] (length m))] \
+                           (begin (%array-push m c) (c) nil)))) \
+                nil)",
+    );
+    assert!(
+        info.activation_adopt_sites.is_empty(),
+        "a park between the members' allocations must refuse the SCC; got {:?}",
+        info.activation_adopt_sites,
+    );
+    let c = sole_closure_region(&hir, &info);
+    assert!(
+        !info.suppressed_decref_regions.contains(&c),
+        "a refused SCC leaves no suppression behind (suppress ⊆ adopt)",
+    );
+
+    // The control twin — the same nesting with no park — admits, so the
+    // refusal above is attributable to the park alone.
+    let (_, info) = analyze_full(
+        "(begin (let [m (@array)] \
+                  (begin nil \
+                         (let [c (fn [] (length m))] \
+                           (begin (%array-push m c) (c) nil)))) \
+                nil)",
+    );
+    assert!(
+        !info.activation_adopt_sites.is_empty(),
+        "precondition: the no-park twin is admitted",
+    );
+}
+
 // ── ownership inference: the transferred-returned-subtree cut ───────────────
 //
 // A producer lambda builds an externally-unique cyclic subtree and returns its

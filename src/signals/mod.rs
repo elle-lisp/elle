@@ -401,6 +401,19 @@ impl Signal {
         self.bits.intersects(SIG_YIELD)
     }
 
+    /// Can this function PARK — suspend its frame into a continuation only a
+    /// resume revives? The static face of [`dispatch::is_suspending`], asked
+    /// of an inferred signal whose bits are a UNION of possible raises: any
+    /// bit outside the two unwinding exits (`:error`, `:halt`) can park, so a
+    /// compound like `:io`+`:error` answers true where the runtime predicate
+    /// classifies one concrete raise at a time. `SIG_FFI` marks a foreign
+    /// call, not a raise, and never parks. A polymorphic signal may park
+    /// through its argument, so it answers true.
+    pub const fn may_park(&self) -> bool {
+        let non_park = SIG_ERROR.union(SIG_HALT).union(SIG_FFI);
+        self.propagates != 0 || !self.bits.subtract(non_park).is_empty()
+    }
+
     /// Can this function error?
     pub const fn may_error(&self) -> bool {
         self.bits.intersects(SIG_ERROR)

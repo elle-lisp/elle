@@ -35,6 +35,7 @@ Each predicate asks a specific question. No vague "is_inert".
 | Predicate | Meaning |
 |-----------|---------|
 | `may_suspend()` | Can suspend execution? (yield, debug, or polymorphic) |
+| `may_park()` | Can park a frame? (any bit outside `:error`/`:halt`/`:ffi`, or polymorphic) — the static face of `dispatch::is_suspending` |
 | `may_yield()` | Can yield? (SIG_YIELD) |
 | `may_error()` | Can signal an error? (SIG_ERROR) |
 | `may_ffi()` | Calls foreign code? (SIG_FFI) |

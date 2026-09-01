@@ -124,10 +124,13 @@
                     "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
-                   "denied-discard@regions" "cancel-discard" "adopt-park-drop"
-                   "adopt-park-drop@regions" "adopt-park-abort"
-                   "adopt-park-abort@regions" "adopt-park-cancel"
-                   "adopt-park-cancel@regions"])
+                   "denied-discard@regions" "cancel-discard"])
+# The `adopt-park-*` family is CLOSED on both dimensions (undeclared, like
+# `rest-array-copy`, so a regression to open trips the completeness gate loudly
+# rather than being absorbed under F2): the park split keys a second adopt
+# ahead of the park, so an abandoned park's discharge frees the SCC through the
+# parked frame's owner node (docs/impl/region/owner.md § "Owner nodes" — "The
+# park split"; the `ap-*` defns below hold the attribution set).
 # `abort-tail-result` and `abort-mask-caught-literal` are CLOSED controls now
 # (undeclared, like `rest-array-copy`, so a regression to open trips the
 # completeness gate loudly rather than being absorbed back under F2). What they
@@ -262,9 +265,9 @@
     "denied-discard" 2
     "abort-discard" 0
     "cancel-discard" 0
-    "adopt-park-drop" 2
-    "adopt-park-abort" 2
-    "adopt-park-cancel" 2
+    "adopt-park-drop" 0
+    "adopt-park-abort" 0
+    "adopt-park-cancel" 0
     "adopt-complete" 0
     "adopt-nopark" 0
     "plain-park-drop" 0
@@ -855,22 +858,21 @@
 (def emit-sig :yield)
 (def emit-error-sig :error)
 (def emit-subject (string "emit-subject"))
-# The activation-adopt scope crossed by a park. `ap-adopting-body` is the
-# capture-back-edge shape (`capture-backedge` below) with a `(yield j)` INSIDE
-# the scope enclosing the members' allocations — the adopt site is the
-# innermost structural scope enclosing every member's allocation
-# (docs/impl/region/owner.md § "Owner nodes"), so the park sits between the
-# allocations and the adopt. The members' own decrefs are suppressed under the
-# suppress ⊆ adopt contract, so a route that abandons the park holds members
-# no release table names and a node that never adopted them: the whole SCC
-# strands, on the handle drop, the abort, and the cancel alike. The set must
-# stay together, because only its gaps attribute the strand: `ap-before-body`
-# differs ONLY in the yield's position (after the scope closes, so the adopt
-# runs before the park — every abandonment route reclaims), `ap-plain-body`
-# removes the SCC, `ap-nopark-body` removes the park, and `adopt-complete`
-# removes the abandonment. The completion control also settles admission: the
-# Shared baseline leaks this cycle per call, so completion at 0 proves the
-# activation cut is active for the shape.
+# The activation-adopt scope crossed by a park — the park split's end-to-end
+# family. `ap-adopting-body` is the capture-back-edge shape (`capture-backedge`
+# below) with a `(yield j)` INSIDE the scope enclosing the members'
+# allocations. The walk keys a second adopt after the last member allocation
+# and ahead of the yield (docs/impl/region/owner.md § "Owner nodes" — "The park
+# split"), so the parked frame carries the members in its activation owner
+# node and every abandonment route frees them: the handle drop's free-path
+# discharge, the abort's discharge, and the cancel's terminal teardown alike.
+# The set must stay together, because only its gaps attribute a regression:
+# `ap-before-body` differs ONLY in the yield's position (after the scope
+# closes, so the single scope-exit adopt covers it), `ap-plain-body` removes
+# the SCC, `ap-nopark-body` removes the park, and `adopt-complete` removes the
+# abandonment. The completion control also settles admission: the Shared
+# baseline leaks this cycle per call, so completion at 0 proves the activation
+# cut is active for the shape — the park did not refuse it.
 (defn ap-adopting-body [j]
   (let [root @[]
         m @[]]
@@ -1385,22 +1387,22 @@
         (fiber/resume f)
         (get (fiber/value f) :error))) 2]
    # The adopt-park family and its controls — the `ap-*` defns above hold the
-   # attribution set. Open on both dimensions; the region pins live in
-   # `@dual-read`.
+   # attribution set. CLOSED controls on both dimensions (see the ledger note
+   # beside `declare-root :f2`); the region pins live in `@dual-read`.
    ["adopt-park-drop"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
-        (fiber/resume f))) 3]
+        (fiber/resume f))) 0]
    ["adopt-park-abort"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
         (fiber/resume f)
-        (protect (fiber/abort f "boom")))) 3]
+        (protect (fiber/abort f "boom")))) 0]
    ["adopt-park-cancel"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
         (fiber/resume f)
-        (fiber/cancel f :dead))) 3]
+        (fiber/cancel f :dead))) 0]
    ["adopt-complete"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
