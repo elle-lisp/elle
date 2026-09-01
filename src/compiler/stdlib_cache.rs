@@ -11,9 +11,11 @@
 //! because serialized native-fn immediates carry process-local `prim_id`s).
 //!
 //! Serialization strategy: the cache format is a plain `StoredBytecode` struct
-//! that is 100% owned data — no `Rc`, no pointers, no symbol-table ids. Symbols
-//! and keywords are carried *by name* (their ids are per-process), and are
-//! re-interned on load. `Value`s that appear in the constant pool are scalars
+//! that is 100% owned data — no `Rc`, no pointers. A symbol or keyword id is
+//! its name's hash (docs/impl/symbol.md), the same number in every process, so
+//! the ids travel as they stand; only the spellings ride alongside, in the
+//! `names` table, and replay into the loading instance's display memo.
+//! `Value`s that appear in the constant pool are scalars
 //! (int/float/bool/nil/keyword/symbol) by construction — string and compound
 //! literals lower to `MaterializeConst` templates, not pool constants — so the
 //! pool serializes cheaply. Closures recurse via `child_protos`.
@@ -32,7 +34,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 4;
+const FORMAT_VERSION: u32 = 5;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
@@ -67,11 +69,16 @@ fn payload_hash(bytes: &[u8]) -> u64 {
 pub struct StoredBytecode {
     pub format_version: u32,
     /// The entry template: `instructions` → bytecode, `constants` → entry
-    /// pool, `child_protos` → nested lambdas. Symbols by name; LIR preserved.
+    /// pool, `child_protos` → nested lambdas. LIR preserved.
     pub entry: crate::value::send::SendableClosure,
     /// Intern table of closure constants reachable from the entry's pool and
     /// its child templates, referenced by `Ref(idx)`.
     pub intern_table: Vec<crate::value::send::SendableClosure>,
+    /// Spelling table for every symbol and keyword the entry and its templates
+    /// name, replayed into the loading instance's display memo. The ids are
+    /// name hashes and cross unchanged; without this table they would still
+    /// compare correctly but print as `#<symbol:hash>`.
+    pub names: Vec<(u64, Box<str>)>,
     pub signal_projection: Option<HashMap<String, Signal>>,
     /// Cross-unit dispatch-wrapper registry (stdlib `push`/`put`/`add`
     /// monomorphization), snapshotted because the disk cache skips the stdlib
@@ -259,26 +266,6 @@ fn store_atomically(
         .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
-/// Refuse a `SendableClosure` whose LIR names a symbol its `symbol_names`
-/// cannot translate. Recurses through `child_protos`.
-fn check_lir_symbols_are_translatable(
-    sc: &crate::value::send::SendableClosure,
-) -> Result<(), String> {
-    if let Some(lir) = sc.lir_function.as_ref() {
-        let missing = crate::value::send::untranslatable_lir_symbols(lir, &sc.symbol_names);
-        if !missing.is_empty() {
-            return Err(format!(
-                "LIR of {} names symbol ids absent from its symbol_names: {missing:?}",
-                sc.name.as_deref().unwrap_or("<anonymous>")
-            ));
-        }
-    }
-    for child in &sc.child_protos {
-        check_lir_symbols_are_translatable(child)?;
-    }
-    Ok(())
-}
-
 /// Remove every cache file in `dir` except `keep`.
 ///
 /// The key follows the binary, so every rebuild mints a new one and orphans
@@ -329,7 +316,6 @@ pub fn store_bytecode(
         signal: bytecode.signal,
         capture_params_mask: 0,
         capture_locals_mask: crate::value::CaptureMask::empty(),
-        symbol_names: Rc::new(bytecode.symbol_names.clone()),
         location_map: Rc::new(bytecode.location_map.clone()),
         lir_function: None, // the entry thunk is not JIT'd; closures carry their own LIR
         doc: None,
@@ -345,22 +331,18 @@ pub fn store_bytecode(
         child_protos: Rc::new(bytecode.child_protos.clone()),
     };
     let entry = std::rc::Rc::new(entry);
-    let (templates, intern_table) =
+    let sent =
         crate::value::send::serialize_templates(std::slice::from_ref(&entry), vm.heap(), symbols)?;
-    let entry = templates.into_iter().next().expect("one template");
-    // Every LIR symbol must be translatable on load. The load-path remap is a
-    // lookup: an id absent from `symbol_names` survives untouched into the
-    // loading process, where the JIT materializes it as whatever symbol happens
-    // to hold that id. Refuse to write a file that would do that — a missing
-    // cache costs a compile, a wrong symbol costs a wrong program.
-    check_lir_symbols_are_translatable(&entry)?;
-    for sc in &intern_table {
-        check_lir_symbols_are_translatable(sc)?;
-    }
+    let entry = sent
+        .templates
+        .into_iter()
+        .next()
+        .expect("one template in, one template out");
     Ok(StoredBytecode {
         format_version: FORMAT_VERSION,
         entry,
-        intern_table,
+        intern_table: sent.intern_table,
+        names: sent.names,
         signal_projection: bytecode.signal_projection.clone(),
         dispatch_wrappers: stored_dispatch,
         fn_inline: stored_fn_inline,
@@ -369,9 +351,9 @@ pub fn store_bytecode(
 
 /// Rebuild a `Bytecode` from the cache format.
 ///
-/// Every symbol is re-interned by name into the loading process's table, and
-/// the LIR embedded in the templates has its symbol ids remapped to the new
-/// table (the JIT materializes `LirConst::Symbol` ids directly).
+/// Symbol ids cross unchanged — an id is its name's hash — and the stored
+/// spelling table replays into the loading instance's display memo so the
+/// names it now holds can be printed.
 pub fn load_bytecode(
     stored: StoredBytecode,
     vm: &mut crate::vm::VM,
@@ -387,8 +369,11 @@ pub fn load_bytecode(
     let t0 = std::time::Instant::now();
     let mut alloc = crate::primitives::ctx::Alloc::new(vm.heap());
     let mut templates = crate::value::send::deserialize_templates(
-        vec![stored.entry],
-        stored.intern_table,
+        crate::value::send::SendTemplates {
+            templates: vec![stored.entry],
+            intern_table: stored.intern_table,
+            names: stored.names,
+        },
         &mut alloc,
         symbols,
     )?;
@@ -407,7 +392,6 @@ pub fn load_bytecode(
     Ok(Bytecode {
         instructions: (*entry.bytecode).clone(),
         constants: (*entry.constants).clone(),
-        symbol_names: (*entry.symbol_names).clone(),
         location_map: (*entry.location_map).clone(),
         signal: entry.signal,
         signal_projection: stored.signal_projection,
@@ -445,12 +429,18 @@ mod tests {
             assert!(!bc.instructions.is_empty());
 
             let stored = store_bytecode(bc, vm, symbols, cctx).expect("stores");
+            let stored_names = stored.names.len();
             let bytes = bincode::serialize(&stored).expect("serializes");
             let decoded: StoredBytecode = bincode::deserialize(&bytes).expect("deserializes");
+            assert_eq!(
+                decoded.names.len(),
+                stored_names,
+                "the spelling table survives bincode; without it every reloaded \
+                 symbol prints as #<symbol:hash>"
+            );
             let loaded = load_bytecode(decoded, vm, symbols, cctx).expect("loads");
             assert_eq!(loaded.instructions, bc.instructions, "instructions equal");
             assert_eq!(loaded.signal, bc.signal);
-            assert_eq!(loaded.symbol_names.len(), bc.symbol_names.len());
             assert_eq!(loaded.child_protos.len(), bc.child_protos.len());
             // The constant pool is byte-identical on the scalar prefix; closure
             // constants are NEW heap instances after reload (pointer-equal
@@ -477,8 +467,8 @@ mod tests {
         };
         // Both bytecodes must execute to the same result.
         let run = |bc: &crate::compiler::Bytecode| -> i64 {
-            let (vm, symbols, cctx) = rt.parts();
-            vm.execute_scheduled(bc, symbols, cctx)
+            let (vm, _symbols, cctx) = rt.parts();
+            vm.execute_scheduled(bc, cctx)
                 .expect("runs")
                 .as_int()
                 .expect("result is an int")
@@ -543,7 +533,7 @@ mod tests {
             let (vm, symbols, cctx) = rt.parts();
             let src = "(map (fn [x] (* x 2)) (quote (1 2 3)))";
             let result = compile_file_repl(src, symbols, cctx, "<probe>").expect("probe compiles");
-            vm.execute_scheduled(&result.0.bytecode, symbols, cctx)
+            vm.execute_scheduled(&result.0.bytecode, cctx)
                 .expect("probe runs")
         };
         let _ = probe(&mut a);
@@ -577,7 +567,7 @@ mod tests {
         let result =
             compile_file_repl("(sys/join (sys/spawn (fn [] 1)))", symbols, cctx, "<spawn>")
                 .expect("spawn form compiles");
-        vm.execute_scheduled(&result.0.bytecode, symbols, cctx)
+        vm.execute_scheduled(&result.0.bytecode, cctx)
             .expect("spawn runs");
 
         assert_eq!(
@@ -755,7 +745,7 @@ mod tests {
             use crate::pipeline::compile_file_repl;
             let (vm, symbols, cctx) = rt.parts();
             let result = compile_file_repl(src, symbols, cctx, "<origin>").expect("compiles");
-            vm.execute_scheduled(&result.0.bytecode, symbols, cctx)
+            vm.execute_scheduled(&result.0.bytecode, cctx)
                 .expect("runs")
                 .is_nil()
         }

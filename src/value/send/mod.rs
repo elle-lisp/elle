@@ -331,137 +331,76 @@ impl SendBundle {
     }
 }
 
+/// A serialized set of closure templates — what `SendBundle` is to a value,
+/// this is to a module's blueprints (the stdlib compilation cache stores one).
+///
+/// A struct rather than a tuple because `templates` and `intern_table` have the
+/// same type: as positional arguments they are swappable at every call site
+/// with no compile error, and a swap would resolve every `Ref(idx)` against the
+/// wrong table.
+pub(crate) struct SendTemplates {
+    /// The blueprints themselves, in the order they were serialized.
+    pub(crate) templates: Vec<SendableClosure>,
+    /// Live closure instances lifted out of the templates' constant pools,
+    /// referenced from the templates by `SendValue::Ref(idx)`.
+    pub(crate) intern_table: Vec<SendableClosure>,
+    /// Spelling table, the same one a `SendBundle` carries. Ids are name
+    /// hashes and need no translation; the names are what the loading instance
+    /// must learn in order to print them.
+    pub(crate) names: Vec<(u64, Box<str>)>,
+}
+
 /// Serialize a list of closure templates (e.g. a module's `child_protos`) into
 /// owned `SendableClosure`s, for the stdlib compilation cache.
 ///
 /// Each template is a blueprint: `env`/`squelch_mask` are empty. Templates have
 /// no heap identity to intern, so they are emitted inline; their own
 /// `child_protos` recurse. Closure constants *inside* a template's constant
-/// pool are live heap instances and intern into `ctx.closures`, which is
-/// returned as the second element — the reconstructed templates reference it
-/// by `Ref(idx)`.
+/// pool are live heap instances and intern into the returned `intern_table` —
+/// the reconstructed templates reference it by `Ref(idx)`.
 pub(crate) fn serialize_templates(
     protos: &[std::rc::Rc<crate::value::ClosureTemplate>],
     heap: &crate::value::fiberheap::FiberHeap,
     symbols: &crate::symbol::SymbolTable,
-) -> Result<(Vec<SendableClosure>, Vec<SendableClosure>), String> {
-    let mut ctx = SerContext::new(heap, symbols);
-    let mut out = Vec::with_capacity(protos.len());
+) -> Result<SendTemplates, String> {
+    let mut ctx = SerContext::new(heap, Some(symbols));
+    let mut templates = Vec::with_capacity(protos.len());
     for t in protos {
-        out.push(sendable_from_template(t, &mut ctx)?);
+        templates.push(sendable_from_template(t, &mut ctx)?);
     }
-    Ok((out, ctx.closures))
+    let names = ctx.take_names();
+    Ok(SendTemplates {
+        templates,
+        intern_table: ctx.closures,
+        names,
+    })
 }
 
-/// Reconstruct closure templates from owned `SendableClosure`s (the `(templates,
-/// intern_table)` pair from `serialize_templates`). The intern table is shared
-/// across all templates so `Ref(idx)` entries (closure constants) resolve.
+/// Reconstruct closure templates from a [`SendTemplates`]. The intern table is
+/// shared across all templates so `Ref(idx)` entries (closure constants)
+/// resolve.
 ///
 /// `Alloc` is the receiving context's allocation capability (every
-/// reconstructed heap object is born in its region); symbols re-intern names.
+/// reconstructed heap object is born in its region).
 ///
-/// The stored `symbol_names` maps and LIR `LirConst::Symbol` ids carry the
-/// *storing* process's ids; both are remapped to this process's table before
-/// reconstruction (constants themselves re-intern by name in
-/// `template_from_sendable`).
+/// The name table replays into `symbols`, the receiving instance's display
+/// memo, exactly as `SendBundle::into_value` does. Nothing else about a symbol
+/// needs carrying: an id is its name's hash, so a `LirConst::Symbol` or a pool
+/// constant means the same symbol here as where it was stored.
 pub(crate) fn deserialize_templates(
-    templates: Vec<SendableClosure>,
-    mut intern_table: Vec<SendableClosure>,
+    stored: SendTemplates,
     alloc: &mut crate::primitives::ctx::Alloc<'_>,
     symbols: &mut crate::symbol::SymbolTable,
 ) -> Result<Vec<std::rc::Rc<crate::value::ClosureTemplate>>, String> {
-    remap_sendable_symbols(&mut intern_table, symbols);
-    let mut templates = templates;
-    remap_sendable_symbols(&mut templates, symbols);
-    let mut dctx = DeserContext::new(intern_table, alloc, symbols);
-    let mut out = Vec::with_capacity(templates.len());
-    for sc in templates {
+    for (hash, name) in &stored.names {
+        symbols.record_spelling(*hash, name);
+    }
+    let mut dctx = DeserContext::new(stored.intern_table, alloc);
+    let mut out = Vec::with_capacity(stored.templates.len());
+    for sc in stored.templates {
         out.push(template_from_sendable(sc, &mut dctx));
     }
     Ok(out)
-}
-
-/// Rewrite a `SendableClosure`'s `symbol_names` map and LIR symbol ids from the
-/// storing process's table to this one. Recurses through `child_protos`.
-fn remap_sendable_symbols(
-    protos: &mut [SendableClosure],
-    symbols: &mut crate::symbol::SymbolTable,
-) {
-    fn fix_one(sc: &mut SendableClosure, symbols: &mut crate::symbol::SymbolTable) {
-        let old_names: Vec<(u32, String)> = sc
-            .symbol_names
-            .iter()
-            .map(|(&id, name)| (id, name.clone()))
-            .collect();
-        let mut old_to_new = HashMap::new();
-        let mut new_names = HashMap::new();
-        for (old_id, name) in &old_names {
-            let new_id = symbols.intern(name).0;
-            old_to_new.insert(*old_id, new_id);
-            new_names.entry(new_id).or_insert_with(|| name.clone());
-        }
-        if let Some(lir) = sc.lir_function.as_mut() {
-            remap_lir_symbols(lir, &old_to_new);
-        }
-        sc.symbol_names = new_names;
-        for child in sc.child_protos.iter_mut() {
-            fix_one(child, symbols);
-        }
-    }
-    for p in protos.iter_mut() {
-        fix_one(p, symbols);
-    }
-}
-
-/// Re-map every `LirConst::Symbol(old_id)` in a LIR function to the id that
-/// `name` has in the *loading* process's symbol table. Symbol ids are
-/// per-process: the JIT materializes them into `Value::symbol(id)` directly.
-fn remap_lir_symbols(lir: &mut crate::lir::LirFunction, old_to_new: &HashMap<u32, u32>) {
-    use crate::lir::LirConst;
-    for block in &mut lir.blocks {
-        for si in &mut block.instructions {
-            // Through the visitor rather than a list of instruction shapes: a
-            // shape this missed would keep the storing process's id, and the
-            // JIT materializes that id straight into a `Value::symbol`.
-            si.instr.for_each_const_mut(|c| {
-                if let LirConst::Symbol(sid) = c {
-                    if let Some(&new_id) = old_to_new.get(&sid.0) {
-                        *sid = crate::value::SymbolId(new_id);
-                    }
-                }
-            });
-        }
-    }
-}
-
-/// The `LirConst::Symbol` ids in `lir` that `names` cannot translate.
-///
-/// The remap above is a lookup, so an id absent from `symbol_names` survives
-/// untouched into the loading process — where it names whatever symbol happens
-/// to hold that id, silently. A storer that would produce one refuses instead.
-pub(crate) fn untranslatable_lir_symbols(
-    lir: &crate::lir::LirFunction,
-    names: &HashMap<u32, String>,
-) -> Vec<u32> {
-    use crate::lir::LirConst;
-    let mut missing = Vec::new();
-    // `for_each_const_mut` needs `&mut`, and this reads; clone the block's
-    // instruction to inspect it rather than duplicate the exhaustive match.
-    for block in &lir.blocks {
-        for si in &block.instructions {
-            let mut probe = si.instr.clone();
-            probe.for_each_const_mut(|c| {
-                if let LirConst::Symbol(sid) = c {
-                    if !names.contains_key(&sid.0) {
-                        missing.push(sid.0);
-                    }
-                }
-            });
-        }
-    }
-    missing.sort_unstable();
-    missing.dedup();
-    missing
 }
 
 #[cfg(test)]

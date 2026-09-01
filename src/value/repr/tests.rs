@@ -12,12 +12,18 @@ fn invalid_scalar_tag_is_an_error_not_a_panic() {
     assert!(bincode::deserialize::<Value>(&bytes).is_err());
 }
 
-/// A symbol `Value` carries only a process-local id; no name travels with it,
-/// so a loader could not re-intern it. Pool symbols cross via
-/// `SendValue::Symbol { name, .. }` instead — this path must refuse, not
-/// persist a raw id that binds to an arbitrary symbol on load.
+/// A symbol `Value`'s payload is its name's hash, the same number in every
+/// process, so the scalar wire form carries it as it stands.
+///
+/// The trap this replaced: while the payload was a per-process table index,
+/// persisting it bound the constant to whatever symbol held that index in the
+/// loading process, so this path had to refuse. The counter-factual now is a
+/// round-trip that returns a *different* symbol — and it would be silent,
+/// because both sides are only integers.
 #[test]
-fn symbol_value_refuses_scalar_serialization() {
-    let sym = Value::symbol(7);
-    assert!(bincode::serialize(&sym).is_err());
+fn symbol_value_round_trips_as_its_name_hash() {
+    let id = crate::value::SymbolId::of("a-pool-symbol");
+    let bytes = bincode::serialize(&Value::symbol(id)).expect("a symbol scalar serializes");
+    let back: Value = bincode::deserialize(&bytes).expect("deserializes");
+    assert_eq!(back.as_symbol(), Some(id));
 }

@@ -3,9 +3,9 @@
 //!
 //! `SendValue` is the owned deep-copy form the send module produces for
 //! cross-thread transport, and it is exactly the shape a disk format needs:
-//! no `Rc`, no pointers, symbols by name. Serde is implemented for it
-//! directly rather than for `Value`, which carries process-local
-//! ids/pointers.
+//! no `Rc`, no pointers, symbol and keyword ids that are their name's hash.
+//! Serde is implemented for it directly rather than for `Value`, which also
+//! carries heap pointers.
 //!
 //! Only the pure-data variants are supported; runtime-resource variants
 //! (channels, ports, FFI descriptors) return an error, which makes the cache
@@ -56,11 +56,6 @@ enum BytesKind {
 #[derive(serde::Serialize, serde::Deserialize)]
 enum Mirror {
     Immediate(Value),
-    Keyword(String),
-    Symbol {
-        name: String,
-        id: u32,
-    },
     String(String),
     Pair(Box<Mirror>, Box<Mirror>, Box<Mirror>),
     Seq(SeqKind, Vec<Mirror>, Box<Mirror>),
@@ -88,11 +83,6 @@ impl serde::Serialize for SendValue {
             }
             Ok(match sv {
                 SV::Immediate(v) => Mirror::Immediate(*v),
-                SV::Keyword(k) => Mirror::Keyword(k.clone()),
-                SV::Symbol { name, id } => Mirror::Symbol {
-                    name: name.clone(),
-                    id: *id,
-                },
                 SV::String(st) => Mirror::String(st.clone()),
                 SV::Pair(a, b, t) => Mirror::Pair(
                     Box::new(to_mirror(a)?),
@@ -151,8 +141,6 @@ impl<'de> serde::Deserialize<'de> for SendValue {
         fn from_mirror(m: Mirror) -> Result<SV, String> {
             Ok(match m {
                 Mirror::Immediate(v) => SV::Immediate(v),
-                Mirror::Keyword(k) => SV::Keyword(k),
-                Mirror::Symbol { name, id } => SV::Symbol { name, id },
                 Mirror::String(st) => SV::String(st),
                 Mirror::Pair(a, b, t) => SV::Pair(
                     Box::new(from_mirror(*a)?),
@@ -204,17 +192,18 @@ impl<'de> serde::Deserialize<'de> for SendValue {
 }
 
 /// Symmetric serde mirror for `TableKey`, for the same reason as [`Mirror`]:
-/// both directions must share one bincode encoding. `Symbol` has no variant —
-/// a symbol key carries only a process-local id, no name the loader could
-/// re-intern, so it is rejected at serialize time (a cache miss, never a key
-/// silently bound to an arbitrary symbol). `Heap` likewise.
+/// both directions must share one bincode encoding. A symbol or keyword key
+/// travels as its name's hash, which names the same symbol in the loading
+/// process. `Heap` has no variant — it holds a live `Value` — so it is
+/// rejected at serialize time, which the cache layer turns into a miss.
 #[derive(serde::Serialize, serde::Deserialize)]
 enum KeyMirror {
     Nil,
     Bool(bool),
     Int(i64),
     String(String),
-    Keyword(String),
+    Symbol(u64),
+    Keyword(u64),
     EmptyList,
     Array(Vec<KeyMirror>),
 }
@@ -229,13 +218,11 @@ impl serde::Serialize for TableKey {
                 TK::Bool(b) => KeyMirror::Bool(*b),
                 TK::Int(i) => KeyMirror::Int(*i),
                 TK::String(st) => KeyMirror::String(st.clone()),
-                TK::Keyword(kw) => KeyMirror::Keyword(kw.clone()),
+                TK::Symbol(id) => KeyMirror::Symbol(id.0),
+                TK::Keyword(hash) => KeyMirror::Keyword(*hash),
                 TK::EmptyList => KeyMirror::EmptyList,
                 TK::Array(a) => {
                     KeyMirror::Array(a.iter().map(to_mirror).collect::<Result<_, _>>()?)
-                }
-                TK::Symbol(_) => {
-                    return Err("TableKey::Symbol has no name to re-intern".into());
                 }
                 TK::Heap(_) => {
                     return Err("TableKey::Heap not serializable by stdlib cache".into());
@@ -255,7 +242,8 @@ impl<'de> serde::Deserialize<'de> for TableKey {
                 KeyMirror::Bool(b) => TK::Bool(b),
                 KeyMirror::Int(i) => TK::Int(i),
                 KeyMirror::String(st) => TK::String(st),
-                KeyMirror::Keyword(kw) => TK::Keyword(kw),
+                KeyMirror::Symbol(id) => TK::Symbol(crate::value::SymbolId(id)),
+                KeyMirror::Keyword(hash) => TK::Keyword(hash),
                 KeyMirror::EmptyList => TK::EmptyList,
                 KeyMirror::Array(a) => TK::Array(a.into_iter().map(from_mirror).collect()),
             }
@@ -281,7 +269,10 @@ mod tests {
         let mut map: BTreeMap<TableKey, SV> = BTreeMap::new();
         map.insert(TableKey::Int(7), SV::Immediate(Value::int(1)));
         map.insert(TableKey::String("s".into()), SV::Immediate(Value::int(2)));
-        map.insert(TableKey::Keyword("k".into()), SV::Immediate(Value::int(3)));
+        map.insert(
+            TableKey::Keyword(crate::value::keyword::keyword_hash("k")),
+            SV::Immediate(Value::int(3)),
+        );
         map.insert(
             TableKey::Array(vec![TableKey::Bool(true), TableKey::EmptyList]),
             SV::Immediate(Value::int(4)),
@@ -297,7 +288,10 @@ mod tests {
         for (k, want) in [
             (TableKey::Int(7), 1),
             (TableKey::String("s".into()), 2),
-            (TableKey::Keyword("k".into()), 3),
+            (
+                TableKey::Keyword(crate::value::keyword::keyword_hash("k")),
+                3,
+            ),
             (
                 TableKey::Array(vec![TableKey::Bool(true), TableKey::EmptyList]),
                 4,
@@ -310,22 +304,31 @@ mod tests {
         }
     }
 
-    /// A symbol `TableKey` carries only a process-local id — no name travels
-    /// with it, so a loader cannot re-intern it. Storing it raw would attach
-    /// the entry to an arbitrary symbol in the loading process; the only safe
-    /// treatment is a serialize error, which the cache layer turns into a
-    /// plain miss.
+    /// A symbol `TableKey` travels as the id it holds, because that id is the
+    /// name's hash and names the same symbol in the loading process. The trap
+    /// this guards: writing the key through any name-shaped detour (intern on
+    /// load, a remap table) reintroduces a step that can disagree with the
+    /// hash the rest of the bundle carries. The counter-factual is a key that
+    /// deserializes to a *different* `SymbolId` than it was stored with — the
+    /// struct then answers to a symbol no source text spells.
     #[test]
-    fn tablekey_symbol_key_is_rejected_not_mistranslated() {
+    fn tablekey_symbol_key_round_trips_as_its_name_hash() {
         use super::SendValue as SV;
         use crate::value::SymbolId;
 
+        let id = SymbolId::of("a-symbol-key");
         let mut map: BTreeMap<TableKey, SV> = BTreeMap::new();
-        map.insert(TableKey::Symbol(SymbolId(42)), SV::Immediate(Value::int(1)));
+        map.insert(TableKey::Symbol(id), SV::Immediate(Value::int(1)));
         let sv = SV::Struct(map, Box::new(SV::Immediate(Value::NIL)));
-        assert!(
-            bincode::serialize(&sv).is_err(),
-            "symbol keys must fail to serialize, not carry a raw id"
-        );
+
+        let bytes = bincode::serialize(&sv).expect("a symbol key serializes");
+        let back: SV = bincode::deserialize(&bytes).expect("deserializes");
+        let SV::Struct(m, _) = back else {
+            panic!("round-trip changed the container kind");
+        };
+        let Some(SV::Immediate(v)) = m.get(&TableKey::Symbol(id)) else {
+            panic!("the symbol key did not come back as the same id");
+        };
+        assert_eq!(v.as_int(), Some(1));
     }
 }
