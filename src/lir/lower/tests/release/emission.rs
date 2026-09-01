@@ -369,10 +369,8 @@ fn decref_region_emitted_once_for_merged_pair() {
 // The native-tail ReturnValue retain (the `IncrefValueRegion` the post-
 // `TailCall` block emits on the native-completion fall-through) is guarded by
 // Elle corpus tests, not a Rust LIR-structural assertion: the non-splice path
-// by region-native-tail-return-uaf.lisp (a true UAF witness, RED before the
-// fix under guardfree) and the splice/`apply` path by
-// region-splice-tail-return.lisp (a correctness guard — the splice UAF is
-// masked by the args-array leak, so it asserts the result value instead).
+// by region-native-tail-return-uaf.lisp and the splice/`apply` path by
+// region-splice-tail-return.lisp, each a UAF witness under guardfree.
 
 // ── The abandoned-frame release tables ───────────────────────────
 //
@@ -422,10 +420,29 @@ fn emitted_slot_route_regions(func: &LirFunction) -> Vec<u32> {
     out
 }
 
+/// Every splice args-array slot a function's call instructions carry. Their
+/// release is the runtime's rather than an emitted `DecrefRegion`, so the frame
+/// still owes it while the array exists and the call has not run.
+fn splice_args_regions(func: &LirFunction) -> Vec<u32> {
+    let mut out: Vec<u32> = func
+        .blocks
+        .iter()
+        .flat_map(|b| b.instructions.iter())
+        .filter_map(|i| match &i.instr {
+            LirInstr::CallArrayMut { args_region, .. }
+            | LirInstr::TailCallArrayMut { args_region, .. } => Some(args_region.get()),
+            _ => None,
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 #[test]
 fn frame_release_tables_name_exactly_the_routes_emitted() {
-    // The walk's whole premise: a table entry IS a release the function emits,
-    // so running it at an abandoned exit runs that instruction and no other.
+    // The walk's whole premise: a table entry IS a release the frame still owes,
+    // so running it at an abandoned exit runs that release and no other.
     // Counterfactual — a table built from the region set rather than from the
     // emit site would carry the routes the emitter declined (a mutated slot, a
     // cell box, a transfer adopt) and release a reference nobody owes.
@@ -444,6 +461,80 @@ fn frame_release_tables_name_exactly_the_routes_emitted() {
             regions,
             emitted_slot_route_regions(func),
             "frame_release_regions must be exactly the slots a DecrefRegion named",
+        );
+    }
+}
+
+#[test]
+fn a_splice_args_array_is_owed_by_the_frame_until_the_call_takes_it() {
+    // The second contributor to the region table: a spliced call's args array has
+    // no binding, so no `DecrefRegion` names it and the call reclaims it at
+    // runtime instead (docs/impl/region/mechanism.md § "A spliced call's arguments
+    // come out of an array the convention owns"). Between the array's
+    // construction and the call the frame still owes that release — an
+    // `ArrayMutExtend` over a non-sequence raises exactly there — so the slot is
+    // in the table, and the call's own take is what keeps it from running twice.
+    let module = compile_to_lir("(fn (xs) (let [n (g ;xs)] n))");
+    let func = std::iter::once(&module.entry)
+        .chain(module.closures.iter())
+        .find(|f| !splice_args_regions(f).is_empty())
+        .expect("a function lowering a spliced call");
+    let mut regions: Vec<u32> = func.frame_release_regions.iter().map(|r| r.get()).collect();
+    regions.sort_unstable();
+    for slot in splice_args_regions(func) {
+        assert!(
+            regions.contains(&slot),
+            "the splice args slot {slot} must be a release the abandoned frame owes",
+        );
+        assert!(
+            !emitted_slot_route_regions(func).contains(&slot),
+            "the splice args slot {slot} must have no emitted DecrefRegion — the call \
+             takes it, and a second release would over-free",
+        );
+    }
+}
+
+#[test]
+fn a_spliced_call_allocates_its_args_array_outside_the_call_region() {
+    // A static region slot names ONE allocation execution between drops
+    // (docs/impl/region/model.md § "The per-execution region model"). The args
+    // array and the call are two, so sharing the call's slot orphans the array's
+    // physical region the moment the call maps its own mint over it — the leak
+    // `tests/elle/region-splice-args.lisp` gauges. Counterfactual: with one slot
+    // for both, this assertion reads them equal.
+    let module = compile_to_lir("(fn (xs) (g ;xs))");
+    let func = std::iter::once(&module.entry)
+        .chain(module.closures.iter())
+        .find(|f| !splice_args_regions(f).is_empty())
+        .expect("a function lowering a spliced call");
+    let array_slots: Vec<u32> = func
+        .blocks
+        .iter()
+        .flat_map(|b| b.instructions.iter())
+        .filter_map(|i| match &i.instr {
+            LirInstr::MakeArrayMut { region, .. } => Some(region.get()),
+            _ => None,
+        })
+        .collect();
+    let call_slots: Vec<u32> =
+        func.blocks
+            .iter()
+            .flat_map(|b| b.instructions.iter())
+            .filter_map(|i| match &i.instr {
+                LirInstr::CallArrayMut { region, .. }
+                | LirInstr::TailCallArrayMut { region, .. } => Some(region.get()),
+                _ => None,
+            })
+            .collect();
+    assert!(!array_slots.is_empty(), "the splice path builds an @array");
+    for slot in &array_slots {
+        assert!(
+            !call_slots.contains(slot),
+            "the args array's slot {slot} must not be the call's own",
+        );
+        assert!(
+            splice_args_regions(func).contains(slot),
+            "the args array's slot {slot} must be the one the call carries",
         );
     }
 }

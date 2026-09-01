@@ -72,8 +72,11 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let push_param_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // make_closure: (template_ptr, captures_ptr, count, region: I32, vm) -> (tag, payload)
     let make_closure_sig = make_sig(module, &[I64, I64, I64, I32, I64], &[I64, I64]);
-    // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id) -> (tag, payload)
-    let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32], &[I64, I64]);
+    // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id,
+    // args_region) -> (tag, payload). `args_region` is the args array's own slot,
+    // which the helper takes to reclaim the array (docs/impl/region/mechanism.md
+    // § "A spliced call's arguments come out of an array the convention owns").
+    let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32, I32], &[I64, I64]);
     // cons: (car_tag, car_pay, cdr_tag, cdr_pay, region, vm) -> (tag, payload).
     // The trailing vm pointer names the heap the cons cell is born on.
     let cons_sig = make_sig(module, &[I64, I64, I64, I64, I32, I64], &[I64, I64]);

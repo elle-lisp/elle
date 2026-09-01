@@ -147,16 +147,19 @@
 # fall-through owes, a signal exit owes too"). Its first stranded reference was the
 # aborted fiber's own value, which pinned the body closure and everything the parked
 # frame held behind it.
-# `denied-discard`'s rate is what is LEFT of the dead continuation once the frames'
-# own owed releases run. A frame abandoned by an error — and a parked one the fiber
-# can never re-enter — reaches none of its remaining instructions, so each release
-# among them runs off the value-route slots the emitter recorded
-# (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it still
-# owes"), gauged directly by `tests/elle/region-error-unwind.lisp`. What that walk
-# cannot NAME is a value with no binding of its own, so no route and no receipt:
-# the literal the denied call materialized straight into an argument, the rest list
-# the calling convention built for it, and a parameter released through an env slot,
-# which carries no nil stamp — so a release that ran reads like one that did not.
+# `denied-discard` is a CLOSED control now, and it stays declared under F2 so its
+# rate keeps reading against that root. What it measured was what is LEFT of a dead
+# continuation once the frames' own owed releases run: a frame abandoned by an
+# error — and a parked one the fiber can never re-enter — reaches none of its
+# remaining instructions, so each release among them runs off the value-route slots
+# the emitter recorded (docs/impl/region/mechanism.md § "An abandoned frame runs the
+# releases it still owes"), gauged directly by `tests/elle/region-error-unwind.lisp`.
+# What that walk could not NAME was a value with no binding of its own, and the one
+# this shape had is the ARGS ARRAY the denied `(println …)` builds for its
+# `(apply string args)`: no binding names it, so no emitted release could either.
+# The call that consumes an args array now reclaims it (mechanism.md § "A spliced
+# call's arguments come out of an array the convention owns"), gauged directly by
+# `tests/elle/region-splice-args.lisp`.
 # `spawn-join` is a CLOSED control now (undeclared, like `rest-array-copy`), so a
 # regression to open trips the completeness gate loudly rather than being absorbed
 # under F2 — which is not where it belonged: what it measured was the frame-held
@@ -259,7 +262,7 @@
   @{"fiber-nested" 0
     "multi-resume" 0
     "yield-discard" 0
-    "denied-discard" 2
+    "denied-discard" 0
     "abort-discard" 0
     "cancel-discard" 0
     "adopt-park-drop" 2
@@ -1383,7 +1386,7 @@
     (fn [j]
       (let [f (fiber/new (fn [] (println "blocked")) |:error :io| :deny |:io|)]
         (fiber/resume f)
-        (get (fiber/value f) :error))) 2]
+        (get (fiber/value f) :error))) 0]
    # The adopt-park family and its controls — the `ap-*` defns above hold the
    # attribution set. Open on both dimensions; the region pins live in
    # `@dual-read`.
@@ -1442,8 +1445,8 @@
    # exit consumes it itself (docs/impl/region/mechanism.md § "What the fall-through
    # owes, a signal exit owes too"). The stranded reference was the fiber's own, which
    # pinned the body closure and the parked frame's payload behind it. A CLOSED control
-   # now, beside `denied-discard`, whose residual is the DENIED call's own argument
-   # scratch and stays open under F2.
+   # now, beside `denied-discard`, whose residual was the args array the denied
+   # `(println …)` built for its own spliced call.
    ["abort-discard"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -1630,10 +1633,9 @@
    # reaches — bound by the body, returned from tail position, and held across a
    # further park — beside `emit-resume-literal`, the control whose resume block
    # mints in bytecode and so is correct with no delivery mint at all. A parked
-   # CAPABILITY DENIAL is the fourth park of this shape and has no probe here on
-   # purpose: its rate is dominated by the denied call's own argument scratch,
-   # which `denied-discard` already declares under F2, so a probe there would
-   # count one root twice instead of gauging the delivery. Its soundness face is
+   # CAPABILITY DENIAL is the fourth park of this shape and has no probe here:
+   # `denied-discard` drives that shape under F2, and it never resumes the denied
+   # fiber, so no rate here would see the delivery at all. Its soundness face is
    # the `w-denied` witness under guardfree.
    ["primitive-resume-bind" (fn [j] (pr-bind j)) 0]
    ["primitive-resume-tail" (fn [j] (pr-tail j)) 0]

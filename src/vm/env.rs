@@ -60,20 +60,24 @@ impl VM {
         Some(Rc::new(self.env_cache.clone()))
     }
 
-    /// Build a closure environment for a JIT TAIL call: a pure MOVE
-    /// (`own_params = false`), mirroring `tail_call_inner`'s closure path
-    /// (`src/vm/call.rs`). The caller's reference to each arg transfers to the
-    /// callee, which releases it at the param's last use — so no `CallArgument`
-    /// incref here. Uses `tail_call_env_cache` (it must not alias `env_cache`).
-    /// Returns `None` (error set on fiber) on bad keyword args.
+    /// Build a closure environment for a JIT TAIL call, mirroring
+    /// `tail_call_inner`'s closure path (`src/vm/call.rs`). Uses
+    /// `tail_call_env_cache` (it must not alias `env_cache`). Returns `None`
+    /// (error set on fiber) on bad keyword args.
     ///
-    /// The interpreter's own tail calls go through `tail_call_inner`, so the
-    /// JIT's array-call helper is the only caller.
+    /// `own_params` is what `tail_call_inner` decides from the same fact: an
+    /// ordinary tail call is a pure MOVE (`false` — the caller's reference to
+    /// each arg transfers to the callee, which releases it at the param's last
+    /// use, so no `CallArgument` incref here), while a SPLICED tail call has no
+    /// reference of the frame's to move and the callee mints one of its own
+    /// (`true`; docs/impl/region/mechanism.md § "A spliced call's arguments come
+    /// out of an array the convention owns").
     #[cfg(feature = "jit")]
     pub(crate) fn build_tail_call_env(
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
+        own_params: bool,
     ) -> Option<Rc<Vec<Value>>> {
         if !Self::populate_env(
             &mut self.tail_call_env_cache,
@@ -81,7 +85,7 @@ impl VM {
             &mut self.fiber,
             closure,
             args,
-            false,
+            own_params,
         ) {
             return None;
         }

@@ -261,12 +261,29 @@ impl fmt::Display for LirInstr {
                 write!(f, "{} ← push({}, {})", dst, array, value)
             }
             LirInstr::CallArrayMut {
-                dst, func, args, ..
+                dst,
+                func,
+                args,
+                args_region,
+                ..
             } => {
-                write!(f, "{} ← {}(;{})", dst, func, args)
+                write!(
+                    f,
+                    "{} ← {}(;{}) [args-region {}]",
+                    dst, func, args, args_region
+                )
             }
-            LirInstr::TailCallArrayMut { func, args, .. } => {
-                write!(f, "tailcall {}(;{})", func, args)
+            LirInstr::TailCallArrayMut {
+                func,
+                args,
+                args_region,
+                ..
+            } => {
+                write!(
+                    f,
+                    "tailcall {}(;{}) [args-region {}]",
+                    func, args, args_region
+                )
             }
 
             // === Allocation Regions ===

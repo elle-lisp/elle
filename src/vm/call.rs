@@ -92,6 +92,15 @@ impl VM {
         instr_ip: usize,
         checked: bool,
     ) -> Option<SignalBits> {
+        // Both region operands are decoded first, so `ip` is past them however
+        // this handler leaves — the type-error arm below returns without calling.
+        let bc: &[u8] = &code.bytecode;
+        let region_id = self.read_static_region(bc, ip);
+        let args_region = self.read_static_region(bc, ip);
+        // Claimed before the callee can park: a suspending callee snapshots this
+        // activation's region map, and the array's entry must not travel into it.
+        let args_array = self.take_splice_args(args_region);
+
         let args_val = self
             .fiber
             .stack
@@ -116,13 +125,12 @@ impl VM {
                     args_val.type_name()
                 ),
             );
+            self.release_splice_args(args_array);
             self.fiber.stack.push(Value::NIL);
             return None;
         };
 
-        let bc: &[u8] = &code.bytecode;
-        let region_id = self.read_static_region(bc, ip);
-        self.call_inner(
+        let bits = self.call_inner(
             func,
             args,
             code,
@@ -131,7 +139,13 @@ impl VM {
             instr_ip,
             checked,
             region_id,
-        )
+        );
+        // The callee holds its own reference to every argument by now — the env's
+        // `CallArgument` incref for a closure, the pass-through retain for a
+        // native — so the array's counted edges are surplus and this reclaim
+        // balances the pushes that built it.
+        self.release_splice_args(args_array);
+        bits
     }
 
     /// Handle the TailCall instruction.
@@ -189,6 +203,7 @@ impl VM {
             defer_callee_release,
             deferred_release_slot,
             &borrowed_arg_slots,
+            false,
         )
     }
 
@@ -203,6 +218,9 @@ impl VM {
         checked: bool,
     ) -> Option<SignalBits> {
         let region_id = self.read_static_region(bytecode, ip);
+        let args_region = self.read_static_region(bytecode, ip);
+        // Claimed before the callee can park, as in the Call position above.
+        let args_array = self.take_splice_args(args_region);
 
         let args_val = self
             .fiber
@@ -228,6 +246,7 @@ impl VM {
                     args_val.type_name()
                 ),
             );
+            self.release_splice_args(args_array);
             return Some(SIG_ERROR);
         };
 
@@ -236,7 +255,15 @@ impl VM {
         // path yet — `false`/`None` keep today's behaviour (no regression). The
         // common `(f …)` tail call uses `TailCall`, which carries both — and the
         // borrowed-argument stash list with them.
-        self.tail_call_inner(func, args, checked, region_id, false, None, &[])
+        let bits = self.tail_call_inner(func, args, checked, region_id, false, None, &[], true);
+        // The array's reclaim, on the one path every outcome of this call passes
+        // through: a frame-replacing closure callee never arrives at the block
+        // after this instruction, so no emitted release could reach it. The
+        // callee has minted its own reference to every argument by now
+        // (`own_params`, from the `true` above), so the cascade here balances the
+        // pushes that built the array and nothing more.
+        self.release_splice_args(args_array);
+        bits
     }
 
     /// Dispatch a collection-as-function call-index (`(arr i)` / `(m :k)` /

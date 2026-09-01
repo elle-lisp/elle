@@ -212,11 +212,13 @@ impl Emitter {
                 func,
                 args,
                 region,
+                args_region,
             } => {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::CallArrayMut);
                 self.bytecode.emit_u32(region.get());
+                self.bytecode.emit_u32(args_region.get());
                 let call_resume_ip = self.bytecode.current_pos();
                 self.pop(); // args
                 self.pop(); // func
@@ -232,11 +234,17 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::TailCallArrayMut { func, args, region } => {
+            LirInstr::TailCallArrayMut {
+                func,
+                args,
+                region,
+                args_region,
+            } => {
                 // Stack: [func, args_array] → (tail call, no push)
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::TailCallArrayMut);
                 self.bytecode.emit_u32(region.get());
+                self.bytecode.emit_u32(args_region.get());
                 self.pop(); // args
                 self.pop(); // func
             }

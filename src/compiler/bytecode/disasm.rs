@@ -144,7 +144,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 // No operands
             }
             Instruction::CallArrayMut | Instruction::TailCallArrayMut
-                if i + 3 < instructions.len() =>
+                if i + 7 < instructions.len() =>
             {
                 let region_id = u32::from_be_bytes([
                     instructions[i],
@@ -152,8 +152,17 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     instructions[i + 2],
                     instructions[i + 3],
                 ]);
-                line.push_str(&format!(" (region={})", region_id));
-                i += 4;
+                let args_region = u32::from_be_bytes([
+                    instructions[i + 4],
+                    instructions[i + 5],
+                    instructions[i + 6],
+                    instructions[i + 7],
+                ]);
+                line.push_str(&format!(
+                    " (region={}, args_region={})",
+                    region_id, args_region
+                ));
+                i += 8;
             }
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one

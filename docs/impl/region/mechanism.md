@@ -81,6 +81,54 @@ Pinned by `regions::tests::inline::*`, the leak face
 result, so everything the callee hands back that is not freshly its own must ride a
 counted edge.
 
+## A spliced call's arguments come out of an array the convention owns
+
+A call with a spliced argument — `(f ;args)`, and the `apply` it underlies — cannot
+push its arguments onto the operand stack, because how many there are is a runtime
+fact. So the lowerer builds them into a fresh `@array` and hands that array to
+`CallArrayMut` / `TailCallArrayMut`, which spreads it across the callee's parameters.
+The array is the operand stack spelled as a heap value: the calling convention builds
+it, the call consumes it, and no binding of the program ever names it.
+
+Three rules follow, and each is the spliced half of a pair the plain call already
+states.
+
+**The array has a region of its own.** `MakeArrayMut` and the call are two
+allocations, and a static region slot names one allocation execution between drops
+(model.md § "The per-execution region model"), so the array takes a managed slot
+of its own rather than the call's. Sharing the call's slot orphans the array's
+physical region the moment the call maps its own mint over it, and no route can name
+an orphan afterwards — not the value route, which needs a binding, and not the
+abandoned-frame walk, which reads the slot.
+
+**The call releases the array.** The array dies where the arguments are read out of
+it, which is *inside* the call — a point no instruction can follow, because a
+frame-replacing tail callee never arrives at the block after `TailCallArrayMut`. So
+the release is the runtime's: each dispatcher takes the array's slot and frees the
+region once the callee holds what it needs. Taking the slot is what keeps the release
+single. A frame abandoned between the array's construction and the call — an
+`ArrayMutExtend` over a source that is not a sequence raises there — still has the
+slot mapped, so the walk reclaims it, and a frame that reached the call does not.
+
+**The callee mints its own reference to every argument.** The store funnel counts each
+`ArrayMutPush` / `ArrayMutExtend`, so the array holds one counted reference per
+element and freeing it cascades that reference away. A spliced call therefore hands
+the callee nothing of the frame's, and the callee mints one owning reference per
+parameter (`own_params`) in tail position exactly as in call position — the same
+answer `tail_arg_is_borrowed` gives for a captured upvalue, and for the same reason:
+the reference belongs to the holder that built it, not to this activation. So a
+spliced tail call **moves nothing**, and every release the frame owes is relocated
+ahead of the frame replacement (§ "A release past a frame-replacing tail call is not
+a release") instead of being exempted as an ownership move. Reading a spliced
+argument as a moved operand instead strands one region per call for each source the
+splice read, and leaves the freed element still named by a source the frame never
+released.
+
+Pinned by `tests/elle/region-splice-args.lisp` — one bounded rate per callee kind and
+call position — and by the soundness complement `region-splice-args-uaf.lisp` under
+`--trace=guardfree`, where the release the array's reclaim adds must not reach a value
+the callee still reads.
+
 ## The return mint is emitted exactly once
 
 The callee half of that convention is **one** mint per returned value: a function

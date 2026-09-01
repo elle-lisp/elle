@@ -303,9 +303,11 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Call the elle_jit_call_array / elle_jit_tail_call_array helper.
-    /// Signature: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id)
-    /// -> (tag, payload). `region_id` routes the native result allocation and
-    /// gates the pass-through retain, exactly as for the non-array call path.
+    /// Signature: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id,
+    /// args_region) -> (tag, payload). `region_id` routes the native result
+    /// allocation and gates the pass-through retain, exactly as for the non-array
+    /// call path; `args_region` names the args array's own slot, which the helper
+    /// takes to reclaim the array once the callee holds its arguments.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_call_array(
         &mut self,
@@ -317,11 +319,20 @@ impl<'a> FunctionTranslator<'a> {
         arr_payload: cranelift_codegen::ir::Value,
         vm: cranelift_codegen::ir::Value,
         region_id: cranelift_codegen::ir::Value,
+        args_region: cranelift_codegen::ir::Value,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let func_ref = self.module.declare_func_in_func(func_id, builder.func);
         let call = builder.ins().call(
             func_ref,
-            &[func_tag, func_payload, arr_tag, arr_payload, vm, region_id],
+            &[
+                func_tag,
+                func_payload,
+                arr_tag,
+                arr_payload,
+                vm,
+                region_id,
+                args_region,
+            ],
         );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }

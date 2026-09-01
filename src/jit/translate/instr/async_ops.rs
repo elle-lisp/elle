@@ -317,14 +317,20 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::CallArrayMut {
-                dst, func, args, ..
+                dst,
+                func,
+                args,
+                args_region,
+                ..
             } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("CallArrayMut without vm pointer".to_string())
                 })?;
-                // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id)
+                let args_region_const = builder.ins().iconst(I32, args_region.get() as i64);
+                // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm,
+                // region_id, args_region)
                 let (rt, rp) = self.call_helper_call_array(
                     builder,
                     self.helpers.call_array,
@@ -334,6 +340,7 @@ impl<'a> FunctionTranslator<'a> {
                     arp,
                     vm,
                     region_id_const,
+                    args_region_const,
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
                 self.emit_exception_check_after_call(builder)?;
@@ -344,12 +351,18 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::TailCallArrayMut { func, args, .. } => {
+            LirInstr::TailCallArrayMut {
+                func,
+                args,
+                args_region,
+                ..
+            } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("TailCallArrayMut without vm pointer".to_string())
                 })?;
+                let args_region_const = builder.ins().iconst(I32, args_region.get() as i64);
                 let (rt, rp) = self.call_helper_call_array(
                     builder,
                     self.helpers.tail_call_array,
@@ -359,6 +372,7 @@ impl<'a> FunctionTranslator<'a> {
                     arp,
                     vm,
                     region_id_const,
+                    args_region_const,
                 )?;
                 self.emit_pop_then_return(builder, rt, rp)?;
                 return Ok(true);
