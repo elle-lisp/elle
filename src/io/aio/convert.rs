@@ -22,7 +22,9 @@ pub(super) fn cook_raw(
         RawCompletion::Pool(pc) => {
             pool_to_completion(pc, pending, fd_states, buffer_pool, origin_heap, gen)
         }
-        RawCompletion::Stdin(sc) => stdin_to_completion(sc, pending, buffer_pool, origin_heap),
+        RawCompletion::Stdin(sc) => {
+            stdin_to_completion(sc, pending, fd_states, buffer_pool, origin_heap, gen)
+        }
     }
 }
 
@@ -52,8 +54,10 @@ fn misrouted(pending_op: &PendingOp, kind: OpKind, id: SubmissionId) -> Option<S
 pub(super) fn stdin_to_completion(
     sc: crate::io::threadpool::StdinCompletion,
     pending: &mut PendingTable,
+    fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(sc.id);
     let pending_op = match pending.take(id) {
@@ -86,74 +90,28 @@ pub(super) fn stdin_to_completion(
     }
     Some(match sc.result {
         Ok(data) if data.is_empty() => Completion::ok(id, Value::NIL),
-        Ok(data) => {
-            // For Read/ReadLine, copy data into the pre-allocated buffer
-            if let PendingOp::Port {
-                op: PortOp::ReadLine { ref buffer } | PortOp::Read { ref buffer, .. },
-                ref port,
-                ..
-            } = &*pending_op
-            {
-                let enc = port
-                    .as_external::<Port>()
-                    .map(|p| p.encoding())
-                    .unwrap_or(Encoding::Binary);
-                unsafe {
-                    let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
-                    let copy_len = data.len().min(dst_cap);
-                    std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_len);
-                    // For ReadLine, trim trailing \r\n
-                    let final_len = if matches!(
-                        &*pending_op,
-                        PendingOp::Port {
-                            op: PortOp::ReadLine { .. },
-                            ..
-                        }
-                    ) {
-                        let mut end = copy_len;
-                        if end > 0 && data[end - 1] == b'\n' {
-                            end -= 1;
-                            if end > 0 && data[end - 1] == b'\r' {
-                                end -= 1;
-                            }
-                        }
-                        end
-                    } else {
-                        copy_len
-                    };
-                    crate::io::request::truncate_buffer(buffer, final_len);
-                }
-                if let PendingOp::Port {
-                    op: PortOp::ReadLine { buffer } | PortOp::Read { buffer, .. },
-                    ..
-                } = &*pending_op
-                {
-                    // ReadLine always returns string; Read depends on encoding
-                    let result = if matches!(
-                        &*pending_op,
-                        PendingOp::Port {
-                            op: PortOp::ReadLine { .. },
-                            ..
-                        }
-                    ) || enc == Encoding::Text
-                    {
-                        unsafe {
-                            crate::io::request::bytes_to_string_in_place(*buffer, origin_heap)
-                        }
-                    } else {
-                        Ok(*buffer)
-                    };
-                    Completion::new(id, result)
-                } else {
-                    unreachable!()
-                }
-            } else {
-                // ReadAll or other — construct bytes (legacy path)
-                let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
-                let ctx = crate::primitives::ctx::Alloc::new(heap);
-                Completion::ok(id, ctx.bytes(data))
-            }
-        }
+        // The worker's bytes are cooked where the pool's are, and for the same
+        // reason: a line has no upper bound, so staging them into the fiber's
+        // pre-allocated buffer first would clamp them to its size. `read_result`
+        // answers from the buffer when the bytes fit and from the requesting
+        // instance's heap when they do not, instead of dropping the excess —
+        // bytes the port has already taken from the kernel, which nothing is
+        // left to read again.
+        //
+        // The pool worker reports its byte count as the result code, and this
+        // worker reports its bytes; `data.len()` is the same number. The buffer
+        // handle is released above, so none is passed here.
+        Ok(data) => completion::process_raw_completion(
+            id,
+            data.len() as i32,
+            data,
+            &pending_op,
+            fd_states,
+            buffer_pool,
+            None,
+            origin_heap,
+            gen,
+        ),
         Err(e) => Completion::err(id, crate::io::io_error("io-error", e, origin_heap)),
     })
 }
