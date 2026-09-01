@@ -6,21 +6,37 @@
 # cannot fire its chan/send while the parent is parked inside a synchronous
 # crossbeam Select::select_timeout — the bug originally reproduced in
 # ~/git/grace/infra/repro-spawn-chan-select.lisp.
+#
+# Every case below times a resume.  A select that lost its wake still comes back
+# with a value — the wrapper's post-park chan/try-select finds it — so the only
+# thing that separates a lost wake from a served one is that the lost one first
+# waited out its timeout.  `prompt-cap` draws that line: above the cost of
+# scheduling a producer on a loaded box, below the plateau at `select-timeout`.
+#
+# The trap is that only one of those two moves.  The plateau is a constant; the
+# scheduling cost tracks machine load, and a shared CI runner is loaded.  On 32
+# cores oversubscribed four to one, the slowest served resume here measured
+# 0.57 s.  Both numbers are read off that measurement: the cap above it, the
+# timeout far enough above the cap to keep a lost wake distinguishable.  A cap
+# chosen as a fraction of the timeout only looks calibrated — anything under
+# 0.6 s fires against working code on a loaded box, whatever it is a fraction of.
+
+(def select-timeout 2000)  # ms, what every case hands chan/select
+(def prompt-cap 1.0)  # s, above this the select waited on something
 
 # ============================================================================
 # Test A: ev/spawn'd producer + chan/select with timeout.
 #
-# A trivial fiber sends a value on a channel.  The parent chan/selects with a
-# 1s timeout.  If chan/select is scheduler-aware, the parent yields, the fiber
-# runs, sends, and the parent resumes with the value well under the timeout.
-# If chan/select parks the OS thread, the fiber never runs and the parent
-# hits the timeout.
+# A trivial fiber sends a value on a channel.  The parent chan/selects.  If
+# chan/select is scheduler-aware, the parent yields, the fiber runs, sends, and
+# the parent resumes with the value well under the timeout.  If chan/select
+# parks the OS thread, the fiber never runs and the parent hits the timeout.
 # ============================================================================
 
 (let [[tx rx] (chan)
       _ (ev/spawn (fn [] (chan/send tx :hello-from-fiber)))
       t0 (clock/monotonic)
-      sel (chan/select @[rx] 1000)
+      sel (chan/select @[rx] select-timeout)
       elapsed (- (clock/monotonic) t0)]
   (assert (array? sel) "chan/select should return an array")
   (assert (= (length sel) 2)
@@ -28,8 +44,8 @@
   (assert (= (get sel 0) 0) "select index should be 0 (the only receiver)")
   (assert (= (get sel 1) :hello-from-fiber)
           "select should observe the fiber's send")
-  (assert (< elapsed 0.5)
-          "select must resume promptly, not wait out the 1s timeout"))
+  (assert (< elapsed prompt-cap)
+          "select must resume promptly, not wait out the timeout"))
 
 # ============================================================================
 # Test B: chan/select with no producer must still hit the timeout.
@@ -50,7 +66,7 @@
           "select with no producer must return [:timeout]")
   (assert (>= elapsed 0.04)
           "select must actually wait the timeout, not return immediately")
-  (assert (< elapsed 0.5) "select must not over-wait the timeout"))
+  (assert (< elapsed prompt-cap) "select must not over-wait the timeout"))
 
 # ============================================================================
 # Test C: ev/spawn'd producer that yields before sending.
@@ -65,14 +81,14 @@
                     (ev/sleep 0.02)
                     (chan/send tx :after-sleep)))
       t0 (clock/monotonic)
-      sel (chan/select @[rx] 1000)
+      sel (chan/select @[rx] select-timeout)
       elapsed (- (clock/monotonic) t0)]
   (assert (= (length sel) 2) "parked select must wake when the producer fires")
   (assert (= (get sel 1) :after-sleep)
           "parked select must observe the producer's value")
   (assert (>= elapsed 0.02)
           "parked select must wait at least the producer's sleep")
-  (assert (< elapsed 0.5)
+  (assert (< elapsed prompt-cap)
           "parked select must resume on the producer's send, not the timeout"))
 
 # ============================================================================
@@ -91,13 +107,14 @@
                         (time/sleep 0.02)
                         (chan/send tx :hello-from-os-thread)))
       t0 (clock/monotonic)
-      sel (chan/select @[rx] 1000)
+      sel (chan/select @[rx] select-timeout)
       elapsed (- (clock/monotonic) t0)]
   (assert (= (length sel) 2)
           "cross-thread select must wake when producer thread fires")
   (assert (= (get sel 1) :hello-from-os-thread)
           "cross-thread select must observe the thread's value")
-  (assert (< elapsed 0.5) "cross-thread select must not wait out the timeout"))
+  (assert (< elapsed prompt-cap)
+          "cross-thread select must not wait out the timeout"))
 
 # ============================================================================
 # Test E: cross-thread race stress.
@@ -106,7 +123,13 @@
 # initial chan/try-select frequently sees :empty just before the send arrives —
 # exactly the race that the post-register re-check in chan/wait-ready closes.
 # If the race is open, at least one of the chan/selects will park on an
-# eventfd no one will signal, hit the 500ms timeout, and the test will fail.
+# eventfd no one will signal and wait out `select-timeout`.
+#
+# This is the case where machine load bites hardest: 200 VM threads spawned in
+# sequence, each racing the parent, so it samples the tail of the spawn latency
+# 200 times over.  On an idle box the slowest iteration lands near 0.05 s; at
+# four-to-one oversubscription, near 0.57 s.  A lost wake lands at
+# `select-timeout`, and `prompt-cap` sits between the two.
 # ============================================================================
 
 (let [iterations 200]
@@ -114,18 +137,13 @@
     (let [[tx rx] (chan)
           producer (sys/spawn-vm (fn [] (chan/send tx i)))
           t0 (clock/monotonic)
-          sel (chan/select @[rx] 500)
+          sel (chan/select @[rx] select-timeout)
           elapsed (- (clock/monotonic) t0)]
       (sys/join producer)
       (assert (= (length sel) 2)
               (string "iteration " i ": cross-thread select hit timeout"))
-      (assert (= (get sel 1) i) (string "iteration " i ": value mismatch"))  # Per-iteration cap — a lost-wake race pushes elapsed to ~500ms
-      # (the timeout) while still returning a value via the wrapper's
-      # post-park chan/try-select, so the discriminating boundary sits
-      # near the timeout.  The cap must tolerate ordinary OS scheduling
-      # latency: spawning a VM thread under machine load routinely costs
-      # 50-100ms, which is noise, not a lost wake.
-      (assert (< elapsed 0.25)
+      (assert (= (get sel 1) i) (string "iteration " i ": value mismatch"))
+      (assert (< elapsed prompt-cap)
               (string "iteration " i ": cross-thread select waited too long: "
                       elapsed " s — race likely lost the wake")))))
 
@@ -140,7 +158,7 @@
 (let [[tx0 rx0] (chan)
       [tx1 rx1] (chan)
       _ (ev/spawn (fn [] (chan/send tx1 :from-one)))
-      sel (chan/select @[rx0 rx1] 1000)]
+      sel (chan/select @[rx0 rx1] select-timeout)]
   (assert (= (length sel) 2)
           "multi-receiver select must resolve to [i v], not :timeout")
   (assert (= (get sel 0) 1)
@@ -155,7 +173,7 @@
 (let [[tx0 rx0] (chan)
       [tx1 rx1] (chan)
       _ (ev/spawn (fn [] (chan/send tx0 :zero)))
-      sel (chan/select @[rx0 rx1] 1000)]
+      sel (chan/select @[rx0 rx1] select-timeout)]
   (assert (= (get sel 0) 0) "select picks the receiver that has a value")
   (assert (= (get sel 1) :zero) "select returns the right value")  # The unused channel must still be empty.
   (let [r1 (chan/recv rx1)]
@@ -177,12 +195,13 @@
                     (ev/sleep 0.02)  # Close every sender so the receiver observes disconnect.
                     (chan/close tx)))
       t0 (clock/monotonic)
-      [ok? result] (protect (chan/select @[rx] 1000))
+      [ok? result] (protect (chan/select @[rx] select-timeout))
       elapsed (- (clock/monotonic) t0)]
   (assert ok? "select must return cleanly when the sender closes mid-park")
   (assert (= (get result 0) :disconnected)
           "select must observe :disconnected after the sender closes")
-  (assert (< elapsed 0.5) "select must wake on close, not wait the full timeout"))
+  (assert (< elapsed prompt-cap)
+          "select must wake on close, not wait the full timeout"))
 
 # ============================================================================
 # Test H: ev/abort cancels a parked select cleanly.
@@ -202,7 +221,7 @@
   # same channel must work — confirms the WakeList wasn't left with a
   # dangling fd that would mis-fire or cause errors.
   (let [_ (ev/spawn (fn [] (chan/send tx :after-abort)))
-        sel (chan/select @[rx] 1000)]
+        sel (chan/select @[rx] select-timeout)]
     (assert (= (length sel) 2)
             "post-abort select on the same channel must still work")
     (assert (= (get sel 1) :after-abort)

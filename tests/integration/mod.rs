@@ -171,6 +171,9 @@ mod bytecode_doc {
 mod workflows {
     include!("workflows.rs");
 }
+mod budget {
+    include!("budget.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
