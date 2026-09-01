@@ -14,7 +14,6 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::CaptureMask;
 use crate::value::Value;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Per-definition closure data shared across all instances of the same lambda.
@@ -42,8 +41,6 @@ pub struct ClosureTemplate {
     /// in width (see `CaptureMask`) — an uncaptured local at any index gets a
     /// bare-NIL env slot, never a leaked dead cell.
     pub capture_locals_mask: CaptureMask,
-    /// Symbol ID → name mapping for cross-thread portability.
-    pub symbol_names: Rc<HashMap<u32, String>>,
     /// Bytecode offset → source location mapping for error reporting.
     pub location_map: Rc<LocationMap>,
     /// LIR function for deferred JIT compilation.
@@ -112,7 +109,6 @@ impl ClosureTemplate {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: CaptureMask::empty(),
-            symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             lir_function: None,
             doc: None,
@@ -350,7 +346,6 @@ impl PartialEq for Closure {
             && self.template.signal == other.template.signal
             && self.template.capture_params_mask == other.template.capture_params_mask
             && self.template.capture_locals_mask == other.template.capture_locals_mask
-            && self.template.symbol_names == other.template.symbol_names
             && self.template.location_map == other.template.location_map
             && self.template.doc == other.template.doc
             && self.template.vararg_kind == other.template.vararg_kind

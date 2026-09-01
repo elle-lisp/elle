@@ -172,7 +172,6 @@ impl Emitter {
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask.clone(),
-                    symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
                     lir_function: Some(Rc::new(nested_lir)),
                     doc: func.doc.clone(),
@@ -443,7 +442,7 @@ impl Emitter {
             LirInstr::StructGetOrNil { dst, src, key } => {
                 self.ensure_on_top(*src);
                 let key_value = match key {
-                    LirConst::Keyword(name) => Value::keyword(name),
+                    LirConst::Keyword(hash) => Value::keyword_from_hash(*hash),
                     // Struct/table keys are only keyword or symbol (the pattern
                     // and access-path lowerers never build a string key), so a
                     // string key never reaches the emitter.
@@ -451,7 +450,7 @@ impl Emitter {
                         unreachable!("struct keys are keyword or symbol, never string")
                     }
                     LirConst::Int(n) => Value::int(*n),
-                    LirConst::Symbol(sym) => Value::symbol(sym.0),
+                    LirConst::Symbol(sym) => Value::symbol(*sym),
                     LirConst::Bool(b) => Value::bool(*b),
                     LirConst::Nil => Value::NIL,
                     _ => panic!("StructGetOrNil: unsupported key type"),
@@ -466,7 +465,7 @@ impl Emitter {
             LirInstr::StructGetDestructure { dst, src, key } => {
                 self.ensure_on_top(*src);
                 let key_value = match key {
-                    LirConst::Keyword(name) => Value::keyword(name),
+                    LirConst::Keyword(hash) => Value::keyword_from_hash(*hash),
                     // Struct/table keys are only keyword or symbol (the pattern
                     // and access-path lowerers never build a string key), so a
                     // string key never reaches the emitter.
@@ -474,7 +473,7 @@ impl Emitter {
                         unreachable!("struct keys are keyword or symbol, never string")
                     }
                     LirConst::Int(n) => Value::int(*n),
-                    LirConst::Symbol(sym) => Value::symbol(sym.0),
+                    LirConst::Symbol(sym) => Value::symbol(*sym),
                     LirConst::Bool(b) => Value::bool(*b),
                     LirConst::Nil => Value::NIL,
                     _ => panic!("StructGetDestructure: unsupported key type"),
@@ -496,8 +495,8 @@ impl Emitter {
                 self.bytecode.emit_u16(exclude_keys.len() as u16);
                 for key in exclude_keys {
                     let key_value = match key {
-                        LirConst::Keyword(name) => Value::keyword(name),
-                        LirConst::Symbol(sid) => Value::symbol(sid.0),
+                        LirConst::Keyword(hash) => Value::keyword_from_hash(*hash),
+                        LirConst::Symbol(sid) => Value::symbol(*sid),
                         _ => panic!("StructRest: unsupported key type {:?}", key),
                     };
                     let const_idx = self.bytecode.add_constant(key_value);

@@ -124,8 +124,8 @@ fn put_intrinsic_gets_a_call_result_region() {
     // arg[0] and manufacture no region, the freshly-copied immutable result
     // would have no region of its own to release — it must be born in its own
     // call-result region so the lowerer can free it.)
-    let (hir, arena, symbols, info) = analyze_with_hir("(let [m @{:a 1}] (%put m :b 2))");
-    let puts = find_calls_to_primitive(&hir, "%put", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_hir("(let [m @{:a 1}] (%put m :b 2))");
+    let puts = find_calls_to_primitive(&hir, "%put", &arena);
     assert_eq!(puts.len(), 1, "expected one %put funnel call");
     let put_id = puts[0];
     let put_region = info
@@ -185,11 +185,11 @@ fn freeze_and_thaw_get_a_real_region() {
     // each result is born in its own call-result region and released by value
     // (`DecrefValueRegion`). (This complements the negative tests above: these
     // two ops ARE allocating.)
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_hir("(let [m @[1 2]] (let [f (%freeze m)] (%thaw f)))");
-    let freezes = find_calls_to_primitive(&hir, "%freeze", &arena, &symbols);
+    let freezes = find_calls_to_primitive(&hir, "%freeze", &arena);
     assert_eq!(freezes.len(), 1, "expected one %freeze funnel call");
-    let thaws = find_calls_to_primitive(&hir, "%thaw", &arena, &symbols);
+    let thaws = find_calls_to_primitive(&hir, "%thaw", &arena);
     assert_eq!(thaws.len(), 1, "expected one %thaw funnel call");
     for (name, id) in [("%freeze", freezes[0]), ("%thaw", thaws[0])] {
         let r =

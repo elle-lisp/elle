@@ -105,7 +105,6 @@ impl JitCompiler {
         mut self,
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
-        symbol_names: HashMap<u32, String>,
         module_closures: Vec<LirFunction>,
     ) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
@@ -166,7 +165,6 @@ impl JitCompiler {
             &mut ctx.func,
             scc_peers.as_ref(),
             self_sym,
-            symbol_names,
             module_closures,
         )?;
 
@@ -243,14 +241,7 @@ impl JitCompiler {
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(
-            lir,
-            &mut ctx.func,
-            scc_peers.as_ref(),
-            self_sym,
-            HashMap::new(),
-            Vec::new(),
-        )?;
+        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym, Vec::new())?;
         // closure_constants from clif_text are discarded — diagnostic only
 
         let text = format!("{}", ctx.func);
@@ -265,7 +256,6 @@ impl JitCompiler {
     pub fn compile_batch(
         mut self,
         members: &[BatchMember],
-        symbol_names: HashMap<u32, String>,
     ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
         // Validate all members are non-polymorphic and non-yielding.
         // Yielding functions require per-function YieldPointMeta in JitCode,
@@ -325,7 +315,6 @@ impl JitCompiler {
                 &mut ctx.func,
                 Some(&scc_peers),
                 Some(member.sym),
-                symbol_names.clone(),
                 Vec::new(),
             )?;
             all_closure_protos.push((member.sym, closure_protos));

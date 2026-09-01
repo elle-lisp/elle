@@ -55,12 +55,11 @@ structure shares that one region. Normal escape RC keeps any escaped copy alive
 past its `decref_point`. Only immediates (numbers, bools, nil, interned
 keyword/symbol) remain as plain pool constants loaded by `Const`/`ValueConst`.
 
-A template carries symbols **by name**, not by interned id: ids are
-per-symbol-table (per-instance), so a raw id would name a different symbol after
-the template crosses a `sys/spawn` boundary. `materialize` re-interns the name
-into the executing instance's table (the explicitly-threaded `SymbolTable`),
-exactly as a sent symbol `Value` re-interns. This makes the template
-self-contained and portable.
+A template carries symbols **by name**, not by interned id. The id would in fact
+survive a `sys/spawn` boundary now that it is the name's hash
+([symbol.md](symbol.md)), but the name is what makes the template readable and
+self-describing; `materialize` interns it, which records the spelling for
+display and returns that same id.
 
 See [region/model.md](region/model.md) — *Constants lower as ordinary
 allocations* — for why a code-object-lifetime "constant-pool region" is forbidden.

@@ -109,7 +109,7 @@ pub(crate) fn parse_shutdown_how(
     prim_name: &str,
     ctx: &mut NativeCtx,
 ) -> Result<i32, (SignalBits, Value)> {
-    match value.as_keyword_name().as_deref() {
+    match ctx.keyword_spelling(*value).as_deref() {
         Some("read") => Ok(libc::SHUT_RD),
         Some("write") => Ok(libc::SHUT_WR),
         Some("read-write") => Ok(libc::SHUT_RDWR),

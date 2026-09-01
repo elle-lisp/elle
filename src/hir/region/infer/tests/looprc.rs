@@ -20,11 +20,11 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
     //      → MakeCaptureCell stamped at this Begin's HirId.
     //   2) `x` — a sibling top-level use of x, lexically after the begin.
     let source = "(begin (def x 100) (defn f [] x) (f)) x";
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 
     // x's binding.
-    let x = find_binding_by_name(&hir, "x", &arena, &symbols).expect("expected binding `x`");
+    let x = find_binding_by_name(&hir, "x", &arena).expect("expected binding `x`");
 
     // Find the Begin node that pre-allocates a CaptureCell because it
     // contains a `(define x …)` whose binding `needs_capture()`.
@@ -158,7 +158,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
                        (assign i (%add i 1))) \
                      acc)";
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 
     // The env-cell release region for `s`: `env_cell_placeholder` (Define arm)
@@ -263,7 +263,7 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
                        (assign i (%add i 1))) \
                      i)";
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 
     // Every iter-scope node (While OR Loop — `while` may lower to either).
@@ -373,7 +373,7 @@ fn loop_local_closure_tail_alloc_region_matches_return_frontier() {
                        (assign i (%add i 1))) \
                      i)";
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 
     // Descend through tail-transparent wrappers (Let/Begin/Block/Return) to the

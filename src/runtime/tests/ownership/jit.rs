@@ -41,9 +41,9 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
     // First run builds the lambda and calls it, submitting it for background JIT
     // compilation; drain blocks until that finishes (or the worker dies).
     {
-        let (vm, symbols, cctx) = rt.parts();
+        let (vm, _symbols, cctx) = rt.parts();
         let v = vm
-            .execute_scheduled(&prog.bytecode, symbols, cctx)
+            .execute_scheduled(&prog.bytecode, cctx)
             .expect("runs (submits the JIT task)");
         assert!(v.is_nil(), "the discarded-shape lambda returns nil");
     }
@@ -52,18 +52,14 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
 
     // Warmup (the lambda body now dispatches to cached native code), then measure.
     {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&prog.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let baseline = rt.heap().active_region_count() as i64;
     for _ in 0..50 {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&prog.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let delta = rt.heap().active_region_count() as i64 - baseline;

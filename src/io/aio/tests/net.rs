@@ -959,11 +959,8 @@ fn a_pool_connect_reports_its_own_deadline_as_a_timeout() {
             .expect_err("a connect to a full accept queue must not succeed");
         let fields = err.as_struct().expect("an io error is a struct");
         assert_eq!(
-            crate::value::sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .as_keyword_name()
-                .as_deref(),
-            Some("timeout"),
+            crate::value::sorted_struct_get(fields, &TableKey::keyword("error")).copied(),
+            Some(crate::value::Value::keyword("timeout")),
             "a connect that ran out its deadline must report :timeout, not a \
              generic :io-error — `ev/timeout` and `timed-out?` match on the kind",
         );

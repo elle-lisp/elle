@@ -122,12 +122,9 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
             a_id.cmp(&b_id)
         }
 
-        // Keyword — lexicographic by name
-        4 => {
-            let a_name = a.as_keyword_name().unwrap();
-            let b_name = b.as_keyword_name().unwrap();
-            a_name.cmp(&b_name)
-        }
+        // Keyword — by hash, the portable order sorted containers rely on
+        // (deterministic in every instance, no spelling lookup on compare).
+        4 => a.payload.cmp(&b.payload),
 
         // C pointer — by address (payload)
         5 => a.payload.cmp(&b.payload),

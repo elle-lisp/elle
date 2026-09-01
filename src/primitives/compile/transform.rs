@@ -232,7 +232,7 @@ pub(super) fn prim_compile_run_on(
     args: &[Value],
 ) -> (SignalBits, Value) {
     // Cheap front-end validation — full type checks happen in the dispatch handler.
-    if args[0].as_keyword_name().is_none() {
+    if !args[0].is_keyword() {
         return (
             SIG_ERROR,
             ctx.error(

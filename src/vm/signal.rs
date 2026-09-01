@@ -371,13 +371,13 @@ impl VM {
 
         let mut fields = BTreeMap::new();
         fields.insert(
-            TableKey::Keyword("error".into()),
+            TableKey::keyword("error"),
             Value::keyword("capability-denied"),
         );
-        fields.insert(TableKey::Keyword("denied".into()), denied);
-        fields.insert(TableKey::Keyword("primitive".into()), primitive);
-        fields.insert(TableKey::Keyword("func".into()), Value::native_fn(def));
-        fields.insert(TableKey::Keyword("args".into()), args_array);
+        fields.insert(TableKey::keyword("denied"), denied);
+        fields.insert(TableKey::keyword("primitive"), primitive);
+        fields.insert(TableKey::keyword("func"), Value::native_fn(def));
+        fields.insert(TableKey::keyword("args"), args_array);
 
         ctx.struct_from(fields)
     }

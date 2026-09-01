@@ -330,10 +330,10 @@ pub(crate) fn error_extra(
 ) -> Value {
     let msg_val = string(heap, msg.into(), region);
     let mut fields = BTreeMap::new();
-    fields.insert(TableKey::Keyword("error".into()), Value::keyword(kind));
-    fields.insert(TableKey::Keyword("message".into()), msg_val);
+    fields.insert(TableKey::keyword("error"), Value::keyword(kind));
+    fields.insert(TableKey::keyword("message"), msg_val);
     for (key, val) in extra {
-        fields.insert(TableKey::Keyword((*key).into()), *val);
+        fields.insert(TableKey::keyword(key), *val);
     }
     struct_from(heap, fields, region)
 }

@@ -56,7 +56,7 @@ pub(crate) fn extract_keyword_timeout(
         let key = &remaining[i];
         let val = &remaining[i + 1];
 
-        match key.as_keyword_name().as_deref() {
+        match ctx.keyword_spelling(*key).as_deref() {
             Some("timeout") => match val.as_int() {
                 Some(ms) if ms >= 0 => {
                     timeout = Some(Duration::from_millis(ms as u64));
@@ -147,7 +147,7 @@ pub(crate) fn extract_connect_kwargs(
         let key = &remaining[i];
         let val = &remaining[i + 1];
 
-        match key.as_keyword_name().as_deref() {
+        match ctx.keyword_spelling(*key).as_deref() {
             Some("timeout") => match val.as_int() {
                 Some(ms) if ms >= 0 => {
                     result.timeout = Some(Duration::from_millis(ms as u64));
@@ -188,7 +188,7 @@ pub(crate) fn extract_connect_kwargs(
                 result.options.keepalive = Some(extract_bool(val, "keepalive", prim_name, ctx)?);
             }
             Some("encoding") => {
-                let enc = match val.as_keyword_name().as_deref() {
+                let enc = match ctx.keyword_spelling(*val).as_deref() {
                     Some("text") => Encoding::Text,
                     Some("binary") => Encoding::Binary,
                     Some(other) => {

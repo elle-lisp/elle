@@ -37,23 +37,11 @@ pub(super) fn build_sequence_methods(heap: &mut FiberHeap) -> Value {
     });
 
     let mut entries = BTreeMap::new();
-    entries.insert(
-        TableKey::Keyword("first".into()),
-        Value::native_fn(&SEQ_FIRST),
-    );
-    entries.insert(
-        TableKey::Keyword("rest".into()),
-        Value::native_fn(&SEQ_REST),
-    );
-    entries.insert(
-        TableKey::Keyword("last".into()),
-        Value::native_fn(&SEQ_LAST),
-    );
-    entries.insert(TableKey::Keyword("nth".into()), Value::native_fn(&SEQ_NTH));
-    entries.insert(
-        TableKey::Keyword("iter".into()),
-        Value::native_fn(&SEQ_ITER),
-    );
+    entries.insert(TableKey::keyword("first"), Value::native_fn(&SEQ_FIRST));
+    entries.insert(TableKey::keyword("rest"), Value::native_fn(&SEQ_REST));
+    entries.insert(TableKey::keyword("last"), Value::native_fn(&SEQ_LAST));
+    entries.insert(TableKey::keyword("nth"), Value::native_fn(&SEQ_NTH));
+    entries.insert(TableKey::keyword("iter"), Value::native_fn(&SEQ_ITER));
     alloc_trait_table(heap, entries)
 }
 
@@ -94,24 +82,12 @@ pub(super) fn build_collection_methods(heap: &mut FiberHeap) -> Value {
     });
 
     let mut entries = BTreeMap::new();
+    entries.insert(TableKey::keyword("length"), Value::native_fn(&COLL_LENGTH));
+    entries.insert(TableKey::keyword("empty?"), Value::native_fn(&COLL_EMPTY));
+    entries.insert(TableKey::keyword("has?"), Value::native_fn(&COLL_HAS));
+    entries.insert(TableKey::keyword("conj"), Value::native_fn(&COLL_CONJ));
     entries.insert(
-        TableKey::Keyword("length".into()),
-        Value::native_fn(&COLL_LENGTH),
-    );
-    entries.insert(
-        TableKey::Keyword("empty?".into()),
-        Value::native_fn(&COLL_EMPTY),
-    );
-    entries.insert(
-        TableKey::Keyword("has?".into()),
-        Value::native_fn(&COLL_HAS),
-    );
-    entries.insert(
-        TableKey::Keyword("conj".into()),
-        Value::native_fn(&COLL_CONJ),
-    );
-    entries.insert(
-        TableKey::Keyword("empty".into()),
+        TableKey::keyword("empty"),
         Value::native_fn(&COLL_EMPTY_NEW),
     );
     alloc_trait_table(heap, entries)
@@ -162,10 +138,10 @@ pub(super) fn make_traitset(
 ) -> Value {
     let mut entries = BTreeMap::new();
     if let Some(seq) = sequence {
-        entries.insert(TableKey::Keyword("Sequence".into()), seq);
+        entries.insert(TableKey::keyword("Sequence"), seq);
     }
     if let Some(coll) = collection {
-        entries.insert(TableKey::Keyword("Collection".into()), coll);
+        entries.insert(TableKey::keyword("Collection"), coll);
     }
     alloc_trait_table_mut(heap, entries)
 }

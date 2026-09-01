@@ -215,15 +215,16 @@ fn call_method_fn(
 
 /// Look up a keyword key in a struct without allocating a TableKey.
 ///
-/// Trait tables are small (2–5 entries), so linear scan on the keyword
-/// discriminant + string comparison avoids the String allocation that
-/// `TableKey::Keyword(key.into())` would require on every dispatch.
+/// Trait tables are small (2–5 entries), so a linear scan comparing the
+/// keyword hash — one integer compare per entry, no allocation — beats a
+/// sorted probe.
 fn lookup_keyword(val: &Value, key: &str) -> Value {
+    let key_hash = crate::value::keyword::keyword_hash(key);
     // Immutable struct — linear scan (small tables)
     if let Some(entries) = val.as_struct() {
         for (k, v) in entries.iter() {
-            if let TableKey::Keyword(ref s) = k {
-                if s == key {
+            if let TableKey::Keyword(hash) = k {
+                if *hash == key_hash {
                     return *v;
                 }
             }
@@ -235,8 +236,8 @@ fn lookup_keyword(val: &Value, key: &str) -> Value {
     if let Some(map_ref) = val.as_struct_mut() {
         let borrowed = map_ref.borrow();
         for (k, v) in borrowed.iter() {
-            if let TableKey::Keyword(ref s) = k {
-                if s == key {
+            if let TableKey::Keyword(hash) = k {
+                if *hash == key_hash {
                     return *v;
                 }
             }

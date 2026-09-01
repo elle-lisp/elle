@@ -146,11 +146,11 @@ impl SpawnRequest {
         let handle_val = ctx.external("process", handle);
 
         let mut fields = std::collections::BTreeMap::new();
-        fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
-        fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
-        fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
-        fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
-        fields.insert(TableKey::Keyword("process".into()), handle_val);
+        fields.insert(TableKey::keyword("pid"), Value::int(pid as i64));
+        fields.insert(TableKey::keyword("stdin"), stdin_val);
+        fields.insert(TableKey::keyword("stdout"), stdout_val);
+        fields.insert(TableKey::keyword("stderr"), stderr_val);
+        fields.insert(TableKey::keyword("process"), handle_val);
         Ok(ctx.struct_from(fields))
     }
 }

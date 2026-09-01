@@ -90,17 +90,14 @@ fn spawn_closure_impl(
 
     // Serialize the closure (validates sendability recursively). The temporary
     // closure Value is born in the caller's region; `from_value` deep-copies it
-    // (resolving symbol ids to names via the sender's table) and the temporary is
-    // dropped.
+    // and the temporary is dropped. The spawning instance's memo names the
+    // symbols in the bundle so the worker can print them.
     let closure_val = ctx.closure(closure.clone());
-    let bundle = {
-        let symbols = match ctx.vm().symbols() {
-            Some(s) => s,
-            None => return Err(LError::generic("spawn: no symbol table".to_string())),
-        };
-        SendBundle::from_value(closure_val, ctx.heap_mut(), symbols)
-            .map_err(|e| LError::generic(format!("spawn: {}", e)))?
-    };
+    let sender_symbols = ctx.vm().symbols_ptr;
+    let bundle = SendBundle::from_value(closure_val, ctx.heap_mut(), unsafe {
+        sender_symbols.as_ref()
+    })
+    .map_err(|e| LError::generic(format!("spawn: {}", e)))?;
 
     let result_holder: Arc<Mutex<Option<Result<SendBundle, String>>>> = Arc::new(Mutex::new(None));
     let result_clone = result_holder.clone();
@@ -253,7 +250,7 @@ fn spawn_closure_impl(
                 let closure_val = {
                     let mut recv_ctx =
                         crate::primitives::ctx::Alloc::with_region(recv_region, vm.heap());
-                    bundle.into_value(&mut recv_ctx, &mut symbols)
+                    bundle.into_value(&mut recv_ctx, Some(&mut symbols))
                 };
                 let closure = closure_val
                     .as_closure()
@@ -315,7 +312,7 @@ fn spawn_closure_impl(
                 let result = vm.execute_code(closure.template.code(), Some(&env_rc));
 
                 let send_result = match result {
-                    Ok(val) => SendBundle::from_value(val, vm.heap(), &symbols)
+                    Ok(val) => SendBundle::from_value(val, vm.heap(), Some(&symbols))
                         .map_err(|e| format!("Failed to serialize result: {}", e)),
                     Err(e) => Err(e.to_string()),
                 };
@@ -445,21 +442,13 @@ pub(crate) fn prim_thread_state(
             if let Some(result) = holder.as_ref() {
                 return match result {
                     Ok(bundle) => {
-                        // Reconstruct into the caller's region (`ctx`), re-interning
-                        // symbol names into this instance's table (raw deref so the
-                        // table borrow is independent of the `&mut Alloc` borrow).
-                        let symbols_ptr = ctx.vm().symbols_ptr;
-                        if symbols_ptr.is_null() {
-                            return (
-                                SIG_ERROR,
-                                ctx.error("internal-error", "thread-state: no symbol table"),
-                            );
-                        }
-                        let value = {
-                            let symbols = unsafe { &mut *symbols_ptr };
-                            // `ctx` deref-coerces `&mut NativeCtx` → `&mut Alloc`.
-                            bundle.clone().into_value(ctx, symbols)
-                        };
+                        // Reconstruct into the caller's region (`ctx`).
+                        // `ctx` deref-coerces `&mut NativeCtx` → `&mut Alloc`.
+                        // The joiner's memo learns the worker's symbol names.
+                        let joiner_symbols = ctx.vm().symbols_ptr;
+                        let value = bundle
+                            .clone()
+                            .into_value(ctx, unsafe { joiner_symbols.as_mut() });
                         (SIG_OK, ctx.array(vec![Value::keyword("ready"), value]))
                     }
                     Err(e) => {
@@ -482,6 +471,25 @@ pub(crate) fn prim_thread_state(
             ),
         )
     }
+}
+
+/// The counter behind `sys/unique`. Process-global on purpose: uniqueness must
+/// hold across every instance and module in the process, because consumers key
+/// process-global tables with it (the scheduler's futex park queues).
+static UNIQUE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `(sys/unique)` — a fresh integer, unique across the whole process.
+///
+/// The identity-only alternative to `gensym`: a coordination key (a futex key,
+/// a correlation id) needs uniqueness and hashability, not a name, and an
+/// integer interns nothing into the symbol table.
+/// `tests/elle/sync-keys.lisp` pins that property for the sync constructors.
+pub(crate) fn prim_unique(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let n = UNIQUE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    (SIG_OK, Value::int(n as i64))
 }
 
 /// Returns the ID of the current thread
@@ -540,6 +548,15 @@ primitive! {
         category: "sys",
         example: "(sys/thread-id)",
         aliases: &["current-thread-id", "os/thread-id"],
+        effect: RegionEffect::Immediate,
+    }
+    "sys/unique" => prim_unique {
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Return a fresh integer, unique across the whole process. A coordination key (futex key, correlation id) that, unlike a gensym, interns nothing.",
+        category: "sys",
+        example: "(sys/unique)",
+        aliases: &[],
         effect: RegionEffect::Immediate,
     }
 }

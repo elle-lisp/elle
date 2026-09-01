@@ -225,7 +225,7 @@ fn test_jit_accepts_yielding() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
+    let result = compiler.compile(&func, None, Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -258,7 +258,7 @@ fn test_jit_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
+    let result = compiler.compile(&func, None, Vec::new());
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
 }
@@ -290,7 +290,7 @@ fn test_jit_rejects_make_closure() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
+    let result = compiler.compile(&func, None, Vec::new());
     assert!(
         matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
         "MakeClosure should be rejected: {:?}",

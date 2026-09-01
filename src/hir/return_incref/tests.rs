@@ -24,7 +24,7 @@ use crate::symbol::SymbolTable;
 fn fhir(source: &str) -> Hir {
     let mut symbols = SymbolTable::new();
     let mut cctx = crate::pipeline::CompileCtx::new();
-    let (hir, _arena, _names) =
+    let (hir, _arena) =
         crate::pipeline::compile_file_to_fhir(source, &mut symbols, &mut cctx, "<test>")
             .expect("compile");
     hir

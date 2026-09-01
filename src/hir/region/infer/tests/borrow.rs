@@ -49,7 +49,7 @@ fn opcode_read_extends_container_decref_to_the_reader() {
     // decref_point` IS the `%get` node — the container's free-time cascade then drops the
     // element's last count and `length` derefs a freed page (the cascade face of
     // `region_container_read_borrow_uaf`). This assertion was RED before the borrow pin.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] (begin (%array-push c r) (length (%get c 0))))",
     );
     let order = compute_order(&hir);
@@ -69,7 +69,7 @@ fn opcode_read_extends_container_decref_to_the_reader() {
         !containers.is_empty(),
         "the %get read must record its container regions (uncounted_read_sites); got none",
     );
-    let c = find_binding_by_name(&hir, "c", &arena, &symbols).expect("binding c");
+    let c = find_binding_by_name(&hir, "c", &arena).expect("binding c");
     let c_regions = info
         .binding_source_regions
         .get(&c)
@@ -127,11 +127,11 @@ fn native_read_alias_outliving_the_container_refuses_the_adopt() {
 fn native_read_records_its_alias_and_container() {
     // The recorded fact the refusal and the release order both read: the native read's
     // call-result placeholder (the alias) paired with the container it reads out of.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (let [x (get c 0)] (length x))))",
     );
-    let get_site = *find_calls_to_primitive(&hir, "get", &arena, &symbols)
+    let get_site = *find_calls_to_primitive(&hir, "get", &arena)
         .first()
         .expect("the shape has a `get` call");
     let pairs = counted_aliases(&info, get_site);
@@ -144,7 +144,7 @@ fn native_read_records_its_alias_and_container() {
         .alloc_region
         .get(&get_site)
         .expect("the read call mints a call-result region");
-    let c = find_binding_by_name(&hir, "c", &arena, &symbols).expect("binding c");
+    let c = find_binding_by_name(&hir, "c", &arena).expect("binding c");
     let c_regions = info
         .binding_source_regions
         .get(&c)
@@ -170,11 +170,11 @@ fn remove_read_is_not_a_borrow() {
     // reference. So the container is NOT borrowed from, and pinning its release to the
     // popped element's reader would be a pure over-keep. The moves-out natives are
     // excluded from the borrow face at the recording site.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (let [x (%pop c)] (length x))))",
     );
-    let pop_sites = find_calls_to_primitive(&hir, "%pop", &arena, &symbols);
+    let pop_sites = find_calls_to_primitive(&hir, "%pop", &arena);
     assert!(
         !pop_sites.is_empty(),
         "precondition: the shape has a `pop` call; if the stdlib route changed, update it",
@@ -332,11 +332,11 @@ fn fresh_call_result_records_no_alias() {
     // every debug run — so it can hand back neither `c` nor anything inside it, and no
     // alias edge is recorded. A `Fresh` native that references an argument declares that
     // separately (`embeds` → a containment edge), which is a different relation.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (length (string \"t\" c))))",
     );
-    let sites = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let sites = find_calls_to_primitive(&hir, "string", &arena);
     assert!(
         !sites.is_empty(),
         "precondition: the shape has `string` calls to check; if the classification \
@@ -392,11 +392,11 @@ fn container_read_is_not_recorded_as_a_result_alias() {
     // the container — the one reading under which the funnel exemption would be plainly
     // wrong. They are excluded from both result-alias relations at the recording site;
     // the read edge carries them instead, with the tighter container and its own bound.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (let [x (get c 0)] (length x))))",
     );
-    let sites = find_calls_to_primitive(&hir, "get", &arena, &symbols);
+    let sites = find_calls_to_primitive(&hir, "get", &arena);
     assert!(
         !sites.is_empty(),
         "precondition: the shape has a `get` call; if the stdlib route changed, update it",

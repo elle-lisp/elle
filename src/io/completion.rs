@@ -249,11 +249,11 @@ pub(super) fn process_raw_completion(
                 .map(|ev| {
                     let mut fields = std::collections::BTreeMap::new();
                     fields.insert(
-                        crate::value::heap::TableKey::Keyword("kind".into()),
+                        crate::value::heap::TableKey::keyword("kind"),
                         Value::keyword(ev.kind.as_keyword()),
                     );
                     let path = ctx.string(ev.path.to_string_lossy().as_ref());
-                    fields.insert(crate::value::heap::TableKey::Keyword("path".into()), path);
+                    fields.insert(crate::value::heap::TableKey::keyword("path"), path);
                     ctx.struct_from(fields)
                 })
                 .collect();
@@ -306,29 +306,29 @@ pub(super) fn process_raw_completion(
                     let name = crate::io::sigmap::signum_to_keyword(ev.signum).unwrap_or("unknown");
                     let mut fields = std::collections::BTreeMap::new();
                     fields.insert(
-                        crate::value::heap::TableKey::Keyword("signal".into()),
+                        crate::value::heap::TableKey::keyword("signal"),
                         Value::keyword(name),
                     );
                     fields.insert(
-                        crate::value::heap::TableKey::Keyword("sender-pid".into()),
+                        crate::value::heap::TableKey::keyword("sender-pid"),
                         match ev.sender_pid {
                             Some(p) => Value::int(p as i64),
                             None => Value::NIL,
                         },
                     );
                     fields.insert(
-                        crate::value::heap::TableKey::Keyword("sender-uid".into()),
+                        crate::value::heap::TableKey::keyword("sender-uid"),
                         match ev.sender_uid {
                             Some(u) => Value::int(u as i64),
                             None => Value::NIL,
                         },
                     );
                     fields.insert(
-                        crate::value::heap::TableKey::Keyword("code".into()),
+                        crate::value::heap::TableKey::keyword("code"),
                         Value::int(ev.code as i64),
                     );
                     fields.insert(
-                        crate::value::heap::TableKey::Keyword("count".into()),
+                        crate::value::heap::TableKey::keyword("count"),
                         Value::int(ev.count as i64),
                     );
                     ctx.struct_from(fields)

@@ -14,13 +14,6 @@ pub(super) fn recv_traits(
     }
 }
 
-/// Reconstruct a symbol value on the receiving thread by re-interning its name
-/// into the receiver's symbol table (`symbols`, threaded explicitly). A symbol
-/// crosses the boundary by name because ids are per-table.
-pub(super) fn recv_symbol(name: &str, symbols: &mut crate::symbol::SymbolTable) -> Value {
-    Value::symbol(symbols.intern(name).0)
-}
-
 /// Reconstruct a standard-stream port value of the given kind. Only the three
 /// stdio kinds are ever serialized (see the `"port"` arm in `from_value_inner`);
 /// any other kind falls back to stdout defensively (unreachable in practice).
@@ -50,7 +43,7 @@ pub(super) enum ReconState {
 /// reconstructed heap object is born explicitly in the call's region on the
 /// call's heap. Region coherence is safety-critical here — a cross-thread message
 /// tree must land entirely in one region (docs/impl/region/ctx.md).
-pub(super) struct DeserContext<'a, 'h, 's> {
+pub(super) struct DeserContext<'a, 'h> {
     /// Owned closure data. Entries are `take`n as they are reconstructed.
     closures: Vec<Option<SendableClosure>>,
     /// Reconstruction state per intern table index.
@@ -62,17 +55,12 @@ pub(super) struct DeserContext<'a, 'h, 's> {
     /// The allocation capability every reconstructed heap object is born
     /// through — the receiving thread's per-call ctx.
     pub(super) ctx: &'a mut crate::primitives::ctx::Alloc<'h>,
-    /// The RECEIVER's symbol table — a symbol value re-interns its name here on
-    /// arrival (ids are per-table). Threaded explicitly
-    /// (docs/impl/region/ctx.md § "Symbols through the ctx").
-    pub(super) symbols: &'s mut crate::symbol::SymbolTable,
 }
 
-impl<'a, 'h, 's> DeserContext<'a, 'h, 's> {
+impl<'a, 'h> DeserContext<'a, 'h> {
     pub(super) fn new(
         closures: Vec<SendableClosure>,
         ctx: &'a mut crate::primitives::ctx::Alloc<'h>,
-        symbols: &'s mut crate::symbol::SymbolTable,
     ) -> Self {
         let n = closures.len();
         DeserContext {
@@ -80,7 +68,6 @@ impl<'a, 'h, 's> DeserContext<'a, 'h, 's> {
             states: (0..n).map(|_| ReconState::NotStarted).collect(),
             fixups: Vec::new(),
             ctx,
-            symbols,
         }
     }
 
@@ -107,7 +94,7 @@ impl<'a, 'h, 's> DeserContext<'a, 'h, 's> {
 /// resolves by index.
 fn template_from_sendable(
     sc: SendableClosure,
-    ctx: &mut DeserContext<'_, '_, '_>,
+    ctx: &mut DeserContext<'_, '_>,
 ) -> std::rc::Rc<crate::value::ClosureTemplate> {
     use std::rc::Rc;
     let constants: Vec<Value> = sc
@@ -138,7 +125,6 @@ fn template_from_sendable(
         signal: sc.signal,
         capture_params_mask: sc.capture_params_mask,
         capture_locals_mask: sc.capture_locals_mask,
-        symbol_names: Rc::new(sc.symbol_names),
         location_map: Rc::new(sc.location_map),
         lir_function,
         doc,
@@ -152,7 +138,7 @@ fn template_from_sendable(
     })
 }
 
-pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_, '_>) -> Value {
+pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::{Closure, ClosureTemplate};
     use crate::value::heap::{HeapObject, Pair};
     use std::cell::RefCell;
@@ -161,8 +147,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_, '_>
 
     match sv {
         SendValue::Immediate(v) => v,
-        SendValue::Keyword(name) => Value::keyword(&name),
-        SendValue::Symbol { name, .. } => recv_symbol(&name, ctx.symbols),
+
         SendValue::String(s) => ctx.ctx.string(s),
         SendValue::Syntax(ss) => ctx.ctx.syntax(send_to_syntax(*ss)),
         SendValue::Pair(first, rest, traits) => {
@@ -413,7 +398,6 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_, '_>
                 signal: sc.signal,
                 capture_params_mask: sc.capture_params_mask,
                 capture_locals_mask: sc.capture_locals_mask,
-                symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
                 lir_function,
                 doc,
@@ -440,7 +424,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_, '_>
 
 /// Patch `ClosureRef(idx)` entries in a LIR function back to `ValueConst`.
 /// Forces reconstruction of any referenced closures that haven't been built yet.
-fn patch_lir_closure_refs(lir: &mut crate::lir::LirFunction, ctx: &mut DeserContext<'_, '_, '_>) {
+fn patch_lir_closure_refs(lir: &mut crate::lir::LirFunction, ctx: &mut DeserContext<'_, '_>) {
     use crate::lir::LirConst;
     use crate::lir::LirInstr;
 

@@ -122,12 +122,17 @@ pub(in crate::plugin_api) extern "C" fn is_external(val: [u64; 2]) -> bool {
 // ── Keyword access ────────────────────────────────────────────────────
 
 pub(in crate::plugin_api) extern "C" fn as_keyword_name(
+    ctx: *mut super::CallCtx,
     val: [u64; 2],
     out_len: *mut usize,
 ) -> *const u8 {
     let v = unsafe { to_value(val) };
-    if let Some(name) = v.as_keyword_name() {
-        let interned = intern_str(name);
+    let symbols = unsafe { ctx.as_ref().and_then(|c| c.symbols.as_ref()) };
+    if let Some(name) = v
+        .keyword_hash()
+        .and_then(|h| crate::value::keyword::resolve_keyword_name(symbols, h))
+    {
+        let interned = intern_str(name.to_string());
         unsafe { *out_len = interned.len() };
         interned.as_ptr()
     } else {

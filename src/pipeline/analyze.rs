@@ -3,7 +3,6 @@
 use super::AnalyzeResult;
 use super::CompileCtx;
 use crate::hir::{classify_form, Analyzer, BindingArena};
-use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
 use crate::syntax::Span;
@@ -51,8 +50,6 @@ pub fn analyze_file(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
-    intern_primitive_names(symbols);
-
     let syntaxes = read_syntax_all(source, source_name)?;
 
     let (mut expander, meta) = cctx.expander_and_meta();

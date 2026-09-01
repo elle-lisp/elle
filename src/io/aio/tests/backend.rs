@@ -167,16 +167,14 @@ fn test_completion_to_value_success() {
         );
         let fields = v.as_struct().unwrap();
         assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
+            sorted_struct_get(fields, &TableKey::keyword("id"))
                 .unwrap()
                 .as_int(),
             Some(42)
         );
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .is_nil()
-        );
+        assert!(sorted_struct_get(fields, &TableKey::keyword("error"))
+            .unwrap()
+            .is_nil());
     });
 }
 
@@ -194,21 +192,17 @@ fn test_completion_to_value_error() {
         let v = c.to_value(&ctx);
         let fields = v.as_struct().unwrap();
         assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
+            sorted_struct_get(fields, &TableKey::keyword("id"))
                 .unwrap()
                 .as_int(),
             Some(7)
         );
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("value".into()))
-                .unwrap()
-                .is_nil()
-        );
-        assert!(
-            !sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .is_nil()
-        );
+        assert!(sorted_struct_get(fields, &TableKey::keyword("value"))
+            .unwrap()
+            .is_nil());
+        assert!(!sorted_struct_get(fields, &TableKey::keyword("error"))
+            .unwrap()
+            .is_nil());
     });
 }
 

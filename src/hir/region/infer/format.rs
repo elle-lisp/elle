@@ -6,19 +6,19 @@ use super::*;
 pub fn format_regions(
     info: &RegionInfo,
     arena: &BindingArena,
-    names: &HashMap<u32, String>,
+    symbols: Option<&crate::symbol::SymbolTable>,
 ) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
 
-    fn bname(b: Binding, arena: &BindingArena, names: &HashMap<u32, String>) -> String {
+    let bname = |b: Binding, arena: &BindingArena| -> String {
         let sym = arena.get(b).name;
-        let base = names
-            .get(&sym.0)
-            .cloned()
+        let base = symbols
+            .and_then(|s| s.name(sym))
+            .map(|n| n.to_string())
             .unwrap_or_else(|| format!("_{}", b.0));
         format!("{}#{}", base, b.0)
-    }
+    };
 
     writeln!(buf, ";; ── region assignments ──").unwrap();
 
@@ -47,7 +47,7 @@ pub fn format_regions(
     let mut bindings: Vec<_> = info.binding_region.iter().collect();
     bindings.sort_by_key(|(b, _)| b.0);
     for (b, region) in &bindings {
-        let name = bname(**b, arena, names);
+        let name = bname(**b, arena);
         writeln!(buf, "  {:<20} → r{}", name, region.0).unwrap();
     }
 

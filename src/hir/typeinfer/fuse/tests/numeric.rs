@@ -13,8 +13,8 @@ use super::*;
 
 #[test]
 fn numeric_declared_intrinsic_body_map_fuses() {
-    let (hir, arena, names) = compile("(map (fn [x] (numeric!) (%add x 1)) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [x] (numeric!) (%add x 1)) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a `(numeric!)`-declared intrinsic kernel must fuse; callees were {cs:?}",
@@ -26,7 +26,7 @@ fn numeric_declared_intrinsic_body_map_fuses() {
         "the kernel's `%add` runs inline in the fused loop, beside the index walk's own",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one fused accumulator; callees were {cs:?}",
     );
@@ -39,8 +39,8 @@ fn numeric_declared_intrinsic_body_map_fuses() {
 /// site's proof depends on. The `map` call survives.
 #[test]
 fn undeclared_intrinsic_body_declines() {
-    let (hir, arena, names) = compile("(map (fn [x] (%add 1 2)) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [x] (%add 1 2)) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "an intrinsic body without `(numeric!)` must not fuse; callees were {cs:?}",
@@ -55,8 +55,8 @@ fn undeclared_intrinsic_body_declines() {
 /// `compile`'s expect would surface.)
 #[test]
 fn numeric_declared_div_intrinsic_body_fuses() {
-    let (hir, arena, names) = compile("(map (fn [x] (numeric!) (%div x 2)) [4 6 8])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [x] (numeric!) (%div x 2)) [4 6 8])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a `%div` kernel with a literal divisor must fuse; callees were {cs:?}",
@@ -74,8 +74,8 @@ fn numeric_declared_div_intrinsic_body_fuses() {
 /// accumulator is a scalar.
 #[test]
 fn numeric_declared_intrinsic_fold_fuses() {
-    let (hir, arena, names) = compile("(fold (fn [a x] (numeric!) (%add a x)) 0 [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(fold (fn [a x] (numeric!) (%add a x)) 0 [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold"),
         "a `(numeric!)`-declared intrinsic combinator must fuse; callees were {cs:?}",
@@ -87,7 +87,7 @@ fn numeric_declared_intrinsic_fold_fuses() {
         "the fold step inlines, beside the index walk's own bump",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a fold accumulator is scalar; callees were {cs:?}",
     );
@@ -98,8 +98,8 @@ fn numeric_declared_intrinsic_fold_fuses() {
 /// comparable-family obligation over the spliced binding.
 #[test]
 fn numeric_declared_intrinsic_predicate_filter_fuses() {
-    let (hir, arena, names) = compile("(filter (fn [x] (numeric!) (%gt x 2)) [1 2 3 4])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(filter (fn [x] (numeric!) (%gt x 2)) [1 2 3 4])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "filter"),
         "a `(numeric!)`-declared intrinsic predicate must fuse; callees were {cs:?}",
@@ -119,8 +119,8 @@ fn numeric_declared_intrinsic_predicate_filter_fuses() {
 /// TWICE: the surviving definition plus the inlined copy.
 #[test]
 fn numeric_declared_intrinsic_named_fn_inlines() {
-    let (hir, arena, names) = compile("(defn sq [x] (numeric!) (%mul x x)) (map sq [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn sq [x] (numeric!) (%mul x x)) (map sq [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a named numeric kernel must inline; callees were {cs:?}",
@@ -138,11 +138,11 @@ fn numeric_declared_intrinsic_named_fn_inlines() {
 /// opcodes inline over a single accumulator — the intermediate array is gone.
 #[test]
 fn numeric_declared_intrinsic_composition_fuses_to_one_loop() {
-    let (hir, arena, names) = compile(
+    let (hir, arena, mut rt) = compile(
         "(map (fn [y] (numeric!) (%add y 1)) \
                (map (fn [x] (numeric!) (%mul x 2)) [1 2 3]))",
     );
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "both `map` dispatches must be gone; callees were {cs:?}",
@@ -155,7 +155,7 @@ fn numeric_declared_intrinsic_composition_fuses_to_one_loop() {
     );
     assert_eq!(count_intrinsic(&hir, "%mul"), 1, "the inner kernel inlines");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one loop, one accumulator — the intermediate array is gone; \
              callees were {cs:?}",

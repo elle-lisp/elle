@@ -49,7 +49,6 @@ pub struct SendableClosure {
     pub signal: Signal,
     pub capture_params_mask: u64,
     pub capture_locals_mask: crate::value::CaptureMask,
-    pub symbol_names: HashMap<u32, String>,
     pub location_map: LocationMap,
     pub doc: Option<String>,
     pub vararg_kind: VarargKind,
@@ -86,26 +85,14 @@ pub struct SendableClosure {
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
 ///
-/// For immediate values (nil, bool, int, float, symbol), SendValue stores
-/// them directly. Keywords carry their name for cross-thread re-interning.
+/// For immediate values (nil, bool, int, float, symbol, keyword), SendValue
+/// stores them directly; their spellings ride the bundle's name table.
 /// For heap values, SendValue stores owned copies of the heap data, ensuring
 /// the data remains valid even if the original Rc is dropped.
 #[derive(Clone)]
 pub enum SendValue {
     /// Immediate values that don't need copying
     Immediate(Value),
-
-    /// Keyword with name for cross-thread re-interning
-    Keyword(String),
-
-    /// Symbol with name for cross-thread re-interning. Symbol IDs are per-table
-    /// and are NOT comparable across tables, so a symbol that appears as runtime
-    /// *data* (a quoted datum, a channel message) carries its name and is
-    /// re-interned in the receiving thread's table. `id` is the sender-table id,
-    /// kept only as a fallback for the (unexpected) case where the receiving
-    /// thread has no symbol table — then it falls back to the raw id rather than
-    /// losing the value.
-    Symbol { name: String, id: u32 },
 
     /// Owned string copy
     String(String),
@@ -223,6 +210,13 @@ pub struct SendBundle {
     pub root: SendValue,
     /// Intern table of all closures reachable from `root`.
     pub closures: Vec<SendableClosure>,
+    /// Spelling table for every symbol and keyword in the bundle, read from
+    /// the sender's memo (and, for keywords, the static vocabulary). The
+    /// receiving instance replays it into its own memo so the names it now
+    /// holds can be printed (docs/impl/symbol.md § "The display memo"). A
+    /// name the sender never learned is absent — its hash still compares
+    /// correctly on the other side.
+    pub symbols: Vec<(u64, Box<str>)>,
 }
 
 // SAFETY: SendBundle owns all its data — no Rc, no RefCell.
@@ -240,9 +234,8 @@ impl SendValue {
     pub fn from_value(
         value: Value,
         heap: &crate::value::fiberheap::FiberHeap,
-        symbols: &crate::symbol::SymbolTable,
     ) -> Result<Self, String> {
-        let mut ctx = SerContext::new(heap, symbols);
+        let mut ctx = SerContext::new(heap, None);
         let sv = from_value_inner(value, &mut ctx)?;
         if !ctx.closures.is_empty() {
             panic!("SendValue::from_value cannot serialize closures; use SendBundle::from_value instead");
@@ -251,18 +244,13 @@ impl SendValue {
     }
 
     /// Convert SendValue back into a Value by reconstructing heap objects into
-    /// the call's region through `ctx`, re-interning any symbol names into the
-    /// receiver's `symbols` (both threaded explicitly).
-    pub fn into_value(
-        self,
-        ctx: &mut crate::primitives::ctx::Alloc,
-        symbols: &mut crate::symbol::SymbolTable,
-    ) -> Value {
+    /// the call's region through `ctx`.
+    pub fn into_value(self, ctx: &mut crate::primitives::ctx::Alloc) -> Value {
         // A bare `SendValue` carries no closures (`from_value` panics if any are
         // reachable), so reconstruction is the closure-free subset of
         // `into_value_inner` — delegate through an empty `DeserContext` rather
         // than duplicate every heap-object arm.
-        let mut dctx = DeserContext::new(Vec::new(), ctx, symbols);
+        let mut dctx = DeserContext::new(Vec::new(), ctx);
         into_value_inner(self, &mut dctx)
     }
 }
@@ -280,16 +268,23 @@ impl SendBundle {
     ///
     /// Returns `Err` if any value in the reachable graph is not sendable
     /// (e.g., mutable @struct, fiber, FFI handle).
+    ///
+    /// `symbols` is the sender's display memo; every symbol met during
+    /// serialization takes its name from it into the bundle's name table.
+    /// `None` sends ids without names — valid, but the receiver cannot print
+    /// them.
     pub fn from_value(
         value: Value,
         heap: &crate::value::fiberheap::FiberHeap,
-        symbols: &crate::symbol::SymbolTable,
+        symbols: Option<&crate::symbol::SymbolTable>,
     ) -> Result<Self, String> {
         let mut ctx = SerContext::new(heap, symbols);
         let root = from_value_inner(value, &mut ctx)?;
+        let names = ctx.take_names();
         Ok(SendBundle {
             root,
             closures: ctx.closures,
+            symbols: names,
         })
     }
 
@@ -298,12 +293,22 @@ impl SendBundle {
     /// Mutually recursive closures are handled via LBox fixups: if a closure's
     /// env contains an LBox wrapping a not-yet-built closure, the LBox is
     /// allocated with a NIL placeholder and updated after all closures are built.
+    ///
+    /// `symbols` is the receiving instance's display memo; the bundle's name
+    /// table replays into it (a learning site, so a cross-instance hash
+    /// collision is caught here). `None` reconstructs values whose symbols
+    /// print as `#<symbol:hash>`.
     pub fn into_value(
         self,
         ctx: &mut crate::primitives::ctx::Alloc,
-        symbols: &mut crate::symbol::SymbolTable,
+        symbols: Option<&mut crate::symbol::SymbolTable>,
     ) -> Value {
-        let mut dctx = DeserContext::new(self.closures, ctx, symbols);
+        if let Some(memo) = symbols {
+            for (hash, name) in &self.symbols {
+                memo.record_spelling(*hash, name);
+            }
+        }
+        let mut dctx = DeserContext::new(self.closures, ctx);
 
         let result = into_value_inner(self.root, &mut dctx);
 

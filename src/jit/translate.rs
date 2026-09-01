@@ -98,7 +98,6 @@ pub(crate) struct FunctionTranslator<'a> {
     #[allow(clippy::vec_box)] // the Box stable-address is the point (see above)
     pub(crate) templates: Vec<Box<crate::value::ConstTemplate>>,
     /// Symbol name map for nested emitters (MakeClosure).
-    pub(crate) symbol_names: HashMap<u32, String>,
     /// Module's closure list for MakeClosure → ClosureId lookup.
     pub(crate) module_closures: Vec<crate::lir::LirFunction>,
     /// Whether this function's LIR carries an `AdoptIntoActivation` — computed
@@ -162,7 +161,6 @@ impl<'a> FunctionTranslator<'a> {
             abandoned_locals_spill: None,
             closure_protos: Vec::new(),
             templates: Vec::new(),
-            symbol_names: HashMap::new(),
             module_closures: Vec::new(),
             uses_activation_owner_node,
         }

@@ -15,6 +15,7 @@
 //! disjunctions the flat fact sets cannot express, so they stay empty).
 
 use super::*;
+use crate::value::SymbolId;
 
 /// One thing a condition proves about one binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,16 +75,32 @@ fn intrinsic_predicate_type(op: IntrinsicOp) -> Option<TyId> {
 /// The type a *stdlib-named* predicate call proves when truthy. Recognition is
 /// by callee name, the same authority the `match (type-of x)` narrowing uses:
 /// these names are the language's stable predicate vocabulary.
-fn named_predicate_type(name: &str) -> Option<TyId> {
-    match name {
-        "int?" | "integer?" => Some(TypeInterner::INT),
-        "float?" => Some(TypeInterner::FLOAT),
-        "number?" => Some(TypeInterner::NUMBER),
-        "keyword?" => Some(TypeInterner::KEYWORD),
-        "symbol?" => Some(TypeInterner::SYMBOL),
-        "bool?" | "boolean?" => Some(TypeInterner::BOOL),
-        "nil?" => Some(TypeInterner::NIL),
-        "pair?" => Some(TypeInterner::PAIR),
+fn named_predicate_type(sym: SymbolId) -> Option<TyId> {
+    // Const patterns, not `symbols.name(sym)`: the question is identity, and
+    // `SymbolId::of` is a `const fn` over the name's hash, so these compile to
+    // integer compares against constants with no table in scope
+    // (docs/impl/symbol.md § "Reading a name, and not reading one"). Several of
+    // these predicates are defined in the stdlib rather than the primitive
+    // tables, so nothing build-time could hand back their spelling anyway.
+    const INT_P: SymbolId = SymbolId::of("int?");
+    const INTEGER_P: SymbolId = SymbolId::of("integer?");
+    const FLOAT_P: SymbolId = SymbolId::of("float?");
+    const NUMBER_P: SymbolId = SymbolId::of("number?");
+    const KEYWORD_P: SymbolId = SymbolId::of("keyword?");
+    const SYMBOL_P: SymbolId = SymbolId::of("symbol?");
+    const BOOL_P: SymbolId = SymbolId::of("bool?");
+    const BOOLEAN_P: SymbolId = SymbolId::of("boolean?");
+    const NIL_P: SymbolId = SymbolId::of("nil?");
+    const PAIR_P: SymbolId = SymbolId::of("pair?");
+    match sym {
+        INT_P | INTEGER_P => Some(TypeInterner::INT),
+        FLOAT_P => Some(TypeInterner::FLOAT),
+        NUMBER_P => Some(TypeInterner::NUMBER),
+        KEYWORD_P => Some(TypeInterner::KEYWORD),
+        SYMBOL_P => Some(TypeInterner::SYMBOL),
+        BOOL_P | BOOLEAN_P => Some(TypeInterner::BOOL),
+        NIL_P => Some(TypeInterner::NIL),
+        PAIR_P => Some(TypeInterner::PAIR),
         _ => None,
     }
 }
@@ -113,17 +130,11 @@ fn zero_comparison_subject(args: &[Hir]) -> Option<Binding> {
 }
 
 /// Extract the facts `cond` proves, by truth value.
-pub(super) fn cond_facts(
-    cond: &Hir,
-    arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
-) -> CondFacts {
+pub(super) fn cond_facts(cond: &Hir, arena: &BindingArena) -> CondFacts {
     let cond = unwrap_anf_let(cond);
     match &cond.kind {
         HirKind::Intrinsic { op, args } => match op {
-            IntrinsicOp::Not if args.len() == 1 => {
-                cond_facts(&args[0], arena, symbol_names).negate()
-            }
+            IntrinsicOp::Not if args.len() == 1 => cond_facts(&args[0], arena).negate(),
             // (%eq x 0): falsy ⇒ x ≠ 0. (%ne x 0): truthy ⇒ x ≠ 0.
             IntrinsicOp::Eq => match zero_comparison_subject(args) {
                 Some(b) => CondFacts {
@@ -171,19 +182,20 @@ pub(super) fn cond_facts(
             let Some(callee) = unwrap_callee_binding(func) else {
                 return CondFacts::none();
             };
-            let Some(name) = symbol_names.get(&arena.get(callee).name.0) else {
-                return CondFacts::none();
-            };
-            match (name.as_str(), args.len()) {
-                ("not", 1) => cond_facts(&args[0].expr, arena, symbol_names).negate(),
-                ("zero?", 1) => match subject(&args[0].expr) {
+            const NOT: SymbolId = SymbolId::of("not");
+            const ZERO_P: SymbolId = SymbolId::of("zero?");
+            const EQ: SymbolId = SymbolId::of("=");
+            let callee_sym = arena.get(callee).name;
+            match (callee_sym, args.len()) {
+                (NOT, 1) => cond_facts(&args[0].expr, arena).negate(),
+                (ZERO_P, 1) => match subject(&args[0].expr) {
                     Some(b) => CondFacts {
                         when_true: vec![],
                         when_false: vec![Fact::Nonzero(b)],
                     },
                     None => CondFacts::none(),
                 },
-                ("=", 2) => {
+                (EQ, 2) => {
                     let b = if literal_zero(&args[1].expr) {
                         subject(&args[0].expr)
                     } else if literal_zero(&args[0].expr) {
@@ -199,7 +211,7 @@ pub(super) fn cond_facts(
                         None => CondFacts::none(),
                     }
                 }
-                (_, 1) => match (named_predicate_type(name), subject(&args[0].expr)) {
+                (_, 1) => match (named_predicate_type(callee_sym), subject(&args[0].expr)) {
                     (Some(ty), Some(b)) => CondFacts {
                         when_true: vec![Fact::TypeIs(b, ty)],
                         when_false: vec![],
@@ -214,7 +226,7 @@ pub(super) fn cond_facts(
         HirKind::And(items) => CondFacts {
             when_true: items
                 .iter()
-                .flat_map(|i| cond_facts(i, arena, symbol_names).when_true)
+                .flat_map(|i| cond_facts(i, arena).when_true)
                 .collect(),
             when_false: vec![],
         },
@@ -223,7 +235,7 @@ pub(super) fn cond_facts(
             when_true: vec![],
             when_false: items
                 .iter()
-                .flat_map(|i| cond_facts(i, arena, symbol_names).when_false)
+                .flat_map(|i| cond_facts(i, arena).when_false)
                 .collect(),
         },
         _ => CondFacts::none(),
@@ -258,11 +270,7 @@ pub(super) fn diverges(h: &Hir) -> bool {
 /// The facts that hold for the statements *after* `stmt` in a sequence: a
 /// one-armed `If` whose taken branch diverges leaves the other branch's
 /// entry facts standing on the fall-through.
-pub(super) fn facts_after_statement(
-    stmt: &Hir,
-    arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
-) -> Vec<Fact> {
+pub(super) fn facts_after_statement(stmt: &Hir, arena: &BindingArena) -> Vec<Fact> {
     let HirKind::If {
         cond,
         then_branch,
@@ -273,7 +281,7 @@ pub(super) fn facts_after_statement(
     };
     let then_div = diverges(then_branch);
     let else_div = diverges(else_branch);
-    let facts = cond_facts(cond, arena, symbol_names);
+    let facts = cond_facts(cond, arena);
     match (then_div, else_div) {
         (true, false) => facts.when_false,
         (false, true) => facts.when_true,

@@ -122,7 +122,7 @@ pub(crate) fn prim_length(
     // Types without traitsets that still support length
     if args[0].is_nil()
         || args[0].is_symbol()
-        || args[0].as_keyword_name().is_some()
+        || args[0].is_keyword()
         || args[0].as_syntax().is_some()
         || args[0].is_empty_list()
     {

@@ -15,10 +15,10 @@ fn capture_by_called_in_place_closure_does_not_escape() {
     let src = "(def make (fn () (let [up \"x\"] \
                    (let [inner (fn () (length up))] \
                      (let [wrap (fn () (inner))] (wrap))))))";
-    let (hir, arena, names, escape) = escape_of(src);
+    let (hir, arena, escape) = escape_of(src);
     // `up` is captured (by `inner`) but its capturer never escapes, so `up` must
     // not escape its activation.
-    let up = bindings_named(&hir, &arena, &["up"], &names);
+    let up = bindings_named(&hir, &arena, &["up"]);
     assert!(!up.is_empty(), "missing `up` in `{src}`");
     assert!(
         up.iter().all(|b| !escape.binding_escapes_activation(*b)),
@@ -27,7 +27,7 @@ fn capture_by_called_in_place_closure_does_not_escape() {
     );
     // The lambda capturing `up` (`inner`) is itself called in place via `wrap`,
     // so it must not escape its definition.
-    let names_up = |b: &Binding| names.get(&arena.get(*b).name.0).map(String::as_str) == Some("up");
+    let names_up = |b: &Binding| arena.get(*b).name == crate::value::SymbolId::of("up");
     let mut found = false;
     for (lid, caps) in lambdas_with_captures(&hir) {
         if caps.iter().any(names_up) {
@@ -155,13 +155,13 @@ fn fiber_emit_value_escapes() {
 fn native_store_arg_escapes_send_message_not_channel() {
     let src = "(def f (fn (c) (let [m \"hi\"] (chan/send c m))))";
     let mut symbols = crate::symbol::SymbolTable::new();
-    let (hir, arena, names) = compile_fhir(src, &mut symbols);
+    let (hir, arena) = compile_fhir(src, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let escape = analyze_escape(&hir, &arena, &pc.call_classification);
 
-    let m = bindings_named(&hir, &arena, &["m"], &names);
-    let c = bindings_named(&hir, &arena, &["c"], &names);
+    let m = bindings_named(&hir, &arena, &["m"]);
+    let c = bindings_named(&hir, &arena, &["c"]);
     assert!(!m.is_empty() && !c.is_empty(), "missing m/c in `{src}`");
     // Positive: the message (the stored arg, a live local) escapes.
     assert!(

@@ -45,8 +45,8 @@ pub(crate) fn prim_json_parse(
     };
 
     let use_keyword_keys = if args.len() == 3 {
-        let opt_key_ok = args[1].as_keyword_name().as_deref() == Some("keys");
-        let opt_val_ok = args[2].as_keyword_name().as_deref() == Some("keyword");
+        let opt_key_ok = args[1].is_keyword_named("keys");
+        let opt_val_ok = args[2].is_keyword_named("keyword");
         if opt_key_ok && opt_val_ok {
             true
         } else {
@@ -77,7 +77,7 @@ pub(crate) fn prim_json_serialize(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let json_str = match serialize_value(&args[0]) {
+    let json_str = match serialize_value(&args[0], ctx.vm().symbols().map(|s| &*s)) {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, ctx.error("serde-error", e)),
     };
@@ -89,7 +89,7 @@ pub(crate) fn prim_json_serialize_pretty(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let json_str = match serialize_value_pretty(&args[0], 0) {
+    let json_str = match serialize_value_pretty(&args[0], ctx.vm().symbols().map(|s| &*s), 0) {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, ctx.error("serde-error", e)),
     };

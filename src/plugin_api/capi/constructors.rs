@@ -49,8 +49,17 @@ pub(in crate::plugin_api) extern "C" fn make_bytes(
     })
 }
 
-pub(in crate::plugin_api) extern "C" fn make_keyword(ptr: *const u8, len: usize) -> [u64; 2] {
+pub(in crate::plugin_api) extern "C" fn make_keyword(
+    ctx: *mut CallCtx,
+    ptr: *const u8,
+    len: usize,
+) -> [u64; 2] {
     let name = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) };
+    // A learning site: the dispatching instance's memo records the spelling,
+    // so a plugin-minted keyword prints in the instance the call belongs to.
+    if let Some(symbols) = unsafe { ctx.as_ref().and_then(|c| c.symbols.as_mut()) } {
+        symbols.keyword(name);
+    }
     from_value(Value::keyword(name))
 }
 
@@ -89,7 +98,10 @@ pub(in crate::plugin_api) extern "C" fn make_struct(
                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(kv.key, kv.key_len))
             };
             let value = unsafe { to_value(kv.value) };
-            fields.insert(TableKey::Keyword(key_str.into()), value);
+            if let Some(symbols) = unsafe { ctx.as_ref().and_then(|c| c.symbols.as_mut()) } {
+                symbols.keyword(key_str);
+            }
+            fields.insert(TableKey::keyword(key_str), value);
         }
     }
     from_value(unsafe {

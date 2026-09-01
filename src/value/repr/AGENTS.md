@@ -33,7 +33,7 @@ Does NOT:
 | TAG_FALSE | 0 | False (falsy) |
 | TAG_TRUE | 0 | True (truthy) |
 | TAG_EMPTY_LIST | 0 | Empty list (truthy) |
-| TAG_SYMBOL | u32 symbol ID | Symbol |
+| TAG_SYMBOL | FNV-1a hash of name | Symbol |
 | TAG_KEYWORD | FNV-1a hash of name | Keyword |
 | TAG_PTR | heap pointer | Cons, Array, Table, Closure, Fiber, etc. |
 ## Constructors
@@ -44,7 +44,7 @@ Does NOT:
 | `Value::float(f)` | Float | Handles NaN/Infinity specially |
 | `Value::bool(b)` | Bool | True or False |
 | `Value::symbol(id)` | Symbol | From SymbolId |
-| `Value::keyword(name)` | Keyword | FNV-1a hash of name; registers in global name table |
+| `Value::keyword(name)` | Keyword | FNV-1a hash of name; identity only, records nothing |
 | `Value::nil()` | Nil | Falsy, represents absence |
 | `Value::EMPTY_LIST` | EmptyList | Truthy, represents empty list |
 | `Value::TRUE` | True | Truthy singleton |
@@ -80,8 +80,8 @@ Does NOT:
 | `is_symbol()` | bool | Type check |
 | `as_symbol()` | Option<SymbolId> | Extract symbol ID |
 | `is_keyword()` | bool | Type check |
-| `keyword_hash()` | Option<u64> | Extract 64-bit keyword hash (fast path — no lock) |
-| `as_keyword_name()` | Option<String> | Extract keyword name (acquires RwLock + allocates) |
+| `keyword_hash()` | Option<u64> | Extract 64-bit keyword hash |
+| `is_keyword_named(name)` | bool | One hash compare against a spelling; spelling recovery goes through the memo |
 | `is_nil()` | bool | Type check (only matches nil, not empty list) |
 | `is_empty_list()` | bool | Type check (only matches empty list, not nil) |
 | `is_cons()` | bool | Type check |

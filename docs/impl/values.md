@@ -25,8 +25,8 @@ TAG_NIL (2)         unused
 TAG_TRUE (3)        unused
 TAG_FALSE (4)       unused
 TAG_EMPTY_LIST (5)  unused
-TAG_SYMBOL (6)      SymbolId (interned)
-TAG_KEYWORD (7)     keyword hash (intern_keyword)
+TAG_SYMBOL (6)      SymbolId — the name's FNV-1a hash (impl/symbol.md)
+TAG_KEYWORD (7)     keyword hash (keyword_hash — the name hash)
 TAG_UNDEFINED (8)   unused (compiler sentinel; never user-visible)
 TAG_CPOINTER (9)    raw C pointer address
 TAG_NATIVE_FN (10)  prim_id (index into the primitive registry)

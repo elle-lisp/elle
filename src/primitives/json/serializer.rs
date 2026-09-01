@@ -23,7 +23,10 @@ pub fn escape_json_string(s: &str) -> String {
 }
 
 /// Serialize a value to compact JSON
-pub fn serialize_value(value: &Value) -> Result<String, String> {
+pub fn serialize_value(
+    value: &Value,
+    symbols: Option<&crate::symbol::SymbolTable>,
+) -> Result<String, String> {
     if value.is_nil() {
         Ok("null".to_string())
     } else if let Some(b) = value.as_bool() {
@@ -49,18 +52,30 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
     } else if value.is_pair() {
         // Convert list to array
         let vec = value.list_to_vec()?;
-        let elements: Result<Vec<String>, String> = vec.iter().map(serialize_value).collect();
+        let elements: Result<Vec<String>, String> =
+            vec.iter().map(|v| serialize_value(v, symbols)).collect();
         Ok(format!("[{}]", elements?.join(",")))
     } else if let Some(v) = value.as_array_mut() {
         let borrowed = v.borrow();
-        let elements: Result<Vec<String>, String> = borrowed.iter().map(serialize_value).collect();
+        let elements: Result<Vec<String>, String> = borrowed
+            .iter()
+            .map(|v| serialize_value(v, symbols))
+            .collect();
         Ok(format!("[{}]", elements?.join(",")))
     } else if let Some(t) = value.as_struct_mut() {
         let mstruct = t.borrow();
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
             let key_str = match k {
-                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                TableKey::String(s) => escape_json_string(s),
+                TableKey::Keyword(hash) => {
+                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                        Some(name) => escape_json_string(name),
+                        None => {
+                            return Err("keyword struct key has no learned spelling".to_string())
+                        }
+                    }
+                }
                 _ => {
                     return Err(
                         "@struct keys must be strings or keywords for JSON serialization"
@@ -68,7 +83,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                     )
                 }
             };
-            let val_str = serialize_value(v)?;
+            let val_str = serialize_value(v, symbols)?;
             pairs.push(format!("{}:{}", key_str, val_str));
         }
         Ok(format!("{{{}}}", pairs.join(",")))
@@ -76,7 +91,15 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
             let key_str = match k {
-                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                TableKey::String(s) => escape_json_string(s),
+                TableKey::Keyword(hash) => {
+                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                        Some(name) => escape_json_string(name),
+                        None => {
+                            return Err("keyword struct key has no learned spelling".to_string())
+                        }
+                    }
+                }
                 _ => {
                     return Err(
                         "Struct keys must be strings or keywords for JSON serialization"
@@ -84,12 +107,14 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                     )
                 }
             };
-            let val_str = serialize_value(v)?;
+            let val_str = serialize_value(v, symbols)?;
             pairs.push(format!("{}:{}", key_str, val_str));
         }
         Ok(format!("{{{}}}", pairs.join(",")))
-    } else if let Some(name) = value.as_keyword_name() {
-        Ok(escape_json_string(&name))
+    } else if let Some(hash) = value.keyword_hash() {
+        let name = crate::value::keyword::resolve_keyword_name(symbols, hash)
+            .ok_or_else(|| "keyword has no learned spelling".to_string())?;
+        Ok(escape_json_string(name))
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
@@ -97,7 +122,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
     } else if let Some(cell) = value.as_lbox() {
         // Dereference the cell and serialize the inner value
         let inner = cell.borrow();
-        serialize_value(&inner)
+        serialize_value(&inner, symbols)
     } else if let Some(tag) = value.heap_tag() {
         use crate::value::heap::HeapTag;
         match tag {
@@ -110,7 +135,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::LArray => {
                 if let Some(elems) = value.as_array() {
                     let items: Result<Vec<String>, String> =
-                        elems.iter().map(serialize_value).collect();
+                        elems.iter().map(|v| serialize_value(v, symbols)).collect();
                     Ok(format!("[{}]", items?.join(",")))
                 } else {
                     Err("Tuple should have been accessible".to_string())
@@ -138,7 +163,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::LSet => {
                 if let Some(s) = value.as_set() {
                     let items: Result<Vec<String>, String> =
-                        s.iter().map(serialize_value).collect();
+                        s.iter().map(|v| serialize_value(v, symbols)).collect();
                     Ok(format!("[{}]", items?.join(",")))
                 } else {
                     Err("Set should have been accessible".to_string())
@@ -148,7 +173,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                 if let Some(s_ref) = value.as_set_mut() {
                     let s = s_ref.borrow();
                     let items: Result<Vec<String>, String> =
-                        s.iter().map(serialize_value).collect();
+                        s.iter().map(|v| serialize_value(v, symbols)).collect();
                     Ok(format!("[{}]", items?.join(",")))
                 } else {
                     Err("Mutable set should have been accessible".to_string())
@@ -164,7 +189,11 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
 }
 
 /// Serialize a value to pretty-printed JSON with indentation
-pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<String, String> {
+pub fn serialize_value_pretty(
+    value: &Value,
+    symbols: Option<&crate::symbol::SymbolTable>,
+    indent_level: usize,
+) -> Result<String, String> {
     let indent = "  ".repeat(indent_level);
     let next_indent = "  ".repeat(indent_level + 1);
 
@@ -196,7 +225,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         }
         let elements: Result<Vec<String>, String> = vec
             .iter()
-            .map(|v| serialize_value_pretty(v, indent_level + 1))
+            .map(|v| serialize_value_pretty(v, symbols, indent_level + 1))
             .collect();
         Ok(format!(
             "[\n{}{}\n{}]",
@@ -211,7 +240,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         }
         let elements: Result<Vec<String>, String> = borrowed
             .iter()
-            .map(|val| serialize_value_pretty(val, indent_level + 1))
+            .map(|val| serialize_value_pretty(val, symbols, indent_level + 1))
             .collect();
         Ok(format!(
             "[\n{}{}\n{}]",
@@ -227,7 +256,15 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
             let key_str = match k {
-                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                TableKey::String(s) => escape_json_string(s),
+                TableKey::Keyword(hash) => {
+                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                        Some(name) => escape_json_string(name),
+                        None => {
+                            return Err("keyword struct key has no learned spelling".to_string())
+                        }
+                    }
+                }
                 _ => {
                     return Err(
                         "@struct keys must be strings or keywords for JSON serialization"
@@ -235,7 +272,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                     )
                 }
             };
-            let val_str = serialize_value_pretty(v, indent_level + 1)?;
+            let val_str = serialize_value_pretty(v, symbols, indent_level + 1)?;
             pairs.push(format!("{}: {}", key_str, val_str));
         }
         Ok(format!(
@@ -251,7 +288,15 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
             let key_str = match k {
-                TableKey::String(s) | TableKey::Keyword(s) => escape_json_string(s),
+                TableKey::String(s) => escape_json_string(s),
+                TableKey::Keyword(hash) => {
+                    match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                        Some(name) => escape_json_string(name),
+                        None => {
+                            return Err("keyword struct key has no learned spelling".to_string())
+                        }
+                    }
+                }
                 _ => {
                     return Err(
                         "Struct keys must be strings or keywords for JSON serialization"
@@ -259,7 +304,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                     )
                 }
             };
-            let val_str = serialize_value_pretty(v, indent_level + 1)?;
+            let val_str = serialize_value_pretty(v, symbols, indent_level + 1)?;
             pairs.push(format!("{}: {}", key_str, val_str));
         }
         Ok(format!(
@@ -268,8 +313,10 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             pairs.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if let Some(name) = value.as_keyword_name() {
-        Ok(escape_json_string(&name))
+    } else if let Some(hash) = value.keyword_hash() {
+        let name = crate::value::keyword::resolve_keyword_name(symbols, hash)
+            .ok_or_else(|| "keyword has no learned spelling".to_string())?;
+        Ok(escape_json_string(name))
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
@@ -277,7 +324,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
     } else if let Some(cell) = value.as_lbox() {
         // Dereference the cell and serialize the inner value
         let inner = cell.borrow();
-        serialize_value_pretty(&inner, indent_level)
+        serialize_value_pretty(&inner, symbols, indent_level)
     } else if let Some(tag) = value.heap_tag() {
         use crate::value::heap::HeapTag;
         match tag {
@@ -291,7 +338,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                 if let Some(elems) = value.as_array() {
                     let items: Result<Vec<String>, String> = elems
                         .iter()
-                        .map(|v| serialize_value_pretty(v, indent_level + 1))
+                        .map(|v| serialize_value_pretty(v, symbols, indent_level + 1))
                         .collect();
                     Ok(format!(
                         "[\n{}{}\n{}]",
@@ -326,7 +373,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                 if let Some(s) = value.as_set() {
                     let items: Result<Vec<String>, String> = s
                         .iter()
-                        .map(|v| serialize_value_pretty(v, indent_level + 1))
+                        .map(|v| serialize_value_pretty(v, symbols, indent_level + 1))
                         .collect();
                     Ok(format!(
                         "[\n{}{}\n{}]",
@@ -343,7 +390,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                     let s = s_ref.borrow();
                     let items: Result<Vec<String>, String> = s
                         .iter()
-                        .map(|v| serialize_value_pretty(v, indent_level + 1))
+                        .map(|v| serialize_value_pretty(v, symbols, indent_level + 1))
                         .collect();
                     Ok(format!(
                         "[\n{}{}\n{}]",

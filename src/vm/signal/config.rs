@@ -50,7 +50,7 @@ impl VM {
                 self.unicode_version_value(ctx),
             );
             (SIG_OK, ctx.struct_from(map))
-        } else if let Some(kw) = arg.as_keyword_name() {
+        } else if let Some(kw) = self.keyword_spelling(arg) {
             match kw.as_str() {
                 "jit" => (SIG_OK, Value::keyword(rc.jit.keyword())),
                 "wasm" => (SIG_OK, Value::keyword(rc.wasm.keyword())),
@@ -98,7 +98,7 @@ impl VM {
         let key = pair.first;
         let val = pair.rest;
 
-        let kw = match key.as_keyword_name() {
+        let kw = match self.keyword_spelling(key) {
             Some(k) => k,
             None => {
                 return ctx.error(
@@ -116,7 +116,7 @@ impl VM {
                 if let Some(closure) = val.as_closure() {
                     let _ = closure; // TODO: store for actual dispatch
                     self.runtime_config.jit = crate::config::JitPolicy::Custom;
-                } else if let Some(policy_kw) = val.as_keyword_name() {
+                } else if let Some(policy_kw) = self.keyword_spelling(val) {
                     match crate::config::JitPolicy::from_keyword(&policy_kw) {
                         Some(policy) => {
                             self.runtime_config.jit = policy;
@@ -140,7 +140,7 @@ impl VM {
                 Value::NIL
             }
             "wasm" => {
-                if let Some(policy_kw) = val.as_keyword_name() {
+                if let Some(policy_kw) = self.keyword_spelling(val) {
                     match crate::config::WasmPolicy::from_keyword(&policy_kw) {
                         Some(policy) => {
                             self.runtime_config.wasm = policy;
@@ -164,7 +164,7 @@ impl VM {
                 Value::NIL
             }
             "mlir" => {
-                if let Some(policy_kw) = val.as_keyword_name() {
+                if let Some(policy_kw) = self.keyword_spelling(val) {
                     match crate::config::MlirPolicy::from_keyword(&policy_kw) {
                         Some(policy) => {
                             #[cfg(feature = "mlir")]
@@ -196,7 +196,7 @@ impl VM {
                 if let Some(set) = val.as_set() {
                     let mut keywords = std::collections::HashSet::new();
                     for v in set.iter() {
-                        if let Some(k) = v.as_keyword_name() {
+                        if let Some(k) = self.keyword_spelling(*v) {
                             keywords.insert(k);
                         }
                     }

@@ -37,7 +37,7 @@ pub(crate) fn prim_bytes(
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
             return (SIG_OK, ctx.bytes(data));
         }
-        if let Some(name) = args[0].as_keyword_name() {
+        if let Some(name) = ctx.keyword_spelling(args[0]) {
             return (SIG_OK, ctx.bytes(name.as_bytes().to_vec()));
         }
     }
@@ -101,7 +101,7 @@ pub(crate) fn prim_bytes_mut(
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
             return (SIG_OK, ctx.bytes_mut(data));
         }
-        if let Some(name) = args[0].as_keyword_name() {
+        if let Some(name) = ctx.keyword_spelling(args[0]) {
             return (SIG_OK, ctx.bytes_mut(name.as_bytes().to_vec()));
         }
     }

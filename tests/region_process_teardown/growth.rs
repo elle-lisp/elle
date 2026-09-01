@@ -186,8 +186,7 @@ fn process_teardown_frees_all_regions() {
     {
         let (vm, symbols, cctx) = rt.parts();
         let result = compile_file("(+ 1 2)", symbols, cctx, "<teardown-target>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
     }
     let report = rt.teardown();
     assert_eq!(

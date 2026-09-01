@@ -295,7 +295,7 @@ pub(crate) fn submit_uring_recvfrom(
     // Writeable pointer into the pre-allocated `:data` buffer (`count` bytes).
     let data_buf = crate::value::sorted_struct_get(
         result.as_struct().expect("recv result must be a struct"),
-        &crate::value::heap::TableKey::Keyword("data".into()),
+        &crate::value::heap::TableKey::keyword("data"),
     )
     .copied()
     .expect("recv result must have :data");

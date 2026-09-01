@@ -22,10 +22,10 @@
 
 # Special forms (begin/def/quote/if) are recognized by the analyzer by NAME,
 # so they resolve in a light worker too — they are not stdlib. This only works
-# because a quoted symbol crosses the spawn boundary by name and re-interns in
-# the worker's own table; a raw sender-table id would not name `begin`/`def`
-# there. (Regression guard: before symbols carried their name, this was a loud
-# :eval-error "Unknown symbol".)
+# because a quoted symbol crosses the spawn boundary unchanged and still names
+# `begin`/`def` on the far side: the id is the name's hash
+# (docs/impl/symbol.md). A per-table id would name something else there.
+# (Regression guard: it was once a loud :eval-error "Unknown symbol".)
 (assert (= 7
            (sys/join (sys/spawn-vm (fn []
                                      (eval (quote (begin

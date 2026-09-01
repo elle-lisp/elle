@@ -11,7 +11,6 @@ pub(crate) fn infer_types(
     hir_types: &mut HashMap<HirId, TyId>,
     lambda_params: &HashMap<Binding, Vec<Binding>>,
     lambda_body_type: &mut HashMap<Binding, TyId>,
-    symbol_names: &HashMap<u32, String>,
     binding_min_length: &mut HashMap<Binding, usize>,
     value_used: &std::collections::HashSet<Binding>,
     typeof_aliases: &HashMap<Binding, Binding>,
@@ -25,7 +24,6 @@ pub(crate) fn infer_types(
         hir_types,
         lambda_params,
         lambda_body_type,
-        symbol_names,
         binding_min_length,
         &mut Vec::new(),
         value_used,
@@ -46,7 +44,6 @@ pub(crate) fn infer_node(
     hir_types: &mut HashMap<HirId, TyId>,
     lambda_params: &HashMap<Binding, Vec<Binding>>,
     lambda_body_type: &mut HashMap<Binding, TyId>,
-    symbol_names: &HashMap<u32, String>,
     binding_min_length: &mut HashMap<Binding, usize>,
     // The letrec lambdas whose own bodies are currently being inferred. A
     // call to one of these from within its own body contributes BOTTOM to
@@ -80,7 +77,6 @@ pub(crate) fn infer_node(
                 hir_types,
                 lambda_params,
                 lambda_body_type,
-                symbol_names,
                 binding_min_length,
                 selfrec,
                 value_used,
@@ -200,7 +196,7 @@ pub(crate) fn infer_node(
             let _cond_ty = recurse!(cond);
             hir_types.insert(cond.id, _cond_ty);
 
-            let facts = super::super::guard::cond_facts(cond, arena, symbol_names);
+            let facts = super::super::guard::cond_facts(cond, arena);
 
             let saved = apply_type_facts(&facts.when_true, binding_types, interner);
             let then_ty = recurse!(then_branch);
@@ -231,7 +227,7 @@ pub(crate) fn infer_node(
             let val_ty = recurse!(value);
             hir_types.insert(value.id, val_ty);
 
-            let subject = typeof_subject_binding(value, arena, symbol_names, typeof_aliases);
+            let subject = typeof_subject_binding(value, arena, typeof_aliases);
             let mut arm_join = TypeInterner::BOTTOM;
             for (pat, guard, body) in arms {
                 if let Some(g) = guard {
@@ -352,11 +348,9 @@ pub(crate) fn infer_node(
 
                 // Primitive return type inference for unresolved callees
                 let callee_sym = arena.get(callee_binding).name;
-                if let Some(name) = symbol_names.get(&callee_sym.0) {
-                    let prim_ty = primitive_return_type(name, &arg_types, interner);
-                    if prim_ty != TypeInterner::TOP {
-                        return prim_ty;
-                    }
+                let prim_ty = primitive_return_type(callee_sym, &arg_types, interner);
+                if prim_ty != TypeInterner::TOP {
+                    return prim_ty;
                 }
             }
 
@@ -376,7 +370,7 @@ pub(crate) fn infer_node(
             for expr in exprs {
                 ty = recurse!(expr);
                 hir_types.insert(expr.id, ty);
-                let facts = super::super::guard::facts_after_statement(expr, arena, symbol_names);
+                let facts = super::super::guard::facts_after_statement(expr, arena);
                 saved.extend(apply_type_facts(&facts, binding_types, interner));
             }
             restore_type_facts(saved, binding_types);
@@ -388,7 +382,7 @@ pub(crate) fn infer_node(
             for expr in body {
                 ty = recurse!(expr);
                 hir_types.insert(expr.id, ty);
-                let facts = super::super::guard::facts_after_statement(expr, arena, symbol_names);
+                let facts = super::super::guard::facts_after_statement(expr, arena);
                 saved.extend(apply_type_facts(&facts, binding_types, interner));
             }
             restore_type_facts(saved, binding_types);
@@ -407,7 +401,7 @@ pub(crate) fn infer_node(
             for (test, body) in clauses {
                 let test_ty = recurse!(test);
                 hir_types.insert(test.id, test_ty);
-                let facts = super::super::guard::cond_facts(test, arena, symbol_names);
+                let facts = super::super::guard::cond_facts(test, arena);
                 let saved = apply_type_facts(&facts.when_true, binding_types, interner);
                 let body_ty = recurse!(body);
                 hir_types.insert(body.id, body_ty);

@@ -343,6 +343,15 @@ impl VM {
         }
     }
 
+    /// The spelling of a keyword value, through this instance's memo and the
+    /// static vocabulary. `None` if `v` is not a keyword or the spelling was
+    /// never learned.
+    pub(crate) fn keyword_spelling(&self, v: crate::value::Value) -> Option<String> {
+        let hash = v.keyword_hash()?;
+        crate::value::keyword::resolve_keyword_name(self.symbols().map(|s| &*s), hash)
+            .map(str::to_string)
+    }
+
     /// The owning instance's compile context, for the runtime `eval`
     /// instruction. Returns `None` for a bare VM (no `RuntimeCore`), in which
     /// case `(eval …)` of macro-using code is unsupported. The borrow is sound

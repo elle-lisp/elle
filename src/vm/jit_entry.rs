@@ -145,13 +145,8 @@ impl VM {
     ) {
         let label = closure.template.display_label();
         let bytecode = closure.template.bytecode.clone();
-        let task = crate::jit::worker::prepare_task(
-            lir_func,
-            None,
-            (*closure.template.symbol_names).clone(),
-            bytecode_ptr as usize,
-            Some(&label),
-        );
+        let task =
+            crate::jit::worker::prepare_task(lir_func, None, bytecode_ptr as usize, Some(&label));
 
         // `--trace=syncjit`: compile here on the VM thread and install
         // immediately; the `elle-jit` worker never spawns. Codegen inputs are
@@ -163,7 +158,7 @@ impl VM {
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
             let res = crate::jit::JitCompiler::new()
-                .and_then(|c| c.compile(&task.lir, task.self_sym, task.symbol_names, Vec::new()));
+                .and_then(|c| c.compile(&task.lir, task.self_sym, Vec::new()));
             match res {
                 Ok(jit_code) => {
                     if self

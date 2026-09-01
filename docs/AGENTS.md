@@ -50,6 +50,7 @@ Design documents, language references, and contributor guides for Elle.
 | `impl/gpu.md` | End-to-end GPU compute (MLIR + SPIR-V + Vulkan) |
 | `impl/differential.md` | Cross-tier agreement: `compile/run-on` + the runner's diverge status |
 | `impl/values.md` | Value representation, tagged union |
+| `impl/symbol.md` | Symbol and keyword identity: name hash, per-instance display memo, collision rule |
 
 ### Reference Material
 

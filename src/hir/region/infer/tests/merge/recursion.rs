@@ -100,7 +100,7 @@ fn merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing() {
     // letrec body (its true last use). This is the counterfactual for that
     // tightening: it FAILS while the drop sits at the enclosing post-dominator.
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(
+    let (hir, arena) = compile_fhir(
         "(begin (letrec [ping (fn [n] (if (%lt n 1) :done (pong (%sub n 1)))) \
                          pong (fn [n] (ping n))] \
                   (ping 3)) \
@@ -150,7 +150,7 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     // deferred release — and must be ADMITTED (the tail-strand refusal bites only a non-member
     // callee, `merge_refuses_in_lambda_cycle_with_foreign_tail_callee`).
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(
+    let (hir, arena) = compile_fhir(
         "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
                           (ev k)))) \
@@ -228,7 +228,7 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
     // `merge_refuses_member_passed_by_move_to_foreign_tail`). `g` is a user closure,
     // so its `(g r)` tail is an ordinary `Call`.
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(
+    let (hir, arena) = compile_fhir(
         "(def g (fn [x] x)) \
          (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
@@ -325,7 +325,7 @@ fn merge_refuses_member_passed_by_move_to_foreign_tail() {
     // prove its `m` — the diverging guard does (ev stays callee-only and is
     // proven by forwarding from od's `(ev (%sub m 1))`).
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(
+    let (hir, arena) = compile_fhir(
         "(def g (fn [x] x)) \
          (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (when (%not (%int? m)) (error :m)) \

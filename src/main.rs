@@ -72,19 +72,22 @@ fn run_dump(
     // FHIR — functionalized HIR (s-expression dump before lowering)
     if cfg.dump.contains("fhir") {
         println!(";; ── fhir (functionalized HIR) ──────────────────────────────");
-        let (hir, arena, names) =
+        let (hir, arena) =
             elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
                     e
                 },
             )?;
-        println!("{}", elle::hir::display::display_hir(&hir, &arena, &names));
+        println!(
+            "{}",
+            elle::hir::display::display_hir(&hir, &arena, Some(symbols))
+        );
     }
 
     if cfg.dump.contains("defuse") {
         println!(";; ── defuse (HIR dataflow) ──────────────────────────────────");
-        let (hir, arena, names) =
+        let (hir, arena) =
             elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
@@ -92,12 +95,15 @@ fn run_dump(
                 },
             )?;
         let info = elle::hir::analyze_dataflow(&hir);
-        print!("{}", elle::hir::format_dataflow(&info, &arena, &names));
+        print!(
+            "{}",
+            elle::hir::format_dataflow(&info, &arena, Some(symbols))
+        );
     }
 
     if cfg.dump.contains("regions") {
         println!(";; ── regions (Tofte-Talpin region inference) ─────────────────");
-        let (hir, arena, names) =
+        let (hir, arena) =
             elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
@@ -105,7 +111,10 @@ fn run_dump(
                 },
             )?;
         let info = elle::hir::analyze_regions(&hir, &arena);
-        print!("{}", elle::hir::format_regions(&info, &arena, &names));
+        print!(
+            "{}",
+            elle::hir::format_regions(&info, &arena, Some(symbols))
+        );
     }
 
     let needs_pipeline = cfg.dump.iter().any(|k| {
@@ -159,20 +168,19 @@ fn run_dump(
         // Re-derive the front-end artifacts (run_dump compiles per kind) plus the
         // classification-aware region info — same inputs `render_all` feeds
         // `escape_module`, so the CLI and `compile/dumps :escape` agree.
-        let (hir, arena, names) =
+        let (hir, arena) =
             elle::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).map_err(
                 |e| {
                     eprintln!("{}", e);
                     e
                 },
             )?;
-        let pc =
-            elle::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
+        let pc = elle::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
         let rinfo = elle::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
         let escape = elle::hir::analyze_escape(&hir, &arena, &pc.call_classification);
         print!(
             "{}",
-            elle::dump::escape_module(&hir, &arena, &names, &escape, &rinfo, &module)
+            elle::dump::escape_module(&hir, &arena, &escape, &rinfo, &module, Some(symbols))
         );
     }
 
@@ -336,7 +344,7 @@ fn run_source(
         );
     }
 
-    match vm.execute_scheduled(&result.bytecode, symbols, cctx) {
+    match vm.execute_scheduled(&result.bytecode, cctx) {
         Ok(_) => {
             // Script mode is silent except for explicit output (display, etc.)
             Ok(())

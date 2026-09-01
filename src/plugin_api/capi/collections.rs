@@ -18,7 +18,7 @@ pub(in crate::plugin_api) extern "C" fn struct_get(
     let v = unsafe { to_value(val) };
     let key_str =
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(key_ptr, key_len)) };
-    let key = TableKey::Keyword(key_str.into());
+    let key = TableKey::keyword(key_str);
 
     if !v.is_struct() {
         return from_value(Value::NIL);
@@ -48,6 +48,7 @@ pub(in crate::plugin_api) extern "C" fn struct_len(val: [u64; 2]) -> isize {
 }
 
 pub(in crate::plugin_api) extern "C" fn struct_key(
+    ctx: *mut super::CallCtx,
     val: [u64; 2],
     idx: usize,
     out_len: *mut usize,
@@ -65,7 +66,14 @@ pub(in crate::plugin_api) extern "C" fn struct_key(
                 }
                 let key = &data[idx].0;
                 let s = match key {
-                    TableKey::Keyword(s) | TableKey::String(s) => intern_str(s.clone()),
+                    TableKey::Keyword(hash) => {
+                        let symbols = ctx.as_ref().and_then(|c| c.symbols.as_ref());
+                        match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                            Some(name) => intern_str(name.to_string()),
+                            None => return std::ptr::null(),
+                        }
+                    }
+                    TableKey::String(s) => intern_str(s.clone()),
                     _ => return std::ptr::null(),
                 };
                 *out_len = s.len();

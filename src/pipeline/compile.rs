@@ -4,7 +4,6 @@ use super::CompileCtx;
 use super::CompileResult;
 use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
-use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
@@ -59,7 +58,6 @@ fn compile_inner(
 ) -> Result<CompileResult, String> {
     // Ensure caller's SymbolTable has primitive names interned so that
     // SymbolIds match the compile context's PrimitiveMeta.
-    intern_primitive_names(symbols);
 
     // Phase 1: Parse to Syntax
     let syntax = read_syntax(source, source_name)?;
@@ -99,26 +97,24 @@ fn compile_inner(
     )?;
 
     // Phase 4: Lower to LIR with intrinsic specialization
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        let names = symbols.all_names();
         eprintln!(
             "[trace:regions] compile:\n{}",
-            crate::hir::format_regions(&region_info, &arena, &names)
+            crate::hir::format_regions(&region_info, &arena, Some(symbols))
         );
     }
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
-    let mut emitter = Emitter::new_with_symbols(symbol_names);
+    let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     Ok(CompileResult { bytecode })
@@ -148,8 +144,6 @@ fn compile_file_to_lir_inner(
     source_name: &str,
     epoch_skip: usize,
 ) -> Result<crate::lir::LirModule, String> {
-    intern_primitive_names(symbols);
-
     let mut syntaxes = read_syntax_all_for(source, source_name)?;
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
@@ -229,46 +223,36 @@ fn compile_file_to_lir_inner(
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        let names = symbols.all_names();
         eprintln!(
             "[trace:regions] compile_file_to_lir:\n{}",
-            crate::hir::format_regions(&region_info, &arena, &names)
+            crate::hir::format_regions(&region_info, &arena, Some(symbols))
         );
     }
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names)
         .with_region_info(region_info);
     lowerer.lower(&hir)
 }
 
 /// Compile a file as a single synthetic letrec.
 ///
-/// Compile to functionalized HIR (for `--dump=fhir`). Returns the HIR tree,
-/// the binding arena, and the symbol name map.
+/// Compile to functionalized HIR (for `--dump=fhir`). Returns the HIR tree
+/// and the binding arena.
 pub fn compile_file_to_fhir(
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<
-    (
-        crate::hir::Hir,
-        BindingArena,
-        std::collections::HashMap<u32, String>,
-    ),
-    String,
-> {
+) -> Result<(crate::hir::Hir, BindingArena), String> {
     let (hir, arena, _expander, _prim_values, _signal_projection) =
         compile_file_frontend(source, symbols, cctx, source_name)?;
-    let names = symbols.all_names();
-    Ok((hir, arena, names))
+    Ok((hir, arena))
 }
 
 /// All top-level forms are analyzed together, enabling mutual recursion.
@@ -306,23 +290,21 @@ fn compile_file_inner(
 
     // Lower to LIR
     let t = std::time::Instant::now();
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     crate::trace::phase(ct, "compile", &format!("{} regions", source_name), t);
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        let names = symbols.all_names();
         eprintln!(
             "[trace:regions] compile_file:\n{}",
-            crate::hir::format_regions(&region_info, &arena, &names)
+            crate::hir::format_regions(&region_info, &arena, Some(symbols))
         );
     }
     let t = std::time::Instant::now();
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
 
     let lir_module = lowerer.lower(&hir)?;
@@ -331,7 +313,7 @@ fn compile_file_inner(
     // Emit bytecode
     let t = std::time::Instant::now();
     let signal = lir_module.entry.signal;
-    let mut emitter = Emitter::new_with_symbols(symbol_names);
+    let mut emitter = Emitter::new();
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     crate::trace::phase(ct, "compile", &format!("{} emit", source_name), t);
     bytecode.signal = signal;
@@ -396,24 +378,23 @@ fn compile_syntaxes_with_transform(
 /// and syntax entry points so they differ only in how the front end is fed.
 fn lower_test_frontend(
     frontend: Frontend,
-    symbols: &mut SymbolTable,
+    symbols: &SymbolTable,
     cctx: &mut CompileCtx,
 ) -> Result<CompileResult, String> {
     let (hir, arena, _expander, prim_values, signal_projection) = frontend;
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&hir)?;
 
     let signal = lir_module.entry.signal;
-    let mut emitter = Emitter::new_with_symbols(symbol_names);
+    let mut emitter = Emitter::new();
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;

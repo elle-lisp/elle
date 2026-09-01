@@ -55,12 +55,7 @@ impl VM {
                         )
                     }
                 };
-                match compiler.compile(
-                    &lir,
-                    None,
-                    (*closure.template.symbol_names).clone(),
-                    Vec::new(),
-                ) {
+                match compiler.compile(&lir, None, Vec::new()) {
                     Ok(jc) => {
                         let jc = Arc::new(jc);
                         self.install_jit_code(closure.template.bytecode.clone(), jc.clone());

@@ -266,7 +266,7 @@ pub(crate) fn incref_owned_call_args(
                 let min = closure.template.arity.fixed_params();
                 let mut count = args.len().min(min);
                 while count < fixed_slots && count < args.len() {
-                    if args[count].as_keyword_name().is_some() {
+                    if args[count].is_keyword() {
                         break;
                     }
                     count += 1;

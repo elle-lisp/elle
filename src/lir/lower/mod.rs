@@ -184,6 +184,12 @@ impl ValueSlot {
 /// Lowers HIR to LIR
 pub struct Lowerer<'a> {
     arena: &'a BindingArena,
+    /// The owning instance's display memo, for naming a binding in an error.
+    /// Lowering never resolves a name to decide anything — the only reader is
+    /// the `undefined variable` message, which is a user's own spelling and so
+    /// is not in the static vocabulary (docs/impl/symbol.md). `None` degrades
+    /// that one message to the hash.
+    symbols: Option<&'a crate::symbol::SymbolTable>,
     /// Current function being built
     current_func: LirFunction,
     /// Current block being built
@@ -247,8 +253,6 @@ pub struct Lowerer<'a> {
     /// Lazily allocated on first use. Reused across all discards
     /// within the same function, so only one extra local slot.
     discard_slot: Option<u16>,
-    /// Symbol ID → name mapping for error messages.
-    symbol_names: HashMap<u32, String>,
     /// Flat list of closure bodies. `MakeClosure` instructions reference
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
@@ -451,6 +455,7 @@ impl<'a> Lowerer<'a> {
     pub fn new(arena: &'a BindingArena) -> Self {
         Lowerer {
             arena,
+            symbols: None,
             current_func: LirFunction::new(Arity::Exact(0)),
             current_block: BasicBlock::new(Label(0)),
             next_reg: 0,
@@ -469,7 +474,6 @@ impl<'a> Lowerer<'a> {
             block_lower_contexts: Vec::new(),
             pending_free_regions: Vec::new(),
             discard_slot: None,
-            symbol_names: HashMap::new(),
             closures: Vec::new(),
             current_function_binding: None,
             current_self_binding: None,
@@ -507,12 +511,6 @@ impl<'a> Lowerer<'a> {
         self
     }
 
-    /// Set symbol names for error messages.
-    pub fn with_symbol_names(mut self, names: HashMap<u32, String>) -> Self {
-        self.symbol_names = names;
-        self
-    }
-
     /// Seed `immutable_values` with primitive binding→value pairs.
     ///
     /// Primitive bindings are `BindingScope::Local` with `mark_immutable()`.
@@ -521,6 +519,13 @@ impl<'a> Lowerer<'a> {
     /// binding with a known constant value.
     pub fn with_primitive_values(mut self, values: HashMap<Binding, Value>) -> Self {
         self.immutable_values.extend(values);
+        self
+    }
+
+    /// Give lowering the instance's display memo, so an `undefined variable`
+    /// error names the variable the user wrote.
+    pub fn with_symbols(mut self, symbols: &'a crate::symbol::SymbolTable) -> Self {
+        self.symbols = Some(symbols);
         self
     }
 

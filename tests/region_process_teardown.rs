@@ -34,8 +34,7 @@ fn census_with(mut rt: Runtime, src: Option<&str>) {
         let value = {
             let (vm, symbols, cctx) = rt.parts();
             let result = compile_file(src, symbols, cctx, "<census>").expect("compiles");
-            vm.execute_scheduled(&result.bytecode, symbols, cctx)
-                .expect("runs")
+            vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
         };
         // The program value is handed to the embedding caller with one owning
         // reference ("ownership transfer"). Dropping the `Value` is a no-op (it

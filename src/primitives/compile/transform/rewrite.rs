@@ -23,7 +23,7 @@ pub(crate) fn prim_compile_extract(
     };
 
     let from_name = match sorted_struct_get(opts, &kw("from")).and_then(|v| {
-        v.as_keyword_name()
+        ctx.keyword_spelling(*v)
             .map(|s| s.to_string())
             .or_else(|| v.with_string(|s| s.to_string()))
     }) {
@@ -52,7 +52,7 @@ pub(crate) fn prim_compile_extract(
         };
 
     let new_fn_name = match sorted_struct_get(opts, &kw("name")).and_then(|v| {
-        v.as_keyword_name()
+        ctx.keyword_spelling(*v)
             .map(|s| s.to_string())
             .or_else(|| v.with_string(|s| s.to_string()))
     }) {
@@ -192,9 +192,8 @@ pub(crate) fn prim_compile_parallelize(
         Some(arr) => {
             let mut names = Vec::new();
             for v in arr {
-                match v
-                    .as_keyword_name()
-                    .map(|s| s.to_string())
+                match ctx
+                    .keyword_spelling(*v)
                     .or_else(|| v.with_string(|s| s.to_string()))
                 {
                     Some(n) => names.push(n),

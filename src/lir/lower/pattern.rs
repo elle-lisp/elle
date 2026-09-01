@@ -338,7 +338,9 @@ impl<'a> Lowerer<'a> {
                     PatternLiteral::Bool(b) => self.emit_const(LirConst::Bool(*b))?,
                     PatternLiteral::Int(n) => self.emit_const(LirConst::Int(*n))?,
                     PatternLiteral::Float(f) => self.emit_const(LirConst::Float(*f))?,
-                    PatternLiteral::Keyword(k) => self.emit_const(LirConst::Keyword(k.clone()))?,
+                    PatternLiteral::Keyword(k) => {
+                        self.emit_const(LirConst::Keyword(crate::value::keyword::keyword_hash(k)))?
+                    }
                     PatternLiteral::String(_) => unreachable!("string handled above"),
                 };
                 let dst = self.fresh_reg();

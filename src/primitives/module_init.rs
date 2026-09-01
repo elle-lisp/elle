@@ -109,8 +109,14 @@ fn extract_exports(
     });
     let mut result = HashMap::new();
     for (key, value) in exports_struct.iter() {
-        if let crate::value::types::TableKey::Keyword(name) = key {
-            let sym_id = symbols.intern(name);
+        if let crate::value::types::TableKey::Keyword(hash) = key {
+            // The export struct was read from stdlib source, so its key
+            // spellings are in the memo; a miss is a missed learning site.
+            let name = symbols
+                .keyword_name(*hash)
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("stdlib export key {:#x} has no learned spelling", hash));
+            let sym_id = symbols.intern(&name);
             let signal = if let Some(closure) = value.as_closure() {
                 closure.template.signal
             } else if value.is_parameter() {

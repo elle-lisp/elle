@@ -29,9 +29,11 @@ fn test_from_value_int() {
 fn test_from_value_keyword() {
     let val = Value::keyword("foo");
     let key = TableKey::from_value(&val).unwrap();
-    assert!(matches!(key, TableKey::Keyword(ref s) if s == "foo"));
+    assert!(
+        matches!(key, TableKey::Keyword(h) if h == elle::value::keyword::keyword_hash("foo"))
+    );
     // to_value produces an equivalent keyword
-    assert_eq!(with_test_ctx(|ctx| key.to_value(ctx)).as_keyword_name().unwrap(), "foo");
+    assert!(with_test_ctx(|ctx| key.to_value(ctx)).is_keyword_named("foo"));
 }
 
 #[test]
@@ -121,7 +123,7 @@ fn test_is_sendable_value_keys() {
     assert!(TableKey::Bool(true).is_sendable());
     assert!(TableKey::Int(42).is_sendable());
     assert!(TableKey::String("hello".to_string()).is_sendable());
-    assert!(TableKey::Keyword("foo".to_string()).is_sendable());
+    assert!(TableKey::keyword("foo").is_sendable());
     assert!(TableKey::EmptyList.is_sendable());
 }
 

@@ -30,7 +30,13 @@ fn test_cmpop_display() {
 fn test_const_display() {
     assert_eq!(format!("{}", LirConst::Nil), "nil");
     assert_eq!(format!("{}", LirConst::Int(42)), "42");
-    assert_eq!(format!("{}", LirConst::Keyword("lit".into())), ":lit");
+    assert_eq!(
+        format!(
+            "{}",
+            LirConst::Keyword(crate::value::keyword::keyword_hash("lit"))
+        ),
+        format!("kw({:#x})", crate::value::keyword::keyword_hash("lit"))
+    );
     assert_eq!(format!("{}", LirConst::String("hello".into())), "\"hello\"");
 }
 
@@ -132,10 +138,13 @@ fn test_instr_destructuring() {
             LirInstr::StructGetOrNil {
                 dst: Reg(3),
                 src: Reg(0),
-                key: LirConst::Keyword("name".into())
+                key: LirConst::Keyword(crate::value::keyword::keyword_hash("name"))
             }
         ),
-        "r3 ← r0.:name?"
+        format!(
+            "r3 ← r0.kw({:#x})?",
+            crate::value::keyword::keyword_hash("name")
+        )
     );
     assert_eq!(
         format!(
@@ -143,10 +152,13 @@ fn test_instr_destructuring() {
             LirInstr::StructGetDestructure {
                 dst: Reg(3),
                 src: Reg(0),
-                key: LirConst::Keyword("name".into())
+                key: LirConst::Keyword(crate::value::keyword::keyword_hash("name"))
             }
         ),
-        "r3 ← r0.:name!"
+        format!(
+            "r3 ← r0.kw({:#x})!",
+            crate::value::keyword::keyword_hash("name")
+        )
     );
 }
 

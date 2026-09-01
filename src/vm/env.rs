@@ -180,7 +180,7 @@ impl VM {
                     // only with non-keyword args
                     let mut count = args.len().min(min);
                     while count < fixed_slots && count < args.len() {
-                        if args[count].as_keyword_name().is_some() {
+                        if args[count].is_keyword() {
                             break;
                         }
                         count += 1;
@@ -506,7 +506,7 @@ impl VM {
         let mut map = BTreeMap::new();
         for i in (0..args.len()).step_by(2) {
             let key = match TableKey::from_value(&args[i]) {
-                Some(TableKey::Keyword(k)) => k,
+                Some(TableKey::Keyword(hash)) => hash,
                 _ => {
                     return Err((
                         "argument-error",
@@ -517,15 +517,26 @@ impl VM {
                     ));
                 }
             };
+            // Error-message spelling: this static path has no memo, so an
+            // off-vocabulary key falls back to the unreadable form.
+            let spell = || {
+                crate::value::keyword::resolve_keyword_name(None, key)
+                    .map(|n| format!(":{}", n))
+                    .unwrap_or_else(|| format!("#<keyword:{:#x}>", key))
+            };
 
-            // Strict validation for &named
+            // Strict validation for &named — parameter spellings are known, so
+            // matching is by hash and the error lists the valid spellings.
             if let Some(valid) = valid_keys {
-                if !valid.iter().any(|v| v == &key) {
+                if !valid
+                    .iter()
+                    .any(|v| crate::value::keyword::keyword_hash(v) == key)
+                {
                     return Err((
                         "argument-error",
                         format!(
-                            "unknown named parameter :{}, valid parameters are: {}",
-                            key,
+                            "unknown named parameter {}, valid parameters are: {}",
+                            spell(),
                             valid
                                 .iter()
                                 .map(|v| format!(":{}", v))
@@ -536,11 +547,11 @@ impl VM {
                 }
             }
 
-            let table_key = TableKey::Keyword(key.clone());
+            let table_key = TableKey::Keyword(key);
             if map.contains_key(&table_key) {
                 return Err((
                     "argument-error",
-                    format!("duplicate keyword argument :{}", key),
+                    format!("duplicate keyword argument {}", spell()),
                 ));
             }
             map.insert(table_key, args[i + 1]);

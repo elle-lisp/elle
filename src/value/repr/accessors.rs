@@ -74,10 +74,11 @@ impl Value {
             .flatten()
     }
 
-    /// Compare two keyword values lexicographically by name.
+    /// Compare two keyword values by hash — the portable order sorted
+    /// containers rely on, deterministic in every instance and build.
     /// Returns None if either value is not a keyword.
     pub fn compare_keyword(&self, other: &Value) -> Option<std::cmp::Ordering> {
-        match (self.as_keyword_name(), other.as_keyword_name()) {
+        match (self.keyword_hash(), other.keyword_hash()) {
             (Some(a), Some(b)) => Some(a.cmp(&b)),
             _ => None,
         }

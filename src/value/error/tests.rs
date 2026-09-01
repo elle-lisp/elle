@@ -45,20 +45,17 @@ fn test_error_val_creates_struct() {
 
         // Should have :error and :message keys
         let fields = err.as_struct().unwrap();
+        assert!(sorted_struct_contains(fields, &TableKey::keyword("error")));
         assert!(sorted_struct_contains(
             fields,
-            &TableKey::Keyword("error".into())
-        ));
-        assert!(sorted_struct_contains(
-            fields,
-            &TableKey::Keyword("message".into())
+            &TableKey::keyword("message")
         ));
 
         // Values should be correct
-        let error_key = sorted_struct_get(fields, &TableKey::Keyword("error".into())).unwrap();
-        assert_eq!(error_key.as_keyword_name().as_deref(), Some("type-error"));
+        let error_key = sorted_struct_get(fields, &TableKey::keyword("error")).unwrap();
+        assert!(error_key.is_keyword_named("type-error"));
 
-        let msg_key = sorted_struct_get(fields, &TableKey::Keyword("message".into())).unwrap();
+        let msg_key = sorted_struct_get(fields, &TableKey::keyword("message")).unwrap();
         assert_eq!(
             msg_key.with_string(|s| s.to_string()),
             Some("expected integer".to_string())
@@ -130,19 +127,16 @@ fn test_error_val_extra_creates_struct() {
         let fields = err.as_struct().unwrap();
         // :error keyword correct
         assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .as_keyword_name()
-                .as_deref(),
-            Some("io-error"),
+            sorted_struct_get(fields, &TableKey::keyword("error")).copied(),
+            Some(Value::keyword("io-error")),
         );
         // :message correct
         assert!(sorted_struct_contains(
             fields,
-            &TableKey::Keyword("message".into())
+            &TableKey::keyword("message")
         ));
         // :path extra field present
-        let path_val = sorted_struct_get(fields, &TableKey::Keyword("path".into())).unwrap();
+        let path_val = sorted_struct_get(fields, &TableKey::keyword("path")).unwrap();
         assert_eq!(
             path_val.with_string(|s| s.to_string()),
             Some("/no/such".to_string()),

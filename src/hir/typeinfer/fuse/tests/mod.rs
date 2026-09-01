@@ -4,35 +4,43 @@
 
 use crate::hir::arena::BindingArena;
 use crate::hir::expr::{Hir, HirKind};
-use std::collections::HashMap;
 
 /// Compile a source form to functionalized HIR against a full stdlib.
-fn compile(src: &str) -> (Hir, BindingArena, HashMap<u32, String>) {
+///
+/// The `Runtime` comes back with the HIR because it owns the display memo, and
+/// most of the names these tests assert on — `map`, `*`, `push` — are stdlib
+/// exports that no build-time table can spell (docs/impl/symbol.md). Hold it
+/// for as long as you want to read a callee's name.
+fn compile(src: &str) -> (Hir, BindingArena, crate::runtime::Runtime) {
     let mut rt = crate::runtime::Runtime::new();
-    let (_vm, symbols, cctx) = rt.parts();
-    crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>").expect("compile")
+    let (hir, arena) = {
+        let (_vm, symbols, cctx) = rt.parts();
+        crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>").expect("compile")
+    };
+    (hir, arena, rt)
 }
 
 /// Names of every call callee (through the ANF/`Var` wrappers) in the tree.
 fn callee_names(
     h: &Hir,
     arena: &BindingArena,
-    names: &HashMap<u32, String>,
+    symbols: &crate::symbol::SymbolTable,
     out: &mut Vec<String>,
 ) {
     if let HirKind::Call { func, .. } = &h.kind {
         if let Some(b) = super::unwrap_callee_binding(func) {
-            if let Some(n) = names.get(&arena.get(b).name.0) {
-                out.push(n.clone());
+            if let Some(n) = symbols.name(arena.get(b).name) {
+                out.push(n.to_string());
             }
         }
     }
-    h.for_each_child(|c| callee_names(c, arena, names, out));
+    h.for_each_child(|c| callee_names(c, arena, symbols, out));
 }
 
-fn callees(h: &Hir, arena: &BindingArena, names: &HashMap<u32, String>) -> Vec<String> {
+fn callees(h: &Hir, arena: &BindingArena, rt: &mut crate::runtime::Runtime) -> Vec<String> {
     let mut out = Vec::new();
-    callee_names(h, arena, names, &mut out);
+    let (_vm, symbols, _cctx) = rt.parts();
+    callee_names(h, arena, symbols, &mut out);
     out
 }
 
@@ -53,11 +61,13 @@ fn count_ifs(h: &Hir) -> usize {
 }
 
 /// Count the calls to a given op name in the tree.
-fn count_callee(h: &Hir, arena: &BindingArena, names: &HashMap<u32, String>, want: &str) -> usize {
-    callees(h, arena, names)
-        .iter()
-        .filter(|n| *n == want)
-        .count()
+fn count_callee(
+    h: &Hir,
+    arena: &BindingArena,
+    rt: &mut crate::runtime::Runtime,
+    want: &str,
+) -> usize {
+    callees(h, arena, rt).iter().filter(|n| *n == want).count()
 }
 
 /// Count the call-position `%`-intrinsic nodes of a given op in the tree.

@@ -53,7 +53,7 @@ pub(crate) fn prim_fiber_new(
     let mut deny_bits = SignalBits::EMPTY;
     let mut i = 2;
     while i < args.len() {
-        if args[i].as_keyword_name().as_deref() == Some("deny") {
+        if args[i].is_keyword_named("deny") {
             if i + 1 >= args.len() {
                 return (
                     SIG_ERROR,
@@ -72,8 +72,7 @@ pub(crate) fn prim_fiber_new(
                     "argument-error",
                     format!(
                         "fiber/new: unexpected keyword argument :{}",
-                        args[i]
-                            .as_keyword_name()
+                        ctx.keyword_spelling(args[i])
                             .unwrap_or_else(|| args[i].type_name().to_string())
                     ),
                 ),

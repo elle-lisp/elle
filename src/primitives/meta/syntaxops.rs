@@ -109,7 +109,7 @@ pub(crate) fn prim_syntax_e(
                 );
             }
             let id = unsafe { (*symbols_ptr).intern(name) };
-            (SIG_OK, Value::symbol(id.0))
+            (SIG_OK, Value::symbol(id))
         }
         // Compounds: return the syntax object unchanged.
         _ => (SIG_OK, args[0]),
@@ -238,15 +238,12 @@ pub(crate) fn prim_meta_origin(
         None => return (SIG_OK, Value::NIL),
     };
     let mut fields = std::collections::BTreeMap::new();
-    fields.insert(TableKey::Keyword("file".to_string()), ctx.string(&*file));
+    fields.insert(TableKey::keyword("file"), ctx.string(&*file));
     fields.insert(
-        TableKey::Keyword("line".to_string()),
+        TableKey::keyword("line"),
         Value::int(syntax.span.line as i64),
     );
-    fields.insert(
-        TableKey::Keyword("col".to_string()),
-        Value::int(syntax.span.col as i64),
-    );
+    fields.insert(TableKey::keyword("col"), Value::int(syntax.span.col as i64));
     (SIG_OK, ctx.struct_from(fields))
 }
 

@@ -43,7 +43,6 @@ pub(super) fn send_closure(
         signal: closure_rc.template.signal,
         capture_params_mask: 0,
         capture_locals_mask: crate::value::CaptureMask::empty(),
-        symbol_names: HashMap::new(),
         location_map: LocationMap::new(),
         doc: None,
         vararg_kind: closure_rc.template.vararg_kind.clone(),
@@ -120,8 +119,6 @@ pub(super) fn send_closure(
         signal: closure_rc.template.signal,
         capture_params_mask: closure_rc.template.capture_params_mask,
         capture_locals_mask: closure_rc.template.capture_locals_mask.clone(),
-
-        symbol_names: (*closure_rc.template.symbol_names).clone(),
         location_map: (*closure_rc.template.location_map).clone(),
         doc,
         vararg_kind: closure_rc.template.vararg_kind.clone(),

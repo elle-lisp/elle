@@ -27,7 +27,7 @@ Runtime value representation using a tagged union.
 | `heap.rs` | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle`, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
 | `send/` | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
-| `keyword.rs` | Hash-based keyword identity: FNV-1a hash (full 64-bit), global name table, DSO routing |
+| `keyword.rs` | Keyword identity (name hash) and the static keyword vocabulary for display |
 
 ## Key types
 
@@ -62,7 +62,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 | `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Paused, Dead, Error |
 | `SignalBits` | `fiber/signalbits.rs` | Newtype over `u64` (re-exported from `fiber.rs`). The `SIG_*` constants are defined in `crate::signals`: SIG_OK(0), SIG_ERROR(1<<0), SIG_YIELD(1<<1), SIG_DEBUG(1<<2), SIG_RESUME(1<<3), SIG_FFI(1<<4), SIG_PROPAGATE(1<<5), SIG_HALT(1<<8) (among others) |
 | `Arity` | `types.rs` | Function arity (Exact, AtLeast, Range) |
-| `SymbolId` | `types.rs` | Interned symbol identifier |
+| `SymbolId` | `types.rs` | Symbol identity: the FNV-1a hash of the name |
 | `SendValue` | `send/` | Thread-safe value wrapper |
 
 ## Invariants

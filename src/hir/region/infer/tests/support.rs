@@ -50,7 +50,7 @@ pub(super) fn pair_store_edges(hir: &Hir, info: &RegionInfo) -> Vec<(Region, Reg
 /// so the seed input is exactly what `analyze_regions` saw.
 pub(super) fn shared_seeds(source: &str) -> (Hir, RegionInfo, rustc_hash::FxHashSet<Region>) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
     let escape = crate::hir::analyze_escape(&hir, &arena, &CallClassification::default());
     let seeds = super::ownership::compute_shared_seeds(&info, &escape);
@@ -66,9 +66,9 @@ pub(super) fn shared_seeds_with_effects(
     source: &str,
 ) -> (Hir, RegionInfo, rustc_hash::FxHashSet<Region>) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let cc = pc.call_classification;
     let info = analyze_regions_with(&hir, &arena, cc.clone());
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
@@ -101,7 +101,7 @@ pub(super) fn owned_subtrees(
     rustc_hash::FxHashMap<Region, rustc_hash::FxHashSet<Region>>,
 ) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let mut info = analyze_regions(&hir, &arena);
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &CallClassification::default());
@@ -125,9 +125,9 @@ pub(super) fn owned_subtrees_with_effects(
     rustc_hash::FxHashMap<Region, rustc_hash::FxHashSet<Region>>,
 ) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let cc = pc.call_classification;
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
@@ -156,9 +156,9 @@ pub(super) fn in_some_owned_subtree(
 /// `compute_adopt_edges` needs for the lifetime obligation.
 pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let cc = pc.call_classification;
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
@@ -181,9 +181,9 @@ pub(super) fn capture_edges(
     source: &str,
 ) -> (Hir, BindingArena, RegionInfo, Vec<(HirId, Region, Region)>) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let cc = pc.call_classification;
     let info = analyze_regions_with(&hir, &arena, cc.clone());
     let edges = super::ownership::capture_containment_edges(&hir, &info, &arena);
@@ -196,9 +196,9 @@ pub(super) fn capture_edges(
 /// drop-site post-dominance check and the deterministic member emit-order.
 pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<HirId, Vec<Region>>) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let cc = pc.call_classification;
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
@@ -216,9 +216,9 @@ pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<Hir
 /// so they exercise the same wiring `analyze_regions_with` hands the lowerer.
 pub(super) fn analyze_full(source: &str) -> (Hir, RegionInfo) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let info = analyze_regions_with(&hir, &arena, pc.call_classification);
     (hir, info)
 }

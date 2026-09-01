@@ -215,7 +215,9 @@ impl<'a> Lowerer<'a> {
                     });
                     let elem = self.fresh_reg();
                     let lir_key = match key {
-                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                        PatternKey::Keyword(k) => {
+                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
+                        }
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
                     self.emit(LirInstr::StructGetOrNil {
@@ -244,7 +246,9 @@ impl<'a> Lowerer<'a> {
                     });
                     let elem = self.fresh_reg();
                     let lir_key = match key {
-                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                        PatternKey::Keyword(k) => {
+                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
+                        }
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
                     if strict {
@@ -273,7 +277,9 @@ impl<'a> Lowerer<'a> {
                     let exclude: Vec<LirConst> = entries
                         .iter()
                         .map(|(key, _)| match key {
-                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                            PatternKey::Keyword(k) => {
+                                LirConst::Keyword(crate::value::keyword::keyword_hash(k))
+                            }
                             PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                         })
                         .collect();
@@ -303,7 +309,9 @@ impl<'a> Lowerer<'a> {
                     });
                     let elem = self.fresh_reg();
                     let lir_key = match key {
-                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                        PatternKey::Keyword(k) => {
+                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
+                        }
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
                     if strict {
@@ -332,7 +340,9 @@ impl<'a> Lowerer<'a> {
                     let exclude: Vec<LirConst> = entries
                         .iter()
                         .map(|(key, _)| match key {
-                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                            PatternKey::Keyword(k) => {
+                                LirConst::Keyword(crate::value::keyword::keyword_hash(k))
+                            }
                             PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                         })
                         .collect();

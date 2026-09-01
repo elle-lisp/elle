@@ -199,7 +199,7 @@ Every compilation path follows the same five phases:
    `analyzer.analyze(&expanded)` → `AnalysisResult { hir, .. }`
 4. **Tail call marking**: `mark_tail_calls(&mut analysis.hir)` (mutates HIR in place)
 5. **Lower + Emit**: `Lowerer::new().with_intrinsics(intrinsics).lower(&hir)` →
-   `LirFunction` → `Emitter::new_with_symbols(snapshot).emit(&lir_func)` → `Bytecode`
+   `LirFunction` → `Emitter::new().emit(&lir_func)` → `Bytecode`
 
 `analyze` and `analyze_file` stop after phase 3 (no lowering or emission).
 
@@ -230,8 +230,6 @@ own VM.
 - Prelude must be 100% defmacro (no runtime definitions)
 - Primitives must be registered in the context's macro VM at construction
 - Pipeline functions are not re-entrant (no nested compile/compile_file)
-- Primitive registration order is deterministic (ALL_TABLES), so the baked
-  `SymbolId`s match any table that interned the primitives in the same order
 
 ## Known issues
 

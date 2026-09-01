@@ -210,6 +210,25 @@ impl<'h> NativeCtx<'h> {
         unsafe { &mut *self.vm }
     }
 
+    /// The spelling of a keyword value, through this instance's memo and the
+    /// static vocabulary. `None` if `v` is not a keyword or the spelling was
+    /// never learned (docs/impl/symbol.md § "The display memo").
+    pub fn keyword_spelling(&self, v: crate::value::Value) -> Option<String> {
+        let hash = v.keyword_hash()?;
+        let symbols = unsafe { self.vm().symbols_ptr.as_ref() };
+        crate::value::keyword::resolve_keyword_name(symbols, hash).map(str::to_string)
+    }
+
+    /// Learn `name` into this instance's memo and build the keyword value —
+    /// the mint path for a spelling that exists only at run time (a string
+    /// conversion, a parsed JSON key).
+    pub fn keyword(&mut self, name: &str) -> crate::value::Value {
+        if let Some(symbols) = unsafe { self.vm().symbols_ptr.as_mut() } {
+            symbols.keyword(name);
+        }
+        crate::value::Value::keyword(name)
+    }
+
     /// The VM's Unicode segmentation generation, for grapheme operations.
     #[inline]
     pub fn unicode_generation(&self) -> crate::segment::Generation {

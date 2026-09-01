@@ -67,25 +67,25 @@ pub fn analyze_dataflow(hir: &Hir) -> DataflowInfo {
 pub fn format_dataflow(
     info: &DataflowInfo,
     arena: &BindingArena,
-    names: &HashMap<u32, String>,
+    symbols: Option<&crate::symbol::SymbolTable>,
 ) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
 
-    fn bname(b: Binding, arena: &BindingArena, names: &HashMap<u32, String>) -> String {
+    let bname = |b: Binding, arena: &BindingArena| -> String {
         let sym = arena.get(b).name;
-        let base = names
-            .get(&sym.0)
-            .cloned()
+        let base = symbols
+            .and_then(|s| s.name(sym))
+            .map(|n| n.to_string())
             .unwrap_or_else(|| format!("_{}", b.0));
         format!("{}#{}", base, b.0)
-    }
+    };
 
     writeln!(buf, ";; ── def-use chains ──").unwrap();
     let mut bindings: Vec<_> = info.def_site.keys().copied().collect();
     bindings.sort_by_key(|b| b.0);
     for b in &bindings {
-        let name = bname(*b, arena, names);
+        let name = bname(*b, arena);
         let def = info.def_site.get(b).map(|id| id.0).unwrap_or(0);
         let use_count = info.uses.get(b).map(|v| v.len()).unwrap_or(0);
         let use_ids: Vec<u32> = info
@@ -108,7 +108,7 @@ pub fn format_dataflow(
     for (id, origin) in &origins {
         let origin_str = match origin {
             ValueOrigin::Immediate => "immediate".to_string(),
-            ValueOrigin::Binding(b) => format!("binding({})", bname(*b, arena, names)),
+            ValueOrigin::Binding(b) => format!("binding({})", bname(*b, arena)),
             ValueOrigin::CallResult => "call-result".to_string(),
             ValueOrigin::Allocation => "allocation".to_string(),
             ValueOrigin::CellDeref => "cell-deref".to_string(),
@@ -127,7 +127,7 @@ pub fn format_dataflow(
         }
         let live_names: Vec<String> = live
             .iter()
-            .map(|idx| bname(info.index_binding[idx], arena, names))
+            .map(|idx| bname(info.index_binding[idx], arena))
             .collect();
         writeln!(
             buf,

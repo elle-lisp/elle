@@ -76,7 +76,7 @@ fn two_instances_interleaved_defs_are_isolated() {
             compile_file_repl(src, symbols, cctx, "<embed>").expect("def compiles");
         // A simple `(def x V)` returns V (the letrec body is the bound name).
         let value = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
+            .execute_scheduled(&result.bytecode, cctx)
             .expect("def runs");
         let sym_id = symbols.intern(name);
         cctx.register_repl_binding(
@@ -92,7 +92,7 @@ fn two_instances_interleaved_defs_are_isolated() {
         let (vm, symbols, cctx) = rt.parts();
         let (result, _expander) =
             compile_file_repl(src, symbols, cctx, "<embed>").expect("read compiles");
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        vm.execute_scheduled(&result.bytecode, cctx)
             .expect("read runs")
             .as_int()
             .expect("read yields an int")
@@ -131,7 +131,7 @@ fn two_instances_read_their_own_vm_args() {
         let (vm, symbols, cctx) = rt.parts();
         let (result, _expander) =
             compile_file_repl(src, symbols, cctx, "<embed>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        vm.execute_scheduled(&result.bytecode, cctx)
             .expect("runs")
             .with_string(|s| s.to_string())
     }
@@ -156,25 +156,23 @@ fn two_instances_read_their_own_vm_args() {
     );
 }
 
-/// Counterfactual for the symbol axis: two embedded instances on one thread must
-/// each resolve symbol NAMES through their OWN symbol table.
+/// The symbol axis: two embedded instances on one thread agree on every name,
+/// and each still resolves a name only it ever mentioned.
 ///
-/// `(string 'sym)` interns `sym` into the COMPILING instance's table (at a fresh
-/// id past the shared stdlib), then at runtime resolves that id back to a name. If
-/// runtime resolution read a single per-thread table shared by both instances, it
-/// would read whichever `Runtime` was built last (`b`), so instance `a`'s fresh
-/// id — valid only in `a`'s table — is out of range in `b`'s table and
-/// `(string …)` fails. Reaching the call's own driving VM's table via
-/// `ctx.vm().symbols()` makes each instance resolve its own: a site is correct iff
-/// it behaves correctly with two instances interleaved on one thread.
+/// Names are the one thing instances may share. A symbol id is the name's hash
+/// (docs/impl/symbol.md), so it means the same symbol in both instances by
+/// construction — nothing an instance can do makes its own id mean something
+/// else. That is what lets `a` read a symbol `b` compiled, and the discriminator
+/// below: under mint-order ids, `a`'s fresh id was a dense index valid only in
+/// `a`'s table, so `b` resolved it to a different name or to none.
 #[test]
-fn two_instances_resolve_their_own_symbols() {
+fn two_instances_agree_on_every_symbol_name() {
     use crate::pipeline::compile_file_repl;
 
     fn to_string(rt: &mut Runtime, src: &str) -> Option<String> {
         let (vm, symbols, cctx) = rt.parts();
         let (result, _expander) = compile_file_repl(src, symbols, cctx, "<embed>").ok()?;
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        vm.execute_scheduled(&result.bytecode, cctx)
             .ok()?
             .with_string(|s| s.to_string())
     }
@@ -182,18 +180,20 @@ fn two_instances_resolve_their_own_symbols() {
     let mut a = Runtime::new();
     let mut b = Runtime::new();
 
-    // `a`'s fresh symbol id is the discriminator: a single shared table
-    // (resolving against `b`, built last) cannot resolve it.
     assert_eq!(
-        to_string(&mut a, "(string 'alpha_only_in_a)").as_deref(),
-        Some("alpha_only_in_a"),
-        "instance a must resolve its own symbol via its own table, not b's \
-         (the symbol table must not be shared between instances)"
+        to_string(&mut a, "(string 'alpha_first_seen_in_a)").as_deref(),
+        Some("alpha_first_seen_in_a"),
+        "an instance resolves a name only it has mentioned"
+    );
+    // The same spelling, compiled by the OTHER instance, is the same symbol.
+    assert_eq!(
+        to_string(&mut b, "(string 'alpha_first_seen_in_a)").as_deref(),
+        Some("alpha_first_seen_in_a"),
+        "and the other instance reads that name as the same symbol"
     );
     assert_eq!(
-        to_string(&mut b, "(string 'beta_only_in_b)").as_deref(),
-        Some("beta_only_in_b"),
-        "instance b must resolve its own symbol via its own table"
+        to_string(&mut b, "(string 'beta_first_seen_in_b)").as_deref(),
+        Some("beta_first_seen_in_b"),
     );
 }
 

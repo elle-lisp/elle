@@ -91,9 +91,14 @@ impl Api {
         }
     }
 
-    pub fn get_struct_key<'a>(&self, v: ElleValue, idx: usize) -> Option<&'a str> {
+    pub fn get_struct_key<'a>(
+        &self,
+        ctx: *mut ElleCtx,
+        v: ElleValue,
+        idx: usize,
+    ) -> Option<&'a str> {
         let mut len = 0usize;
-        let ptr = (self.struct_key)(v, idx, &mut len);
+        let ptr = (self.struct_key)(ctx, v, idx, &mut len);
         if ptr.is_null() {
             None
         } else {
@@ -106,14 +111,14 @@ impl Api {
     }
 
     /// Iterate struct entries as (key, value) pairs.
-    pub fn struct_entries(&self, v: ElleValue) -> Vec<(&str, ElleValue)> {
+    pub fn struct_entries(&self, ctx: *mut ElleCtx, v: ElleValue) -> Vec<(&str, ElleValue)> {
         let n = match self.get_struct_len(v) {
             Some(n) => n,
             None => return Vec::new(),
         };
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
-            if let Some(k) = self.get_struct_key(v, i) {
+            if let Some(k) = self.get_struct_key(ctx, v, i) {
                 out.push((k, self.get_struct_value(v, i)));
             }
         }
@@ -124,9 +129,9 @@ impl Api {
         (self.intern_keyword)(name.as_ptr(), name.len())
     }
 
-    pub fn kw_name<'a>(&self, hash: u64) -> Option<&'a str> {
+    pub fn kw_name<'a>(&self, ctx: *mut ElleCtx, hash: u64) -> Option<&'a str> {
         let mut len = 0usize;
-        let ptr = (self.keyword_name)(hash, &mut len);
+        let ptr = (self.keyword_name)(ctx, hash, &mut len);
         if ptr.is_null() {
             None
         } else {
@@ -167,9 +172,9 @@ impl Api {
         (self.is_external)(v)
     }
 
-    pub fn get_keyword_name<'a>(&self, v: ElleValue) -> Option<&'a str> {
+    pub fn get_keyword_name<'a>(&self, ctx: *mut ElleCtx, v: ElleValue) -> Option<&'a str> {
         let mut len = 0usize;
-        let ptr = (self.as_keyword_name)(v, &mut len);
+        let ptr = (self.as_keyword_name)(ctx, v, &mut len);
         if ptr.is_null() {
             None
         } else {

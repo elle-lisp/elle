@@ -9,8 +9,8 @@ use super::*;
 
 #[test]
 fn single_fold_dissolves_to_scalar_accumulator() {
-    let (hir, arena, names) = compile("(fold (fn [a x] (+ a x)) 0 [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold"),
         "the `fold` dispatch must be gone; callees were {cs:?}",
@@ -21,7 +21,7 @@ fn single_fold_dissolves_to_scalar_accumulator() {
         "the fold body op `+` must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a fold's accumulator is a scalar — no `@array`; callees were {cs:?}",
     );
@@ -40,8 +40,9 @@ fn single_fold_dissolves_to_scalar_accumulator() {
 /// exists). Fails before fold fusion: a `fold` and a `map` call, two closures.
 #[test]
 fn fold_of_map_fuses_to_one_scalar_loop() {
-    let (hir, arena, names) = compile("(fold (fn [a x] (+ a x)) 0 (map (fn [x] (* x 2)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) =
+        compile("(fold (fn [a x] (+ a x)) 0 (map (fn [x] (* x 2)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold" || n == "map"),
         "both the `fold` and `map` dispatches must be gone; callees were {cs:?}",
@@ -52,7 +53,7 @@ fn fold_of_map_fuses_to_one_scalar_loop() {
         "both the fold step and the map transform must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "map-into-fold mints NO array — the map's result feeds the fold step; \
              callees were {cs:?}",
@@ -68,9 +69,9 @@ fn fold_of_map_fuses_to_one_scalar_loop() {
 /// fusion: a `fold` and a `filter` call, two closures.
 #[test]
 fn fold_of_filter_fuses_to_one_scalar_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [y] (even? y)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold" || n == "filter"),
         "both the `fold` and `filter` dispatches must be gone; callees were {cs:?}",
@@ -81,7 +82,7 @@ fn fold_of_filter_fuses_to_one_scalar_loop() {
         "both the fold step and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "filter-into-fold mints NO array; callees were {cs:?}",
     );
@@ -92,15 +93,15 @@ fn fold_of_filter_fuses_to_one_scalar_loop() {
 /// name. `(reduce f init xs)` dissolves exactly as `fold` does.
 #[test]
 fn reduce_dissolves_like_fold() {
-    let (hir, arena, names) = compile("(reduce (fn [a x] (+ a x)) 0 [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(reduce (fn [a x] (+ a x)) 0 [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "reduce" || n == "fold"),
         "the `reduce` dispatch must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "reduce fuses to a scalar accumulator; callees were {cs:?}",
     );
@@ -112,8 +113,8 @@ fn reduce_dissolves_like_fold() {
 /// through `apply`). The single-op path carries no reorder requirement.
 #[test]
 fn single_fold_with_non_reorder_safe_body_still_fuses() {
-    let (hir, arena, names) = compile("(fold (fn [a x] (if (> a x) a x)) 0 [3 1 2])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(fold (fn [a x] (if (> a x) a x)) 0 [3 1 2])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold"),
         "a lone fold has no reorder gate and must fuse; callees were {cs:?}",
@@ -129,9 +130,9 @@ fn single_fold_with_non_reorder_safe_body_still_fuses() {
 /// argument spill keeps that sound — `call-arg-across-loop.lisp`.)
 #[test]
 fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(fold (fn [a x] (+ a x)) 0 (filter (fn [w] (> w 1)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "fold"),
         "the outer `fold` must not fuse a non-reorder-safe composition; \
@@ -147,8 +148,8 @@ fn fold_over_non_reorder_safe_prefix_fuses_inner_only() {
 /// non-primitive one, so it is never rewritten. The user's `fold` call survives.
 #[test]
 fn user_shadowed_fold_is_not_fused() {
-    let (hir, arena, names) = compile("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "fold"),
         "a user `fold` must not be rewritten; callees were {cs:?}",
@@ -162,8 +163,8 @@ fn user_shadowed_fold_is_not_fused() {
 /// capture: the `fold` call and the closure both survive.
 #[test]
 fn capturing_fold_lambda_fuses() {
-    let (hir, arena, names) = compile("(let [k 10] (fold (fn [a x] (+ a (+ x k))) 0 [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 10] (fold (fn [a x] (+ a (+ x k))) 0 [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold"),
         "the `fold` dispatch must be gone; callees were {cs:?}",
@@ -175,15 +176,15 @@ fn capturing_fold_lambda_fuses() {
 /// the scalar terminal compose, exactly as they do for `map`/`filter`.
 #[test]
 fn fold_over_var_bound_immutable_array_fuses() {
-    let (hir, arena, names) = compile("(let [xs [1 2 3 4]] (fold (fn [a x] (+ a x)) 0 xs))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [xs [1 2 3 4]] (fold (fn [a x] (+ a x)) 0 xs))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold"),
         "a Var-bound base must fuse; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "scalar fold accumulator; callees were {cs:?}",
     );

@@ -243,18 +243,14 @@ pub(super) fn complete_port_op(
                     let (addr_str, port_num) = crate::io::sockaddr::parse(&addr_storage, addr_len);
 
                     let struct_ref = result.as_struct().expect("recv result must be a struct");
-                    let data_buf = crate::value::sorted_struct_get(
-                        struct_ref,
-                        &TableKey::Keyword("data".into()),
-                    )
-                    .copied()
-                    .expect("recv result must have :data");
-                    let addr_buf = crate::value::sorted_struct_get(
-                        struct_ref,
-                        &TableKey::Keyword("addr".into()),
-                    )
-                    .copied()
-                    .expect("recv result must have :addr");
+                    let data_buf =
+                        crate::value::sorted_struct_get(struct_ref, &TableKey::keyword("data"))
+                            .copied()
+                            .expect("recv result must have :data");
+                    let addr_buf =
+                        crate::value::sorted_struct_get(struct_ref, &TableKey::keyword("addr"))
+                            .copied()
+                            .expect("recv result must have :addr");
 
                     unsafe {
                         // :data — payload already in the buffer on the io_uring
@@ -280,16 +276,12 @@ pub(super) fn complete_port_op(
                         truncate_buffer(&addr_buf, n);
                         let addr_val =
                             bytes_to_string_in_place(addr_buf, origin_heap).unwrap_or(addr_buf);
-                        set_struct_field_in_place(
-                            result,
-                            &TableKey::Keyword("addr".into()),
-                            addr_val,
-                        );
+                        set_struct_field_in_place(result, &TableKey::keyword("addr"), addr_val);
 
                         // :port — stamp the sender port int into the slot.
                         set_struct_field_in_place(
                             result,
-                            &TableKey::Keyword("port".into()),
+                            &TableKey::keyword("port"),
                             Value::int(port_num as i64),
                         );
                     }

@@ -37,11 +37,9 @@ pub(crate) fn prim_trace(
         let name = ctx
             .vm()
             .symbols()
-            .and_then(|s| {
-                s.name(crate::value::SymbolId(sym_id))
-                    .map(|n| n.to_string())
-            })
-            .unwrap_or_else(|| format!("#<sym:{}>", sym_id));
+            .and_then(|s| s.name(sym_id))
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| format!("#<symbol:{:#x}>", sym_id.0));
         eprintln!("[TRACE] {}: {:?}", name, args[1]);
         (SIG_OK, args[1])
     } else {
@@ -178,25 +176,15 @@ fn get_memory_usage() -> (u64, u64) {
     (0, 0)
 }
 
-/// Returns the number of interned symbols in the VM's symbol table
-/// (via `ctx.vm().symbols()`).
+/// Returns the number of distinct spellings this instance's memo has
+/// recorded, across both vocabularies (docs/impl/symbol.md).
 /// (debug/symbol-count)
 pub(crate) fn prim_symbol_count(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
 ) -> (SignalBits, Value) {
-    let count = ctx.vm().symbols().map_or(0, |s| s.len());
-    (SIG_OK, Value::int(count as i64))
-}
-
-/// Returns the number of registered keywords in the global name table.
-/// (debug/keyword-count)
-pub(crate) fn prim_keyword_count(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    let count = crate::value::keyword::keyword_count();
-    (SIG_OK, Value::int(count as i64))
+    let n = ctx.vm().symbols().map_or(0, |s| s.len());
+    (SIG_OK, Value::int(n as i64))
 }
 
 // Declarative primitive definitions for debug operations.
@@ -232,12 +220,6 @@ primitive! {
         doc: "Returns the number of interned symbols in the symbol table",
         category: "debug",
         example: "(debug/symbol-count)",
-        effect: RegionEffect::Immediate,
-    }
-    "debug/keyword-count" => prim_keyword_count {
-        doc: "Returns the number of registered keywords in the global name table",
-        category: "debug",
-        example: "(debug/keyword-count)",
         effect: RegionEffect::Immediate,
     }
 }

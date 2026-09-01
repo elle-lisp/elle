@@ -93,8 +93,8 @@ fn closure_cycle_discarded_release_is_prompt() {
                 .expect("compiles")
                 .0
         };
-        let (vm, symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        let (vm, _symbols, cctx) = rt.parts();
+        vm.execute_scheduled(&result.bytecode, cctx)
             .expect("runs")
             .as_int()
             .expect("program returns the region-count delta as an int")
@@ -335,9 +335,9 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
+    let (vm, _symbols, cctx) = rt.parts();
     let delta = vm
-        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .execute_scheduled(&res.bytecode, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns the region-count delta as an int");
@@ -389,9 +389,9 @@ fn self_recursive_loop_under_a_branch_tail_reclaims_per_call() {
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
+    let (vm, _symbols, cctx) = rt.parts();
     let delta = vm
-        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .execute_scheduled(&res.bytecode, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns the region-count delta as an int");
@@ -664,9 +664,9 @@ fn tail_or_short_circuit_returns_owned_param_no_uaf() {
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
+    let (vm, _symbols, cctx) = rt.parts();
     let v = vm
-        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .execute_scheduled(&res.bytecode, cctx)
         .expect("a tail `(or param …)` returning an owned heap param must not double-free it");
     assert!(
         v.is_string(),
@@ -842,9 +842,9 @@ fn self_recursive_define_in_lambda_no_double_free() {
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
+    let (vm, _symbols, cctx) = rt.parts();
     let v = vm
-        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .execute_scheduled(&res.bytecode, cctx)
         .expect("a cell-free self-recursive `def` must not double-free its closure region");
     assert!(
         v.is_keyword(),
@@ -877,9 +877,9 @@ fn self_recursive_and_sibling_captured_no_double_free() {
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
+    let (vm, _symbols, cctx) = rt.parts();
     let v = vm
-        .execute_scheduled(&res.bytecode, symbols, cctx)
+        .execute_scheduled(&res.bytecode, cctx)
         .expect("a sibling-captured self-recursive `def` must not double-free its closure region");
     assert!(
         v.is_keyword(),

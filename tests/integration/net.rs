@@ -21,7 +21,7 @@ fn setup_scheduled() -> Runtime {
 fn run_scheduled(input: &str, rt: &mut Runtime) -> Result<Value, String> {
     let (vm, symbols, cctx) = rt.parts();
     let result = compile_file(input, symbols, cctx, "<test>")?;
-    let value = vm.execute_scheduled(&result.bytecode, symbols, cctx)?;
+    let value = vm.execute_scheduled(&result.bytecode, cctx)?;
     Ok(value)
 }
 
@@ -130,7 +130,7 @@ fn test_udp_roundtrip() {
     let fields = result.as_struct().expect("expected struct result");
     use elle::value::heap::TableKey;
     use elle::value::sorted_struct_get;
-    let data = sorted_struct_get(fields, &TableKey::Keyword("data".into())).unwrap();
+    let data = sorted_struct_get(fields, &TableKey::keyword("data")).unwrap();
     let data_bytes = data.as_bytes().unwrap();
     assert_eq!(data_bytes, b"udp-hello");
 

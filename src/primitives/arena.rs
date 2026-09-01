@@ -201,12 +201,9 @@ pub(crate) fn prim_arena_region_info(
             use crate::value::heap::TableKey;
             use std::collections::BTreeMap;
             let mut fields = BTreeMap::new();
-            fields.insert(TableKey::Keyword("id".to_string()), Value::int(id as i64));
-            fields.insert(TableKey::Keyword("rc".to_string()), Value::int(rc as i64));
-            fields.insert(
-                TableKey::Keyword("objects".to_string()),
-                Value::int(objects as i64),
-            );
+            fields.insert(TableKey::keyword("id"), Value::int(id as i64));
+            fields.insert(TableKey::keyword("rc"), Value::int(rc as i64));
+            fields.insert(TableKey::keyword("objects"), Value::int(objects as i64));
             ctx.struct_from(fields)
         })
         .collect();

@@ -21,8 +21,8 @@ fn count_ands(h: &Hir) -> usize {
 /// reads is that index, never a survivor count.
 #[test]
 fn single_map_indexed_dissolves_to_an_indexed_push() {
-    let (hir, arena, names) = compile("(map-indexed (fn [i x] (* i x)) [10 20 30])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map-indexed (fn [i x] (* i x)) [10 20 30])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map-indexed"),
         "the `map-indexed` dispatch must be gone; callees were {cs:?}",
@@ -33,7 +33,7 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
         "the function's body op must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator; callees were {cs:?}",
     );
@@ -63,9 +63,9 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
 /// indexed one produced.
 #[test]
 fn map_over_map_indexed_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(map (fn [y] (+ y 1)) (map-indexed (fn [i x] (* i x)) [10 20 30]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map-indexed" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -76,7 +76,7 @@ fn map_over_map_indexed_fuses_to_one_loop() {
         "the indexed body must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
@@ -91,16 +91,16 @@ fn map_over_map_indexed_fuses_to_one_loop() {
 /// which a `map` preserves.
 #[test]
 fn map_indexed_over_map_prefix_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(map-indexed (fn [i y] (* i y)) (map (fn [x] (+ x 1)) [10 20 30]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map-indexed" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
@@ -116,16 +116,16 @@ fn map_indexed_over_map_prefix_fuses_to_one_loop() {
 /// the terminal's seed however the stdlib op typed its intermediate.
 #[test]
 fn count_over_map_indexed_fuses_to_one_scalar_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(count (fn [y] (odd? y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map-indexed" || n == "count"),
         "both dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a scalar terminal mints no array; callees were {cs:?}",
     );
@@ -141,15 +141,15 @@ fn map_indexed_inner_to_an_untyped_arm_fuses() {
         "(drop-while (fn [y] (odd? y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))",
         "(map-indexed (fn [j y] (+ j y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))",
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter()
                 .any(|n| n == "map-indexed" || n == "take-while" || n == "drop-while"),
             "a length-preserving inner stage must fuse whole in {src}; callees were {cs:?}",
         );
         assert_eq!(
-            count_callee(&hir, &arena, &names, "@array"),
+            count_callee(&hir, &arena, &mut rt, "@array"),
             1,
             "one accumulator, no intermediate in {src}; callees were {cs:?}",
         );
@@ -177,10 +177,10 @@ fn shortening_stage_inner_to_map_indexed_declines() {
             "drop-while",
         ),
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert_eq!(
-            count_callee(&hir, &arena, &names, "map-indexed"),
+            count_callee(&hir, &arena, &mut rt, "map-indexed"),
             1,
             "a map-indexed whose input's emptiness `len` cannot decide must not fuse \
              in {src}; callees were {cs:?}",
@@ -197,8 +197,8 @@ fn shortening_stage_inner_to_map_indexed_declines() {
 /// once, so a function that grows or shrinks the base would diverge.
 #[test]
 fn map_indexed_over_mutable_array_is_not_fused() {
-    let (hir, arena, names) = compile("(map-indexed (fn [i x] (* i x)) @[10 20 30])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map-indexed (fn [i x] (* i x)) @[10 20 30])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map-indexed"),
         "a mutable `@array` base must not fuse a map-indexed; callees were {cs:?}",
@@ -209,9 +209,9 @@ fn map_indexed_over_mutable_array_is_not_fused() {
 /// so it is never rewritten.
 #[test]
 fn user_shadowed_map_indexed_is_not_fused() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(defn map-indexed [f c] c) (map-indexed (fn [i x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map-indexed"),
         "a user `map-indexed` must not be rewritten; callees were {cs:?}",
@@ -224,8 +224,8 @@ fn user_shadowed_map_indexed_is_not_fused() {
 /// both survive.
 #[test]
 fn capturing_map_indexed_fn_fuses() {
-    let (hir, arena, names) = compile("(let [k 2] (map-indexed (fn [i x] (* k x)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 2] (map-indexed (fn [i x] (* k x)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map-indexed"),
         "the `map-indexed` dispatch must be gone; callees were {cs:?}",
@@ -238,8 +238,8 @@ fn capturing_map_indexed_fn_fuses() {
 /// declines rather than splicing a body with an unbound parameter.
 #[test]
 fn wrong_arity_map_indexed_fn_is_not_fused() {
-    let (hir, arena, names) = compile("(map-indexed (fn [x] (* x 2)) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map-indexed (fn [x] (* x 2)) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map-indexed"),
         "a one-parameter function must not fuse a map-indexed; callees were {cs:?}",
@@ -251,8 +251,8 @@ fn wrong_arity_map_indexed_fn_is_not_fused() {
 /// no new requirement on how the function is resolved.
 #[test]
 fn named_map_indexed_fn_inlines() {
-    let (hir, arena, names) = compile("(defn scale [i x] (* i x)) (map-indexed scale [10 20 30])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn scale [i x] (* i x)) (map-indexed scale [10 20 30])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map-indexed"),
         "the dispatch must be gone for a named function; callees were {cs:?}",

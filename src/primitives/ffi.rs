@@ -17,7 +17,7 @@ pub(crate) fn resolve_type_desc(
     ctx: &mut NativeCtx,
 ) -> Result<TypeDesc, (SignalBits, Value)> {
     // First try keyword
-    if let Some(name) = value.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(*value) {
         return TypeDesc::from_keyword(&name).ok_or_else(|| {
             (
                 SIG_ERROR,

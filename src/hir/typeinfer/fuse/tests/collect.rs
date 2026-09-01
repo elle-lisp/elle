@@ -7,8 +7,8 @@ use super::*;
 /// closure are both present.
 #[test]
 fn single_map_dissolves_the_closure_and_dispatch() {
-    let (hir, arena, names) = compile("(map (fn [x] (* x 2)) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [x] (* x 2)) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` dispatch must be gone; callees were {cs:?}",
@@ -40,8 +40,8 @@ fn single_map_dissolves_the_closure_and_dispatch() {
 /// closures, and (were only the single case built) two accumulators.
 #[test]
 fn composed_maps_fuse_to_one_loop() {
-    let (hir, arena, names) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "both `map` dispatches must be gone; callees were {cs:?}",
@@ -63,8 +63,8 @@ fn composed_maps_fuse_to_one_loop() {
 /// `is_primitive`). The user's `map` call survives.
 #[test]
 fn user_shadowed_map_is_not_fused() {
-    let (hir, arena, names) = compile("(defn map [f xs] xs) (map (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn map [f xs] xs) (map (fn [x] x) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a user `map` must not be rewritten; callees were {cs:?}",
@@ -92,25 +92,20 @@ fn user_shadowed_map_is_not_fused() {
 fn core_lisp_hof_exports_are_primitive_like_stdlib() {
     // The binding a `(name …)` call resolves to (the winning shadow).
     fn callee_is_primitive(src: &str, name: &str) -> bool {
-        let (hir, arena, names) = compile(src);
-        fn find(
-            h: &Hir,
-            arena: &BindingArena,
-            names: &HashMap<u32, String>,
-            want: &str,
-        ) -> Option<bool> {
+        let (hir, arena, _rt) = compile(src);
+        fn find(h: &Hir, arena: &BindingArena, want: &str) -> Option<bool> {
             if let HirKind::Call { func, .. } = &h.kind {
                 if let Some(b) = super::super::unwrap_callee_binding(func) {
-                    if names.get(&arena.get(b).name.0).map(String::as_str) == Some(want) {
+                    if arena.get(b).name == crate::value::SymbolId::of(want) {
                         return Some(arena.get(b).is_primitive);
                     }
                 }
             }
             let mut found = None;
-            h.for_each_child(|c| found = found.or_else(|| find(c, arena, names, want)));
+            h.for_each_child(|c| found = found.or_else(|| find(c, arena, want)));
             found
         }
-        find(&hir, &arena, &names, name).expect("call to the named op is present")
+        find(&hir, &arena, name).expect("call to the named op is present")
     }
     // core.lisp exports — primitive, exactly like the stdlib map/filter.
     assert!(
@@ -133,8 +128,8 @@ fn core_lisp_hof_exports_are_primitive_like_stdlib() {
 /// the gate refuses a capture: the `map` call and the closure both survive.
 #[test]
 fn capturing_lambda_fuses() {
-    let (hir, arena, names) = compile("(let [k 10] (map (fn [x] (+ x k)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 10] (map (fn [x] (+ x k)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` dispatch must be gone; callees were {cs:?}",
@@ -151,8 +146,8 @@ fn capturing_lambda_fuses() {
 /// type proof selects.
 #[test]
 fn map_over_unproven_collection_is_not_fused() {
-    let (hir, arena, names) = compile("(defn f [xs] (map (fn [x] (* x 2)) xs))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn f [xs] (map (fn [x] (* x 2)) xs))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "an unproven collection must not fuse; callees were {cs:?}",
@@ -167,8 +162,8 @@ fn map_over_unproven_collection_is_not_fused() {
 /// are both present and there is no synthesized `if`.
 #[test]
 fn single_filter_dissolves_to_guarded_push() {
-    let (hir, arena, names) = compile("(filter (fn [x] (> x 2)) [1 2 3 4])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(filter (fn [x] (> x 2)) [1 2 3 4])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "filter"),
         "the `filter` dispatch must be gone; callees were {cs:?}",
@@ -202,9 +197,9 @@ fn single_filter_dissolves_to_guarded_push() {
 /// carry only `SIG_ERROR`). Fails before fusion: two `filter` calls, two closures.
 #[test]
 fn composed_filters_fuse_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(filter (fn [y] (even? y)) (filter (fn [x] (integer? x)) [1 2 3 4 5]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "filter"),
         "both `filter` dispatches must be gone; callees were {cs:?}",
@@ -229,8 +224,8 @@ fn composed_filters_fuse_to_one_loop() {
 /// and the guarded-push shape compose.
 #[test]
 fn filter_over_var_bound_immutable_array_fuses() {
-    let (hir, arena, names) = compile("(let [xs [1 2 3 4]] (filter (fn [x] (> x 2)) xs))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [xs [1 2 3 4]] (filter (fn [x] (> x 2)) xs))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "filter"),
         "a Var-bound base must fuse; callees were {cs:?}",
@@ -250,8 +245,9 @@ fn filter_over_var_bound_immutable_array_fuses() {
 /// reorder-safe mixed case fusing into ONE loop is pinned below.
 #[test]
 fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
-    let (hir, arena, names) = compile("(map (fn [x] (* x 2)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) =
+        compile("(map (fn [x] (* x 2)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "the outer `map` must not fuse a non-reorder-safe composition; \
@@ -276,9 +272,9 @@ fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
 /// the outer `map` survives as a plain call over the inner-fused filter.
 #[test]
 fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(map (fn [x] (* x 10)) (filter (fn [y] (even? y)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map" || n == "filter"),
         "both HOF dispatches must be gone in a fused mixed chain; callees were {cs:?}",
@@ -306,9 +302,9 @@ fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
 /// the outer `filter` survives as a plain call over the inner-fused map.
 #[test]
 fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(filter (fn [y] (even? y)) (map (fn [x] (* x 5)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map" || n == "filter"),
         "both HOF dispatches must be gone in a fused mixed chain; callees were {cs:?}",
@@ -334,12 +330,12 @@ fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {
 /// depth across kinds, not just length 2.
 #[test]
 fn mixed_three_stage_tower_fuses_to_one_loop() {
-    let (hir, arena, names) = compile(
+    let (hir, arena, mut rt) = compile(
         "(map (fn [z] (+ z 1)) \
                (filter (fn [y] (even? y)) \
                  (map (fn [x] (* x 3)) [1 2 3 4])))",
     );
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map" || n == "filter"),
         "every HOF dispatch must be gone; callees were {cs:?}",
@@ -367,8 +363,8 @@ fn mixed_three_stage_tower_fuses_to_one_loop() {
 /// refuses a capture: the `filter` call and the closure both survive.
 #[test]
 fn capturing_predicate_fuses() {
-    let (hir, arena, names) = compile("(let [k 2] (filter (fn [x] (> x k)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 2] (filter (fn [x] (> x k)) [1 2 3 4]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "filter"),
         "the `filter` dispatch must be gone; callees were {cs:?}",
@@ -384,8 +380,8 @@ fn capturing_predicate_fuses() {
 /// both survive because the base is a `Var`, not a literal `array` call.
 #[test]
 fn map_over_var_bound_immutable_array_fuses() {
-    let (hir, arena, names) = compile("(let [xs [1 2 3]] (map (fn [x] (* x 2)) xs))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [xs [1 2 3]] (map (fn [x] (* x 2)) xs))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a Var-bound immutable array must fuse; callees were {cs:?}",
@@ -401,8 +397,9 @@ fn map_over_var_bound_immutable_array_fuses() {
 /// aliases `xs` aliases the literal, so `(map f ys)` still fuses.
 #[test]
 fn map_over_aliased_var_immutable_array_fuses() {
-    let (hir, arena, names) = compile("(let [xs [1 2 3]] (let [ys xs] (map (fn [x] (* x 2)) ys)))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) =
+        compile("(let [xs [1 2 3]] (let [ys xs] (map (fn [x] (* x 2)) ys)))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "an aliased Var over an immutable array must fuse; callees were {cs:?}",
@@ -419,8 +416,8 @@ fn map_over_aliased_var_immutable_array_fuses() {
 /// the accumulator are two `@array` calls; neither is frozen.)
 #[test]
 fn single_map_over_mutable_array_fuses_unfrozen() {
-    let (hir, arena, names) = compile("(map (fn [x] (* x 2)) @[1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [x] (* x 2)) @[1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a mutable `@array` base must fuse; callees were {cs:?}",
@@ -441,8 +438,8 @@ fn single_map_over_mutable_array_fuses_unfrozen() {
 /// the unfrozen index-walk loop, exactly as the call-site literal does.
 #[test]
 fn map_over_var_bound_mutable_array_fuses_unfrozen() {
-    let (hir, arena, names) = compile("(let [xs @[1 2 3]] (map (fn [x] (* x 2)) xs))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [xs @[1 2 3]] (map (fn [x] (* x 2)) xs))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a Var-bound mutable `@array` base must fuse; callees were {cs:?}",
@@ -460,8 +457,8 @@ fn map_over_var_bound_mutable_array_fuses_unfrozen() {
 /// gone, the predicate inlines under an `if`, and no `freeze` runs.
 #[test]
 fn single_filter_over_mutable_array_fuses_unfrozen() {
-    let (hir, arena, names) = compile("(filter (fn [x] (> x 2)) @[1 2 3 4])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(filter (fn [x] (> x 2)) @[1 2 3 4])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "filter"),
         "a mutable `@array` base must fuse; callees were {cs:?}",
@@ -480,8 +477,8 @@ fn single_filter_over_mutable_array_fuses_unfrozen() {
 /// diverge from the stdlib fold. The `fold` call survives.
 #[test]
 fn fold_over_mutable_array_is_not_fused() {
-    let (hir, arena, names) = compile("(fold (fn [a x] (+ a x)) 0 @[1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 @[1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "fold"),
         "a fold over a mutable base must not fuse; callees were {cs:?}",
@@ -499,10 +496,10 @@ fn fold_over_mutable_array_is_not_fused() {
 /// the inner transform inlines.
 #[test]
 fn composition_over_mutable_array_fuses_inner_only() {
-    let (hir, arena, names) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) @[1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) @[1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "map"),
+        count_callee(&hir, &arena, &mut rt, "map"),
         1,
         "only the outer `map` survives a mutable-base composition; callees were {cs:?}",
     );

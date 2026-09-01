@@ -69,6 +69,5 @@ pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use docs::help_text;
 pub use module_init::init_stdlib;
 pub use registration::{
-    build_primitive_meta, intern_primitive_names, prim_def, prim_id_of, prim_table_snapshot,
-    register_primitives,
+    build_primitive_meta, prim_def, prim_id_of, prim_table_snapshot, register_primitives,
 };

@@ -44,9 +44,8 @@ impl<'a> Lowerer<'a> {
                     PatternLiteral::Int(n) => self.emit_const(LirConst::Int(*n))?,
                     PatternLiteral::Float(f) => self.emit_const(LirConst::Float(*f))?,
                     PatternLiteral::String(s) => self.emit_const(LirConst::String(s.clone()))?,
-                    PatternLiteral::Keyword(name) => {
-                        self.emit_const(LirConst::Keyword(name.clone()))?
-                    }
+                    PatternLiteral::Keyword(name) => self
+                        .emit_const(LirConst::Keyword(crate::value::keyword::keyword_hash(name)))?,
                 };
 
                 let eq_reg = self.fresh_reg();

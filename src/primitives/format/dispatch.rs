@@ -59,7 +59,7 @@ pub(super) fn format_named(
     let mut kwargs: HashMap<String, Value> = HashMap::new();
     let mut provided_keys: Vec<String> = Vec::new();
     for i in (0..args.len()).step_by(2) {
-        let key = match args[i].as_keyword_name() {
+        let key = match ctx.keyword_spelling(args[i]) {
             Some(name) => name,
             None => {
                 return type_error!(ctx, args[i], "string/format", "keyword");

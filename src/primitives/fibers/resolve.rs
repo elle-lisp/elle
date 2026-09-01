@@ -23,7 +23,7 @@ fn resolve_keyword_slice(
     let reg = crate::signals::registry::global_registry().lock().unwrap();
     let mut bits = SignalBits::EMPTY;
     for elem in elems {
-        let name = elem.as_keyword_name().ok_or_else(|| {
+        let name = ctx.keyword_spelling(*elem).ok_or_else(|| {
             (
                 SIG_ERROR,
                 ctx.error(
@@ -69,7 +69,7 @@ pub(crate) fn resolve_signal_bits(
     }
 
     // 2. Single keyword
-    if let Some(name) = val.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(*val) {
         let reg = crate::signals::registry::global_registry().lock().unwrap();
         return match reg.to_signal_bits(&name) {
             Some(bits) => Ok(bits),
@@ -88,7 +88,7 @@ pub(crate) fn resolve_signal_bits(
         let reg = crate::signals::registry::global_registry().lock().unwrap();
         let mut bits = SignalBits::EMPTY;
         for elem in set.iter() {
-            let name = elem.as_keyword_name().ok_or_else(|| {
+            let name = ctx.keyword_spelling(*elem).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     ctx.error(
@@ -132,7 +132,7 @@ pub(crate) fn resolve_signal_bits(
         let mut bits = SignalBits::EMPTY;
         let mut current = *val;
         while let Some(pair) = current.as_pair() {
-            let name = pair.first.as_keyword_name().ok_or_else(|| {
+            let name = ctx.keyword_spelling(pair.first).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     ctx.error(

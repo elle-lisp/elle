@@ -264,18 +264,10 @@ impl CompileCtx {
 
     /// Look up or compute the signal projection for an imported file.
     ///
-    /// On a miss, compiles the file in the caller's `SymbolTable` and this
-    /// instance's context, then caches the projection from the resulting
-    /// bytecode. Returns `None` if the file's return value is not a projectable
-    /// struct (cached as `None` to avoid recompiling).
-    ///
-    /// The table is the caller's, not a fresh one, because this compile expands
-    /// macros: a transformer compiles lazily on its first expansion and caches
-    /// on the shared expander, and its quoted literals bind to whichever table
-    /// compiled it. A throwaway table here would cache transformers carrying ids
-    /// no later expansion can read (pinned by
-    /// `import_projection_probe_interns_into_the_callers_symbol_table` and
-    /// `each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first`).
+    /// On a miss, compiles the file in this instance's context and caches the
+    /// projection from the resulting bytecode. Returns `None` if the file's
+    /// return value is not a projectable struct (cached as `None` to avoid
+    /// recompiling).
     pub fn get_or_compile_projection(
         &mut self,
         resolved_path: &str,
@@ -286,6 +278,12 @@ impl CompileCtx {
         }
 
         let source = std::fs::read_to_string(resolved_path).ok()?;
+        // The probe compiles in the CALLER's memo: the memo is per-instance
+        // (docs/impl/symbol.md § "The display memo"), so a throwaway table
+        // here would drop every name the module's quoted data carries, and a
+        // transformer cached on the shared expander during this compile would
+        // outlive the table it learned into. The `each` and probe tests in
+        // tests/integration/projection.rs pin both halves.
         let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
             .ok()
             .and_then(|result| result.bytecode.signal_projection);
@@ -316,12 +314,9 @@ fn compile_core(
 ) {
     use crate::hir::{Analyzer, BindingArena, FileForm};
     use crate::lir::{Emitter, Lowerer};
-    use crate::primitives::intern_primitive_names;
     use crate::reader::read_syntax_all;
     use crate::syntax::Span;
     use std::rc::Rc;
-
-    intern_primitive_names(symbols);
 
     let syntaxes = read_syntax_all(CORE, "<core>").expect("core.lisp parsing must succeed");
 
@@ -382,27 +377,25 @@ fn compile_core(
     )
     .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(meta);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        let names = symbols.all_names();
         eprintln!(
             "[trace:regions] cache (core.lisp):\n{}",
-            crate::hir::format_regions(&region_info, &arena, &names)
+            crate::hir::format_regions(&region_info, &arena, Some(symbols))
         );
     }
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer
         .lower(&hir)
         .expect("core.lisp lowering must succeed");
 
-    let mut emitter = Emitter::new_with_symbols(symbol_names);
+    let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     let closure_val = vm
@@ -449,11 +442,17 @@ fn compile_core(
         .as_struct()
         .expect("core.lisp must return a struct");
     for (key, value) in exports_struct.iter() {
-        if let crate::value::types::TableKey::Keyword(name) = key {
+        if let crate::value::types::TableKey::Keyword(hash) = key {
+            // The export struct was read from module source, so its key
+            // spellings are in the memo; a miss is a missed learning site.
+            let name = symbols
+                .keyword_name(*hash)
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("module export key {:#x} has no learned spelling", hash));
             // core_env: name-keyed, used by eval_syntax for macro bodies
-            expander.core_env.insert(name.to_string(), *value);
+            expander.core_env.insert(name.clone(), *value);
             // meta: SymbolId-keyed, used by compile_file for user code
-            let sym_id = symbols.intern(name);
+            let sym_id = symbols.intern(&name);
             let signal = if let Some(c) = value.as_closure() {
                 c.template.signal
             } else {

@@ -37,14 +37,13 @@ fn make_lowerer_with(
             .stubs(STUBS_RETURNING_ARGS)
             .build_into(source, arena, &mut symbols);
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &built.meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&built.meta);
     let mut region_info =
         crate::hir::analyze_regions_with(&built.hir, arena, pc.call_classification.clone());
     mutate(&mut region_info, &built.hir);
     let lowerer = Lowerer::new(arena)
         .with_primitive_classification(pc)
         .with_primitive_values(built.primitive_values)
-        .with_symbol_names(symbols.all_names())
         .with_region_info(region_info);
     (lowerer, built.hir)
 }

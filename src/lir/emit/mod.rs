@@ -44,8 +44,6 @@ pub struct Emitter {
     stack: Vec<Reg>,
     /// Register to stack position mapping (for finding values)
     reg_to_stack: HashMap<Reg, usize>,
-    /// Symbol ID → name mapping for cross-thread portability
-    symbol_names: HashMap<u32, String>,
     /// Saved stack state from yield terminators, keyed by resume label.
     /// When a block ends with Terminator::Yield, the stack state is saved here
     /// so the resume block can start with the correct simulation state.
@@ -83,27 +81,6 @@ impl Emitter {
             pending_jumps: Vec::new(),
             stack: Vec::new(),
             reg_to_stack: HashMap::new(),
-            symbol_names: HashMap::new(),
-            yield_stack_state: HashMap::new(),
-            block_entry_depth: HashMap::new(),
-            yield_points: Vec::new(),
-            call_sites: Vec::new(),
-            current_func_may_suspend: false,
-            current_func_num_locals: 0,
-            compiled_closures: None,
-            closure_lir_funcs: None,
-        }
-    }
-
-    /// Create an emitter with symbol name mappings for cross-thread portability.
-    pub fn new_with_symbols(symbol_names: HashMap<u32, String>) -> Self {
-        Emitter {
-            bytecode: Bytecode::new(),
-            label_offsets: HashMap::new(),
-            pending_jumps: Vec::new(),
-            stack: Vec::new(),
-            reg_to_stack: HashMap::new(),
-            symbol_names,
             yield_stack_state: HashMap::new(),
             block_entry_depth: HashMap::new(),
             yield_points: Vec::new(),
@@ -192,10 +169,7 @@ impl Emitter {
 
     /// Emit bytecode from a single LIR function.
     pub fn emit(&mut self, func: &LirFunction) -> ClosureCompiled {
-        let mut bytecode = Bytecode::new();
-        // Copy symbol names to the new bytecode for cross-thread portability
-        bytecode.symbol_names = self.symbol_names.clone();
-        self.bytecode = bytecode;
+        self.bytecode = Bytecode::new();
         self.label_offsets.clear();
         self.pending_jumps.clear();
         self.stack.clear();
@@ -510,13 +484,12 @@ impl Emitter {
                 unreachable!("string literals lower to MaterializeConst, not Const")
             }
             LirConst::Symbol(sym) => {
-                let name = self.symbol_names.get(&sym.0).cloned().unwrap_or_default();
-                let idx = self.bytecode.add_symbol(sym.0, &name);
+                let idx = self.bytecode.add_constant(Value::symbol(*sym));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
-            LirConst::Keyword(name) => {
-                let idx = self.bytecode.add_constant(Value::keyword(name));
+            LirConst::Keyword(hash) => {
+                let idx = self.bytecode.add_constant(Value::keyword_from_hash(*hash));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }

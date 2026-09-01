@@ -372,8 +372,8 @@ fn frame_held_names_a_yielded_capturers_forward_cell() {
     // is the refusal that keeps the projection honest.
     let mut symbols = SymbolTable::new();
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
-    let (hir, arena, _) = compile_fhir(
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
+    let (hir, arena) = compile_fhir(
         "(fiber/new (fn () \
            (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
                     go (fn [m] (when (%not (%int? m)) (error :m)) \
@@ -408,8 +408,8 @@ fn frame_held_refuses_a_forward_cell_whose_binding_is_stored() {
     // must be refused there and its release must keep the baseline.
     let mut symbols = SymbolTable::new();
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
-    let (hir, arena, _) = compile_fhir(
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
+    let (hir, arena) = compile_fhir(
         "(defn h [n] \
            (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
                     go (fn [m] (when (%not (%int? m)) (error :m)) \
@@ -466,14 +466,13 @@ fn letrec_init_does_not_overwrite_destructure_binding_regions() {
     // binding_regions[r].
     let source =
         "(begin (def (a & r) (list 1 2 3)) (length r)) (def (a b & r) (list 1 2)) (length r)";
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
     // Find the pattern binding `r` introduced by the destructure.
     // The arena names it from the source symbol, so we look it up
     // by name. The letrec also declares it; the destructure's
     // pattern shares the same Binding id.
-    let r_binding =
-        find_binding_by_name(&hir, "r", &arena, &symbols).expect("expected binding `r`");
+    let r_binding = find_binding_by_name(&hir, "r", &arena).expect("expected binding `r`");
     let r_regions = info
         .binding_source_regions
         .get(&r_binding)
@@ -487,7 +486,7 @@ fn letrec_init_does_not_overwrite_destructure_binding_regions() {
     // decref_point would be left at its destructure id and
     // `(length r)` inside the begin (which uses r while r still
     // points into the first list) would read a freed page.
-    let list_calls = find_calls_to_primitive(&hir, "list", &arena, &symbols);
+    let list_calls = find_calls_to_primitive(&hir, "list", &arena);
     assert_eq!(
         list_calls.len(),
         2,

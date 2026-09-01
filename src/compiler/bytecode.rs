@@ -13,10 +13,6 @@ pub use instruction::*;
 pub struct Bytecode {
     pub instructions: Vec<u8>,
     pub constants: Vec<Value>,
-    /// Symbol ID → name mapping for cross-thread portability.
-    /// When bytecode is sent to a new thread, symbol IDs may differ.
-    /// This map allows remapping globals to the correct IDs.
-    pub symbol_names: std::collections::HashMap<u32, String>,
     /// Bytecode offset → source location mapping for error reporting.
     /// Maps instruction offsets to their source locations.
     pub location_map: LocationMap,
@@ -64,7 +60,6 @@ impl Bytecode {
         Bytecode {
             instructions: Vec::new(),
             constants: Vec::new(),
-            symbol_names: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
@@ -90,15 +85,6 @@ impl Bytecode {
             span.col as usize,
         );
         self.location_map.insert(offset, loc);
-    }
-
-    /// Add a symbol constant and record its name for portability.
-    /// This enables cross-thread symbol ID remapping.
-    pub fn add_symbol(&mut self, id: u32, name: &str) -> u16 {
-        self.symbol_names
-            .entry(id)
-            .or_insert_with(|| name.to_string());
-        self.add_constant(Value::symbol(id))
     }
 
     /// Add a constant and return its index

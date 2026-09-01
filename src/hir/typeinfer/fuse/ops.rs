@@ -22,23 +22,21 @@ pub(super) struct Ops {
 }
 
 impl Ops {
-    pub(super) fn resolve(
-        arena: &BindingArena,
-        symbol_names: &HashMap<u32, String>,
-    ) -> Option<Ops> {
-        // Name → the first `is_primitive` binding for it (each global is bound
-        // once by `bind_primitives`, so first-wins is exact).
-        let mut prim: HashMap<&str, Binding> = HashMap::new();
+    pub(super) fn resolve(arena: &BindingArena) -> Option<Ops> {
+        // Id → the first `is_primitive` binding for it (each global is bound
+        // once by `bind_primitives`, so first-wins is exact). Keyed by id, not
+        // spelling: `push`, `<` and `freeze` reach the arena as stdlib exports,
+        // which are in no primitive table, and no instance memo is in scope
+        // here (docs/impl/symbol.md § "Reading a name, and not reading one").
+        let mut prim: HashMap<SymbolId, Binding> = HashMap::new();
         for i in 0..arena.len() as u32 {
             let b = Binding(i);
             let bi = arena.get(b);
             if bi.is_primitive {
-                if let Some(name) = symbol_names.get(&bi.name.0) {
-                    prim.entry(name.as_str()).or_insert(b);
-                }
+                prim.entry(bi.name).or_insert(b);
             }
         }
-        let find = |n: &str| prim.get(n).copied();
+        let find = |n: &str| prim.get(&SymbolId::of(n)).copied();
         Some(Ops {
             at_array: find("@array")?,
             length: find("length")?,

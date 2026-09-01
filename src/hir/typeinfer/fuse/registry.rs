@@ -272,7 +272,6 @@ impl FnResolver<'_> {
         &self,
         lam: &Hir,
         arena: &BindingArena,
-        symbol_names: &HashMap<u32, String>,
         bases: &FxHashMap<Binding, &'static str>,
     ) -> bool {
         let body = match &lam.kind {
@@ -283,7 +282,7 @@ impl FnResolver<'_> {
             },
             _ => return false,
         };
-        classify_base(body, arena, symbol_names, bases).is_some()
+        classify_base(body, arena, bases).is_some()
     }
 
     /// Resolve a HOF's function argument to owned `(params, body)`, ready to splice:

@@ -234,10 +234,12 @@ impl<'a> Analyzer<'a> {
         self.is_primitive_named(func, "import")
     }
 
-    /// Check if a callee HIR node refers to a named primitive.
+    /// Check if a callee HIR node refers to a named primitive — one hash
+    /// compare, no memo (docs/impl/symbol.md § "Reading a name, and not
+    /// reading one").
     fn is_primitive_named(&self, func: &Hir, name: &str) -> bool {
         if let HirKind::Var(binding) = &func.kind {
-            self.symbols.name(self.arena.get(*binding).name) == Some(name)
+            self.arena.get(*binding).name == crate::value::SymbolId::of(name)
         } else {
             false
         }

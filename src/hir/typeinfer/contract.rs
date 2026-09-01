@@ -67,9 +67,8 @@ pub(super) fn check_intrinsic_operand_proofs(
     hir: &Hir,
     hir_types: &HashMap<HirId, TyId>,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
 ) -> Result<(), String> {
     let interner = TypeInterner::new();
     let mut env = NonzeroEnv::default();
-    walk(hir, hir_types, arena, symbol_names, &interner, &mut env)
+    walk(hir, hir_types, arena, &interner, &mut env)
 }

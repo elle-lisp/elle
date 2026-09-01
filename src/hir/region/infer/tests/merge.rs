@@ -78,9 +78,9 @@ fn analyze_cycle_with_effects(
     symbols: &mut SymbolTable,
 ) -> (Hir, BindingArena, RegionInfo) {
     let meta = crate::primitives::build_primitive_meta(symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let cc = pc.call_classification;
-    let (hir, arena, _) = compile_fhir(source, symbols);
+    let (hir, arena) = compile_fhir(source, symbols);
     let info = analyze_regions_with(&hir, &arena, cc);
     (hir, arena, info)
 }

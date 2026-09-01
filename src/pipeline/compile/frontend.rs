@@ -92,7 +92,6 @@ fn compile_syntaxes_frontend_xform_inner(
     source_name: &str,
     xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
-    intern_primitive_names(symbols);
     let ct = crate::trace::compile();
     let t = std::time::Instant::now();
 

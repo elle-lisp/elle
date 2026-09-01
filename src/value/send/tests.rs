@@ -11,16 +11,11 @@ use std::rc::Rc;
 /// heap, NOT releasing the region: the result must outlive the call (the test
 /// reads it afterward), so freeing the region would recycle the pages the
 /// returned value points at. The leaked heap keeps it resident for the test.
-fn into_value_in_region(
-    f: impl FnOnce(&mut crate::primitives::ctx::Alloc, &mut crate::symbol::SymbolTable) -> Value,
-) -> Value {
+fn into_value_in_region(f: impl FnOnce(&mut crate::primitives::ctx::Alloc) -> Value) -> Value {
     let heap_ptr = crate::value::arena::leaked_test_heap();
     let region = unsafe { (*heap_ptr).new_runtime_region() };
     let mut ctx = crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
-    // These round-trips carry no symbols; a fresh table suffices. The
-    // symbol-specific round-trip threads its own sender/receiver tables.
-    let mut symbols = crate::symbol::SymbolTable::new();
-    f(&mut ctx, &mut symbols)
+    f(&mut ctx)
 }
 
 /// Build a minimal closure Value with an attached LIR function, on `heap`.
@@ -115,13 +110,9 @@ fn test_send_bundle_patches_closure_value_const_in_lir() {
         );
 
         // 3. Round-trip through SendBundle.
-        let bundle = SendBundle::from_value(
-            outer_val,
-            unsafe { &*heap_ptr },
-            &crate::symbol::SymbolTable::new(),
-        )
-        .expect("should serialize");
-        let restored = into_value_in_region(|ctx, symbols| bundle.into_value(ctx, symbols));
+        let bundle = SendBundle::from_value(outer_val, unsafe { &*heap_ptr }, None)
+            .expect("should serialize");
+        let restored = into_value_in_region(|ctx| bundle.into_value(ctx, None));
 
         // 4. The reconstructed outer closure should still have an LIR.
         let restored_rc = restored
@@ -172,9 +163,9 @@ fn parameter_round_trips_preserving_id_and_default() {
         let p = h.ctx().parameter(Value::int(7));
         let (id0, _) = p.as_parameter().expect("p is a parameter");
 
-        let bundle = SendBundle::from_value(p, h.heap(), &crate::symbol::SymbolTable::new())
+        let bundle = SendBundle::from_value(p, h.heap(), None)
             .expect("a parameter with a sendable default must be sendable");
-        let p2 = into_value_in_region(|ctx, symbols| bundle.into_value(ctx, symbols));
+        let p2 = into_value_in_region(|ctx| bundle.into_value(ctx, None));
 
         let (id1, def1) = p2
             .as_parameter()
@@ -199,69 +190,143 @@ fn stdio_port_round_trips_by_kind() {
             (Port::stdin as fn() -> Port, PortKind::Stdin),
         ] {
             let v = h.ctx().external("port", mk());
-            let bundle = SendBundle::from_value(v, h.heap(), &crate::symbol::SymbolTable::new())
-                .expect("stdio ports are sendable");
-            let v2 = into_value_in_region(|ctx, symbols| bundle.into_value(ctx, symbols));
+            let bundle =
+                SendBundle::from_value(v, h.heap(), None).expect("stdio ports are sendable");
+            let v2 = into_value_in_region(|ctx| bundle.into_value(ctx, None));
             let got = v2.as_external::<Port>().map(|p| p.kind());
             assert_eq!(got, Some(kind), "stdio port must reconstruct with its kind");
         }
     });
 }
 
-// ── symbol values re-intern by name (not by raw id) ─────────────────
+// ── symbol identity survives the boundary verbatim ──────────────────
+//
+// The three tests below cover the three ways a symbol id crosses `send`: as a
+// value, as a struct key, and as a LIR constant. Only the first was ever
+// translated; the other two always crossed raw, so they were correct only when
+// the two tables happened to agree. Hash identity makes all three the same
+// case, and each test asserts a name resolves on the receiving side.
+
+/// A receiver's table whose history differs from the sender's. Under
+/// mint-order ids the four decoys are what made every shared name disagree.
+fn skewed_receiver() -> crate::symbol::SymbolTable {
+    let mut receiver = crate::symbol::SymbolTable::new();
+    for n in ["skew-w", "skew-x", "skew-y", "skew-z"] {
+        let _ = receiver.intern(n);
+    }
+    receiver
+}
 
 #[test]
-fn symbol_round_trips_by_name_not_id() {
+fn a_symbol_value_names_the_same_symbol_on_both_sides() {
     use crate::symbol::SymbolTable;
-    use crate::value::SymbolId;
 
-    // Sender's table: intern a couple of names first so "begin" lands at
-    // some non-zero id that is meaningful only in THIS table.
     let mut sender = SymbolTable::new();
-    let _ = sender.intern("aaa");
-    let _ = sender.intern("bbb");
-    let begin_sender = sender.intern("begin");
+    let _ = sender.intern("send-aaa");
+    let _ = sender.intern("send-bbb");
+    let begin = sender.intern("begin");
 
-    // Serialize a symbol value carrying the sender-table id, resolving the name
-    // against the sender's table (threaded explicitly).
     // A symbol is immediate, so serialization allocates nothing; any heap serves.
     let sv = SendBundle::from_value(
-        Value::symbol(begin_sender.0),
+        Value::symbol(begin),
         unsafe { &*crate::value::arena::leaked_test_heap() },
-        &sender,
+        Some(&sender),
     )
     .expect("symbol is sendable");
 
-    // Receiver's table: a DIFFERENT layout, so "begin" gets a different id.
-    // This is the cross-thread reality the worker faces.
-    let mut receiver = SymbolTable::new();
-    for n in ["w", "x", "y", "z"] {
-        let _ = receiver.intern(n);
-    }
-    let begin_receiver = receiver.intern("begin");
-    assert_ne!(
-        begin_sender.0, begin_receiver.0,
-        "test setup: the two tables must assign 'begin' different ids"
-    );
-
-    // Reconstruct re-interning into the RECEIVER's table (threaded explicitly).
-    // A symbol is an immediate, so reconstruction allocates nothing — any mortal
-    // ctx serves as the target.
+    let mut receiver = skewed_receiver();
     let got = {
         let heap_ptr = crate::value::arena::leaked_test_heap();
         let region = unsafe { (*heap_ptr).new_runtime_region() };
         let mut alloc =
             crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
-        sv.into_value(&mut alloc, &mut receiver)
+        sv.into_value(&mut alloc, Some(&mut receiver))
     };
 
     let got_id = got.as_symbol().expect("reconstructed value is a symbol");
+    assert_eq!(got_id, begin, "the id crosses unchanged");
+    assert_eq!(receiver.name(got_id), Some("begin"));
+}
+
+// `SendValue::Struct` clones each `TableKey` verbatim, so a symbol key crosses
+// as a bare id with no name beside it. The receiver must still read the key the
+// sender wrote.
+//
+// Counter-factual: with mint-order ids this is the defect that made
+// `(get (sys/join (sys/spawn (fn [] {'alpha 1}))) 'alpha)` return the wrong
+// entry — `tests/elle/symbol-identity.lisp` pins the end-to-end shape.
+#[test]
+fn a_symbol_struct_key_names_the_same_symbol_on_both_sides() {
+    use crate::symbol::SymbolTable;
+    use crate::value::heap::TableKey;
+
+    crate::value::arena::with_test_region(|| {
+        let mut sender = SymbolTable::new();
+        let _ = sender.intern("send-aaa");
+        let alpha = sender.intern("key-alpha");
+        let beta = sender.intern("key-beta");
+
+        let h = crate::primitives::ctx::TestHeap::new();
+        let mut entries = vec![
+            (TableKey::Symbol(alpha), Value::int(7)),
+            (TableKey::Symbol(beta), Value::int(8)),
+        ];
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let s = h.ctx().struct_from_sorted(entries);
+        let bundle =
+            SendBundle::from_value(s, h.heap(), Some(&sender)).expect("struct is sendable");
+
+        let mut receiver = skewed_receiver();
+        let probe = TableKey::Symbol(receiver.intern("key-alpha"));
+        let got = {
+            let heap_ptr = crate::value::arena::leaked_test_heap();
+            let region = unsafe { (*heap_ptr).new_runtime_region() };
+            let mut alloc =
+                crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
+            bundle.into_value(&mut alloc, Some(&mut receiver))
+        };
+
+        let entries = got.as_struct().expect("reconstructed value is a struct");
+        assert_eq!(
+            crate::value::types::sorted_struct_get(entries, &probe),
+            Some(&crate::value::Value::int(7)),
+            "the receiver's own key must find the entry the sender stored"
+        );
+        // `key-beta` was never interned on this side: its name reaches the
+        // receiver only through the bundle's name table, from the struct-key
+        // noting site (keys are cloned as `TableKey`, never routed through
+        // `from_value_inner`).
+        assert_eq!(
+            receiver.name(beta),
+            Some("key-beta"),
+            "a struct key's name must cross inside the bundle"
+        );
+    });
+}
+
+// A `LirConst::Symbol` ships inside the live `LirFunction` with no name and no
+// rewrite, so the id the sender lowered is the id the worker re-emits into its
+// own constant pool.
+#[test]
+fn a_lir_symbol_const_names_the_same_symbol_on_both_sides() {
+    use crate::lir::value_to_lir_const;
+    use crate::symbol::SymbolTable;
+
+    let mut sender = SymbolTable::new();
+    let _ = sender.intern("send-aaa");
+    let alpha = sender.intern("lir-alpha");
+
+    let shipped = match value_to_lir_const(Value::symbol(alpha)) {
+        Some(LirConst::Symbol(id)) => id,
+        other => panic!("a symbol lowers to LirConst::Symbol, got {:?}", other),
+    };
+
+    let mut receiver = skewed_receiver();
+    let _ = receiver.intern("lir-alpha");
     assert_eq!(
-        receiver.name(SymbolId(got_id)),
-        Some("begin"),
-        "a symbol must cross the boundary by NAME and re-intern in the \
-             receiver's table — carrying the raw sender id would resolve to the \
-             wrong name (or none)"
+        receiver.name(shipped),
+        Some("lir-alpha"),
+        "the worker re-emits this id verbatim; it must name the sender's symbol"
     );
 }
 
@@ -274,9 +339,9 @@ fn parameter_holding_stdout_port_is_sendable() {
         let p = h
             .ctx()
             .parameter(h.ctx().external("port", crate::port::Port::stdout()));
-        let bundle = SendBundle::from_value(p, h.heap(), &crate::symbol::SymbolTable::new())
+        let bundle = SendBundle::from_value(p, h.heap(), None)
             .expect("a parameter defaulting to a stdio port must be sendable");
-        let p2 = into_value_in_region(|ctx, symbols| bundle.into_value(ctx, symbols));
+        let p2 = into_value_in_region(|ctx| bundle.into_value(ctx, None));
         let (_, def) = p2.as_parameter().expect("reconstructed is a parameter");
         assert_eq!(
             def.as_external::<crate::port::Port>().map(|p| p.kind()),
@@ -323,13 +388,9 @@ fn closure_round_trips_preserving_frame_release_tables() {
             },
         );
 
-        let bundle = SendBundle::from_value(
-            val,
-            unsafe { &*heap_ptr },
-            &crate::symbol::SymbolTable::new(),
-        )
-        .expect("a plain closure is sendable");
-        let restored = into_value_in_region(|ctx, symbols| bundle.into_value(ctx, symbols));
+        let bundle = SendBundle::from_value(val, unsafe { &*heap_ptr }, None)
+            .expect("a plain closure is sendable");
+        let restored = into_value_in_region(|ctx| bundle.into_value(ctx, None));
 
         let closure = restored.as_closure().expect("restored value is a closure");
         assert_eq!(
@@ -352,5 +413,44 @@ fn closure_round_trips_preserving_frame_release_tables() {
              template_from_sendable, not send_closure — its tables must cross too"
         );
         assert_eq!(&child.frame_release_regions[..], &[23u32]);
+    });
+}
+
+// A keyword crosses as an immediate; its spelling rides the bundle's name
+// table with the symbols', so the receiving instance can print both the
+// keyword value and a keyword struct key it never learned itself.
+#[test]
+fn a_keyword_names_the_same_keyword_on_both_sides() {
+    use crate::symbol::SymbolTable;
+    use crate::value::heap::TableKey;
+
+    crate::value::arena::with_test_region(|| {
+        let mut sender = SymbolTable::new();
+        let kw_hash = sender.keyword("kw-send-xt");
+        let key_hash = sender.keyword("kw-send-key-xt");
+
+        let h = crate::primitives::ctx::TestHeap::new();
+        let s = h.ctx().struct_from_sorted(vec![(
+            TableKey::Keyword(key_hash),
+            Value::keyword("kw-send-xt"),
+        )]);
+        let bundle =
+            SendBundle::from_value(s, h.heap(), Some(&sender)).expect("struct is sendable");
+
+        let mut receiver = SymbolTable::new();
+        let got = {
+            let heap_ptr = crate::value::arena::leaked_test_heap();
+            let region = unsafe { (*heap_ptr).new_runtime_region() };
+            let mut alloc =
+                crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
+            bundle.into_value(&mut alloc, Some(&mut receiver))
+        };
+
+        assert_eq!(
+            format!("{}", got.display_with(Some(&receiver))),
+            "{:kw-send-key-xt :kw-send-xt}",
+            "both the key's and the value's spellings crossed in the bundle"
+        );
+        assert_eq!(receiver.keyword_name(kw_hash), Some("kw-send-xt"));
     });
 }

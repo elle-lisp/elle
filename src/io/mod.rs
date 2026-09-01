@@ -208,18 +208,15 @@ impl Completion {
     /// carries it past this array's demise.
     pub(crate) fn to_value(&self, ctx: &crate::primitives::ctx::Alloc<'_>) -> Value {
         let mut fields = BTreeMap::new();
-        fields.insert(
-            TableKey::Keyword("id".into()),
-            Value::int(self.id.as_u64() as i64),
-        );
+        fields.insert(TableKey::keyword("id"), Value::int(self.id.as_u64() as i64));
         match &self.result {
             Ok(v) => {
-                fields.insert(TableKey::Keyword("value".into()), *v);
-                fields.insert(TableKey::Keyword("error".into()), Value::NIL);
+                fields.insert(TableKey::keyword("value"), *v);
+                fields.insert(TableKey::keyword("error"), Value::NIL);
             }
             Err(e) => {
-                fields.insert(TableKey::Keyword("value".into()), Value::NIL);
-                fields.insert(TableKey::Keyword("error".into()), *e);
+                fields.insert(TableKey::keyword("value"), Value::NIL);
+                fields.insert(TableKey::keyword("error"), *e);
             }
         }
         ctx.struct_from(fields)

@@ -12,13 +12,14 @@
 ##           :send-data-with-flow-control :ack-settings-received
 ##           :default-settings :initial-window :max-frame :test}
 ##
-## The SETTINGS-ACK latch key comes from `(gensym)`, a process-global
+## The SETTINGS-ACK latch key comes from `(sys/unique)`, a process-global
 ## primitive counter, NOT a module-local counter.  `(import ...)` returns
 ## a fresh module instance each call, so a module-local counter would
 ## restart in every importer and hand out colliding keys; since the
 ## scheduler's park-queue is process-global, acking one session's SETTINGS
 ## would then wake another session's settings-waiter (same elle bug class
-## as the lib/sync futex-key collision, #861).
+## as the lib/sync futex-key collision, #861).  An integer key also
+## interns nothing, where a gensym key retained one symbol per session.
 
 (fn [&named frame stream hpack]
   (def C frame:constants)
@@ -109,7 +110,7 @@
     "Send SETTINGS and start a 30s timeout for the ACK."
     (let [[ftype flags sid payload] (frame:make-settings-frame settings)]
       (send-frame session ftype flags sid payload))
-    (let [latch-key (gensym)
+    (let [latch-key (sys/unique)
           latch-box (box 0)]
       (put session :settings-ack-latch @{:key latch-key :box latch-box})
       (ev/spawn (fn []

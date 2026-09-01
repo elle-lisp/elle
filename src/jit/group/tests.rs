@@ -96,7 +96,7 @@ fn test_find_global_call_targets_no_calls() {
 fn test_discover_empty_when_no_peers() {
     crate::value::arena::with_test_region(|| {
         let leaf = make_leaf();
-        let globals: Vec<Value> = vec![];
+        let globals: HashMap<SymbolId, Value> = HashMap::new();
         let group = discover_compilation_group(&leaf, &globals);
         assert!(group.is_empty());
     });
@@ -112,8 +112,8 @@ fn test_discover_finds_callee() {
         let caller = make_caller("f", sym_g);
         let callee = make_leaf();
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = make_closure_value(callee);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), make_closure_value(callee));
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -129,8 +129,8 @@ fn test_discover_skips_suspending() {
         let mut callee = make_leaf();
         callee.signal = Signal::yields();
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = make_closure_value(callee);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), make_closure_value(callee));
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -146,8 +146,8 @@ fn test_discover_skips_captures() {
         let mut callee = make_leaf();
         callee.num_captures = 1;
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = make_closure_value(callee);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), make_closure_value(callee));
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -182,8 +182,8 @@ fn test_discover_skips_unsupported_instructions() {
             )
             .build();
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = make_closure_value(callee);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), make_closure_value(callee));
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -202,9 +202,9 @@ fn test_discover_transitive() {
         let g = make_caller("g", sym_h);
         let h = make_leaf();
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = make_closure_value(g);
-        globals[6] = make_closure_value(h);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), make_closure_value(g));
+        globals.insert(SymbolId(6), make_closure_value(h));
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -224,9 +224,9 @@ fn test_discover_no_duplicates_in_cycle() {
 
         let f_for_global = make_caller("f", sym_g);
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[4] = make_closure_value(f_for_global);
-        globals[5] = make_closure_value(g);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(4), make_closure_value(f_for_global));
+        globals.insert(SymbolId(5), make_closure_value(g));
 
         let group = discover_compilation_group(&hot, &globals);
         assert!(group.is_empty());
@@ -234,11 +234,11 @@ fn test_discover_no_duplicates_in_cycle() {
 }
 
 #[test]
-fn test_discover_out_of_bounds_sym() {
+fn test_discover_unknown_sym() {
     crate::value::arena::with_test_region(|| {
         let sym_g = SymbolId(999);
         let caller = make_caller("f", sym_g);
-        let globals = vec![Value::NIL; 10]; // Only 10 globals
+        let globals: HashMap<SymbolId, Value> = HashMap::new();
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -251,8 +251,8 @@ fn test_discover_non_closure_global() {
         let sym_g = SymbolId(5);
         let caller = make_caller("f", sym_g);
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = Value::int(42); // Not a closure
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), Value::int(42)); // Not a closure
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -281,8 +281,8 @@ fn test_discover_closure_without_lir() {
             squelch_mask: SignalBits::EMPTY,
         };
 
-        let mut globals = vec![Value::NIL; 10];
-        globals[5] = h.ctx().closure(closure);
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
+        globals.insert(SymbolId(5), h.ctx().closure(closure));
 
         let group = discover_compilation_group(&caller, &globals);
         assert!(group.is_empty());
@@ -334,16 +334,16 @@ fn test_discover_respects_size_bound() {
         // Create a chain of functions f0 -> f1 -> f2 -> ... -> f(N)
         // Verify that discovery stops at MAX_GROUP_SIZE.
         let n = MAX_GROUP_SIZE + 5; // more than the limit
-        let syms: Vec<SymbolId> = (0..n).map(|i| SymbolId(i as u32)).collect();
+        let syms: Vec<SymbolId> = (0..n).map(|i| SymbolId(i as u64)).collect();
 
         // Build chain: f_i calls f_{i+1}
-        let mut globals = vec![Value::NIL; n];
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
         for i in 0..n - 1 {
             let caller = make_caller(&format!("f{}", i), syms[i + 1]);
-            globals[i] = make_closure_value(caller);
+            globals.insert(syms[i], make_closure_value(caller));
         }
         // Last function is a leaf
-        globals[n - 1] = make_closure_value(make_leaf());
+        globals.insert(syms[n - 1], make_closure_value(make_leaf()));
 
         // Hot function calls f0
         let hot = make_caller("hot", syms[0]);
@@ -365,14 +365,14 @@ fn test_discover_respects_depth_bound() {
         // Create a chain longer than MAX_DISCOVERY_DEPTH.
         // Even though all functions are valid, depth limiting should cap discovery.
         let n = MAX_DISCOVERY_DEPTH + 3;
-        let syms: Vec<SymbolId> = (0..n).map(|i| SymbolId(i as u32)).collect();
+        let syms: Vec<SymbolId> = (0..n).map(|i| SymbolId(i as u64)).collect();
 
-        let mut globals = vec![Value::NIL; n];
+        let mut globals: HashMap<SymbolId, Value> = HashMap::new();
         for i in 0..n - 1 {
             let caller = make_caller(&format!("f{}", i), syms[i + 1]);
-            globals[i] = make_closure_value(caller);
+            globals.insert(syms[i], make_closure_value(caller));
         }
-        globals[n - 1] = make_closure_value(make_leaf());
+        globals.insert(syms[n - 1], make_closure_value(make_leaf()));
 
         let hot = make_caller("hot", syms[0]);
         let group = discover_compilation_group(&hot, &globals);

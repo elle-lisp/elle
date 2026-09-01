@@ -10,11 +10,7 @@ use crate::hir::{Hir, HirId, HirKind};
 fn compile_fhir(
     src: &str,
     symbols: &mut crate::symbol::SymbolTable,
-) -> (
-    Hir,
-    crate::hir::BindingArena,
-    std::collections::HashMap<u32, String>,
-) {
+) -> (Hir, crate::hir::BindingArena) {
     let mut cctx = crate::pipeline::CompileCtx::new();
     crate::pipeline::compile_file_to_fhir(src, symbols, &mut cctx, "<test>").expect("compile")
 }
@@ -32,39 +28,32 @@ fn compile_with_cc(
     crate::hir::region::CallClassification,
 ) {
     let mut symbols = crate::symbol::SymbolTable::new();
-    let (hir, arena, _names) = compile_fhir(src, &mut symbols);
+    let (hir, arena) = compile_fhir(src, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     (hir, arena, pc.call_classification)
 }
 
 /// Compile a source under the real classification and return its
-/// `EscapeInfo` alongside the HIR/arena/names — the fixture every spec test
+/// `EscapeInfo` alongside the HIR and arena — the fixture every spec test
 /// reads. Escape is the **authority**; these tests assert its four-facet spec
 /// directly (`docs/impl/escape.md`), never agreement with any other analysis.
-fn escape_of(
-    src: &str,
-) -> (
-    Hir,
-    BindingArena,
-    std::collections::HashMap<u32, String>,
-    EscapeInfo,
-) {
+fn escape_of(src: &str) -> (Hir, BindingArena, EscapeInfo) {
     let mut symbols = crate::symbol::SymbolTable::new();
-    let (hir, arena, names) = compile_fhir(src, &mut symbols);
+    let (hir, arena) = compile_fhir(src, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let escape = analyze_escape(&hir, &arena, &pc.call_classification);
-    (hir, arena, names, escape)
+    (hir, arena, escape)
 }
 
 /// Assert the escape spec for named bindings: each `(name, escapes_activation,
 /// escapes_via_return)` triple is checked against every binding that name
 /// resolves to. The invariant `returned ⟹ escapes` is checked too.
 fn assert_binding_escape(src: &str, expect: &[(&str, bool, bool)]) {
-    let (hir, arena, names, escape) = escape_of(src);
+    let (hir, arena, escape) = escape_of(src);
     for &(name, esc, ret) in expect {
-        let bs = bindings_named(&hir, &arena, &[name], &names);
+        let bs = bindings_named(&hir, &arena, &[name]);
         assert!(!bs.is_empty(), "missing `{name}` in `{src}`");
         for b in bs {
             assert_eq!(
@@ -102,12 +91,7 @@ fn lambdas_with_captures(hir: &Hir) -> Vec<(HirId, Vec<Binding>)> {
 /// The binding(s) a `Var(name)` reference resolves to in a program, restricted
 /// to those whose name matches `wanted` — a small helper to point a scrutiny
 /// test at a specific source binding without depending on raw arena indices.
-fn bindings_named(
-    hir: &Hir,
-    arena: &BindingArena,
-    wanted: &[&str],
-    names: &std::collections::HashMap<u32, String>,
-) -> Vec<Binding> {
+fn bindings_named(hir: &Hir, arena: &BindingArena, wanted: &[&str]) -> Vec<Binding> {
     fn walk(h: &Hir, out: &mut Vec<Binding>) {
         if let HirKind::Var(b) = &h.kind {
             out.push(*b);
@@ -118,9 +102,8 @@ fn bindings_named(
     walk(hir, &mut all);
     all.into_iter()
         .filter(|b| {
-            names
-                .get(&arena.get(*b).name.0)
-                .is_some_and(|n| wanted.contains(&n.as_str()))
+            let id = arena.get(*b).name;
+            wanted.iter().any(|w| crate::value::SymbolId::of(w) == id)
         })
         .collect()
 }

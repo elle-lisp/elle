@@ -79,7 +79,8 @@ bytecode. Error messages include file:line:col information.
 - **`error`** — `LocationMap` for bytecode offset → source location mapping
 - **`runtime`** — Per-instance `Runtime`/`RuntimeCore` owning the VM, symbol
   table, compile context, and heap; handed out via `rt.parts()`
-- **`symbol`** — Symbol interning table
+- **`symbol`** — Symbol identity (the name's FNV-1a hash) and the process-global
+  hash→name registry. See [`docs/impl/symbol.md`](docs/impl/symbol.md)
 - **`config`** — Global CLI configuration (parsed once at startup)
 
 **Backends:**

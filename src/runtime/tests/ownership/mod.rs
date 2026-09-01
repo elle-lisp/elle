@@ -61,18 +61,14 @@ pub(super) fn steady_region_growth(src: &str) -> i64 {
             .0
     };
     {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(v.is_nil(), "the discarded-shape program returns nil");
     }
     let baseline = rt.heap().active_region_count() as i64;
     for _ in 0..50 {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(v.is_nil());
     }
     rt.heap().active_region_count() as i64 - baseline
@@ -115,8 +111,8 @@ pub(super) fn mid_run_growth(mut rt: Runtime, prelude: &str, body: &str, gauge: 
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
-    vm.execute_scheduled(&result.bytecode, symbols, cctx)
+    let (vm, _symbols, cctx) = rt.parts();
+    vm.execute_scheduled(&result.bytecode, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns the gauge delta as an int")

@@ -236,6 +236,10 @@ impl Expander {
         // recursion; the table is reborrowed per transformer call, never touched
         // simultaneously (docs/impl/region/ctx.md § "Symbols").
         vm.set_symbols(symbols as *mut SymbolTable);
+        // Keyword spellings must be learned BEFORE expansion: a macro argument
+        // or quasiquote template round-trips a keyword as a bare hash, and the
+        // value → syntax conversion on the way back needs the spelling.
+        crate::syntax::convert::learn_keywords(&syntax, symbols);
         match &syntax.kind {
             SyntaxKind::Symbol(_) => Ok(syntax),
             SyntaxKind::List(items) if !items.is_empty() => {

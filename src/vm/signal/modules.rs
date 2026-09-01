@@ -33,7 +33,7 @@ impl VM {
             );
         }
 
-        let tier_kw = match parts[0].as_keyword_name() {
+        let tier_kw = match self.keyword_spelling(parts[0]) {
             Some(k) => k,
             None => {
                 return (

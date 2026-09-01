@@ -437,7 +437,10 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     // execution), but test harnesses format it; returning the owned string keeps
     // them sound for heap results, not only immediates. Pinned by the `wasm_smoke`
     // / `wasm_stdlib` heap-result tests (e.g. `[1 2 3]`, `(map … (list 1 2 3))`).
-    let ret = ret.map(|v| format!("{}", v));
+    // Render through this instance's table: a bare `Display` prints a symbol or
+    // keyword as `#<symbol:hash>` (docs/impl/symbol.md § "Reading a name, and
+    // not reading one").
+    let ret = ret.map(|v| format!("{}", v.display_with(Some(&symbols))));
 
     let funcs = 1 + lir_module.closures.len();
     let lir_secs = (t1 - t0).as_secs_f64();

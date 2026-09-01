@@ -340,7 +340,7 @@ fn push_inner_array_into_outer_widens_inner() {
     // Begin allocations that don't correspond to real heap objects.
     // The correct invariant is that chunk's @array alloc site resolves
     // to a region outside the inner scope.
-    let (hir, arena, info, names) = pipeline_with_names(
+    let (hir, arena, info) = pipeline(
         "(let [result @[]]\n\
              \x20 (let [chunk @[]]\n\
              \x20   (begin\n\
@@ -349,7 +349,7 @@ fn push_inner_array_into_outer_widens_inner() {
              \x20     (%array-push result chunk)\n\
              \x20     result)))",
     );
-    eprintln!("{}", format_regions(&info, &arena, &names));
+    eprintln!("{}", format_regions(&info, &arena, None));
 
     // Find the inner let scope region
     let lets = find_lets(&hir);
@@ -434,7 +434,7 @@ fn push_inner_array_into_outer_widens_inner() {
 fn partition_pattern_via_call_push() {
     // Same test but using %array-push directly. chunk is born in its
     // own region, distinct from the inner scope it is pushed past.
-    let (hir, arena, info, names) = pipeline_with_names(
+    let (hir, arena, info) = pipeline(
         "(let [result @[]]\n\
              \x20 (let [chunk @[]]\n\
              \x20   (begin\n\
@@ -443,7 +443,7 @@ fn partition_pattern_via_call_push() {
              \x20     (%array-push result chunk)\n\
              \x20     result)))",
     );
-    eprintln!("{}", format_regions(&info, &arena, &names));
+    eprintln!("{}", format_regions(&info, &arena, None));
 
     let lets = find_lets(&hir);
     assert!(

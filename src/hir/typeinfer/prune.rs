@@ -69,7 +69,6 @@ use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirKind};
 use crate::hir::pattern::{HirPattern, PatternLiteral};
 use crate::primitives::def::RetType;
-use crate::symbol::SymbolTable;
 
 /// The keyword `type-of` returns for a value of this declared return type, or
 /// `None` when the type is not a single concrete `type-of` category (`Unknown`,
@@ -119,11 +118,10 @@ enum InitKw {
 pub(super) fn concrete_init_keywords(
     hir: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
 ) -> FxHashMap<Binding, &'static str> {
     let mut init: FxHashMap<Binding, InitKw> = FxHashMap::default();
     let mut seen: FxHashSet<Binding> = FxHashSet::default();
-    collect_inits(hir, arena, symbol_names, &mut init, &mut seen);
+    collect_inits(hir, arena, &mut init, &mut seen);
 
     // Resolve alias chains to a concrete keyword (depth-bounded; the alias graph
     // is over distinct binding ids, so a small cap both terminates any accidental
@@ -139,11 +137,9 @@ pub(super) fn concrete_init_keywords(
 
 /// Prune provably-dead arms of every `(match (type-of x) …)` whose scrutinee `x`
 /// has a statically-known concrete type. See the module doc.
-pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTable) {
-    let symbol_names = symbols.all_names();
-
+pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena) {
     // Phase 1 (read-only): the sound binding→keyword proof.
-    let concrete = concrete_init_keywords(hir, arena, &symbol_names);
+    let concrete = concrete_init_keywords(hir, arena);
     if concrete.is_empty() {
         return;
     }
@@ -151,10 +147,10 @@ pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbo
     // A `(let [ta (type-of x)] (match ta …))` scrutinee resolves through this map
     // to `x`, so the aliased dispatch prunes like the inline `(match (type-of x)`.
     let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
-    collect_typeof_aliases(hir, arena, &symbol_names, &mut typeof_aliases);
+    collect_typeof_aliases(hir, arena, &mut typeof_aliases);
 
     // Phase 2 (mutating): drop the dead arms.
-    prune_node(hir, arena, &symbol_names, &concrete, &typeof_aliases);
+    prune_node(hir, arena, &concrete, &typeof_aliases);
 }
 
 /// Walk every `Let`/`Letrec`/`Define` binding, recording its initializer keyword
@@ -162,7 +158,6 @@ pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbo
 fn collect_inits(
     hir: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     init: &mut FxHashMap<Binding, InitKw>,
     seen: &mut FxHashSet<Binding>,
 ) {
@@ -176,7 +171,7 @@ fn collect_inits(
         if !bi.is_immutable || bi.is_mutated {
             return;
         }
-        if let Some(k) = classify_init(value, arena, symbol_names) {
+        if let Some(k) = classify_init(value, arena) {
             init.insert(b, k);
         }
     };
@@ -189,16 +184,12 @@ fn collect_inits(
         HirKind::Define { binding, value } => record(*binding, value, init),
         _ => {}
     }
-    hir.for_each_child(|c| collect_inits(c, arena, symbol_names, init, seen));
+    hir.for_each_child(|c| collect_inits(c, arena, init, seen));
 }
 
 /// The `type-of` keyword an initializer expression evaluates to (or an alias to
 /// the binding it forwards), when soundly determinable. `None` ⇒ unknown.
-fn classify_init(
-    h: &Hir,
-    arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
-) -> Option<InitKw> {
+fn classify_init(h: &Hir, arena: &BindingArena) -> Option<InitKw> {
     match &h.kind {
         HirKind::Int(_) => Some(InitKw::Concrete("integer")),
         HirKind::Float(_) => Some(InitKw::Concrete("float")),
@@ -210,9 +201,7 @@ fn classify_init(
         // Aliases: a bare var, or the ANF/region-transparent wrappers whose value
         // is their inner expression.
         HirKind::Var(b) => Some(InitKw::Alias(*b)),
-        HirKind::MakeCell { value } | HirKind::Return { value } => {
-            classify_init(value, arena, symbol_names)
-        }
+        HirKind::MakeCell { value } | HirKind::Return { value } => classify_init(value, arena),
         // A call to a genuine primitive with a concrete declared return type. The
         // `is_primitive` gate is what makes reading the name's `RetType` sound — a
         // user binding shadowing the name is excluded (its `RetType` would be a
@@ -225,8 +214,7 @@ fn classify_init(
             if !bi.is_primitive || !bi.is_immutable || bi.is_mutated {
                 return None;
             }
-            let name = symbol_names.get(&bi.name.0)?;
-            let def = crate::primitives::registration::def_by_name(name)?;
+            let def = crate::primitives::registration::def_by_symbol(bi.name)?;
             keyword_of_rettype(def.ret).map(InitKw::Concrete)
         }
         _ => None,
@@ -249,12 +237,11 @@ fn resolve(b: Binding, init: &FxHashMap<Binding, InitKw>, depth: u32) -> Option<
 fn prune_node(
     hir: &mut Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     concrete: &FxHashMap<Binding, &'static str>,
     typeof_aliases: &HashMap<Binding, Binding>,
 ) {
     if let HirKind::Match { value, arms } = &mut hir.kind {
-        if let Some(subj) = typeof_subject_binding(value, arena, symbol_names, typeof_aliases) {
+        if let Some(subj) = typeof_subject_binding(value, arena, typeof_aliases) {
             if let Some(&k) = concrete.get(&subj) {
                 let dead = arms.iter().filter(|(p, _, _)| arm_is_dead(p, k)).count();
                 // Prune only when it removes some — but not all — arms: an
@@ -266,7 +253,7 @@ fn prune_node(
             }
         }
     }
-    hir.for_each_child_mut(|c| prune_node(c, arena, symbol_names, concrete, typeof_aliases));
+    hir.for_each_child_mut(|c| prune_node(c, arena, concrete, typeof_aliases));
 }
 
 /// Is this arm a *type-keyword* arm whose keyword set excludes `k`? Such an arm

@@ -66,15 +66,14 @@ impl<'a> FunctionTranslator<'a> {
                 unreachable!("LirConst::String should be pre-resolved to ValueConst")
             }
             LirConst::Symbol(id) => {
-                let v = crate::value::Value::symbol(id.0);
+                let v = crate::value::Value::symbol(*id);
                 let t = builder.ins().iconst(I64, TAG_SYMBOL as i64);
                 let p = builder.ins().iconst(I64, v.payload as i64);
                 (t, p)
             }
-            LirConst::Keyword(name) => {
-                let v = crate::value::Value::keyword(name);
+            LirConst::Keyword(hash) => {
                 let t = builder.ins().iconst(I64, TAG_KEYWORD as i64);
-                let p = builder.ins().iconst(I64, v.payload as i64);
+                let p = builder.ins().iconst(I64, *hash as i64);
                 (t, p)
             }
             LirConst::ClosureRef(_) => {

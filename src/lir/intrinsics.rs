@@ -6,7 +6,6 @@
 
 use super::types::ConvOp;
 use crate::primitives::def::PrimitiveMeta;
-use crate::symbol::SymbolTable;
 use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
 
@@ -17,13 +16,11 @@ pub enum IntrinsicOp {
 }
 
 /// Build the intrinsics map from a symbol table.
-pub(crate) fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, IntrinsicOp> {
+pub(crate) fn build_intrinsics() -> FxHashMap<SymbolId, IntrinsicOp> {
     let mut map = FxHashMap::default();
 
     let mut add = |name: &str, op: IntrinsicOp| {
-        if let Some(id) = symbols.get(name) {
-            map.insert(id, op);
-        }
+        map.insert(SymbolId::of(name), op);
     };
 
     add("float", IntrinsicOp::Conversion(ConvOp::IntToFloat));
@@ -40,8 +37,8 @@ pub struct PrimitiveClassification {
 }
 
 impl PrimitiveClassification {
-    pub fn new(symbols: &SymbolTable, meta: &PrimitiveMeta) -> Self {
-        let intrinsics = build_intrinsics(symbols);
+    pub fn new(meta: &PrimitiveMeta) -> Self {
+        let intrinsics = build_intrinsics();
 
         // The value-retaining store funnels — the `Funnel` ops whose runtime body
         // increfs the stored heap value (the put/push/add family). NOT the
@@ -61,7 +58,7 @@ impl PrimitiveClassification {
             "%add-set-mut",
         ]
         .iter()
-        .filter_map(|name| symbols.get(name))
+        .map(|name| SymbolId::of(name))
         .collect();
 
         // The BYTE-COPY store funnels — `Funnel` ops that COPY the pushed value's
@@ -76,7 +73,7 @@ impl PrimitiveClassification {
         // excludes does NOT apply). See `CallClassification::bytecopy_store_funnels`.
         let bytecopy_store_funnels = ["%string-push", "%string-push-mut", "%bytes-push"]
             .iter()
-            .filter_map(|name| symbols.get(name))
+            .map(|name| SymbolId::of(name))
             .collect();
 
         // The moves-out ∩ PassThrough natives (`%pop`/`%pop-array*`): a non-fresh
@@ -124,7 +121,7 @@ impl PrimitiveClassification {
             "%pop-bytes",
         ]
         .iter()
-        .filter_map(|name| symbols.get(name))
+        .map(|name| SymbolId::of(name))
         .collect();
 
         let call_classification = crate::hir::CallClassification {
@@ -139,15 +136,15 @@ impl PrimitiveClassification {
             moves_out,
             // The two natives the transferred-returned-subtree cut recognizes
             // structurally: a fiber-body producer and its resume consumer.
-            fiber_new: symbols.get("fiber/new"),
-            fiber_resume: symbols.get("fiber/resume"),
+            fiber_new: Some(SymbolId::of("fiber/new")),
+            fiber_resume: Some(SymbolId::of("fiber/resume")),
             // The emit primitive under each name it answers to: a dynamic `emit`
             // compiles to a call on it, and that call parks and yields exactly as
             // the `Emit` terminator does (`CallClassification::emit_natives`).
             // Ordinary code reaches it through the alias, so both belong here.
             emit_natives: ["fiber/emit", "emit"]
                 .iter()
-                .filter_map(|name| symbols.get(name))
+                .map(|name| SymbolId::of(name))
                 .collect(),
             ..Default::default()
         };

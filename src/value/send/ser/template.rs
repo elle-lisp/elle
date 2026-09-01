@@ -55,7 +55,6 @@ pub(super) fn sendable_from_template(
         signal: t.signal,
         capture_params_mask: t.capture_params_mask,
         capture_locals_mask: t.capture_locals_mask.clone(),
-        symbol_names: (*t.symbol_names).clone(),
         location_map: (*t.location_map).clone(),
         doc,
         vararg_kind: t.vararg_kind.clone(),

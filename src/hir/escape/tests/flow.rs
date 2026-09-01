@@ -61,12 +61,12 @@ fn def_callee_arg_does_not_escape_through_call() {
     // assert only about the argument binding here, by name.)
     let src = "(def id (fn (x) x)) (def f (fn (y) (id y))) (f 1)";
     let mut symbols = crate::symbol::SymbolTable::new();
-    let (hir, arena, names) = compile_fhir(src, &mut symbols);
+    let (hir, arena) = compile_fhir(src, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let escape = analyze_escape(&hir, &arena, &pc.call_classification);
 
-    let y = bindings_named(&hir, &arena, &["y"], &names);
+    let y = bindings_named(&hir, &arena, &["y"]);
     assert!(!y.is_empty(), "missing `y` in `{src}`");
     assert!(
         y.iter().all(|b| !escape.binding_escapes_activation(*b)),
@@ -95,11 +95,11 @@ fn arg_return_summary_chains_through_the_fixpoint() {
                          c (fn (w) 0)] \
                      (begin (id 1) (g 1) (k 1 2) (c 1)))";
     let mut symbols = crate::symbol::SymbolTable::new();
-    let (hir, arena, names) = compile_fhir(src, &mut symbols);
+    let (hir, arena) = compile_fhir(src, &mut symbols);
     let summary = compute_arg_return(&hir, &arena);
 
     let lookup = |name: &str| -> Vec<usize> {
-        let bs = bindings_named(&hir, &arena, &[name], &names);
+        let bs = bindings_named(&hir, &arena, &[name]);
         assert!(!bs.is_empty(), "missing `{name}` in `{src}`");
         summary.get(&bs[0]).cloned().unwrap_or_default()
     };
@@ -129,11 +129,11 @@ fn arg_return_summary_chains_through_the_fixpoint() {
 fn return_facet_is_narrower_than_full_escape() {
     let check = |src: &str, name: &str, want_full: bool, want_return: bool| {
         let mut symbols = crate::symbol::SymbolTable::new();
-        let (hir, arena, names) = compile_fhir(src, &mut symbols);
+        let (hir, arena) = compile_fhir(src, &mut symbols);
         let meta = crate::primitives::build_primitive_meta(&mut symbols);
-        let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+        let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
         let escape = analyze_escape(&hir, &arena, &pc.call_classification);
-        let bs = bindings_named(&hir, &arena, &[name], &names);
+        let bs = bindings_named(&hir, &arena, &[name]);
         assert!(!bs.is_empty(), "missing `{name}` in `{src}`");
         for b in bs {
             assert_eq!(

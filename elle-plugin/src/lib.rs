@@ -181,7 +181,7 @@ elle_api! {
     fn make_nil() -> ElleValue;
     fn make_string(*mut ElleCtx, *const u8, usize) -> ElleValue;
     fn make_bytes(*mut ElleCtx, *const u8, usize) -> ElleValue;
-    fn make_keyword(*const u8, usize) -> ElleValue;
+    fn make_keyword(*mut ElleCtx, *const u8, usize) -> ElleValue;
     fn make_array(*mut ElleCtx, *const ElleValue, usize) -> ElleValue;
     fn make_struct(*mut ElleCtx, *const ElleKV, usize) -> ElleValue;
     fn make_set(*mut ElleCtx, *const ElleValue, usize) -> ElleValue;
@@ -218,12 +218,12 @@ elle_api! {
     fn is_external(ElleValue) -> bool;
 
     // ── Keyword access ────────────────────────────────────────────
-    fn as_keyword_name(ElleValue, *mut usize) -> *const u8;
+    fn as_keyword_name(*mut ElleCtx, ElleValue, *mut usize) -> *const u8;
 
     // ── Struct access ─────────────────────────────────────────────
     fn struct_get(ElleValue, *const u8, usize) -> ElleValue;
     fn struct_len(ElleValue) -> isize;
-    fn struct_key(ElleValue, usize, *mut usize) -> *const u8;
+    fn struct_key(*mut ElleCtx, ElleValue, usize, *mut usize) -> *const u8;
     fn struct_value(ElleValue, usize) -> ElleValue;
 
     // ── Array access ──────────────────────────────────────────────
@@ -241,7 +241,7 @@ elle_api! {
 
     // ── Keyword interning ─────────────────────────────────────────
     fn intern_keyword(*const u8, usize) -> u64;
-    fn keyword_name(u64, *mut usize) -> *const u8;
+    fn keyword_name(*mut ElleCtx, u64, *mut usize) -> *const u8;
 }
 
 // ── Safe wrappers ─────────────────────────────────────────────────────
@@ -271,8 +271,8 @@ impl Api {
         (self.make_bytes)(ctx, b.as_ptr(), b.len())
     }
 
-    pub fn keyword(&self, s: &str) -> ElleValue {
-        (self.make_keyword)(s.as_ptr(), s.len())
+    pub fn keyword(&self, ctx: *mut ElleCtx, s: &str) -> ElleValue {
+        (self.make_keyword)(ctx, s.as_ptr(), s.len())
     }
 
     pub fn array(&self, ctx: *mut ElleCtx, elems: &[ElleValue]) -> ElleValue {

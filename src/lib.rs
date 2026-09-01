@@ -98,6 +98,7 @@ pub mod lir;
 pub mod lsp;
 #[cfg(feature = "mlir")]
 pub mod mlir;
+pub mod namehash;
 pub mod path;
 pub mod pipeline;
 pub mod plugin;

@@ -194,7 +194,9 @@ fn try_eval_accumulated(
                 match eval_form(form, vm, symbols, cctx) {
                     Ok(value) => {
                         if !value.is_nil() {
-                            println!("⟹ {:?}", value);
+                            // Debug render through the instance memo, so symbol
+                            // and keyword spellings resolve.
+                            println!("⟹ {}", value.debug_with(Some(symbols)));
                         }
                     }
                     Err(e) => {
@@ -324,7 +326,7 @@ fn try_resolve_single(
         return false;
     };
     cctx.register_repl_macros(expander.macros());
-    let Ok(value) = vm.execute_scheduled(&result.bytecode, symbols, cctx) else {
+    let Ok(value) = vm.execute_scheduled(&result.bytecode, cctx) else {
         return false;
     };
     let sym_id = symbols.intern(&form.name);
@@ -358,7 +360,7 @@ fn try_batch_resolve(
         return false;
     };
     cctx.register_repl_macros(expander.macros());
-    let Ok(tuple_val) = vm.execute_scheduled(&result.bytecode, symbols, cctx) else {
+    let Ok(tuple_val) = vm.execute_scheduled(&result.bytecode, cctx) else {
         return false;
     };
 
@@ -516,7 +518,7 @@ fn eval_form(
         // return value IS the bound value.
         let (result, expander) = compile_file_repl(&form.source, symbols, cctx, "<repl>")?;
         cctx.register_repl_macros(expander.macros());
-        let value = vm.execute_scheduled(&result.bytecode, symbols, cctx)?;
+        let value = vm.execute_scheduled(&result.bytecode, cctx)?;
 
         if let Some(binding) = form.bindings.first() {
             let sym_id = symbols.intern(&binding.name);
@@ -536,7 +538,7 @@ fn eval_form(
 
         let (result, expander) = compile_file_repl(&combined, symbols, cctx, "<repl>")?;
         cctx.register_repl_macros(expander.macros());
-        let tuple_val = vm.execute_scheduled(&result.bytecode, symbols, cctx)?;
+        let tuple_val = vm.execute_scheduled(&result.bytecode, cctx)?;
 
         // Register each leaf binding from the tuple.
         if let Some(items) = tuple_val.as_array() {

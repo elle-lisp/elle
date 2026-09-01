@@ -43,8 +43,8 @@ fn run_int(src: &str) -> i64 {
             .expect("compiles")
             .0
     };
-    let (vm, symbols, cctx) = rt.parts();
-    vm.execute_scheduled(&result.bytecode, symbols, cctx)
+    let (vm, _symbols, cctx) = rt.parts();
+    vm.execute_scheduled(&result.bytecode, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns its result as an int")

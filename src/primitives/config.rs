@@ -70,10 +70,7 @@ pub(crate) fn prim_backend_q(
     args: &[Value],
 ) -> (SignalBits, Value) {
     let active = ctx.vm().active_tier;
-    let matches = match args[0].as_keyword_name() {
-        Some(k) => k == active,
-        None => false,
-    };
+    let matches = args[0].is_keyword_named(active);
     (SIG_OK, Value::bool(matches))
 }
 
