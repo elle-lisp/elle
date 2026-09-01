@@ -218,14 +218,15 @@ jobs:
       - name: make check-wasm
         run: make check-wasm
 
+  # The corpus half of the AArch64 tier. Its Rust half is `aarch64-tests`
+  # below, running at the same time on its own runner — the two share no build
+  # and no run, so serializing them made this platform cost the sum. See
+  # docs/analysis/ci.md § "Why each platform has two test jobs".
   aarch64:
     name: AArch64 Smoke
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
-    env:
-      PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -242,6 +243,26 @@ jobs:
         run: make doctest
       - name: make smoke
         run: make smoke
+
+  # The Rust half of the AArch64 tier, mirroring the x86_64 `tests-combined`
+  # job: `cargo test` builds and runs everything it needs, so this job installs
+  # no packages and never invokes the Makefile. Its cache key is its own — it
+  # fills the target directory with dev-profile artifacts, where `aarch64`
+  # fills one with release artifacts.
+  aarch64-tests:
+    name: AArch64 Rust Tests
+    needs: changes
+    runs-on: ubuntu-24.04-arm
+    if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aarch64-tests
       - name: Run integration tests
         run: cargo test --test '*' -- --skip property
       - name: Run property tests
@@ -252,9 +273,6 @@ jobs:
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
-    env:
-      PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -292,14 +310,16 @@ jobs:
       - name: Cross-check Android
         run: cargo check --target aarch64-linux-android --no-default-features -p elle
 
+  # The corpus half of the macOS tier. Its Rust half is `macos-tests` below,
+  # running at the same time on its own runner. This is the slowest platform in
+  # the workflow, so it is the one the split buys the most from — see
+  # docs/analysis/ci.md § "Why each platform has two test jobs".
   macos:
     name: macOS Smoke
     needs: changes
     runs-on: macos-latest
     if: needs.changes.outputs.source == 'true'
     env:
-      PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
       # The release profile strips the symbol table (Cargo.toml: strip =
       # "symbols"), which turns the timeout photograph (src/test.lisp
       # photograph-threads → /usr/bin/sample) into unreadable `???` frames.
@@ -344,10 +364,6 @@ jobs:
       # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
       - name: make smoke
         run: make smoke ELLE_TEST_FLAGS=--trace=scrub
-      - name: Run integration tests
-        run: cargo test --test '*' -- --skip property
-      - name: Run property tests
-        run: "cargo test --test lib property::"
       # A batch killed by a signal leaves the batch number and nothing else. The
       # kernel's crash report has the faulting thread's stack, and the symbol
       # table is kept on this runner (CARGO_PROFILE_RELEASE_STRIP above), so the
@@ -370,9 +386,60 @@ jobs:
             cat "$r"
           done
 
+  # The Rust half of the macOS tier. It skips the clippy gate and the Makefile
+  # targets that `macos` above owns, and keeps its own cache key: `cargo test`
+  # fills the target directory with dev-profile artifacts, where `macos` fills
+  # one with release artifacts.
+  macos-tests:
+    name: macOS Rust Tests
+    needs: changes
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-tests
+      # Only zstd, not the GNU parallel and coreutils the `macos` job needs:
+      # those two are Makefile tools, and this job runs no Makefile target. The
+      # tests spawn the elle binary, which loads libzstd for CAS compression —
+      # and libzstd is not a macOS system library. Homebrew installs it under
+      # /opt/homebrew/lib, which library_candidates probes explicitly (dyld
+      # does not search there for a bare soname).
+      - name: Install zstd
+        run: brew install zstd
+      - name: Run integration tests
+        run: cargo test --test '*' -- --skip property
+      - name: Run property tests
+        run: "cargo test --test lib property::"
+      # Same argument as the `macos` job's copy: a test whose elle subprocess
+      # dies on a signal reports an exit status and nothing else, and the
+      # kernel's report is the only stack. The dev profile keeps its symbols,
+      # so this job needs no CARGO_PROFILE_RELEASE_STRIP to read the frames.
+      - name: Crash reports
+        if: failure()
+        run: |
+          sleep 15
+          dir=~/Library/Logs/DiagnosticReports
+          shopt -s nullglob
+          reports=("$dir"/elle*.ips "$dir"/elle*.crash)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "no crash report for elle under $dir"
+            ls -la "$dir" 2>/dev/null || echo "$dir does not exist"
+            exit 0
+          fi
+          for r in "${reports[@]}"; do
+            echo "===== $r ====="
+            cat "$r"
+          done
+
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, tests-combined, tests, nouring, wasm, mlir, aarch64, aarch64-noffi, android, macos]
+    needs: [changes, qa, docs, tests-combined, tests, nouring, wasm, mlir, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -398,8 +465,14 @@ jobs:
       - name: Check WASM
         if: needs.wasm.result == 'failure'
         run: exit 1
+      - name: Check documentation build
+        if: needs.docs.result == 'failure'
+        run: exit 1
       - name: Check aarch64
         if: needs.aarch64.result == 'failure'
+        run: exit 1
+      - name: Check aarch64 Rust tests
+        if: needs.aarch64-tests.result == 'failure'
         run: exit 1
       - name: Check aarch64-noffi
         if: needs.aarch64-noffi.result == 'failure'
@@ -409,6 +482,9 @@ jobs:
         run: exit 1
       - name: Check macOS
         if: needs.macos.result == 'failure'
+        run: exit 1
+      - name: Check macOS Rust tests
+        if: needs.macos-tests.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'
