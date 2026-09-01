@@ -50,6 +50,40 @@ define RUN_PLUMB
 		|| { echo "FAILED: plumb.lisp ($(1))"; exit 1; }
 endef
 
+# Two corpus files spend most of a per-file budget on work the case needs:
+# h2-load-volume drives 500 requests over one h2 session, and
+# region-jit-io-suspend-uaf reads 20000 lines to drive one function hot enough
+# for the JIT to compile it. Cut either volume and the shape stops reaching the
+# state it pins. Both fit TIMEOUT with room on an idle box, and both have been
+# killed at it on CI, where the runner is shared and slower by an order of
+# magnitude. A killed file is exit 124 — no output, no assertion message — so it
+# reads as a flaky runner rather than as a budget that was never wide enough.
+# They get a wider one, which is the bargain ORACLE_TIMEOUT already makes, in
+# per-file form: an override for the files that need it, so every other file
+# still fails fast on a hang. The pins are tests/integration/budget.rs.
+#
+# The wider budget is a BACKSTOP, not the deadline. h2-load-volume carries its
+# own deadline and reports which request stalled and how long it waited; that
+# message is the reason to run the file, and it only ever prints if the outer
+# kill lands after it. Keep this above any in-file deadline, and read both from
+# a timed run rather than from a number written here — remembering that a run
+# `timeout` killed reports the cap, not what the file would have cost.
+WIDE_TIMEOUT ?= 120s
+WIDE_FILES   := -e h2-load-volume.lisp -e region-jit-io-suspend-uaf.lisp
+
+# The budget for ONE corpus file: `parallel` substitutes the path into `{}` and
+# the pass's shell picks a budget, once per file. Every pass that runs the corpus
+# one file at a time spells `timeout $(FILE_TIMEOUT)` — a pass that spells
+# `timeout $(TIMEOUT)` hands the narrow budget to the two files above.
+#
+# A `case` reads better here and does not survive the trip. `parallel` runs this
+# under the platform's `/bin/sh`, which on macOS is bash 3.2, and that parser
+# ends a `$(…)` at the first `)` inside it — the one closing a case pattern. The
+# corpus then dies file by file on a syntax error rather than on anything it
+# tests. `grep` needs no parentheses, and matches the shape the skip lists above
+# already use. tests/integration/budget.rs runs the real thing under `sh`.
+FILE_TIMEOUT = $$(echo {} | grep -q $(WIDE_FILES) && echo $(WIDE_TIMEOUT) || echo $(TIMEOUT))
+
 # One corpus pass with ONE PROCESS PER FILE, under a wall-clock TIMEOUT. Each
 # file starts, runs as a whole program, and exits — the shape `elle test` never
 # takes, and the only one that covers program teardown and process-global modes.
@@ -69,7 +103,7 @@ define RUN_PER_FILE
 	@printf '%s\n' tests/elle/*.lisp \
 		| grep -v $(1) | grep -v $(ORACLE_FILE) | grep -v $(PLUMB_FILE) \
 		| parallel -j $(JOBS) --tag --joblog target/smoke-$(4).joblog \
-			'timeout $(TIMEOUT) $(ELLE) $(2) {}' \
+			'timeout $(FILE_TIMEOUT) $(ELLE) $(2) {}' \
 		|| { \
 			echo "--- files that failed the $(3) ---"; \
 			awk 'NR > 1 && ($$7 != 0 || $$8 != 0) { \
@@ -322,7 +356,7 @@ smoke-mlir: elle-mlir  ## Corpus via elle test (+ mlir-cpu tier) + whole-file --
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ORACLE_FILE) | grep -v $(PLUMB_FILE) | \
 		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
+			'timeout $(FILE_TIMEOUT) $(ELLE) --mlir=eager {}' \
 		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
 	$(call RUN_ORACLE,--mlir=eager)
 	$(call RUN_PLUMB,--mlir=eager)
