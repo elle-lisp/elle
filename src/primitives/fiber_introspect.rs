@@ -199,12 +199,20 @@ fn inject_error_at_suspension(
     // tables claim (docs/impl/region/owner.md § "Park/unpark symmetry").
     let parked = handle.with(|fiber| fiber.signal);
     crate::vm::fiber::release_displaced_terminal_signal(ctx.heap_mut(), fiber_value, parked);
-    // A parked CAPABILITY-DENIAL payload is the one non-terminal park this
-    // install does answer for: the runtime built it, so the child's continuation
-    // releases nothing for it, and refusing the denied call displaces it exactly
-    // as a resume would (docs/impl/region/owner.md § "Park/unpark symmetry" —
-    // "A payload the RUNTIME built is released by the install that displaces
-    // it").
+    // A park whose payload the RUNTIME built is what this install does answer
+    // for: the child's continuation releases nothing for such a value, and
+    // raising at the suspension point displaces it exactly as a resume would
+    // (docs/impl/region/owner.md § "Park/unpark symmetry" — "A payload the
+    // RUNTIME built is released by the install that displaces it"). Two parks
+    // are that shape and each has its own reading — a capability denial's
+    // payload by the classifier's record, a yielding io op's `IoRequest` by the
+    // payload's own type — so the two name disjoint payloads and both run. The
+    // io arm goes first because it is the one that READS the parked value to
+    // decide, and the denial arm's release may have been the payload's last.
+    // The resume's `Fresh`-op skip does not travel here: an injected error is
+    // not a delivery, so an error value living in the request's region owes this
+    // release all the same.
+    crate::vm::fiber::release_displaced_io_request(ctx.heap_mut(), parked);
     crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
     handle.with_mut(|fiber| {
         fiber.signal = Some((SIG_ERROR, error_value));

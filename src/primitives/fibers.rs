@@ -158,14 +158,14 @@ pub(crate) fn prim_fiber_resume(
             // The park's payload is the RUNTIME's, not the body's, in two shapes,
             // and each owes one release as this resume displaces it: a
             // capability-denial struct, named by the classifier's record, and a
-            // yielding io op's `IoRequest`, named by its `SIG_IO` bit. They are
-            // asked in that order because a fiber denied `:io` parks under
-            // `SIG_IO` too, so the bit alone cannot tell that one denial from a
-            // real io park — the record can, and one reference is owed, not two
-            // (docs/impl/region/owner.md § "Park/unpark symmetry").
-            if !crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle) {
-                crate::vm::fiber::release_parked_signal(ctx.heap_mut(), parked, resume_value);
-            }
+            // yielding io op's `IoRequest`, named by the payload's own type. The
+            // two readings name disjoint payloads, so both run
+            // (docs/impl/region/owner.md § "Park/unpark symmetry"). The io arm
+            // goes first because it is the one that READS the parked value to
+            // decide, and the denial arm's release may have been the payload's
+            // last (`release_displaced_denial_payload`).
+            crate::vm::fiber::release_resumed_io_request(ctx.heap_mut(), parked, resume_value);
+            crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
             // And a parked TERMINAL result this resume displaces (a restarted
             // `:error` fiber, a re-resumed drained stream source): its
             // park-retain + recorded content edge counted on the free-time

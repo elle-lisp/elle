@@ -24,6 +24,29 @@ fn foreign(heap: &mut crate::value::fiberheap::FiberHeap) -> Value {
     alloc_in_fresh_region(heap, cons()).0
 }
 
+/// An `IoRequest` on a region of its own — the payload a yielding io op parks,
+/// and the one thing the io arm answers for. A `Sleep` because it is the portless
+/// op: nothing else in the request has to be built for the type to be right.
+fn io_request(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+) -> (Value, crate::hir::region::RuntimeRegion) {
+    use crate::value::heap::ExternalObject;
+    let obj = HeapObject::External {
+        obj: ExternalObject {
+            type_name: "io-request",
+            data: Rc::new(crate::io::request::IoRequest {
+                op: crate::io::request::IoOp::Sleep {
+                    duration: std::time::Duration::from_secs(1),
+                },
+                port: Value::NIL,
+                timeout: None,
+            }),
+        },
+        traits: Value::NIL,
+    };
+    alloc_in_fresh_region(heap, obj)
+}
+
 fn test_closure() -> Rc<Closure> {
     use crate::value::types::Arity;
     use crate::value::ClosureTemplate;
@@ -65,9 +88,8 @@ fn a_recorded_denial_park_is_released_by_the_install() {
     let handle = parked_fiber(SIG_YIELD, p, Some(p));
     let before = region_rc(&heap, rid);
 
-    let claimed = release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_denial_payload(&mut heap, &handle);
 
-    assert!(claimed, "the record claims the park it names");
     assert_eq!(
         region_rc(&heap, rid),
         before - 1,
@@ -87,9 +109,8 @@ fn a_record_that_no_longer_names_the_parked_signal_releases_nothing() {
     let handle = parked_fiber(SIG_YIELD, parked, Some(stale));
     let before = region_rc(&heap, rid);
 
-    let claimed = release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_denial_payload(&mut heap, &handle);
 
-    assert!(!claimed, "a stale record claims nothing");
     assert_eq!(
         region_rc(&heap, rid),
         before,
@@ -110,9 +131,8 @@ fn an_unrecorded_park_under_the_same_bits_releases_nothing() {
     let handle = parked_fiber(SIG_YIELD, p, None);
     let before = region_rc(&heap, rid);
 
-    let claimed = release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_denial_payload(&mut heap, &handle);
 
-    assert!(!claimed, "an unrecorded park is not a denial");
     assert_eq!(
         region_rc(&heap, rid),
         before,
@@ -132,15 +152,11 @@ fn the_record_is_taken_so_a_second_install_releases_nothing() {
     let (p, rid) = payload(&mut heap);
     let handle = parked_fiber(SIG_YIELD, p, Some(p));
 
-    assert!(release_displaced_denial_payload(&mut heap, &handle));
+    release_displaced_denial_payload(&mut heap, &handle);
     let after_first = region_rc(&heap, rid);
 
-    let claimed = release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_denial_payload(&mut heap, &handle);
 
-    assert!(
-        !claimed,
-        "the record is gone — the second install claims nothing"
-    );
     assert_eq!(
         region_rc(&heap, rid),
         after_first,
@@ -148,40 +164,105 @@ fn the_record_is_taken_so_a_second_install_releases_nothing() {
     );
 }
 
-/// A fiber denied `:io` parks under `SIG_IO`, the very bit an io request's park
-/// carries, so there the two readings name the same park. The record answers, and
-/// `prim_fiber_resume` skips the io arm on this `true` — running both frees the
-/// payload under the mediator that is still reading it.
+/// A fiber denied `:io` parks under `SIG_IO`, the very bit a yielding io op's
+/// request park carries, so the bits alone would hand one park to both readings.
+/// The record answers and the io arm stands down, because the payload is a
+/// struct rather than an `IoRequest` — one reference is owed, not one per
+/// reading.
+///
+/// The trap: the record lives on the fiber that was DENIED, and an install can
+/// reach a fiber that merely relays the park (the outer fiber of a `protect`ed
+/// denial), where there is no record to ask. So the exclusion cannot be an
+/// ordering between the two calls — it has to be each reading's own, which is
+/// what the type test buys. Ordering instead frees the struct under the mediator
+/// on exactly that route.
 #[test]
-fn an_io_denial_is_claimed_by_the_record_that_names_it() {
+fn an_io_denial_answers_to_the_record_and_not_to_the_io_arm() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (p, rid) = payload(&mut heap);
     let handle = parked_fiber(SIG_IO, p, Some(p));
     let before = region_rc(&heap, rid);
 
-    let claimed = release_displaced_denial_payload(&mut heap, &handle);
+    release_displaced_io_request(&mut heap, Some((SIG_IO, p)));
+    let after_io_arm = region_rc(&heap, rid);
+    release_displaced_denial_payload(&mut heap, &handle);
 
-    assert!(claimed, "the record tells the denial from the io request");
+    assert_eq!(
+        after_io_arm, before,
+        "a denial payload is not an IoRequest — the io arm has no claim on it",
+    );
     assert_eq!(
         region_rc(&heap, rid),
         before - 1,
-        "the collision owes ONE reference, not one per reading",
+        "the collision owes ONE reference, and it is the record's",
     );
 }
 
-// -- release_parked_signal: the io arm, gated on SIG_IO alone --
+// -- release_displaced_io_request: the io arm, on a park's own IoRequest --
 
-/// The io arm keeps its shared-region skip: a `Fresh` io op builds its completion
+/// An io park's request is the runtime's value, so whatever ends the park owes
+/// the reference the allocation left. The injection `fiber/abort` and
+/// `fiber/refuse` share reaches this arm with no resume value at all.
+#[test]
+fn a_displaced_io_request_is_released() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (request, rid) = io_request(&mut heap);
+    let before = region_rc(&heap, rid);
+
+    release_displaced_io_request(&mut heap, Some((SIG_IO, request)));
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before - 1,
+        "the install that displaces an io park owes its request one decref",
+    );
+}
+
+/// The counter-factual for the io gate: a `yield`/`emit` payload is body-owned.
+/// The resumed body releases the reference it held across the suspend, so a
+/// decref here would free the value under every holder that outlives the fiber.
+#[test]
+fn a_non_io_park_releases_nothing() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (p, rid) = payload(&mut heap);
+    let before = region_rc(&heap, rid);
+
+    release_displaced_io_request(&mut heap, Some((SIG_YIELD, p)));
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before,
+        "the io arm answers for io requests alone",
+    );
+}
+
+/// The trap: the bits must be read BEFORE the payload is dereferenced. A park
+/// this arm has no claim on is one whose region another holder may already have
+/// released, and `region_of` answers such a value with a stale-deref panic rather
+/// than with `None`. Reading the value first turns every non-io park into that
+/// panic once its region is gone.
+#[test]
+fn a_non_io_park_is_answered_without_dereferencing_its_payload() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (p, rid) = payload(&mut heap);
+    crate::value::arena::decref_region(&mut heap, Some(rid));
+
+    release_displaced_io_request(&mut heap, Some((SIG_YIELD, p)));
+}
+
+// -- release_resumed_io_request: the same arm, plus the delivery's skip --
+
+/// The resume adds a shared-region skip: a `Fresh` io op builds its completion
 /// buffer in the request's own region and hands it back as the resume value, so
 /// that region is still live and the caller's release answers for it.
 #[test]
 fn an_io_park_whose_resume_value_shares_its_region_releases_nothing() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
-    let (request, rid) = payload(&mut heap);
+    let (request, rid) = io_request(&mut heap);
     let completion = heap.alloc_in_region(cons(), rid);
     let before = region_rc(&heap, rid);
 
-    release_parked_signal(&mut heap, Some((SIG_IO, request)), completion);
+    release_resumed_io_request(&mut heap, Some((SIG_IO, request)), completion);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -195,11 +276,11 @@ fn an_io_park_whose_resume_value_shares_its_region_releases_nothing() {
 #[test]
 fn an_io_park_whose_resume_value_is_foreign_is_released() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
-    let (request, rid) = payload(&mut heap);
+    let (request, rid) = io_request(&mut heap);
     let completion = foreign(&mut heap);
     let before = region_rc(&heap, rid);
 
-    release_parked_signal(&mut heap, Some((SIG_IO, request)), completion);
+    release_resumed_io_request(&mut heap, Some((SIG_IO, request)), completion);
 
     assert_eq!(
         region_rc(&heap, rid),
@@ -208,21 +289,28 @@ fn an_io_park_whose_resume_value_is_foreign_is_released() {
     );
 }
 
-/// The counter-factual for the io gate: a `yield`/`emit` payload is body-owned.
-/// The resumed body releases the reference it held across the suspend, so a
-/// decref here would free the value under every holder that outlives the fiber.
+/// The skip belongs to the DELIVERY, not to the io park: an injected error that
+/// happens to live in the request's region is not a resume value, so the
+/// injection's release stands. Sharing a region is what the resume reads as
+/// "still live"; here it means nothing.
 #[test]
-fn a_non_io_park_releases_nothing() {
+fn a_displaced_io_request_takes_no_skip_from_a_payload_sharing_its_region() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
-    let (p, rid) = payload(&mut heap);
-    let resume_value = foreign(&mut heap);
+    let (request, rid) = io_request(&mut heap);
+    let error_value = heap.alloc_in_region(cons(), rid);
     let before = region_rc(&heap, rid);
 
-    release_parked_signal(&mut heap, Some((SIG_YIELD, p)), resume_value);
+    release_resumed_io_request(&mut heap, Some((SIG_IO, request)), error_value);
+    let after_resume_reading = region_rc(&heap, rid);
+    release_displaced_io_request(&mut heap, Some((SIG_IO, request)));
 
     assert_eq!(
+        after_resume_reading, before,
+        "the resume reading skips on a shared region — which is why it must not travel",
+    );
+    assert_eq!(
         region_rc(&heap, rid),
-        before,
-        "the io arm answers for io requests alone",
+        before - 1,
+        "an injected error sharing the request's region still owes the release",
     );
 }

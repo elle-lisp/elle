@@ -639,6 +639,26 @@ fn region_denial_park_uaf() {
     );
 }
 
+// Guard — the other park a payload the RUNTIME built (docs/impl/region/owner.md
+// § "Park/unpark symmetry"): a yielding io op's `IoRequest`, which the native
+// built and the body never named, so no continuation releases it. Every install
+// that displaces the park owes that release, and `fiber/abort` / `fiber/refuse`
+// each run one where none ran before. The mediator reads the request out of the
+// park before it ends it — `fiber/value` is pass-through, so a binding carries a
+// counted reference of its own — and every witness DEREFERENCES the request after
+// the install; a bare status check passes over a freed one. The `:io` denial
+// witnesses are the bits collision: a fiber denied `:io` parks under `SIG_IO`, so
+// the ledger record and the io bit both answer for one park and exactly one
+// reference is owed. Running both frees the payload under the mediator's read —
+// SIGSEGV under guardfree. The leak face is `tests/elle/region-io-park.lisp`.
+#[test]
+fn region_io_park_uaf() {
+    run_elle_script_with_args(
+        "region-io-park-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — `fiber/propagate` installs the child's parked payload as this fiber's
 // own `signal`, which is a fresh park and owes its own delivery reference
 // (docs/impl/region/owner.md § "Park/unpark symmetry"). The propagating fiber's

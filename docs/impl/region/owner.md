@@ -280,31 +280,51 @@ parked fiber's accounting symmetric with its unpark:
   therefore the discharge's on a fiber that never runs again, and the DISPLACING install's
   on one that does: `fiber/resume`'s delivery and `fiber/abort` / `fiber/refuse`'s injected
   error each replace the payload in the slot, and each owes it a release as it does.
-  Which parks are that shape is read two ways, because the bits answer for only one of
-  them. An io park is its `SIG_IO` bit, and its release is
-  `release_parked_signal` — resume-only, because a `Fresh` io op builds its completion
-  buffer IN the request's region and hands that back as the resume value, where the
-  resumer's release of the resume result is the second consumer and a release here would
-  free the buffer under the caller. A denial parks under the WITHHELD capability's bits,
+  Which parks are that shape is read two ways, because the bits answer for neither on
+  their own. An io park is a `SIG_IO` park whose payload IS an `IoRequest`, a value only
+  an io primitive builds, and `release_displaced_io_request` releases the region that
+  payload lives in. A denial parks under the WITHHELD capability's bits,
   which say nothing about who built the payload and are indistinguishable from an
   `(emit :fs v)` of a body-allocated value — so the classifier records the payload in the
   ledger (`park_denial`, an uncounted marker compared bit-wise like the mint record) and
   `release_displaced_denial_payload` releases exactly what the record names, taking it
-  (`take_bodyless`) as the receipt, on both installs. The injected error takes no skip: it
-  is not a delivery, and the abort's own `AbortDelivery` mint funds the consumer it does
-  have.
+  (`take_bodyless`) as the receipt. Both readings run at every install, and neither asks
+  what the other did.
 
-  **The two readings overlap on one denial, and the record wins it.** `:io` is a
-  withheld capability like any other, so a fiber denied `:io` parks under `SIG_IO` —
-  the very bit the io arm reads — and there the denial payload and an `IoRequest`
-  cannot be told apart by bits at all. One reference is owed, so `fiber/resume` asks
-  the record first and skips the io arm when it claims the park; running both frees
-  the payload under the mediator that is still reading it. Every other install
-  displaces on the record alone, the io arm never having reached them. Gauged by
-  `tests/elle/region-denial-park.lisp` per install and by
-  `tests/elle/region-capability-denial-resume-leak.lisp` per denial position, and pinned
-  guardfree by `tests/elle/region-denial-park-uaf.lisp`, whose `:io` witnesses are the
-  collision.
+  **What is resume-only is the SKIP, not the release.** A `Fresh` io op
+  (`port/read`, `accept`) builds its completion buffer IN the request's region and hands
+  that buffer back as the resume value, so at a resume that region is still live and the
+  resumer's release of the resume result is its second consumer — releasing there too
+  would free the buffer under the caller. `release_resumed_io_request` is that skip and
+  nothing else; every other install reaches the release directly. An injected error is
+  not a delivery — the abort's own `AbortDelivery` mint funds the consumer it does have —
+  so an error value that happens to live in the request's region owes this release all
+  the same, and the skip must not travel to the injection.
+
+  **An in-flight request needs no waiting on.** An abort reaches a fiber whose request
+  the scheduler already submitted, where the release must not free a buffer the kernel
+  is still writing into. It cannot, because the submitted operand is one of Rule 8's
+  escape sites ([rules.md](rules.md) Rule 8): the pending entry increfs every value its
+  completion reads and decrefs when the entry is disposed. A `Fresh` op's completion
+  buffer lives in the request's own region, so that retain is a count on the region for
+  the operation's whole lifetime, and the install's release drops the suspend retain and
+  no more. `tests/elle/grpc.lisp`'s `with-server` teardown is the full-scheduler shape,
+  and the `region_fiber_abort_io_protect_uaf` fixture the minimal one.
+
+  **The bits collide on one denial, and each reading refuses it on its own.** `:io` is
+  a withheld capability like any other, so a fiber denied `:io` parks under `SIG_IO` and
+  the bit alone hands that one park to both readings, where one reference is owed and
+  not two. Ordering the two calls does not settle it, because the record is written on
+  the fiber that WAS denied and an install can reach a fiber that merely relays the
+  park — the outer fiber of a `protect`ed denial, whose slot holds the same payload and
+  whose ledger holds nothing. There the io arm would find no record to defer to. So the
+  refusal is each reading's own: a denial's payload is a struct and never an
+  `IoRequest`, so the io arm has no claim on it wherever the install lands. Gauged by
+  `tests/elle/region-denial-park.lisp` and `tests/elle/region-io-park.lisp` per install,
+  and by `tests/elle/region-capability-denial-resume-leak.lisp` per denial position;
+  pinned guardfree by `tests/elle/region-denial-park-uaf.lisp` and
+  `tests/elle/region-io-park-uaf.lisp`, whose `:io` witnesses are the collision, direct
+  and relayed.
 - **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
   cannot read as a keyword set falls through to the `emit` primitive
   ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way
