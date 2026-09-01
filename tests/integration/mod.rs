@@ -168,6 +168,9 @@ mod paths {
 mod bytecode_doc {
     include!("bytecode_doc.rs");
 }
+mod workflows {
+    include!("workflows.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
