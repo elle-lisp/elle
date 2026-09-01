@@ -46,6 +46,56 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
     );
 }
 
+/// The capture-back-edge SCC with a park INSIDE the adopt scope, on the two
+/// in-process abandonment routes — the park split end-to-end
+/// (docs/impl/region/owner.md § "Owner nodes" — "The park split"; inference pin
+/// `region::infer::tests::adopt::activation_adopt_sites_ahead_of_park`; the
+/// abort route and both heap dimensions ride the `adopt-park-*` oracle family).
+/// The early adopt runs after the members' allocations and before the yield, so
+/// the parked frame carries the members in its activation owner node; the
+/// handle drop's free-path discharge and the cancel's terminal teardown then
+/// free node + members. The trap this gauges: the scope-exit adopt alone sits
+/// PAST the yield, so a route that abandons the park would strand the whole
+/// SCC (~2 regions per op) — suppressed members that no release table names
+/// and no node ever adopted.
+#[test]
+fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
+    const PRELUDE: &str = "(def body (fn [] (let [root (@array) m (@array)] \
+        (let [c (fn [] (length m))] \
+          (begin (%array-push m c) (c) (%array-push root m) \
+                 (emit :yield 0) (length root))))))";
+    let leak = mid_run_discriminator(Runtime::without_stdlib(), "arena/region-count");
+    assert!(
+        leak > 150,
+        "gauge live: the self-referential accumulator must grow (~200); got {leak}",
+    );
+    let routes = [
+        (
+            "drop",
+            "(let [f (fiber/new body 2)] (begin (fiber/resume f) nil))",
+        ),
+        (
+            "cancel",
+            "(let [f (fiber/new body 2)] \
+               (begin (fiber/resume f) (fiber/cancel f :dead) nil))",
+        ),
+    ];
+    for (route, body) in routes {
+        let growth = mid_run_growth(
+            Runtime::without_stdlib(),
+            PRELUDE,
+            body,
+            "arena/region-count",
+        );
+        assert!(
+            growth < 50,
+            "a park inside the adopt scope must reclaim the SCC on the {route} \
+             route — per-op region growth must be near zero over 200 iterations, \
+             got {growth} (the discriminator grows {leak})",
+        );
+    }
+}
+
 /// End-to-end reclamation of the **transferred returned cycle** — the
 /// consuming-activation owner cut (docs/impl/region/owner.md § "Owner nodes" —
 /// "The transferred returned subtree"; inference pin

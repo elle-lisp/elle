@@ -64,7 +64,17 @@ gates, each refusing to Shared (the always-legal baseline):
   enclosing structural scope (the adopt site; a cross-lambda SCC refuses), and no
   `While`/`Loop` encloses a member's allocation without also enclosing the adopt site
   (adopt-per-iteration is sound — fresh regions each round; alloc-inside/adopt-outside is
-  not — the static suppression would outlive the slot's last iteration value).
+  not — the static suppression would outlive the slot's last iteration value);
+- **the park split** — no park may run between a member's allocation and its adopt. In
+  that interval the members are `Counted`, and their own releases are already suppressed
+  under the suppress ⊆ adopt contract. A route that abandons such a park therefore
+  strands the whole SCC: no release table names the members, and no node adopted them.
+  So when the adopt scope can park (`Signal::may_park` — any inferred bit outside
+  `:error`/`:halt`/`:ffi`, or a polymorphic propagation), the walk sites a second,
+  earlier adopt ahead of every reachable park (the park split, below). A shape the
+  split cannot order refuses to Shared. A park ordered before every member allocation
+  needs no gate: no member exists when it parks, and the early adopt still precedes
+  every later one.
 
 The lowerer emits one value-resolved `AdoptIntoActivation` per member at the adopt site
 (`emit_adopt_into_activation`, driven by `emit_decrefs_for` exactly like the co-owned
@@ -76,12 +86,40 @@ node member's demise. The members stay `Counted` between construction and the ad
 RC absorbs the interval — an outside holder's earlier cascade decref just lowers the count
 the adopt then consumes); from the adopt to the activation's completion they are `Owned`,
 and the node's release frees the cycle wholesale, interior m↔c references reclaiming with
-the set. Pinned by `regions::tests::adopt::activation_adopts_capture_back_edge_scc`
+the set.
+
+**The park split — the adopt runs before any park.** `emit_decrefs_for` fires for every
+node right after its own lowering; for a binding init it fires right after the binding's
+store (`lower_let`/`lower_letrec`'s deferral). An adopt keyed at ANY node therefore runs
+at that node's completion. When the adopt scope can park, the walk uses this to close the
+`Counted` interval ahead of every park
+(`compute_activation_adopts`' park split). It descends the scope's sequential spine — a
+`Let`/`Letrec`'s binding inits then body, a `Begin`/`Block`'s statements, each constituent
+completing before the next begins — to the last constituent that allocates a member,
+recursing while that constituent both allocates and parks. It keys a second adopt there,
+so `activation_adopt_sites` carries two entries for one SCC. Every member's binding store
+completes with that constituent, so the early adopt loads populated slots. Every park in a
+later constituent finds the members already `Owned`, and the parked frame carries them in
+its owner node (the park rules below). The scope-exit adopt stays beside the early one: a
+path that leaves the scope before its end (a `break` past the early key) still adopts
+there, and the channel's idempotence makes a second adopt of an `Owned` member a no-op.
+The early adopt may precede the SCC's own interior stores. That is sound: `incref`/
+`decref` are inert on an `Owned` region, and the store still records its edge, which the
+node's set-drop walks like any other. A shape the spine cannot order — a park between two
+members' allocations, or a park and an allocation inside one non-sequential constituent (a
+branch, a call) — refuses at admission (the park-split gate above).
+
+Pinned by `regions::tests::adopt::activation_adopts_capture_back_edge_scc`
 (rooted and bare shapes, funnel-recovered stores),
-`…::activation_adopt_excludes_other_mechanisms` (merge/group disjointness), and at runtime
+`…::activation_adopt_sites_ahead_of_park` (the park split: two sites, the early key
+ordered after every member allocation and before the park),
+`…::activation_adopt_refuses_park_between_allocations` (the refusal),
+`…::activation_adopt_excludes_other_mechanisms` (merge/group disjointness), at runtime
 by `runtime::tests::ownership::region_ownership_capture_back_edge_cycle_reclaims`
 (bounded flag-on beside the leaking flag-off counterfactual, panic-clean, on the
-interpreter and under the JIT).
+interpreter and under the JIT), and end-to-end by the `adopt-park-*` oracle family
+(`tests/elle/oracle.lisp`: a park inside the adopt scope reclaims on the handle-drop,
+abort, and cancel routes alike; the `ap-*` controls attribute each ingredient).
 
 **The transferred returned subtree — owner = the consuming activation.** The second
 containment shape no region root can own is the **returned cycle**: a callee builds an

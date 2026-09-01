@@ -141,8 +141,9 @@ impl Hir {
     /// so out-of-crate analysis and tests can walk the tree the same way the
     /// compiler does — consistent with the already-public `Hir::{kind, id}`. The
     /// mutating twin (`for_each_child_mut`) stays crate-private: rewriting the HIR
-    /// is an internal concern.
-    pub fn for_each_child(&self, mut f: impl FnMut(&Hir)) {
+    /// is an internal concern. The callback's references live as long as `self`,
+    /// so a search may return the child it finds.
+    pub fn for_each_child<'a>(&'a self, mut f: impl FnMut(&'a Hir)) {
         match &self.kind {
             HirKind::Nil
             | HirKind::EmptyList

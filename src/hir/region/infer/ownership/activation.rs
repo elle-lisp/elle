@@ -21,10 +21,15 @@ use super::subtree::innermost_enclosing_scope;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The activation-adopt map the lowerer consumes
-/// (`RegionInfo::activation_adopt_sites`): adopt-site HirId — the innermost
-/// structural scope enclosing every member's allocation — → the capture-back-edge
-/// SCC members to `AdoptIntoActivation` there, in allocation program order.
-/// Run by the ownership pass in `analyze_regions_with`.
+/// (`RegionInfo::activation_adopt_sites`): adopt-site HirId → the
+/// capture-back-edge SCC members to `AdoptIntoActivation` there, in allocation
+/// program order. The primary site is the innermost structural scope enclosing
+/// every member's allocation; a scope that can park carries a SECOND entry for
+/// the same members — an early key on the scope's sequential spine, ahead of
+/// every park (gate 6, the park split). The channel is idempotent on an Owned
+/// member, so the scope-exit adopt behind the early key is a structural no-op
+/// on the paths that ran both. Run by the ownership pass in
+/// `analyze_regions_with`.
 ///
 /// Admission (each gate refusing to Shared, the always-legal baseline):
 ///
@@ -61,6 +66,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 ///    site. Adopt-per-iteration is sound (each iteration adopts that round's
 ///    fresh regions); alloc-inside/adopt-outside is not — the static suppression
 ///    covers every iteration while the slot-loaded adopt reaches only the last.
+/// 6. **The park split.** No park may run between a member's allocation and its
+///    adopt: in that interval the members are `Counted` with their own releases
+///    suppressed, so a route that abandons such a park strands the whole SCC —
+///    no release table names the members, and no node adopted them. When the
+///    adopt scope can park (`Signal::may_park` on its aggregated signal), the
+///    walk finds an early adopt key on the scope's sequential spine
+///    ([`park_split_key`]) and emits the adopt there too; a shape the spine
+///    cannot order refuses to Shared
+///    (docs/impl/region/owner.md § "Owner nodes" — "The park split").
 ///
 /// The **free** needs no post-dominance check of its own: the adopt only
 /// transfers ownership, and the node's release at the activation's completion is
@@ -199,10 +213,27 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
         if loop_seam {
             continue;
         }
+        // Gate 6 — the park split: a parking adopt scope gets an early key
+        // ahead of every park, or refuses. The scope-exit entry stays beside
+        // the early one — a path that leaves the scope before the key (a
+        // `break` past it) still adopts there, and the channel's idempotence
+        // absorbs the double adopt on paths that run both.
+        let mut early_key = None;
+        if let Some(site_node) = find_node(hir, site) {
+            if site_node.signal.may_park() {
+                match park_split_key(site_node, &targets, false) {
+                    Some(k) => early_key = Some(k),
+                    None => continue,
+                }
+            }
+        }
         for &m in scc {
             taken.insert(m);
         }
         out.entry(site).or_default().extend(scc.iter().copied());
+        if let Some(k) = early_key {
+            out.entry(k).or_default().extend(scc.iter().copied());
+        }
     }
     // Deterministic member order per site: allocation program order (region ids
     // order nothing).
@@ -210,6 +241,92 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
         members.sort_by_key(|m| region_alloc_hir.get(m).map(|&h| ord(h)).unwrap_or(0));
     }
     out
+}
+
+/// The node with `id` in `hir`'s tree, by structural search — the adopt site's
+/// `&Hir` for the park-split gate (gate 6), which reads its aggregated signal
+/// and its spine.
+fn find_node(hir: &Hir, id: HirId) -> Option<&Hir> {
+    if hir.id == id {
+        return Some(hir);
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = find_node(c, id);
+        }
+    });
+    found
+}
+
+/// The node's sequential constituents in execution order — a `Let`/`Letrec`'s
+/// binding inits then body, a `Begin`/`Block`'s statements — each completing
+/// before the next begins, so `emit_decrefs_for` on a constituent's id runs
+/// between it and its successor (for a binding init, after the binding's
+/// store). `None` for any other node: its interior execution order is not one
+/// this walk can read, so the park split refuses rather than guess.
+fn sequential_constituents(node: &Hir) -> Option<Vec<&Hir>> {
+    match &node.kind {
+        HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => Some(
+            bindings
+                .iter()
+                .map(|(_b, init)| init)
+                .chain(std::iter::once(&**body))
+                .collect(),
+        ),
+        HirKind::Begin(items) => Some(items.iter().collect()),
+        HirKind::Block { body, .. } => Some(body.iter().collect()),
+        _ => None,
+    }
+}
+
+/// Does `hir`'s subtree contain any of `targets` (the members' allocation
+/// sites)?
+fn contains_any(hir: &Hir, targets: &FxHashSet<HirId>) -> bool {
+    if targets.contains(&hir.id) {
+        return true;
+    }
+    let mut found = false;
+    hir.for_each_child(|c| {
+        if !found {
+            found = contains_any(c, targets);
+        }
+    });
+    found
+}
+
+/// The park split (gate 6): the node whose `emit_decrefs_for` is the early
+/// adopt key — ordered after every member allocation and before every park
+/// that could strand one — or `None` where no such node exists on the
+/// sequential spine.
+///
+/// Per spine level, the key candidate is the LAST constituent containing a
+/// member allocation: every member's binding store completes with it, and
+/// every later constituent's park finds the members already Owned. A park in
+/// an EARLIER constituent refuses only where a member allocation precedes it
+/// (`allocs_before` carries that fact into recursion) — a park before every
+/// member allocation strands nothing, because no member exists when it parks.
+/// When the candidate itself both allocates and parks, the walk recurses into
+/// it; a non-sequential candidate ([`sequential_constituents`] `None`) or a
+/// member allocated outside every constituent refuses.
+fn park_split_key(node: &Hir, targets: &FxHashSet<HirId>, allocs_before: bool) -> Option<HirId> {
+    let cs = sequential_constituents(node)?;
+    let has_alloc: Vec<bool> = cs.iter().map(|c| contains_any(c, targets)).collect();
+    let last_a = has_alloc.iter().rposition(|&a| a)?;
+    for (i, c) in cs.iter().enumerate() {
+        if i >= last_a || !c.signal.may_park() {
+            continue;
+        }
+        if allocs_before || has_alloc[..=i].iter().any(|&a| a) {
+            return None;
+        }
+    }
+    if cs[last_a].signal.may_park() {
+        let inner_before = allocs_before || has_alloc[..last_a].iter().any(|&a| a);
+        park_split_key(cs[last_a], targets, inner_before)
+    } else {
+        Some(cs[last_a].id)
+    }
 }
 
 /// Every `While`/`Loop` node's post-order subtree interval `[low, order]`, so
