@@ -677,6 +677,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "elle-myplugin"
+version = "1.0.0"
+dependencies = [
+ "elle-plugin",
+]
+
+[[package]]
 name = "elle-plugin"
 version = "1.0.0"
 

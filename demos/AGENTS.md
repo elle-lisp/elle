@@ -20,6 +20,7 @@ These demos validate that Elle can express the same algorithms as other Lisps (C
 | `nqueens/` | N-Queens backtracking algorithm | Recursion, list operations, functional predicates, backtracking |
 | `scope-alloc/` | Allocator scope testing | Memory management, region-based allocation |
 | `embedding/` | Elle as a shared library | Custom primitives, C-ABI surface, step-based scheduling |
+| `myplugin/` | The plugin `docs/cookbook/plugins.md` walks through | Stable plugin ABI, `define_plugin!`, cdylib loading |
 
 ## Running demos
 

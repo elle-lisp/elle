@@ -154,6 +154,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | lib/gtk4.lisp | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
 | lib/sdl.lisp | `lib/` | SDL3 bindings for games/graphics |
 | embedding | `demos/embedding/` | Elle as a shared library (Rust + C hosts) |
+| myplugin | `demos/myplugin/` | The cookbook's worked plugin, built for the literate docs that load it |
 
 ## Directories
 
