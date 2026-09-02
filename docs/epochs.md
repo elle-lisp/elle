@@ -44,6 +44,10 @@ compiler applies all migration rules from epoch N+1 through the current epoch
 to the parsed syntax tree. This is transparent — old-epoch code compiles and
 runs exactly as if it had been written using current-epoch syntax.
 
+Because migration operates on parsed trees, it cannot express changes to
+tokenization itself. [`impl/lexicon.md`](impl/lexicon.md) is the design for
+extending epochs to lexical changes (not yet implemented).
+
 ## Migration rule types
 
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in

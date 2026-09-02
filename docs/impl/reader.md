@@ -63,4 +63,5 @@ reporting.
 ## See also
 
 - [impl/hir.md](hir.md) — analysis phase after reading
+- [impl/lexicon.md](lexicon.md) — epoch-aware lexing design (not yet implemented)
 - [syntax.md](../syntax.md) — user-facing syntax reference

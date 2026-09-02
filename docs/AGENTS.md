@@ -39,6 +39,7 @@ Design documents, language references, and contributor guides for Elle.
 | File | Description |
 |------|-------------|
 | `impl/reader.md` | Lexer, parser, source locations, markdown literate mode |
+| `impl/lexicon.md` | Epoch-aware lexing design: the epoch prescan and the `Lexicon` rule set |
 | `impl/hir.md` | Binding resolution, signal inference |
 | `impl/lir.md` | SSA form, virtual registers, basic blocks |
 | `impl/bytecode.md` | Instruction set and encoding |
