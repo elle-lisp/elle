@@ -94,6 +94,7 @@ make smoke                 # run all tests (~30s)
 | [symbol](docs/impl/symbol.md) | Symbol and keyword identity: name hash, per-instance display memo, ordering |
 | [image](docs/impl/image.md) | Image persistence design: boot image, environment save/load |
 | [stdlib-cache](docs/impl/stdlib-cache.md) | Disk cache for the compiled standard library |
+| [fleet](docs/impl/fleet.md) | Distributed runtime design: content-addressed tasks over environment images |
 
 ## Reference
 
