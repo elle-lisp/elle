@@ -19,6 +19,7 @@ renamed heading breaks the site generator.
 | Thread-Pool I/O Tests | ubuntu | The corpus on the thread-pool I/O backend | — |
 | MLIR Tests | ubuntu | `smoke-mlir` | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
+| Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | `make smoke` | — |
 | AArch64 Rust Tests | ubuntu-arm | Integration tests, then property tests | 8 |
 | AArch64 No-Features | ubuntu-arm | `smoke-noffi` | — |
@@ -88,6 +89,49 @@ the runner, and its owner can pass `JOBS=`.
 
 `tests/integration/capacity.rs` is the standing check that the CI count still
 tracks the runner.
+
+### The plugins job
+
+The `plugins/` submodule is a separate cargo workspace. Every plugin in it
+takes `elle-plugin` by path, so a rebuild moves the plugin and the SDK
+together: a changed `elle_api!` declaration either compiles at every call site
+or does not. #997 changed six declarations and stopped 17 plugins from
+compiling, at about 90 call sites, and nothing went red. No job checked the
+submodule out.
+
+The ABI version guard does not close that hole. It compares `ABI_VERSION` when
+a plugin loads, so it catches a stale `.so` built against an older SDK. A
+source break never reaches a load. Only a job that compiles the submodule sees
+one.
+
+So `Plugin Tests` checks the submodule out at its recorded pointer, builds the
+portable plugins, asserts the artifacts, and runs `plugins/tests/*.lisp`
+against the release binary. Building at the recorded pointer is also what keeps
+the pointer fresh: a pointer left behind an ABI change names plugins that no
+longer compile, and the job fails on them.
+
+#### Why the job asserts its build output
+
+Each `plugins/tests/*.lisp` imports its `.so` under `protect` and exits 0 when
+the import fails. That is deliberate, because the file has to run on a tree
+where the submodule was never built. It also means a plugin that did not build
+makes its own test report success: run from a directory where the paths did not
+resolve, 13 of 19 files reported `ok` having executed nothing.
+
+`make plugins-verify` asserts the build output separately. Every package in
+`plugins/Makefile`'s `PORTABLE` list must have produced its cdylib under
+`target/release`. The list is read back out of the submodule's own make rather
+than copied, so a plugin added there is demanded here with no second edit. With
+the artifacts asserted, the self-gating is harmless — the tests never have to be
+the thing that detects a missing plugin. `make smoke-plugins` runs the
+assertion before the corpus for the same reason.
+
+The assertion names the portable set, not every plugin. `elle-polars` does not
+build on the current toolchain: its `ethnum` dependency fails a
+`mem::transmute` size check under this rustc, unrelated to elle. `elle-arrow`
+carries heavy optional dependencies, and `elle-vulkan`, `elle-egui` and
+`elle-wayland` need a GPU or a display to exercise. The tests for those plugins
+gate themselves out of the run.
 
 ### Adding a job
 

@@ -81,6 +81,23 @@ unless you move the `.so` files or use `--path` (see below).
 The plugins submodule's own Makefile handles this automatically when it
 detects it's inside the elle repo, so `cd plugins && make` also works.
 
+## Testing plugins
+
+Each plugin has an integration test under `plugins/tests/`. Run the whole set
+against the elle binary from the repo root:
+
+```bash
+make plugins          # build the portable plugins first
+make smoke-plugins    # assert the artifacts, then run plugins/tests/*.lisp
+```
+
+`smoke-plugins` runs `plugins-verify` first, which fails when a portable plugin
+produced no `.so`. That assertion is not decoration. Every test file imports its
+`.so` under `protect` and exits 0 when the import fails, so a plugin that did
+not build makes its own test report success. The reasoning, and the CI job that
+runs these targets, are in
+[`docs/analysis/ci.md`](analysis/ci.md) § "The plugins job".
+
 ## Usage pattern
 
 ```text

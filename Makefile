@@ -1,6 +1,7 @@
 .PHONY: all elle docs docgen smoke test qa crosscheck clean space help \
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-nouring smoke-wasm smoke-mlir \
-       doctest myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
+       doctest myplugin elle-wasm check-wasm elle-mlir elle-noffi plugins plugins-all \
+       plugins-verify smoke-plugins mcp embedding \
        fmt fmt-check
 
 .DEFAULT_GOAL := all
@@ -161,6 +162,51 @@ plugins-all:  ## Build all plugins including system-dep ones (vulkan, egui, etc.
 mcp: elle  ## Build elle + MCP plugins (oxigraph, syn)
 	$(MAKE) -C plugins mcp
 
+# The portable plugin set has ONE home: `PORTABLE` in plugins/Makefile. This
+# reads that variable back out of the submodule's own make instead of repeating
+# the list, so a plugin added there is demanded here with no second edit, and a
+# plugin dropped there stops being demanded. The submodule carries no `print-%`
+# rule, so one is supplied for the read.
+#
+# Recursively expanded (`=`, not `:=`): the read runs `make -C plugins`, and
+# every invocation of this Makefile would pay for it under `:=` — including the
+# ones on a tree where the submodule was never checked out.
+#
+# A package's cdylib is `lib<package with - as _>.so`, because no plugin crate
+# overrides `[lib] name`. tests/integration/plugins.rs pins that mapping against
+# the crates the submodule actually contains.
+PORTABLE_PKGS = $(filter-out -p,$(shell $(MAKE) -s -C plugins --eval='print-portable:; @echo $$(PORTABLE)' print-portable))
+PORTABLE_SO   = $(foreach p,$(PORTABLE_PKGS),target/release/lib$(subst -,_,$(p)).so)
+
+# Every portable plugin produced its artifact.
+#
+# This is what makes the plugin corpus's self-gating harmless. Each
+# plugins/tests/*.lisp imports its `.so` under `protect` and exits 0 when the
+# import fails, so a plugin that did not build makes its own test report
+# success. Asserting the build output separately means the tests never have to
+# be the thing that detects a missing plugin. See docs/analysis/ci.md § "The
+# plugins job".
+#
+# The empty list is a failure, not a vacuous pass: it is what a tree whose
+# `plugins/` submodule was never checked out looks like.
+#
+# No prerequisite on `plugins`: the assertion is about what is on disk, and
+# keeping it free of a build is what lets tests/integration/plugins.rs drive it
+# both ways in a second.
+plugins-verify:  ## Assert every portable plugin built its artifact
+	@[ -n "$(PORTABLE_SO)" ] || { \
+		echo "FAILED: no portable plugins named — run: git submodule update --init plugins"; \
+		exit 1; }
+	@missing=""; for so in $(PORTABLE_SO); do \
+		[ -f "$$so" ] || missing="$$missing $$so"; \
+	done; \
+	[ -z "$$missing" ] || { \
+		echo "FAILED: the plugins build produced no artifact for:$$missing"; \
+		echo "  Each plugins/tests/*.lisp exits 0 when its import fails, so the"; \
+		echo "  corpus would report success without them. Run: make plugins"; \
+		exit 1; }
+	@echo "=== plugins: $(words $(PORTABLE_SO)) portable artifacts present ==="
+
 # ── Docs ────────────────────────────────────────────────────────────
 
 docs: docs/pipeline.svg  ## Generate documentation assets
@@ -196,6 +242,12 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # `make test` exists to predict the PR gate, so it runs what the gate runs. A
 # target the workflow requires and `make test` skips is a failure a branch can
 # only discover in CI.
+#
+# `smoke-plugins` is the one exception, and it is deliberate. It needs the
+# `plugins/` submodule checked out, and the submodule is optional for building
+# elle (INSTALL.md), so folding it in here would fail every tree that never
+# initialized it. Run it by hand after `make plugins` when a change touches
+# `elle_api!`; the `Plugin Tests` job runs it on every pull request.
 #
 # The default-build elle scripts get TWO corpus passes, because they are two
 # different tests of the same files:
@@ -430,8 +482,8 @@ DOCTEST_TIMEOUT ?= 180s
 # authoring guide and demos/myplugin is the crate it walks through, so the
 # document's own test imports it as `plugin/myplugin`; docs/testing.md gates its
 # example on the same import. Nothing else in the tree builds it — the
-# `plugins/` submodule is a separate workspace, and it is not even checked out
-# in CI — so without this every form below either import is dead: the guide
+# `plugins/` submodule is a separate workspace, checked out by one CI job that
+# runs no doctest — so without this every form below either import is dead: the guide
 # fails its import, the gating example gates itself out, and `doctest` reports
 # both as passing. tests/integration/doctest.rs pins the agreement.
 myplugin:  ## Build the plugin the literate documents load
@@ -443,6 +495,28 @@ doctest: myplugin  ## Test code examples in documentation (literate mode)
 		parallel -j $(JOBS) --tag \
 			'timeout $(DOCTEST_TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
+
+# A plugin test drives a whole library through one long program — the oxigraph
+# file loads an RDF store, the tree-sitter file parses a grammar — so the corpus
+# TIMEOUT is too narrow for it. Same shape as DOCTEST_TIMEOUT: a wider per-file
+# budget, so every file still fails fast on a hang. Read the budget from a timed
+# run, never from a number written here.
+PLUGIN_TIMEOUT ?= 120s
+
+# The plugin corpus: one process per file, against the release binary and the
+# artifacts `plugins-verify` just asserted. Each file's `import-file` path is
+# relative to the repository root, so the run has to start here rather than in
+# the submodule.
+#
+# `plugins-verify` is a prerequisite rather than a step of the CI job, so that a
+# `make smoke-plugins` on a tree where `make plugins` was never run fails loud
+# instead of reporting a corpus that imported nothing.
+smoke-plugins: elle plugins-verify  ## Run the plugin corpus (needs `make plugins` first)
+	@echo "=== plugin tests ==="
+	@printf '%s\n' plugins/tests/*.lisp | \
+		parallel -j $(JOBS) --tag \
+			'timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: plugin tests"; exit 1; }
 
 EMBED_TARGET_DIR = $(CURDIR)/target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
 
