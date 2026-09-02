@@ -234,16 +234,22 @@ primitive never returns, so nothing mints the reference that release consumes:
 ledger (`Fiber::delivery` — `park_primitive` / `park_denial`) and
 `do_fiber_resume_single` takes it (`take_resume_funding`) as it delivers.
 
-The denial owes one more, in the other direction. Its payload is the RUNTIME's,
-so the body names it nowhere and no continuation releases it — the install that
-displaces the park does, through `release_displaced_denial_payload` off the
-ledger's record (`park_denial` writes it, `take_bodyless` consumes it):
-`fiber/resume`, the `fiber/abort` / `fiber/refuse` injection, and the three
-`FiberResume` deliveries that reach an inner fiber directly. `fiber/resume` asks
-the record before `release_parked_signal`'s io arm and skips that arm when the
-record claims the park, a fiber denied `:io` parking under the same `SIG_IO` bit
-an io request does. See docs/impl/region/owner.md § "A payload the RUNTIME built
-is released by the install that displaces it".
+A runtime-built payload owes one more, in the other direction. The body names it
+nowhere and no continuation releases it — the install that displaces the park
+does. Two parks are that shape, and each has its own reading. A DENIAL's payload
+is named by the ledger's record (`park_denial` writes it,
+`release_displaced_denial_payload` takes it through `take_bodyless`); an io
+park's payload is named by BEING an `IoRequest` under `SIG_IO`
+(`release_displaced_io_request`). The readings name disjoint payloads — a
+denial's struct is never an `IoRequest` — so both run and neither asks what the
+other did, which is what a fiber denied `:io` needs: it parks under the same
+`SIG_IO` bit, and the install may reach a fiber that only relays the park and
+holds no record to defer to. The installs are `fiber/resume`, the `fiber/abort` /
+`fiber/refuse` injection, and the three `FiberResume` deliveries that reach an
+inner fiber directly. Only the resume adds a skip of its own
+(`release_resumed_io_request`), for the `Fresh` op whose completion buffer lives
+in the request's region. See docs/impl/region/owner.md § "A payload the RUNTIME
+built is released by the install that displaces it".
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants

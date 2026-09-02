@@ -111,11 +111,12 @@
       (length (get p :primitive)))))
 
 # ── (f) the bits collision — the shape a second release detonates on ─────────
-# A fiber denied `:io` parks under `SIG_IO`, the very bit `release_parked_signal`
-# reads to recognize a yielding io op's request. So this park answers to BOTH
-# routes at a resume, and exactly one reference is owed: run them both and the
-# payload's region is freed while the mediator still holds it. That is the whole
-# reason the record is asked FIRST and the io arm skipped when it claims the park.
+# A fiber denied `:io` parks under `SIG_IO`, the bit a yielding io op's request
+# park also carries. Exactly one reference is owed, so the io arm must refuse this
+# park on its own account: it asks for an `IoRequest`, and a denial's payload is a
+# struct. Reading the bit instead frees the payload's region while the mediator
+# still holds it. The relayed face — the same denial inside a `protect`, where the
+# install reaches a fiber holding no ledger record — is in region-io-park-uaf.lisp.
 (defn io-denied-body ()
   (println "never runs — the fiber is denied :io"))
 (defn w-io-resume (n)
@@ -133,6 +134,14 @@
       (fiber/refuse f :denied)
       (assert (= (get p :error) :capability-denied)
               "an :io denial's payload was released twice at the refusal")
+      (length (get p :primitive)))))
+(defn w-io-abort (n)
+  (let [f (fiber/new io-denied-body |:error :io| :deny |:io|)]
+    (fiber/resume f)
+    (let [p (fiber/value f)]
+      (fiber/abort f :done)
+      (assert (= (get p :error) :capability-denied)
+              "an :io denial's payload was released twice at the abort")
       (length (get p :primitive)))))
 
 # ── (g) the abort face ───────────────────────────────────────────────────────
@@ -179,6 +188,7 @@
   (var k 0)
   (var m 0)
   (var n 0)
+  (var p 0)
   (while (%lt i reps)
     (assign a (w-hold-resume i))
     (assign b (w-alias-resume i))
@@ -188,12 +198,13 @@
     (assign f (w-protect-refuse i))
     (assign g (w-io-resume i))
     (assign h (w-io-refuse i))
+    (assign p (w-io-abort i))
     (assign k (w-abort i))
     (assign m (c-emit-resume i))
     (assign n (c-emit-refuse i))
     (assign denials @[])
     (assign i (%add i 1)))
-  (list a b c d e f g h k m n))
+  (list a b c d e f g h k m n p))
 
 (let [r (drive 300)]
   (assert (> (get r 0) 0) "payload freed under a held read past the resume")
@@ -206,6 +217,7 @@
   (assert (> (get r 7) 0) ":io denial's payload released twice at the refusal")
   (assert (> (get r 8) 0) "payload freed under the read past the abort")
   (assert (> (get r 9) 0) "control: emit payload freed by the resume install")
-  (assert (> (get r 10) 0) "control: emit payload freed by the refusal install"))
+  (assert (> (get r 10) 0) "control: emit payload freed by the refusal install")
+  (assert (> (get r 11) 0) ":io denial's payload released twice at the abort"))
 
 (println "region-denial-park-uaf: ok")

@@ -22,15 +22,6 @@
 # verdict never carries across processes.
 (each l in ["discriminator (live-growth)" "region discriminator (live-growth)"]
   (put by-design l true))
-# An io park displaced by `fiber/abort` or `fiber/refuse` strands the
-# `IoRequest` region the runtime built for it: `release_parked_signal` runs on
-# the resume path only, and the injection site runs the displaced-terminal and
-# denial releases but nothing for an io request (docs/impl/region/owner.md
-# § "Park/unpark symmetry" — a park with no body reference owes one release
-# where it is displaced). One region and the request it holds, per op, on both
-# displacing routes; `io-drop` is the reclaiming control, the same park whose
-# fiber nobody displaces, covered by the free-path discharge.
-(declare-root :f2 ["io-abort" "io-abort@regions" "io-refuse" "io-refuse@regions"])
 
 # ── Discriminators ────────────────────────────────────────────────────
 (def @disc-sink @[])
@@ -81,10 +72,17 @@
                        (get io :rate))))
 
 # ── The displaced io park ─────────────────────────────────────────────
-# The three exits of a parked io op — see the F2 declaration above for the
-# mechanism. The three must stay together: `io-drop` removes the displacing
-# install, so the gap between it and either displacing route isolates the
-# install's owed release from the park itself.
+# The three exits of a parked io op. Its `IoRequest` is the RUNTIME's value —
+# the native built it and the body names it nowhere — so no continuation
+# releases it and whatever ends the park owes that release
+# (docs/impl/region/owner.md § "Park/unpark symmetry"). `io-drop` is the exit
+# with no install at all, covered by the free-path discharge; `io-abort` and
+# `io-refuse` each end the park by raising at the fiber's own suspension point.
+# The three must stay together: `io-drop` removes the displacing install, so the
+# gap between it and either displacing route isolates the install's owed release
+# from the park itself. The per-install leak gauge is
+# tests/elle/region-io-park.lisp and the guardfree face is
+# tests/elle/region-io-park-uaf.lisp; these read the same shapes as rates.
 (defn mk-io []
   (fiber/new (fn []
                (let [r (ev/sleep 10000)]
@@ -107,8 +105,8 @@
     (pin r opin)
     (pin rr rpin)))
 (pin-io-2 "io-drop" probe-io-drop 0 0)
-(pin-io-2 "io-abort" probe-io-abort 1 1)
-(pin-io-2 "io-refuse" probe-io-refuse 1 1)
+(pin-io-2 "io-abort" probe-io-abort 0 0)
+(pin-io-2 "io-refuse" probe-io-refuse 0 0)
 
 # ── The split headline ────────────────────────────────────────────────
 (println "── split ──")
