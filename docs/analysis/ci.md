@@ -110,6 +110,21 @@ against the release binary. Building at the recorded pointer is also what keeps
 the pointer fresh: a pointer left behind an ABI change names plugins that no
 longer compile, and the job fails on them.
 
+#### What the runner has to install
+
+Two plugins in the portable set are not pure Rust, and neither says so in its
+own `Cargo.toml`. The system libraries arrive several crates deep:
+`elle-oxigraph` reaches `oxrocksdb-sys`, which runs bindgen over vendored
+RocksDB and needs libclang; `elle-plotters` reaches `font-kit`, which needs
+fontconfig through pkg-config and pulls the freetype, expat and png headers
+behind it.
+
+Read that set off the built artifacts, not off the manifests. After a local
+`make plugins`, `ldd target/release/libelle_*.so` names every library the build
+actually linked, and which plugin linked it. A manifest scan misses all of
+them, which is how the job's first run failed on a fontconfig nobody had
+declared.
+
 #### Why the job asserts its build output
 
 Each `plugins/tests/*.lisp` imports its `.so` under `protect` and exits 0 when

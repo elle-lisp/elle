@@ -261,14 +261,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: plugins
-      # clang and libclang for bindgen: elle-oxigraph pulls oxrocksdb-sys, which
-      # generates its bindings and compiles vendored RocksDB. Everything else in
-      # the portable set is pure Rust (elle-tls takes rustls over ring, not
-      # OpenSSL), so no other system library is needed.
-      - name: Install GNU parallel and bindgen's toolchain
+      # Two plugins in the portable set are not pure Rust, and neither says so
+      # in its own Cargo.toml — the system libraries arrive several crates deep.
+      # Read the set off the built artifacts, not off the manifests: `ldd
+      # target/release/libelle_*.so` after a local `make plugins` names every
+      # library the build actually linked.
+      #
+      # elle-oxigraph pulls oxrocksdb-sys, which runs bindgen over vendored
+      # RocksDB and needs libclang. elle-plotters pulls font-kit, which needs
+      # fontconfig through pkg-config; libfontconfig1-dev brings the freetype,
+      # expat and png headers the same chain wants.
+      - name: Install GNU parallel and the plugin build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y parallel clang libclang-dev
+          sudo apt-get install -y parallel clang libclang-dev \
+                                  pkg-config libfontconfig1-dev
       - name: make elle
         run: make elle
       - name: make plugins
