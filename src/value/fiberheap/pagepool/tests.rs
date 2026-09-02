@@ -339,3 +339,33 @@ fn large_pages_are_self_aligned() {
         );
     }
 }
+
+// A file-backed (hydrated image) page is never cached: its release is
+// `munmap`, even when the cache has room (docs/impl/image.md § Hydration
+// step 3). The anonymous release above (`release_and_reclaim`) is the
+// counter-factual: same pool, same room, an anonymous page IS cached.
+#[test]
+fn file_backed_release_is_munmap_not_cache() {
+    let mut pool = PagePool::default();
+    // A self-aligned anonymous mapping standing in for a hydrated image
+    // page (a private file view behaves identically at release).
+    let raw = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            base_page(),
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    assert_ne!(raw, libc::MAP_FAILED);
+    let page = unsafe { MmapPage::from_fixed_mapping(raw as *mut u8, base_page()) };
+    let dirty = all_of(&page);
+    pool.release(page, dirty);
+    assert_eq!(
+        pool.cached_bytes(),
+        0,
+        "file-backed page entered the cache instead of being unmapped"
+    );
+}

@@ -95,7 +95,9 @@ impl RuntimeCore {
         let mut vm = Box::new(VM::new_with_heap(heap_ptr));
         vm.set_unicode_generation(gen);
         let mut symbols = Box::new(SymbolTable::new());
+        let t = std::time::Instant::now();
         let meta = register_primitives(&mut vm, &mut symbols);
+        crate::trace::phase(crate::trace::boot(), "boot", "primitives", t);
         // Point the VM at this instance's symbol table (stable boxed address),
         // so the runtime `eval` instruction, the meta/read/debug primitives, and
         // value name-resolution resolve in THIS instance's own table. Mirrors
@@ -206,6 +208,15 @@ impl Runtime {
         // through `ctx.vm().symbols()` — this instance's own table.
         if load_stdlib {
             core.load_stdlib();
+        }
+
+        // The post-boot heap census (docs/impl/image.md § "Open risks and
+        // dispatch experiments", item 2): at this point every live object is
+        // boot state, the graph a boot image must dump.
+        if crate::trace::census() {
+            for line in core.heap().census().lines() {
+                eprintln!("[trace:census] {}", line);
+            }
         }
 
         Runtime {

@@ -29,8 +29,10 @@ heap and region explicitly through `arena`.
 | `regionstore/mintscope.rs` | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | `regionpool.rs` | `RegionPool`: dual-ended pages, page-header stamp, `header_of_page_ptr` |
 | `regionpool/introspect.rs` | `find_object_cross_refs` content scan (cascade + diagnostics) |
-| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook |
+| `pagepool.rs` | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` release-time body reset; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
+| `regionstore/hydrate.rs` | Install a hydrated image region: adopt mapped pages, rebuild object bookkeeping from the image's index (docs/impl/image.md § Hydration) |
 | `freelog.rs` | `--trace=free`/`freebt` free-log; guardfree arming |
+| `census.rs` | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts (docs/impl/image.md § Sealing) |
 | `tests.rs` | `FiberHeap` unit tests |
 
 ## Page layout

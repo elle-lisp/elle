@@ -89,6 +89,7 @@ pub mod error;
 pub mod ffi;
 pub mod formatter;
 pub mod hir;
+pub mod image;
 pub mod io;
 #[cfg(feature = "jit")]
 pub mod jit;

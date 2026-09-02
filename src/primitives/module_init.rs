@@ -18,10 +18,14 @@ const STDLIB: &str = include_str!("../stdlib.lisp");
 /// export into the compilation cache's PrimitiveMeta so that
 /// `bind_primitives` pre-binds them for all subsequent compilations.
 pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) {
+    let boot = crate::trace::boot();
+    let t = std::time::Instant::now();
     let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
         Ok(r) => r,
         Err(e) => panic!("stdlib compilation failed: {}", e),
     };
+    crate::trace::phase(boot, "boot", "stdlib-compile", t);
+    let t = std::time::Instant::now();
     // Execute stdlib — returns the last expression (a closure).
     let closure_val = match vm.execute(&result.bytecode) {
         Ok(v) => v,
@@ -29,6 +33,8 @@ pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx
     };
     // Call the returned closure to get the exports struct.
     let exports_val = call_closure(vm, closure_val);
+    crate::trace::phase(boot, "boot", "stdlib-execute", t);
+    let t = std::time::Instant::now();
     // Root the stdlib export aggregate (the struct + its module closure), not
     // each export. `exports_val` references every stdlib export, and the `Value`s
     // registered into the compilation caches below are aliases into those
@@ -44,6 +50,7 @@ pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx
     // Extract exports from the struct and register them.
     let exports = extract_exports(exports_val, symbols);
     register_stdlib_exports(cctx, symbols, &exports);
+    crate::trace::phase(boot, "boot", "stdlib-exports", t);
     // Arm guardfree page-protection (no-op unless --trace=guardfree): from
     // here on, freed pages are mprotected so the first user-program
     // use-after-free faults at the exact dereference. Stdlib init has its

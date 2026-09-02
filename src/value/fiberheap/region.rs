@@ -191,6 +191,34 @@ impl FiberHeap {
         self.alloc_count -= freed;
     }
 
+    /// Install a hydrated image region (docs/impl/image.md § Hydration):
+    /// adopt the mapped pages, rebuild the object bookkeeping from the index
+    /// (`base`-relative offsets), and account the objects like any other
+    /// allocation. Returns the minted `Counted` region — rc 1, the caller's
+    /// reference.
+    pub(crate) fn install_hydrated_region(
+        &mut self,
+        pages: Vec<(super::pagepool::MmapPage, usize, usize)>,
+        objects: &[(usize, crate::value::heap::HeapTag)],
+        base: usize,
+    ) -> RuntimeRegion {
+        let id = self
+            .region_store
+            .install_hydrated_region(pages, objects, base);
+        self.alloc_count += objects.len();
+        if self.alloc_count > self.peak_alloc_count {
+            self.peak_alloc_count = self.alloc_count;
+        }
+        self.total_alloc_count += objects.len() as u64;
+        id
+    }
+
+    /// The page layouts and live objects of one region, for the image dumper
+    /// (docs/impl/image.md § Dumping). `None` for an absent region.
+    pub(crate) fn region_pool(&self, id: RuntimeRegion) -> Option<&super::regionpool::RegionPool> {
+        self.region_store.region_pool(id)
+    }
+
     /// Page size used by the region store's page pool.
     pub fn region_page_size(&self) -> usize {
         self.region_store.page_size()

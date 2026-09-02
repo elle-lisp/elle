@@ -300,13 +300,16 @@ fn compile_file_inner(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(CompileResult, crate::syntax::Expander), String> {
+    let ct = crate::trace::compile();
     let (hir, arena, expander, prim_values, signal_projection) =
         compile_file_frontend(source, symbols, cctx, source_name)?;
 
     // Lower to LIR
+    let t = std::time::Instant::now();
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+    crate::trace::phase(ct, "compile", &format!("{} regions", source_name), t);
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
         let names = symbols.all_names();
         eprintln!(
@@ -314,6 +317,7 @@ fn compile_file_inner(
             crate::hir::format_regions(&region_info, &arena, &names)
         );
     }
+    let t = std::time::Instant::now();
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -322,11 +326,14 @@ fn compile_file_inner(
         .with_region_info(region_info);
 
     let lir_module = lowerer.lower(&hir)?;
+    crate::trace::phase(ct, "compile", &format!("{} lower", source_name), t);
 
     // Emit bytecode
+    let t = std::time::Instant::now();
     let signal = lir_module.entry.signal;
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
+    crate::trace::phase(ct, "compile", &format!("{} emit", source_name), t);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
 

@@ -43,6 +43,8 @@ Available trace keywords:
 | `:regions` | Region inference and lifetime decisions |
 | `:anf` | A-normal form lift pass |
 | `:pages` | Region page allocation |
+| `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute (string-traced, no bit) |
+| `:census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants (string-traced, no bit; see docs/impl/image.md § Sealing) |
 | `:free` | Region free diagnostics (string-traced, no bit) |
 | `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
 | `:freebt` | Free backtrace diagnostics (string-traced, no bit) |

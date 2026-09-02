@@ -140,8 +140,17 @@ mod scratch {
 mod truncation {
     include!("truncation.rs");
 }
+mod census {
+    include!("census.rs");
+}
+mod image {
+    include!("image.rs");
+}
 mod timeout_capture {
     include!("timeout_capture.rs");
+}
+mod trace_boot {
+    include!("trace_boot.rs");
 }
 mod trace_isolation {
     include!("trace_isolation.rs");

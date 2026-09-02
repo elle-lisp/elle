@@ -112,6 +112,9 @@ Tests are organized by feature area in separate files:
 | `environment.rs` | Environment variables |
 | `escape.rs` | Escape analysis |
 | `arena.rs` | Arena allocation |
+| `trace_boot.rs` | `--trace=boot`/`--trace=compile` phase-timing marks |
+| `census.rs` | Post-boot heap census: the sealing regression net and the `--trace=census` report (docs/impl/image.md) |
+| `image.rs` | Image store spike: dump/hydrate round-trip, fingerprint fallback, relocation independence, mapping and pool-interplay pins (docs/impl/image.md § Test plan) |
 | `allocator.rs` | Memory allocation |
 | ~~`parameters.rs`~~ | Migrated to `tests/elle/parameters.lisp` |
 | `ports.rs` | I/O ports |

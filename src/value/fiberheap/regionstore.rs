@@ -174,6 +174,7 @@ pub(crate) struct RegionStore {
 
 mod alloc;
 mod free;
+mod hydrate;
 mod introspect;
 mod mintscope;
 mod ownership;
