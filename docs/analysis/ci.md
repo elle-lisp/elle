@@ -119,11 +119,24 @@ RocksDB and needs libclang; `elle-plotters` reaches `font-kit`, which needs
 fontconfig through pkg-config and pulls the freetype, expat and png headers
 behind it.
 
-Read that set off the built artifacts, not off the manifests. After a local
-`make plugins`, `ldd target/release/libelle_*.so` names every library the build
-actually linked, and which plugin linked it. A manifest scan misses all of
-them, which is how the job's first run failed on a fontconfig nobody had
-declared.
+A manifest scan finds none of that, which is how the job's first run failed on
+a fontconfig nobody had declared. Two other readings do find it, and they
+answer different questions.
+
+For what the plugins **link**, read the built artifacts. After a local `make
+plugins`, `ldd target/release/libelle_*.so` names every shared library and
+which plugin needs it. Today that is `libfontconfig`, `libfreetype`,
+`libexpat`, `libpng16` and their compression chain under
+`libelle_plotters.so`, plus `libstdc++` under `libelle_oxigraph.so`, and
+nothing under any other portable plugin.
+
+For what the plugins **build with**, `ldd` says nothing: a build-time tool
+leaves no trace in the artifact. `oxrocksdb-sys` runs bindgen, which dlopens
+libclang at build time and links none of it — the job's second run failed
+there, one layer past the first. That class shows up only in a build on a bare
+runner, so read it out of the failure and set the variable the tool asks for.
+The job locates `libclang.so` rather than naming an LLVM version, because the
+version moves with the runner image.
 
 #### Why the job asserts its build output
 

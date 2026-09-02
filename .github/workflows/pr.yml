@@ -262,20 +262,27 @@ jobs:
         with:
           shared-key: plugins
       # Two plugins in the portable set are not pure Rust, and neither says so
-      # in its own Cargo.toml — the system libraries arrive several crates deep.
-      # Read the set off the built artifacts, not off the manifests: `ldd
-      # target/release/libelle_*.so` after a local `make plugins` names every
-      # library the build actually linked.
+      # in its own Cargo.toml — the dependencies arrive several crates deep.
+      # elle-plotters reaches font-kit, which wants fontconfig through
+      # pkg-config; libfontconfig1-dev brings the freetype, expat and png
+      # headers behind it. elle-oxigraph reaches oxrocksdb-sys, which runs
+      # bindgen over vendored RocksDB.
       #
-      # elle-oxigraph pulls oxrocksdb-sys, which runs bindgen over vendored
-      # RocksDB and needs libclang. elle-plotters pulls font-kit, which needs
-      # fontconfig through pkg-config; libfontconfig1-dev brings the freetype,
-      # expat and png headers the same chain wants.
+      # See docs/analysis/ci.md § "What the runner has to install" for how to
+      # find this set, which is not by reading manifests.
       - name: Install GNU parallel and the plugin build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel clang libclang-dev \
                                   pkg-config libfontconfig1-dev
+          # bindgen dlopens libclang by soname, and libclang-dev installs it
+          # under /usr/lib/llvm-<N>/lib, which is not on the loader's search
+          # path — so clang-sys has to be pointed at it. The <N> moves with the
+          # runner image, so find the file rather than write a version down, and
+          # fail here rather than let an empty LIBCLANG_PATH reach bindgen.
+          lib=$(find /usr/lib -name 'libclang.so*' -print -quit)
+          [ -n "$lib" ] || { echo "no libclang after installing libclang-dev"; exit 1; }
+          echo "LIBCLANG_PATH=$(dirname "$lib")" >> "$GITHUB_ENV"
       - name: make elle
         run: make elle
       - name: make plugins
