@@ -420,6 +420,58 @@ fn traited_value_refuses_dump() {
     }
 }
 
+// ── The platform rule the file geometry is built on ─────────────────
+
+// The trap, and the reason the pages section is aligned at all: `mmap`
+// refuses a file offset that is not a multiple of the OS page size. This
+// cost six hydration failures on macOS arm64, where the page is 16 KiB and
+// the pages section started at a hardcoded 4 KiB — legal on the 4 KiB hosts
+// every other CI job runs, EINVAL there.
+//
+// The counter-factual this pins: the round-trip tests above cannot catch
+// that class of bug, because the dumper and the hydrator agreed on the wrong
+// offset and agreement is all a round trip checks. This test asserts against
+// the kernel instead of against the other half of our own code.
+#[test]
+fn mmap_refuses_a_file_offset_off_the_page_boundary() {
+    let dir = crate::common::ScratchDir::new("image-mmap-offset");
+    let path = dir.join("offsets.bin");
+
+    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+    std::fs::write(&path, vec![0u8; page * 4]).expect("write");
+    let file = std::fs::File::open(&path).expect("open");
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&file);
+
+    let map_at = |offset: usize| unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            page,
+            libc::PROT_READ,
+            libc::MAP_PRIVATE,
+            fd,
+            offset as libc::off_t,
+        )
+    };
+
+    // A page-aligned offset maps; half a page in does not.
+    let good = map_at(page);
+    assert_ne!(good, libc::MAP_FAILED, "page-aligned offset must map");
+    unsafe { libc::munmap(good, page) };
+
+    let bad = map_at(page / 2);
+    assert_eq!(
+        bad,
+        libc::MAP_FAILED,
+        "a half-page offset mapped; this platform's rule is not what the \
+         image format assumes"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::EINVAL),
+        "expected EINVAL for a misaligned file offset"
+    );
+}
+
 // An immediate root needs no pages at all; the round trip is the header.
 #[test]
 fn immediate_root_round_trips() {

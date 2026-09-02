@@ -28,7 +28,7 @@ use crate::value::repr::{
 };
 use crate::value::Value;
 
-use super::format::{self, Header, PageEntry, HEADER_BLOCK};
+use super::format::{self, Header, PageEntry};
 use super::layout;
 use super::ImageError;
 
@@ -179,7 +179,7 @@ fn dump_into(
         format::write_u64_pair(&mut file_bytes, o, t);
     }
     debug_assert_eq!(file_bytes.len() % 8, 0);
-    debug_assert!(HEADER_BLOCK as u64 + pages_len <= file_bytes.len() as u64);
+    debug_assert!(format::pages_offset() as u64 + pages_len <= file_bytes.len() as u64);
 
     // Never rewrite an image file in place (§ Hydration): a mapped old inode
     // must stay stable while a new image replaces the path.

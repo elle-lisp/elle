@@ -333,7 +333,7 @@ One image is one file (or one embedded blob):
 | Section | Content |
 |---------|---------|
 | header | magic, format version, fingerprint, section offsets, page count |
-| pages | the dumped region's pages, largest first: body bytes per page at 4 KiB-aligned file offsets, so the section is mappable. Descending size order makes the packed layout self-aligning: every earlier page's size is a multiple of every later page's, so each page's offset — in the file and in the mapped interval — is a multiple of its own size, satisfying the masked-header walk with no padding |
+| pages | the dumped region's pages, largest first: body bytes per page at base-page-aligned file offsets, so the section is mappable. Descending size order makes the packed layout self-aligning: every earlier page's size is a multiple of every later page's, so each page's offset — in the file and in the mapped interval — is a multiple of its own size, satisfying the masked-header walk with no padding |
 | page table | (size, object cursor, data cursor) per page, in placement order — rebuilds each page's cursors |
 | relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval (Hydration step 3), so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
@@ -343,6 +343,16 @@ One image is one file (or one embedded blob):
 | watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
 | manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
 | side-stream | typed streams, present in any image: encoded `LirFunction`s keyed by template location (the boot configuration requires this stream — see *JIT*); `SendValue`-encoded mutable bindings (present only where the dump policy permits mutables) |
+
+**The pages section starts at a base-page boundary.** `mmap` accepts only a
+file offset that is a multiple of the OS page size, and that size is a
+property of the running machine rather than of the format: Linux on x86-64
+reports 4 KiB, macOS on arm64 reports 16 KiB. The header block is therefore
+padded with zeros up to the first base-page boundary at or after it, and the
+pages section begins there. Pinning the section to a fixed 4 KiB start
+instead would map on a 4 KiB machine and fail every page with `EINVAL` on a
+16 KiB one — the header block is the only part of the file read with `read`
+rather than mapped, so it is the only part whose offset is free.
 
 **Relocation slots.** A pointer slot is any 8-byte field holding an absolute
 address: a heap-tagged `Value`'s payload, a `RegionSlice`'s ptr. A primitive
@@ -369,8 +379,16 @@ layout agrees with the dumper's. The fingerprint records: format version,
 rustc version and target triple, `size_of`/`align_of` for `Value`,
 `HeapObject`, `RegionSlice`, `Closure`, `ClosureTemplate`, and `TableKey`, the
 instruction-set high-water mark, `CURRENT_EPOCH`, the feature set, a hash of
-the primitive name list in registration order, and (for the boot
-configuration) the hashes of the three sources.
+the primitive name list in registration order, the OS base page size, and
+(for the boot configuration) the hashes of the three sources.
+
+The base page size earns its place because the file's geometry is built from
+it: the pages section starts at a base-page boundary (§ File format) and
+every page size in the page table is a multiple of it. Two machines can
+agree on the target triple and still disagree here — arm64 Linux ships both
+4 KiB and 64 KiB kernels. Recording the size turns that case into a
+fingerprint mismatch, which falls back to sources, instead of a page table
+the reader rejects as corrupt or an offset `mmap` refuses.
 
 Size and align alone do not pin field offsets. The fingerprint therefore
 also records the probed layout of every variant the dumper can emit: the

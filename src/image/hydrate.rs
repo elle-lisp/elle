@@ -14,7 +14,7 @@ use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
 
-use super::format::{self, Header, HEADER_BLOCK, INDEX_BYTES, PAGE_ENTRY_BYTES, RELOC_BYTES};
+use super::format::{self, Header, INDEX_BYTES, PAGE_ENTRY_BYTES, RELOC_BYTES};
 use super::{Hydrated, ImageError};
 
 /// An address reservation that unmaps itself unless disarmed — the cleanup
@@ -39,8 +39,12 @@ pub fn hydrate(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError
     let file = std::fs::File::open(path)?;
     let file_len = file.metadata()?.len();
 
-    let mut block = vec![0u8; HEADER_BLOCK];
-    if file_len < HEADER_BLOCK as u64 {
+    // The header fields are read, not mapped, so only they need to be
+    // present before parsing; the padding out to `pages_offset` is checked
+    // with the rest of the geometry below.
+    let pages_at = format::pages_offset();
+    let mut block = vec![0u8; format::HEADER_BLOCK];
+    if file_len < format::HEADER_BLOCK as u64 {
         return Err(ImageError::Corrupt("file shorter than the header".into()));
     }
     file.read_exact_at(&mut block, 0)?;
@@ -63,7 +67,7 @@ pub fn hydrate(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError
     let meta_len = header.n_pages * PAGE_ENTRY_BYTES as u64
         + header.n_relocs * RELOC_BYTES as u64
         + header.n_objects * INDEX_BYTES as u64;
-    let meta_off = HEADER_BLOCK as u64 + pages_len;
+    let meta_off = pages_at as u64 + pages_len;
     if file_len < meta_off + meta_len {
         return Err(corrupt("file shorter than its sections claim"));
     }
@@ -177,8 +181,9 @@ pub fn hydrate(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError
     };
 
     // Map each page from the file into its slot (step 3). The pages section
-    // starts at the 4 KiB-aligned HEADER_BLOCK and offsets are multiples of
-    // each page's (≥ 4 KiB) size, so every file offset is mmap-legal.
+    // starts on a base-page boundary and each offset within it is a multiple
+    // of that page's own (≥ base-page) size, so every file offset here is a
+    // multiple of the OS page size — the only offsets `mmap` accepts.
     for &(off, e) in &entries {
         let want = (base + off as usize) as *mut libc::c_void;
         let got = unsafe {
@@ -188,7 +193,7 @@ pub fn hydrate(heap: &mut FiberHeap, path: &Path) -> Result<Hydrated, ImageError
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_PRIVATE | libc::MAP_FIXED,
                 file.as_raw_fd(),
-                (HEADER_BLOCK as u64 + off) as libc::off_t,
+                (pages_at as u64 + off) as libc::off_t,
             )
         };
         if got == libc::MAP_FAILED {

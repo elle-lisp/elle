@@ -2,12 +2,13 @@
 //! fingerprint that gates hydration (§ "Fingerprint: regenerate, never
 //! migrate").
 //!
-//! One header block of `HEADER_BLOCK` bytes, then the pages section at that
-//! 4 KiB-aligned offset, then the metadata sections (page table, relocations,
-//! object index). Pages are stored largest first, so packing them
-//! contiguously keeps every page's offset a multiple of its own size — the
-//! self-alignment the masked-header walk requires — and every file offset
-//! 4 KiB-aligned for `mmap`. All integers are little-endian u64 unless noted.
+//! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
+//! then the pages section, then the metadata sections (page table,
+//! relocations, object index). Pages are stored largest first, so packing
+//! them contiguously keeps every page's offset a multiple of its own size —
+//! the self-alignment the masked-header walk requires — and, since the
+//! section starts on a base-page boundary, every file offset stays legal for
+//! `mmap`. All integers are little-endian u64 unless noted.
 
 use std::mem::{align_of, size_of};
 
@@ -20,9 +21,28 @@ use super::ImageError;
 pub(crate) const MAGIC: [u8; 8] = *b"ELLEIMG\0";
 pub(crate) const VERSION: u32 = 0;
 
-/// Fixed size of the header block; the pages section starts here. Holds the
-/// magic, the section geometry, the root, and the fingerprint string.
+/// Fixed size of the serialized header block: the magic, the section
+/// geometry, the root, and the fingerprint string. The pages section starts
+/// at [`pages_offset`], at or after this.
 pub(crate) const HEADER_BLOCK: usize = 4096;
+
+/// File offset where the pages section starts, for this machine's OS page
+/// size (docs/impl/image.md § "The pages section starts at a base-page
+/// boundary").
+pub(crate) fn pages_offset() -> usize {
+    pages_offset_for(crate::value::fiberheap::pagepool::base_page())
+}
+
+/// The pages-section start for an OS base page size, as a pure function of
+/// it: the first multiple of `base_page` at or after the header block.
+///
+/// Split out from [`pages_offset`] so the alignment rule can be checked at
+/// page sizes this machine does not have — the defect it replaces was a
+/// fixed 4 KiB start, which no test on a 4 KiB host could distinguish from a
+/// correct one.
+pub(crate) fn pages_offset_for(base_page: usize) -> usize {
+    HEADER_BLOCK.next_multiple_of(base_page)
+}
 
 /// Byte offset of the fingerprint length field; the string follows it.
 const FINGERPRINT_AT: usize = 80;
@@ -34,11 +54,12 @@ const FINGERPRINT_AT: usize = 80;
 /// cannot see a reordered field or a moved discriminant.
 pub fn fingerprint() -> String {
     format!(
-        "elle-image v{} rustc={} target={}-{} value={}/{} heapobject={}/{} regionslice={}/{} epoch={} {}",
+        "elle-image v{} rustc={} target={}-{} page={} value={}/{} heapobject={}/{} regionslice={}/{} epoch={} {}",
         VERSION,
         env!("ELLE_RUSTC"),
         std::env::consts::ARCH,
         std::env::consts::OS,
+        crate::value::fiberheap::pagepool::base_page(),
         size_of::<Value>(),
         align_of::<Value>(),
         size_of::<HeapObject>(),
@@ -87,7 +108,10 @@ fn get(buf: &[u8], at: usize) -> u64 {
 }
 
 impl Header {
-    /// Serialize into a fresh `HEADER_BLOCK`-byte block.
+    /// Serialize into the file's whole header prefix: the `HEADER_BLOCK`
+    /// bytes of fields, then zero padding out to [`pages_offset`]. Emitting
+    /// the padding here keeps the pages section's start in one place — the
+    /// dumper appends pages to whatever this returns.
     pub fn to_block(&self) -> Result<Vec<u8>, ImageError> {
         let fp = self.fingerprint.as_bytes();
         if FINGERPRINT_AT + 8 + fp.len() > HEADER_BLOCK {
@@ -95,7 +119,7 @@ impl Header {
                 "fingerprint does not fit the header block".into(),
             ));
         }
-        let mut block = vec![0u8; HEADER_BLOCK];
+        let mut block = vec![0u8; pages_offset()];
         block[0..8].copy_from_slice(&MAGIC);
         block[8..12].copy_from_slice(&VERSION.to_le_bytes());
         put(&mut block, 16, self.pages_len);
@@ -172,6 +196,12 @@ pub(crate) fn read_u64_pair(buf: &[u8], i: usize, stride: usize) -> (u64, u64) {
     (get(buf, at), get(buf, at + 8))
 }
 
+/// Page sizes a host may report. 4 KiB is Linux on x86-64, 16 KiB is macOS
+/// on arm64, 64 KiB is an arm64 Linux kernel build — the alignment rule has
+/// to hold at every one of them, not just this machine's.
+#[cfg(test)]
+const HOST_PAGE_SIZES: [usize; 3] = [4096, 16384, 65536];
+
 /// Decode a stored tag word. Exhaustive over `HeapTag`: an unknown value is
 /// image corruption, not a variant to guess at.
 pub(crate) fn tag_from_u64(raw: u64) -> Result<HeapTag, ImageError> {
@@ -209,4 +239,96 @@ pub(crate) fn tag_from_u64(raw: u64) -> Result<HeapTag, ImageError> {
         }
     };
     Ok(tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::fiberheap::pagepool::base_page;
+
+    // The trap, discovered on macOS CI: `mmap` rejects a file offset that is
+    // not a multiple of the OS page size, and that size is a property of the
+    // host, not of the format — 4 KiB on Linux x86-64, 16 KiB on macOS
+    // arm64. The counter-factual: a fixed 4 KiB start passes every check a
+    // 4 KiB host can run, then fails all six hydration tests with EINVAL on
+    // a 16 KiB one. Asserting over HOST_PAGE_SIZES, not over base_page(),
+    // is what makes this test able to fail here.
+    #[test]
+    fn pages_section_starts_on_a_boundary_of_every_host_page_size() {
+        for p in HOST_PAGE_SIZES {
+            let off = pages_offset_for(p);
+            assert_eq!(
+                off % p,
+                0,
+                "pages start {off} is not a multiple of page {p}"
+            );
+        }
+    }
+
+    // The header block must still fit in front of the pages: aligning up may
+    // only ever push the section later, never overlap the block it follows.
+    #[test]
+    fn pages_section_starts_at_or_after_the_header_block() {
+        for p in HOST_PAGE_SIZES {
+            assert!(
+                pages_offset_for(p) >= HEADER_BLOCK,
+                "page {p} puts the pages section inside the header block"
+            );
+        }
+    }
+
+    // Aligning up must not waste a whole page when the block already sits on
+    // a boundary — the 4 KiB host keeps the layout it had.
+    #[test]
+    fn a_page_sized_header_block_needs_no_padding() {
+        assert_eq!(pages_offset_for(HEADER_BLOCK), HEADER_BLOCK);
+    }
+
+    // The live wiring, as opposed to the rule: whatever this host reports,
+    // the offset the dumper writes at and the hydrator maps from is legal
+    // for it.
+    #[test]
+    fn this_hosts_pages_offset_is_mmap_legal() {
+        assert_eq!(pages_offset() % base_page(), 0);
+        assert_eq!(pages_offset(), pages_offset_for(base_page()));
+    }
+
+    // The dumper appends pages directly to `to_block`'s output, and the
+    // hydrator maps them from `pages_offset` — so the block's length is the
+    // agreement between the two halves. The counter-factual: a block padded
+    // to HEADER_BLOCK while the hydrator maps from a 16 KiB boundary reads
+    // 12 KiB of header as page bytes, and every object decodes as garbage.
+    #[test]
+    fn the_header_block_runs_exactly_up_to_the_pages_section() {
+        let header = Header {
+            pages_len: 0,
+            n_pages: 0,
+            n_relocs: 0,
+            n_objects: 0,
+            root_tag: 0,
+            root_payload: 0,
+            root_is_heap: false,
+            fingerprint: fingerprint(),
+        };
+        let block = header.to_block().expect("fingerprint fits");
+        assert_eq!(block.len(), pages_offset());
+        assert!(
+            block[HEADER_BLOCK..].iter().all(|&b| b == 0),
+            "padding between the header fields and the pages section is not zero"
+        );
+    }
+
+    // The page size shapes the file geometry, so an image built under a
+    // different one cannot be mapped here. Recording it makes that a
+    // fingerprint mismatch — the documented fallback — instead of a page
+    // table the reader calls corrupt (§ "Fingerprint: regenerate, never
+    // migrate").
+    #[test]
+    fn the_fingerprint_records_the_host_page_size() {
+        assert!(
+            fingerprint().contains(&format!("page={}", base_page())),
+            "fingerprint omits the page size: {}",
+            fingerprint()
+        );
+    }
 }
