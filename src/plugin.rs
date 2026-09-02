@@ -5,8 +5,10 @@
 //! receives an `ElleApiLoader` + `EllePluginCtx`, resolves API functions
 //! by name, and registers primitives.
 //!
-//! The ABI is stable: plugins can be compiled separately from elle and
-//! loaded at runtime without version matching.
+//! The ABI is stable: a plugin compiles separately from elle and loads at
+//! runtime. Stable does not mean unversioned — a lookup carries the name and
+//! not the argument list, so the loader advertises `ABI_VERSION` and the
+//! plugin refuses a host it cannot call (docs/plugins.md § "The ABI version").
 
 use crate::error::{LError, LResult};
 use crate::plugin_api::{self, ApiLoader, PrimDefRaw};

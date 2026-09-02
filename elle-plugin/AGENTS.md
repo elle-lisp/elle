@@ -14,6 +14,12 @@ Single resolve function — same pattern as `vkGetInstanceProcAddr`.
 Plugins look up API functions by name at init time. Adding functions
 to elle never breaks existing plugins.
 
+A lookup carries the name, not the argument list, so a changed signature
+resolves and then miscalls. `ABI_VERSION` names the current calling
+convention; the host advertises its own in `ElleApiLoader::version` and
+init returns `-2` on a mismatch. See `docs/plugins.md` § "The ABI version"
+for the history and the rule for bumping it.
+
 ## Key Types
 
 | Type | Purpose |
@@ -44,3 +50,7 @@ to elle never breaks existing plugins.
 2. All types are `#[repr(C)]` for ABI stability.
 3. `ElleValue` is never inspected — always accessed through `Api`.
 4. Plugin .so is never unloaded — string pointers from rodata are static.
+5. `ABI_VERSION` is written once, here; the host reads it rather than
+   copying it.
+6. `tests.rs` pins the signature of every function the current version
+   names, so a changed argument list cannot ship under the old number.

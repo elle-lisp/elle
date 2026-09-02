@@ -6,16 +6,47 @@ use `import` with the `std/` prefix and require no compilation.
 
 ## Stable ABI
 
-Plugins depend on the `elle-plugin` crate — not on `elle` itself. This
-provides a stable ABI: plugins can be compiled independently from elle
-and loaded at runtime without version matching. The ABI uses a named
-function lookup pattern (like `vkGetInstanceProcAddr`). Adding API
-functions to elle never breaks existing plugins.
+Plugins depend on the `elle-plugin` crate — not on `elle` itself, so a
+plugin compiles independently and loads at runtime. The ABI uses a named
+function lookup pattern (like `vkGetInstanceProcAddr`): the plugin asks
+the host for each API function by name at init time. Adding API functions
+to elle never breaks an existing plugin, because a plugin only asks for
+the names it was written against.
 
 Plugins live in a [separate repository](https://github.com/elle-lisp/plugins),
 available as a git submodule at `plugins/`.
 See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for a step-by-step
 guide to writing a plugin.
+
+### The ABI version
+
+Name lookup carries the name, not the calling convention. A plugin that
+resolves `struct_key` gets whatever the host has under that name. It then
+calls that pointer through the argument list it was compiled with. A
+changed signature is therefore a corrupt call, not a failed lookup.
+`ABI_VERSION` names the current calling convention, and it is the only
+thing that tells those two cases apart.
+
+The host advertises its version in `ElleApiLoader::version`, and
+`define_plugin!`'s init returns `-2` when that differs from the
+`ABI_VERSION` the plugin was built against. The load fails cleanly and the
+`import` reports it.
+
+| Version | What it named |
+|---------|---------------|
+| 2 | Primitives took `(args, nargs)`. |
+| 3 | Primitives take a leading opaque `*mut ElleCtx`, and thread it into the allocating constructors. |
+| 4 | The keyword and struct-key name readers take the `ctx` too: a spelling comes from the calling instance's memo. |
+
+Bump `ABI_VERSION` whenever an existing declaration in `elle_api!` changes
+its arguments or return type, whenever a declaration is removed, and
+whenever the primitive calling convention itself changes. Adding a new
+declaration needs no bump.
+
+`elle-plugin`'s tests pin the signature of every function the current
+version names. Changing one fails the build until the pin and the version
+move together, because an unbumped signature change is the one breakage
+the load guard cannot see.
 
 ## Building plugins
 

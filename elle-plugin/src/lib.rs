@@ -19,9 +19,19 @@ mod accessors;
 /// host whose version differs, turning an incompatible calling convention into a
 /// clean load failure instead of undefined behaviour.
 ///
+/// Name lookup carries the name and not the argument list, so a changed
+/// signature resolves and then miscalls. This number is what separates that
+/// from a name the plugin simply never asked for. Bump it whenever a
+/// declaration in `elle_api!` changes or disappears, and whenever the primitive
+/// calling convention changes; adding a declaration needs no bump. The version
+/// history and the rule are in `docs/plugins.md` § "The ABI version", and
+/// `tests.rs` pins the signature set this number names.
+///
 /// v3 added a leading opaque `*mut ElleCtx` (per-call region + heap capability)
-/// to every primitive and to the allocating constructors.
-pub const ABI_VERSION: u32 = 3;
+/// to every primitive and to the allocating constructors. v4 extends it to the
+/// keyword and struct-key name readers, whose spellings come from the calling
+/// instance's memo.
+pub const ABI_VERSION: u32 = 4;
 
 // ── Signal constants ──────────────────────────────────────────────────
 
@@ -141,6 +151,8 @@ pub type PluginInitFn = extern "C" fn(loader: &ElleApiLoader, ctx: &mut EllePlug
 /// This macro generates:
 /// - `Api` struct with one function pointer field per declared function
 /// - `Api::load()` that resolves all function pointers from the loader
+/// - `ABI_FUNCTIONS`, the declared name and signature of each, for the test
+///   that pins what `ABI_VERSION` names
 macro_rules! elle_api {
     ($(fn $name:ident($($arg:ty),*) -> $ret:ty;)*) => {
         /// Resolved function pointer cache. Built once at plugin init.
@@ -150,6 +162,16 @@ macro_rules! elle_api {
         pub struct Api {
             $(pub $name: extern "C" fn($($arg),*) -> $ret,)*
         }
+
+        /// Every declared API function, as `(name, signature)`, in declaration
+        /// order. The signature is the argument types and return type as
+        /// written, which is what a plugin compiles its call against.
+        pub const ABI_FUNCTIONS: &[(&str, &str)] = &[
+            $((
+                stringify!($name),
+                concat!("(", $(stringify!($arg), ",",)* ")->", stringify!($ret)),
+            ),)*
+        ];
 
         impl Api {
             /// Resolve all functions from the loader.
@@ -546,3 +568,6 @@ impl EllePrimDef {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
