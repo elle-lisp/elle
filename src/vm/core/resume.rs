@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::fiber::ActivationDues;
 
 impl VM {
     /// Resume execution from suspended frames.
@@ -19,7 +20,7 @@ impl VM {
     /// Returns SignalBits. The result value is stored in `self.fiber.signal`.
     pub fn resume_suspended(
         &mut self,
-        frames: Vec<SuspendedFrame>,
+        mut frames: Vec<SuspendedFrame>,
         resume_value: Value,
     ) -> SignalBits {
         if frames.is_empty() {
@@ -33,6 +34,16 @@ impl VM {
         let mut current_value = resume_value;
 
         for i in 0..frames.len() {
+            // MOVE what the parked activation owed out of the frame before the
+            // shared borrow below: the record lives in exactly one place, and
+            // from the restore on it is the live slot's (docs/impl/region/owner.md
+            // § "A deferred tail-call release has the node's life"). A
+            // `FiberResume` frame owes nothing — its sub-fiber has its own
+            // lifecycle — and this arm returns before the restore anyway.
+            let parked_dues = match &mut frames[i] {
+                SuspendedFrame::Bytecode(f) => std::mem::take(&mut f.activation_dues),
+                SuspendedFrame::FiberResume { .. } => ActivationDues::default(),
+            };
             let frame = &frames[i];
 
             match frame {
@@ -201,16 +212,17 @@ impl VM {
                     // Restore this activation's static→physical region remap
                     // as the current frame before re-entering its body, so
                     // post-resume allocs/decrefs resolve in the same frame the
-                    // pre-yield allocations did (docs/impl/region/owner.md). The
-                    // parked owner node is restored with it, so the resumed
-                    // body's normal completion frees it through the trampoline's
-                    // clean break. The chain is
+                    // pre-yield allocations did (docs/impl/region/owner.md). What
+                    // the activation owed is restored with it — its owner node and
+                    // the releases it took over from its own frame-replacing tail
+                    // calls — so the resumed body's normal completion discharges
+                    // both through the trampoline's clean break. The chain is
                     // replayed sequentially (not Rust-nested), so each frame
                     // gets its own push/pop around its resumed execution.
                     // `from_ip` does not push/pop, so we manage it here.
                     self.restore_activation_region_map(
                         frame.activation_region_map.clone(),
-                        frame.activation_owner_node,
+                        parked_dues,
                     );
 
                     // Re-install the executing-closure register parked at suspend so
@@ -263,7 +275,7 @@ impl VM {
                                 .last()
                                 .cloned()
                                 .unwrap_or_default();
-                            let activation_owner_node = self.take_activation_owner_node();
+                            let activation_dues = self.take_activation_dues();
                             let re_suspend = BytecodeFrame::suspend(
                                 exec.code,
                                 exec.env,
@@ -271,7 +283,7 @@ impl VM {
                                 exec.stack,
                                 !exec.bits.intersects(SIG_FUEL),
                                 activation_region_map,
-                                activation_owner_node,
+                                activation_dues,
                                 exec.current_closure,
                                 self.heap(),
                             );

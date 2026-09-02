@@ -280,6 +280,16 @@ impl RegionStore {
                     handle.try_with_mut(|fib| {
                         let parked = fib.take_parked_state();
                         discharged.extend(parked.nodes.iter().map(|r| r.get()));
+                        // The releases those activations took over from their own
+                        // frame-replacing tail calls (docs/impl/region/owner.md
+                        // § "A deferred tail-call release has the node's life").
+                        // The completion that would have run them is a
+                        // continuation this fiber can never re-enter. Unlike the
+                        // owed tables below, these name no value the payload could
+                        // be: a deferred region is the tail callee's own closure
+                        // region or a merged arena, and a raise's payload is
+                        // neither.
+                        discharged.extend(parked.deferred.iter().map(|r| r.get()));
                         if let Some(node) = fib.fiber_owner_node.take() {
                             discharged.push(node.get());
                         }

@@ -92,11 +92,12 @@ impl VM {
                 .last()
                 .cloned()
                 .unwrap_or_default();
-            // MOVE the activation's owner node into the frame (its slot is
-            // likewise still on top): the members are Owned with no other
-            // release route, so the node must ride the park to the resumed
+            // MOVE what the activation owes into the frame (its slot is
+            // likewise still on top): a node's members are Owned with no other
+            // release route and a deferred tail-call release has no emitted
+            // instruction left at all, so both must ride the park to the resumed
             // body's completion (docs/impl/region/owner.md § "Owner nodes").
-            let activation_owner_node = self.take_activation_owner_node();
+            let activation_dues = self.take_activation_dues();
             // The yielding activation runs the current closure — park it so the
             // recursion resolves to the same closure after resume.
             let current_closure = self.fiber.current_closure;
@@ -107,7 +108,7 @@ impl VM {
                 saved_stack,
                 true,
                 activation_region_map,
-                activation_owner_node,
+                activation_dues,
                 current_closure,
                 self.heap(),
             ));

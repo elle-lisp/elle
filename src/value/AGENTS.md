@@ -19,6 +19,7 @@ Runtime value representation using a tagged union.
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
 | `closure.rs` | `Closure` (template + env + squelch mask), `ClosureTemplate`, `TemplateRef` |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
+| `fiber/dues.rs` | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither (docs/impl/region/owner.md § "A deferred tail-call release has the node's life") |
 | `fiber/delivery.rs` | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface (docs/impl/region/owner.md § "A park names its funding in the delivery ledger") |
 | `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs (docs/impl/region/errors.md) |
 | `ffi.rs` | `LibHandle` for C interop |

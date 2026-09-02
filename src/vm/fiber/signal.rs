@@ -126,10 +126,10 @@ impl VM {
                 .last()
                 .cloned()
                 .unwrap_or_default();
-            // MOVE the caller's owner node into its continuation park — this
+            // MOVE what the caller's activation owes into its continuation park — this
             // activation unwinds with the SIG_SWITCH handoff
             // (docs/impl/region/owner.md § "Owner nodes").
-            let activation_owner_node = self.take_activation_owner_node();
+            let activation_dues = self.take_activation_dues();
             // The closure that called `fiber/resume` is the one to resume into.
             let current_closure = self.fiber.current_closure;
             let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
@@ -139,7 +139,7 @@ impl VM {
                 caller_stack,
                 true,
                 activation_region_map,
-                activation_owner_node,
+                activation_dues,
                 current_closure,
                 self.heap(),
             ));
@@ -192,10 +192,10 @@ impl VM {
                         .last()
                         .cloned()
                         .unwrap_or_default();
-                    // MOVE the caller's owner node into its continuation park —
+                    // MOVE what the caller's activation owes into its continuation park —
                     // this activation unwinds with the child's suspending
                     // signal (docs/impl/region/owner.md § "Owner nodes").
-                    let activation_owner_node = self.take_activation_owner_node();
+                    let activation_dues = self.take_activation_dues();
                     // Caller activation's remap (the resumed sub-fiber runs
                     // on its own frame stack; this frame continues us).
                     let current_closure = self.fiber.current_closure;
@@ -206,7 +206,7 @@ impl VM {
                         caller_stack,
                         true,
                         activation_region_map,
-                        activation_owner_node,
+                        activation_dues,
                         current_closure,
                         self.heap(),
                     ));

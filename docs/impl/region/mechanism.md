@@ -1646,6 +1646,12 @@ function releases for is what keeps a caller's leftovers out: the map survives a
 frame-replacing tail call, and the references still in it are the callee's own machinery
 to answer for.
 
+The tables are not everything the exit runs. A release the frame took over from a
+frame-replacing tail call has no route and no receipt to record — the instruction that
+would have run it is the *caller's*, dead past the `TailCall` — so it is carried on the
+activation itself and discharged at the same exits, on the same `walk_abandoned` question
+([owner.md](owner.md) § "A deferred tail-call release has the node's life").
+
 **What the signal carries is not abandoned — unless the raise minted its delivery.**
 The error's payload leaves with the signal, and the catcher's read of it is funded by
 exactly one **delivery** reference. Where that reference comes from decides what the

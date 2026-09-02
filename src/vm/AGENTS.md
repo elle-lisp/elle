@@ -78,9 +78,12 @@ creating `SuspendedFrame`s or `TailCallInfo`.
 - `execute_bytecode` wraps raw slices in `Rc` once at the public boundary
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take `&Rc`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
-  value (installed as `fiber.current_closure` on the frame replacement), its
-  squelch mask, and an optional adopt region — tail calls clone the `Rc`s (cheap),
-  not the `Vec`s (expensive)
+  value (installed as `fiber.current_closure` on the frame replacement), and its
+  squelch mask — tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).
+  The releases the call strands are NOT carried here: `tail_call_inner` records
+  them on the activation's own `ActivationDues`, which outlives whoever consumes
+  the pending call (docs/impl/region/owner.md § "A deferred tail-call release has
+  the node's life")
 - `closure_env` parameter is `&Rc<Vec<Value>>` (non-optional; empty Rc for no env)
 - `execute_closure_bytecode` takes `&Rc` params directly (no `.to_vec()` copy);
   used by JIT trampolines where the closure already owns Rc'd data

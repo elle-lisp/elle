@@ -101,7 +101,7 @@ branches — `(begin (stmt …) (go k))`, `(if c go (go k))` — and the frame i
 the same. On the paths that take the tail call the scope end is dead and the
 deferral supplies it; on a path that falls through instead — a sibling arm, or a callee
 that turns out to be a native and keeps the frame — the scope-end `DecrefRegion` runs live
-and no deferral is recorded at all (`tail_call_inner` builds `DeferredReleases` only on
+and no deferral is recorded at all (`tail_call_inner` records one only on
 the closure arm). The two channels are exclusive per path by construction, so a body whose
 paths disagree needs no choice made for it.
 
@@ -166,10 +166,13 @@ cell-free case.
 In both stranded cases the runtime **deferred release** supplies it.
 `tail_callee_defers_release` (`lir/lower/control/call.rs`) returns true for every tail call to a
 `stranded_self_bindings` callee (§ "The deferral needs no escape gate"); the `TailCall` then
-carries `DeferredReleases::callee = region_of(callee)`, and `trampoline_loop` (`vm/execute.rs`)
-decrefs each deferred region exactly once on the recursion's **normal completion** (deduped — a
-tail-recursive `loop` re-enters with the same closure each iteration but carries one
-stranded decref).
+carries the callee channel's `region_of(callee)`, `tail_call_inner` records it on the
+activation, and the activation decrefs each deferred region exactly once when it ends
+(deduped — a tail-recursive `loop` re-enters with the same closure each iteration but carries
+one stranded decref). Which ends it takes — the recursion's normal completion, a park it is
+resumed out of, or an abandonment no resume reaches — is the activation owner node's question
+and is answered beside it ([region/owner.md](region/owner.md) § "A deferred tail-call release
+has the node's life").
 
 That marking is consulted **before** the predicate's demise reading, which asks whether some
 region's `decref_point` is this call node. The stranded binding's release is at its binder's
@@ -207,13 +210,13 @@ call:
 - any **container's**, taken by the store funnel when the closure is stored on the way out
   — the store facet, which never refused.
 
-The deferral runs at the recursion's **normal completion**: `trampoline_loop` breaks only
-once the final body has returned, so every `Return` mint on the taken path has already
-executed. The order over one call is: frame reference taken, callee mint, deferred release,
-caller's release — and between the mint and the caller's release the standing reference is
-the caller's. On a path that returns something *else* no mint fired and no one else holds
-the region, so the deferral's decref is the last reference and freeing there is exactly
-right.
+On the **normal completion** the order over one call is: frame reference taken, callee mint,
+deferred release, caller's release — the trampoline breaks only once the final body has
+returned, so every `Return` mint on the taken path has already executed, and between the mint
+and the caller's release the standing reference is the caller's. On a path that returns
+something *else* no mint fired and no one else holds the region, so the deferral's decref is
+the last reference and freeing there is exactly right. An **abandoned** exit is that second
+case: the callee never returned, so it minted nothing and handed the closure to nobody.
 
 This is the same "the retain on this node funds this release" argument the frame-exit
 relocation makes for a returned region ([region/mechanism.md](region/mechanism.md) § "The

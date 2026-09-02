@@ -152,7 +152,7 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
             vec![],
             true,
             rustc_hash::FxHashMap::default(),
-            Some(node_b),
+            crate::value::fiber::ActivationDues::with_owner_node(node_b),
             crate::value::Value::NIL,
             unsafe { &*heap_ptr },
         );
@@ -863,7 +863,7 @@ fn a_primitive_park_delivery_is_worth_one_retain() {
             vec![],
             true,
             rustc_hash::FxHashMap::default(),
-            None,
+            crate::value::fiber::ActivationDues::default(),
             crate::value::Value::NIL,
             unsafe { &*heap_ptr },
         );

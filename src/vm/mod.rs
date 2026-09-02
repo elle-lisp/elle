@@ -207,13 +207,14 @@ impl VM {
         // Whether THIS invocation is the true root driver (the fiber's base
         // activation frame). A top-level body runs directly on the base slot —
         // this entry pushes no activation frame — so an `AdoptIntoActivation` it
-        // executes mints the owner node in the BASE slot, which no trampoline
-        // clean break ever releases; the root driver must release it itself at
-        // the program's completion (below). A RE-ENTRANT execute_code (a native
-        // loading a module mid-activation) runs in its caller's activation
-        // (depth > 1), whose node belongs to that caller's own completion
-        // release — it must not be touched here.
-        let at_root = self.fiber.activation_owner_nodes.len() == 1;
+        // executes mints the owner node in the BASE slot, and a top-level tail
+        // call records its deferred release there, neither of which any
+        // trampoline clean break ever reaches; the root driver discharges them
+        // itself at the program's completion (below). A RE-ENTRANT execute_code
+        // (a native loading a module mid-activation) runs in its caller's
+        // activation (depth > 1), whose dues belong to that caller's own
+        // completion release — they must not be touched here.
+        let at_root = self.fiber.activation_dues.len() == 1;
 
         // Initial execution with tail-call loop.
         // Scope-mark rotation: when a tail call is rotation-safe,
@@ -281,14 +282,15 @@ impl VM {
                 ));
             }
         };
-        // The root activation's clean break: release the base slot's owner node
-        // (one tolerant decref → subtree drop over node + adopted members) at the
+        // The root activation's clean break: discharge the base slot's dues —
+        // the owner node (one tolerant decref → subtree drop over node +
+        // adopted members) and whatever a top-level tail call deferred — at the
         // program's completion, the root counterpart of `trampoline_loop`'s
         // normal-break release (docs/impl/region/owner.md § "Owner nodes"). Runs
         // on every root exit — a finished program has no resumable state at this
         // boundary, so an error exit releases identically.
         if at_root {
-            self.release_activation_owner_node();
+            self.release_activation_dues();
         }
         self.fiber.current_closure = saved_closure;
         result

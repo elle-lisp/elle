@@ -145,7 +145,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) adopt_into_activation: FuncId,
     /// Free the current activation's owner node at the compiled `Return` path —
     /// the JIT twin of the interpreter trampoline's clean-break release.
-    pub(crate) release_activation_owner_node: FuncId,
+    pub(crate) release_activation_dues: FuncId,
     /// Run the releases this compiled activation still owed at an **error** exit
     /// — the compiled entry to the interpreter's abandoned-frame walk.
     pub(crate) release_abandoned_frame: FuncId,
@@ -449,8 +449,8 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_adopt_into_activation as *const u8,
     );
     builder.symbol(
-        "elle_jit_release_activation_owner_node",
-        dispatch::elle_jit_release_activation_owner_node as *const u8,
+        "elle_jit_release_activation_dues",
+        dispatch::elle_jit_release_activation_dues as *const u8,
     );
     builder.symbol(
         "elle_jit_release_abandoned_frame",

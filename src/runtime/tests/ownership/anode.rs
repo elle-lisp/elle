@@ -221,7 +221,7 @@ fn activation_owner_node_survives_repeated_parks() {
     );
 }
 
-/// The node rides `ExecResult::activation_owner_node` when the park is built by
+/// The node rides `ExecResult::activation_dues` when the park is built by
 /// the CALLER of the already-unwound activation — the fuel-pause channel
 /// (docs/impl/region/owner.md § "Owner nodes"). A fuel pause (unlike a yield)
 /// creates no suspended frame inside the dispatch loop: the activation unwinds
@@ -297,7 +297,7 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
             result.stack,
             !result.bits.intersects(crate::value::SIG_FUEL),
             result.activation_region_map,
-            result.activation_owner_node,
+            result.activation_dues,
             result.current_closure,
             vm.heap(),
         );

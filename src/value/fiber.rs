@@ -21,6 +21,9 @@ pub use status::*;
 mod delivery;
 pub use delivery::Delivery;
 
+mod dues;
+pub use dues::ActivationDues;
+
 mod signalbits;
 pub use signalbits::SignalBits;
 
@@ -172,19 +175,21 @@ pub struct Fiber {
     /// covers the top level). Carried on the fiber so it survives yields.
     pub activation_region_maps: Vec<rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>>,
 
-    /// The per-activation OWNER-NODE slots, parallel to `activation_region_maps`
-    /// (one entry per activation frame; pushed/popped only through
+    /// The per-activation DUES slots, parallel to `activation_region_maps` (one
+    /// entry per activation frame; pushed/popped only through
     /// `VM::push_activation_region_map` / `restore_activation_region_map` /
     /// `pop_activation_region_map`, which keep the two stacks in lockstep). An
-    /// entry holds the activation's pages-less owner-node region — the forest
-    /// root `AdoptIntoActivation` adopts members into (docs/impl/region/owner.md
-    /// § "Owner nodes — an activation as a forest root") — or `None` until the
-    /// activation's first adopt lazily mints it. Freed at the activation's
-    /// normal completion (`VM::release_activation_owner_node`); a suspend MOVES
-    /// the slot's node into the parked frame
-    /// ([`BytecodeFrame::activation_owner_node`]) and the resume restores it,
-    /// so the node reaches that completion across any number of parks.
-    pub activation_owner_nodes: Vec<Option<crate::hir::region::RuntimeRegion>>,
+    /// entry holds what the activation owes the region system when it ends: its
+    /// pages-less owner-node region — the forest root `AdoptIntoActivation`
+    /// adopts members into (docs/impl/region/owner.md § "Owner nodes — an
+    /// activation as a forest root") — and the releases it took over from
+    /// frame-replacing tail calls. Discharged at the activation's normal
+    /// completion (`VM::release_activation_dues`); a suspend MOVES the whole
+    /// record into the parked frame ([`BytecodeFrame::activation_dues`]) and the
+    /// resume restores it, so both reach that completion across any number of
+    /// parks (docs/impl/region/owner.md § "A deferred tail-call release has the
+    /// node's life").
+    pub activation_dues: Vec<ActivationDues>,
 
     /// The FIBER's own owner node — the pages-less forest root for a region whose
     /// owner is the fiber itself, outliving every single activation
@@ -278,6 +283,14 @@ pub struct ParkedState {
     /// can be stale (its value's release was emitted value-based, or died past a
     /// tail call), so a blanket map release double-frees a possibly-recycled id.
     pub nodes: Vec<crate::hir::region::RuntimeRegion>,
+    /// The releases each still-parked `BytecodeFrame`'s activation took over from
+    /// its own frame-replacing tail calls, in chain order. Kept apart from
+    /// [`Self::nodes`] because the two are freed differently: a node's members are
+    /// gathered under the fiber node before its subtree drop, while a deferred
+    /// region is `Counted` throughout and takes the plain decref its emitting
+    /// instruction never ran (docs/impl/region/owner.md § "A deferred tail-call
+    /// release has the node's life").
+    pub deferred: Vec<crate::hir::region::RuntimeRegion>,
     /// The parked NON-TERMINAL signal (a yielded value, a yielding io request, a
     /// capability-denial payload) — its park took exactly one escape retain
     /// (`EmitEscape` / `SuspendEscape`) whose symmetric release lives on the
@@ -348,6 +361,7 @@ impl Fiber {
     /// across two discharges.
     pub fn take_parked_state(&mut self) -> ParkedState {
         let mut nodes = Vec::new();
+        let mut deferred = Vec::new();
         let mut owed = Vec::new();
         let mut owed_regions = Vec::new();
         let mut owns_signal = false;
@@ -362,7 +376,8 @@ impl Fiber {
                 if i == 0 {
                     owns_signal = true;
                 }
-                nodes.extend(f.activation_owner_node);
+                nodes.extend(f.activation_dues.owner_node);
+                deferred.extend(f.activation_dues.deferred.iter().copied());
                 // The releases this frame still owed. Its locals sit at the base
                 // of the saved stack (the activation's own frame base, the stack
                 // having been emptied at entry), so the emitter's slot indexes
@@ -411,6 +426,7 @@ impl Fiber {
         }
         ParkedState {
             nodes,
+            deferred,
             signal,
             owed,
             owed_regions,
@@ -439,7 +455,7 @@ impl Fiber {
             delivery: Delivery::new(),
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
-            activation_owner_nodes: vec![None],
+            activation_dues: vec![ActivationDues::default()],
             fiber_owner_node: None,
             current_closure: Value::NIL,
             call_depth: 0,
@@ -475,7 +491,7 @@ impl Fiber {
             delivery: Delivery::new(),
             suspended: None,
             activation_region_maps: vec![rustc_hash::FxHashMap::default()],
-            activation_owner_nodes: vec![None],
+            activation_dues: vec![ActivationDues::default()],
             fiber_owner_node: None,
             current_closure: Value::NIL,
             call_depth: 0,

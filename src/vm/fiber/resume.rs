@@ -267,8 +267,8 @@ impl VM {
             // (SIG_ERROR, user-defined, etc.): the instruction at result.ip expects
             // the signal's "return value" on the stack (e.g. Return needs a value to
             // pop), so push it.
-            // The body's owner node rode out of the popped activation in
-            // `result.activation_owner_node` (moved, beside the region map) —
+            // What the body's activation owed rode out of the popped activation in
+            // `result.activation_dues` (moved, beside the region map) —
             // park it so the resumed body's completion frees it.
             let frame = BytecodeFrame::suspend(
                 result.code,
@@ -277,7 +277,7 @@ impl VM {
                 result.stack,
                 !result.bits.intersects(SIG_FUEL),
                 result.activation_region_map,
-                result.activation_owner_node,
+                result.activation_dues,
                 result.current_closure,
                 self.heap(),
             );

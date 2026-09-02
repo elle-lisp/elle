@@ -198,11 +198,11 @@ pub extern "C" fn elle_jit_yield(
         let resume_ip = yield_meta.resume_ip;
         trace_park("jit-yield", closure, yield_index, resume_ip, &env, &stack);
         check_parked_frame("elle_jit_yield", closure, resume_ip, &env, &stack);
-        // MOVE the activation's owner node into the frame (its slot is
+        // MOVE what the activation owes into the frame (its slot is
         // likewise still on top) so it rides the park to the resumed body's
         // completion — the compiled twin of the interpreter yield park
         // (docs/impl/region/owner.md § "Owner nodes").
-        let activation_owner_node = vm.take_activation_owner_node();
+        let activation_dues = vm.take_activation_dues();
         // The yielding body's own closure — park it so a self-edge resolved after
         // resume (re-entering via the interpreter) names the right closure. The JIT
         // already threads it here for self-tail-call detection.
@@ -213,7 +213,7 @@ pub extern "C" fn elle_jit_yield(
             stack,
             true,
             activation_region_map,
-            activation_owner_node,
+            activation_dues,
             closure_val,
             vm.heap(),
         ));
@@ -320,9 +320,9 @@ pub extern "C" fn elle_jit_yield_through_call(
         &env,
         &stack,
     );
-    // MOVE the caller's owner node into its park — this compiled activation
+    // MOVE what the caller's activation owes into its park — this compiled activation
     // unwinds with the callee's suspending signal (see elle_jit_yield).
-    let activation_owner_node = vm.take_activation_owner_node();
+    let activation_dues = vm.take_activation_dues();
     // The caller body's own closure (see elle_jit_yield) — park it for the resume.
     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
         code,
@@ -331,7 +331,7 @@ pub extern "C" fn elle_jit_yield_through_call(
         stack,
         true,
         activation_region_map,
-        activation_owner_node,
+        activation_dues,
         closure_val,
         vm.heap(),
     ));
