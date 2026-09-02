@@ -14,7 +14,7 @@ use super::lir::convert_lir_for_send;
 /// so they are emitted inline; `env`/`squelch_mask` are empty (a blueprint is a
 /// pure template). Recurses on the template's own `child_protos` so a worker
 /// rebuilds the full nested-lambda tree and every `MakeClosure` resolves.
-pub(super) fn sendable_from_template(
+pub(in crate::value::send) fn sendable_from_template(
     t: &crate::value::ClosureTemplate,
     ctx: &mut SerContext<'_>,
 ) -> Result<SendableClosure, String> {

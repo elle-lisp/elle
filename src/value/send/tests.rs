@@ -454,3 +454,107 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
         assert_eq!(receiver.keyword_name(kw_hash), Some("kw-send-xt"));
     });
 }
+
+// ── the serde mirror keeps container kinds apart ────────────────────
+
+/// `SendValue`'s serde is the stdlib cache's wire format, and eight variants
+/// share three shapes: a sequence, a map, a byte run. Collapsing them loses
+/// which one it was, so a `Tuple` returns as an `Array`, an `LSet` as an
+/// `Array`, and a `Buffer` — a *mutable* @string — as immutable `Bytes`. The
+/// value would be silently the wrong type on every reload.
+#[test]
+fn serde_round_trip_keeps_each_container_kind_distinct() {
+    use super::SendValue as SV;
+
+    fn nil() -> Box<SV> {
+        Box::new(SV::Immediate(Value::NIL))
+    }
+    fn name(sv: &SV) -> &'static str {
+        match sv {
+            SV::Array(..) => "Array",
+            SV::Tuple(..) => "Tuple",
+            SV::LSet(..) => "LSet",
+            SV::LSetMut(..) => "LSetMut",
+            SV::Struct(..) => "Struct",
+            SV::StructMut(..) => "StructMut",
+            SV::Buffer(..) => "Buffer",
+            SV::Bytes(..) => "Bytes",
+            SV::Blob(..) => "Blob",
+            _ => panic!("unexpected variant in this test"),
+        }
+    }
+
+    let empty = std::collections::BTreeMap::new();
+    let cases = vec![
+        SV::Array(vec![], nil()),
+        SV::Tuple(vec![], nil()),
+        SV::LSet(vec![], nil()),
+        SV::LSetMut(vec![], nil()),
+        SV::Struct(empty.clone(), nil()),
+        SV::StructMut(empty, nil()),
+        SV::Buffer(vec![1, 2, 3], nil()),
+        SV::Bytes(vec![1, 2, 3], nil()),
+        SV::Blob(vec![1, 2, 3], nil()),
+    ];
+
+    for case in cases {
+        let bytes = bincode::serialize(&case).expect("serializes");
+        let back: SV = bincode::deserialize(&bytes).expect("deserializes");
+        assert_eq!(
+            name(&back),
+            name(&case),
+            "a {} must not come back as a {} — the cache would hand the runtime \
+             a value of the wrong type on every reload",
+            name(&case),
+            name(&back)
+        );
+    }
+}
+
+// ── a LIR symbol constant crosses unchanged ─────────────────────────
+
+/// The JIT materializes a `LirConst::Symbol` straight into a `Value::symbol`,
+/// so the id that crosses the boundary must name the same symbol on the other
+/// side. It does, with no translation step: the id is the name's hash.
+///
+/// The trap this replaced: while ids were per-process table indices, the
+/// loading side remapped them against a stored name map, and an id the map
+/// missed silently became whatever symbol held that index there. The
+/// counter-factual is a round-trip that yields a different `SymbolId` — the
+/// JIT then compiles a comparison against a symbol no source text spells.
+#[test]
+fn a_lir_symbol_constant_survives_serialization_as_the_name_hash() {
+    use crate::lir::{LirConst, LirInstr, Reg, Terminator};
+    use crate::value::SymbolId;
+
+    let lir = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Symbol(SymbolId::of("answerish")),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+
+    let bytes = bincode::serialize(&lir).expect("LIR serializes");
+    let back: crate::lir::LirFunction = bincode::deserialize(&bytes).expect("deserializes");
+
+    let mut ids = Vec::new();
+    for block in &back.blocks {
+        for si in &block.instructions {
+            let mut probe = si.instr.clone();
+            probe.for_each_const_mut(|c| {
+                if let LirConst::Symbol(sid) = c {
+                    ids.push(*sid);
+                }
+            });
+        }
+    }
+    assert_eq!(
+        ids,
+        vec![SymbolId::of("answerish")],
+        "the stored id must still be the hash of `answerish`"
+    );
+}

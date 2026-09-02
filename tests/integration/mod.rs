@@ -118,6 +118,9 @@ mod elle_scripts {
 mod dump_cli {
     include!("dump_cli.rs");
 }
+mod trace_compile {
+    include!("trace_compile.rs");
+}
 mod flip_cli {
     include!("flip_cli.rs");
 }

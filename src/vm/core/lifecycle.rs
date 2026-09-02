@@ -46,6 +46,17 @@ impl VM {
         self.unicode_generation = gen;
     }
 
+    /// Where this VM's instance caches its compiled stdlib — what a `sys/spawn`
+    /// worker inherits.
+    pub fn stdlib_cache(&self) -> &crate::compiler::stdlib_cache::StdlibCache {
+        &self.stdlib_cache
+    }
+
+    /// Record it. Construction-time only, from `RuntimeCore::load_stdlib`.
+    pub(crate) fn set_stdlib_cache(&mut self, cache: crate::compiler::stdlib_cache::StdlibCache) {
+        self.stdlib_cache = cache;
+    }
+
     /// Build a VM pointing at an externally-owned heap (`RuntimeCore`'s
     /// `Box<FiberHeap>`), the coexistence-correct constructor: the program VM and
     /// its instance's macro-expansion VM share this one heap, so core.lisp and
@@ -86,6 +97,7 @@ impl VM {
         VM {
             runtime_config: rc,
             unicode_generation: crate::config::get().unicode_generation(),
+            stdlib_cache: crate::compiler::stdlib_cache::StdlibCache::default(),
             heap_ptr,
             compile_ctx_ptr: std::ptr::null_mut(),
             symbols_ptr: std::ptr::null_mut(),

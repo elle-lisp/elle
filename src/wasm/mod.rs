@@ -303,7 +303,12 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     // spliced letrec definitions (lexical scope shadows the registered exports),
     // so the emitted WASM calls the compiled stdlib, not the macro-VM closures.
     if with_stdlib {
-        crate::primitives::init_stdlib(&mut vm, &mut symbols, &mut compile);
+        crate::primitives::init_stdlib(
+            &mut vm,
+            &mut symbols,
+            &mut compile,
+            &crate::compiler::stdlib_cache::StdlibCache::Process,
+        );
     }
 
     let full_source;

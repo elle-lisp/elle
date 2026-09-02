@@ -51,6 +51,7 @@ pub use code::JitCode;
 pub use compiler::{BatchMember, JitCompiler};
 pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 pub use value::JitValue;
+pub use worker::{JIT_COMPILE_NS, JIT_COMPILE_TASKS};
 
 use std::fmt;
 

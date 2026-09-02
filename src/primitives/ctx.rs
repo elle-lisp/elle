@@ -234,6 +234,12 @@ impl<'h> NativeCtx<'h> {
     pub fn unicode_generation(&self) -> crate::segment::Generation {
         self.vm().unicode_generation()
     }
+
+    /// Where this instance caches its compiled stdlib — what a worker spawned
+    /// from here inherits.
+    pub fn stdlib_cache(&self) -> crate::compiler::stdlib_cache::StdlibCache {
+        self.vm().stdlib_cache().clone()
+    }
 }
 
 /// Generate the ergonomic `ctx.*` constructors (docs/impl/region/ctx.md

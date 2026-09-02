@@ -92,7 +92,7 @@ impl<'a, 'h> DeserContext<'a, 'h> {
 /// `env`/`squelch_mask` (a blueprint is a pure template). Used to rebuild a
 /// reconstructed template's `child_protos` so the worker's `MakeClosure`
 /// resolves by index.
-fn template_from_sendable(
+pub(in crate::value::send) fn template_from_sendable(
     sc: SendableClosure,
     ctx: &mut DeserContext<'_, '_>,
 ) -> std::rc::Rc<crate::value::ClosureTemplate> {

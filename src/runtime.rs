@@ -21,6 +21,7 @@
 //! world returns to its pre-`main` state — only the native-fn primitives persist
 //! (immediates, occupying no region).
 
+use crate::compiler::stdlib_cache::StdlibCache;
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
@@ -120,9 +121,16 @@ impl RuntimeCore {
 
     /// Compile and execute stdlib.lisp into this core's `CompileCtx`. The caller
     /// must have installed the symbol-table context first (stdlib macros gensym).
-    pub fn load_stdlib(&mut self) {
+    pub fn load_stdlib(
+        &mut self,
+        cache: &crate::compiler::stdlib_cache::StdlibCache,
+    ) -> crate::primitives::module_init::StdlibSource {
+        // Record it on the VM so a `sys/spawn` worker, which reaches the
+        // spawning instance only through `ctx.vm()`, inherits this directory
+        // instead of falling back to the process-wide one.
+        self.vm.set_stdlib_cache(cache.clone());
         let (vm, symbols, compile) = self.parts();
-        init_stdlib(vm, symbols, compile);
+        init_stdlib(vm, symbols, compile, cache)
     }
 
     /// Mutable access to the VM.
@@ -174,6 +182,7 @@ impl RuntimeCore {
 pub struct Runtime {
     core: RuntimeCore,
     torn_down: bool,
+    stdlib_source: crate::primitives::module_init::StdlibSource,
 }
 
 impl Runtime {
@@ -193,22 +202,36 @@ impl Runtime {
     /// given Unicode generation for its whole life. `Runtime::new()` uses
     /// the newest vendored generation (or the process `--unicode=` choice).
     pub fn with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::build_with(true, gen)
+        Self::build_with(true, gen, StdlibCache::Process)
+    }
+
+    /// Build a stdlib-loaded runtime that caches its compiled stdlib under
+    /// `cache` rather than the process-wide directory. Two instances given the
+    /// same directory share a cache; two given different ones cannot see each
+    /// other's, which is what lets tests run beside each other.
+    pub fn with_stdlib_cache(cache: StdlibCache) -> Self {
+        Self::build_with(true, crate::config::get().unicode_generation(), cache)
     }
 
     fn build(load_stdlib: bool) -> Self {
-        Self::build_with(load_stdlib, crate::config::get().unicode_generation())
+        Self::build_with(
+            load_stdlib,
+            crate::config::get().unicode_generation(),
+            StdlibCache::Process,
+        )
     }
 
-    fn build_with(load_stdlib: bool, gen: crate::segment::Generation) -> Self {
+    fn build_with(load_stdlib: bool, gen: crate::segment::Generation, cache: StdlibCache) -> Self {
         let mut core = RuntimeCore::bare_with_unicode(gen);
 
         // `RuntimeCore::bare` already pointed the VM at this instance's symbol
         // table, so stdlib-load gensym (and all runtime name resolution) resolve
         // through `ctx.vm().symbols()` — this instance's own table.
-        if load_stdlib {
-            core.load_stdlib();
-        }
+        let stdlib_source = if load_stdlib {
+            core.load_stdlib(&cache)
+        } else {
+            crate::primitives::module_init::StdlibSource::Compiled
+        };
 
         // The post-boot heap census (docs/impl/image.md § "Open risks and
         // dispatch experiments", item 2): at this point every live object is
@@ -222,7 +245,15 @@ impl Runtime {
         Runtime {
             core,
             torn_down: false,
+            stdlib_source,
         }
+    }
+
+    /// Where this instance's stdlib came from. A cache that silently never hits
+    /// still yields a working runtime, so a test that only checks behaviour
+    /// cannot tell the two apart — this is what it asserts on instead.
+    pub fn stdlib_source(&self) -> crate::primitives::module_init::StdlibSource {
+        self.stdlib_source
     }
 
     /// Mutable access to the VM.

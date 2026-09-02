@@ -131,6 +131,12 @@ pub struct VM {
     /// split at cluster boundaries, so a mid-run change would corrupt
     /// their framing.
     pub(crate) unicode_generation: crate::segment::Generation,
+    /// Where this instance caches its compiled stdlib. Recorded by
+    /// `RuntimeCore::load_stdlib`, and read by `sys/spawn`: a worker builds its
+    /// own runtime on a new thread and reaches the spawning instance only
+    /// through `ctx.vm()`, so this is how it inherits the directory its parent
+    /// was given instead of falling back to the process-wide one.
+    pub(crate) stdlib_cache: crate::compiler::stdlib_cache::StdlibCache,
     /// Pointer to this instance's heap. The VM does not own it: a `RuntimeCore`
     /// owns it as a sibling `Box<FiberHeap>` (`VM::new_with_heap`), or — for a bare
     /// VM with no `RuntimeCore` — it is a privately leaked heap (`VM::new`). Either

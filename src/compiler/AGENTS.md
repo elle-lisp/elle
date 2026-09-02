@@ -1,12 +1,13 @@
 # compiler
 
-Bytecode instruction definitions and debug formatting.
+Bytecode instruction definitions, debug formatting, and the stdlib disk cache.
 
 ## Responsibility
 
 - Define the `Instruction` enum (bytecode opcodes)
 - Define the `Bytecode` struct (instructions + constants)
 - Provide debug formatting for bytecode disassembly
+- Persist and restore the compiled standard library
 
 ## Submodules
 
@@ -15,6 +16,7 @@ Bytecode instruction definitions and debug formatting.
 | `bytecode.rs` | `Bytecode` struct, encoding, disassembly entry points |
 | `bytecode/instruction.rs` | `Instruction` enum, opcode decoding |
 | `bytecode/disasm.rs` | Debug formatting for bytecode disassembly |
+| `stdlib_cache.rs` | Disk cache for the compiled stdlib (docs/impl/stdlib-cache.md) |
 
 ## Dependents
 
@@ -35,6 +37,13 @@ Bytecode instruction definitions and debug formatting.
 |------|----------|---------|
 | `Instruction` | `bytecode/instruction.rs` | Bytecode opcodes |
 | `Bytecode` | `bytecode.rs` | Instructions + constants |
+| `StdlibCache` | `stdlib_cache.rs` | Where a runtime caches its stdlib: `Process`, `Dir`, or `Off`. A construction parameter, passed to `Runtime::with_stdlib_cache` — never read from process-global state |
+| `StoredBytecode` | `stdlib_cache.rs` | The cache file's payload: fully owned data, symbols by name, LIR preserved |
+
+The cache is an optimization with no correctness role: every failure — an
+unidentifiable binary, a hash mismatch, a truncated file, a format bump — falls
+back to a full compile, and a rejected file is replaced rather than left to be
+rejected again. `Runtime::stdlib_source()` says which path an instance took.
 ## Type guard instructions
 
 Type guard instructions are used in pattern matching to check value types:

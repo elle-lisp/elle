@@ -1,7 +1,7 @@
 use super::*;
 
 /// A LIR function (compilation unit)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LirFunction {
     /// This closure's identity in the module's closure list.
     /// `None` for the entry function and standalone tests.
@@ -38,8 +38,10 @@ pub struct LirFunction {
     /// Optional docstring from the source lambda. Plain `Rc<str>` compile-time
     /// data, never a heap `Value` — materialized as a fresh ordinary
     /// (reclaimable) allocation on `(doc f)`.
+    #[serde(skip)]
     pub doc: Option<std::rc::Rc<str>>,
     /// Original lambda Syntax node for eval environment reconstruction
+    #[serde(skip)]
     pub syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     /// How varargs are collected: List (pair chain) or Struct (immutable struct).
     /// Only meaningful when arity is AtLeast.
@@ -91,7 +93,7 @@ pub struct LirFunction {
 /// Metadata about a yield point, collected during bytecode emission.
 /// The JIT reads this to know how to spill registers and where to
 /// resume in the interpreter.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct YieldPointInfo {
     /// Bytecode IP to resume at (the instruction after the Yield opcode).
     /// This is the IP stored in the SuspendedFrame so the interpreter
@@ -113,7 +115,7 @@ pub struct YieldPointInfo {
 /// which is needed to build SuspendedFrames for yield-through-call.
 ///
 /// Only populated for functions where `signal.may_suspend()`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CallSiteInfo {
     /// Bytecode IP after the Call instruction and its operands.
     /// This is the IP the interpreter would store in SuspendedFrame.ip

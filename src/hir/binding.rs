@@ -11,7 +11,9 @@ use std::fmt;
 
 /// A compile-time binding handle. Index into a `BindingArena`.
 /// 4 bytes, Copy, no heap allocation.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Binding(pub(crate) u32);
 
 impl fmt::Debug for Binding {
@@ -33,7 +35,7 @@ impl Binding {
 }
 
 /// Information about a captured variable in a closure
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CaptureInfo {
     /// The binding being captured
     pub binding: Binding,
@@ -42,7 +44,7 @@ pub struct CaptureInfo {
 }
 
 /// How a capture is accessed from the enclosing scope
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CaptureKind {
     /// Capture from parent's local slot (resolved by lowerer via binding_to_slot)
     Local,

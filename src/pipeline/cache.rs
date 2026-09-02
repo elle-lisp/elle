@@ -283,7 +283,9 @@ impl CompileCtx {
         // here would drop every name the module's quoted data carries, and a
         // transformer cached on the shared expander during this compile would
         // outlive the table it learned into. The `each` and probe tests in
-        // tests/integration/projection.rs pin both halves.
+        // tests/integration/projection.rs pin both halves. A cache hit skips
+        // the stdlib compile that would otherwise warm every transformer, so
+        // the probe is often the first expansion on that path too.
         let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
             .ok()
             .and_then(|result| result.bytecode.signal_projection);

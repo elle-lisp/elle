@@ -353,7 +353,7 @@ primitive! {
 #[cfg(feature = "ffi")]
 primitive!(
     /// FFI call and callback primitives (require libffi).
-    pub(crate) const CALLBACK_PRIMITIVES =
+    pub(crate) static CALLBACK_PRIMITIVES =
         "ffi/call" => prim_ffi_call {
             signal: Signal::ffi_errors(),
             arity: Arity::AtLeast(2),

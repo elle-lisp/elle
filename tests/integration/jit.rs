@@ -53,7 +53,7 @@ fn stdlib_cctx(
 ) -> elle::pipeline::CompileCtx {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut elle::symbol::SymbolTable);
-    elle::init_stdlib(vm, symbols, &mut cctx);
+    elle::init_stdlib(vm, symbols, &mut cctx, &elle::compiler::stdlib_cache::StdlibCache::Off);
     cctx
 }
 

@@ -26,12 +26,13 @@ use std::collections::HashMap;
 mod contract;
 mod fuse;
 pub(crate) use fuse::fuse_map_chains;
-pub(crate) use fuse::FnInlineRegistry;
+pub(crate) use fuse::{FnInlineRegistry, StoredFnInlineRegistry};
 mod guard;
 mod infer;
 use infer::*;
 mod monomorphize;
 pub use monomorphize::DispatchWrapperRegistry;
+pub(crate) use monomorphize::StoredDispatchRegistry;
 mod prune;
 pub(crate) use prune::prune_typeof_match_arms;
 
@@ -188,7 +189,7 @@ fn unwrap_to_call(hir: &Hir) -> Option<usize> {
 ///
 /// Primitives carry their return type in the registry
 /// (`PrimitiveDef::ret`, looked up through `def_by_name` — name and
-/// alias spellings alike), so inference reads the same const tables
+/// alias spellings alike), so inference reads the same static tables
 /// `register_primitives` feeds and cannot drift from them. The only
 /// names matched here are stdlib *closures* (defined in stdlib.lisp,
 /// not in any primitive table) whose pass-through typing inference

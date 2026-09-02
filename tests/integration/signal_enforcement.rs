@@ -56,7 +56,7 @@ fn analyze_with_stdlib(
 ) -> Result<elle::pipeline::AnalyzeResult, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut SymbolTable);
-    elle::init_stdlib(vm, symbols, &mut cctx);
+    elle::init_stdlib(vm, symbols, &mut cctx, &elle::compiler::stdlib_cache::StdlibCache::Off);
     elle::pipeline::analyze(source, symbols, vm, &mut cctx, source_name)
 }
 

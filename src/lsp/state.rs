@@ -86,7 +86,12 @@ impl CompilerState {
         vm.set_symbols(&mut *symbol_table as *mut SymbolTable);
         let mut compile = Box::new(CompileCtx::new());
         vm.set_compile_ctx(&mut *compile as *mut CompileCtx);
-        init_stdlib(&mut vm, &mut symbol_table, &mut compile);
+        init_stdlib(
+            &mut vm,
+            &mut symbol_table,
+            &mut compile,
+            &crate::compiler::stdlib_cache::StdlibCache::Process,
+        );
 
         Self {
             documents: HashMap::new(),

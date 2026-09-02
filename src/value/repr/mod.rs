@@ -303,3 +303,81 @@ impl Value {
         }
     }
 }
+
+// =============================================================================
+// Scalar serialization (used by the stdlib compilation cache)
+// =============================================================================
+//
+// The cache serializes `Value` constants in `Bytecode`/`ClosureTemplate` pools
+// and in LIR `ValueConst` operands. After `convert_lir_for_send`, the values
+// that reach this path are non-heap scalars (int/float/bool/nil/symbol/keyword)
+// and native-fn immediates. A symbol and a keyword carry their name's hash
+// (docs/impl/symbol.md), which is the same in every process, so the payload
+// travels as it stands; only the spelling needs the bundle's name table. Every
+// malformed input must come back as a serde error, never a panic: the cache
+// layer converts errors into a miss and recompiles, and `ScalarPayload`'s
+// single derived enum tag makes an out-of-range discriminant a native bincode
+// error.
+impl serde::Serialize for Value {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::Error;
+        if self.is_heap() {
+            return Err(Error::custom("cannot serialize heap Value"));
+        }
+        let payload = if let Some(id) = self.as_symbol() {
+            ScalarPayload::Symbol(id.0)
+        } else if let Some(hash) = self.keyword_hash() {
+            ScalarPayload::Keyword(hash)
+        } else if let Some(b) = self.as_bool() {
+            ScalarPayload::Bool(b)
+        } else if self.is_native_fn() {
+            // Native-fn payload is a prim_id, stable across processes as long
+            // as the cache key mixes in the primitive-table identity.
+            ScalarPayload::NativeFn(self.payload as u32)
+        } else if self.is_nil() {
+            ScalarPayload::Nil
+        } else if let Some(n) = self.as_int() {
+            ScalarPayload::Int(n)
+        } else if let Some(f) = self.as_float() {
+            ScalarPayload::Float(f)
+        } else {
+            return Err(Error::custom("unsupported scalar Value"));
+        };
+        payload.serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match ScalarPayload::deserialize(d)? {
+            ScalarPayload::Nil => Value::NIL,
+            ScalarPayload::Bool(b) => Value::bool(b),
+            ScalarPayload::Int(n) => Value::int(n),
+            ScalarPayload::Float(f) => Value::float(f),
+            ScalarPayload::Symbol(hash) => Value::symbol(crate::value::SymbolId(hash)),
+            ScalarPayload::Keyword(hash) => Value::keyword_from_hash(hash),
+            ScalarPayload::NativeFn(id) => match crate::primitives::prim_def(id) {
+                Some(def) => Value::native_fn(def),
+                // A cache written by a process whose primitive registry
+                // differs (feature set, prim tables) is a stale file, not a
+                // reason to crash. Report the error so the cache layer treats
+                // it as a miss and recompiles.
+                None => return Err(serde::de::Error::custom(format!("unknown prim id {id}"))),
+            },
+        })
+    }
+}
+
+/// The single wire form of a scalar `Value`. Its derived enum tag is the only
+/// discriminant — both serde directions share it, so the encoding cannot
+/// drift and an invalid tag is a bincode error, not a panic.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum ScalarPayload {
+    Nil,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Symbol(u64),
+    Keyword(u64),
+    NativeFn(u32),
+}

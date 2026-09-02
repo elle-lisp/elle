@@ -11,12 +11,12 @@ use super::{
     structs, subprocess, time, traits, types, unix, watch,
 };
 
-/// All primitive tables. Each module exports a `const PRIMITIVES`
+/// All primitive tables. Each module exports a `static PRIMITIVES`
 /// array; this list is the single place that enumerates them.
 ///
 /// Tables gated behind `ffi` are appended via `ffi_tables()` below
-/// because `const` arrays cannot contain conditional entries.
-pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
+/// because `static` arrays cannot contain conditional entries.
+pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
     arena::PRIMITIVES,
     arithmetic::PRIMITIVES,
@@ -74,7 +74,8 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
 /// Primitive tables that require the `ffi` feature (libffi).
 #[cfg(feature = "ffi")]
 fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
-    &[loading::CALLBACK_PRIMITIVES]
+    static TABLES: &[&[PrimitiveDef]] = &[loading::CALLBACK_PRIMITIVES];
+    TABLES
 }
 
 #[cfg(not(feature = "ffi"))]
@@ -86,7 +87,7 @@ fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
 ///
 /// Compile-time consumers (type inference reading `PrimitiveDef::ret`)
 /// use this to look up primitive metadata by source name without a VM —
-/// the same const tables `register_primitives` feeds, so the data cannot
+/// the same static tables `register_primitives` feeds, so the data cannot
 /// drift from what runs.
 pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
     use std::collections::HashMap;
@@ -154,8 +155,8 @@ pub(crate) fn def_by_symbol(id: crate::value::SymbolId) -> Option<&'static Primi
 /// small, deterministic ids; any other native-fn def (the trait-method handlers
 /// in `traitregistry`, ffi callbacks) is appended on first `prim_id_of` — in a
 /// deterministic startup order, so the ids are stable across runs of one binary.
-/// Keyed by the def's `&'static` address (every table is a `const PRIMITIVES`
-/// reference into promoted static memory, so addresses are stable).
+/// Keyed by the def's `&'static` address (every table is a `static PRIMITIVES`
+/// item, so addresses are stable across every reference site).
 struct PrimRegistry {
     defs: Vec<&'static PrimitiveDef>,
     by_ptr: std::collections::HashMap<usize, u32>,
@@ -179,6 +180,30 @@ static PRIM_REGISTRY: std::sync::LazyLock<std::sync::Mutex<PrimRegistry>> =
         }
         std::sync::Mutex::new(reg)
     });
+
+/// Visit the ordered canonical primitive-table identity (`name` + `aliases`)
+/// into a hasher.
+///
+/// A native-fn immediate's whole payload is its `prim_id`, which is the def's
+/// index in the canonical `ALL_TABLES`+`ffi_tables` enumeration. That id is
+/// only meaningful against the exact table that minted it, so consumers that
+/// persist native-fn values (the stdlib disk cache) must mix this identity
+/// into their key: any addition, removal, rename, or reorder of a canonical
+/// primitive changes the hash and invalidates the persisted payload.
+pub(crate) fn hash_prim_table_identity<H: std::hash::Hasher>(hasher: &mut H) {
+    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
+        for def in *table {
+            hash_def_identity(def, hasher);
+        }
+    }
+}
+
+/// Hash one def's identity fields (see [`hash_prim_table_identity`]).
+fn hash_def_identity<H: std::hash::Hasher>(def: &PrimitiveDef, hasher: &mut H) {
+    use std::hash::Hash;
+    def.name.hash(hasher);
+    def.aliases.hash(hasher);
+}
 
 /// The `prim_id` of a primitive definition — how `Value::native_fn` finds the id
 /// to store as the immediate payload. Returns the existing id, or appends the def

@@ -19,11 +19,12 @@ use crate::value::types::Arity;
 use std::collections::{BTreeMap, HashMap};
 
 mod de;
+mod mirror;
 mod ser;
 mod syntax;
 
-use de::{into_value_inner, DeserContext, ReconState};
-use ser::{from_value_inner, SerContext};
+use de::{into_value_inner, template_from_sendable, DeserContext, ReconState};
+use ser::{from_value_inner, sendable_from_template, SerContext};
 use syntax::{send_to_syntax, SendSyntax};
 
 /// Sendable snapshot of a closure.
@@ -38,7 +39,7 @@ use syntax::{send_to_syntax, SendSyntax};
 ///
 /// This struct is `pub(crate)` — it is part of the public interface of
 /// `SendBundle` but not independently useful outside `send.rs`.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SendableClosure {
     pub bytecode: Vec<u8>,
     pub arity: Arity,
@@ -328,6 +329,78 @@ impl SendBundle {
 
         result
     }
+}
+
+/// A serialized set of closure templates — what `SendBundle` is to a value,
+/// this is to a module's blueprints (the stdlib compilation cache stores one).
+///
+/// A struct rather than a tuple because `templates` and `intern_table` have the
+/// same type: as positional arguments they are swappable at every call site
+/// with no compile error, and a swap would resolve every `Ref(idx)` against the
+/// wrong table.
+pub(crate) struct SendTemplates {
+    /// The blueprints themselves, in the order they were serialized.
+    pub(crate) templates: Vec<SendableClosure>,
+    /// Live closure instances lifted out of the templates' constant pools,
+    /// referenced from the templates by `SendValue::Ref(idx)`.
+    pub(crate) intern_table: Vec<SendableClosure>,
+    /// Spelling table, the same one a `SendBundle` carries. Ids are name
+    /// hashes and need no translation; the names are what the loading instance
+    /// must learn in order to print them.
+    pub(crate) names: Vec<(u64, Box<str>)>,
+}
+
+/// Serialize a list of closure templates (e.g. a module's `child_protos`) into
+/// owned `SendableClosure`s, for the stdlib compilation cache.
+///
+/// Each template is a blueprint: `env`/`squelch_mask` are empty. Templates have
+/// no heap identity to intern, so they are emitted inline; their own
+/// `child_protos` recurse. Closure constants *inside* a template's constant
+/// pool are live heap instances and intern into the returned `intern_table` —
+/// the reconstructed templates reference it by `Ref(idx)`.
+pub(crate) fn serialize_templates(
+    protos: &[std::rc::Rc<crate::value::ClosureTemplate>],
+    heap: &crate::value::fiberheap::FiberHeap,
+    symbols: &crate::symbol::SymbolTable,
+) -> Result<SendTemplates, String> {
+    let mut ctx = SerContext::new(heap, Some(symbols));
+    let mut templates = Vec::with_capacity(protos.len());
+    for t in protos {
+        templates.push(sendable_from_template(t, &mut ctx)?);
+    }
+    let names = ctx.take_names();
+    Ok(SendTemplates {
+        templates,
+        intern_table: ctx.closures,
+        names,
+    })
+}
+
+/// Reconstruct closure templates from a [`SendTemplates`]. The intern table is
+/// shared across all templates so `Ref(idx)` entries (closure constants)
+/// resolve.
+///
+/// `Alloc` is the receiving context's allocation capability (every
+/// reconstructed heap object is born in its region).
+///
+/// The name table replays into `symbols`, the receiving instance's display
+/// memo, exactly as `SendBundle::into_value` does. Nothing else about a symbol
+/// needs carrying: an id is its name's hash, so a `LirConst::Symbol` or a pool
+/// constant means the same symbol here as where it was stored.
+pub(crate) fn deserialize_templates(
+    stored: SendTemplates,
+    alloc: &mut crate::primitives::ctx::Alloc<'_>,
+    symbols: &mut crate::symbol::SymbolTable,
+) -> Result<Vec<std::rc::Rc<crate::value::ClosureTemplate>>, String> {
+    for (hash, name) in &stored.names {
+        symbols.record_spelling(*hash, name);
+    }
+    let mut dctx = DeserContext::new(stored.intern_table, alloc);
+    let mut out = Vec::with_capacity(stored.templates.len());
+    for sc in stored.templates {
+        out.push(template_from_sendable(sc, &mut dctx));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
