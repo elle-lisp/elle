@@ -140,6 +140,22 @@ fn region_match_rest_uaf() {
     );
 }
 
+// Guard — a match-destructured `rest` alias (`(a & rest)`) is a BORROWED subview
+// of the scrutinee, but the region solver never registered a counted container
+// read for the pattern load (only for call-site `rest()`/`first()`). Passing the
+// alias as an owned-param call argument (tail or not) made the callee's param
+// release free the caller's still-live scrutinee region — a use-after-free on
+// the caller's original list (SIGSEGV/SIGBUS under guardfree). The lowerer now
+// marks destructure-rest bindings borrowed so the call site mints a fresh
+// owning reference the callee's release balances.
+#[test]
+fn region_match_rest_tail_move_uaf() {
+    run_elle_script_with_args(
+        "region-match-rest-tail-move-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — native-tail-return of a heap pass-through result (`(first xs)`/
 // `(get xs 0)`/`(xs i)`) must keep the ReturnValue retain, so the caller's
 // DecrefValueRegion does not free it under its borrow (which would SIGSEGV

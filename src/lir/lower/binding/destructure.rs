@@ -93,6 +93,11 @@ impl<'a> Lowerer<'a> {
                 }
                 // Bind the remaining tail to the rest pattern
                 if let Some(rest_pat) = rest {
+                    // A list rest is a borrowed subview of the scrutinee —
+                    // mark its bindings (see `destructure_alias_bindings`).
+                    for b in rest_pat.bindings().bindings {
+                        self.destructure_alias_bindings.insert(b);
+                    }
                     self.lower_destructure(rest_pat, current, strict)?;
                 }
                 Ok(())

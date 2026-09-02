@@ -82,6 +82,11 @@ impl<'a> Lowerer<'a> {
                 });
 
                 // Match tail pattern
+                // The tail is a borrowed subview of the scrutinee — mark
+                // its bindings (see `destructure_alias_bindings`).
+                for b in tail.bindings().bindings {
+                    self.destructure_alias_bindings.insert(b);
+                }
                 self.lower_pattern_match(tail, tail_reg, fail_label)?;
 
                 Ok(())
@@ -162,7 +167,12 @@ impl<'a> Lowerer<'a> {
                 }
 
                 if let Some(rest_pat) = rest {
-                    // With & rest: bind remaining tail to rest pattern
+                    // With & rest: bind remaining tail to rest pattern.
+                    // The tail is a borrowed subview — mark its bindings
+                    // (see `destructure_alias_bindings`).
+                    for b in rest_pat.bindings().bindings {
+                        self.destructure_alias_bindings.insert(b);
+                    }
                     self.lower_pattern_match(rest_pat, current_reg, fail_label)?;
                 } else {
                     // Without rest: check that tail is empty_list (exact length)
