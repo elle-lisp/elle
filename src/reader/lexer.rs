@@ -1,4 +1,5 @@
 use super::token::{SourceLoc, Token, TokenWithLoc, UNKNOWN_FILE};
+use crate::epoch::rules::Lexicon;
 
 /// Fast delimiter check - O(1) instead of string contains O(n)
 /// Checks if a character is a Lisp delimiter
@@ -24,6 +25,7 @@ pub struct Lexer<'a> {
     line: usize,
     col: usize,
     file: String,
+    lexicon: Lexicon,
 }
 
 impl<'a> Lexer<'a> {
@@ -39,6 +41,16 @@ impl<'a> Lexer<'a> {
             line: 1,
             col: 1,
             file: file.into(),
+            lexicon: Lexicon::current(),
+        }
+    }
+
+    /// Lex under an explicit lexicon instead of the current epoch's
+    /// (docs/impl/lexicon.md). The epoch prescan picks the lexicon.
+    pub fn with_lexicon(input: &'a str, lexicon: Lexicon) -> Self {
+        Lexer {
+            lexicon,
+            ..Lexer::new(input)
         }
     }
 
@@ -112,12 +124,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Read a comment starting at the current `#` character.
-    /// Returns the full comment text including the `#` prefix.
+    /// Read a comment starting at the current comment character.
+    /// Returns the full comment text including its prefix character.
     /// Leaves the lexer positioned after the newline (or at EOF).
     fn read_comment(&mut self) -> String {
         let mut text = String::new();
-        // The caller guarantees current() == Some('#')
+        // The caller guarantees current() == Some(self.lexicon.comment_char)
         while let Some(c) = self.advance() {
             text.push(c);
             if c == '\n' {
@@ -190,7 +202,9 @@ impl<'a> Lexer<'a> {
 
         match self.current() {
             None => Ok(None),
-            Some('#') => {
+            // Checked before every other arm: a lexicon whose comment
+            // character is `;` shadows the splice arm below.
+            Some(c) if c == self.lexicon.comment_char => {
                 let text = self.read_comment();
                 Ok(Some(self.spanned(Token::Comment(text), loc, start_pos)))
             }
@@ -228,7 +242,7 @@ impl<'a> Lexer<'a> {
             }
             Some(',') => {
                 self.advance();
-                if self.current() == Some(';') {
+                if self.lexicon.comma_semicolon_fuses && self.current() == Some(';') {
                     self.advance();
                     Ok(Some(self.spanned(Token::UnquoteSplicing, loc, start_pos)))
                 } else {
@@ -236,6 +250,15 @@ impl<'a> Lexer<'a> {
                 }
             }
             Some(';') => {
+                if !self.lexicon.semicolon_splices {
+                    // Refuse rather than fall through: the symbol reader
+                    // stops at `;` (a delimiter) without advancing, so
+                    // falling through would loop forever on empty symbols.
+                    return Err(format!(
+                        "unexpected ';' at {}:{}:{}",
+                        self.file, self.line, self.col
+                    ));
+                }
                 self.advance();
                 Ok(Some(self.spanned(Token::Splice, loc, start_pos)))
             }

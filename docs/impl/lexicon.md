@@ -1,7 +1,9 @@
 # Lexicon: epoch-aware lexing
 
-Status: design — not yet implemented; tracked in issue #1020. The first
-client is the comment/splice swap proposed in issue #983.
+Status: the prescan (`prescan_epoch`) and the `Lexicon` seam are implemented
+and tested; the reader entry points do not consult them yet. Issue #1020
+tracks the remaining wiring. The first client is the comment/splice swap
+proposed in issue #983.
 
 Epochs rewrite parsed syntax trees (see [../epochs.md](../epochs.md)). This
 document extends the epoch system down one level, to the lexer, so that an
@@ -57,8 +59,9 @@ a fixed micro-grammar that no future epoch may change:
 1. If the source starts with `#!`, skip the first line (the reader already
    strips shebangs before lexing).
 2. Skip whitespace.
-3. Match the literal shape `(elle/epoch <digits>)`: the characters `(`, the
-   symbol `elle/epoch`, whitespace, decimal digits, optional whitespace, `)`.
+3. Match the literal shape `(elle/epoch <digits>)`: the character `(`,
+   optional whitespace, the symbol `elle/epoch`, whitespace, decimal digits,
+   optional whitespace, `)`.
 4. On a match, the digits name the epoch. On anything else — including a
    comment in either style — the source targets `CURRENT_EPOCH`.
 
@@ -173,16 +176,20 @@ before the body, that selects the reader for the rest of the file.
 
 ## Landing order
 
-Documentation, then tests, then code:
+Documentation, then tests, then code. The prescan
+(`src/epoch/mod.rs::prescan_epoch`), the `Lexicon` seam
+(`src/epoch/rules.rs`), and the lexer's consultation of its lexicon are in
+place, with tests pinning the prescan edges and the token-stream divergence.
+What remains, in order:
 
-1. This document, cross-referenced from [../epochs.md](../epochs.md) and
-   [reader.md](reader.md).
-2. Tests: prescan unit tests (shebang, whitespace, absent, malformed,
-   too-new, negative, declaration-below-comment), the lexicon-mismatch
-   error, and the silent-divergence example pinned as producing different
-   trees under two lexicons that differ.
-3. The `Lexicon` seam with identical rules for all epochs ≤ 12 — a pure
-   refactor — plus the prescan and the mismatch check.
-4. The `elle rewrite` token-level pass.
+1. Wire the prescan into the reader entry points (`read_str` and `lex_all`
+   in `src/reader/mod.rs`): prescan the original source, then lex with
+   `Lexer::with_lexicon(input, Lexicon::for_epoch(n))`.
+2. The mismatch check after `extract_epoch` in `src/pipeline/compile.rs`:
+   reject the file when the declared and prescanned epochs select
+   different lexicons.
+3. Update `detect_epoch_in_source` (`src/epoch/mod.rs`) to lex under the
+   prescanned lexicon instead of the current one.
+4. The `elle rewrite` token-level pass (`src/rewrite/`).
 5. The first real lexical epoch (#983) exercises the mechanism end to end
    and lands with its own migration tests.

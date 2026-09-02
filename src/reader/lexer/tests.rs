@@ -129,3 +129,89 @@ fn comment_with_special_chars() {
     let tok = lexer.next_token().unwrap().unwrap();
     assert!(matches!(tok, Token::Comment(s) if s.contains("(parens)")));
 }
+
+// --- The lexicon seam (docs/impl/lexicon.md) ---
+
+use crate::epoch::rules::Lexicon;
+
+/// All tokens of `input` under `lexicon`.
+fn tokens_under(input: &str, lexicon: Lexicon) -> Vec<Token<'_>> {
+    let mut lexer = Lexer::with_lexicon(input, lexicon);
+    let mut tokens = Vec::new();
+    while let Some(t) = lexer.next_token().unwrap() {
+        tokens.push(t);
+    }
+    tokens
+}
+
+#[test]
+fn the_lexicon_decides_whether_semicolon_splices_or_comments() {
+    // Both lexicons accept this text and produce different programs — the
+    // silent divergence that makes the epoch declaration mandatory. A
+    // lexer that hard-codes `;` as splice passes the current-lexicon half
+    // and fails the divergent half; equality of the two streams would
+    // mean the seam carries nothing.
+    let src = "[1 ;xs\n 2]";
+    assert_eq!(
+        tokens_under(src, Lexicon::current()),
+        vec![
+            Token::LeftBracket,
+            Token::Integer(1),
+            Token::Splice,
+            Token::Symbol("xs"),
+            Token::Integer(2),
+            Token::RightBracket,
+        ]
+    );
+    assert_eq!(
+        tokens_under(src, Lexicon::divergent()),
+        vec![
+            Token::LeftBracket,
+            Token::Integer(1),
+            Token::Comment(";xs\n".to_string()),
+            Token::Integer(2),
+            Token::RightBracket,
+        ]
+    );
+}
+
+#[test]
+fn the_lexicon_decides_the_comment_character() {
+    assert_eq!(
+        tokens_under("# c\n42", Lexicon::current()),
+        vec![Token::Comment("# c\n".to_string()), Token::Integer(42)]
+    );
+    assert_eq!(
+        tokens_under("; c\n42", Lexicon::divergent()),
+        vec![Token::Comment("; c\n".to_string()), Token::Integer(42)]
+    );
+}
+
+#[test]
+fn the_lexicon_decides_whether_comma_semicolon_fuses() {
+    assert_eq!(
+        tokens_under(",;x", Lexicon::current()),
+        vec![Token::UnquoteSplicing, Token::Symbol("x")]
+    );
+    // Without fusion the comma is a plain unquote and `;` starts a comment.
+    assert_eq!(
+        tokens_under(",;x", Lexicon::divergent()),
+        vec![Token::Unquote, Token::Comment(";x".to_string())]
+    );
+}
+
+#[test]
+fn a_meaningless_semicolon_is_a_lex_error_not_a_silent_symbol() {
+    // Under a lexicon where `;` neither splices nor comments, falling
+    // through to the symbol reader would yield an empty symbol without
+    // advancing — an infinite loop. The refusal must be explicit.
+    let mut lexer = Lexer::with_lexicon("(f ;xs)", Lexicon::no_semicolon());
+    let mut result = Ok(None);
+    for _ in 0..8 {
+        result = lexer.next_token();
+        if result.is_err() {
+            break;
+        }
+    }
+    assert!(result.unwrap_err().contains(";"));
+}

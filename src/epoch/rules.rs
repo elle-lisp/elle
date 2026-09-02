@@ -10,6 +10,64 @@ use std::collections::HashMap;
 /// and add a corresponding entry to `MIGRATIONS`.
 pub const CURRENT_EPOCH: u64 = 12;
 
+/// The epoch-gated lexer rules (docs/impl/lexicon.md). The lexer consults
+/// a `Lexicon` instead of hard-coding these, so an epoch bump can change
+/// tokenization itself. All registered epochs currently share one lexicon;
+/// the first lexical epoch introduces the first divergence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lexicon {
+    /// The character that starts a comment running to end of line.
+    pub(crate) comment_char: char,
+    /// Whether `;` lexes as the splice token. The comment character is
+    /// checked first, so a lexicon whose `comment_char` is `;` never
+    /// consults this flag; with both off, `;` is a lex error.
+    pub(crate) semicolon_splices: bool,
+    /// Whether `,;` fuses into the unquote-splicing token.
+    pub(crate) comma_semicolon_fuses: bool,
+}
+
+impl Lexicon {
+    /// The lexicon for the given epoch. Callers validate the epoch number
+    /// first: the prescan and `extract_epoch` both reject epochs above
+    /// [`CURRENT_EPOCH`].
+    pub fn for_epoch(epoch: u64) -> Lexicon {
+        debug_assert!(epoch <= CURRENT_EPOCH, "unregistered epoch {epoch}");
+        Lexicon {
+            comment_char: '#',
+            semicolon_splices: true,
+            comma_semicolon_fuses: true,
+        }
+    }
+
+    /// The current epoch's lexicon.
+    pub fn current() -> Lexicon {
+        Lexicon::for_epoch(CURRENT_EPOCH)
+    }
+}
+
+/// Lexicons that match no registered epoch. Tests lex under them to prove
+/// the lexer consults its lexicon rather than hard-coding the rules.
+#[cfg(test)]
+impl Lexicon {
+    /// `;` comments, nothing splices — the shape issue #983 proposes.
+    pub(crate) fn divergent() -> Lexicon {
+        Lexicon {
+            comment_char: ';',
+            semicolon_splices: false,
+            comma_semicolon_fuses: false,
+        }
+    }
+
+    /// `;` has no meaning at all: not a comment, not a splice.
+    pub(crate) fn no_semicolon() -> Lexicon {
+        Lexicon {
+            semicolon_splices: false,
+            comma_semicolon_fuses: false,
+            ..Lexicon::current()
+        }
+    }
+}
+
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
 pub struct Migration {

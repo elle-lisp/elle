@@ -18,7 +18,7 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `Lexer` | Tokenizes input string |
+| `Lexer` | Tokenizes input string under a `Lexicon` (epoch-gated rules, `docs/impl/lexicon.md`) |
 | `Token` | Token variants (LParen, Int, Symbol, Pipe, AtPipe, etc.) |
 | `SourceLoc` | Line/column position |
 | `Reader` | Parses tokens to `Value` |

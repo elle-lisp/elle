@@ -80,6 +80,52 @@ pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
     Ok(None)
 }
 
+/// The epoch whose lexicon tokenizes this source (docs/impl/lexicon.md).
+///
+/// Scans a frozen micro-grammar that no epoch may change: an optional
+/// shebang line, whitespace, then the literal shape `(elle/epoch N)`.
+/// Anything else means the source targets [`CURRENT_EPOCH`].
+///
+/// Comment syntax is epoch-dependent, so the prescan cannot skip a
+/// comment without the answer it is computing. A declaration below a
+/// comment is therefore invisible here — `extract_epoch` still sees it
+/// for tree migration, and the reader rejects the file only when the two
+/// epochs select different lexicons.
+pub fn prescan_epoch(source: &str) -> Result<u64, String> {
+    let rest = match source.strip_prefix("#!") {
+        Some(after) => match after.find('\n') {
+            Some(i) => &after[i + 1..],
+            None => "",
+        },
+        None => source,
+    };
+    let Some(rest) = rest.trim_start().strip_prefix('(') else {
+        return Ok(CURRENT_EPOCH);
+    };
+    let Some(rest) = rest.trim_start().strip_prefix("elle/epoch") else {
+        return Ok(CURRENT_EPOCH);
+    };
+    // The symbol must end here: `elle/epochs` is a different name.
+    if !rest.starts_with(|c: char| c.is_whitespace()) {
+        return Ok(CURRENT_EPOCH);
+    }
+    let rest = rest.trim_start();
+    let digits = &rest[..rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len())];
+    if digits.is_empty() || !rest[digits.len()..].trim_start().starts_with(')') {
+        return Ok(CURRENT_EPOCH);
+    }
+    match digits.parse::<u64>() {
+        Ok(epoch) if epoch <= CURRENT_EPOCH => Ok(epoch),
+        // Also the overflow case: an epoch too large for u64 is too new.
+        _ => Err(format!(
+            "file targets epoch {} but this compiler only supports up to epoch {}",
+            digits, CURRENT_EPOCH
+        )),
+    }
+}
+
 /// Info about an epoch declaration found in source text.
 pub struct EpochInfo {
     /// The declared epoch number.
