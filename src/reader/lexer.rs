@@ -45,13 +45,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Lex under an explicit lexicon instead of the current epoch's
-    /// (docs/impl/lexicon.md). The epoch prescan picks the lexicon.
-    pub fn with_lexicon(input: &'a str, lexicon: Lexicon) -> Self {
-        Lexer {
-            lexicon,
-            ..Lexer::new(input)
-        }
+    /// Lex under `lexicon` instead of the current epoch's
+    /// (docs/impl/lexicon.md). The reader's epoch prescan picks it. This
+    /// is a builder rather than a third constructor so that a caller who
+    /// also needs a file name (`with_file`) can have both.
+    pub fn in_lexicon(mut self, lexicon: Lexicon) -> Self {
+        self.lexicon = lexicon;
+        self
     }
 
     fn get_loc(&self) -> SourceLoc {

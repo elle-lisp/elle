@@ -3,33 +3,42 @@
 use super::edit::{apply_edits, Edit};
 use super::engine::collect_edits;
 use super::rule::{RenameSymbol, RewriteRule};
-use crate::epoch::detect_epoch_in_source;
+use super::text::SourceText;
 use crate::epoch::rules::{
-    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range, removals_in_range,
-    replace_rules_in_range, unwrap_rules_in_range, CURRENT_EPOCH,
+    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range,
+    lexical_changes_in_range, removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
+    Lexicon, CURRENT_EPOCH,
 };
-use crate::reader::{Lexer, Token};
+use crate::epoch::{check_declared_lexicon, detect_epoch_in_source};
+use crate::reader::{shebang_len, Token};
 use std::collections::HashMap;
 
-/// Lex source into tokens, filtering out comment tokens.
-/// The rewrite engine uses positional token matching that assumes
-/// no comment tokens in the stream (they were invisible before the
-/// formatter needed them).
-fn lex_tokens_no_comments(source: &str) -> Result<Vec<(Token<'_>, usize, usize)>, String> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens = Vec::new();
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(t)) => {
-                if !matches!(t.token, Token::Comment(_)) {
-                    tokens.push((t.token, t.byte_offset, t.len));
-                }
-            }
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
+/// Collect edits that respell every token whose spelling differs between
+/// `source`'s lexicon and `target` (docs/impl/lexicon.md).
+pub(crate) fn collect_lexical_edits(
+    source: SourceText<'_>,
+    target: Lexicon,
+) -> Result<Vec<Edit>, String> {
+    let mut edits = Vec::new();
+
+    for token in source.tokens()? {
+        if source.in_shebang(&token) {
+            continue;
+        }
+        let replacement = source
+            .lexicon
+            .respell(&token.token, &target)
+            .map_err(|e| format!("{}: {}", token.loc.position(), e))?;
+        if let Some(replacement) = replacement {
+            edits.push(Edit {
+                byte_offset: token.byte_offset,
+                byte_len: token.len,
+                replacement,
+            });
         }
     }
-    Ok(tokens)
+
+    Ok(edits)
 }
 
 /// Run the rewrite tool. Returns exit code.
@@ -97,6 +106,9 @@ pub fn run(args: &[String]) -> i32 {
                     "  flatten-clauses: {} (parenthesized → flat pairs)",
                     names.join(", ")
                 );
+            }
+            for change in lexical_changes_in_range(0, CURRENT_EPOCH) {
+                println!("  lexical: {} ({})", change.name, change.summary);
             }
         }
         return 0;
@@ -169,11 +181,23 @@ pub(crate) fn rewrite_file(
 
     let file_epoch = epoch_info.as_ref().map(|info| info.epoch);
 
+    // The rules that read this file. A declaration the prescan cannot see
+    // did not choose the lexer that tokenized the file, so when the two
+    // disagree about the rules there is nothing safe to rewrite.
+    if let Some(epoch) = file_epoch {
+        check_declared_lexicon(epoch, source, file_path)?;
+    }
+    let text = SourceText::new(
+        source,
+        file_path,
+        Lexicon::for_epoch(file_epoch.unwrap_or(CURRENT_EPOCH)),
+    );
+
     // Check for removed symbols before doing any rewrites
     if let Some(epoch) = file_epoch {
         let removals = removals_in_range(epoch, CURRENT_EPOCH);
         if !removals.is_empty() {
-            check_removals(source, &removals, file_path)?;
+            check_removals(text, &removals)?;
         }
     }
 
@@ -183,7 +207,7 @@ pub(crate) fn rewrite_file(
         if unwraps.is_empty() {
             Vec::new()
         } else {
-            collect_unwrap_edits(source, &unwraps, file_path)?
+            collect_unwrap_edits(text, &unwraps)?
         }
     } else {
         Vec::new()
@@ -195,7 +219,7 @@ pub(crate) fn rewrite_file(
         if flattens.is_empty() {
             Vec::new()
         } else {
-            collect_flatten_edits(source, &flattens)?
+            collect_flatten_edits(text, &flattens)?
         }
     } else {
         Vec::new()
@@ -207,7 +231,7 @@ pub(crate) fn rewrite_file(
         if flatten_clauses.is_empty() {
             Vec::new()
         } else {
-            collect_flatten_clause_edits(source, &flatten_clauses)?
+            collect_flatten_clause_edits(text, &flatten_clauses)?
         }
     } else {
         Vec::new()
@@ -216,7 +240,7 @@ pub(crate) fn rewrite_file(
     // Normalize paren-delimited binding vectors to brackets:
     // (let (name val) ...) → (let [name val] ...)
     let binding_forms = &["let", "letrec", "let*", "if-let", "when-let", "when-ok"];
-    let bracket_edits = collect_bracket_edits(source, binding_forms)?;
+    let bracket_edits = collect_bracket_edits(text, binding_forms)?;
 
     // Collect replace edits (syntax-level, whole-form rewrites)
     let replace_edits = if let Some(epoch) = file_epoch {
@@ -224,7 +248,7 @@ pub(crate) fn rewrite_file(
         if replaces.is_empty() {
             Vec::new()
         } else {
-            collect_replace_edits(source, &replaces)?
+            collect_replace_edits(text, &replaces)?
         }
     } else {
         Vec::new()
@@ -245,7 +269,12 @@ pub(crate) fn rewrite_file(
 
     // Collect rename edits (token-level)
     let rules: Vec<&dyn RewriteRule> = rename_rule.iter().map(|r| r as &dyn RewriteRule).collect();
-    let mut edits = collect_edits(source, &rules)?;
+    let mut edits = collect_edits(text, &rules)?;
+
+    // Respell tokens whose lexical rules moved between the file's epoch and
+    // this one. Token-level like the renames above, so the structural filter
+    // below governs both (docs/impl/lexicon.md).
+    edits.extend(collect_lexical_edits(text, Lexicon::current())?);
 
     // Merge all structural edits (unwrap + replace + flatten), filtering out
     // rename edits that fall within their spans.
@@ -290,13 +319,8 @@ pub(crate) fn rewrite_file(
             });
         }
         // Insert current epoch as the first form, after the shebang if present.
-        let insert_offset = if source.starts_with("#!") {
-            source.find('\n').map(|i| i + 1).unwrap_or(source.len())
-        } else {
-            0
-        };
         edits.push(Edit {
-            byte_offset: insert_offset,
+            byte_offset: shebang_len(source),
             byte_len: 0,
             replacement: format!("(elle/epoch {})\n", CURRENT_EPOCH),
         });

@@ -136,7 +136,7 @@ use crate::epoch::rules::Lexicon;
 
 /// All tokens of `input` under `lexicon`.
 fn tokens_under(input: &str, lexicon: Lexicon) -> Vec<Token<'_>> {
-    let mut lexer = Lexer::with_lexicon(input, lexicon);
+    let mut lexer = Lexer::new(input).in_lexicon(lexicon);
     let mut tokens = Vec::new();
     while let Some(t) = lexer.next_token().unwrap() {
         tokens.push(t);
@@ -205,7 +205,7 @@ fn a_meaningless_semicolon_is_a_lex_error_not_a_silent_symbol() {
     // Under a lexicon where `;` neither splices nor comments, falling
     // through to the symbol reader would yield an empty symbol without
     // advancing — an infinite loop. The refusal must be explicit.
-    let mut lexer = Lexer::with_lexicon("(f ;xs)", Lexicon::no_semicolon());
+    let mut lexer = Lexer::new("(f ;xs)").in_lexicon(Lexicon::no_semicolon());
     let mut result = Ok(None);
     for _ in 0..8 {
         result = lexer.next_token();

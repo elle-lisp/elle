@@ -43,6 +43,11 @@ Reader (read_syntax / read_syntax_all)
     ▼
 Syntax (one or many)
     │
+    ├─► check_lexicon_agreement (the declaration matches the lexer that
+    │   read it — docs/impl/lexicon.md)
+    │
+    ├─► extract_epoch + migrate_forms (old-epoch syntax → current)
+    │
     ▼
 Expander (macro expansion, cached VM)
     │

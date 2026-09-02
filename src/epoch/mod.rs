@@ -8,7 +8,7 @@
 //! # File format
 //!
 //! ```lisp
-//! (elle 42)
+//! (elle/epoch 12)
 //! (def x 10)
 //! ```
 //!
@@ -18,10 +18,13 @@
 //!
 //! # Pipeline integration
 //!
-//! The epoch pass runs after parsing and before macro expansion:
+//! The reader prescans the declaration to choose the lexicon it tokenizes
+//! under (docs/impl/lexicon.md). The migration pass then runs after parsing
+//! and before macro expansion:
 //!
 //! ```text
-//! Source → Reader → [epoch migration] → Expander → HIR → LIR → Bytecode
+//! Source → [epoch prescan] → Reader → [epoch migration] → Expander → HIR
+//!        → LIR → Bytecode
 //! ```
 
 pub mod rules;
@@ -38,46 +41,54 @@ use crate::syntax::{Syntax, SyntaxKind};
 /// the list and returns the epoch number. If absent, returns `None`
 /// (the file targets the current epoch).
 pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
-    if forms.is_empty() {
+    let Some(n) = forms.first().and_then(epoch_declaration) else {
         return Ok(None);
+    };
+    if n < 0 {
+        return Err(format!(
+            "invalid epoch at {}: {} (must be non-negative)",
+            forms[0].span, n
+        ));
     }
+    let epoch = n as u64;
+    if epoch > CURRENT_EPOCH {
+        return Err(format!(
+            "file at {} targets epoch {} but this compiler only supports up to epoch {}",
+            forms[0].span, epoch, CURRENT_EPOCH
+        ));
+    }
+    forms.remove(0);
 
-    if let SyntaxKind::List(items) = &forms[0].kind {
-        if items.len() == 2 && items[0].is_symbol("elle/epoch") {
-            if let SyntaxKind::Int(n) = items[1].kind {
-                if n < 0 {
-                    return Err(format!(
-                        "invalid epoch at {}: {} (must be non-negative)",
-                        forms[0].span, n
-                    ));
-                }
-                let epoch = n as u64;
-                if epoch > CURRENT_EPOCH {
-                    return Err(format!(
-                        "file at {} targets epoch {} but this compiler only supports up to epoch {}",
-                        forms[0].span, epoch, CURRENT_EPOCH
-                    ));
-                }
-                forms.remove(0);
-
-                // Reject duplicate epoch declarations.
-                for form in forms.iter() {
-                    if let SyntaxKind::List(items) = &form.kind {
-                        if items.len() == 2 && items[0].is_symbol("elle/epoch") {
-                            return Err(format!(
-                                "duplicate (elle/epoch) at {}; only one epoch declaration is allowed per file",
-                                form.span
-                            ));
-                        }
-                    }
-                }
-
-                return Ok(Some(epoch));
+    // Reject duplicate epoch declarations. This matches the form's shape
+    // rather than a usable number, which `epoch_declaration` requires:
+    // `(elle/epoch x)` further down the file is still a second declaration.
+    for form in forms.iter() {
+        if let SyntaxKind::List(items) = &form.kind {
+            if items.len() == 2 && items[0].is_symbol("elle/epoch") {
+                return Err(format!(
+                    "duplicate (elle/epoch) at {}; only one epoch declaration is allowed per file",
+                    form.span
+                ));
             }
         }
     }
 
-    Ok(None)
+    Ok(Some(epoch))
+}
+
+/// The number in an `(elle/epoch N)` form, or `None` when `form` is not
+/// one. The number is unvalidated: callers decide what they can act on.
+fn epoch_declaration(form: &Syntax) -> Option<i64> {
+    let SyntaxKind::List(items) = &form.kind else {
+        return None;
+    };
+    if items.len() != 2 || !items[0].is_symbol("elle/epoch") {
+        return None;
+    }
+    match items[1].kind {
+        SyntaxKind::Int(n) => Some(n),
+        _ => None,
+    }
 }
 
 /// The epoch whose lexicon tokenizes this source (docs/impl/lexicon.md).
@@ -92,13 +103,7 @@ pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
 /// for tree migration, and the reader rejects the file only when the two
 /// epochs select different lexicons.
 pub fn prescan_epoch(source: &str) -> Result<u64, String> {
-    let rest = match source.strip_prefix("#!") {
-        Some(after) => match after.find('\n') {
-            Some(i) => &after[i + 1..],
-            None => "",
-        },
-        None => source,
-    };
+    let rest = &source[crate::reader::shebang_len(source)..];
     let Some(rest) = rest.trim_start().strip_prefix('(') else {
         return Ok(CURRENT_EPOCH);
     };
@@ -126,6 +131,97 @@ pub fn prescan_epoch(source: &str) -> Result<u64, String> {
     }
 }
 
+/// An epoch paired with the lexicon it selects.
+///
+/// The mismatch check compares two of these. Carrying the lexicon beside
+/// its epoch lets a test build a pair no registered epoch can produce:
+/// every registered epoch shares one lexicon today, so the refusal below
+/// is otherwise unreachable and would ship untested.
+#[derive(Clone, Copy)]
+struct EpochLexicon {
+    epoch: u64,
+    lexicon: rules::Lexicon,
+}
+
+impl EpochLexicon {
+    /// The pair a real epoch number produces.
+    fn of(epoch: u64) -> Self {
+        EpochLexicon {
+            epoch,
+            lexicon: rules::Lexicon::for_epoch(epoch),
+        }
+    }
+
+    /// A pair no registered epoch produces, for reaching the refusal path.
+    #[cfg(test)]
+    fn with_lexicon(epoch: u64, lexicon: rules::Lexicon) -> Self {
+        EpochLexicon { epoch, lexicon }
+    }
+}
+
+/// Reject a source whose declaration could not have chosen the lexer that
+/// read it (docs/impl/lexicon.md).
+fn refuse_mismatch(
+    declared: EpochLexicon,
+    prescanned: EpochLexicon,
+    source_name: &str,
+) -> Result<(), String> {
+    // Lexicons, never epoch numbers. A declaration the prescan could not
+    // see still tokenized correctly when both epochs lex alike, which is
+    // every file today and every file that carries a comment above its
+    // declaration.
+    if declared.lexicon == prescanned.lexicon {
+        return Ok(());
+    }
+    Err(format!(
+        "{}: this file declares (elle/epoch {}), but the reader tokenized it \
+         as epoch {}. The two epochs do not lex alike. Move the declaration \
+         above everything except a shebang line.",
+        source_name, declared.epoch, prescanned.epoch
+    ))
+}
+
+/// The epoch this tree declares, when the declaration is one the lexicon
+/// tables can answer for.
+///
+/// [`extract_epoch`] is the authority: it validates the number, consumes
+/// the form, and reports a negative or unknown epoch. This only looks, so
+/// the lexicon check can run before it.
+fn declared_epoch(forms: &[Syntax]) -> Option<u64> {
+    let n = epoch_declaration(forms.first()?)?;
+    u64::try_from(n).ok().filter(|e| *e <= CURRENT_EPOCH)
+}
+
+/// Reject a file whose epoch declaration the prescan could not see, when
+/// the declaration and the prescan select different lexicons
+/// (docs/impl/lexicon.md). Pass the source as the reader received it.
+pub fn check_lexicon_agreement(
+    forms: &[Syntax],
+    source: &str,
+    source_name: &str,
+) -> Result<(), String> {
+    match declared_epoch(forms) {
+        Some(declared) => check_declared_lexicon(declared, source, source_name),
+        None => Ok(()),
+    }
+}
+
+/// The same check for a caller that already knows the declared epoch and
+/// has no parsed tree — `elle rewrite`, which reads the declaration out of
+/// the source text.
+pub fn check_declared_lexicon(
+    declared: u64,
+    source: &str,
+    source_name: &str,
+) -> Result<(), String> {
+    let prescanned = crate::reader::prescanned_epoch_for(source, source_name)?;
+    refuse_mismatch(
+        EpochLexicon::of(declared),
+        EpochLexicon::of(prescanned),
+        source_name,
+    )
+}
+
 /// Info about an epoch declaration found in source text.
 pub struct EpochInfo {
     /// The declared epoch number.
@@ -141,44 +237,35 @@ pub struct EpochInfo {
 /// Parses just enough to find `(elle/epoch N)` at the start. Returns `None`
 /// if no epoch declaration is present. Used by the CLI rewriter to
 /// build per-file rules without modifying the syntax tree.
+///
+/// The read goes through [`read_syntax_all`], so the source is tokenized
+/// under the lexicon its own prescan selects (docs/impl/lexicon.md) — the
+/// spans below name bytes of the file as its author wrote it.
 pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String> {
     // The reader strips shebang lines before parsing, so syntax spans are
     // relative to the post-strip input.  Compute the offset so we can
     // translate back to original-source byte positions.
-    let shebang_offset = if source.starts_with("#!") {
-        source.find('\n').map(|i| i + 1).unwrap_or(source.len())
-    } else {
-        0
-    };
+    let shebang_offset = crate::reader::shebang_len(source);
 
     let syntaxes = read_syntax_all(source, "<detect-epoch>")?;
-    if syntaxes.is_empty() {
+    let Some(n) = syntaxes.first().and_then(epoch_declaration) else {
         return Ok(None);
+    };
+    if n < 0 {
+        return Err(format!("invalid epoch: {} (must be non-negative)", n));
     }
-
-    if let SyntaxKind::List(items) = &syntaxes[0].kind {
-        if items.len() == 2 && items[0].is_symbol("elle/epoch") {
-            if let SyntaxKind::Int(n) = items[1].kind {
-                if n < 0 {
-                    return Err(format!("invalid epoch: {} (must be non-negative)", n));
-                }
-                let epoch = n as u64;
-                if epoch > CURRENT_EPOCH {
-                    return Err(format!(
-                        "file targets epoch {} but this compiler only supports up to epoch {}",
-                        epoch, CURRENT_EPOCH
-                    ));
-                }
-                return Ok(Some(EpochInfo {
-                    epoch,
-                    byte_start: syntaxes[0].span.start + shebang_offset,
-                    byte_end: syntaxes[0].span.end + shebang_offset,
-                }));
-            }
-        }
+    let epoch = n as u64;
+    if epoch > CURRENT_EPOCH {
+        return Err(format!(
+            "file targets epoch {} but this compiler only supports up to epoch {}",
+            epoch, CURRENT_EPOCH
+        ));
     }
-
-    Ok(None)
+    Ok(Some(EpochInfo {
+        epoch,
+        byte_start: syntaxes[0].span.start + shebang_offset,
+        byte_end: syntaxes[0].span.end + shebang_offset,
+    }))
 }
 
 /// Migrate forms from a source epoch to the current epoch.

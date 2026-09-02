@@ -33,6 +33,14 @@ Rewriting is implemented via:
 3. **Transformation**: Apply rewrite rules to the tree
 4. **Emission**: Convert back to source code
 
+## Epochs
+
+`elle rewrite` migrates a file from the epoch it declares to the current one.
+It reads the file under that epoch's lexicon, so a file written before a
+token-level change tokenizes the way its author meant, and respells the
+tokens whose spelling changed. See
+[`docs/impl/lexicon.md`](../../docs/impl/lexicon.md).
+
 ## See Also
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents

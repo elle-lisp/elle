@@ -106,3 +106,60 @@ fn test_rename_chaining() {
     assert_eq!(table.get("A"), Some(&"C"));
     assert!(!table.contains_key("B"));
 }
+
+// --- token-level respelling (docs/impl/lexicon.md) ---
+
+/// The current lexicon's spelling of `token`, read under `from`.
+fn into_current(from: Lexicon, token: Token<'_>) -> Result<Option<String>, String> {
+    from.respell(&token, &Lexicon::current())
+}
+
+#[test]
+fn a_comment_keeps_its_spelling_when_the_introducer_is_unchanged() {
+    assert_eq!(
+        into_current(Lexicon::current(), Token::Comment("# c\n".to_string())).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_comment_takes_the_introducer_of_the_target_lexicon() {
+    // `divergent` comments with `;`; the current lexicon comments with `#`.
+    // Only the introducer moves — the rest of the line is the author's text.
+    assert_eq!(
+        into_current(Lexicon::divergent(), Token::Comment("; c\n".to_string())).unwrap(),
+        Some("# c\n".to_string())
+    );
+}
+
+#[test]
+fn a_token_the_target_cannot_spell_is_refused_not_left_alone() {
+    // `;` splices under one lexicon and starts a comment under the other,
+    // so there is no text to put in its place. Answering "unchanged" would
+    // leave the byte where it is and silently change what the file means.
+    let err = Lexicon::current()
+        .respell(&Token::Splice, &Lexicon::divergent())
+        .unwrap_err();
+    assert!(err.contains(';'), "{err}");
+}
+
+#[test]
+fn a_fused_unquote_splice_the_target_cannot_spell_is_refused() {
+    let err = Lexicon::current()
+        .respell(&Token::UnquoteSplicing, &Lexicon::no_semicolon())
+        .unwrap_err();
+    assert!(err.contains(",;"), "{err}");
+}
+
+#[test]
+fn an_epoch_declares_a_lexical_change_exactly_when_its_lexicon_moves() {
+    // The descriptor is what `--list-rules` and the epoch history read. A
+    // lexicon that moves without one is a breaking change nothing tells the
+    // author about; a descriptor without a moved lexicon describes a change
+    // that did not happen.
+    for epoch in 1..=CURRENT_EPOCH {
+        let moved = Lexicon::for_epoch(epoch) != Lexicon::for_epoch(epoch - 1);
+        let declared = lexical_changes_in_range(epoch - 1, epoch).next().is_some();
+        assert_eq!(moved, declared, "epoch {epoch}");
+    }
+}

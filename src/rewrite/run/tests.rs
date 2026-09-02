@@ -65,3 +65,58 @@ fn test_rewrite_no_epoch_tag_injects_one() {
         &new_source[..new_source.len().min(80)]
     );
 }
+
+// --- the token-level pass (docs/impl/lexicon.md) ---
+
+/// The source `edits` produce when applied.
+fn applied(source: &str, mut edits: Vec<Edit>) -> String {
+    apply_edits(source, &mut edits).unwrap()
+}
+
+/// `source` as a file read under `lexicon`.
+fn read_under(source: &str, lexicon: Lexicon) -> SourceText<'_> {
+    SourceText::new(source, "t.lisp", lexicon)
+}
+
+#[test]
+fn a_comment_is_respelled_into_the_target_lexicon() {
+    // Read under a lexicon that comments with `;`, written back out under
+    // one that comments with `#`. The comment's own text is untouched.
+    let source = "; note\n(def x 1)\n";
+    let edits = collect_lexical_edits(read_under(source, Lexicon::divergent()), Lexicon::current())
+        .unwrap();
+    assert_eq!(applied(source, edits), "# note\n(def x 1)\n");
+}
+
+#[test]
+fn a_shebang_line_is_never_respelled() {
+    // `#!/usr/bin/env elle` lexes as a comment under every lexicon that
+    // comments with `#`, so the pass sees it as ordinary Elle trivia. It is
+    // the operating system's line: respelling its first byte produces a file
+    // the kernel will not run.
+    let source = "#!/usr/bin/env elle\n# note\n(def x 1)\n";
+    let edits = collect_lexical_edits(read_under(source, Lexicon::current()), Lexicon::divergent())
+        .unwrap();
+    assert_eq!(
+        applied(source, edits),
+        "#!/usr/bin/env elle\n; note\n(def x 1)\n"
+    );
+}
+
+#[test]
+fn a_token_with_no_spelling_in_the_target_names_its_position() {
+    let source = "(def x 1)\n(f ;xs)\n";
+    let err = collect_lexical_edits(read_under(source, Lexicon::current()), Lexicon::divergent())
+        .unwrap_err();
+    assert!(err.contains("t.lisp:2:4"), "{err}");
+}
+
+#[test]
+fn a_file_under_one_lexicon_needs_no_lexical_edits() {
+    // Every registered epoch shares one lexicon, so this is the only case
+    // the tool can reach today: the pass must add nothing to the rewrite.
+    let source = "# note\n(def x 1)\n";
+    let edits =
+        collect_lexical_edits(read_under(source, Lexicon::current()), Lexicon::current()).unwrap();
+    assert!(edits.is_empty());
+}

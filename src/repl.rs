@@ -12,7 +12,7 @@
 //! letrec unit.
 
 use crate::pipeline::{compile_file_repl, CompileCtx};
-use crate::reader::read_syntax_all;
+use crate::reader::read_syntax_all_current;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -418,13 +418,17 @@ struct DefBinding {
 }
 
 /// Try to parse source into complete forms.
+///
+/// Prompt input is always current-epoch (docs/impl/lexicon.md): a pasted
+/// `(elle/epoch N)` is a form the session evaluates, never a choice of
+/// lexer for the text around it.
 fn try_read(source: &str) -> ReadResult {
     let trimmed = source.trim();
     if trimmed.is_empty() {
         return ReadResult::Incomplete;
     }
 
-    match read_syntax_all(trimmed, "<repl>") {
+    match read_syntax_all_current(trimmed, "<repl>") {
         Ok(syntaxes) if syntaxes.is_empty() => ReadResult::Incomplete,
         Ok(syntaxes) => {
             let forms = syntaxes

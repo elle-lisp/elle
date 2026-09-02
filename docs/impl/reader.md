@@ -7,8 +7,16 @@ markdown (`.md`).
 ## Pipeline
 
 ```text
-Source text → Lexer → Tokens → Parser → Vec<Syntax>
+Source text → [shebang strip] → [epoch prescan] → Lexer(Lexicon) → Tokens
+            → Parser → Vec<Syntax>
 ```
+
+The entry points in `src/reader/mod.rs` prescan the source for its
+`(elle/epoch N)` declaration and lex under the lexicon that epoch selects
+(see [impl/lexicon.md](lexicon.md)). A declaration naming an epoch this
+compiler does not know is a read error: no lexicon exists to tokenize it.
+`read_syntax_all_current` skips the prescan and lexes under the current
+epoch; the REPL is its one caller.
 
 ## Lexer
 
@@ -63,5 +71,5 @@ reporting.
 ## See also
 
 - [impl/hir.md](hir.md) — analysis phase after reading
-- [impl/lexicon.md](lexicon.md) — epoch-aware lexing design (not yet implemented)
+- [impl/lexicon.md](lexicon.md) — epoch-aware lexing: the prescan and the `Lexicon`
 - [syntax.md](../syntax.md) — user-facing syntax reference

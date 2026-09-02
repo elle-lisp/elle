@@ -2,11 +2,10 @@ use super::*;
 
 /// Scan source for removed symbols and return an error listing them.
 pub(super) fn check_removals(
-    source: &str,
+    src: SourceText<'_>,
     removals: &HashMap<&str, &str>,
-    file_path: &str,
 ) -> Result<(), String> {
-    let tokens = lex_tokens_no_comments(source)?;
+    let tokens = src.code_tokens()?;
 
     let mut errors = Vec::new();
     for (token, _, _) in &tokens {
@@ -22,7 +21,7 @@ pub(super) fn check_removals(
     } else {
         Err(format!(
             "{}: removed symbols found:\n{}",
-            file_path,
+            src.name,
             errors.join("\n")
         ))
     }
@@ -32,16 +31,15 @@ pub(super) fn check_removals(
 /// Matches `(symbol (fn [] body...))` or `(symbol (fn () body...))` and
 /// replaces the entire form with just the body.
 pub(super) fn collect_unwrap_edits(
-    source: &str,
+    src: SourceText<'_>,
     unwraps: &HashMap<&str, &str>,
-    file_path: &str,
 ) -> Result<Vec<Edit>, String> {
-    let tokens = lex_tokens_no_comments(source)?;
+    let tokens = src.code_tokens()?;
 
     let mut edits = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        if let Some(edit) = try_match_unwrap(source, &tokens, i, unwraps) {
+        if let Some(edit) = try_match_unwrap(src.text, &tokens, i, unwraps) {
             i = skip_balanced_form(&tokens, i);
             edits.push(edit);
         } else {
@@ -52,7 +50,7 @@ pub(super) fn collect_unwrap_edits(
                     if i > 0 && matches!(tokens[i - 1].0, Token::LeftParen) {
                         return Err(format!(
                             "{}: `{}` cannot be automatically unwrapped — {}",
-                            file_path, name, msg
+                            src.name, name, msg
                         ));
                     }
                 }
@@ -148,15 +146,15 @@ pub(super) fn try_match_unwrap<'a>(
 /// Lex source and collect edits for forms matching replace rules.
 /// Works at the token level using byte offsets from the lexer.
 pub(super) fn collect_replace_edits(
-    source: &str,
+    src: SourceText<'_>,
     replaces: &[(&str, usize, &str)],
 ) -> Result<Vec<Edit>, String> {
-    let tokens = lex_tokens_no_comments(source)?;
+    let tokens = src.code_tokens()?;
 
     let mut edits = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        if let Some(edit) = try_match_replace(source, &tokens, i, replaces) {
+        if let Some(edit) = try_match_replace(src.text, &tokens, i, replaces) {
             // Skip past the matched form
             i = skip_balanced_form(&tokens, i);
             edits.push(edit);

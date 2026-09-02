@@ -11,7 +11,7 @@ source locations and supports hygienic macro expansion.
 ```rust
 use elle::reader::read_syntax;
 
-let syntax = read_syntax("(+ 1 2)")?;
+let syntax = read_syntax("(+ 1 2)", "example.lisp")?;
 // syntax.span contains line/column info
 // syntax.kind is SyntaxKind::List(...)
 ```
@@ -28,7 +28,10 @@ let value = read_str("(+ 1 2)", runtime.heap(), &mut symbols)?;
 
 ## Lexer
 
-The lexer tokenizes input character by character:
+The lexer tokenizes input character by character, under the `Lexicon` its
+epoch selects (`docs/impl/lexicon.md`). The entry points above prescan the
+source for `(elle/epoch N)` and hand the lexer that epoch's rules; a lexer
+built directly uses the current epoch's.
 
 ```rust
 let mut lexer = Lexer::new("(+ 1 2)");
@@ -62,7 +65,7 @@ Error at 5:12: undefined variable 'foo'
 To parse a file with multiple top-level expressions:
 
 ```rust
-let forms = read_syntax_all(source)?;
+let forms = read_syntax_all(source, source_name)?;
 for form in forms {
     // Process each form
 }

@@ -3,7 +3,7 @@
 //! Implements the full formatting pipeline:
 //!
 //! ```text
-//! Source → strip shebang → lex (separate tokens + comments)
+//! Source → strip shebang → epoch prescan → lex (separate tokens + comments)
 //!       → parse to Syntax → collect trivia → attach trivia
 //!       → generate Doc → render → prepend shebang + trailing newline
 //! ```
@@ -13,7 +13,7 @@ use super::config::FormatterConfig;
 use super::format::format_forms;
 use super::render::render;
 use super::trivia::{collect_trivia, AnnotatedSyntax, CommentInfo};
-use crate::reader::SyntaxReader;
+use crate::reader::{lexicon_for, SyntaxReader};
 
 /// Format Elle source code with the given configuration.
 ///
@@ -22,8 +22,9 @@ pub fn format_code(source: &str, config: &FormatterConfig) -> Result<String, Str
     // 1. Strip shebang (single strip point for consistent byte offsets)
     let (stripped, shebang) = strip_shebang(source);
 
-    // 2. Lex: separate regular tokens from comment tokens
-    let lexed = lex_for_format(stripped, "<format>")?;
+    // 2. Lex: separate regular tokens from comment tokens, under the rules
+    //    this source's own epoch declares (docs/impl/lexicon.md)
+    let lexed = lex_for_format(stripped, "<format>", lexicon_for(stripped)?)?;
 
     // 3. Parse regular tokens to Syntax tree
     let forms = if lexed.tokens.is_empty() {

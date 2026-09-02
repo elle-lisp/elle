@@ -59,7 +59,7 @@ fn test_take_trailing() {
 
 #[test]
 fn test_lex_for_format() {
-    let result = lex_for_format("# comment\n(+ 1 2)", "<test>").unwrap();
+    let result = lex_for_format("# comment\n(+ 1 2)", "<test>", Lexicon::current()).unwrap();
     // Regular tokens: (, +, 1, 2, )
     assert_eq!(result.tokens.len(), 5);
     // Comment map has 1 comment
@@ -84,7 +84,7 @@ fn test_strip_no_shebang() {
 fn test_lex_for_format_shebang() {
     // lex_for_format receives already-stripped source
     let (stripped, _shebang) = strip_shebang("#!/usr/bin/env elle\n(+ 1 2)");
-    let result = lex_for_format(stripped, "<test>").unwrap();
+    let result = lex_for_format(stripped, "<test>", Lexicon::current()).unwrap();
     assert_eq!(result.tokens.len(), 5);
     assert!(result.comment_map.is_empty());
 }

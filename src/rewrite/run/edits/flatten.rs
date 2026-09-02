@@ -6,10 +6,10 @@ use super::*;
 /// Matches `( let|letrec [ [p1 v1] [p2 v2] ... ] body... )` and deletes
 /// the inner `[`/`]` (or `(`/`)`) delimiters, leaving the contents flat.
 pub(crate) fn collect_flatten_edits(
-    source: &str,
+    src: SourceText<'_>,
     flatten_syms: &[&str],
 ) -> Result<Vec<Edit>, String> {
-    let tokens = lex_tokens_no_comments(source)?;
+    let tokens = src.code_tokens()?;
 
     let mut edits = Vec::new();
     let mut i = 0;
@@ -18,7 +18,7 @@ pub(crate) fn collect_flatten_edits(
         if matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
             if let Some((Token::Symbol(s), _, _)) = tokens.get(i + 1) {
                 if flatten_syms.contains(s) {
-                    if let Some(new_edits) = try_match_flatten(source, &tokens, i) {
+                    if let Some(new_edits) = try_match_flatten(src.text, &tokens, i) {
                         edits.extend(new_edits);
                         // Don't skip the whole form — advance past `(` and symbol
                         // so nested let/letrec forms in the body are still visited.
@@ -135,10 +135,10 @@ pub(super) fn try_match_flatten(
 /// Matches `(let|letrec|let*|if-let|when-let|when-ok (bindings...) body...)`
 /// where the bindings container uses `(...)` and replaces with `[...]`.
 pub(crate) fn collect_bracket_edits(
-    source: &str,
+    src: SourceText<'_>,
     binding_forms: &[&str],
 ) -> Result<Vec<Edit>, String> {
-    let tokens = lex_tokens_no_comments(source)?;
+    let tokens = src.code_tokens()?;
 
     let mut edits = Vec::new();
     let mut i = 0;
@@ -179,18 +179,16 @@ pub(crate) fn collect_bracket_edits(
 /// Matches `(cond (test body) ...)` or `(match val (pat body) ...)` and
 /// removes the inner clause delimiters, wrapping multi-body arms in `(begin ...)`.
 pub(crate) fn collect_flatten_clause_edits(
-    source: &str,
+    src: SourceText<'_>,
     flatten_clauses: &[(&str, usize)],
 ) -> Result<Vec<Edit>, String> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
+    // Comments stay in this stream: a clause walk that counts them as
+    // children is what the pinned rewrites of `cond` and `match` expect.
+    let tokens: Vec<(Token<'_>, usize, usize)> = src
+        .tokens()?
+        .into_iter()
+        .map(|t| (t.token, t.byte_offset, t.len))
+        .collect();
 
     let mut edits = Vec::new();
     let mut i = 0;
@@ -199,7 +197,7 @@ pub(crate) fn collect_flatten_clause_edits(
         if matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
             if let Some((Token::Symbol(s), _, _)) = tokens.get(i + 1) {
                 if let Some(&(_, skip)) = flatten_clauses.iter().find(|(sym, _)| sym == s) {
-                    if let Some(new_edits) = try_match_flatten_clauses(source, &tokens, i, skip) {
+                    if let Some(new_edits) = try_match_flatten_clauses(src.text, &tokens, i, skip) {
                         edits.extend(new_edits);
                         // Don't skip the whole form — advance past head symbol
                         // so nested forms in the body are still visited.

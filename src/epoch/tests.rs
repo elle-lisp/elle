@@ -169,3 +169,64 @@ fn test_lexicon_identical_across_all_registered_epochs() {
         assert_eq!(rules::Lexicon::for_epoch(epoch), rules::Lexicon::current());
     }
 }
+
+// --- the mismatch check (docs/impl/lexicon.md) ---
+
+/// The forms of `source`, read the way the pipeline reads them.
+fn forms_of(source: &str) -> Vec<Syntax> {
+    read_syntax_all(source, "t.lisp").unwrap()
+}
+
+#[test]
+fn a_declaration_below_a_comment_is_allowed_when_the_lexicons_agree() {
+    // The prescan cannot see this declaration, so the two epochs differ:
+    // prescanned is CURRENT_EPOCH, declared is 3. Comparing the NUMBERS
+    // rejects this file, and with it every existing file that carries a
+    // comment above its epoch line. The rule compares lexicons.
+    let source = "# what this file is\n(elle/epoch 3)\n(def x 1)";
+    assert_eq!(prescan_epoch(source).unwrap(), CURRENT_EPOCH);
+    check_lexicon_agreement(&forms_of(source), source, "t.lisp").unwrap();
+}
+
+#[test]
+fn a_source_without_a_declaration_needs_no_agreement() {
+    let source = "(def x 1)";
+    check_lexicon_agreement(&forms_of(source), source, "t.lisp").unwrap();
+}
+
+#[test]
+fn a_declaration_this_compiler_cannot_act_on_is_left_to_extract_epoch() {
+    // A negative epoch is not a lexicon the check could look up. It stays
+    // extract_epoch's error to report, so the check must pass it through
+    // rather than panic looking the number up.
+    let source = "(elle/epoch -1)\n(def x 1)";
+    check_lexicon_agreement(&forms_of(source), source, "t.lisp").unwrap();
+    assert!(extract_epoch(&mut forms_of(source)).is_err());
+}
+
+#[test]
+fn agreeing_lexicons_accept_any_pair_of_epochs() {
+    refuse_mismatch(
+        EpochLexicon::of(3),
+        EpochLexicon::of(CURRENT_EPOCH),
+        "t.lisp",
+    )
+    .unwrap();
+}
+
+#[test]
+fn differing_lexicons_refuse_the_file_and_name_the_fix() {
+    // Unreachable through for_epoch until a lexical epoch exists, so the
+    // pair is built directly. Without this the refusal would ship untested
+    // and first run on the epoch that needs it.
+    let err = refuse_mismatch(
+        EpochLexicon::with_lexicon(3, rules::Lexicon::divergent()),
+        EpochLexicon::of(CURRENT_EPOCH),
+        "t.lisp",
+    )
+    .unwrap_err();
+    assert!(err.contains("t.lisp"), "{err}");
+    assert!(err.contains("(elle/epoch 3)"), "{err}");
+    assert!(err.contains(&format!("epoch {}", CURRENT_EPOCH)), "{err}");
+    assert!(err.contains("shebang"), "{err}");
+}

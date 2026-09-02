@@ -196,3 +196,18 @@
   (assert (= (type-of m) :@struct) "eval of read @{...} produces @struct")
   (put m :b 2)
   (assert (= (get m :b) 2) "eval of read @{...} is mutable"))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# epoch declaration — the read text names the token rules it is read under
+# ──────────────────────────────────────────────────────────────────────────────
+
+(assert (= (read-all "(elle/epoch 3) 1") (list '(elle/epoch 3) 1))
+        "a supported epoch declaration reads as an ordinary form")
+
+# The number comes from (elle/epoch) so the case stays "one past the end"
+# after every epoch bump.
+(let [future (string "(elle/epoch " (+ 1 (elle/epoch)) ") (def x 1)")]
+  (let [[ok? err] (protect (read-all future))]
+    (assert (not ok?) "reading an epoch with no token rules fails")
+    (assert (has? (get err :message) "only supports up to")
+            "the failure names the epoch ceiling")))

@@ -4,6 +4,7 @@
 //! migration rules here. Rules are pure data so they can be consumed
 //! by both the in-pipeline transformer and the `elle rewrite` CLI tool.
 
+use crate::reader::Token;
 use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
@@ -43,6 +44,51 @@ impl Lexicon {
     pub fn current() -> Lexicon {
         Lexicon::for_epoch(CURRENT_EPOCH)
     }
+
+    /// The text that spells `token` — read under `self` — with its meaning
+    /// intact under `target`. `None` when both lexicons spell it alike,
+    /// which is every token whose rules did not move.
+    ///
+    /// This is the only place a token crosses between two lexicons, so
+    /// `elle rewrite` and the lexer read the same fields and cannot drift
+    /// apart (docs/impl/lexicon.md).
+    ///
+    /// A token `target` cannot spell at all is an error, not an unchanged
+    /// token: leaving those bytes in place would keep a file that parses
+    /// and means something else.
+    pub(crate) fn respell(
+        &self,
+        token: &Token<'_>,
+        target: &Lexicon,
+    ) -> Result<Option<String>, String> {
+        match token {
+            // A comment is its introducer and the rest of the line. Only the
+            // introducer belongs to the lexicon; the rest is the author's.
+            Token::Comment(text) if self.comment_char != target.comment_char => {
+                let body = text.strip_prefix(self.comment_char).unwrap_or(text);
+                Ok(Some(format!("{}{}", target.comment_char, body)))
+            }
+            Token::Splice if self.semicolon_splices && !target.semicolon_splices => {
+                Err(no_spelling("`;` splice"))
+            }
+            Token::UnquoteSplicing
+                if self.comma_semicolon_fuses && !target.comma_semicolon_fuses =>
+            {
+                Err(no_spelling("`,;` unquote-splicing"))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+/// The refusal shared by every token shape that survives a lexical change
+/// only as a different form, never as different bytes.
+fn no_spelling(lexeme: &str) -> String {
+    format!(
+        "{} has no spelling under the target lexicon; the epoch that removed \
+         the shape migrates it with a tree rule, not a token rewrite",
+        lexeme
+    )
 }
 
 /// Lexicons that match no registered epoch. Tests lex under them to prove
@@ -68,6 +114,19 @@ impl Lexicon {
     }
 }
 
+/// A token-level change an epoch made, for the reader of a changelog.
+///
+/// The rewrite itself comes from `Lexicon::respell`; this only names the
+/// change so `elle rewrite --list-rules` and the epoch history can show it
+/// beside the tree rules (docs/impl/lexicon.md).
+#[derive(Debug, Clone)]
+pub struct LexicalChange {
+    /// Short name, in the shape of a rule name: `comment-char`, `splice`.
+    pub name: &'static str,
+    /// Human-readable summary for changelogs and error messages.
+    pub summary: &'static str,
+}
+
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
 pub struct Migration {
@@ -77,6 +136,10 @@ pub struct Migration {
     pub summary: &'static str,
     /// The individual rules in this migration.
     pub rules: &'static [MigrationRule],
+    /// The token-level changes in this migration. Non-empty exactly when
+    /// this epoch's [`Lexicon`] differs from its predecessor's; a test
+    /// pins the pairing.
+    pub lexical: &'static [LexicalChange],
 }
 
 /// A single mechanical transformation.
@@ -182,6 +245,7 @@ static MIGRATIONS: &[Migration] = &[
                 template: "(let [[ok? err] (protect ($1))] (assert (not ok?) $3) (assert (= (get err :error) $2) $3))",
             },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 2,
@@ -200,6 +264,7 @@ static MIGRATIONS: &[Migration] = &[
                 message: "use (pp ...) for literal form or (port/write port data) for port I/O",
             },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 3,
@@ -210,6 +275,7 @@ static MIGRATIONS: &[Migration] = &[
                 new: "print",
             },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 4,
@@ -236,6 +302,7 @@ static MIGRATIONS: &[Migration] = &[
                 new: "port/flush",
             },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 5,
@@ -255,6 +322,7 @@ static MIGRATIONS: &[Migration] = &[
                 new: "has?",
             },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 6,
@@ -263,6 +331,7 @@ static MIGRATIONS: &[Migration] = &[
             symbol: "ev/run",
             message: "user code already runs in the async scheduler; remove the ev/run wrapper",
         }],
+        lexical: &[],
     },
     Migration {
         epoch: 7,
@@ -270,6 +339,7 @@ static MIGRATIONS: &[Migration] = &[
         rules: &[MigrationRule::FlattenBindings {
             symbols: &["let", "letrec", "let*", "if-let", "when-let", "when-ok"],
         }],
+        lexical: &[],
     },
     Migration {
         epoch: 8,
@@ -279,6 +349,7 @@ static MIGRATIONS: &[Migration] = &[
             arity: 2,
             template: "(def @$1 $2)",
         }],
+        lexical: &[],
     },
     Migration {
         epoch: 9,
@@ -293,6 +364,7 @@ static MIGRATIONS: &[Migration] = &[
                 skip: 1,
             },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 10,
@@ -302,6 +374,7 @@ static MIGRATIONS: &[Migration] = &[
             MigrationRule::Rename { old: "car", new: "first" },
             MigrationRule::Rename { old: "cdr", new: "rest" },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 11,
@@ -327,6 +400,7 @@ static MIGRATIONS: &[Migration] = &[
             MigrationRule::Rename { old: "sys/spawn", new: "sys/spawn-vm" },
             MigrationRule::Rename { old: "os/spawn", new: "os/spawn-vm" },
         ],
+        lexical: &[],
     },
     Migration {
         epoch: 12,
@@ -372,6 +446,7 @@ static MIGRATIONS: &[Migration] = &[
                 message: "use (fiber/resume f) instead of (coroutine-next f)",
             },
         ],
+        lexical: &[],
     },
 ];
 
@@ -380,6 +455,14 @@ pub fn migrations_in_range(from: u64, to: u64) -> impl Iterator<Item = &'static 
     MIGRATIONS
         .iter()
         .filter(move |m| m.epoch > from && m.epoch <= to)
+}
+
+/// Every token-level change made in the range (from, to].
+pub fn lexical_changes_in_range(
+    from: u64,
+    to: u64,
+) -> impl Iterator<Item = &'static LexicalChange> {
+    migrations_in_range(from, to).flat_map(|m| m.lexical.iter())
 }
 
 /// Collapse all renames in a range into a single lookup table.
