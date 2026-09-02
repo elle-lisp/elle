@@ -741,6 +741,24 @@ fn region_tail_signal_exit_uaf() {
     );
 }
 
+// Guard — a spliced call's args array is reclaimed by the call that consumes it
+// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of an
+// array the convention owns"). The array counts one reference per element, so
+// that reclaim is a cascade on a path that ran none before, and four faces must
+// survive it: the ARGUMENT the callee still reads after the array is gone, the
+// SOURCE the splice read — released ahead of the frame replacement now that a
+// spliced tail call moves nothing — the pass-through RESULT handed back out of
+// an argument, and an OUTER holder in call position. Every read below happens
+// after the reclaim ran, so an over-release faults there — SIGSEGV under
+// guardfree. The leak face is `region-splice-args.lisp`.
+#[test]
+fn region_splice_args_uaf() {
+    run_elle_script_with_args(
+        "region-splice-args-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a frame abandoned by an ERROR runs the releases it still owed, off
 // the value-route slots the emitter recorded (docs/impl/region/mechanism.md
 // § "An abandoned frame runs the releases it still owes"). Each is a release

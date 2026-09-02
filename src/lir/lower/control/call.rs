@@ -716,6 +716,24 @@ impl<'a> Lowerer<'a> {
             // as in the non-splice path.
             let func_reg = self.lower_expr(func)?;
 
+            // The args array is the operand stack spelled as a heap value: the
+            // calling convention builds it, the call consumes it, and no binding
+            // of the program ever names it. So it takes a managed slot of its own
+            // rather than the call's — the call maps its own mint over that slot,
+            // and a static slot names one allocation execution between drops — and
+            // the release is the runtime's, carried on the call instruction
+            // (docs/impl/region/mechanism.md § "A spliced call's arguments come out
+            // of an array the convention owns").
+            let args_region = self.fresh_managed_region();
+            // A frame abandoned between the array's construction and the call —
+            // an `ArrayMutExtend` over a source that is not a sequence raises
+            // there — still has the slot mapped, so the walk reclaims it off this
+            // record (§ "An abandoned frame runs the releases it still owes"). A
+            // frame that reached the call does not: the call took the slot, and
+            // the walk's own take then finds nothing. The slot is minted per call
+            // site, so it can enter the table only once.
+            self.current_func.frame_release_regions.push(args_region);
+
             // Build the args array incrementally
             // Start with MakeArrayMut of the first run of non-spliced args
             let mut args_reg: Option<Reg> = None;
@@ -725,7 +743,7 @@ impl<'a> Lowerer<'a> {
                     (None, false) => {
                         // First arg, not spliced: create array with one element
                         let dst = self.fresh_reg();
-                        self.emit_alloc(|region| LirInstr::MakeArrayMut {
+                        self.emit_alloc_with_slot(args_region, |region| LirInstr::MakeArrayMut {
                             region,
                             dst,
                             elements: vec![*reg],
@@ -735,7 +753,7 @@ impl<'a> Lowerer<'a> {
                     (None, true) => {
                         // First arg, spliced: create empty array, then extend
                         let empty = self.fresh_reg();
-                        self.emit_alloc(|region| LirInstr::MakeArrayMut {
+                        self.emit_alloc_with_slot(args_region, |region| LirInstr::MakeArrayMut {
                             region,
                             dst: empty,
                             elements: vec![],
@@ -771,7 +789,7 @@ impl<'a> Lowerer<'a> {
 
             let final_args = args_reg.unwrap_or_else(|| {
                 let dst = self.fresh_reg();
-                self.emit_alloc(|region| LirInstr::MakeArrayMut {
+                self.emit_alloc_with_slot(args_region, |region| LirInstr::MakeArrayMut {
                     region,
                     dst,
                     elements: vec![],
@@ -785,14 +803,28 @@ impl<'a> Lowerer<'a> {
                     region,
                     func: func_reg,
                     args: final_args,
+                    args_region,
                 });
+                // A spliced call moves nothing: the array holds one counted
+                // reference per element and the callee mints its own, so every
+                // release the frame owes past this frame replacement is an
+                // ordinary release the relocation carries rather than an
+                // ownership move. Hence NO argument expressions in the exempt
+                // set — a spliced argument was consumed into the array, and the
+                // source the splice read is handed to no one. The callee's own
+                // region and this call's result placeholder still are.
+                if let Some(call_id) = self.current_hir_id {
+                    let operands = [final_args, func_reg];
+                    self.open_tail_exit_hoist(call_id, func, &[], &operands);
+                }
                 // ReturnValue retain on the native-completion fall-through —
                 // the splice/`apply` mirror of the non-splice `TailCall` arm
                 // above. A splice tail call to a heap pass-through native
                 // (`(first ;argv)`, `(get ;argv)`, an `apply`'d accessor) needs
                 // the same retain or its result is freed under the caller's
-                // borrow once the args-array leak that currently masks it is
-                // fixed (region-splice-tail-return.lisp; docs/impl/region/rules.md
+                // borrow — nothing outlives the call to hold it, the args array
+                // being reclaimed by the call itself
+                // (region-splice-tail-return.lisp; docs/impl/region/rules.md
                 // Rules 4/5). Dead for a frame-replacing closure tail call;
                 // no-op for an immediate result. The emitter peeks the operand
                 // stack top — the native's pushed result. Stands down under the
@@ -810,6 +842,7 @@ impl<'a> Lowerer<'a> {
                     dst,
                     func: func_reg,
                     args: final_args,
+                    args_region,
                 });
                 // ANF binds this Call's result; the binding's slot is
                 // recorded in `region_to_slot` by the enclosing

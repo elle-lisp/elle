@@ -288,17 +288,29 @@ pub enum LirInstr {
     ArrayMutPush { dst: Reg, array: Reg, value: Reg },
     /// Call a function with elements of an array as arguments.
     /// The array is unpacked into individual arguments at runtime.
+    ///
+    /// `args_region` is the managed slot the args array was allocated into, and
+    /// the runtime takes it to reclaim the array once the callee holds its own
+    /// reference to every argument. The array is the calling convention's own —
+    /// no binding of the program names it, so no emitted release can
+    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of
+    /// an array the convention owns").
     CallArrayMut {
         dst: Reg,
         func: Reg,
         args: Reg,
         region: StaticRegion,
+        args_region: StaticRegion,
     },
-    /// Tail call with elements of an array as arguments.
+    /// Tail call with elements of an array as arguments. `args_region` is the
+    /// args array's own slot, as for [`LirInstr::CallArrayMut`] — and here it is
+    /// the only route there is, a frame-replacing callee never arriving at the
+    /// block after this instruction.
     TailCallArrayMut {
         func: Reg,
         args: Reg,
         region: StaticRegion,
+        args_region: StaticRegion,
     },
 
     // === Allocation Regions ===

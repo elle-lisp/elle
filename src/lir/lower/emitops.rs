@@ -148,7 +148,11 @@ impl<'a> Lowerer<'a> {
         self.emit_alloc_with_slot(slot, build);
     }
 
-    fn emit_alloc_with_slot(
+    /// `emit_alloc` against a slot the caller already holds — the solver's, via
+    /// the two wrappers above, or a synthetic one from
+    /// [`Self::fresh_managed_region`] for an allocation region inference does not
+    /// track (the splice args array, whose release is the calling convention's).
+    pub(super) fn emit_alloc_with_slot(
         &mut self,
         region: StaticRegion,
         build: impl FnOnce(StaticRegion) -> LirInstr,

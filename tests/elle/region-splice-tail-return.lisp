@@ -10,19 +10,18 @@
 # native's single pass-through reference is drained by the caller's
 # `DecrefValueRegion`. The fix is in `lower_call`'s splice arm (src/lir/lower).
 #
-# WHY A CORRECTNESS GUARD, NOT A UAF WITNESS. Unlike the non-splice case, the
-# splice path cannot fault TODAY even with the retain missing: the freshly-built
-# splice args-array's region is never released (a separate, pre-existing leak,
-# shared with the non-tail `CallArrayMut` path — see the discarded-tail-return
-# leak the leak-suite canaries pin on this branch), and that live args-array keeps
-# the borrowed result alive. So under `--trace=guardfree` the value reads back
-# intact whether or not the retain is present — there is no deterministic fault
-# to assert on. This test therefore asserts the RESULT VALUE is correct: GREEN
-# now (the retain is present; and even without it the masking leak hid the bug),
-# and it BECOMES a real use-after-free guard the moment the args-array leak is
-# fixed — at which point a missing retain would free the result under the
-# caller's borrow and this assert would read torn bytes. Keeping the retain in
-# now means that future leak fix lands UAF-free. docs/impl/region/rules.md Rules 4/5/8.
+# THE TRAP the assertions guard. The args array is reclaimed by the call that
+# consumes it (docs/impl/region/mechanism.md § "A spliced call's arguments come
+# out of an array the convention owns"), so nothing outlives the call to keep a
+# borrowed result alive on the caller's behalf. Withhold the retain and the
+# native's single pass-through reference is drained by the caller's
+# `DecrefValueRegion`, and the reads below get torn bytes.
+#
+# THE COUNTER-FACTUAL. While the array's own region was still stranded, that live
+# array held the borrowed result and these same assertions passed with the retain
+# missing — the leak masked the defect. So this file is a witness only in company
+# with region-splice-args.lisp: a regression that re-strands the array would paint
+# it green again. docs/impl/region/rules.md Rules 4/5/8.
 #
 # Run under the guardfree oracle in tests/integration/elle_scripts.rs, mirroring
 # region-native-tail-return-uaf.

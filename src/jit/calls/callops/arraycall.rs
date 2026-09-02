@@ -3,6 +3,12 @@
 use super::*;
 
 /// Unpacks the array and delegates to elle_jit_call.
+///
+/// `args_region` is the args array's own static slot: the array is the calling
+/// convention's, so the call that consumes it reclaims it, on this tier exactly
+/// as on the interpreter's (`VM::release_splice_args`,
+/// docs/impl/region/mechanism.md § "A spliced call's arguments come out of an
+/// array the convention owns").
 #[no_mangle]
 pub extern "C" fn elle_jit_call_array(
     func_tag: u64,
@@ -11,12 +17,17 @@ pub extern "C" fn elle_jit_call_array(
     args_array_payload: u64,
     vm: *mut (),
     region_id: u32,
+    args_region: u32,
 ) -> JitValue {
     let args_val = Value {
         tag: args_array_tag,
         payload: args_array_payload,
     };
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let args_slot = crate::hir::region::StaticRegion::new(args_region)
+        .expect("JIT region slot is nonzero — emitter invariant");
+    // Claimed before the callee can park, exactly as on the interpreter tier.
+    let args_array = vm_ref.take_splice_args(args_slot);
 
     let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
         arr.borrow().to_vec()
@@ -30,11 +41,12 @@ pub extern "C" fn elle_jit_call_array(
                 args_val.type_name()
             ),
         );
+        vm_ref.release_splice_args(args_array);
         return JitValue::nil();
     };
 
     let nargs = args.len() as u32;
-    if args.is_empty() {
+    let result = if args.is_empty() {
         elle_jit_call(
             func_tag,
             func_payload,
@@ -45,11 +57,19 @@ pub extern "C" fn elle_jit_call_array(
         )
     } else {
         elle_jit_call(func_tag, func_payload, args.as_ptr(), nargs, vm, region_id)
-    }
+    };
+    // The callee holds its own reference to every argument by now, so the
+    // array's counted edges are surplus.
+    unsafe { &mut *(vm as *mut crate::vm::VM) }.release_splice_args(args_array);
+    result
 }
 
 /// Tail-call a function with arguments from an array value.
-/// Unpacks the array and delegates to elle_jit_tail_call.
+/// Unpacks the array and delegates to the shared tail-call body.
+///
+/// A spliced tail call MOVES nothing — its arguments came out of the args array,
+/// not off this frame — so the callee mints one reference per parameter
+/// (`own_params`), and the array's reclaim balances the pushes that built it.
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call_array(
     func_tag: u64,
@@ -58,12 +78,17 @@ pub extern "C" fn elle_jit_tail_call_array(
     args_array_payload: u64,
     vm: *mut (),
     region_id: u32,
+    args_region: u32,
 ) -> JitValue {
     let args_val = Value {
         tag: args_array_tag,
         payload: args_array_payload,
     };
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let args_slot = crate::hir::region::StaticRegion::new(args_region)
+        .expect("JIT region slot is nonzero — emitter invariant");
+    // Claimed before the callee can park, exactly as on the interpreter tier.
+    let args_array = vm_ref.take_splice_args(args_slot);
 
     let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
         arr.borrow().to_vec()
@@ -77,22 +102,34 @@ pub extern "C" fn elle_jit_tail_call_array(
                 args_val.type_name()
             ),
         );
+        vm_ref.release_splice_args(args_array);
         return JitValue::nil();
     };
 
     let nargs = args.len() as u32;
-    if args.is_empty() {
-        elle_jit_tail_call(
+    let result = if args.is_empty() {
+        jit_tail_call_inner(
             func_tag,
             func_payload,
             std::ptr::null(),
             nargs,
             vm,
             region_id,
+            true,
         )
     } else {
-        elle_jit_tail_call(func_tag, func_payload, args.as_ptr(), nargs, vm, region_id)
-    }
+        jit_tail_call_inner(
+            func_tag,
+            func_payload,
+            args.as_ptr(),
+            nargs,
+            vm,
+            region_id,
+            true,
+        )
+    };
+    unsafe { &mut *(vm as *mut crate::vm::VM) }.release_splice_args(args_array);
+    result
 }
 
 /// Create a closure from a template **blueprint** and captured environment.
@@ -214,6 +251,34 @@ pub extern "C" fn elle_jit_tail_call(
     vm: *mut (),
     region_id: u32,
 ) -> JitValue {
+    jit_tail_call_inner(
+        func_tag,
+        func_payload,
+        args_ptr,
+        nargs,
+        vm,
+        region_id,
+        false,
+    )
+}
+
+/// The body of [`elle_jit_tail_call`], shared with the spliced entry point
+/// [`elle_jit_tail_call_array`].
+///
+/// `spliced_args` is the same fact `tail_call_inner` reads on the interpreter
+/// tier: an ordinary tail call MOVES its arguments (the caller's reference
+/// transfers), while a spliced one holds them in an args array the convention
+/// owns and reclaims, so the callee mints one reference per parameter instead.
+#[allow(clippy::too_many_arguments)]
+fn jit_tail_call_inner(
+    func_tag: u64,
+    func_payload: u64,
+    args_ptr: *const Value,
+    nargs: u32,
+    vm: *mut (),
+    region_id: u32,
+    spliced_args: bool,
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let func = Value {
         tag: func_tag,
@@ -287,9 +352,11 @@ pub extern "C" fn elle_jit_tail_call(
             .collect();
 
         // Tail call: pure MOVE (own_params=false) — the caller's arg references
-        // transfer to the callee, which releases them. Per-value env minting via
+        // transfer to the callee, which releases them. A SPLICED tail call has
+        // no such reference of the frame's: its arguments came out of the args
+        // array, so the callee mints its own. Per-value env minting via
         // `populate_env`, same as the interpreter's `tail_call_inner`.
-        let new_env = match vm.build_tail_call_env(closure, &args) {
+        let new_env = match vm.build_tail_call_env(closure, &args, spliced_args) {
             Some(env) => env,
             None => return JitValue::nil(), // bad keyword args — error on fiber
         };

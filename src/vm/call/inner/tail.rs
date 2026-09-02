@@ -96,6 +96,16 @@ impl VM {
     /// exit owes too"). A terminal `:error` consumes them like any other exit and
     /// mints the payload's delivery instead
     /// ([`Self::mint_raised_argument_delivery`]).
+    ///
+    /// `spliced_args` says the arguments came out of an args array the calling
+    /// convention owns rather than off this frame's own operand stack. That
+    /// decides who holds the reference the callee's owned-param release consumes:
+    /// the array does, so a spliced tail call MOVES nothing and the callee mints
+    /// one reference per parameter of its own (`own_params`), exactly as a
+    /// call-position callee does. The caller reclaims the array once this returns,
+    /// and the cascade balances against those mints
+    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of an
+    /// array the convention owns").
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tail_call_inner(
         &mut self,
@@ -106,6 +116,7 @@ impl VM {
         defer_callee_release: bool,
         deferred_release_slot: Option<StaticRegion>,
         borrowed_arg_slots: &[u16],
+        spliced_args: bool,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             let blocked = def
@@ -330,13 +341,18 @@ impl VM {
             // owned-param callee releases it. So NO caller incref here —
             // `own_params = false`. (The non-tail path, `build_closure_env`,
             // passes `true`.)
+            //
+            // A SPLICED tail call has no such reference to move: its arguments
+            // came out of an args array the calling convention owns, whose
+            // counted edge the caller reclaims once this returns. So the callee
+            // mints one of its own per parameter, as in call position.
             if !Self::populate_env(
                 &mut self.tail_call_env_cache,
                 unsafe { &mut *self.heap_ptr },
                 &mut self.fiber,
                 closure,
                 &args,
-                false,
+                spliced_args,
             ) {
                 return Some(SIG_ERROR);
             }

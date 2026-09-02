@@ -70,7 +70,11 @@ binding, and routing them all through the Begin's single region slot would
 orphan every cell but the last (at stdlib scale, thousands of cells plus
 everything they pin). Pre-allocated capture cells therefore get **one region
 per cell** (`begin_cell_regions`), each released by its own `DecrefRegion` at
-its binding's last use.
+its binding's last use. A spliced call's args array is the same obligation with
+a different resolution: it takes a managed slot of its own so the call's result
+mint cannot orphan it, and its drop is the call's own — the runtime takes that
+slot (mechanism.md § "A spliced call's arguments come out of an array the
+convention owns").
 
 ## Constants lower as ordinary allocations, not promoted values
 

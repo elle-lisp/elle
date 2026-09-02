@@ -380,6 +380,49 @@ impl VM {
             .and_then(|frame| frame.remove(&static_id.get()))
             .map(|m| m.region)
     }
+    /// Claim a spliced call's args array — the array the calling convention built
+    /// for this call and no binding of the program names
+    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of
+    /// an array the convention owns").
+    ///
+    /// The claim is split from the free ([`Self::release_splice_args`]) because
+    /// the two answer to different moments. Taking the slot must happen BEFORE the
+    /// callee runs: a callee that suspends parks the continuation, and the park
+    /// SNAPSHOTS this activation's region map, so an entry still naming the array
+    /// would outlive the free and detonate the uncounted-borrow check when the
+    /// resume reads it (docs/impl/region/generations.md). Taking it first settles
+    /// the abandoned-frame walk in the same stroke — the slot is gone, so a callee
+    /// that raises leaves the walk nothing to run, and a frame abandoned BEFORE
+    /// the call still has it mapped and reclaims the array there.
+    ///
+    /// Shared by both dispatch tiers so the accounting is identical whichever runs
+    /// the caller (`handle_call_array`/`handle_tail_call_array`, and the JIT's
+    /// `elle_jit_call_array`/`elle_jit_tail_call_array`).
+    #[inline]
+    pub(crate) fn take_splice_args(&mut self, slot: StaticRegion) -> Option<RuntimeRegion> {
+        self.take_runtime_region_for_drop_slot(slot)
+    }
+
+    /// Free the region [`Self::take_splice_args`] claimed, once the callee holds
+    /// its own reference to every argument.
+    ///
+    /// The array counts one reference per element — `ArrayMutPush` /
+    /// `ArrayMutExtend` go through the store funnel — so this release runs their
+    /// cascade, and the callee's own references are what it must not be the last
+    /// of. The region cannot be recycled between the claim and here: it is held by
+    /// its own minting reference until this call.
+    #[inline]
+    pub(crate) fn release_splice_args(&mut self, region: Option<RuntimeRegion>) {
+        let Some(region) = region else {
+            return;
+        };
+        if crate::config::get().has_trace("rc") {
+            let rc = self.heap().region_rc(region);
+            eprintln!("[trace:rc] splice args released({region}) rc={rc}");
+        }
+        self.heap().decref_region(region);
+    }
+
     /// The interpreter's entry to the abandoned-frame walk: the tables come off
     /// the executing `Code`, and slot `s` lives on this activation's frame stack.
     pub(crate) fn release_abandoned_frame(&mut self, code: &crate::value::Code, payload: Value) {
