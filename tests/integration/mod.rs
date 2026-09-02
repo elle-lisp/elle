@@ -174,6 +174,9 @@ mod workflows {
 mod budget {
     include!("budget.rs");
 }
+mod capacity {
+    include!("capacity.rs");
+}
 mod doctest {
     include!("doctest.rs");
 }

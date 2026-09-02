@@ -49,6 +49,46 @@ Each job keeps its own `Swatinem/rust-cache` `shared-key`. The pair builds
 different profiles, so one shared key would make the two jobs overwrite each
 other's cache on alternating runs.
 
+### What each job builds
+
+Every job that drives the Makefile builds `--release` and runs
+`target/release/elle`, on every platform. The Makefile picks that under
+`ifdef GITHUB_ACTIONS`, which is set on all GitHub runners, so the macOS and
+AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. The Rust
+Tests jobs build the dev profile, also on every platform, because `cargo test`
+does. No platform is quietly gated at a weaker optimization level.
+
+One job changes the release profile it builds. `macOS Smoke` sets
+`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`, because the panic that reads a
+scrubbed page is `#[cfg(debug_assertions)]` and `--trace=scrub` is worthless
+without it (docs/impl/region/diagnostics.md). Its binary is therefore a release
+build that also runs the debug-only checks, on the smallest runner in the
+workflow. Read a macOS corpus timing against that, not against a Linux one.
+
+### Runner capacity
+
+The corpus passes run one process per file, `parallel -j $(JOBS)`. On CI the
+Makefile reads that count from the runner — `nproc`, or `getconf
+_NPROCESSORS_ONLN` where `nproc` is absent, which is every macOS runner. It does
+not write a number down.
+
+GitHub does not give every runner the same machine, and it re-sizes them
+without notice. Today the Linux x86_64 and AArch64 runners report four
+processors and the macOS runner reports three. A constant chosen for one runner
+over-subscribes the other.
+
+Over-subscription does not fail the corpus, it stretches it. Every file still
+passes its assertions, and the ones nearest the per-file budget get killed on
+the way out. That failure is exit 124 with no output, which reads as a flaky
+runner rather than as a job count that never fit. `JOBS` remains an override
+for a job that needs a different number.
+
+Outside CI the default stays the constant 16. A development box is not sized by
+the runner, and its owner can pass `JOBS=`.
+
+`tests/integration/capacity.rs` is the standing check that the CI count still
+tracks the runner.
+
 ### Adding a job
 
 `All Checks Passed` is the only status check branch protection requires

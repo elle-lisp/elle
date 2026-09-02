@@ -189,6 +189,40 @@ pub fn eval_reuse(input: &str) -> Result<Value, String> {
     eval_with_cache(input, &FULL_CACHE, true)
 }
 
+/// One Makefile variable's value, as `make` itself expands it, or `None` if
+/// `make` could not be run.
+///
+/// Tests that check how CI dimensions the corpus — job counts, per-file
+/// budgets — have to read the value the pass will use, not the assignment's
+/// text. Those two differ: a variable can sit inside an `ifdef`, be computed by
+/// `$(shell …)`, be continued across lines with a backslash, or reference
+/// another variable. A test that parses the Makefile reimplements `make`, and
+/// the first thing such a parser does is disagree with it. This asks `make`.
+///
+/// `env` sets variables for the child, over a slate cleared of `GITHUB_ACTIONS`
+/// and `JOBS`: the answer must not depend on whether the suite itself is
+/// running under CI.
+///
+/// The Makefile's `print-%` rule is what this reads through.
+#[allow(dead_code)]
+pub fn make_var(name: &str, env: &[(&str, &str)]) -> Option<String> {
+    let mut command = std::process::Command::new("make");
+    command
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("--no-print-directory")
+        .arg(format!("print-{name}"))
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("JOBS");
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let out = command.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
+}
+
 /// Uniquely-named scratch directory under the platform temp root, removed
 /// recursively on drop — the panic path included, so a failing test leaves no
 /// litter in `$TMPDIR`. See `tests/AGENTS.md` § Scratch files.

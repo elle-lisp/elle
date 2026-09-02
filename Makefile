@@ -5,12 +5,32 @@
 
 .DEFAULT_GOAL := all
 
+# The processors the box will schedule on.
+#
+# `nproc` first because it is the only one of the three that honours a CPU
+# affinity mask: a run pinned to a subset of the box gets the subset, not the
+# box. It is GNU coreutils, so it is absent on a stock macOS runner — and the
+# `brew install coreutils` the macOS job runs installs it as `gnproc`, not on
+# PATH under this name. `getconf` is the portable answer both platforms give.
+# The literal is reached only if a box has neither.
+CORES := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+
 ifdef GITHUB_ACTIONS
-  JOBS          ?= 4
+  # One corpus process per processor. GitHub gives the Linux runners four and
+  # the macOS runner three, and re-sizes them without notice, so this is read
+  # from the runner rather than written down — a constant fits the runner it was
+  # chosen on and over-subscribes the others. See docs/analysis/ci.md § "Runner
+  # capacity"; tests/integration/capacity.rs is the standing check.
+  JOBS          ?= $(CORES)
+  # Not $(CORES): the wasm pass is bounded by memory, not by processors. Each
+  # `--wasm=full` run compiles a whole module before it runs anything.
   WASM_JOBS     ?= 2
   ELLE          ?= ./target/release/elle
   CARGO_PROFILE := --release
 else
+  # Deliberately a constant, and deliberately not $(CORES): a development box
+  # shares its cores with everything else its owner is running, and its owner
+  # can pass JOBS= when that is wrong.
   JOBS          ?= 16
   WASM_JOBS     ?= 4
   ELLE          ?= ./target/debug/elle
@@ -50,11 +70,11 @@ define RUN_PLUMB
 		|| { echo "FAILED: plumb.lisp ($(1))"; exit 1; }
 endef
 
-# Two corpus files spend most of a per-file budget on work the case needs:
-# h2-load-volume drives 500 requests over one h2 session, and
+# Some corpus files spend most of a per-file budget on work the case needs: the
+# h2 families drive hundreds of requests or streams over one session, and
 # region-jit-io-suspend-uaf reads 20000 lines to drive one function hot enough
 # for the JIT to compile it. Cut either volume and the shape stops reaching the
-# state it pins. Both fit TIMEOUT with room on an idle box, and both have been
+# state it pins. They fit TIMEOUT with room on an idle box, and they have been
 # killed at it on CI, where the runner is shared and slower by an order of
 # magnitude. A killed file is exit 124 — no output, no assertion message — so it
 # reads as a flaky runner rather than as a budget that was never wide enough.
@@ -62,14 +82,24 @@ endef
 # per-file form: an override for the files that need it, so every other file
 # still fails fast on a hang. The pins are tests/integration/budget.rs.
 #
-# The wider budget is a BACKSTOP, not the deadline. h2-load-volume carries its
-# own deadline and reports which request stalled and how long it waited; that
-# message is the reason to run the file, and it only ever prints if the outer
-# kill lands after it. Keep this above any in-file deadline, and read both from
-# a timed run rather than from a number written here — remembering that a run
-# `timeout` killed reports the cap, not what the file would have cost.
-WIDE_TIMEOUT ?= 120s
-WIDE_FILES   := -e h2-load-volume.lisp -e region-jit-io-suspend-uaf.lisp
+# The wider budget is a BACKSTOP, not the deadline. Each of these files carries
+# its own `deadline` and reports which request stalled and how long it waited;
+# that message is the reason to run the file, and it only ever prints if the
+# outer kill lands after it. So WIDE_TIMEOUT must stay above the LARGEST
+# in-file deadline named here, which is 120 s. Read both from a timed run rather
+# than from a number written here — remembering that a run `timeout` killed
+# reports the cap, not what the file would have cost.
+#
+# The h2 entries are family prefixes, not file names. A deadline is a property
+# of the family: every h2-bidi case gets 120 s, every h2-load case 60 s, and a
+# new sibling copies its neighbour. Naming the prefix means the new file arrives
+# with a budget above the deadline it inherited, instead of arriving under a
+# 30 s one and going unnoticed until a runner is slow enough. h2 files that
+# declare no deadline (h2-rfc9113, h2-recycle-cleanup, h2-stress-scoped) are not
+# in a family named here and keep TIMEOUT.
+WIDE_TIMEOUT ?= 150s
+WIDE_FILES   := -e h2-bidi- -e h2-load- -e h2-stream- -e h2-timeout- \
+                -e region-jit-io-suspend-uaf.lisp
 
 # The budget for ONE corpus file: `parallel` substitutes the path into `{}` and
 # the pass's shell picks a budget, once per file. Every pass that runs the corpus
@@ -481,3 +511,10 @@ help:  ## Show this help
 	@grep -E '^[a-z].*:.*##' $(MAKEFILE_LIST) | \
 		sed 's/:.*##/\t/' | \
 		column -t -s '	'
+
+# One variable's value, as make expands it: `make print-JOBS`. Several of these
+# are conditional on the environment or computed by `$(shell …)`, so reading
+# the assignment is not reading the value. tests/integration/capacity.rs checks
+# the job count through this rule.
+print-%:
+	@echo '$($*)'
