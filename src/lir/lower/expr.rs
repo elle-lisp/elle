@@ -44,7 +44,9 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(dst)
             }
-            HirKind::Keyword(name) => self.emit_const(LirConst::Keyword(name.clone())),
+            HirKind::Keyword(name) => {
+                self.emit_const(LirConst::Keyword(crate::value::keyword::keyword_hash(name)))
+            }
 
             HirKind::Var(binding) => self.lower_var(binding, &hir.span),
             HirKind::Let { bindings, body } => self.lower_let(bindings, body, hir.id),

@@ -7,8 +7,6 @@
 //!
 //! Modeled on `StdinThread` in `src/io/threadpool.rs`.
 
-use std::collections::HashMap;
-
 use crate::jit::{JitCode, JitCompiler, JitError};
 use crate::lir::LirFunction;
 use crate::value::SymbolId;
@@ -20,7 +18,6 @@ pub(crate) struct JitTask {
     /// dereferencing heap pointers during compilation.
     pub lir: LirFunction,
     pub self_sym: Option<SymbolId>,
-    pub symbol_names: HashMap<u32, String>,
     /// Cache key — the bytecode pointer address, cast to usize.
     pub bytecode_key: usize,
 }
@@ -68,12 +65,7 @@ impl JitWorker {
                 while let Ok(task) = task_rx.recv() {
                     let key = task.bytecode_key;
                     let result = match JitCompiler::new() {
-                        Ok(compiler) => compiler.compile(
-                            &task.lir,
-                            task.self_sym,
-                            task.symbol_names,
-                            Vec::new(),
-                        ),
+                        Ok(compiler) => compiler.compile(&task.lir, task.self_sym, Vec::new()),
                         Err(e) => Err(e),
                     };
                     let _ = result_tx.send(JitResult {
@@ -122,7 +114,6 @@ impl JitWorker {
 pub(crate) fn prepare_task(
     lir: &LirFunction,
     self_sym: Option<SymbolId>,
-    symbol_names: HashMap<u32, String>,
     bytecode_key: usize,
     display_name: Option<&str>,
 ) -> JitTask {
@@ -135,7 +126,6 @@ pub(crate) fn prepare_task(
     JitTask {
         lir,
         self_sym,
-        symbol_names,
         bytecode_key,
     }
 }

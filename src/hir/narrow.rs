@@ -10,6 +10,7 @@ use super::expr::{CallArg, Hir, HirId, HirKind};
 use super::types::{TyId, TypeInterner};
 use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
+use crate::value::SymbolId;
 
 use std::collections::HashMap;
 
@@ -19,7 +20,6 @@ pub(super) fn narrow_signals(
     hir: &mut Hir,
     interner: &TypeInterner,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     hir_types: &HashMap<HirId, TyId>,
     binding_min_length: &HashMap<Binding, usize>,
 ) {
@@ -28,61 +28,74 @@ pub(super) fn narrow_signals(
         let callee_binding = super::typeinfer::unwrap_callee_binding(func);
         if let Some(callee_binding) = callee_binding {
             let callee_sym = arena.get(callee_binding).name;
-            if let Some(name) = symbol_names.get(&callee_sym.0) {
-                let arg_tys: Vec<TyId> = args
-                    .iter()
-                    .map(|a| {
-                        hir_types
-                            .get(&a.expr.id)
-                            .copied()
-                            .unwrap_or(TypeInterner::TOP)
-                    })
-                    .collect();
-                if should_narrow_error(name, &arg_tys, args, interner, arena, binding_min_length) {
-                    let sig_error = SignalBits::from_bit(0); // SIG_ERROR = bit 0
-                    hir.signal.bits = hir.signal.bits.subtract(sig_error);
-                }
+            let arg_tys: Vec<TyId> = args
+                .iter()
+                .map(|a| {
+                    hir_types
+                        .get(&a.expr.id)
+                        .copied()
+                        .unwrap_or(TypeInterner::TOP)
+                })
+                .collect();
+            if should_narrow_error(
+                callee_sym,
+                &arg_tys,
+                args,
+                interner,
+                arena,
+                binding_min_length,
+            ) {
+                let sig_error = SignalBits::from_bit(0); // SIG_ERROR = bit 0
+                hir.signal.bits = hir.signal.bits.subtract(sig_error);
             }
         }
     }
 
     // Recurse into children
     hir.for_each_child_mut(|child| {
-        narrow_signals(
-            child,
-            interner,
-            arena,
-            symbol_names,
-            hir_types,
-            binding_min_length,
-        );
+        narrow_signals(child, interner, arena, hir_types, binding_min_length);
     });
 }
 
 /// Determine if a call's SIG_ERROR can be stripped based on argument types.
 fn should_narrow_error(
-    name: &str,
+    sym: SymbolId,
     arg_tys: &[TyId],
     args: &[CallArg],
     interner: &TypeInterner,
     _arena: &BindingArena,
     binding_min_length: &HashMap<Binding, usize>,
 ) -> bool {
-    match name {
+    // Const patterns over the name's hash rather than a resolved spelling:
+    // recognition is identity, so it needs no symbol table (docs/impl/symbol.md
+    // § "Reading a name, and not reading one").
+    const PTR_P: SymbolId = SymbolId::of("ptr?");
+    const POINTER_P: SymbolId = SymbolId::of("pointer?");
+    const TYPE: SymbolId = SymbolId::of("type");
+    const EMPTY_P: SymbolId = SymbolId::of("empty?");
+    const STRING: SymbolId = SymbolId::of("string");
+    const PUT: SymbolId = SymbolId::of("put");
+    const PUSH: SymbolId = SymbolId::of("push");
+    const HAS_P: SymbolId = SymbolId::of("has?");
+    const LENGTH: SymbolId = SymbolId::of("length");
+    const STRING_CONTAINS_SLASH: SymbolId = SymbolId::of("string/contains?");
+    const STRING_CONTAINS_DASH: SymbolId = SymbolId::of("string-contains?");
+    const NUMBER_TO_STRING: SymbolId = SymbolId::of("number->string");
+    match sym {
         // Type predicates: never error
-        "ptr?" | "pointer?" => true,
+        PTR_P | POINTER_P => true,
 
         // type: never errors
-        "type" => true,
+        TYPE => true,
 
         // empty?: never errors
-        "empty?" => true,
+        EMPTY_P => true,
 
         // string: all args must be stringifiable
-        "string" => arg_tys.iter().all(|t| interner.is_stringifiable(*t)),
+        STRING => arg_tys.iter().all(|t| interner.is_stringifiable(*t)),
 
         // put on MutableStruct with keyword key
-        "put" => {
+        PUT => {
             if arg_tys.len() >= 2 {
                 let target = arg_tys[0];
                 if target == TypeInterner::MUTABLE_STRUCT && arg_tys[1] == TypeInterner::KEYWORD {
@@ -108,25 +121,25 @@ fn should_narrow_error(
         }
 
         // push on MutableArray
-        "push" => arg_tys
+        PUSH => arg_tys
             .first()
             .is_some_and(|t| *t == TypeInterner::MUTABLE_ARRAY),
 
         // has?: arg0 must be struct-like
-        "has?" => arg_tys.first().is_some_and(|t| interner.is_struct(*t)),
+        HAS_P => arg_tys.first().is_some_and(|t| interner.is_struct(*t)),
 
         // length: arg0 is not Top (works on strings, arrays, lists)
-        "length" => arg_tys.first().is_some_and(|t| *t != TypeInterner::TOP),
+        LENGTH => arg_tys.first().is_some_and(|t| *t != TypeInterner::TOP),
 
         // string/contains?: both args must be String
-        "string/contains?" | "string-contains?" => {
+        STRING_CONTAINS_SLASH | STRING_CONTAINS_DASH => {
             arg_tys.len() >= 2
                 && arg_tys[0] == TypeInterner::STRING
                 && arg_tys[1] == TypeInterner::STRING
         }
 
         // number->string: arg0 must be Number
-        "number->string" => arg_tys
+        NUMBER_TO_STRING => arg_tys
             .first()
             .is_some_and(|t| interner.subtype(*t, TypeInterner::NUMBER)),
 

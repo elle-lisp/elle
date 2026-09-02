@@ -183,47 +183,24 @@ reached as `ctx.vm().field`:
   `(backend? :tier)`. Set/restored around the dispatch in
   `dispatch_compile_run_on`.
 
-## Symbols through the ctx — per-instance name resolution
+## Symbols are not a per-instance capability
 
-The symbol table is reached the same way as the VM and for the same reason: name
-resolution binds to the instance that owns it, so two embedded instances on one
-thread resolve names independently. It is a per-instance capability
-— a `RuntimeCore` sibling of the `VM`/`SymbolTable`/`CompileCtx` (the boxed
-`SymbolTable` has a stable address), with the VM holding a pointer to it
-(`VM::set_symbols`, the `heap_ptr`/`compile_ctx_ptr` idiom).
+A symbol id is the name's hash and the hash→name registry is process-global
+([impl/symbol.md](../symbol.md)), so name resolution needs no instance, no ctx,
+and no threading. `crate::symbol::name(id)` answers anywhere — inside
+`Display`/`Debug for Value`, inside a panic message, inside a unit test with no
+`Runtime` at all. There is no lost-names case to work around.
 
-Two reach paths, by what is in scope:
+The `SymbolTable` a `RuntimeCore` owns is a handle onto that registry, not a
+table of its own. It is still threaded through the pipeline (`&mut SymbolTable`
+where interning happens, `vm.symbols()` / `ctx.vm().symbols()` where a VM is in
+scope), because interning is a compile-time capability — but two instances
+cannot disagree about a name, and none of the reach paths above affects what a
+symbol means.
 
-- **A driving VM is in scope** — the runtime `eval` instruction, the dispatch
-  `SIG_QUERY` answers, and `MaterializeConst` read `vm.symbols()` directly; a
-  primitive reads `ctx.vm().symbols()`. Both return `Option<&mut SymbolTable>`
-  (`None` for a bare VM with no `RuntimeCore`; the readers then error or skip name
-  resolution). A primitive that needs a `&SymbolTable` *and* allocates through the
-  same `ctx` in one expression reads the raw `ctx.vm().symbols_ptr` first (a
-  `Copy` pointer that borrows nothing), then derefs — so the symbol borrow and the
-  `ctx.*` allocation borrow do not collide (the `compile/*` reflection primitives).
-- **No VM is in scope** — the table is threaded as an explicit `&SymbolTable` /
-  `&mut SymbolTable` parameter: the `send` serializer resolves symbol ids to names
-  against the sender's table (`SerContext`), the deserializer re-interns names into
-  the receiver's table (`DeserContext`), and the `os/spawn` worker threads its own
-  table to both.
-
-`Display`/`Debug for Value` (and for `TableKey`) **cannot** accept a table — the
-`fmt` trait signatures are fixed and a 16-byte `Value` carries none. So the
-rendering body is a free `fmt_value(v, symbols: Option<&SymbolTable>,
-debug, f)` (and `fmt_table_key`) that recurses by calling itself: bare
-`Display`/`Debug` pass `None` and render a symbol as `#<sym:id>`, while
-`value.display_with(symbols)` / `value.debug_with(symbols)` wrappers pass `Some`
-and thread names all the way down. Every *user-facing* render has a table:
-`VM::format_error_with_location` uses `self.symbols()`, and the `string`/`print`
-path resolves through `ctx.vm().symbols()`. Only bare `{:?}`/`{}` in internal Rust
-logging and panics loses names — acceptable, and noted in
-[docs/testing.md](../../testing.md) so the cold reader knows why a unit-test `{:?}`
-on a symbol-bearing `Value` prints `#<sym:id>` (reach for `debug_with`).
-
-Pinned by `two_instances_resolve_their_own_symbols` (`src/runtime/tests/lifecycle.rs`): two
-`Runtime`s on one thread each convert a symbol unique to themselves, and each
-resolves it through its own table — a single shared table fails it.
+Pinned by `two_instances_agree_on_every_symbol_name`
+(`src/runtime/tests/lifecycle.rs`): a symbol one `Runtime` compiled is the same
+symbol in the other.
 
 ## JIT intrinsic helpers reach the VM through a `JitCtx`
 
@@ -327,7 +304,7 @@ load rather than mismatching the calling convention.
 | A native allocates into a region its caller already released | the ctx owns a fresh per-call region; nothing hands a native another |
 | A save/restore imbalance corrupting a sibling call's region | each call's region is private to its ctx |
 | A native reaching a different instance's VM | `ctx.vm()` resolves the call's own driving VM |
-| A native resolving/interning a name in a different instance's symbol table | name resolution reads `ctx.vm().symbols()` / a threaded `&SymbolTable` |
+| A native resolving a symbol to a different instance's name | a symbol id is the name's hash ([impl/symbol.md](../symbol.md)); there is no per-instance name to get wrong |
 | A `vm()` call on a context that has no VM | only `NativeCtx` (always VM-bearing) has `vm()`; an allocation-only site holds an `Alloc`, which has none |
 | `exit`-trap / FFI-callback-error / active-tier state leaking between coexisting instances | each is a `VM` field |
 

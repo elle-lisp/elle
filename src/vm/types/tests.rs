@@ -35,7 +35,7 @@ fn intr_get_unhashable_key_on_immutable_struct_panics() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mut vm = VM::new();
         let s = h.ctx().struct_from_sorted(vec![(
-            crate::value::heap::TableKey::Keyword("a".to_string()),
+            crate::value::heap::TableKey::keyword("a"),
             Value::int(1),
         )]);
         vm.fiber.stack.push(s);
@@ -51,10 +51,7 @@ fn intr_get_unhashable_key_on_mutable_struct_panics() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mut vm = VM::new();
         let mut entries = std::collections::BTreeMap::new();
-        entries.insert(
-            crate::value::heap::TableKey::Keyword("a".to_string()),
-            Value::int(1),
-        );
+        entries.insert(crate::value::heap::TableKey::keyword("a"), Value::int(1));
         let s = h.ctx().struct_mut_from(entries);
         vm.fiber.stack.push(s);
         vm.fiber.stack.push(Value::float(1.5)); // floats are not hashable keys
@@ -70,7 +67,7 @@ fn intr_get_absent_hashable_key_on_struct_is_nil() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mut vm = VM::new();
         let s = h.ctx().struct_from_sorted(vec![(
-            crate::value::heap::TableKey::Keyword("a".to_string()),
+            crate::value::heap::TableKey::keyword("a"),
             Value::int(1),
         )]);
         vm.fiber.stack.push(s);

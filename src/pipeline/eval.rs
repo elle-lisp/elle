@@ -52,25 +52,22 @@ pub fn eval_syntax(
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
     crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        let names = symbols.all_names();
         eprintln!(
             "[trace:regions] eval_syntax:\n{}",
-            crate::hir::format_regions(&region_info, &arena, &names)
+            crate::hir::format_regions(&region_info, &arena, Some(symbols))
         );
     }
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
-    let mut emitter = Emitter::new_with_symbols(symbol_names);
+    let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     vm.execute(&bytecode).map_err(|e| e.to_string())
@@ -119,25 +116,22 @@ pub fn eval(
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
     crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        let names = symbols.all_names();
         eprintln!(
             "[trace:regions] eval:\n{}",
-            crate::hir::format_regions(&region_info, &arena, &names)
+            crate::hir::format_regions(&region_info, &arena, Some(symbols))
         );
     }
-    let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
-    let mut emitter = Emitter::new_with_symbols(symbol_names);
+    let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     vm.execute(&bytecode).map_err(|e| e.to_string())
@@ -162,7 +156,7 @@ pub fn eval_all(
     // `chan/select`) work in the test harness. `execute_scheduled` falls back
     // to a plain `execute` when `ev/run` is absent (no stdlib loaded), so
     // bare-VM callers are unaffected.
-    vm.execute_scheduled(&result.bytecode, symbols, cctx)
+    vm.execute_scheduled(&result.bytecode, cctx)
         .map_err(|e| e.to_string())
 }
 

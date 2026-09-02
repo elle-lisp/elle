@@ -20,8 +20,8 @@ fn count_loops(h: &Hir) -> usize {
 /// `(if (mutable? coll) acc (freeze acc))`.
 #[test]
 fn single_mapcat_dissolves_to_a_nested_walk() {
-    let (hir, arena, names) = compile("(mapcat (fn [x] [x (* x 10)]) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(mapcat (fn [x] [x (* x 10)]) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat"),
         "the `mapcat` dispatch must be gone; callees were {cs:?}",
@@ -33,17 +33,17 @@ fn single_mapcat_dissolves_to_a_nested_walk() {
     );
     assert_eq!(count_loops(&hir), 2, "the base walk, and the fan-out's own");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "length"),
+        count_callee(&hir, &arena, &mut rt, "length"),
         2,
         "one length per level: the base's and the per-element array's; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "get"),
+        count_callee(&hir, &arena, &mut rt, "get"),
         2,
         "one indexed read per level; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, however many runs are spliced into it; callees were {cs:?}",
     );
@@ -59,9 +59,9 @@ fn single_mapcat_dissolves_to_a_nested_walk() {
 /// element — which is what the staged form gives it.
 #[test]
 fn map_over_mapcat_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -73,7 +73,7 @@ fn map_over_mapcat_fuses_to_one_loop() {
     );
     assert_eq!(count_loops(&hir), 2, "one pair of loops, not two pairs");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no flat collection between the ops; callees were {cs:?}",
     );
@@ -88,8 +88,8 @@ fn map_over_mapcat_fuses_to_one_loop() {
 /// so `len` still decides the base's emptiness.
 #[test]
 fn mapcat_over_map_prefix_fuses_to_one_loop() {
-    let (hir, arena, names) = compile("(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -97,7 +97,7 @@ fn mapcat_over_map_prefix_fuses_to_one_loop() {
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(count_loops(&hir), 2, "one pair of loops");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
@@ -107,9 +107,9 @@ fn mapcat_over_map_prefix_fuses_to_one_loop() {
 /// all — the flat collection the terminal would have walked never exists.
 #[test]
 fn count_over_mapcat_fuses_to_one_scalar_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(count (fn [y] (odd? y)) (mapcat (fn [x] [x (* x 10)]) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat" || n == "count"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -117,7 +117,7 @@ fn count_over_mapcat_fuses_to_one_scalar_loop() {
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(count_loops(&hir), 2, "one pair of loops");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a scalar terminal mints no array; callees were {cs:?}",
     );
@@ -130,9 +130,9 @@ fn count_over_mapcat_fuses_to_one_scalar_loop() {
 /// two index walks need.
 #[test]
 fn find_index_over_mapcat_carries_a_survivor_count() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(find-index (fn [y] (even? y)) (mapcat (fn [x] [x x x]) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat" || n == "find-index"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -156,8 +156,8 @@ fn unproven_result_mapcat_is_not_fused() {
         "(mapcat (fn [x] (if (odd? x) [x] [])) [1 2 3])",
         "(mapcat (fn [x] x) [[1] [2]])",
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             cs.iter().any(|n| n == "mapcat"),
             "a function with no proven array result must not fuse in {src}; \
@@ -190,8 +190,8 @@ fn mapcat_inner_to_an_untyped_arm_declines() {
             "mapcat",
         ),
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             cs.iter().any(|n| n == outer),
             "a mapcat whose output's emptiness `len` cannot decide must not fuse \
@@ -208,15 +208,15 @@ fn length_preserving_stage_inner_to_mapcat_fuses() {
         "(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))",
         "(mapcat (fn [y] [y y]) (map-indexed (fn [i x] (+ i x)) [1 2 3]))",
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter()
                 .any(|n| n == "mapcat" || n == "map" || n == "map-indexed"),
             "a length-preserving inner stage must fuse whole in {src}; callees were {cs:?}",
         );
         assert_eq!(
-            count_callee(&hir, &arena, &names, "@array"),
+            count_callee(&hir, &arena, &mut rt, "@array"),
             1,
             "one accumulator, no intermediate in {src}; callees were {cs:?}",
         );
@@ -227,10 +227,11 @@ fn length_preserving_stage_inner_to_mapcat_fuses() {
 /// shortening stage inner to any other untyped array arm does.
 #[test]
 fn shortening_stage_inner_to_mapcat_declines() {
-    let (hir, arena, names) = compile("(mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) =
+        compile("(mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "mapcat"),
+        count_callee(&hir, &arena, &mut rt, "mapcat"),
         1,
         "a mapcat whose input's emptiness `len` cannot decide must not fuse; \
          callees were {cs:?}",
@@ -247,8 +248,8 @@ fn shortening_stage_inner_to_mapcat_declines() {
 /// recursion fuses the innermost single op.
 #[test]
 fn lone_mapcat_over_mutable_array_fuses() {
-    let (hir, arena, names) = compile("(mapcat (fn [x] [x x]) @[1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(mapcat (fn [x] [x x]) @[1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat"),
         "a lone mapcat must fuse over a mutable base; callees were {cs:?}",
@@ -258,8 +259,8 @@ fn lone_mapcat_over_mutable_array_fuses() {
         "the mutable arm returns the accumulator unfrozen; callees were {cs:?}",
     );
 
-    let (hir, arena, names) = compile("(map (fn [y] (+ y 1)) (mapcat (fn [x] [x x]) @[1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map (fn [y] (+ y 1)) (mapcat (fn [x] [x x]) @[1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a composition over a mutable base must decline; callees were {cs:?}",
@@ -270,8 +271,8 @@ fn lone_mapcat_over_mutable_array_fuses() {
 /// so it is never rewritten.
 #[test]
 fn user_shadowed_mapcat_is_not_fused() {
-    let (hir, arena, names) = compile("(defn mapcat [f c] c) (mapcat (fn [x] [x]) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn mapcat [f c] c) (mapcat (fn [x] [x]) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "mapcat"),
         "a user `mapcat` must not be rewritten; callees were {cs:?}",
@@ -284,8 +285,8 @@ fn user_shadowed_mapcat_is_not_fused() {
 /// closure both survive.
 #[test]
 fn capturing_mapcat_fn_fuses() {
-    let (hir, arena, names) = compile("(let [k 2] (mapcat (fn [x] [x k]) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 2] (mapcat (fn [x] [x k]) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat"),
         "the `mapcat` dispatch must be gone; callees were {cs:?}",
@@ -297,8 +298,8 @@ fn capturing_mapcat_fn_fuses() {
 /// cloning, and the array proof reads that body exactly as it reads a literal's.
 #[test]
 fn named_mapcat_fn_inlines() {
-    let (hir, arena, names) = compile("(defn pairup [x] [x (* x 10)]) (mapcat pairup [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn pairup [x] [x (* x 10)]) (mapcat pairup [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "mapcat"),
         "the dispatch must be gone for a named function; callees were {cs:?}",

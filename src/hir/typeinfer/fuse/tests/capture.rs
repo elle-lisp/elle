@@ -15,8 +15,8 @@ use super::*;
 /// Fails while a capture declines: the `map` dispatch and the closure both survive.
 #[test]
 fn a_capture_from_two_function_levels_out_fuses() {
-    let (hir, arena, names) = compile("(let [k 10] ((fn [] (map (fn [x] (+ x k)) [1 2 3]))))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 10] ((fn [] (map (fn [x] (+ x k)) [1 2 3]))))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` dispatch must be gone; callees were {cs:?}",
@@ -38,8 +38,8 @@ fn a_capture_from_two_function_levels_out_fuses() {
 /// declines: the `map` dispatch survives.
 #[test]
 fn a_mutable_capture_fuses() {
-    let (hir, arena, names) = compile("(let [@k 1] (assign k 2) (map (fn [x] (+ x k)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [@k 1] (assign k 2) (map (fn [x] (+ x k)) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` dispatch must be gone; callees were {cs:?}",
@@ -53,8 +53,8 @@ fn a_mutable_capture_fuses() {
 /// The `map` call and its closure survive.
 #[test]
 fn a_self_reference_capture_declines() {
-    let (hir, arena, names) = compile("(def g (map (fn [x] (if (< x 2) x (g 1))) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(def g (map (fn [x] (if (< x 2) x (g 1))) [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a self-referencing lambda must not fuse; callees were {cs:?}",
@@ -69,9 +69,9 @@ fn a_self_reference_capture_declines() {
 /// op: exactly one `map` dispatch is left, and it is the capturing one.
 #[test]
 fn a_capture_declines_a_composition() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(let [k 2] (map (fn [y] (+ y k)) (map (fn [x] (* x 2)) [1 2 3])))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
         cs.iter().filter(|n| *n == "map").count(),
         1,
@@ -89,9 +89,9 @@ fn a_capture_declines_a_composition() {
 /// The `count` survives; the prefix, a lone chain on the recursion's retry, fuses.
 #[test]
 fn a_capturing_terminal_declines_over_a_prefix() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(let [k 2] (count (fn [x] (> x k)) (map (fn [x] (* x 2)) [1 2 3])))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "count"),
         "the capturing `count` must survive; callees were {cs:?}",
@@ -108,9 +108,9 @@ fn a_capturing_terminal_declines_over_a_prefix() {
 /// `map` survives with a fused loop underneath it.
 #[test]
 fn a_capturing_inner_stage_fuses_on_the_retry() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(let [k 2] (map (fn [y] (+ y 1)) (map (fn [x] (* x k)) [1 2 3])))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
         cs.iter().filter(|n| *n == "map").count(),
         1,

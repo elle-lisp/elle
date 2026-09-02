@@ -252,7 +252,7 @@ pub(crate) fn prim_file_size(
 }
 
 pub(super) fn kw(name: &str) -> TableKey {
-    TableKey::Keyword(name.to_string())
+    TableKey::keyword(name)
 }
 
 pub(super) fn system_time_to_value(result: std::io::Result<SystemTime>) -> Value {

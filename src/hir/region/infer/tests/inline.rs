@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::SymbolId;
 
 // ── A call's result is named by the call's own region ─────────────────
 //
@@ -11,32 +12,26 @@ use super::*;
 
 /// The HirId of the first `Call` whose callee names `callee`, looking through the
 /// `DerefCell` wrapper functionalization puts around a `needs_capture` read.
-fn call_to(hir: &Hir, callee: &str, arena: &BindingArena, symbols: &SymbolTable) -> Option<HirId> {
-    fn names(func: &Hir, callee: &str, arena: &BindingArena, symbols: &SymbolTable) -> bool {
+fn call_to(hir: &Hir, callee: &str, arena: &BindingArena) -> Option<HirId> {
+    fn names(func: &Hir, callee: &str, arena: &BindingArena) -> bool {
         match &func.kind {
-            HirKind::Var(b) => symbols.name(arena.get(*b).name) == Some(callee),
-            HirKind::DerefCell { cell } => names(cell, callee, arena, symbols),
+            HirKind::Var(b) => arena.get(*b).name == SymbolId::of(callee),
+            HirKind::DerefCell { cell } => names(cell, callee, arena),
             _ => false,
         }
     }
-    fn walk(
-        hir: &Hir,
-        callee: &str,
-        arena: &BindingArena,
-        symbols: &SymbolTable,
-        found: &mut Option<HirId>,
-    ) {
+    fn walk(hir: &Hir, callee: &str, arena: &BindingArena, found: &mut Option<HirId>) {
         if found.is_none() {
             if let HirKind::Call { func, .. } = &hir.kind {
-                if names(func, callee, arena, symbols) {
+                if names(func, callee, arena) {
                     *found = Some(hir.id);
                 }
             }
         }
-        hir.for_each_child(|c| walk(c, callee, arena, symbols, found));
+        hir.for_each_child(|c| walk(c, callee, arena, found));
     }
     let mut found = None;
-    walk(hir, callee, arena, symbols, &mut found);
+    walk(hir, callee, arena, &mut found);
     found
 }
 
@@ -55,15 +50,15 @@ fn an_inlined_call_result_is_named_by_the_call_node() {
     // binding that holds the result must still name the CALL's own region — the
     // caller-side marker the value-resolved release resolves at runtime — and not
     // the region `mk`'s body minted for `(list 1 2)`.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(let [mk (fn () (list 1 2))] (let [v (mk)] (length v)))");
-    let call = call_to(&hir, "mk", &arena, &symbols).expect("a call to mk");
+    let call = call_to(&hir, "mk", &arena).expect("a call to mk");
     let call_r = info
         .alloc_region
         .get(&call)
         .copied()
         .expect("the call node has its own region");
-    let v = find_binding_by_name(&hir, "v", &arena, &symbols).expect("a binding named v");
+    let v = find_binding_by_name(&hir, "v", &arena).expect("a binding named v");
     assert_eq!(
         info.binding_source_regions.get(&v),
         Some(&vec![call_r]),
@@ -77,10 +72,10 @@ fn a_base_arms_result_is_released_in_the_base_arm() {
     // without the rule its result binding names the BASE arm's result region too —
     // and, being structurally later, takes that region's one release into an arm
     // mutually exclusive with the only path that mints it.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(letrec [go (fn (m) (if (%eq m 0) (list 1 2) (go (%sub m 1))))] (go 1))",
     );
-    let base = call_to(&hir, "list", &arena, &symbols).expect("a call to list");
+    let base = call_to(&hir, "list", &arena).expect("a call to list");
     let r = info
         .alloc_region
         .get(&base)
@@ -108,10 +103,10 @@ fn an_inlined_result_region_keeps_one_holder() {
     // holder binding in the sibling arm, and a two-holder region is refused the
     // single-slot value route `region::infer::compensate` needs to place a per-arm
     // release — so the arm the misplacement stranded cannot be compensated either.
-    let (hir, arena, symbols, info) = analyze_with_class(
+    let (hir, arena, _symbols, info) = analyze_with_class(
         "(letrec [go (fn (m) (if (%eq m 0) (list 1 2) (go (%sub m 1))))] (go 1))",
     );
-    let base = call_to(&hir, "list", &arena, &symbols).expect("a call to list");
+    let base = call_to(&hir, "list", &arena).expect("a call to list");
     let r = info
         .alloc_region
         .get(&base)

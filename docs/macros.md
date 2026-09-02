@@ -346,8 +346,8 @@ is returned unchanged.
 ### Implementation
 
 Both are runtime primitives in `src/primitives/meta.rs`. They reach the
-symbol table through their `NativeCtx` — `ctx.vm().symbols()` — which
-resolves in the running instance's own table.
+symbol table through their `NativeCtx` — `ctx.vm().symbols()` — to intern
+the names they build.
 
 The `scope_exempt: bool` field on `Syntax` is the mechanism that
 prevents intro scope stamping. `add_scope_recursive` checks this flag

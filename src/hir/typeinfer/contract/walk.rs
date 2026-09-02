@@ -7,13 +7,12 @@ pub(super) fn walk(
     h: &Hir,
     hir_types: &HashMap<HirId, TyId>,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     interner: &TypeInterner,
     env: &mut NonzeroEnv,
 ) -> Result<(), String> {
     macro_rules! recurse {
         ($e:expr, $env:expr) => {
-            walk($e, hir_types, arena, symbol_names, interner, $env)
+            walk($e, hir_types, arena, interner, $env)
         };
     }
 
@@ -35,7 +34,8 @@ pub(super) fn walk(
             // argument list has no per-operand types to check; the native's
             // own runtime validation covers that (dynamic) shape.
             if let HirKind::Var(b) = &func.kind {
-                if let Some(name) = symbol_names.get(&arena.get(*b).name.0) {
+                if let Some(name) = crate::primitives::registration::static_name(arena.get(*b).name)
+                {
                     if name.starts_with('%') && !args.iter().any(|a| a.spliced) {
                         if let Some(op) = IntrinsicOp::from_name(name) {
                             let arg_refs: Vec<&Hir> = args.iter().map(|a| &a.expr).collect();
@@ -52,7 +52,7 @@ pub(super) fn walk(
             let saved = env.clone();
             for e in exprs {
                 recurse!(e, env)?;
-                env.apply(&guard::facts_after_statement(e, arena, symbol_names));
+                env.apply(&guard::facts_after_statement(e, arena));
             }
             *env = saved;
             Ok(())
@@ -61,7 +61,7 @@ pub(super) fn walk(
             let saved = env.clone();
             for e in body {
                 recurse!(e, env)?;
-                env.apply(&guard::facts_after_statement(e, arena, symbol_names));
+                env.apply(&guard::facts_after_statement(e, arena));
             }
             *env = saved;
             Ok(())
@@ -72,7 +72,7 @@ pub(super) fn walk(
             else_branch,
         } => {
             recurse!(cond, env)?;
-            let facts = guard::cond_facts(cond, arena, symbol_names);
+            let facts = guard::cond_facts(cond, arena);
             let mut then_env = env.clone();
             then_env.apply(&facts.when_true);
             recurse!(then_branch, &mut then_env)?;
@@ -99,7 +99,7 @@ pub(super) fn walk(
             let mut running = env.clone();
             for (test, body) in clauses {
                 recurse!(test, &mut running)?;
-                let facts = guard::cond_facts(test, arena, symbol_names);
+                let facts = guard::cond_facts(test, arena);
                 let mut body_env = running.clone();
                 body_env.apply(&facts.when_true);
                 recurse!(body, &mut body_env)?;

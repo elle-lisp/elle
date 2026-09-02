@@ -116,7 +116,7 @@ fn flow_from_closure(
 
     // :name
     fields.insert(
-        TableKey::Keyword("name".to_string()),
+        TableKey::keyword("name"),
         match &lir.name {
             Some(n) => ctx.string(n.as_str()),
             None => Value::NIL,
@@ -125,7 +125,7 @@ fn flow_from_closure(
 
     // :doc
     fields.insert(
-        TableKey::Keyword("doc".to_string()),
+        TableKey::keyword("doc"),
         closure
             .template
             .doc
@@ -136,27 +136,21 @@ fn flow_from_closure(
 
     // :arity — use Display impl: "2", "1+", "2-4"
     fields.insert(
-        TableKey::Keyword("arity".to_string()),
+        TableKey::keyword("arity"),
         ctx.string(format!("{}", lir.arity)),
     );
 
     // :regs
-    fields.insert(
-        TableKey::Keyword("regs".to_string()),
-        Value::int(lir.num_regs as i64),
-    );
+    fields.insert(TableKey::keyword("regs"), Value::int(lir.num_regs as i64));
 
     // :locals
     fields.insert(
-        TableKey::Keyword("locals".to_string()),
+        TableKey::keyword("locals"),
         Value::int(lir.num_locals as i64),
     );
 
     // :entry
-    fields.insert(
-        TableKey::Keyword("entry".to_string()),
-        Value::int(lir.entry.0 as i64),
-    );
+    fields.insert(TableKey::keyword("entry"), Value::int(lir.entry.0 as i64));
 
     // :blocks — array of block structs
     let blocks: Vec<Value> = lir
@@ -166,10 +160,7 @@ fn flow_from_closure(
             let mut block_fields = BTreeMap::new();
 
             // :label
-            block_fields.insert(
-                TableKey::Keyword("label".to_string()),
-                Value::int(block.label.0 as i64),
-            );
+            block_fields.insert(TableKey::keyword("label"), Value::int(block.label.0 as i64));
 
             // :instrs — array of Debug-formatted instruction strings
             let instrs: Vec<Value> = block
@@ -177,7 +168,7 @@ fn flow_from_closure(
                 .iter()
                 .map(|si| ctx.string(format!("{:?}", si.instr)))
                 .collect();
-            block_fields.insert(TableKey::Keyword("instrs".to_string()), ctx.array(instrs));
+            block_fields.insert(TableKey::keyword("instrs"), ctx.array(instrs));
 
             // :display — array of compact human-readable instruction strings
             let display: Vec<Value> = block
@@ -185,7 +176,7 @@ fn flow_from_closure(
                 .iter()
                 .map(|si| ctx.string(format!("{}", si.instr)))
                 .collect();
-            block_fields.insert(TableKey::Keyword("display".to_string()), ctx.array(display));
+            block_fields.insert(TableKey::keyword("display"), ctx.array(display));
 
             // :spans — array of "line:col" strings (nil for synthetic spans)
             let spans: Vec<Value> = block
@@ -199,7 +190,7 @@ fn flow_from_closure(
                     }
                 })
                 .collect();
-            block_fields.insert(TableKey::Keyword("spans".to_string()), ctx.array(spans));
+            block_fields.insert(TableKey::keyword("spans"), ctx.array(spans));
 
             // :annotated — display strings with span annotations for CFG rendering
             let annotated: Vec<Value> = block
@@ -214,20 +205,17 @@ fn flow_from_closure(
                     }
                 })
                 .collect();
-            block_fields.insert(
-                TableKey::Keyword("annotated".to_string()),
-                ctx.array(annotated),
-            );
+            block_fields.insert(TableKey::keyword("annotated"), ctx.array(annotated));
 
             // :term — Debug-formatted terminator string
             block_fields.insert(
-                TableKey::Keyword("term".to_string()),
+                TableKey::keyword("term"),
                 ctx.string(format!("{:?}", block.terminator.terminator)),
             );
 
             // :term-display — compact terminator string
             block_fields.insert(
-                TableKey::Keyword("term-display".to_string()),
+                TableKey::keyword("term-display"),
                 ctx.string(format!("{}", block.terminator.terminator)),
             );
 
@@ -240,11 +228,11 @@ fn flow_from_closure(
                     block.terminator.span.line, block.terminator.span.col
                 ))
             };
-            block_fields.insert(TableKey::Keyword("term-span".to_string()), term_span);
+            block_fields.insert(TableKey::keyword("term-span"), term_span);
 
             // :term-kind — keyword identifying the terminator type
             block_fields.insert(
-                TableKey::Keyword("term-kind".to_string()),
+                TableKey::keyword("term-kind"),
                 Value::keyword(terminator_kind(&block.terminator.terminator)),
             );
 
@@ -266,13 +254,13 @@ fn flow_from_closure(
                     vec![Value::int(resume_label.0 as i64)]
                 }
             };
-            block_fields.insert(TableKey::Keyword("edges".to_string()), ctx.array(edges));
+            block_fields.insert(TableKey::keyword("edges"), ctx.array(edges));
 
             ctx.struct_from(block_fields)
         })
         .collect();
 
-    fields.insert(TableKey::Keyword("blocks".to_string()), ctx.array(blocks));
+    fields.insert(TableKey::keyword("blocks"), ctx.array(blocks));
 
     (SIG_OK, ctx.struct_from(fields))
 }

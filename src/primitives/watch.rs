@@ -50,11 +50,8 @@ fn prim_watch_add(
         args[2]
             .as_struct()
             .and_then(|s| {
-                sorted_struct_get(
-                    s,
-                    &crate::value::heap::TableKey::Keyword("recursive".into()),
-                )
-                .map(|v| v.is_truthy())
+                sorted_struct_get(s, &crate::value::heap::TableKey::keyword("recursive"))
+                    .map(|v| v.is_truthy())
             })
             .unwrap_or(true)
     } else {

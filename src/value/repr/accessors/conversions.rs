@@ -53,11 +53,11 @@ impl Value {
             self.as_float()
         }
     }
-    /// Extract symbol ID if this is a symbol.
+    /// Extract symbol identity if this is a symbol.
     #[inline]
-    pub fn as_symbol(&self) -> Option<u32> {
+    pub fn as_symbol(&self) -> Option<crate::value::SymbolId> {
         if self.is_symbol() {
-            Some(self.payload as u32)
+            Some(crate::value::SymbolId(self.payload))
         } else {
             None
         }
@@ -71,16 +71,13 @@ impl Value {
             None
         }
     }
-    /// Extract keyword name if this is a keyword.
-    /// Acquires RwLock read lock and allocates a String.
-    /// Use `keyword_hash()` when only comparing, not displaying.
+    /// Whether this value is the keyword spelled `name` — one hash compare,
+    /// no table, no allocation (docs/impl/symbol.md § "Reading a name, and
+    /// not reading one"). Spelling recovery goes through
+    /// `keyword::resolve_keyword_name` with a memo instead.
     #[inline]
-    pub fn as_keyword_name(&self) -> Option<String> {
-        if self.is_keyword() {
-            crate::value::keyword::keyword_name(self.payload)
-        } else {
-            None
-        }
+    pub fn is_keyword_named(&self, name: &str) -> bool {
+        self.keyword_hash() == Some(crate::value::keyword::keyword_hash(name))
     }
     /// Extract heap pointer if this is a heap value.
     #[inline]

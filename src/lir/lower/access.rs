@@ -62,7 +62,9 @@ impl<'a> Lowerer<'a> {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
                 let lir_key = match key {
-                    PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                    PatternKey::Keyword(k) => {
+                        LirConst::Keyword(crate::value::keyword::keyword_hash(k))
+                    }
                     PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                 };
                 self.emit(LirInstr::StructGetOrNil {
@@ -78,7 +80,9 @@ impl<'a> Lowerer<'a> {
                 let lir_exclude: Vec<LirConst> = exclude_keys
                     .iter()
                     .map(|k| match k {
-                        PatternKey::Keyword(s) => LirConst::Keyword(s.clone()),
+                        PatternKey::Keyword(s) => {
+                            LirConst::Keyword(crate::value::keyword::keyword_hash(s))
+                        }
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     })
                     .collect();

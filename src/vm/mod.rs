@@ -32,7 +32,6 @@ pub use core::VM;
 use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::error::LocationMap;
 use crate::pipeline::CompileCtx;
-use crate::symbol::SymbolTable;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
@@ -364,14 +363,9 @@ impl VM {
     pub fn execute_scheduled(
         &mut self,
         bytecode: &Bytecode,
-        symbols: &SymbolTable,
         cctx: &CompileCtx,
     ) -> Result<Value, String> {
-        let ev_run_id = match symbols.get("ev/run") {
-            Some(id) => id,
-            None => return self.execute(bytecode),
-        };
-        let ev_run = match cctx.lookup_stdlib_value(ev_run_id) {
+        let ev_run = match cctx.lookup_stdlib_value(crate::value::SymbolId::of("ev/run")) {
             Some(v) => v,
             None => return self.execute(bytecode),
         };
@@ -469,14 +463,16 @@ pub(crate) fn gated_reason(err_value: Value) -> Option<String> {
     let mut is_gated = false;
     let mut reason = String::new();
     for (key, value) in entries {
-        let crate::value::types::TableKey::Keyword(name) = key else {
+        let crate::value::types::TableKey::Keyword(hash) = key else {
             continue;
         };
-        match name.as_str() {
-            "error" if value.as_keyword_name().as_deref() == Some("gated") => {
+        match *hash {
+            h if h == crate::value::keyword::keyword_hash("error")
+                && value.is_keyword_named("gated") =>
+            {
                 is_gated = true;
             }
-            "reason" => {
+            h if h == crate::value::keyword::keyword_hash("reason") => {
                 if let Some(s) = value.with_string(|s| s.to_string()) {
                     reason = s;
                 }

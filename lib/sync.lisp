@@ -18,12 +18,13 @@
 ## colliding keys, and since the scheduler's park-queue is process-global
 ## (one key → one wait list), a wake on one futex would unpark a waiter
 ## on the other (which re-checks its unchanged value and re-parks),
-## losing the intended wakeup.  `gensym` is a process-global primitive
-## counter, so keys are globally unique regardless of how many times the
-## module is imported.
+## losing the intended wakeup.  `sys/unique` is a process-global
+## primitive counter, so keys are globally unique regardless of how many
+## times the module is imported — and unlike a gensym, an integer key
+## interns nothing into the symbol table (tests/elle/sync-keys.lisp).
 (defn make-futex [initial]
   "Low-level futex. Wraps a box with park/notify."
-  (let [key (gensym)
+  (let [key (sys/unique)
         bx (box initial)]
     {:wait (fn [expected]
              (while (= (unbox bx) expected) (ev/futex-wait key bx expected)))

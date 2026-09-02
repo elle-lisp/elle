@@ -172,7 +172,7 @@ pub(crate) fn prim_vm_query(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    if !args[0].is_string() && args[0].as_keyword_name().is_none() {
+    if !args[0].is_string() && !args[0].is_keyword() {
         return (
             SIG_ERROR,
             ctx.error(
@@ -208,8 +208,10 @@ pub(crate) fn prim_keyword(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    if let Some(kw) = args[0].with_string(Value::keyword) {
-        (SIG_OK, kw)
+    // A learning site: the spelling exists only at run time, so the instance
+    // memo records it here (docs/impl/symbol.md § "The display memo").
+    if let Some(name) = args[0].with_string(str::to_string) {
+        (SIG_OK, ctx.keyword(&name))
     } else {
         type_error!(ctx, args[0], "keyword", "string")
     }

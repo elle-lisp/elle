@@ -18,8 +18,8 @@ fn count_ands(h: &Hir) -> usize {
 /// condition reads the `more` sentinel the deciding element clears.
 #[test]
 fn single_any_dissolves_to_sentinel_loop() {
-    let (hir, arena, names) = compile("(any? (fn [x] (even? x)) [1 2 3 4])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(any? (fn [x] (even? x)) [1 2 3 4])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "any?"),
         "the `any?` dispatch must be gone; callees were {cs:?}",
@@ -30,7 +30,7 @@ fn single_any_dissolves_to_sentinel_loop() {
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a search's accumulator is a scalar — no `@array`; callees were {cs:?}",
     );
@@ -55,8 +55,8 @@ fn single_any_dissolves_to_sentinel_loop() {
 /// scalar accumulator, and the sentinel condition.
 #[test]
 fn single_all_dissolves_to_sentinel_loop() {
-    let (hir, arena, names) = compile("(all? (fn [x] (even? x)) [1 2 3 4])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(all? (fn [x] (even? x)) [1 2 3 4])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "all?" || n == "any?"),
         "the `all?` dispatch (and the `any?` it may delegate to) must be gone; \
@@ -68,7 +68,7 @@ fn single_all_dissolves_to_sentinel_loop() {
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a search's accumulator is a scalar — no `@array`; callees were {cs:?}",
     );
@@ -93,15 +93,15 @@ fn find_and_find_index_dissolve_to_sentinel_loops() {
         "(find (fn [x] (even? x)) [1 2 3 4])",
         "(find-index (fn [x] (even? x)) [1 2 3 4])",
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter().any(|n| n == "find" || n == "find-index"),
             "the search dispatch must be gone for {src}; callees were {cs:?}",
         );
         assert_eq!(count_lambdas(&hir), 0, "no closure may survive for {src}");
         assert_eq!(
-            count_callee(&hir, &arena, &names, "@array"),
+            count_callee(&hir, &arena, &mut rt, "@array"),
             0,
             "scalar accumulator for {src}; callees were {cs:?}",
         );
@@ -126,8 +126,8 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
         "(find (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))",
         "(find-index (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))",
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter()
                 .any(|n| n == "any?" || n == "all?" || n == "find" || n == "find-index"),
@@ -139,7 +139,7 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
         );
         assert_eq!(count_lambdas(&hir), 0, "no closure may survive for {src}");
         assert_eq!(
-            count_callee(&hir, &arena, &names, "@array"),
+            count_callee(&hir, &arena, &mut rt, "@array"),
             0,
             "map-into-search mints NO intermediate array for {src}; \
              callees were {cs:?}",
@@ -170,8 +170,8 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
 #[test]
 fn find_index_over_a_filter_prefix_counts_survivors() {
     let filtered = "(filter (fn [w] (number? w)) [1 \"a\" 2 3])";
-    let (hir, arena, names) = compile(&format!("(find-index (fn [y] (even? y)) {filtered})"));
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile(&format!("(find-index (fn [y] (even? y)) {filtered})"));
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "find-index" || n == "filter"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -189,8 +189,8 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
     );
 
     // The same prefix under a boolean search carries no counter.
-    let (hir, arena, names) = compile(&format!("(any? (fn [y] (even? y)) {filtered})"));
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile(&format!("(any? (fn [y] (even? y)) {filtered})"));
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
         count_intrinsic(&hir, "%add"),
         1,
@@ -199,9 +199,9 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
 
     // A `map` prefix preserves both count and order, so the base index is already
     // the answer — no counter there either.
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(find-index (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
         count_intrinsic(&hir, "%add"),
         1,
@@ -216,9 +216,9 @@ fn find_index_over_a_filter_prefix_counts_survivors() {
 /// gauge if the chain fused.
 #[test]
 fn search_prefix_with_erroring_predicate_fuses() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(find (fn [y] (even? (/ 6 y))) (map (fn [x] (* x 1)) [3 0]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "find" || n == "map"),
         "an erroring predicate is reorder-safe and must fuse; callees were {cs:?}",
@@ -235,8 +235,8 @@ fn search_prefix_with_erroring_predicate_fuses() {
 /// `map`.
 #[test]
 fn search_over_non_reorder_safe_prefix_fuses_inner_only() {
-    let (hir, arena, names) = compile("(any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "any?"),
         "the outer `any?` must not fuse a non-reorder-safe composition; \
@@ -259,8 +259,8 @@ fn heap_valued_prefixes_fuse() {
         "(find (fn [s] (= (length s) 3)) (map (fn [s] (string s \"!\")) [\"a\" \"bb\"]))",
         "(find-index (fn [s] (= (length s) 3)) (filter (fn [s] (string? s)) [1 \"a\" \"ccc\"]))",
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter()
                 .any(|n| n == "find" || n == "find-index" || n == "map" || n == "filter"),
@@ -275,8 +275,8 @@ fn heap_valued_prefixes_fuse() {
 /// `len` once, so a predicate that grows or shrinks the base would diverge.
 #[test]
 fn search_over_mutable_array_is_not_fused() {
-    let (hir, arena, names) = compile("(find (fn [x] (even? x)) @[1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(find (fn [x] (even? x)) @[1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "find"),
         "a mutable `@array` base must not fuse a search; callees were {cs:?}",
@@ -287,8 +287,8 @@ fn search_over_mutable_array_is_not_fused() {
 /// non-primitive one, so it is never rewritten.
 #[test]
 fn user_shadowed_search_is_not_fused() {
-    let (hir, arena, names) = compile("(defn find [p c] nil) (find (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn find [p c] nil) (find (fn [x] x) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "find"),
         "a user `find` must not be rewritten; callees were {cs:?}",
@@ -300,8 +300,8 @@ fn user_shadowed_search_is_not_fused() {
 /// while the gate refuses a capture: the `any?` call and the closure both survive.
 #[test]
 fn capturing_search_predicate_fuses() {
-    let (hir, arena, names) = compile("(let [k 2] (any? (fn [x] (> x k)) [1 2 3 4]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 2] (any? (fn [x] (> x k)) [1 2 3 4]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "any?"),
         "the `any?` dispatch must be gone; callees were {cs:?}",
@@ -314,8 +314,8 @@ fn capturing_search_predicate_fuses() {
 /// requirement to either proof.
 #[test]
 fn named_search_predicate_and_var_base_fuse() {
-    let (hir, arena, names) = compile("(defn pos? [x] (> x 0)) (let [xs [1 2 3]] (all? pos? xs))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn pos? [x] (> x 0)) (let [xs [1 2 3]] (all? pos? xs))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "all?"),
         "a named predicate over a Var-bound base must fuse; callees were {cs:?}",
@@ -325,7 +325,7 @@ fn named_search_predicate_and_var_base_fuse() {
         "the named predicate's body must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "scalar accumulator; callees were {cs:?}",
     );

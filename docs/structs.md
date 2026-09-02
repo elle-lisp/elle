@@ -84,13 +84,16 @@ reference for mutable).
 ## Introspection
 
 ```lisp
-(keys {:a 1 :b 2})         # => (:a :b)   (sorted order)
+(keys {:a 1 :b 2})         # => (:a :b)   (deterministic key order)
 (values {:a 1 :b 2})       # => (1 2)     (matching key order)
 (pairs {:a 1 :b 2})        # => ([a 1] [b 2])  (list of [key value] arrays)
 (from-pairs [[:a 1] [:b 2]])  # => {:a 1 :b 2}
 ```
 
-`pairs` returns a list of `[key value]` arrays in sorted key order.
+`pairs` returns a list of `[key value]` arrays in the struct's key order.
+Key order is deterministic — the same in every run, thread, and process —
+but carries no alphabetical meaning: symbol and keyword keys sort by their
+name hash (docs/impl/symbol.md § "What the property buys").
 Combined with `from-pairs`, structs can be round-tripped through list
 operations:
 

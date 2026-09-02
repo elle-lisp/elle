@@ -9,8 +9,8 @@ fn merge_self_edge_refuses_clique() {
     // distinct merge roots and the predicate must refuse it. Its balancing decref is the
     // target's runtime content scan; eliminating it trades a known leak for a possible
     // UAF. Uses the REAL classification (`git` genuinely Mixed), not a forced effect.
-    let (hir, arena, symbols, info) = analyze_with_class("(git \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(git \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena);
     assert_eq!(calls.len(), 1, "expected one (git ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(

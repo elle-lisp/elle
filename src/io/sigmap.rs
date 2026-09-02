@@ -74,11 +74,19 @@ pub fn resolve(val: &crate::value::Value, context: &str) -> Result<libc::c_int, 
             None => Err(ResolveError::UnknownSignum(n)),
         };
     }
-    if let Some(name) = val.as_keyword_name() {
-        return match keyword_to_signum(&name) {
-            Some(s) => Ok(s),
-            None => Err(ResolveError::UnknownKeyword(name.to_string())),
-        };
+    if let Some(hash) = val.keyword_hash() {
+        // Match by hash — the recognised set is fixed, so no spelling is
+        // needed to resolve. A miss recovers a spelling for the error
+        // message through the static vocabulary, or shows the raw hash.
+        for (k, v) in SIGNALS {
+            if crate::value::keyword::keyword_hash(k) == hash {
+                return Ok(*v);
+            }
+        }
+        let spelling = crate::value::keyword::resolve_keyword_name(None, hash)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("#<keyword:{:#x}>", hash));
+        return Err(ResolveError::UnknownKeyword(spelling));
     }
     let _ = context;
     Err(ResolveError::WrongType(val.type_name()))

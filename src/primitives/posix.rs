@@ -55,7 +55,7 @@ fn resolve_signal_set(
         };
 
     // Single keyword.
-    if let Some(name) = val.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(*val) {
         process_keyword(&name, &mut out)?;
         return Ok(out);
     }
@@ -63,7 +63,7 @@ fn resolve_signal_set(
     // Set of keywords.
     if let Some(set) = val.as_set() {
         for elem in set.iter() {
-            let name = elem.as_keyword_name().ok_or_else(|| {
+            let name = ctx.keyword_spelling(*elem).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     ctx.error(
@@ -84,7 +84,7 @@ fn resolve_signal_set(
     // Array / mutable array of keywords.
     if let Some(elems) = val.as_array() {
         for elem in elems.iter() {
-            let name = elem.as_keyword_name().ok_or_else(|| {
+            let name = ctx.keyword_spelling(*elem).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     ctx.error(
@@ -103,7 +103,7 @@ fn resolve_signal_set(
     }
     if let Some(arr) = val.as_array_mut() {
         for elem in arr.borrow().iter() {
-            let name = elem.as_keyword_name().ok_or_else(|| {
+            let name = ctx.keyword_spelling(*elem).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     ctx.error(
@@ -125,7 +125,7 @@ fn resolve_signal_set(
     if val.as_pair().is_some() {
         let mut current = *val;
         while let Some(pair) = current.as_pair() {
-            let name = pair.first.as_keyword_name().ok_or_else(|| {
+            let name = ctx.keyword_spelling(pair.first).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     ctx.error(

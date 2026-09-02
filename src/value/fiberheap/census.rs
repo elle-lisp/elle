@@ -267,7 +267,7 @@ fn slice_stat<T: 'static>(sl: &RegionSlice<T>, seen: &mut FxHashSet<usize>, stat
 
 fn key_bytes(k: &TableKey) -> usize {
     match k {
-        TableKey::String(s) | TableKey::Keyword(s) => s.len(),
+        TableKey::String(s) => s.len(),
         TableKey::Array(ks) => ks.iter().map(key_bytes).sum(),
         _ => 0,
     }

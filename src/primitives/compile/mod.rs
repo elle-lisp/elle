@@ -59,7 +59,7 @@ pub(crate) use callgraph::*;
 // ── Helper ─────────────────────────────────────────────────────────────
 
 pub(super) fn kw(name: &str) -> TableKey {
-    TableKey::Keyword(name.to_string())
+    TableKey::keyword(name)
 }
 
 // ── Analysis handle ────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ pub(super) fn resolve_name(
     ctx: &mut NativeCtx,
 ) -> Result<String, (SignalBits, Value)> {
     // Accept keyword or string.
-    if let Some(name) = args[idx].as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(args[idx]) {
         return Ok(name.to_string());
     }
     if let Some(name) = args[idx].with_string(|s| s.to_string()) {

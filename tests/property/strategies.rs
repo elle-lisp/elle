@@ -4,6 +4,7 @@
 
 use elle::ffi::types::{StructDesc, TypeDesc};
 use elle::Value;
+use elle::value::SymbolId;
 use proptest::prelude::*;
 
 /// Strategy for arbitrary immediate Values (no heap allocation).
@@ -29,7 +30,7 @@ pub fn arb_immediate() -> impl Strategy<Value = Value> {
         1 => Just(Value::float(f64::NEG_INFINITY)),
         1 => Just(Value::float(f64::NAN)),
         // Symbols
-        3 => (0u32..10000).prop_map(Value::symbol),
+        3 => (0u64..10000).prop_map(|n| Value::symbol(SymbolId(n))),
     ]
 }
 
@@ -57,7 +58,7 @@ fn arb_value_depth(depth: u32) -> BoxedStrategy<Value> {
             10 => prop::num::f64::NORMAL.prop_map(Value::float),
             1 => Just(Value::float(f64::INFINITY)),
             1 => Just(Value::float(f64::NEG_INFINITY)),
-            3 => (0u32..10000).prop_map(Value::symbol),
+            3 => (0u64..10000).prop_map(|n| Value::symbol(SymbolId(n))),
             5 => "[a-zA-Z0-9_ ]{0,20}".prop_map(|s| {
                 let h = elle::primitives::ctx::TestHeap::new();
                 h.ctx().string(s)

@@ -106,6 +106,45 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
     INDEX.get(name).copied()
 }
 
+/// Hash→(spelling, def) index over the same tables `def_by_name` walks.
+///
+/// The built-in vocabulary is fixed at build time, so its spellings need no
+/// instance memo: a compiler pass holding a primitive binding's `SymbolId` can
+/// recover the name it was written with, wherever it runs and with no table in
+/// scope. That is what keeps type inference, narrowing and fusion off the
+/// display path (docs/impl/symbol.md § "Reading a name, and not reading one").
+///
+/// `static_vocabulary_is_collision_free` asserts the spellings are distinct, so
+/// a build whose own names collide fails before this index can hide one.
+fn static_index() -> &'static std::collections::HashMap<u64, (&'static str, &'static PrimitiveDef)>
+{
+    use std::collections::HashMap;
+    use std::sync::LazyLock;
+    static INDEX: LazyLock<HashMap<u64, (&'static str, &'static PrimitiveDef)>> =
+        LazyLock::new(|| {
+            let mut index = HashMap::new();
+            for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
+                for def in *table {
+                    for name in std::iter::once(&def.name).chain(def.aliases) {
+                        index.insert(crate::namehash::name_hash(name), (*name, def));
+                    }
+                }
+            }
+            index
+        });
+    &INDEX
+}
+
+/// The spelling of a built-in name, or `None` if `id` names nothing built in.
+pub(crate) fn static_name(id: crate::value::SymbolId) -> Option<&'static str> {
+    static_index().get(&id.0).map(|(name, _)| *name)
+}
+
+/// The def a built-in name resolves to, by id rather than by spelling.
+pub(crate) fn def_by_symbol(id: crate::value::SymbolId) -> Option<&'static PrimitiveDef> {
+    static_index().get(&id.0).map(|(_, def)| *def)
+}
+
 /// The process-global registry owning the `prim_id` ↔ `&'static PrimitiveDef`
 /// correspondence. A native-fn is the IMMEDIATE `Value{TAG_NATIVE_FN, prim_id}`
 /// (no `HeapObject`, no region), so the id is its whole identity: dense (a
@@ -263,23 +302,6 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
     }
 
     meta
-}
-
-/// Intern all primitive names (and aliases) into a SymbolTable.
-///
-/// This ensures the SymbolTable has the same SymbolId assignments as
-/// the cached PrimitiveMeta. Must be called before using cached meta
-/// with a SymbolTable that hasn't had `register_primitives` called on it.
-/// Idempotent — safe to call multiple times.
-pub fn intern_primitive_names(symbols: &mut SymbolTable) {
-    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-        for def in *table {
-            symbols.intern(def.name);
-            for alias in def.aliases {
-                symbols.intern(alias);
-            }
-        }
-    }
 }
 
 #[cfg(test)]

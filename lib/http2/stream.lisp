@@ -7,13 +7,16 @@
 ##
 ## No sync dependency — uses bare ev/futex-wait and ev/futex-wake.
 ##
-## Futex keys come from `(gensym)`, a process-global primitive counter,
-## NOT a module-local counter.  `(import ...)` returns a fresh module
-## instance each call, so a module-local counter would restart at 0 in
-## every importer and hand out colliding keys — and since the scheduler's
-## park-queue is process-global (one key -> one wait list), a wake on one
-## channel/flow-control futex would unpark a waiter on another instance's
-## (same elle bug class as the lib/sync futex-key collision, #861).
+## Futex keys come from `(sys/unique)`, a process-global primitive
+## counter, NOT a module-local counter.  `(import ...)` returns a fresh
+## module instance each call, so a module-local counter would restart at
+## 0 in every importer and hand out colliding keys — and since the
+## scheduler's park-queue is process-global (one key -> one wait list), a
+## wake on one channel/flow-control futex would unpark a waiter on
+## another instance's (same elle bug class as the lib/sync futex-key
+## collision, #861).  An integer key also interns nothing, where a gensym
+## key retained one symbol per stream (tests/elle/sync-keys.lisp pins the
+## property for the sync constructors).
 ##
 ## Exports: {:make-stream :make-channel :transition :make-flow-control :test}
 
@@ -24,7 +27,7 @@
   ## single-threaded cooperative runtime.
 
   (defn make-channel []
-    (let [key (gensym)
+    (let [key (sys/unique)
           bx (box 0)
           buf @[]
           @closed false
@@ -107,7 +110,7 @@
   ## ── Flow control ───────────────────────────────────────────────────────
 
   (defn make-flow-control [initial-window]
-    (let [key (gensym)
+    (let [key (sys/unique)
           bx (box 0)]
       @{:send-window initial-window
         :recv-window initial-window

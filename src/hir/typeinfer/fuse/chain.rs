@@ -23,15 +23,25 @@ pub(super) enum Hof {
 }
 
 impl Hof {
-    /// The canonical stdlib name this op is recognized by.
-    pub(super) fn from_name(name: &str) -> Option<Hof> {
-        match name {
-            "map" => Some(Hof::Map),
-            "map-indexed" => Some(Hof::MapIndexed),
-            "filter" => Some(Hof::Filter),
-            "take-while" => Some(Hof::TakeWhile),
-            "drop-while" => Some(Hof::DropWhile),
-            "mapcat" => Some(Hof::Mapcat),
+    /// The op a callee names, or `None` if it names none of them.
+    ///
+    /// By id, not by spelling: these are stdlib closures, in no primitive
+    /// table, and `SymbolId::of` is const, so recognition needs no memo
+    /// (docs/impl/symbol.md § "Reading a name, and not reading one").
+    pub(super) fn from_symbol(sym: SymbolId) -> Option<Hof> {
+        const MAP: SymbolId = SymbolId::of("map");
+        const MAP_INDEXED: SymbolId = SymbolId::of("map-indexed");
+        const FILTER: SymbolId = SymbolId::of("filter");
+        const TAKE_WHILE: SymbolId = SymbolId::of("take-while");
+        const DROP_WHILE: SymbolId = SymbolId::of("drop-while");
+        const MAPCAT: SymbolId = SymbolId::of("mapcat");
+        match sym {
+            MAP => Some(Hof::Map),
+            MAP_INDEXED => Some(Hof::MapIndexed),
+            FILTER => Some(Hof::Filter),
+            TAKE_WHILE => Some(Hof::TakeWhile),
+            DROP_WHILE => Some(Hof::DropWhile),
+            MAPCAT => Some(Hof::Mapcat),
             _ => None,
         }
     }
@@ -216,12 +226,16 @@ pub(super) enum Search {
 
 impl Search {
     /// The canonical stdlib name this search is recognized by.
-    pub(super) fn from_name(name: &str) -> Option<Search> {
-        match name {
-            "any?" => Some(Search::Any),
-            "all?" => Some(Search::All),
-            "find" => Some(Search::Find),
-            "find-index" => Some(Search::FindIndex),
+    pub(super) fn from_symbol(sym: SymbolId) -> Option<Search> {
+        const ANY_P: SymbolId = SymbolId::of("any?");
+        const ALL_P: SymbolId = SymbolId::of("all?");
+        const FIND: SymbolId = SymbolId::of("find");
+        const FIND_INDEX: SymbolId = SymbolId::of("find-index");
+        match sym {
+            ANY_P => Some(Search::Any),
+            ALL_P => Some(Search::All),
+            FIND => Some(Search::Find),
+            FIND_INDEX => Some(Search::FindIndex),
             _ => None,
         }
     }
@@ -310,7 +324,6 @@ pub(super) struct FoldTerminal {
 pub(super) fn fusable_hof_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
 ) -> Option<(Hof, &'a Hir, &'a Hir)> {
     let HirKind::Call { func, args, .. } = &hir.kind else {
         return None;
@@ -323,7 +336,7 @@ pub(super) fn fusable_hof_parts<'a>(
     if !bi.is_primitive {
         return None;
     }
-    let hof = Hof::from_name(symbol_names.get(&bi.name.0)?)?;
+    let hof = Hof::from_symbol(bi.name)?;
     Some((hof, &args[0].expr, &args[1].expr))
 }
 
@@ -338,7 +351,6 @@ pub(super) fn fusable_hof_parts<'a>(
 pub(super) fn fusable_fold_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
 ) -> Option<(&'a Hir, &'a Hir, &'a Hir)> {
     let HirKind::Call { func, args, .. } = &hir.kind else {
         return None;
@@ -351,8 +363,7 @@ pub(super) fn fusable_fold_parts<'a>(
     if !bi.is_primitive {
         return None;
     }
-    let name = symbol_names.get(&bi.name.0)?;
-    if name != "fold" && name != "reduce" {
+    if bi.name != SymbolId::of("fold") && bi.name != SymbolId::of("reduce") {
         return None;
     }
     Some((&args[0].expr, &args[1].expr, &args[2].expr))
@@ -370,7 +381,6 @@ pub(super) fn fusable_fold_parts<'a>(
 pub(super) fn fusable_count_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
 ) -> Option<(&'a Hir, &'a Hir)> {
     let HirKind::Call { func, args, .. } = &hir.kind else {
         return None;
@@ -380,7 +390,7 @@ pub(super) fn fusable_count_parts<'a>(
     }
     let callee = unwrap_callee_binding(func)?;
     let bi = arena.get(callee);
-    if !bi.is_primitive || symbol_names.get(&bi.name.0)? != "count" {
+    if !bi.is_primitive || bi.name != SymbolId::of("count") {
         return None;
     }
     Some((&args[0].expr, &args[1].expr))
@@ -398,7 +408,6 @@ pub(super) fn fusable_count_parts<'a>(
 pub(super) fn fusable_search_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
 ) -> Option<(Search, &'a Hir, &'a Hir)> {
     let HirKind::Call { func, args, .. } = &hir.kind else {
         return None;
@@ -411,7 +420,7 @@ pub(super) fn fusable_search_parts<'a>(
     if !bi.is_primitive {
         return None;
     }
-    let search = Search::from_name(symbol_names.get(&bi.name.0)?)?;
+    let search = Search::from_symbol(bi.name)?;
     Some((search, &args[0].expr, &args[1].expr))
 }
 
@@ -540,7 +549,6 @@ pub(super) struct ChainPlan {
 pub(super) fn validate_chain(
     hir: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
     fns: &FnResolver,
 ) -> Option<ChainPlan> {
@@ -556,19 +564,19 @@ pub(super) fn validate_chain(
     // count, or one of the four searches (1-param predicate). Asked before the
     // pipeline walk, so a `count` or a search — each of which wears a `filter`'s
     // two-argument shape — is never read as a stage.
-    let terminal = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena, symbol_names) {
+    let terminal = if let Some((lam, _init, coll)) = fusable_fold_parts(cur, arena) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, 2)?);
         any_capturing |= captures_locals(lam);
         ops += 1;
         cur = coll;
         TerminalOp::Fold
-    } else if let Some((pred, coll)) = fusable_count_parts(cur, arena, symbol_names) {
+    } else if let Some((pred, coll)) = fusable_count_parts(cur, arena) {
         all_silent &= reorder_safe(fns.body_signal(pred, arena, 1)?);
         any_capturing |= captures_locals(pred);
         ops += 1;
         cur = coll;
         TerminalOp::Count
-    } else if let Some((search, pred, coll)) = fusable_search_parts(cur, arena, symbol_names) {
+    } else if let Some((search, pred, coll)) = fusable_search_parts(cur, arena) {
         all_silent &= reorder_safe(fns.body_signal(pred, arena, 1)?);
         any_capturing |= captures_locals(pred);
         ops += 1;
@@ -581,7 +589,7 @@ pub(super) fn validate_chain(
     // The inner pipeline. Every op's function takes the element alone but a
     // `map-indexed`'s, which takes the position first (`Hof::arity`).
     let mut kinds = Vec::new();
-    while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena, symbol_names) {
+    while let Some((hof, lam, coll)) = fusable_hof_parts(cur, arena) {
         all_silent &= reorder_safe(fns.body_signal(lam, arena, hof.arity())?);
         any_capturing |= captures_locals(lam);
         // A `mapcat` reads what its function returns as a COLLECTION and walks it,
@@ -589,7 +597,7 @@ pub(super) fn validate_chain(
         // where a list would make it quadratic. Every other op is indifferent to
         // what its function returns (dissolution.md § "Mapcat — the stage that fans
         // out").
-        if hof == Hof::Mapcat && !fns.result_is_array(lam, arena, symbol_names, bases) {
+        if hof == Hof::Mapcat && !fns.result_is_array(lam, arena, bases) {
             return None;
         }
         ops += 1;
@@ -618,7 +626,7 @@ pub(super) fn validate_chain(
             return None;
         }
     }
-    let base = classify_base(cur, arena, symbol_names, bases)?;
+    let base = classify_base(cur, arena, bases)?;
     // A mutable `@array` base fuses only a single `map`/`filter`/`mapcat`: the fused
     // loop
     // walks the base LIVE against a `len` captured once, which matches those stdlib
@@ -702,7 +710,6 @@ pub(super) enum BaseKind {
 pub(super) fn classify_base(
     expr: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     bases: &FxHashMap<Binding, &'static str>,
 ) -> Option<BaseKind> {
     if let HirKind::Var(b) = &expr.kind {
@@ -720,8 +727,7 @@ pub(super) fn classify_base(
     if !bi.is_primitive || !bi.is_immutable || bi.is_mutated {
         return None;
     }
-    let name = symbol_names.get(&bi.name.0)?;
-    match crate::primitives::registration::def_by_name(name).map(|d| d.ret) {
+    match crate::primitives::registration::def_by_symbol(bi.name).map(|d| d.ret) {
         Some(RetType::Array) => Some(BaseKind::Immutable),
         Some(RetType::MutableArray) => Some(BaseKind::Mutable),
         _ => None,

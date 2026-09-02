@@ -51,7 +51,7 @@ fn open_file(
         }
     };
 
-    let mode_name_owned = match args[1].as_keyword_name() {
+    let mode_name_owned = match ctx.keyword_spelling(args[1]) {
         Some(name) => name,
         None => {
             return (

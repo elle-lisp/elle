@@ -70,10 +70,10 @@ impl<'a> Lowerer<'a> {
             // creates a dangling binding for an undefined variable.
             let sym_id = self.arena.get(*binding).name;
             let name = self
-                .symbol_names
-                .get(&sym_id.0)
-                .cloned()
-                .unwrap_or_else(|| format!("symbol #{}", sym_id.0));
+                .symbols
+                .and_then(|s| s.name(sym_id))
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| format!("symbol #{:#x}", sym_id.0));
             Err(format!("{}: undefined variable: {}", span, name))
         }
     }

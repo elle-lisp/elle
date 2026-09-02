@@ -66,7 +66,7 @@ fn main() {
     let (vm, symbols, cctx) = rt.parts();
     let compiled = compile_file(&source, symbols, cctx, "hello.lisp").expect("compilation failed");
     let result = vm
-        .execute_scheduled(&compiled.bytecode, symbols, cctx)
+        .execute_scheduled(&compiled.bytecode, cctx)
         .expect("execution failed");
 
     // 6. Extract result

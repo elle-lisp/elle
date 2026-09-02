@@ -46,7 +46,7 @@ Provide the complete Elle implementation:
 | `primitives` | Built-in functions (arithmetic, list, string, I/O, concurrency, etc.) |
 | `pipeline` | Compilation entry points (`compile`, `analyze`, `eval`) |
 | `repl` | Interactive REPL |
-| `symbol` | Symbol table and interning |
+| `symbol` | Symbol identity (name hash) and the per-instance display memo |
 | `port` | I/O port abstraction |
 
 ## Compilation pipeline

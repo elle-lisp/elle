@@ -134,13 +134,7 @@ impl DispatchWrapperRegistry {
     /// Record a locally-collected wrapper under its name. First definition wins,
     /// so the stdlib's canonical wrapper is never clobbered by a later same-named
     /// user binding, and re-recording across compiles is a cheap no-op.
-    fn record(
-        &mut self,
-        name: SymbolId,
-        w: &Wrapper,
-        arena: &BindingArena,
-        symbol_names: &HashMap<u32, String>,
-    ) {
+    fn record(&mut self, name: SymbolId, w: &Wrapper, arena: &BindingArena) {
         self.by_name.entry(name).or_insert_with(|| RegWrapper {
             arity: w.arity,
             arms: w
@@ -148,8 +142,7 @@ impl DispatchWrapperRegistry {
                 .iter()
                 .map(|a| {
                     let native_name = arena.get(a.native).name;
-                    let is_del = symbol_names
-                        .get(&native_name.0)
+                    let is_del = crate::primitives::registration::static_name(native_name)
                         .is_some_and(|n| n.starts_with("%del"));
                     RegArm {
                         ty: a.ty,
@@ -179,16 +172,15 @@ pub(super) fn monomorphize_dispatch_wrappers(
     hir: &mut Hir,
     hir_types: &HashMap<HirId, TyId>,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
     registry: &mut DispatchWrapperRegistry,
 ) {
     let mut wrappers: HashMap<Binding, Wrapper> = HashMap::new();
-    collect_wrappers(hir, arena, symbol_names, typeof_aliases, &mut wrappers);
+    collect_wrappers(hir, arena, typeof_aliases, &mut wrappers);
     // Persist this unit's wrappers by name so later units can reach them (the
     // stdlib's push/put populate the instance registry on the `<stdlib>` compile).
     for (b, w) in &wrappers {
-        registry.record(arena.get(*b).name, w, arena, symbol_names);
+        registry.record(arena.get(*b).name, w, arena);
     }
     if wrappers.is_empty() && registry.by_name.is_empty() {
         return;
@@ -212,7 +204,6 @@ pub(super) fn monomorphize_dispatch_wrappers(
 fn collect_wrappers(
     hir: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
     out: &mut HashMap<Binding, Wrapper>,
 ) {
@@ -228,14 +219,7 @@ fn collect_wrappers(
             ..
         } = &value.kind
         {
-            if let Some(w) = build_wrapper(
-                params,
-                *rest_param,
-                body,
-                arena,
-                symbol_names,
-                typeof_aliases,
-            ) {
+            if let Some(w) = build_wrapper(params, *rest_param, body, arena, typeof_aliases) {
                 out.insert(b, w);
             }
         }
@@ -249,7 +233,7 @@ fn collect_wrappers(
         HirKind::Define { binding, value } => record(*binding, value, out),
         _ => {}
     }
-    hir.for_each_child(|c| collect_wrappers(c, arena, symbol_names, typeof_aliases, out));
+    hir.for_each_child(|c| collect_wrappers(c, arena, typeof_aliases, out));
 }
 
 /// Build a `Wrapper` from a lambda's params/body when the body dispatches on
@@ -260,7 +244,6 @@ fn build_wrapper(
     rest_param: Option<Binding>,
     body: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
 ) -> Option<Wrapper> {
     // Functionalize lists the rest binding in BOTH `params` and `rest_param`. The
@@ -274,16 +257,8 @@ fn build_wrapper(
         .filter(|p| Some(*p) != rest_param)
         .collect();
     let param0 = *fixed.first()?;
-    let rest_first = rest_param.and_then(|rp| find_rest_first_local(body, rp, arena, symbol_names));
-    let arms = find_arms(
-        body,
-        param0,
-        &fixed,
-        rest_first,
-        arena,
-        symbol_names,
-        typeof_aliases,
-    )?;
+    let rest_first = rest_param.and_then(|rp| find_rest_first_local(body, rp, arena));
+    let arms = find_arms(body, param0, &fixed, rest_first, arena, typeof_aliases)?;
     if arms.is_empty() {
         return None;
     }
@@ -311,11 +286,10 @@ fn find_arms(
     params: &[Binding],
     rest_first: Option<Binding>,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
 ) -> Option<Vec<Arm>> {
     if let HirKind::Match { value, arms } = &body.kind {
-        if typeof_subject_binding(value, arena, symbol_names, typeof_aliases) == Some(param0) {
+        if typeof_subject_binding(value, arena, typeof_aliases) == Some(param0) {
             let mut out = Vec::new();
             for (pat, _guard, arm_body) in arms {
                 let Some(ty) = pattern_type_keyword(pat) else {
@@ -334,33 +308,15 @@ fn find_arms(
     let mut found = None;
     body.for_each_child(|c| {
         if found.is_none() {
-            found = find_arms(
-                c,
-                param0,
-                params,
-                rest_first,
-                arena,
-                symbol_names,
-                typeof_aliases,
-            );
+            found = find_arms(c, param0, params, rest_first, arena, typeof_aliases);
         }
     });
     found
 }
 
 /// The local binding bound to `(first <rest_param>)` within `body`, if any.
-fn find_rest_first_local(
-    body: &Hir,
-    rest_param: Binding,
-    arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
-) -> Option<Binding> {
-    fn is_first_of(
-        init: &Hir,
-        rest: Binding,
-        arena: &BindingArena,
-        names: &HashMap<u32, String>,
-    ) -> bool {
+fn find_rest_first_local(body: &Hir, rest_param: Binding, arena: &BindingArena) -> Option<Binding> {
+    fn is_first_of(init: &Hir, rest: Binding, arena: &BindingArena) -> bool {
         let inner = unwrap_anf_let(init);
         match &inner.kind {
             HirKind::Intrinsic {
@@ -368,33 +324,25 @@ fn find_rest_first_local(
                 args,
             } => args.len() == 1 && var_of(&args[0]) == Some(rest),
             HirKind::Call { func, args, .. } if args.len() == 1 => {
-                unwrap_callee_binding(func)
-                    .and_then(|b| names.get(&arena.get(b).name.0))
-                    .map(String::as_str)
-                    == Some("first")
+                unwrap_callee_binding(func).map(|b| arena.get(b).name)
+                    == Some(SymbolId::of("first"))
                     && var_of(&args[0].expr) == Some(rest)
             }
             _ => false,
         }
     }
     let mut found: Option<Binding> = None;
-    fn go(
-        h: &Hir,
-        rest: Binding,
-        arena: &BindingArena,
-        names: &HashMap<u32, String>,
-        found: &mut Option<Binding>,
-    ) {
+    fn go(h: &Hir, rest: Binding, arena: &BindingArena, found: &mut Option<Binding>) {
         if let HirKind::Let { bindings, .. } = &h.kind {
             for (b, init) in bindings {
-                if found.is_none() && is_first_of(init, rest, arena, names) {
+                if found.is_none() && is_first_of(init, rest, arena) {
                     *found = Some(*b);
                 }
             }
         }
-        h.for_each_child(|c| go(c, rest, arena, names, found));
+        h.for_each_child(|c| go(c, rest, arena, found));
     }
-    go(body, rest_param, arena, symbol_names, &mut found);
+    go(body, rest_param, arena, &mut found);
     found
 }
 
@@ -558,24 +506,18 @@ fn arg_type_id(arg: &Hir) -> HirId {
 mod tests {
     use crate::hir::arena::BindingArena;
     use crate::hir::expr::{Hir, HirKind};
-    use std::collections::HashMap;
 
     /// Collect the name of every call callee (through the ANF/`Var` wrappers) in
     /// the tree, so a test can assert which ops a source form lowered to.
-    fn callee_names(
-        h: &Hir,
-        arena: &BindingArena,
-        names: &HashMap<u32, String>,
-        out: &mut Vec<String>,
-    ) {
+    fn callee_names(h: &Hir, arena: &BindingArena, out: &mut Vec<String>) {
         if let HirKind::Call { func, .. } = &h.kind {
             if let Some(b) = super::unwrap_callee_binding(func) {
-                if let Some(n) = names.get(&arena.get(b).name.0) {
-                    out.push(n.clone());
+                if let Some(n) = crate::primitives::registration::static_name(arena.get(b).name) {
+                    out.push(n.to_string());
                 }
             }
         }
-        h.for_each_child(|c| callee_names(c, arena, names, out));
+        h.for_each_child(|c| callee_names(c, arena, out));
     }
 
     /// Cross-unit dispatch-wrapper monomorphization: a user call to the stdlib
@@ -590,11 +532,11 @@ mod tests {
     fn cross_unit_put_on_proven_struct_monomorphizes() {
         let mut rt = crate::runtime::Runtime::new(); // stdlib loaded
         let (_vm, symbols, cctx) = rt.parts();
-        let (hir, arena, names) =
+        let (hir, arena) =
             crate::pipeline::compile_file_to_fhir("(put {:a 1} :b 2)", symbols, cctx, "<test>")
                 .expect("compile");
         let mut callees = Vec::new();
-        callee_names(&hir, &arena, &names, &mut callees);
+        callee_names(&hir, &arena, &mut callees);
         assert!(
             callees.iter().any(|n| n == "%put-struct"),
             "a `put` on a proven :struct must collapse to %put-struct; callees were {:?}",
@@ -622,11 +564,10 @@ mod tests {
         for (src, want_op, wrapper) in cases {
             let mut rt = crate::runtime::Runtime::new();
             let (_vm, symbols, cctx) = rt.parts();
-            let (hir, arena, names) =
-                crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
-                    .expect("compile");
+            let (hir, arena) = crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
+                .expect("compile");
             let mut callees = Vec::new();
-            callee_names(&hir, &arena, &names, &mut callees);
+            callee_names(&hir, &arena, &mut callees);
             assert!(
                 callees.iter().any(|n| n == want_op),
                 "{src} must collapse to {want_op}; callees were {callees:?}",

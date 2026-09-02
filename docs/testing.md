@@ -254,13 +254,14 @@ what kind of Rust test to write and where, see [`tests/AGENTS.md`](../tests/AGEN
 [`docs/analysis/testing.md`](analysis/testing.md). (`elle test --rust`, which folds
 the cargo suite into the same DB, is specced but not yet implemented.)
 
-**Symbol names in assertions.** Symbol name resolution is per-instance
-(docs/impl/region/ctx.md § "Symbols through the ctx"). So a
-bare `{:?}`/`{}` on a symbol-bearing `Value` (as in `assert_eq!` output) renders
-`#<sym:id>`, not the bare `name`, because the trait `fmt` has no table to thread.
-When a failing assertion needs readable names, put `v.debug_with(symbols)` /
-`v.display_with(symbols)` in the assert message — those carry the table (a symbol
-then renders as its bare `name`, matching Scheme/CL — no leading `'`).
+**Symbol names in assertions.** A name lives in the owning instance's display
+memo, not in a global table (docs/impl/symbol.md), and `fmt` cannot reach it. So
+a bare `{:?}`/`{}` on a symbol-bearing `Value` renders `#<symbol:hash>`. To read
+names in assertion output, thread the table:
+`format!("{}", v.display_with(Some(&symbols)))`, which renders the bare `name`
+with no leading `'` (matching Scheme/CL). Comparing a symbol against a known
+name needs no table and no formatting at all — use
+`v.as_symbol() == Some(SymbolId::of("map"))`.
 
 ## Known gaps
 

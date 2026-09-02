@@ -246,7 +246,7 @@ impl<'a> FunctionTranslator<'a> {
                     })?
                     .clone();
 
-                let mut emitter = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
+                let mut emitter = crate::lir::Emitter::new();
 
                 let lir_module = crate::lir::LirModule {
                     entry: func.clone(),
@@ -260,7 +260,7 @@ impl<'a> FunctionTranslator<'a> {
                 drop(nested_bytecode);
                 drop(nested_yield_points);
                 drop(nested_call_sites);
-                let mut emitter2 = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
+                let mut emitter2 = crate::lir::Emitter::new();
                 let all_compiled = emitter2.emit_module_closures(&lir_module);
                 let (nested_bytecode, nested_yield_points, nested_call_sites) =
                     all_compiled.into_iter().nth(closure_id.0 as usize).unwrap();
@@ -282,7 +282,6 @@ impl<'a> FunctionTranslator<'a> {
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask.clone(),
-                    symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
                     location_map: std::rc::Rc::new(nested_bytecode.location_map),
                     lir_function: Some(std::rc::Rc::new(nested_lir)),
                     doc: func.doc.clone(),

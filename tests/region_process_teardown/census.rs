@@ -14,8 +14,7 @@ fn process_teardown_is_observable_and_idempotent() {
     {
         let (vm, symbols, cctx) = rt.parts();
         let result = compile_file(src, symbols, cctx, "<teardown-test>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
     }
 
     let report = rt.teardown();

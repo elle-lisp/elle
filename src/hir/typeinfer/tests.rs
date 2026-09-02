@@ -9,7 +9,7 @@ use crate::symbol::SymbolTable;
 /// compile (driven from `hir::regularize`).
 fn compile_fhir(src: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
     let mut cctx = crate::pipeline::CompileCtx::new();
-    let (hir, arena, _names) =
+    let (hir, arena) =
         crate::pipeline::compile_file_to_fhir(src, symbols, &mut cctx, "<test>").expect("compile");
     (hir, arena)
 }
@@ -18,8 +18,7 @@ fn compile_fhir(src: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
 fn inferred_types(src: &str) -> Vec<TyId> {
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info =
-        infer_and_rewrite(&mut hir, &arena, &symbols, &mut Default::default()).expect("infer");
+    let info = infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
     info.hir_types.values().copied().collect()
 }
 
@@ -560,26 +559,19 @@ fn has_intrinsic_named(hir: &Hir, name: &str) -> bool {
 }
 
 /// Does the tree contain a `Call` whose callee is a `Var` binding named `name`?
-fn has_call_to(hir: &Hir, arena: &BindingArena, symbols: &SymbolTable, name: &str) -> bool {
-    let names = symbols.all_names();
+fn has_call_to(hir: &Hir, arena: &BindingArena, name: &str) -> bool {
     let mut found = false;
-    fn walk(
-        h: &Hir,
-        arena: &BindingArena,
-        names: &std::collections::HashMap<u32, String>,
-        name: &str,
-        found: &mut bool,
-    ) {
+    fn walk(h: &Hir, arena: &BindingArena, name: &str, found: &mut bool) {
         if let HirKind::Call { func, .. } = &h.kind {
             if let HirKind::Var(b) = &func.kind {
-                if names.get(&arena.get(*b).name.0).map(String::as_str) == Some(name) {
+                if arena.get(*b).name == crate::value::SymbolId::of(name) {
                     *found = true;
                 }
             }
         }
-        h.for_each_child(|c| walk(c, arena, names, name, found));
+        h.for_each_child(|c| walk(c, arena, name, found));
     }
-    walk(hir, arena, &names, name, &mut found);
+    walk(hir, arena, name, &mut found);
     found
 }
 
@@ -738,7 +730,7 @@ fn storing_intrinsic_routes_to_the_native_funnel_call() {
         "%array-push must not lower to an inline opcode"
     );
     assert!(
-        has_call_to(&hir, &arena, &symbols, "%array-push"),
+        has_call_to(&hir, &arena, "%array-push"),
         "%array-push lowers to a Call to its registered NativeFn"
     );
 }
@@ -754,7 +746,7 @@ fn pop_routes_to_the_native_funnel_call() {
         "%pop must not lower to an inline opcode"
     );
     assert!(
-        has_call_to(&hir, &arena, &symbols, "%pop"),
+        has_call_to(&hir, &arena, "%pop"),
         "%pop lowers to a Call to its registered NativeFn"
     );
 }
@@ -769,7 +761,7 @@ fn freeze_routes_to_the_native_funnel_call() {
         "%freeze must not lower to an inline opcode"
     );
     assert!(
-        has_call_to(&hir, &arena, &symbols, "%freeze"),
+        has_call_to(&hir, &arena, "%freeze"),
         "%freeze lowers to a Call to its registered NativeFn"
     );
 }
@@ -854,21 +846,16 @@ fn unknown_typed_caller_defeats_param_join_proofs() {
 // path never reaches). An UNPROVEN container leaves the dispatch intact.
 
 /// Count Call nodes whose callee resolves to a binding named `name`.
-fn count_calls_to(
-    hir: &Hir,
-    arena: &BindingArena,
-    names: &std::collections::HashMap<u32, String>,
-    name: &str,
-) -> usize {
+fn count_calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
     let mut n = 0;
     if let HirKind::Call { func, .. } = &hir.kind {
         if let Some(b) = super::unwrap_callee_binding(func) {
-            if names.get(&arena.get(b).name.0).map(String::as_str) == Some(name) {
+            if arena.get(b).name == crate::value::SymbolId::of(name) {
                 n += 1;
             }
         }
     }
-    hir.for_each_child(|c| n += count_calls_to(c, arena, names, name));
+    hir.for_each_child(|c| n += count_calls_to(c, arena, name));
     n
 }
 
@@ -884,10 +871,9 @@ fn container_dispatch_wrapper_monomorphizes_on_proven_container() {
                (let [s @{:x 0}] (myp s :x 9))";
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let names = symbols.all_names();
-    infer_and_rewrite(&mut hir, &arena, &symbols, &mut Default::default()).expect("infer");
+    infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
     assert_eq!(
-        count_calls_to(&hir, &arena, &names, "myp"),
+        count_calls_to(&hir, &arena, "myp"),
         0,
         "a proven-@struct container collapses the dispatch-wrapper call to its arm"
     );
@@ -905,10 +891,9 @@ fn container_dispatch_wrapper_stays_dynamic_on_unproven_container() {
                (defn g [c] (myp c :x 9)) (g @{:x 0}) (g @[1])";
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let names = symbols.all_names();
-    infer_and_rewrite(&mut hir, &arena, &symbols, &mut Default::default()).expect("infer");
+    infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
     assert!(
-        count_calls_to(&hir, &arena, &names, "myp") >= 1,
+        count_calls_to(&hir, &arena, "myp") >= 1,
         "an unproven container leaves the dispatch-wrapper call intact"
     );
 }

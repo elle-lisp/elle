@@ -488,11 +488,11 @@ impl WasmEmitter {
                 self.write_val_to_mem(f, *src, 0);
                 for (i, key) in exclude_keys.iter().enumerate() {
                     match key {
-                        LirConst::Keyword(name) => {
-                            self.emit_const_pool_load(f, *dst, Value::keyword(name));
+                        LirConst::Keyword(hash) => {
+                            self.emit_const_pool_load(f, *dst, Value::keyword_from_hash(*hash));
                         }
                         LirConst::Symbol(id) => {
-                            self.emit_const_pool_load(f, *dst, Value::symbol(id.0));
+                            self.emit_const_pool_load(f, *dst, Value::symbol(*id));
                         }
                         _ => {
                             f.instruction(&Instruction::I64Const(TAG_NIL as i64));

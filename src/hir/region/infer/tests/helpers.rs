@@ -1,14 +1,12 @@
 //! Shared helpers for the regions analysis tests. Free functions only —
 //! every `#[test]` lives in a themed sibling submodule (see `mod.rs`).
 use super::*;
+use crate::value::SymbolId;
 
 /// Compile Elle source to canonical (functionalized) HIR with a fresh per-call
 /// `CompileCtx` (every compile names its instance's compile state explicitly,
 /// threading the compile context as a parameter — docs/impl/region/ctx.md).
-pub(super) fn compile_fhir(
-    source: &str,
-    symbols: &mut SymbolTable,
-) -> (Hir, BindingArena, HashMap<u32, String>) {
+pub(super) fn compile_fhir(source: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
     let mut cctx = crate::pipeline::CompileCtx::new();
     crate::pipeline::compile_file_to_fhir(source, symbols, &mut cctx, "<test>").expect("compile")
 }
@@ -67,20 +65,9 @@ pub(super) fn count_empty_scopes(info: &RegionInfo) -> usize {
 /// arena, and RegionInfo.
 pub(super) fn pipeline(source: &str) -> (Hir, BindingArena, RegionInfo) {
     let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
     (hir, arena, info)
-}
-
-/// Same as `pipeline` but also returns the symbol names for dumping.
-pub(super) fn pipeline_with_names(
-    source: &str,
-) -> (Hir, BindingArena, RegionInfo, HashMap<u32, String>) {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena, _) = compile_fhir(source, &mut symbols);
-    let info = analyze_regions(&hir, &arena);
-    let names = symbols.all_names();
-    (hir, arena, info, names)
 }
 
 /// Find the HirId of the Intrinsic node matching `op` inside a Loop body.
@@ -256,55 +243,44 @@ pub(super) fn analyze_with_hir(source: &str) -> (Hir, BindingArena, SymbolTable,
     (analysis.hir, arena, symbols, info)
 }
 
-pub(super) fn find_calls_to_primitive(
-    hir: &Hir,
-    name: &str,
-    arena: &BindingArena,
-    symbols: &SymbolTable,
-) -> Vec<HirId> {
+/// The trap these two share: a binding is found by *identity*, never by asking
+/// a memo for a spelling. A primitive's id is minted against the compile
+/// context's own table, so the caller's memo may never have learned the name —
+/// `SymbolId::of` sidesteps that entirely (docs/impl/symbol.md § "Reading a
+/// name, and not reading one").
+pub(super) fn find_calls_to_primitive(hir: &Hir, name: &str, arena: &BindingArena) -> Vec<HirId> {
     let mut out = Vec::new();
-    fn walk(
-        hir: &Hir,
-        name: &str,
-        arena: &BindingArena,
-        symbols: &SymbolTable,
-        out: &mut Vec<HirId>,
-    ) {
+    fn walk(hir: &Hir, want: SymbolId, arena: &BindingArena, out: &mut Vec<HirId>) {
         if let HirKind::Call { func, .. } = &hir.kind {
             if let HirKind::Var(b) = &func.kind {
-                if symbols.name(arena.get(*b).name) == Some(name) {
+                if arena.get(*b).name == want {
                     out.push(hir.id);
                 }
             }
         }
-        hir.for_each_child(|c| walk(c, name, arena, symbols, out));
+        hir.for_each_child(|c| walk(c, want, arena, out));
     }
-    walk(hir, name, arena, symbols, &mut out);
+    walk(hir, SymbolId::of(name), arena, &mut out);
     out
 }
 
 #[allow(dead_code)]
-pub(super) fn find_binding_by_name(
-    hir: &Hir,
-    name: &str,
-    arena: &BindingArena,
-    symbols: &SymbolTable,
-) -> Option<Binding> {
-    fn walk(hir: &Hir, name: &str, arena: &BindingArena, symbols: &SymbolTable) -> Option<Binding> {
+pub(super) fn find_binding_by_name(hir: &Hir, name: &str, arena: &BindingArena) -> Option<Binding> {
+    fn walk(hir: &Hir, want: SymbolId, arena: &BindingArena) -> Option<Binding> {
         if let HirKind::Var(b) = &hir.kind {
-            if symbols.name(arena.get(*b).name) == Some(name) {
+            if arena.get(*b).name == want {
                 return Some(*b);
             }
         }
         let mut found = None;
         hir.for_each_child(|c| {
             if found.is_none() {
-                found = walk(c, name, arena, symbols);
+                found = walk(c, want, arena);
             }
         });
         found
     }
-    walk(hir, name, arena, symbols)
+    walk(hir, SymbolId::of(name), arena)
 }
 
 /// The `(then_id, else_id)` body HirIds of the first `If` in the tree.
@@ -414,7 +390,7 @@ pub(super) fn analyze_with_class(source: &str) -> (Hir, BindingArena, SymbolTabl
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
     crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let info = analyze_regions_with(&analysis.hir, &arena, pc.call_classification);
     (analysis.hir, arena, symbols, info)
 }
@@ -455,9 +431,9 @@ pub(super) fn analyze_with_effect(
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
     crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let mut call_class = pc.call_classification;
-    let sym = symbols.get(prim).expect("primitive symbol");
+    let sym = crate::value::SymbolId::of(prim);
     call_class.effects.insert(sym, effect);
     let info = analyze_regions_with(&analysis.hir, &arena, call_class);
     (analysis.hir, arena, symbols, info)

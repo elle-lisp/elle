@@ -102,14 +102,11 @@ pub(super) fn prim_udp_recv_from(
     let result = {
         use crate::value::heap::TableKey;
         let mut fields = std::collections::BTreeMap::new();
-        fields.insert(
-            TableKey::Keyword("data".into()),
-            ctx.bytes(vec![0u8; count]),
-        );
+        fields.insert(TableKey::keyword("data"), ctx.bytes(vec![0u8; count]));
         // INET6_ADDRSTRLEN is 46; 64 gives slack and the completion truncates to
         // the real length before transmuting the buffer to a string.
-        fields.insert(TableKey::Keyword("addr".into()), ctx.bytes(vec![0u8; 64]));
-        fields.insert(TableKey::Keyword("port".into()), Value::int(0));
+        fields.insert(TableKey::keyword("addr"), ctx.bytes(vec![0u8; 64]));
+        fields.insert(TableKey::keyword("port"), Value::int(0));
         ctx.struct_from(fields)
     };
     (

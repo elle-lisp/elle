@@ -133,8 +133,8 @@ fn test_string_to_keyword_returns_keyword() {
     eval_full(r#"(string->keyword "foo")"#, |r| {
         let result = r.unwrap();
         assert!(
-            result.as_keyword_name().is_some(),
-            "string->keyword should return a keyword"
+            result.is_keyword_named("foo"),
+            "string->keyword should return the keyword :foo"
         );
     });
 }

@@ -24,7 +24,7 @@ pub(super) fn parse_exec_opts(
     };
 
     // :env — struct of string → string, or nil for inherit
-    let env = match sorted_struct_get(fields, &TableKey::Keyword("env".into())) {
+    let env = match sorted_struct_get(fields, &TableKey::keyword("env")) {
         Some(v) if v.is_nil() => None,
         Some(v) => {
             let env_fields = match v.as_struct() {
@@ -38,19 +38,31 @@ pub(super) fn parse_exec_opts(
             };
             let mut pairs = Vec::new();
             for (k, val) in env_fields {
-                let key_str = match k {
-                    TableKey::Keyword(s) => s.clone(),
-                    TableKey::String(s) => s.clone(),
-                    _ => {
-                        return Err((
-                            SIG_ERROR,
-                            ctx.error(
-                                "type-error",
-                                "subprocess/exec: :env keys must be keywords or strings",
-                            ),
-                        ))
-                    }
-                };
+                let key_str =
+                    match k {
+                        TableKey::Keyword(hash) => {
+                            match ctx.keyword_spelling(Value::keyword_from_hash(*hash)) {
+                                Some(s) => s,
+                                None => return Err((
+                                    SIG_ERROR,
+                                    ctx.error(
+                                        "type-error",
+                                        "subprocess/exec: :env keyword key has no learned spelling",
+                                    ),
+                                )),
+                            }
+                        }
+                        TableKey::String(s) => s.clone(),
+                        _ => {
+                            return Err((
+                                SIG_ERROR,
+                                ctx.error(
+                                    "type-error",
+                                    "subprocess/exec: :env keys must be keywords or strings",
+                                ),
+                            ))
+                        }
+                    };
                 let val_str = match val.with_string(|s| s.to_string()) {
                     Some(s) => s,
                     None => {
@@ -68,7 +80,7 @@ pub(super) fn parse_exec_opts(
     };
 
     // :cwd — string or nil
-    let cwd = match sorted_struct_get(fields, &TableKey::Keyword("cwd".into())) {
+    let cwd = match sorted_struct_get(fields, &TableKey::keyword("cwd")) {
         Some(v) if v.is_nil() => None,
         Some(v) => Some(match v.with_string(|s| s.to_string()) {
             Some(s) => s,
@@ -88,7 +100,7 @@ pub(super) fn parse_exec_opts(
         field: &str,
         ctx: &mut NativeCtx,
     ) -> Result<StdioDisposition, (SignalBits, Value)> {
-        match v.as_keyword_name().as_deref() {
+        match ctx.keyword_spelling(*v).as_deref() {
             Some("pipe") => Ok(StdioDisposition::Pipe),
             Some("inherit") => Ok(StdioDisposition::Inherit),
             Some("null") => Ok(StdioDisposition::Null),
@@ -105,15 +117,15 @@ pub(super) fn parse_exec_opts(
         }
     }
 
-    let stdin_disp = match sorted_struct_get(fields, &TableKey::Keyword("stdin".into())) {
+    let stdin_disp = match sorted_struct_get(fields, &TableKey::keyword("stdin")) {
         Some(v) => parse_disp(v, ":stdin", ctx)?,
         None => StdioDisposition::Pipe,
     };
-    let stdout_disp = match sorted_struct_get(fields, &TableKey::Keyword("stdout".into())) {
+    let stdout_disp = match sorted_struct_get(fields, &TableKey::keyword("stdout")) {
         Some(v) => parse_disp(v, ":stdout", ctx)?,
         None => StdioDisposition::Pipe,
     };
-    let stderr_disp = match sorted_struct_get(fields, &TableKey::Keyword("stderr".into())) {
+    let stderr_disp = match sorted_struct_get(fields, &TableKey::keyword("stderr")) {
         Some(v) => parse_disp(v, ":stderr", ctx)?,
         None => StdioDisposition::Pipe,
     };
@@ -133,7 +145,7 @@ pub(super) fn extract_process_handle(
         return Ok(*val);
     }
     if let Some(fields) = val.as_struct() {
-        match sorted_struct_get(fields, &TableKey::Keyword("process".into())) {
+        match sorted_struct_get(fields, &TableKey::keyword("process")) {
             Some(v) => return Ok(*v),
             None => {
                 return Err((

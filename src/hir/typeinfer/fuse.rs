@@ -108,7 +108,6 @@ use crate::hir::binding::{Binding, CaptureKind};
 use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::primitives::def::RetType;
 use crate::signals::{Signal, SIG_ERROR};
-use crate::symbol::SymbolTable;
 use crate::value::SymbolId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
@@ -141,10 +140,8 @@ pub(crate) use registry::FnInlineRegistry;
 pub(crate) fn fuse_map_chains(
     hir: &mut Hir,
     arena: &mut BindingArena,
-    symbols: &SymbolTable,
     registry: &mut FnInlineRegistry,
 ) {
-    let symbol_names = symbols.all_names();
     // The same-unit function templates: a `Var` naming a non-capturing lambda
     // (a top-level `defn` or a `let`/`def`-bound `fn`) inlines like a literal
     // (docs/impl/dissolution.md § "Named same-unit functions"). Built once over
@@ -159,7 +156,7 @@ pub(crate) fn fuse_map_chains(
     // inert here — but the stdlib is exactly where the `inc`/`dec` templates that
     // later units inline are defined, so the recording must not sit behind that gate.
     record_cross_unit_fns(hir, arena, registry);
-    let Some(ops) = Ops::resolve(arena, &symbol_names) else {
+    let Some(ops) = Ops::resolve(arena) else {
         return;
     };
     // The sound `binding → type-of keyword` proof dead-arm pruning already
@@ -168,7 +165,7 @@ pub(crate) fn fuse_map_chains(
     // is what proves the alias `array`. Built once over the pre-rewrite tree — the
     // base-var bindings live in enclosing `let`s that fusion never mutates, so the
     // proof stays valid as inner map calls collapse.
-    let bases = concrete_init_keywords(hir, arena, &symbol_names);
+    let bases = concrete_init_keywords(hir, arena);
     // This unit's primitives by name, so a cross-unit template's free globals
     // (recorded by name in a different arena) re-resolve to this arena's bindings.
     // `bind_primitives` binds each primitive/stdlib-export once, so first-wins is
@@ -186,7 +183,7 @@ pub(crate) fn fuse_map_chains(
         registry,
         prim_by_name: &prim_by_name,
     };
-    rewrite(hir, arena, &symbol_names, &ops, &bases, &fns);
+    rewrite(hir, arena, &ops, &bases, &fns);
 }
 
 #[cfg(test)]

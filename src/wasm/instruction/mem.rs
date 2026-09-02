@@ -87,10 +87,10 @@ impl WasmEmitter {
                 self.emit_const_pool_load(f, dst, sval);
             }
             LirConst::Symbol(id) => {
-                self.emit_const_pool_load(f, dst, Value::symbol(id.0));
+                self.emit_const_pool_load(f, dst, Value::symbol(*id));
             }
-            LirConst::Keyword(name) => {
-                self.emit_const_pool_load(f, dst, Value::keyword(name));
+            LirConst::Keyword(hash) => {
+                self.emit_const_pool_load(f, dst, Value::keyword_from_hash(*hash));
             }
             _ => {
                 let (tag, payload) = match value {

@@ -67,6 +67,7 @@ Tests are organized by feature area:
 | `regex.lisp` | Regular expressions |
 | `bytes.lisp` | Bytes operations |
 | `string.lisp` | String and @string operations |
+| `symbol-identity.lisp` | Symbol identity across worker symbol tables |
 
 ## Running Elle scripts
 

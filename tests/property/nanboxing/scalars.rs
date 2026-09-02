@@ -1,4 +1,5 @@
 use super::*;
+use elle::value::SymbolId;
 
 #[test]
 fn int_roundtrip_min() {
@@ -142,25 +143,25 @@ fn float_is_float_type() {
 
 #[test]
 fn symbol_roundtrip_zero() {
-    let v = Value::symbol(0);
-    assert_eq!(v.as_symbol(), Some(0));
+    let v = Value::symbol(SymbolId(0));
+    assert_eq!(v.as_symbol(), Some(SymbolId(0)));
 }
 
 #[test]
 fn symbol_roundtrip_one() {
-    let v = Value::symbol(1);
-    assert_eq!(v.as_symbol(), Some(1));
+    let v = Value::symbol(SymbolId(1));
+    assert_eq!(v.as_symbol(), Some(SymbolId(1)));
 }
 
 #[test]
-fn symbol_roundtrip_large() {
-    let v = Value::symbol(99999);
-    assert_eq!(v.as_symbol(), Some(99999));
+fn symbol_roundtrip_full_64_bit_payload() {
+    let v = Value::symbol(SymbolId(0xdead_beef_cafe_f00d));
+    assert_eq!(v.as_symbol(), Some(SymbolId(0xdead_beef_cafe_f00d)));
 }
 
 #[test]
 fn symbol_is_symbol_type() {
-    let v = Value::symbol(42);
+    let v = Value::symbol(SymbolId(42));
     assert!(v.is_symbol());
     assert!(!v.is_int());
     assert!(!v.is_float());
@@ -262,7 +263,7 @@ fn exactly_one_type_for_float_zero() {
 
 #[test]
 fn exactly_one_type_for_symbol_zero() {
-    let v = Value::symbol(0);
+    let v = Value::symbol(SymbolId(0));
     let count = v.is_nil() as u8
         + v.is_empty_list() as u8
         + v.is_bool() as u8
@@ -275,8 +276,8 @@ fn exactly_one_type_for_symbol_zero() {
 }
 
 #[test]
-fn exactly_one_type_for_symbol_large() {
-    let v = Value::symbol(99999);
+fn exactly_one_type_for_symbol_full_64_bit_payload() {
+    let v = Value::symbol(SymbolId(0xdead_beef_cafe_f00d));
     let count = v.is_nil() as u8
         + v.is_empty_list() as u8
         + v.is_bool() as u8
@@ -324,7 +325,7 @@ fn float_is_truthy_zero() {
 
 #[test]
 fn symbol_is_truthy() {
-    assert!(Value::symbol(42).is_truthy());
+    assert!(Value::symbol(SymbolId(42)).is_truthy());
 }
 
 #[test]
@@ -381,7 +382,7 @@ fn float_eq_reflexive_zero() {
 
 #[test]
 fn symbol_eq_reflexive() {
-    let v = Value::symbol(42);
+    let v = Value::symbol(SymbolId(42));
     assert_eq!(v, v);
 }
 

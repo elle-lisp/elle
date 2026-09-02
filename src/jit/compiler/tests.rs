@@ -56,7 +56,7 @@ fn test_compile_identity() {
     let lir = make_simple_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, HashMap::new(), Vec::new())
+        .compile(&lir, None, Vec::new())
         .expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call).
@@ -83,7 +83,7 @@ fn test_compile_add() {
     let lir = make_add_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, HashMap::new(), Vec::new())
+        .compile(&lir, None, Vec::new())
         .expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0
@@ -144,7 +144,7 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
     let lir = make_adopt_into_activation_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, HashMap::new(), Vec::new())
+        .compile(&lir, None, Vec::new())
         .expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
@@ -198,7 +198,7 @@ fn test_accept_polymorphic() {
     lir.signal = Signal::polymorphic(0);
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
+    let result = compiler.compile(&lir, None, Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept polymorphic functions (runtime dispatch handles callables): {:?}",
@@ -213,7 +213,7 @@ fn test_accept_yielding() {
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     // Should compile (no Yield terminators in this simple LIR)
-    let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
+    let result = compiler.compile(&lir, None, Vec::new());
     assert!(result.is_ok());
 }
 
@@ -227,7 +227,7 @@ fn test_compile_batch_single_function() {
         lir: &lir,
     }];
     let results = compiler
-        .compile_batch(&members, HashMap::new())
+        .compile_batch(&members)
         .expect("Failed to compile batch");
 
     assert_eq!(results.len(), 1);
@@ -368,7 +368,7 @@ fn test_compile_batch_mutual_calls() {
         },
     ];
     let results = compiler
-        .compile_batch(&members, HashMap::new())
+        .compile_batch(&members)
         .expect("Failed to compile batch");
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].0, sym_f);
@@ -385,7 +385,7 @@ fn test_compile_batch_rejects_polymorphic() {
         sym: SymbolId(0),
         lir: &lir,
     }];
-    let result = compiler.compile_batch(&members, HashMap::new());
+    let result = compiler.compile_batch(&members);
     assert!(matches!(result, Err(JitError::Polymorphic)));
 }
 
@@ -420,7 +420,7 @@ fn test_compile_yielding_function() {
         .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&func, None, HashMap::new(), Vec::new());
+    let result = compiler.compile(&func, None, Vec::new());
     assert!(
         result.is_ok(),
         "Yielding function should compile: {:?}",
@@ -436,7 +436,7 @@ fn test_reject_struct_variadic() {
     lir.vararg_kind = crate::hir::VarargKind::Struct;
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
+    let result = compiler.compile(&lir, None, Vec::new());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "Struct variadic functions should be rejected: {:?}",
@@ -451,7 +451,7 @@ fn test_reject_strict_struct_variadic() {
     lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
+    let result = compiler.compile(&lir, None, Vec::new());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "StrictStruct variadic functions should be rejected: {:?}",
@@ -469,7 +469,7 @@ fn test_compile_list_variadic() {
     lir.num_params = 2; // x + rest
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
+    let result = compiler.compile(&lir, None, Vec::new());
     assert!(
         result.is_ok(),
         "List variadic functions should compile: {:?}",
@@ -488,7 +488,7 @@ fn test_compile_batch_rejects_struct_variadic() {
         sym: SymbolId(0),
         lir: &lir,
     }];
-    let result = compiler.compile_batch(&members, HashMap::new());
+    let result = compiler.compile_batch(&members);
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "Struct variadic functions should be rejected from batch: {:?}",
@@ -508,7 +508,7 @@ fn test_compile_batch_accepts_list_variadic() {
         sym: SymbolId(0),
         lir: &lir,
     }];
-    let result = compiler.compile_batch(&members, HashMap::new());
+    let result = compiler.compile_batch(&members);
     assert!(
         result.is_ok(),
         "List variadic functions should compile in batch: {:?}",
@@ -522,7 +522,7 @@ fn compile_records_entry_in_code_address_registry() {
     lir.name = Some("registry-probe-solo".to_string());
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, None, HashMap::new(), Vec::new())
+        .compile(&lir, None, Vec::new())
         .expect("Failed to compile");
     let entry = code.fn_ptr() as usize;
     let name = crate::jit::registry::snapshot()
@@ -542,7 +542,7 @@ fn compile_batch_records_each_member_in_code_address_registry() {
         lir: &lir,
     }];
     let results = compiler
-        .compile_batch(&members, HashMap::new())
+        .compile_batch(&members)
         .expect("Failed to compile batch");
     let entry = results[0].1.fn_ptr() as usize;
     let name = crate::jit::registry::snapshot()

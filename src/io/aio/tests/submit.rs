@@ -248,11 +248,8 @@ fn a_process_wait_completes_under_the_id_it_was_submitted_with() {
             .submit(&spawn, crate::io::pending::Submitter::for_test())
             .unwrap();
         let spawned = backend.poll().pop().unwrap().result.unwrap();
-        let handle = sorted_struct_get(
-            spawned.as_struct().unwrap(),
-            &TableKey::Keyword("process".into()),
-        )
-        .expect("spawn result carries a :process handle");
+        let handle = sorted_struct_get(spawned.as_struct().unwrap(), &TableKey::keyword("process"))
+            .expect("spawn result carries a :process handle");
 
         let req = IoRequest {
             op: IoOp::ProcessWait,

@@ -187,8 +187,15 @@ fn test_ge_strings() {
 
 #[test]
 fn test_lt_keywords() {
-    let a = Value::keyword("apple");
-    let b = Value::keyword("banana");
+    // Keyword order is hash order (the portable order sorted containers use),
+    // so the smaller operand is whichever spelling hashes lower.
+    let x = Value::keyword("apple");
+    let y = Value::keyword("banana");
+    let (a, b) = if x.payload < y.payload {
+        (x, y)
+    } else {
+        (y, x)
+    };
     assert_eq!(
         elle_jit_lt(a.tag, a.payload, b.tag, b.payload),
         JitValue::bool_val(true)

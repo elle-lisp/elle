@@ -33,7 +33,7 @@ const MAX_DISCOVERY_DEPTH: usize = 4;
 /// (num_captures == 0) since direct SCC calls pass null env.
 pub(crate) fn discover_compilation_group(
     hot_lir: &LirFunction,
-    globals: &[Value],
+    globals: &HashMap<SymbolId, Value>,
 ) -> Vec<(SymbolId, Rc<LirFunction>)> {
     let mut visited: HashSet<SymbolId> = HashSet::new();
     let mut group: Vec<(SymbolId, Rc<LirFunction>)> = Vec::new();
@@ -52,11 +52,12 @@ pub(crate) fn discover_compilation_group(
             continue;
         }
 
-        let idx = sym.0 as usize;
-        if idx >= globals.len() {
-            continue;
-        }
-        let val = &globals[idx];
+        // Keyed by symbol, not indexed by it: a `SymbolId` is a name hash
+        // (docs/impl/symbol.md), so it addresses nothing densely.
+        let val = match globals.get(&sym) {
+            Some(v) => v,
+            None => continue,
+        };
 
         let closure = match val.as_closure() {
             Some(c) => c,

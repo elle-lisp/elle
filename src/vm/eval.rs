@@ -171,21 +171,19 @@ fn eval_inner(
     crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
     // Lower
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbols.all_names())
         .with_region_info(region_info);
     let lir_module = lowerer
         .lower(&analysis.hir)
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
     // Emit
-    let symbol_snapshot = symbols.all_names();
-    let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
+    let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     // Execute

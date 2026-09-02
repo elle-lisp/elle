@@ -1,146 +1,36 @@
-// DEFENSE: Symbol interning must be fast and correct
+// DEFENSE: an embedder sees stable, table-independent symbol identity.
+//
+// The mechanism's own tests live in `src/symbol/tests.rs`. These pin what only
+// a consumer of the public API can see: that `elle::symbol` hands out the same
+// id for a name no matter which handle asks, and that an id computed without a
+// handle is the id interning produces.
 use elle::symbol::SymbolTable;
+use elle::value::SymbolId;
 
 #[test]
-fn test_symbol_interning_basic() {
-    let mut table = SymbolTable::new();
+fn every_handle_agrees_on_a_name() {
+    let mut first = SymbolTable::new();
+    let mut second = SymbolTable::new();
 
-    let id1 = table.intern("foo");
-    let id2 = table.intern("bar");
-    let id3 = table.intern("foo"); // Same as id1
+    let a = first.intern("embedder-alpha");
+    let _ = second.intern("embedder-decoy-1");
+    let _ = second.intern("embedder-decoy-2");
+    let b = second.intern("embedder-alpha");
 
-    assert_eq!(id1, id3);
-    assert_ne!(id1, id2);
+    assert_eq!(a, b);
+    assert_eq!(first.name(b), Some("embedder-alpha"));
+    assert_eq!(second.name(a), Some("embedder-alpha"));
 }
 
 #[test]
-fn test_symbol_names() {
+fn identity_needs_no_handle() {
     let mut table = SymbolTable::new();
-
-    let id = table.intern("hello");
-    assert_eq!(table.name(id), Some("hello"));
+    assert_eq!(table.intern("embedder-beta"), SymbolId::of("embedder-beta"));
 }
 
 #[test]
-fn test_symbol_lookup() {
-    let mut table = SymbolTable::new();
-
-    // Intern first
-    let id1 = table.intern("test");
-
-    // Lookup should return same ID
-    let id2 = table.get("test");
-    assert_eq!(Some(id1), id2);
-
-    // Unknown symbol
-    assert_eq!(None, table.get("unknown"));
-}
-
-#[test]
-fn test_many_symbols() {
-    let mut table = SymbolTable::new();
-
-    // Intern 1000 unique symbols
-    let ids: Vec<_> = (0..1000)
-        .map(|i| table.intern(&format!("symbol-{}", i)))
-        .collect();
-
-    // All should be unique
-    for i in 0..1000 {
-        for j in 0..1000 {
-            if i == j {
-                assert_eq!(ids[i], ids[j]);
-            } else {
-                assert_ne!(ids[i], ids[j]);
-            }
-        }
-    }
-}
-
-#[test]
-fn test_symbol_persistence() {
-    let mut table = SymbolTable::new();
-
-    let id = table.intern("persistent");
-
-    // Add more symbols
-    for i in 0..100 {
-        table.intern(&format!("sym-{}", i));
-    }
-
-    // Original symbol should still be valid
-    assert_eq!(table.name(id), Some("persistent"));
-    assert_eq!(table.intern("persistent"), id);
-}
-
-#[test]
-fn test_special_characters() {
-    let mut table = SymbolTable::new();
-
-    // Lisp allows many special characters in symbols
-    let symbols = vec![
-        "+",
-        "-",
-        "*",
-        "/",
-        "=",
-        "<",
-        ">",
-        "<=",
-        ">=",
-        "!=",
-        "list?",
-        "nil?",
-        "number?",
-        "some-func-name",
-        "CamelCase",
-        "with_underscores",
-    ];
-
-    for sym in symbols {
-        let id = table.intern(sym);
-        assert_eq!(table.name(id), Some(sym));
-    }
-}
-
-#[test]
-fn test_empty_symbol_table() {
+fn an_unrecorded_id_has_no_name() {
     let table = SymbolTable::new();
-
-    // Invalid ID should return None
-    assert_eq!(table.name(elle::value::SymbolId(0)), None);
-    assert_eq!(table.name(elle::value::SymbolId(9999)), None);
-}
-
-#[test]
-fn test_symbol_ordering() {
-    let mut table = SymbolTable::new();
-
-    let id0 = table.intern("first");
-    let id1 = table.intern("second");
-    let id2 = table.intern("third");
-
-    // IDs should be assigned sequentially
-    assert_eq!(id0.0 + 1, id1.0);
-    assert_eq!(id1.0 + 1, id2.0);
-}
-
-#[test]
-fn test_unicode_symbols() {
-    let mut table = SymbolTable::new();
-
-    let id = table.intern("λ");
-    assert_eq!(table.name(id), Some("λ"));
-
-    let id2 = table.intern("こんにちは");
-    assert_eq!(table.name(id2), Some("こんにちは"));
-}
-
-#[test]
-fn test_long_symbol_names() {
-    let mut table = SymbolTable::new();
-
-    let long_name = "a".repeat(1000);
-    let id = table.intern(&long_name);
-    assert_eq!(table.name(id), Some(long_name.as_str()));
+    assert_eq!(table.name(SymbolId::of("embedder-never-interned")), None);
+    assert_eq!(table.name(SymbolId::SYNTHETIC), None);
 }

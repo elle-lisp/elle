@@ -58,7 +58,7 @@ fn rich_error_string_field_shares_the_error_region() {
         let fields = err.as_struct().expect("error is a struct");
         let path_val = crate::value::types::sorted_struct_get(
             fields,
-            &crate::value::heap::TableKey::Keyword("path".into()),
+            &crate::value::heap::TableKey::keyword("path"),
         )
         .copied()
         .expect(":path field present");

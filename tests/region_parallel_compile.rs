@@ -7,7 +7,7 @@
 //! use-after-free: a region freed while a `Bytecode`'s strings/slices still
 //! point into its pages, whose page-reuse window opens far more often under
 //! multi-thread memory pressure. It surfaces as a torn `String` length inside a
-//! `Bytecode::symbol_names` (`HashMap<u32,String>`) clone in `lir::emit`,
+//! `Bytecode` clone in `lir::emit`,
 //! attempting a multi-hundred-GiB allocation that aborts (a garbage length, so
 //! an OOM-abort rather than a clean SIGSEGV). It reproduces with
 //! `--jit=off --mlir=off`, so it is neither the JIT nor the analyzer's HIR logic.
@@ -86,7 +86,7 @@ fn parallel_compile_no_corruption() {
     assert!(
         status.success(),
         "concurrent-compile child exited abnormally ({status:?}): the cumulative \
-         parallel-compile heap corruption reproduced (torn Bytecode::symbol_names \
+         parallel-compile heap corruption reproduced (torn Bytecode string \
          in lir::emit)."
     );
 }

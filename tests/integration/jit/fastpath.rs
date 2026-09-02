@@ -135,7 +135,7 @@ fn test_jit_accepts_yields_errors_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
+    let result = compiler.compile(&func, None, Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept yields_errors signal via side-exit: {:?}",
@@ -166,7 +166,7 @@ fn test_jit_accepts_errors_only_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
+    let result = compiler.compile(&func, None, Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept errors-only signal: {:?}",

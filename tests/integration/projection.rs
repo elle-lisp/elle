@@ -10,6 +10,7 @@ use elle::hir::HirKind;
 use elle::primitives::register_primitives;
 use elle::signals::{Signal, SIG_IO, SIG_YIELD};
 use elle::symbol::SymbolTable;
+use elle::value::SymbolId;
 use elle::vm::VM;
 
 fn setup() -> (SymbolTable, VM) {
@@ -244,31 +245,25 @@ fn test_projection_yields_function() {
 }
 
 // ============================================================================
-// 4. THE PROBE COMPILES IN THE CALLER'S SYMBOL TABLE
+// 4. THE IMPORT PROJECTION PROBE
 // ============================================================================
 
 #[test]
-fn import_projection_probe_interns_into_the_callers_symbol_table() {
+fn import_projection_probe_compiles_the_imported_module() {
     // `((import "…"))` makes the analyzer compile the imported file to read its
     // signal projection (src/hir/analyze/call.rs § "Import projection
-    // detection"). Which symbol table that compile runs in is not an internal
-    // detail: macro transformers compile lazily on first expansion and cache on
-    // the shared expander, and a transformer's quoted literals bind to the table
-    // that compiled it. A probe running in a throwaway table therefore caches
-    // transformers whose ids mean nothing in the instance's table, and a later
-    // expansion comparing against an instance-table symbol takes the wrong
-    // branch — `each`'s `(= (syntax->datum iter-or-in) 'in)` is the shape that
-    // bites.
+    // detection"). `compile_file` never executes the import, so the probe is the
+    // only thing that reaches the module's source at all.
     //
-    // The caller's table learning the module's quoted symbol is the observable
-    // form of the invariant: `compile_file` never executes the import, so the
-    // probe is the only thing that could have interned it.
+    // The trap: `SymbolId::of` derives an id without recording anything, so the
+    // name answers here only if some compile interned it. The module's marker is
+    // a quoted symbol — runtime data, which compiling must intern — unlike a
+    // binding name, which analysis resolves into the binding arena instead. The
+    // spelling has to stay unique across this test binary: the registry is
+    // process-global, so any other test interning it would answer here too.
     let tmp = tempfile::tempdir().expect("scratch dir");
     let dir = tmp.path();
     let module = dir.join("probe_module.lisp");
-    // A quoted symbol is runtime data, so compiling this file must intern
-    // `probe-only-marker` — unlike a binding name, which analysis resolves into
-    // the binding arena instead.
     std::fs::write(
         &module,
         "(fn [] (def marker 'probe-only-marker) {:marker marker})\n",
@@ -279,14 +274,11 @@ fn import_projection_probe_interns_into_the_callers_symbol_table() {
     let source = format!("(def m ((import \"{}\")))\nm\n", module.display());
     compile_file(&source, &mut symbols, "<probe-main>").expect("main file compiles");
 
-    let learned = symbols.get("probe-only-marker");
-
     assert!(
-        learned.is_some(),
-        "the import projection probe must compile in the caller's symbol table; \
-         compiling in a throwaway one leaves the instance's table without the \
-         module's symbols and caches transformers bound to a table nothing else \
-         can read"
+        symbols.name(SymbolId::of("probe-only-marker")).is_some(),
+        "compiling a file whose import is probed must compile the module: with \
+         no probe nothing reads the module's source, so its quoted data is never \
+         interned and the import falls back to the conservative projection"
     );
 }
 
@@ -294,25 +286,25 @@ fn import_projection_probe_interns_into_the_callers_symbol_table() {
 fn each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first() {
     // The trap: `each` decides whether it was written in `in` form with
     // `(= (syntax->datum iter-or-in) 'in)` (src/prelude.lisp § each). That `'in`
-    // is a quoted literal in the transformer's own bytecode, so it carries the
-    // `SymbolId` of whichever table compiled the transformer — and a transformer
+    // is a quoted literal in the transformer's own bytecode, and a transformer
     // compiles once, lazily, on its first expansion, then caches on the shared
-    // expander (`ensure_transformer`, src/syntax/expand/macro_expand.rs). The
-    // first expansion in an instance therefore fixes the id every later
-    // expansion compares against.
+    // expander (`ensure_transformer`, src/syntax/expand/macro_expand.rs). So
+    // whichever compile expands `each` first fixes the literal that every later
+    // expansion compares against — including a compile the program never asked
+    // for.
     //
-    // Here the import projection probe expands `each` first: this runtime loads
-    // no stdlib, so nothing has warmed the transformer against the instance's
-    // table, and compiling the main file runs the probe over a module that uses
-    // `each`. The second compile, on the same context, is the one that must
-    // still read its `in`.
+    // Here the import projection probe is that first compile: this runtime loads
+    // no stdlib, so nothing has warmed the transformer, and compiling the main
+    // file runs the probe over a module that uses `each`. The probe compiles in
+    // its own symbol table (`CompileCtx::get_or_compile_projection`), so this is
+    // also what pins that the two tables agree. The second compile, on the same
+    // context, is the one that must still read its `in`.
     //
-    // The counter-factual: with the probe compiling in a throwaway table, the
-    // comparison against the instance table's `in` is false, so `each` takes the
-    // symbol `in` itself as the collection and shifts `'(1 2 3)` into the body —
-    // the second compile then fails with `undefined variable: in`. The assertion
-    // names the elements the loop visited rather than settling for a successful
-    // compile, because the same shift is silent wherever `in` is bound.
+    // The counter-factual: the assertion names the elements the loop visited
+    // rather than settling for a successful compile. When the comparison against
+    // `'in` fails, `each` takes the symbol `in` itself as the collection and
+    // shifts `'(1 2 3)` into the body — which raises `undefined variable: in`
+    // only where `in` is unbound, and is silent everywhere else.
     //
     // Both files define `pair?` themselves: `each`'s `:list` arm calls it, it is
     // the one name in the expansion that is not a primitive, and no stdlib is
@@ -359,8 +351,8 @@ fn each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first() {
         visited.as_ref().map(|v| v.to_string()).as_deref(),
         Ok("(3 2 1)"),
         "`each` must still read its `in` form after the import projection probe \
-         expanded the macro; a probe in a throwaway table caches a transformer \
-         whose quoted `'in` no instance-table expansion can match, and the \
-         collection is dropped from the loop"
+         expanded the macro; when the cached transformer's quoted `'in` stops \
+         matching the one at the use site, the collection is dropped from the \
+         loop and the body iterates over the symbol `in`"
     );
 }

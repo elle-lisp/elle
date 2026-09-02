@@ -19,8 +19,8 @@ fn count_ands(h: &Hir) -> usize {
 /// array arm has no `(if (mutable? coll) acc (freeze acc))`.
 #[test]
 fn single_take_while_dissolves_to_sentinel_loop() {
-    let (hir, arena, names) = compile("(take-while (fn [x] (even? x)) [2 4 5 6])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(take-while (fn [x] (even? x)) [2 4 5 6])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while"),
         "the `take-while` dispatch must be gone; callees were {cs:?}",
@@ -31,7 +31,7 @@ fn single_take_while_dissolves_to_sentinel_loop() {
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator; callees were {cs:?}",
     );
@@ -58,9 +58,9 @@ fn single_take_while_dissolves_to_sentinel_loop() {
 /// nothing.
 #[test]
 fn map_over_take_while_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(map (fn [y] (* y 2)) (take-while (fn [x] (even? x)) [2 4 5 6]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -71,7 +71,7 @@ fn map_over_take_while_fuses_to_one_loop() {
         "both the predicate and the transform must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
@@ -91,9 +91,9 @@ fn map_over_take_while_fuses_to_one_loop() {
 /// test and the sentinel gates the `take-while`'s own stage instead.
 #[test]
 fn take_while_over_map_prefix_keeps_the_walk_exhaustive() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(take-while (fn [y] (even? y)) (map (fn [x] (* x 2)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -118,16 +118,16 @@ fn take_while_over_map_prefix_keeps_the_walk_exhaustive() {
 /// with the terminal's seed however the stdlib op typed its intermediate.
 #[test]
 fn count_over_take_while_fuses_to_one_scalar_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(count (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5 6]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while" || n == "count"),
         "both dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a scalar terminal mints no array; callees were {cs:?}",
     );
@@ -149,9 +149,9 @@ fn count_over_take_while_fuses_to_one_scalar_loop() {
 /// under a `map` prefix.
 #[test]
 fn search_over_take_while_gates_its_own_stage() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(any? (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5 6]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while" || n == "any?"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -176,9 +176,9 @@ fn search_over_take_while_gates_its_own_stage() {
 /// fuses on the recursion.
 #[test]
 fn take_while_over_filter_prefix_declines() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(take-while (fn [y] (even? y)) (filter (fn [x] (number? x)) [1 \"a\" 2]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "take-while"),
         "a take-while whose input's emptiness `len` cannot decide must not fuse; \
@@ -196,11 +196,11 @@ fn take_while_over_filter_prefix_declines() {
 /// gate that can be doing the declining.
 #[test]
 fn take_while_over_take_while_declines_the_outer() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(take-while (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
-        count_callee(&hir, &arena, &names, "take-while"),
+        count_callee(&hir, &arena, &mut rt, "take-while"),
         1,
         "exactly the outer take-while survives; callees were {cs:?}",
     );
@@ -211,8 +211,8 @@ fn take_while_over_take_while_declines_the_outer() {
 /// once, so a predicate that grows or shrinks the base would diverge.
 #[test]
 fn take_while_over_mutable_array_is_not_fused() {
-    let (hir, arena, names) = compile("(take-while (fn [x] (even? x)) @[2 4 5])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(take-while (fn [x] (even? x)) @[2 4 5])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "take-while"),
         "a mutable `@array` base must not fuse a take-while; callees were {cs:?}",
@@ -223,8 +223,8 @@ fn take_while_over_mutable_array_is_not_fused() {
 /// so it is never rewritten.
 #[test]
 fn user_shadowed_take_while_is_not_fused() {
-    let (hir, arena, names) = compile("(defn take-while [p c] c) (take-while (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn take-while [p c] c) (take-while (fn [x] x) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "take-while"),
         "a user `take-while` must not be rewritten; callees were {cs:?}",
@@ -236,8 +236,8 @@ fn user_shadowed_take_while_is_not_fused() {
 /// the gate refuses a capture: the `take-while` call and the closure both survive.
 #[test]
 fn capturing_take_while_predicate_fuses() {
-    let (hir, arena, names) = compile("(let [k 2] (take-while (fn [x] (> x k)) [3 4 1]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 2] (take-while (fn [x] (> x k)) [3 4 1]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while"),
         "the `take-while` dispatch must be gone; callees were {cs:?}",
@@ -250,8 +250,8 @@ fn capturing_take_while_predicate_fuses() {
 /// requirement on how the function is resolved.
 #[test]
 fn named_take_while_predicate_inlines() {
-    let (hir, arena, names) = compile("(defn small? [x] (< x 3)) (take-while small? [1 2 5])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn small? [x] (< x 3)) (take-while small? [1 2 5])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "take-while"),
         "the dispatch must be gone for a named predicate; callees were {cs:?}",

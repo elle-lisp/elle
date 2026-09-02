@@ -68,7 +68,7 @@ fn test_scheduled_execution() {
     )
     .unwrap();
     let value = vm
-        .execute_scheduled(&result.bytecode, symbols, cctx)
+        .execute_scheduled(&result.bytecode, cctx)
         .unwrap();
     assert!(value.is_keyword());
 }

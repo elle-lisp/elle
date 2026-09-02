@@ -22,8 +22,8 @@ fn count_ands(h: &Hir) -> usize {
 /// itself, and the flag read that admits the rest of the pipeline.
 #[test]
 fn single_drop_while_dissolves_to_a_flag_gated_push() {
-    let (hir, arena, names) = compile("(drop-while (fn [x] (even? x)) [2 4 5 6])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(drop-while (fn [x] (even? x)) [2 4 5 6])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while"),
         "the `drop-while` dispatch must be gone; callees were {cs:?}",
@@ -34,7 +34,7 @@ fn single_drop_while_dissolves_to_a_flag_gated_push() {
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator; callees were {cs:?}",
     );
@@ -59,9 +59,9 @@ fn single_drop_while_dissolves_to_a_flag_gated_push() {
 /// elements the drop-while passed on, which is what the staged form gives it.
 #[test]
 fn map_over_drop_while_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(map (fn [y] (* y 2)) (drop-while (fn [x] (even? x)) [2 4 5 6]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -72,7 +72,7 @@ fn map_over_drop_while_fuses_to_one_loop() {
         "both the predicate and the transform must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
@@ -92,16 +92,16 @@ fn map_over_drop_while_fuses_to_one_loop() {
 /// exhaustive, so a prefix changes nothing about where the flag is read.
 #[test]
 fn drop_while_over_map_prefix_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(drop-while (fn [y] (even? y)) (map (fn [x] (* x 2)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while" || n == "map"),
         "both dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
@@ -118,16 +118,16 @@ fn drop_while_over_map_prefix_fuses_to_one_loop() {
 /// the terminal's seed however the stdlib op typed its intermediate.
 #[test]
 fn count_over_drop_while_fuses_to_one_scalar_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(count (fn [y] (number? y)) (drop-while (fn [x] (even? x)) [2 4 5 6]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while" || n == "count"),
         "both dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a scalar terminal mints no array; callees were {cs:?}",
     );
@@ -145,8 +145,8 @@ fn count_over_drop_while_fuses_to_one_scalar_loop() {
 #[test]
 fn find_index_over_drop_while_counts_survivors() {
     let dropped = "(drop-while (fn [x] (even? x)) [2 4 5 7])";
-    let (hir, arena, names) = compile(&format!("(find-index (fn [y] (odd? y)) {dropped})"));
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile(&format!("(find-index (fn [y] (odd? y)) {dropped})"));
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "find-index" || n == "drop-while"),
         "both dispatches must be gone; callees were {cs:?}",
@@ -160,8 +160,8 @@ fn find_index_over_drop_while_counts_survivors() {
 
     // A boolean search over the same prefix answers a value, not a position, so it
     // carries no counter.
-    let (hir, arena, names) = compile(&format!("(any? (fn [y] (odd? y)) {dropped})"));
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile(&format!("(any? (fn [y] (odd? y)) {dropped})"));
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
         count_intrinsic(&hir, "%add"),
         1,
@@ -170,9 +170,9 @@ fn find_index_over_drop_while_counts_survivors() {
 
     // A `take-while` preserves every survivor's position, so the base index is
     // already the answer there.
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(find-index (fn [y] (odd? y)) (take-while (fn [x] (number? x)) [2 4 5 7]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
         count_intrinsic(&hir, "%add"),
         1,
@@ -196,8 +196,8 @@ fn drop_while_erroring_bodies_fuse() {
             "zero?",
         ),
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter().any(|n| n == "drop-while" || n == "map"),
             "an erroring body is reorder-safe and must fuse in {src}; callees were {cs:?}",
@@ -217,9 +217,9 @@ fn drop_while_erroring_bodies_fuse() {
 /// and the loop its accumulator. The inner `filter` still fuses on the recursion.
 #[test]
 fn drop_while_over_filter_prefix_declines() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(drop-while (fn [y] (even? y)) (filter (fn [x] (number? x)) [1 \"a\" 2]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "drop-while"),
         "a drop-while whose input's emptiness `len` cannot decide must not fuse; \
@@ -250,10 +250,10 @@ fn either_untyped_arm_inner_to_the_other_declines_the_outer() {
             "drop-while",
         ),
     ] {
-        let (hir, arena, names) = compile(src);
-        let cs = callees(&hir, &arena, &names);
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
         assert_eq!(
-            count_callee(&hir, &arena, &names, outer),
+            count_callee(&hir, &arena, &mut rt, outer),
             1,
             "exactly the outer op survives in {src}; callees were {cs:?}",
         );
@@ -265,8 +265,8 @@ fn either_untyped_arm_inner_to_the_other_declines_the_outer() {
 /// once, so a predicate that grows or shrinks the base would diverge.
 #[test]
 fn drop_while_over_mutable_array_is_not_fused() {
-    let (hir, arena, names) = compile("(drop-while (fn [x] (even? x)) @[2 4 5])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(drop-while (fn [x] (even? x)) @[2 4 5])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "drop-while"),
         "a mutable `@array` base must not fuse a drop-while; callees were {cs:?}",
@@ -277,8 +277,8 @@ fn drop_while_over_mutable_array_is_not_fused() {
 /// so it is never rewritten.
 #[test]
 fn user_shadowed_drop_while_is_not_fused() {
-    let (hir, arena, names) = compile("(defn drop-while [p c] c) (drop-while (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn drop-while [p c] c) (drop-while (fn [x] x) [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "drop-while"),
         "a user `drop-while` must not be rewritten; callees were {cs:?}",
@@ -291,8 +291,8 @@ fn user_shadowed_drop_while_is_not_fused() {
 /// both survive.
 #[test]
 fn capturing_drop_while_predicate_fuses() {
-    let (hir, arena, names) = compile("(let [k 2] (drop-while (fn [x] (> x k)) [3 4 1]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 2] (drop-while (fn [x] (> x k)) [3 4 1]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while"),
         "the `drop-while` dispatch must be gone; callees were {cs:?}",
@@ -305,8 +305,8 @@ fn capturing_drop_while_predicate_fuses() {
 /// requirement on how the function is resolved.
 #[test]
 fn named_drop_while_predicate_inlines() {
-    let (hir, arena, names) = compile("(defn small? [x] (< x 3)) (drop-while small? [1 2 5])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn small? [x] (< x 3)) (drop-while small? [1 2 5])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while"),
         "the dispatch must be gone for a named predicate; callees were {cs:?}",

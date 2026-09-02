@@ -78,7 +78,7 @@ pub unsafe extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize)
     // bytecode under the async scheduler.
     let (vm, symbols, cctx) = ctx.runtime.parts();
     match compile_file(source, symbols, cctx, "<embed>") {
-        Ok(compiled) => match vm.execute_scheduled(&compiled.bytecode, symbols, cctx) {
+        Ok(compiled) => match vm.execute_scheduled(&compiled.bytecode, cctx) {
             Ok(value) => {
                 ctx.last_result = Some(value);
                 0

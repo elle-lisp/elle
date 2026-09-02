@@ -22,10 +22,7 @@
 
   (defn snapshot []
     "Capture all resource counters at a point in time."
-    {:objects (arena/count)
-     :bytes (arena/bytes)
-     :symbols (debug/symbol-count)
-     :keywords (debug/keyword-count)})
+    {:objects (arena/count) :bytes (arena/bytes) :symbols (debug/symbol-count)})
 
   ## ── Measure ─────────────────────────────────────────────────────────
 
@@ -48,7 +45,6 @@
     (let* [b-objects (arena/count)
            b-bytes (arena/bytes)
            b-symbols (debug/symbol-count)
-           b-keywords (debug/keyword-count)
            _ (arena/reset-peak)
            pair (arena/allocs thunk)
            peak (- (arena/peak) b-objects peak-overhead)]
@@ -56,8 +52,7 @@
        :allocs (rest pair)
        :peak peak
        :bytes (- (arena/bytes) b-bytes)
-       :symbols (- (debug/symbol-count) b-symbols)
-       :keywords (- (debug/keyword-count) b-keywords)}))
+       :symbols (- (debug/symbol-count) b-symbols)}))
 
   ## ── Report ──────────────────────────────────────────────────────────
 
@@ -76,7 +71,7 @@
     "Format a measurement as a tab-separated key=value line."
     (let [n (pad-right name 24)]
       (string n "\tallocs=" (m :allocs) "\tpeak=" (m :peak) "\tbytes="
-              (m :bytes) "\tsymbols=" (m :symbols) "\tkeywords=" (m :keywords))))
+              (m :bytes) "\tsymbols=" (m :symbols))))
 
   ## ── Suite ───────────────────────────────────────────────────────────
 

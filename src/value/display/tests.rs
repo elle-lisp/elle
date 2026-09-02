@@ -2,6 +2,7 @@
 
 use crate::value::arena::with_test_region;
 use crate::value::error::error_val_in;
+use crate::value::Value;
 
 /// Debug repr of a string containing a double-quote must escape it.
 #[test]
@@ -55,4 +56,33 @@ fn test_display_struct_quotes_string_values() {
         // :message → "expected \"integer\"" (string, quoted and escaped)
         assert!(repr.contains(r#""expected \"integer\"""#), "got: {}", repr);
     })
+}
+
+// ── keyword display resolves memo → vocabulary → unreadable form ─────
+
+// A vocabulary spelling ("ok") needs no memo; a run-time spelling resolves
+// only through the memo that learned it; an unlearned spelling renders the
+// unreadable form. The form is deliberately not a keyword literal: any
+// `:something` rendering would denote a real — and different — keyword.
+#[test]
+fn keyword_display_resolves_memo_then_vocabulary_then_unreadable() {
+    let mut memo = crate::symbol::SymbolTable::new();
+    memo.keyword("kw-display-learned-xt");
+
+    let learned = Value::keyword("kw-display-learned-xt");
+    let vocab = Value::keyword("ok");
+    let unlearned = Value::keyword("kw-display-unlearned-xt");
+
+    assert_eq!(
+        format!("{}", learned.display_with(Some(&memo))),
+        ":kw-display-learned-xt"
+    );
+    assert_eq!(format!("{}", vocab), ":ok");
+    assert_eq!(
+        format!("{}", unlearned.display_with(Some(&memo))),
+        format!(
+            "#<keyword:{:#x}>",
+            crate::value::keyword::keyword_hash("kw-display-unlearned-xt")
+        )
+    );
 }

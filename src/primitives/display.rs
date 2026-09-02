@@ -4,7 +4,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 /// Generate a flat single-line representation of a value
-fn flat_repr(val: Value, depth: usize) -> String {
+fn flat_repr(val: Value, symbols: Option<&crate::symbol::SymbolTable>, depth: usize) -> String {
     // Depth limit to prevent infinite recursion on circular structures
     if depth > 10 {
         return "...".to_string();
@@ -42,12 +42,9 @@ fn flat_repr(val: Value, depth: usize) -> String {
         return r;
     }
 
-    if let Some(_id) = val.as_symbol() {
-        return val.to_string();
-    }
-
-    if val.as_keyword_name().is_some() {
-        return val.to_string();
+    if val.as_symbol().is_some() || val.is_keyword() {
+        // Render through the memo so spellings resolve.
+        return format!("{}", val.display_with(symbols));
     }
 
     // Lists
@@ -55,11 +52,11 @@ fn flat_repr(val: Value, depth: usize) -> String {
         let mut parts = Vec::new();
         let mut current = val;
         while let Some(pair) = current.as_pair() {
-            parts.push(flat_repr(pair.first, depth + 1));
+            parts.push(flat_repr(pair.first, symbols, depth + 1));
             current = pair.rest;
         }
         if !current.is_empty_list() && !current.is_nil() {
-            parts.push(format!(". {}", flat_repr(current, depth + 1)));
+            parts.push(format!(". {}", flat_repr(current, symbols, depth + 1)));
         }
         return format!("({})", parts.join(" "));
     }
@@ -67,7 +64,10 @@ fn flat_repr(val: Value, depth: usize) -> String {
     // @array (mutable)
     if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
-        let parts: Vec<String> = vec.iter().map(|v| flat_repr(*v, depth + 1)).collect();
+        let parts: Vec<String> = vec
+            .iter()
+            .map(|v| flat_repr(*v, symbols, depth + 1))
+            .collect();
         return format!("@[{}]", parts.join(" "));
     }
 
@@ -76,7 +76,11 @@ fn flat_repr(val: Value, depth: usize) -> String {
         let table = table_ref.borrow();
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
-            parts.push(format!("{:?} {}", k, flat_repr(*v, depth + 1)));
+            parts.push(format!(
+                "{} {}",
+                crate::value::types::TableKeyDisplay(k, symbols),
+                flat_repr(*v, symbols, depth + 1)
+            ));
         }
         return format!("@{{{}}}", parts.join(" "));
     }
@@ -85,7 +89,11 @@ fn flat_repr(val: Value, depth: usize) -> String {
     if let Some(struct_map) = val.as_struct() {
         let mut parts = Vec::new();
         for (k, v) in struct_map.iter() {
-            parts.push(format!("{:?} {}", k, flat_repr(*v, depth + 1)));
+            parts.push(format!(
+                "{} {}",
+                crate::value::types::TableKeyDisplay(k, symbols),
+                flat_repr(*v, symbols, depth + 1)
+            ));
         }
         return format!("{{{}}}", parts.join(" "));
     }
@@ -110,7 +118,13 @@ fn flat_repr(val: Value, depth: usize) -> String {
 }
 
 /// Pretty-print a value with width-aware line breaking
-fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: usize) -> String {
+fn pretty_print_impl(
+    val: Value,
+    symbols: Option<&crate::symbol::SymbolTable>,
+    indent: usize,
+    remaining_width: usize,
+    depth: usize,
+) -> String {
     const DEFAULT_WIDTH: usize = 80;
 
     // Depth limit
@@ -119,7 +133,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Get flat representation
-    let flat = flat_repr(val, depth);
+    let flat = flat_repr(val, symbols, depth);
 
     // If it fits on one line, use it
     if flat.len() <= remaining_width {
@@ -137,7 +151,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         || val.as_int().is_some()
         || val.as_float().is_some()
         || val.as_symbol().is_some()
-        || val.as_keyword_name().is_some()
+        || val.is_keyword()
         || val.is_closure()
         || val.as_fiber().is_some()
         || val.as_native_fn().is_some()
@@ -159,6 +173,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         while let Some(pair) = current.as_pair() {
             let part = pretty_print_impl(
                 pair.first,
+                symbols,
                 next_indent,
                 DEFAULT_WIDTH - next_indent,
                 depth + 1,
@@ -173,8 +188,13 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         }
 
         if !current.is_empty_list() && !current.is_nil() {
-            let tail =
-                pretty_print_impl(current, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
+            let tail = pretty_print_impl(
+                current,
+                symbols,
+                next_indent,
+                DEFAULT_WIDTH - next_indent,
+                depth + 1,
+            );
             parts.push(format!("{}. {}", next_indent_str, tail));
         }
 
@@ -189,7 +209,13 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         }
         let mut parts = Vec::new();
         for v in vec.iter() {
-            let part = pretty_print_impl(*v, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
+            let part = pretty_print_impl(
+                *v,
+                symbols,
+                next_indent,
+                DEFAULT_WIDTH - next_indent,
+                depth + 1,
+            );
             parts.push(format!("{}{}", next_indent_str, part));
         }
         return format!("@[\n{}]", parts.join("\n"));
@@ -203,8 +229,19 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         }
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
-            let v_str = pretty_print_impl(*v, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
-            parts.push(format!("{}{:?} {}", next_indent_str, k, v_str));
+            let v_str = pretty_print_impl(
+                *v,
+                symbols,
+                next_indent,
+                DEFAULT_WIDTH - next_indent,
+                depth + 1,
+            );
+            parts.push(format!(
+                "{}{} {}",
+                next_indent_str,
+                crate::value::types::TableKeyDisplay(k, symbols),
+                v_str
+            ));
         }
         return format!("@{{\n{}}}", parts.join("\n"));
     }
@@ -216,8 +253,19 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         }
         let mut parts = Vec::new();
         for (k, v) in struct_map.iter() {
-            let v_str = pretty_print_impl(*v, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
-            parts.push(format!("{}{:?} {}", next_indent_str, k, v_str));
+            let v_str = pretty_print_impl(
+                *v,
+                symbols,
+                next_indent,
+                DEFAULT_WIDTH - next_indent,
+                depth + 1,
+            );
+            parts.push(format!(
+                "{}{} {}",
+                next_indent_str,
+                crate::value::types::TableKeyDisplay(k, symbols),
+                v_str
+            ));
         }
         return format!("{{\n{}}}", parts.join("\n"));
     }
@@ -228,13 +276,14 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
 
 /// (pp value) — Pretty-print a value with indentation, returns the value
 pub(crate) fn prim_pp(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
     let val = args[0];
 
     const DEFAULT_WIDTH: usize = 80;
-    let output = pretty_print_impl(val, 0, DEFAULT_WIDTH, 0);
+    let symbols = unsafe { ctx.vm().symbols_ptr.as_ref() };
+    let output = pretty_print_impl(val, symbols, 0, DEFAULT_WIDTH, 0);
     println!("{}", output);
 
     (SIG_OK, val)
@@ -293,11 +342,15 @@ pub(crate) fn prim_describe(
         );
     }
 
-    if let Some(_id) = val.as_symbol() {
-        return (SIG_OK, ctx.string(format!("<symbol {}>", val)));
+    if val.as_symbol().is_some() {
+        let symbols = unsafe { ctx.vm().symbols_ptr.as_ref() };
+        return (
+            SIG_OK,
+            ctx.string(format!("<symbol {}>", val.display_with(symbols))),
+        );
     }
 
-    if let Some(name) = val.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(val) {
         return (SIG_OK, ctx.string(format!("<keyword :{}>", name)));
     }
 

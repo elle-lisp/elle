@@ -52,17 +52,15 @@ only whether stdlib *functions* (`+`, `map`, …) are present.
 (sys/join (sys/spawn (fn [] (eval '(map inc [1 2 3])))))   # => [2 3 4]
 ```
 
-#### Quoted symbols cross the boundary by name
+#### Quoted symbols cross the boundary unchanged
 
 A deep-copied value (closure, quoted datum, channel message) crosses threads via
-`SendValue`. A worker's symbol table is its own — interned IDs are not comparable
-across threads — so any **symbol value** in the copied data is serialized with its
-*name* and **re-interned** into the receiving thread's table (exactly as keywords
-are). This is what lets `(eval '(begin …))` work in a worker: the analyzer matches
-special forms by name, and the name survives the copy even though `begin`'s ID in
-the worker's table differs from the sender's. (Symbol references baked into
-compiled *bytecode* travel separately, via the closure template's `symbol_names`
-map; this paragraph is about symbols that appear as runtime *data*.)
+`SendValue`. A symbol id is the FNV-1a hash of its name
+([impl/symbol.md](impl/symbol.md)), so it means the same thing on both sides and
+copies verbatim — as an immediate, with no name and no re-interning. This is what
+lets `(eval '(begin …))` work in a worker: `begin`'s id in the worker is
+`begin`'s id everywhere. The same holds for symbols baked into compiled
+*bytecode*, which needs no name table to travel.
 
 Aliases: `sys/spawn` = `os/spawn` (heavy); `sys/spawn-vm` = `os/spawn-vm` (light).
 There is no bare `spawn` — it was an ambiguous global (it collides with the

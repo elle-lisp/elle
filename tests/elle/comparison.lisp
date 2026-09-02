@@ -32,23 +32,27 @@
 # ============================================================================
 # Keyword comparison
 # ============================================================================
+# Keywords order by name hash (docs/impl/symbol.md § "What the property
+# buys"): the order is total and identical in every run, thread, process,
+# and tier, but carries no alphabetical meaning. The counter-factual these
+# assertions replace: lexicographic order needed a name lookup on every
+# compare, which a sorted-container probe and the JIT tier cannot afford.
 
-# Keyword less-than
-(assert (< :apple :banana) ":apple < :banana")
-(assert (not (< :banana :apple)) ":banana < :apple is false")
+# Total and irreflexive
 (assert (not (< :apple :apple)) ":apple < :apple is false")
+(assert (or (< :apple :banana) (< :banana :apple)) "keyword order is total")
+(assert (not (and (< :apple :banana) (< :banana :apple)))
+        "keyword order is antisymmetric")
 
-# Keyword greater-than
-(assert (> :banana :apple) ":banana > :apple")
-(assert (not (> :apple :banana)) ":apple > :banana is false")
+# < and > mirror each other
+(assert (= (< :apple :banana) (> :banana :apple)) "< and > agree")
+(assert (= (< :banana :apple) (> :apple :banana)) "< and > agree, reversed")
 
-# Keyword less-than-or-equal
-(assert (<= :apple :banana) ":apple <= :banana")
+# Reflexive bounds
 (assert (<= :apple :apple) ":apple <= :apple")
-
-# Keyword greater-than-or-equal
-(assert (>= :banana :apple) ":banana >= :apple")
 (assert (>= :apple :apple) ":apple >= :apple")
+(assert (= (<= :apple :banana) (not (> :apple :banana))) "<= is not->")
+(assert (= (>= :apple :banana) (not (< :apple :banana))) ">= is not-<")
 
 # ============================================================================
 # Edge cases

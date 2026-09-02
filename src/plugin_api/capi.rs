@@ -17,6 +17,10 @@ use super::*;
 pub struct CallCtx {
     pub(crate) region: crate::hir::region::RuntimeRegion,
     pub(crate) heap: *mut crate::value::fiberheap::FiberHeap,
+    /// The dispatching instance's display memo, so a plugin-minted keyword is
+    /// learned by the instance the call belongs to and a spelling accessor
+    /// reads back through the same memo. Null for a bare test ctx.
+    pub(crate) symbols: *mut crate::symbol::SymbolTable,
 }
 
 /// Run `f` with the call's heap and region, taken from the `CallCtx` the plugin
@@ -108,17 +112,25 @@ pub(super) extern "C" fn make_poll_fd(ctx: *mut CallCtx, fd: i32, events: u32) -
     })
 }
 
-// ── Keyword interning ─────────────────────────────────────────────────
+// ── Keyword identity and spelling ─────────────────────────────────────
 
+/// Pure hash — identity needs no instance, so this ABI function takes no ctx.
 pub(super) extern "C" fn intern_keyword(name_ptr: *const u8, name_len: usize) -> u64 {
     let name =
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(name_ptr, name_len)) };
-    crate::value::keyword::intern_keyword(name)
+    crate::value::keyword::keyword_hash(name)
 }
 
-pub(super) extern "C" fn keyword_name(hash: u64, out_len: *mut usize) -> *const u8 {
-    if let Some(name) = crate::value::keyword::keyword_name(hash) {
-        let interned = intern_str(name);
+/// Spelling recovery reads the calling instance's memo (then the static
+/// vocabulary), so it takes the per-call ctx like the constructors do.
+pub(super) extern "C" fn keyword_name(
+    ctx: *mut CallCtx,
+    hash: u64,
+    out_len: *mut usize,
+) -> *const u8 {
+    let symbols = unsafe { ctx.as_ref().and_then(|c| c.symbols.as_ref()) };
+    if let Some(name) = crate::value::keyword::resolve_keyword_name(symbols, hash) {
+        let interned = intern_str(name.to_string());
         unsafe { *out_len = interned.len() };
         interned.as_ptr()
     } else {

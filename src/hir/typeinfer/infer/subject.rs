@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::hir::pattern::{HirPattern, PatternLiteral};
+use crate::value::SymbolId;
 
 /// The binding a `(type-of <var>)` match scrutinee discriminates, for match-arm
 /// narrowing. Recognizes both the `type-of`/`type` callable and the `%type-of`
@@ -13,11 +14,10 @@ use crate::hir::pattern::{HirPattern, PatternLiteral};
 pub(crate) fn typeof_subject_binding(
     value: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     typeof_aliases: &HashMap<Binding, Binding>,
 ) -> Option<Binding> {
     let inner = unwrap_anf_let(value);
-    if let Some(subj) = typeof_call_subject(inner, arena, symbol_names) {
+    if let Some(subj) = typeof_call_subject(inner, arena) {
         return Some(subj);
     }
     // The `(let [ta (type-of a)] (match ta …))` idiom: the scrutinee is a plain
@@ -30,11 +30,7 @@ pub(crate) fn typeof_subject_binding(
 /// The subject binding of a `(type-of x)` / `(%type-of x)` expression — `x` a
 /// `Var` or `DerefCell{Var}` — else `None`. `h` must already be positioned at the
 /// underlying expression (callers unwrap ANF/cell wrappers first).
-pub(crate) fn typeof_call_subject(
-    h: &Hir,
-    arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
-) -> Option<Binding> {
+pub(crate) fn typeof_call_subject(h: &Hir, arena: &BindingArena) -> Option<Binding> {
     let subject = match &h.kind {
         HirKind::Intrinsic {
             op: IntrinsicOp::TypeOf,
@@ -42,8 +38,8 @@ pub(crate) fn typeof_call_subject(
         } if args.len() == 1 => &args[0],
         HirKind::Call { func, args, .. } if args.len() == 1 => {
             let callee = unwrap_callee_binding(func)?;
-            let name = symbol_names.get(&arena.get(callee).name.0)?;
-            if name != "type-of" && name != "type" {
+            let callee_name = arena.get(callee).name;
+            if callee_name != SymbolId::of("type-of") && callee_name != SymbolId::of("type") {
                 return None;
             }
             &args[0].expr

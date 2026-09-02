@@ -67,20 +67,20 @@ pub fn render_all(
     // artifacts (held in `fhir`) — the `escape` dump below reuses this HIR/arena.
     crate::signals::registry::restore_registry(registry_baseline.clone());
     let fhir = crate::pipeline::compile_file_to_fhir(contents, symbols, cctx, source_name).ok();
-    if let Some((hir, arena, names)) = &fhir {
+    if let Some((hir, arena)) = &fhir {
         out.insert(
             "fhir".to_string(),
-            crate::hir::display::display_hir(hir, arena, names),
+            crate::hir::display::display_hir(hir, arena, Some(symbols)),
         );
         let info = crate::hir::analyze_dataflow(hir);
         out.insert(
             "defuse".to_string(),
-            crate::hir::format_dataflow(&info, arena, names),
+            crate::hir::format_dataflow(&info, arena, Some(symbols)),
         );
         let rinfo = crate::hir::analyze_regions(hir, arena);
         out.insert(
             "regions".to_string(),
-            crate::hir::format_regions(&rinfo, arena, names),
+            crate::hir::format_regions(&rinfo, arena, Some(symbols)),
         );
     }
 
@@ -101,16 +101,15 @@ pub fn render_all(
     // the bare `analyze_regions` used for the `regions` dump above omits the
     // native effects the lowerer actually consumes, so escape facts (tail
     // regions, escape-return sites) would diverge from what was emitted.
-    if let (Some((hir, arena, names)), Some(module)) = (&fhir, &module) {
-        let pc =
-            crate::lir::intrinsics::PrimitiveClassification::new(symbols, cctx.primitive_meta());
+    if let (Some((hir, arena)), Some(module)) = (&fhir, &module) {
+        let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
         let rinfo = crate::hir::analyze_regions_with(hir, arena, pc.call_classification.clone());
         // Escape is the authority the snapshot's return-frontier section reads; run
         // it with the same real classification the solver and lowerer consumed.
         let escape = crate::hir::analyze_escape(hir, arena, &pc.call_classification);
         out.insert(
             "escape".to_string(),
-            escape::escape_module(hir, arena, names, &escape, &rinfo, module),
+            escape::escape_module(hir, arena, &escape, &rinfo, module, Some(symbols)),
         );
     }
 

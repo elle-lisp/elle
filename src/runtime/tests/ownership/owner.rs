@@ -237,27 +237,23 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
                 .0
         };
         {
-            let (vm, symbols, cctx) = rt.parts();
+            let (vm, _symbols, cctx) = rt.parts();
             let v = vm
-                .execute_scheduled(&prog.bytecode, symbols, cctx)
+                .execute_scheduled(&prog.bytecode, cctx)
                 .expect("runs (submits the JIT task)");
             assert!(v.is_nil());
         }
         rt.vm().drain_jit_pending();
         let jit_compiled = !rt.vm().jit_cache.is_empty();
         {
-            let (vm, symbols, cctx) = rt.parts();
-            let v = vm
-                .execute_scheduled(&prog.bytecode, symbols, cctx)
-                .expect("runs");
+            let (vm, _symbols, cctx) = rt.parts();
+            let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
             assert!(v.is_nil());
         }
         let baseline = rt.heap().active_region_count() as i64;
         for _ in 0..50 {
-            let (vm, symbols, cctx) = rt.parts();
-            let v = vm
-                .execute_scheduled(&prog.bytecode, symbols, cctx)
-                .expect("runs");
+            let (vm, _symbols, cctx) = rt.parts();
+            let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
             assert!(v.is_nil());
         }
         (
@@ -421,8 +417,8 @@ fn reassign_toplevel_prior_release_is_bounded() {
                 .expect("compiles")
                 .0
         };
-        let (vm, symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        let (vm, _symbols, cctx) = rt.parts();
+        vm.execute_scheduled(&result.bytecode, cctx)
             .expect("runs")
             .as_int()
             .expect("program returns the region-count delta as an int")

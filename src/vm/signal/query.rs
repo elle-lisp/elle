@@ -44,7 +44,7 @@ impl VM {
         };
 
         // Accept keyword or string as operation identifier.
-        let op_name: String = if let Some(name) = pair.first.as_keyword_name() {
+        let op_name: String = if let Some(name) = self.keyword_spelling(pair.first) {
             name
         } else if let Some(s) = pair.first.with_string(|s| s.to_string()) {
             s
@@ -76,7 +76,7 @@ impl VM {
             "doc" => {
                 let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
                     s
-                } else if let Some(s) = arg.as_keyword_name() {
+                } else if let Some(s) = self.keyword_spelling(arg) {
                     s
                 } else {
                     return (
@@ -109,7 +109,7 @@ impl VM {
                 // arg is nil (no filter) or a keyword/string category name
                 let category_filter: Option<String> = if arg.is_nil() {
                     None
-                } else if let Some(k) = arg.as_keyword_name() {
+                } else if let Some(k) = self.keyword_spelling(arg) {
                     Some(k)
                 } else {
                     arg.with_string(|s| s.to_string())
@@ -136,7 +136,7 @@ impl VM {
                             ctx.string(n)
                         } else {
                             let id = unsafe { (*symbols_ptr).intern(n) };
-                            Value::symbol(id.0)
+                            Value::symbol(id)
                         }
                     })
                     .collect();
@@ -145,13 +145,14 @@ impl VM {
             "primitive-meta" => {
                 let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
                     s
-                } else if let Some(s) = arg.as_keyword_name() {
+                } else if let Some(s) = self.keyword_spelling(arg) {
                     s
                 } else if let Some(sym_id) = arg.as_symbol() {
-                    match self.symbols().and_then(|s| {
-                        s.name(crate::value::SymbolId(sym_id))
-                            .map(|n| n.to_string())
-                    }) {
+                    match self
+                        .symbols()
+                        .and_then(|s| s.name(sym_id))
+                        .map(|n| n.to_string())
+                    {
                         Some(s) => s,
                         None => {
                             return (
@@ -159,7 +160,7 @@ impl VM {
                                 ctx.error(
                                     "internal-error",
                                     format!(
-                                        "primitive-meta: symbol ID {} not found in symbol table",
+                                        "primitive-meta: symbol ID {} has no recorded name",
                                         sym_id
                                     ),
                                 ),
@@ -179,30 +180,24 @@ impl VM {
                     use crate::value::heap::TableKey;
                     use std::collections::BTreeMap;
                     let mut fields = BTreeMap::new();
-                    fields.insert(TableKey::Keyword("name".to_string()), ctx.string(doc.name));
-                    fields.insert(TableKey::Keyword("doc".to_string()), ctx.string(doc.doc));
+                    fields.insert(TableKey::keyword("name"), ctx.string(doc.name));
+                    fields.insert(TableKey::keyword("doc"), ctx.string(doc.doc));
                     // params as a list of strings
                     let params: Vec<Value> = doc.params.iter().map(|p| ctx.string(*p)).collect();
-                    fields.insert(TableKey::Keyword("params".to_string()), ctx.list(params));
+                    fields.insert(TableKey::keyword("params"), ctx.list(params));
+                    fields.insert(TableKey::keyword("category"), ctx.string(doc.category));
+                    fields.insert(TableKey::keyword("example"), ctx.string(doc.example));
                     fields.insert(
-                        TableKey::Keyword("category".to_string()),
-                        ctx.string(doc.category),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("example".to_string()),
-                        ctx.string(doc.example),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("arity".to_string()),
+                        TableKey::keyword("arity"),
                         ctx.string(format!("{}", doc.arity)),
                     );
                     fields.insert(
-                        TableKey::Keyword("signal".to_string()),
+                        TableKey::keyword("signal"),
                         ctx.string(format!("{}", doc.signal)),
                     );
                     // aliases as a list of strings
                     let aliases: Vec<Value> = doc.aliases.iter().map(|a| ctx.string(*a)).collect();
-                    fields.insert(TableKey::Keyword("aliases".to_string()), ctx.list(aliases));
+                    fields.insert(TableKey::keyword("aliases"), ctx.list(aliases));
                     (SIG_OK, ctx.struct_from(fields))
                 } else {
                     (SIG_OK, Value::NIL)
@@ -221,35 +216,29 @@ impl VM {
                 fn build_stats(heap: &crate::value::FiberHeap) -> BTreeMap<TableKey, Value> {
                     let mut fields = BTreeMap::new();
                     fields.insert(
-                        TableKey::Keyword("object-count".to_string()),
+                        TableKey::keyword("object-count"),
                         Value::int(heap.visible_len() as i64),
                     );
                     fields.insert(
-                        TableKey::Keyword("peak-count".to_string()),
+                        TableKey::keyword("peak-count"),
                         Value::int(heap.peak_alloc_count() as i64),
                     );
                     fields.insert(
-                        TableKey::Keyword("allocated-bytes".to_string()),
+                        TableKey::keyword("allocated-bytes"),
                         Value::int(heap.allocated_bytes() as i64),
                     );
                     let limit_val = match heap.object_limit() {
                         Some(n) => Value::int(n as i64),
                         None => Value::NIL,
                     };
-                    fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
-                    fields.insert(TableKey::Keyword("scope-depth".to_string()), Value::int(0));
+                    fields.insert(TableKey::keyword("object-limit"), limit_val);
+                    fields.insert(TableKey::keyword("scope-depth"), Value::int(0));
                     fields.insert(
-                        TableKey::Keyword("active-allocator".to_string()),
+                        TableKey::keyword("active-allocator"),
                         Value::keyword("region"),
                     );
-                    fields.insert(
-                        TableKey::Keyword("scope-enter-count".to_string()),
-                        Value::int(0),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("scope-dtor-count".to_string()),
-                        Value::int(0),
-                    );
+                    fields.insert(TableKey::keyword("scope-enter-count"), Value::int(0));
+                    fields.insert(TableKey::keyword("scope-dtor-count"), Value::int(0));
                     fields
                 }
 
@@ -288,21 +277,15 @@ impl VM {
                     .map(|(ptr, info)| {
                         let mut fields = BTreeMap::new();
                         let name = info.name.as_deref().unwrap_or("<anon>");
-                        fields.insert(TableKey::Keyword("name".to_string()), ctx.string(name));
+                        fields.insert(TableKey::keyword("name"), ctx.string(name));
                         fields.insert(
-                            TableKey::Keyword("reason".to_string()),
+                            TableKey::keyword("reason"),
                             ctx.string(info.reason.to_string()),
                         );
                         let calls = self.closure_call_counts.get(ptr).copied().unwrap_or(0);
-                        fields.insert(
-                            TableKey::Keyword("calls".to_string()),
-                            Value::int(calls as i64),
-                        );
+                        fields.insert(TableKey::keyword("calls"), Value::int(calls as i64));
                         let attempts = self.jit_compile_attempts.get(ptr).copied().unwrap_or(0);
-                        fields.insert(
-                            TableKey::Keyword("attempts".to_string()),
-                            Value::int(attempts as i64),
-                        );
+                        fields.insert(TableKey::keyword("attempts"), Value::int(attempts as i64));
                         ctx.struct_from(fields)
                     })
                     .collect();

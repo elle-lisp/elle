@@ -18,6 +18,7 @@ fn ctx_over(heap: &mut FiberHeap, region: crate::hir::region::RuntimeRegion) -> 
     CallCtx {
         region,
         heap: heap as *mut FiberHeap,
+        symbols: std::ptr::null_mut(),
     }
 }
 

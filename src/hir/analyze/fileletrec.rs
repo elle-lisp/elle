@@ -224,8 +224,7 @@ impl<'a> Analyzer<'a> {
             // Struct literal: (struct :key1 val1 :key2 val2 ...)
             HirKind::Call { func, args, .. } => {
                 if let HirKind::Var(binding) = &func.kind {
-                    let name = self.symbols.name(self.arena.get(*binding).name)?;
-                    if name != "struct" {
+                    if self.arena.get(*binding).name != crate::value::SymbolId::of("struct") {
                         return None;
                     }
                     // Parse alternating keyword-value pairs

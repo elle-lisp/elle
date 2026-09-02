@@ -297,17 +297,16 @@ pub(super) fn clone_template(t: &FnTemplate, arena: &mut BindingArena) -> (Vec<B
 pub(super) fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,
-    symbol_names: &HashMap<u32, String>,
     ops: &Ops,
     bases: &FxHashMap<Binding, &'static str>,
     fns: &FnResolver,
 ) {
-    if let Some(plan) = validate_chain(hir, arena, symbol_names, bases, fns) {
+    if let Some(plan) = validate_chain(hir, arena, bases, fns) {
         let sig = hir.signal;
         let span = hir.span.clone();
         let owned = std::mem::replace(hir, Hir::error(span.clone()));
         let chain = take_chain(owned, plan, arena, fns);
         *hir = build_loop(chain, arena, ops, sig, span);
     }
-    hir.for_each_child_mut(|c| rewrite(c, arena, symbol_names, ops, bases, fns));
+    hir.for_each_child_mut(|c| rewrite(c, arena, ops, bases, fns));
 }

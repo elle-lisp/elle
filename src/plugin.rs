@@ -111,7 +111,10 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
     let mut fields = BTreeMap::new();
     for def in &collected {
         let short_name = def.name.strip_prefix(prefix).unwrap_or(def.name);
-        fields.insert(TableKey::Keyword(short_name.into()), Value::native_fn(def));
+        fields.insert(
+            TableKey::Keyword(symbols.keyword(short_name)),
+            Value::native_fn(def),
+        );
     }
 
     // Register docs

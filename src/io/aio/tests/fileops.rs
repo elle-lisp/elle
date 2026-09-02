@@ -109,7 +109,7 @@ fn test_async_submit_spawn_echo() {
         let val = completions[0].result.as_ref().expect("spawn failed");
         let fields = val.as_struct().expect("expected struct");
         assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("pid".into()))
+            sorted_struct_get(fields, &TableKey::keyword("pid"))
                 .unwrap()
                 .as_int()
                 .unwrap()
@@ -214,7 +214,7 @@ fn a_failed_pool_process_wait_names_waitpid() {
             .as_ref()
             .expect_err("a wait for a child that is gone must fail");
         let fields = err.as_struct().expect("an io error is a struct");
-        let msg = sorted_struct_get(fields, &TableKey::Keyword("message".into()))
+        let msg = sorted_struct_get(fields, &TableKey::keyword("message"))
             .and_then(|v| v.with_string(|s| s.to_string()))
             .expect("an io error carries a :message");
         assert!(

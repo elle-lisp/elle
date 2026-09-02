@@ -197,7 +197,7 @@ pub enum LirConst {
     Float(f64),
     String(String),
     Symbol(SymbolId),
-    Keyword(String),
+    Keyword(u64),
     /// Placeholder for a closure during cross-thread LIR transfer.
     /// The usize is the index into `SendBundle::closures`.
     /// Patched back to `ValueConst` during reconstruction.
@@ -224,9 +224,9 @@ pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
     } else if let Some(f) = v.as_float() {
         Some(LirConst::Float(f))
     } else if let Some(id) = v.as_symbol() {
-        Some(LirConst::Symbol(SymbolId(id)))
-    } else if let Some(name) = v.as_keyword_name() {
-        Some(LirConst::Keyword(name))
+        Some(LirConst::Symbol(id))
+    } else if let Some(hash) = v.keyword_hash() {
+        Some(LirConst::Keyword(hash))
     } else {
         v.with_string(|s| s.to_string()).map(LirConst::String)
     }

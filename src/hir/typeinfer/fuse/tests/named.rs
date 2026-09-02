@@ -10,14 +10,14 @@ use super::*;
 
 #[test]
 fn named_map_fn_inlines() {
-    let (hir, arena, names) = compile("(defn dbl [x] (* x 2)) (map dbl [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn dbl [x] (* x 2)) (map dbl [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` dispatch must be gone when the fn is a named defn; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "*"),
+        count_callee(&hir, &arena, &mut rt, "*"),
         2,
         "`dbl`'s body op appears twice — the surviving definition plus the \
              inlined copy; callees were {cs:?}",
@@ -27,7 +27,7 @@ fn named_map_fn_inlines() {
         "the fused loop freezes one accumulator; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one fused accumulator; callees were {cs:?}",
     );
@@ -40,19 +40,19 @@ fn named_map_fn_inlines() {
 /// `(+ i 1)` increment uses `+`, so `+` would not be a clean discriminator.
 #[test]
 fn named_fold_fn_inlines() {
-    let (hir, arena, names) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "fold"),
         "the `fold` dispatch must be gone for a named combinator; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "*"),
+        count_callee(&hir, &arena, &mut rt, "*"),
         2,
         "`mul`'s body op appears twice (definition + inlined); callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         0,
         "a fold accumulator is scalar — no `@array`; callees were {cs:?}",
     );
@@ -64,19 +64,19 @@ fn named_fold_fn_inlines() {
 /// over a single accumulator.
 #[test]
 fn named_fn_composition_fuses_to_one_loop() {
-    let (hir, arena, names) = compile("(defn dbl [x] (* x 2)) (map dbl (map dbl [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn dbl [x] (* x 2)) (map dbl (map dbl [1 2 3]))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "*"),
+        count_callee(&hir, &arena, &mut rt, "*"),
         3,
         "definition + two inlined copies of `dbl`; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one loop, one accumulator — the intermediate array is gone; callees were {cs:?}",
     );
@@ -90,20 +90,20 @@ fn named_fn_composition_fuses_to_one_loop() {
 /// declines and the `map` call survives.
 #[test]
 fn named_fn_with_let_body_inlines() {
-    let (hir, arena, names) = compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "a named fn with a `let` body must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "*"),
+        count_callee(&hir, &arena, &mut rt, "*"),
         2,
         "`g`'s `*` appears twice — the surviving definition plus the inlined \
              copy; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one fused accumulator; callees were {cs:?}",
     );
@@ -117,8 +117,8 @@ fn named_fn_with_let_body_inlines() {
 /// correct-by-construction.
 #[test]
 fn named_fn_with_match_body_declines() {
-    let (hir, arena, names) = compile("(defn g [x] (match x _ (* x 2))) (map g [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn g [x] (match x _ (* x 2))) (map g [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a named fn with a `match` body must not inline; callees were {cs:?}",
@@ -135,20 +135,20 @@ fn named_fn_with_match_body_declines() {
 /// increment also uses `+`.)
 #[test]
 fn named_let_body_fn_composition_fuses_to_one_loop() {
-    let (hir, arena, names) =
+    let (hir, arena, mut rt) =
         compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g (map g [1 2 3]))");
-    let cs = callees(&hir, &arena, &names);
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "*"),
+        count_callee(&hir, &arena, &mut rt, "*"),
         3,
         "definition + two inlined copies of `g`'s `*`; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one loop, one accumulator — the intermediate array is gone; callees were {cs:?}",
     );
@@ -162,8 +162,8 @@ fn named_let_body_fn_composition_fuses_to_one_loop() {
 /// (docs/impl/dissolution.md § "Captures"). The `map` call survives.
 #[test]
 fn named_capturing_local_fn_declines() {
-    let (hir, arena, names) = compile("(let [k 10] (let [g (fn [x] (+ x k))] (map g [1 2 3])))");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(let [k 10] (let [g (fn [x] (+ x k))] (map g [1 2 3])))");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a capturing local fn must not inline; callees were {cs:?}",
@@ -175,8 +175,8 @@ fn named_capturing_local_fn_declines() {
 /// the `map` call survives.
 #[test]
 fn named_non_lambda_var_declines() {
-    let (hir, arena, names) = compile("(def h 5) (map h [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(def h 5) (map h [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a non-lambda Var arg must not inline; callees were {cs:?}",
@@ -195,15 +195,15 @@ fn named_non_lambda_var_declines() {
 /// survives and no `-` appears at all (dec's body is not in this tree).
 #[test]
 fn named_map_cross_unit_stdlib_fn_inlines() {
-    let (hir, arena, names) = compile("(map dec [1 2 3])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map dec [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` dispatch must be gone for a cross-unit stdlib fn; callees were {cs:?}",
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &names, "-"),
+        count_callee(&hir, &arena, &mut rt, "-"),
         1,
         "`dec`'s body op `-` is spliced in exactly once — the definition stays in \
              the stdlib unit, so there is no surviving copy; callees were {cs:?}",
@@ -213,7 +213,7 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
         "the fused loop freezes one accumulator; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &names, "@array"),
+        count_callee(&hir, &arena, &mut rt, "@array"),
         1,
         "one fused accumulator; callees were {cs:?}",
     );
@@ -225,8 +225,8 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
 /// as an inlineable template, and `(map distinct …)` stays a plain `map` call.
 #[test]
 fn cross_unit_non_inlineable_stdlib_fn_declines() {
-    let (hir, arena, names) = compile("(map distinct [[1] [2]])");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(map distinct [[1] [2]])");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
         "a cross-unit fn with a non-whitelisted body must not inline; callees were {cs:?}",
@@ -239,8 +239,8 @@ fn cross_unit_non_inlineable_stdlib_fn_declines() {
 /// inline cloned it rather than consuming it).
 #[test]
 fn named_fn_inlined_and_still_first_class() {
-    let (hir, arena, names) = compile("(defn dbl [x] (* x 2)) (def ys (map dbl [1 2 3])) (dbl 9)");
-    let cs = callees(&hir, &arena, &names);
+    let (hir, arena, mut rt) = compile("(defn dbl [x] (* x 2)) (def ys (map dbl [1 2 3])) (dbl 9)");
+    let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "map"),
         "the `map` must fuse; callees were {cs:?}",

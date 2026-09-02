@@ -72,11 +72,14 @@ pub fn match_fail_error_in(heap: &mut FiberHeap, val: Value, region: RuntimeRegi
 pub fn format_error(value: Value) -> String {
     // Struct error: {:error :keyword :message "string"}
     if let Some(fields) = value.as_struct() {
-        let error = sorted_struct_get(fields, &TableKey::Keyword("error".into()));
-        let msg = sorted_struct_get(fields, &TableKey::Keyword("message".into()));
+        let error = sorted_struct_get(fields, &TableKey::keyword("error"));
+        let msg = sorted_struct_get(fields, &TableKey::keyword("message"));
         if let (Some(error_val), Some(msg_val)) = (error, msg) {
             if let (Some(name), Some(text)) = (
-                error_val.as_keyword_name(),
+                error_val
+                    .keyword_hash()
+                    .and_then(|h| crate::value::keyword::resolve_keyword_name(None, h))
+                    .map(str::to_string),
                 msg_val.with_string(|s| s.to_string()),
             ) {
                 return format!("{}: {}", name, text);
@@ -88,7 +91,10 @@ pub fn format_error(value: Value) -> String {
     if let Some(elems) = value.as_array() {
         if elems.len() == 2 {
             if let Some(msg) = elems[1].with_string(|s| s.to_string()) {
-                if let Some(name) = elems[0].as_keyword_name() {
+                if let Some(name) = elems[0]
+                    .keyword_hash()
+                    .and_then(|h| crate::value::keyword::resolve_keyword_name(None, h))
+                {
                     return format!("{}: {}", name, msg);
                 }
                 return msg;

@@ -1,7 +1,7 @@
 //! Core value types for the Elle runtime
 //!
 //! This module contains fundamental types used throughout the value system:
-//! - `SymbolId` - Interned symbol identifier
+//! - `SymbolId` - Symbol identity: the name's hash (`docs/impl/symbol.md`)
 //! - `Arity` - Function arity specification
 //! - `TableKey` - Keys for structs (accepts all immutable non-float types)
 //! - `NativeFn` - Unified primitive function type
@@ -26,17 +26,28 @@ use crate::value::heap::HeapTag;
 use crate::value::Value;
 use std::fmt;
 
-/// Symbol ID for interned symbols.
+/// Symbol identity: the name's 64-bit hash.
 ///
-/// Symbols are interned for fast comparison (O(1) via ID comparison
-/// instead of O(n) string comparison).
+/// The id is a pure function of the name ([`crate::namehash`]), so it is the
+/// same in every symbol table, thread, process, and build — comparison is one
+/// integer compare, and a symbol value is portable by construction. Ordering
+/// follows the hash, which is deterministic but carries no alphabetical
+/// meaning; see [docs/impl/symbol.md](../../docs/impl/symbol.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SymbolId(pub u32);
+pub struct SymbolId(pub u64);
 
 impl SymbolId {
-    /// Sentinel value for compiler-generated bindings with no source-level
-    /// symbol name (phi temporaries, etc.). Not a valid interned symbol.
-    pub const SYNTHETIC: Self = Self(u32::MAX);
+    /// The id of `name`, without recording the name for display. Use
+    /// [`SymbolTable::intern`](crate::symbol::SymbolTable::intern) when the
+    /// symbol may need to be printed.
+    pub const fn of(name: &str) -> Self {
+        Self(crate::namehash::name_hash(name))
+    }
+
+    /// Sentinel for compiler-generated bindings with no source-level symbol
+    /// name (phi temporaries, etc.). Reserved: `SymbolTable::intern` refuses a
+    /// name that hashes onto it, so it is never a real symbol.
+    pub const SYNTHETIC: Self = Self(u64::MAX);
 }
 
 impl fmt::Display for SymbolId {
@@ -116,7 +127,13 @@ pub enum TableKey {
     Int(i64),
     Symbol(SymbolId),
     String(String),
-    Keyword(String),
+    /// A keyword key is its 64-bit name hash — the keyword value's payload,
+    /// exactly as `Symbol` is its `SymbolId`. Identity and order are pure
+    /// functions of the hash, so a probe builds a key with no lock and no
+    /// allocation, and a sorted struct probes correctly in every instance.
+    /// Display resolves the spelling through the per-instance memo
+    /// (docs/impl/symbol.md § "The display memo").
+    Keyword(u64),
     EmptyList,
     /// Immutable array key. All elements must themselves be valid TableKeys.
     /// Mutable arrays are rejected — mutation after insertion would break
@@ -135,6 +152,12 @@ pub enum TableKey {
 }
 
 impl TableKey {
+    /// Build a keyword key from its spelling. Identity only — the spelling is
+    /// not recorded anywhere; display resolves through the per-instance memo.
+    pub fn keyword(name: &str) -> TableKey {
+        TableKey::Keyword(crate::value::keyword::keyword_hash(name))
+    }
+
     /// Convert a Value to a TableKey if possible.
     ///
     /// Returns `None` if the value cannot be used as a key.
@@ -147,9 +170,9 @@ impl TableKey {
         } else if let Some(i) = val.as_int() {
             Some(TableKey::Int(i))
         } else if let Some(id) = val.as_symbol() {
-            Some(TableKey::Symbol(SymbolId(id)))
-        } else if let Some(name) = val.as_keyword_name() {
-            Some(TableKey::Keyword(name))
+            Some(TableKey::Symbol(id))
+        } else if let Some(hash) = val.keyword_hash() {
+            Some(TableKey::Keyword(hash))
         } else if let Some(s) = val.with_string(|s| s.to_string()) {
             Some(TableKey::String(s))
         } else if let Some(arr) = val.as_array() {
@@ -195,9 +218,9 @@ impl TableKey {
             TableKey::Nil => Value::NIL,
             TableKey::Bool(b) => Value::bool(*b),
             TableKey::Int(i) => Value::int(*i),
-            TableKey::Symbol(sid) => Value::symbol(sid.0),
+            TableKey::Symbol(sid) => Value::symbol(*sid),
             TableKey::String(s) => ctx.string(s.as_str()),
-            TableKey::Keyword(s) => Value::keyword(s.as_str()),
+            TableKey::Keyword(hash) => Value::keyword_from_hash(*hash),
             TableKey::EmptyList => Value::EMPTY_LIST,
             TableKey::Array(keys) => {
                 let items: Vec<Value> = keys.iter().map(|k| k.to_value(ctx)).collect();
@@ -341,13 +364,12 @@ impl Ord for TableKey {
     }
 }
 
-/// Render a `TableKey`, optionally resolving a symbol key's name through
-/// `symbols` — the shared body for `Display` (`debug == false`) and `Debug`
-/// (`debug == true`), and the entry `Value`'s struct rendering threads its table
-/// through (docs/impl/region/ctx.md § "Symbols through the ctx"). The two modes
-/// diverge only in the symbol arm (Display prints the raw `SymbolId`; Debug
-/// resolves a name, falling back to `'#<sym:id>` with no table) and in the nested
-/// recursion of array/heap keys (which follows the outer mode).
+/// Render a `TableKey` — the shared body for `Display` (`debug == false`) and
+/// `Debug` (`debug == true`). A symbol key's name comes from the process-global
+/// registry (docs/impl/symbol.md), so nothing is threaded. The two modes diverge
+/// only in the symbol arm (Display prints the raw `SymbolId`; Debug prints the
+/// quoted name) and in the nested recursion of array/heap keys, which follows the
+/// outer mode.
 pub(crate) fn fmt_table_key(
     key: &TableKey,
     symbols: Option<&crate::symbol::SymbolTable>,
@@ -362,14 +384,19 @@ pub(crate) fn fmt_table_key(
             if debug {
                 match symbols.and_then(|s| s.name(*id)) {
                     Some(name) => write!(f, "'{}", name),
-                    None => write!(f, "'#<sym:{}>", id.0),
+                    None => write!(f, "'#<symbol:{:#x}>", id.0),
                 }
             } else {
                 write!(f, "{:?}", id)
             }
         }
         TableKey::String(s) => write!(f, "\"{}\"", s),
-        TableKey::Keyword(s) => write!(f, ":{}", s),
+        TableKey::Keyword(hash) => {
+            match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
+                Some(name) => write!(f, ":{}", name),
+                None => write!(f, "#<keyword:{:#x}>", hash),
+            }
+        }
         TableKey::EmptyList => write!(f, "()"),
         TableKey::Array(keys) => {
             write!(f, "[")?;
@@ -391,9 +418,21 @@ impl fmt::Display for TableKey {
     }
 }
 
+/// A `TableKey` paired with a memo for name-resolving Debug-style rendering —
+/// the key analogue of `Value::debug_with`, for formatters that print keys
+/// outside `fmt_value`'s recursion.
+pub(crate) struct TableKeyDisplay<'a>(pub &'a TableKey, pub Option<&'a crate::symbol::SymbolTable>);
+
+impl fmt::Display for TableKeyDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt_table_key(self.0, self.1, true, f)
+    }
+}
+
 impl fmt::Debug for TableKey {
     /// Machine-readable representation of table keys.
-    /// Symbols: 'name (with opening quote only); `'#<sym:id>` with no table.
+    /// Symbols: `'#<symbol:hash>` — a bare `Debug` threads no memo, so it has no
+    /// name to print; `fmt_table_key` with a memo renders `'name`.
     /// Strings: "value" (with quotes)
     /// Keywords: :name
     /// Others: same as Display

@@ -118,7 +118,6 @@ pub(crate) fn collect_lambda_info(
 pub(crate) fn collect_typeof_aliases(
     hir: &Hir,
     arena: &BindingArena,
-    symbol_names: &HashMap<u32, String>,
     out: &mut HashMap<Binding, Binding>,
 ) {
     let record = |b: Binding, init: &Hir, out: &mut HashMap<Binding, Binding>| {
@@ -127,7 +126,7 @@ pub(crate) fn collect_typeof_aliases(
             return;
         }
         let inner = unwrap_anf_let(unwrap_make_cell(init));
-        if let Some(subj) = typeof_call_subject(inner, arena, symbol_names) {
+        if let Some(subj) = typeof_call_subject(inner, arena) {
             if !arena.get(subj).is_mutated {
                 out.insert(b, subj);
             }
@@ -142,5 +141,5 @@ pub(crate) fn collect_typeof_aliases(
         HirKind::Define { binding, value } => record(*binding, value, out),
         _ => {}
     }
-    hir.for_each_child(|c| collect_typeof_aliases(c, arena, symbol_names, out));
+    hir.for_each_child(|c| collect_typeof_aliases(c, arena, out));
 }

@@ -26,13 +26,13 @@ impl<'a> Analyzer<'a> {
         let ref_scopes: &[crate::syntax::ScopeId] = &items[0].scopes;
 
         // Collect all lexical (non-primitive) bindings from all scopes.
-        // Inner scopes shadow outer: track seen names.
+        // Inner scopes shadow outer: track seen ids.
         let mut seen = std::collections::HashSet::new();
-        let mut pairs: Vec<(String, Binding)> = Vec::new();
+        let mut pairs: Vec<(SymbolId, Binding)> = Vec::new();
 
         for scope in self.scopes.iter().rev() {
-            for (name, candidates) in &scope.bindings {
-                if seen.contains(name) {
+            for (&sym, candidates) in &scope.bindings {
+                if seen.contains(&sym) {
                     continue;
                 }
                 // Resolve like `lookup`: the binding's scopes must be a
@@ -48,11 +48,11 @@ impl<'a> Analyzer<'a> {
                     if self.primitive_values.contains_key(&binding)
                         || self.arena.get(binding).is_synthetic
                     {
-                        seen.insert(name.clone());
+                        seen.insert(sym);
                         continue;
                     }
-                    pairs.push((name.clone(), binding));
-                    seen.insert(name.clone());
+                    pairs.push((sym, binding));
+                    seen.insert(sym);
                 }
             }
         }
@@ -62,16 +62,15 @@ impl<'a> Analyzer<'a> {
         let func = Hir::new(HirKind::Var(struct_binding), span.clone(), Signal::silent());
 
         let mut args = Vec::new();
-        for (name, binding) in &pairs {
-            let sym_id = self.symbols.intern(name);
+        for &(sym_id, binding) in &pairs {
             // quoted symbol key
-            let key = Hir::silent(HirKind::Quote(Value::symbol(sym_id.0)), span.clone());
+            let key = Hir::silent(HirKind::Quote(Value::symbol(sym_id)), span.clone());
             args.push(crate::hir::expr::CallArg {
                 expr: key,
                 spliced: false,
             });
             // variable reference
-            let var = Hir::silent(HirKind::Var(*binding), span.clone());
+            let var = Hir::silent(HirKind::Var(binding), span.clone());
             args.push(crate::hir::expr::CallArg {
                 expr: var,
                 spliced: false,

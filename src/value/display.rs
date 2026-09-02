@@ -2,8 +2,8 @@
 //!
 //! The tagged-union `Value` renders through one body, `fmt_value`, parameterized
 //! by a `debug` flag and an optional `&SymbolTable`. Symbol-name resolution is
-//! per-instance (docs/impl/region/ctx.md § "Symbols through the ctx"): a bare
-//! `Display`/`Debug` carries no table and renders a symbol as `#<sym:id>`, while
+//! per-instance (docs/impl/symbol.md § "Reading a name, and not reading one"): a bare
+//! `Display`/`Debug` carries no table and renders a symbol as `#<symbol:hash>`, while
 //! [`Value::display_with`] / [`Value::debug_with`] thread an instance's table so
 //! names resolve all the way down.
 
@@ -79,9 +79,9 @@ fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
 /// rendering body for both `Display` (`debug == false`) and `Debug`
 /// (`debug == true`); it recurses by calling itself, so a threaded table reaches
 /// every nested symbol. `symbols` is `None` for a bare trait render — a symbol
-/// then prints `#<sym:id>` — and `Some` when a caller threads its instance's
+/// then prints `#<symbol:hash>` — and `Some` when a caller threads its instance's
 /// table via [`Value::display_with`] / [`Value::debug_with`]
-/// (docs/impl/region/ctx.md § "Symbols through the ctx").
+/// (docs/impl/symbol.md § "Reading a name, and not reading one").
 ///
 /// Where the two renderings diverge they branch on `debug`: strings (Debug quotes
 /// and escapes), and the element/key recursion of cons/array/set/struct. A struct
@@ -115,7 +115,7 @@ pub(crate) fn fmt_value(
     }
     if let Some(id) = v.as_symbol() {
         // Identical in Display and Debug: the bare name if the threaded table
-        // resolves it, else `#<sym:id>`. The name carries no leading `'` —
+        // resolves it, else `#<symbol:hash>`. The name carries no leading `'` —
         // Scheme/CL print a symbol as its bare name (`'` is reader syntax for
         // `quote`, not part of a symbol's printed form), and this matches the
         // `string`/`println` path (`src/primitives/convert.rs`), so a list of
@@ -123,13 +123,20 @@ pub(crate) fn fmt_value(
         // `Display`, a struct field, an error's `:syntax` form). A symbol stays
         // distinguishable from a `"string"` in Debug mode (strings quote) and
         // from a `:keyword` always.
-        return match symbols.and_then(|s| s.name(crate::value::SymbolId(id))) {
+        return match symbols.and_then(|s| s.name(id)) {
             Some(name) => write!(f, "{}", name),
-            None => write!(f, "#<sym:{}>", id),
+            None => write!(f, "#<symbol:{:#x}>", id.0),
         };
     }
-    if let Some(name) = v.as_keyword_name() {
-        return write!(f, ":{}", name);
+    // Keywords resolve their spelling through the threaded memo, exactly as
+    // symbols do; without one (or for a spelling this instance never learned)
+    // the unreadable form keeps the identity visible without fabricating a
+    // keyword literal that would denote a different keyword.
+    if let Some(hash) = v.keyword_hash() {
+        return match crate::value::keyword::resolve_keyword_name(symbols, hash) {
+            Some(name) => write!(f, ":{}", name),
+            None => write!(f, "#<keyword:{:#x}>", hash),
+        };
     }
     if let Some(addr) = v.as_pointer() {
         return write!(f, "<pointer 0x{:x}>", addr);
@@ -405,7 +412,7 @@ impl fmt::Debug for Value {
 /// A `Value` paired with a symbol table for name-resolving rendering. Returned by
 /// [`Value::display_with`]; its `Display` resolves symbol names (the bare `name`)
 /// through the table, where a bare `Display`/`Debug` (no table) would print
-/// `#<sym:id>`.
+/// `#<symbol:hash>`.
 pub struct DisplayWith<'a> {
     value: Value,
     symbols: Option<&'a SymbolTable>,
@@ -433,8 +440,8 @@ impl fmt::Display for DebugWith<'_> {
 
 impl Value {
     /// Render through `symbols`, resolving symbol names (`'name`); pass `None` to
-    /// render `#<sym:id>`. The threaded-table alternative to a bare `Display`
-    /// (docs/impl/region/ctx.md § "Symbols through the ctx").
+    /// render `#<symbol:hash>`. The threaded-table alternative to a bare `Display`
+    /// (docs/impl/symbol.md § "Reading a name, and not reading one").
     pub fn display_with<'a>(&self, symbols: Option<&'a SymbolTable>) -> DisplayWith<'a> {
         DisplayWith {
             value: *self,

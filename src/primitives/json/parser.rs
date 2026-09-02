@@ -385,7 +385,10 @@ impl<'a, 'h> JsonParser<'a, 'h> {
             let key = match key_value.with_string(|s| s.to_string()) {
                 Some(s) => {
                     if self.use_keyword_keys {
-                        TableKey::Keyword(s)
+                        // A JSON key is a spelling that exists only at run
+                        // time — learn it so the struct's keys can print.
+                        self.ctx.keyword(&s);
+                        TableKey::keyword(&s)
                     } else {
                         TableKey::String(s)
                     }

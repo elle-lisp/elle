@@ -42,25 +42,18 @@ pub(super) fn from_value_inner(
     value: Value,
     ctx: &mut SerContext<'_>,
 ) -> Result<SendValue, String> {
-    // Keywords carry their name for cross-thread re-interning
-    if let Some(name) = value.as_keyword_name() {
-        return Ok(SendValue::Keyword(name));
-    }
-
-    // Symbols carry their name for cross-thread re-interning (IDs are
-    // per-table). If the id is not in the sender's table (should not happen),
-    // fall through to Immediate.
+    // Immediate values are always safe. A symbol or keyword is among them: its
+    // payload is the name's hash (docs/impl/symbol.md), which means the same
+    // name in the receiving thread. Its spelling goes into the bundle's name
+    // table so the receiving instance can print it.
     if let Some(id) = value.as_symbol() {
-        if let Some(name) = ctx.symbols.name(crate::value::SymbolId(id)) {
-            return Ok(SendValue::Symbol {
-                name: name.to_string(),
-                id,
-            });
-        }
+        ctx.note_symbol(id);
         return Ok(SendValue::Immediate(value));
     }
-
-    // Immediate values are always safe
+    if let Some(hash) = value.keyword_hash() {
+        ctx.note_keyword(hash);
+        return Ok(SendValue::Immediate(value));
+    }
     if value.is_nil() || value.is_bool() || value.is_int() || value.is_float() {
         return Ok(SendValue::Immediate(value));
     }
@@ -116,6 +109,11 @@ pub(super) fn from_value_inner(
             for (k, v) in s.iter() {
                 if !k.is_sendable() {
                     return Err("Cannot send struct with identity keys".to_string());
+                }
+                match k {
+                    crate::value::heap::TableKey::Symbol(id) => ctx.note_symbol(*id),
+                    crate::value::heap::TableKey::Keyword(hash) => ctx.note_keyword(*hash),
+                    _ => {}
                 }
                 copied.insert(k.clone(), from_value_inner(*v, ctx)?);
             }
@@ -195,6 +193,11 @@ pub(super) fn from_value_inner(
             for (k, v) in borrowed.iter() {
                 if !k.is_sendable() {
                     return Err("Cannot send @struct with identity keys".to_string());
+                }
+                match k {
+                    crate::value::heap::TableKey::Symbol(id) => ctx.note_symbol(*id),
+                    crate::value::heap::TableKey::Keyword(hash) => ctx.note_keyword(*hash),
+                    _ => {}
                 }
                 copied.insert(k.clone(), from_value_inner(*v, ctx)?);
             }

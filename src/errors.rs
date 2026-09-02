@@ -1,14 +1,14 @@
 //! Runtime/compile error formatting (human and JSON).
 
-use super::*;
-
-/// Format a runtime error with symbol resolution
-pub(super) fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
+/// Format a runtime error, naming any `SymbolId(N)` it carries through
+/// `symbols` — the instance that raised the error, and so the only memo that
+/// can hold the name (docs/impl/symbol.md).
+pub(super) fn format_runtime_error(error: &str, symbols: &elle::symbol::SymbolTable) -> String {
     // Check for SymbolId pattern and resolve it
     if let Some(start) = error.find("SymbolId(") {
         if let Some(end) = error[start..].find(')') {
             let id_str = &error[start + 9..start + end];
-            if let Ok(id) = id_str.parse::<u32>() {
+            if let Ok(id) = id_str.parse::<u64>() {
                 let name = symbols
                     .name(elle::value::SymbolId(id))
                     .unwrap_or("<unknown>");

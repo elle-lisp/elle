@@ -57,16 +57,14 @@ use crate::hir::region::{Region, RegionInfo, StaticRegion};
 use crate::hir::{Binding, BindingArena, CaptureKind, EscapeInfo, Hir, HirId, HirKind};
 use crate::lir::{LirFunction, LirInstr, LirModule};
 
-type Names = HashMap<u32, String>;
-
 /// Render the normalized escape snapshot for a compiled module.
 pub fn escape_module(
     hir: &Hir,
     arena: &BindingArena,
-    names: &Names,
     escape: &EscapeInfo,
     ri: &RegionInfo,
     module: &LirModule,
+    symbols: Option<&crate::symbol::SymbolTable>,
 ) -> String {
     // The return frontier — escape's authoritative return verdict projected onto
     // regions. A flat region set; its members feed both the region normalization
@@ -102,7 +100,7 @@ pub fn escape_module(
     // identically. Names without a trailing-digit suffix (`x`, `down`, `~`) are
     // left verbatim. Hygiene does not depend on the counter (it is carried by
     // scopes), so this is display-only.
-    let name_label = build_name_labels(&binding_order, arena, names);
+    let name_label = build_name_labels(&binding_order, arena, symbols);
     let h = |id: HirId| -> String {
         match hir_norm.get(&id) {
             Some(n) => format!("#{n}"),
@@ -305,15 +303,14 @@ fn blabel(
 fn build_name_labels(
     order: &[Binding],
     arena: &BindingArena,
-    names: &Names,
+    symbols: Option<&crate::symbol::SymbolTable>,
 ) -> HashMap<Binding, String> {
     let mut out: HashMap<Binding, String> = HashMap::new();
     let mut by_raw: HashMap<String, String> = HashMap::new();
     let mut base_ctr: HashMap<String, usize> = HashMap::new();
     for &b in order {
-        let raw = names
-            .get(&arena.get(b).name.0)
-            .map(String::as_str)
+        let raw = symbols
+            .and_then(|s| s.name(arena.get(b).name))
             .unwrap_or("~")
             .to_string();
         let label = by_raw.entry(raw.clone()).or_insert_with(|| {

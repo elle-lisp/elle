@@ -215,13 +215,13 @@ impl crate::io::IoBackend for MockBackend {
                                 result.as_struct().expect("recv result must be a struct");
                             let data_buf = crate::value::sorted_struct_get(
                                 struct_ref,
-                                &TableKey::Keyword("data".into()),
+                                &TableKey::keyword("data"),
                             )
                             .copied()
                             .expect("recv result must have :data");
                             let addr_buf = crate::value::sorted_struct_get(
                                 struct_ref,
-                                &TableKey::Keyword("addr".into()),
+                                &TableKey::keyword("addr"),
                             )
                             .copied()
                             .expect("recv result must have :addr");
@@ -240,7 +240,7 @@ impl crate::io::IoBackend for MockBackend {
                                     .unwrap_or(addr_buf);
                                 set_struct_field_in_place(
                                     result,
-                                    &TableKey::Keyword("addr".into()),
+                                    &TableKey::keyword("addr"),
                                     addr_val,
                                 );
                                 // :port stays 0 (mock).

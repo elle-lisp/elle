@@ -23,7 +23,12 @@
 ## ── sort: non-numeric types ─────────────────────────────────────────
 (assert (= (sort (list "banana" "apple" "cherry"))
            (list "apple" "banana" "cherry")) "sort: strings")
-(assert (= (sort (list :b :a :c)) (list :a :b :c)) "sort: keywords")
+# Keyword sort order is hash order — deterministic (the same for any input
+# permutation) but not alphabetical (docs/impl/symbol.md).
+(assert (= (sort (list :b :a :c)) (sort (list :c :a :b)))
+        "sort: keywords is deterministic across permutations")
+(assert (= (length (sort (list :b :a :c))) 3)
+        "sort: keywords keeps all elements")
 # Cross-type ordering: nil < bool < int < ... (Value::Ord rank order)
 (let [result (sort [nil true 1])]
   (assert (= (get result 0) nil) "sort: cross-type nil first")

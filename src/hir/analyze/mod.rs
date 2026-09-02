@@ -115,9 +115,17 @@ fn is_scope_subset(subset: &[ScopeId], superset: &[ScopeId]) -> bool {
 
 /// A lexical scope
 struct Scope {
-    /// Bindings in this scope, by name. Multiple bindings per name are possible
-    /// when macro expansion introduces bindings with different scope sets.
-    bindings: HashMap<String, Vec<ScopedBinding>>,
+    /// Bindings in this scope, keyed by the name's `SymbolId`. Multiple
+    /// bindings per name are possible when macro expansion introduces bindings
+    /// with different scope sets.
+    ///
+    /// The key is the id, not the spelling, because resolution is an identity
+    /// question: the id is the name's hash, so it answers without a display
+    /// memo (docs/impl/symbol.md § "Reading a name, and not reading one"). A
+    /// name-keyed map would make binding resolution depend on whichever memo
+    /// happened to have learned the spelling — and `bind_primitives` receives
+    /// ids minted against the compile context's own table, not this one's.
+    bindings: HashMap<SymbolId, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
     /// Is this a definition-environment frame — the global frame or a file's
@@ -377,6 +385,10 @@ impl<'a> Analyzer<'a> {
 
     /// Analyze a syntax tree into HIR
     pub fn analyze(&mut self, syntax: &crate::syntax::Syntax) -> Result<AnalysisResult, String> {
+        // Keyword pre-pass: keywords reach HIR through many arms (literals,
+        // pattern keys, struct literals, quoted data), so their spellings are
+        // learned in one walk rather than per arm.
+        crate::syntax::convert::learn_keywords(syntax, self.symbols);
         let hir = self.analyze_expr(syntax)?;
         let errors = std::mem::take(&mut self.errors);
         Ok(AnalysisResult { hir, errors })
@@ -461,13 +473,20 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Find bindings in scope with names similar to `name` (edit distance <= 2).
+    ///
+    /// Spelling-based, so unlike resolution this does need the memo. A binding
+    /// whose name this instance never learned simply cannot be suggested — the
+    /// message degrades, nothing resolves differently.
     fn suggest_similar(&self, name: &str) -> Vec<String> {
         let mut candidates: Vec<(usize, String)> = Vec::new();
         for scope in self.scopes.iter().rev() {
-            for scope_name in scope.bindings.keys() {
+            for scope_sym in scope.bindings.keys() {
+                let Some(scope_name) = self.symbols.name(*scope_sym) else {
+                    continue;
+                };
                 let dist = Self::levenshtein(name, scope_name);
                 if dist > 0 && dist <= 2 && !candidates.iter().any(|(_, n)| n == scope_name) {
-                    candidates.push((dist, scope_name.clone()));
+                    candidates.push((dist, scope_name.to_string()));
                 }
             }
         }

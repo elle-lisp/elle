@@ -60,7 +60,7 @@ fn display_self_referencing_struct() {
     let mut rt = elle::runtime::Runtime::without_stdlib();
     let h = elle::primitives::ctx::TestHeap::new();
     let t = h.ctx().struct_mut();
-    elle::value::arena::struct_put_with_rebind(rt.heap(), t, TableKey::Keyword("self".to_string()), t);
+    elle::value::arena::struct_put_with_rebind(rt.heap(), t, TableKey::keyword("self"), t);
     let s = format!("{}", t);
     assert!(s.contains("<cycle>"), "expected <cycle>, got: {}", s);
 }
@@ -93,7 +93,7 @@ fn debug_self_referencing_struct() {
     let mut rt = elle::runtime::Runtime::without_stdlib();
     let h = elle::primitives::ctx::TestHeap::new();
     let t = h.ctx().struct_mut();
-    elle::value::arena::struct_put_with_rebind(rt.heap(), t, TableKey::Keyword("self".to_string()), t);
+    elle::value::arena::struct_put_with_rebind(rt.heap(), t, TableKey::keyword("self"), t);
     let s = format!("{:?}", t);
     assert!(s.contains("<cycle>"), "expected <cycle>, got: {}", s);
 }

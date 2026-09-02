@@ -13,7 +13,6 @@ impl JitCompiler {
         func: &mut Function,
         scc_peers: Option<&HashMap<SymbolId, FuncId>>,
         self_sym: Option<SymbolId>,
-        symbol_names: HashMap<u32, String>,
         module_closures: Vec<LirFunction>,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -21,7 +20,6 @@ impl JitCompiler {
 
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
-        translator.symbol_names = symbol_names;
         translator.module_closures = module_closures;
 
         translator.self_sym = self_sym;

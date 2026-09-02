@@ -107,9 +107,11 @@ pub(crate) fn call_plugin(
     // (docs/impl/region/ctx.md "Plugins"). The capability lives on this stack
     // frame for exactly the synchronous plugin call — no ambient slot to install
     // or clear, and no way for a (future) nested plugin call to clobber it.
+    let symbols = ctx.vm().symbols_ptr;
     let mut call_ctx = CallCtx {
         region,
         heap: ctx.heap_mut(),
+        symbols,
     };
     let result = unsafe { func(&mut call_ctx, args.as_ptr(), args.len()) };
     (SignalBits::new(result.signal as u64), result.value)

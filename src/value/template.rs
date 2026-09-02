@@ -76,8 +76,11 @@ impl ConstTemplate {
             ConstTemplate::Bool(b) => Some(Value::bool(*b)),
             ConstTemplate::Int(n) => Some(Value::int(*n)),
             ConstTemplate::Float(f) => Some(Value::float(*f)),
-            ConstTemplate::Symbol(name) => Some(Value::symbol(symbols.intern(name).0)),
-            ConstTemplate::Keyword(k) => Some(Value::keyword(k)),
+            ConstTemplate::Symbol(name) => Some(Value::symbol(symbols.intern(name))),
+            ConstTemplate::Keyword(k) => {
+                symbols.keyword(k);
+                Some(Value::keyword(k))
+            }
             ConstTemplate::String(_)
             | ConstTemplate::StringMut(_)
             | ConstTemplate::Pair(_, _)
@@ -117,13 +120,18 @@ impl ConstTemplate {
             ConstTemplate::Bool(b) => Value::bool(*b),
             ConstTemplate::Int(n) => Value::int(*n),
             ConstTemplate::Float(f) => Value::float(*f),
-            ConstTemplate::Keyword(k) => Value::keyword(k),
+            ConstTemplate::Keyword(k) => {
+                if let Some(symbols) = symbols.as_deref_mut() {
+                    symbols.keyword(k);
+                }
+                Value::keyword(k)
+            }
             // Re-intern the symbol's name into the executing instance's table so
             // the id is valid HERE — across a `sys/spawn` boundary the sender's id
             // would name a different symbol (spawn-eval.lisp).
             ConstTemplate::Symbol(name) => {
                 let symbols = symbols.expect("materialize: no symbol table for a quoted symbol");
-                Value::symbol(symbols.intern(name).0)
+                Value::symbol(symbols.intern(name))
             }
 
             ConstTemplate::String(s) => {

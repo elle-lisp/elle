@@ -29,7 +29,7 @@ pub(super) fn prim_port_set_options(
         let key = &remaining[i];
         let val = &remaining[i + 1];
 
-        match key.as_keyword_name().as_deref() {
+        match ctx.keyword_spelling(*key).as_deref() {
             Some("timeout") => {
                 if val.is_nil() {
                     port.set_timeout_ms(None);
@@ -179,7 +179,7 @@ pub(super) fn prim_port_seek(
 
     // Parse optional :from keyword-value pair (args[2] and args[3]).
     let whence = if args.len() == 4 {
-        match args[2].as_keyword_name().as_deref() {
+        match ctx.keyword_spelling(args[2]).as_deref() {
             Some("from") => {}
             Some(other) => {
                 return (
@@ -192,7 +192,7 @@ pub(super) fn prim_port_seek(
             }
             None => return type_error!(ctx, args[2], "port/seek", "keyword for third argument"),
         }
-        match args[3].as_keyword_name().as_deref() {
+        match ctx.keyword_spelling(args[3]).as_deref() {
             Some("start") => libc::SEEK_SET,
             Some("current") => libc::SEEK_CUR,
             Some("end") => libc::SEEK_END,

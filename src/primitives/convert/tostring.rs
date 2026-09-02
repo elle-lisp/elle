@@ -72,15 +72,19 @@ fn write_value_to_string(
         out.push_str("nil");
         return Ok(());
     }
-    if let Some(name) = val.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(val) {
         out.push_str(&name);
         return Ok(());
     }
     if let Some(sym_id) = val.as_symbol() {
-        let name = ctx.vm().symbols().and_then(|s| {
-            s.name(crate::value::SymbolId(sym_id))
-                .map(|n| n.to_string())
-        });
+        // Copied out of the memo before `ctx` is touched again: `symbols()`
+        // hands back a borrow into the instance's map, and `ctx.error` below
+        // reborrows the same ctx.
+        let name = ctx
+            .vm()
+            .symbols()
+            .and_then(|s| s.name(sym_id))
+            .map(str::to_string);
         match name {
             Some(name) => out.push_str(&name),
             None => {
@@ -88,7 +92,7 @@ fn write_value_to_string(
                     SIG_ERROR,
                     ctx.error(
                         "internal-error",
-                        format!("to-string: symbol ID {} not found in symbol table", sym_id),
+                        format!("to-string: symbol ID {} has no recorded name", sym_id),
                     ),
                 ))
             }
@@ -196,23 +200,24 @@ fn prim_to_string_single(
     }
 
     if let Some(sym_id) = val.as_symbol() {
-        let name = ctx.vm().symbols().and_then(|s| {
-            s.name(crate::value::SymbolId(sym_id))
-                .map(|n| n.to_string())
-        });
+        let name = ctx
+            .vm()
+            .symbols()
+            .and_then(|s| s.name(sym_id))
+            .map(str::to_string);
         return match name {
-            Some(name) => (SIG_OK, ctx.string(name)),
+            Some(name) => (SIG_OK, ctx.string(&name)),
             None => (
                 SIG_ERROR,
                 ctx.error(
                     "internal-error",
-                    format!("to-string: symbol ID {} not found in symbol table", sym_id),
+                    format!("to-string: symbol ID {} has no recorded name", sym_id),
                 ),
             ),
         };
     }
 
-    if let Some(name) = val.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(val) {
         return (SIG_OK, ctx.string(name));
     }
 
@@ -305,8 +310,12 @@ fn prim_to_string_single(
         return (SIG_OK, ctx.string(vec_str));
     }
 
-    // For other types, use a reasonable debug representation — through this
-    // instance's symbol table so nested symbols still resolve to names.
-    let repr = format!("{}", val.debug_with(ctx.vm().symbols().as_deref()));
+    // For other types, render Debug-style through the instance memo, so
+    // nested symbol and keyword spellings resolve (docs/impl/symbol.md
+    // § "Reading a name, and not reading one").
+    let repr = {
+        let symbols = unsafe { ctx.vm().symbols_ptr.as_ref() };
+        format!("{}", val.debug_with(symbols))
+    };
     (SIG_OK, ctx.string(repr))
 }

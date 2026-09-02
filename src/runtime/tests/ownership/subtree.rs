@@ -28,19 +28,15 @@ fn region_ownership_adopt_subtree_drop_reclaims_in_a_real_run() {
 
     // Warm-up run, then measure the steady-state live region count.
     {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(v.is_nil(), "the discarded-container program returns nil");
     }
     let baseline = rt.heap().active_region_count();
 
     for _ in 0..50 {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let after = rt.heap().active_region_count();
@@ -122,10 +118,8 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
             .0
     };
     {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(
             v.is_nil(),
             "the discarded captured-value program returns nil"
@@ -133,10 +127,8 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
     }
     let baseline = rt.heap().active_region_count();
     for _ in 0..50 {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let after = rt.heap().active_region_count();
@@ -258,10 +250,8 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
             .0
     };
     {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(
             v.is_nil(),
             "the discarded container+closure program returns nil"
@@ -269,10 +259,8 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
     }
     let baseline = rt.heap().active_region_count();
     for _ in 0..50 {
-        let (vm, symbols, cctx) = rt.parts();
-        let v = vm
-            .execute_scheduled(&result.bytecode, symbols, cctx)
-            .expect("runs");
+        let (vm, _symbols, cctx) = rt.parts();
+        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let after = rt.heap().active_region_count();

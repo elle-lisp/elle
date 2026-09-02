@@ -138,50 +138,26 @@ image first would mean shipping remap passes, re-sort passes, and a syntax
 codec whose only purpose is to compensate for representations we intend to
 fix anyway.
 
-### Stable symbol identity
+### Stable symbol identity — landed
 
-`SymbolId` is a dense per-table index minted in first-intern order — a
-process-local accident. Everything downstream compensates: every code object
-carries a `symbol_names` map for cross-table remap, `send` re-interns by
-name, `CompileCtx` leans on a fragile "registration order is deterministic"
+A `SymbolId` used to be a dense per-table index minted in first-intern order —
+a process-local accident. Everything downstream compensated: every code object
+carried a `symbol_names` map for cross-table remap, `send` re-interned by name,
+`CompileCtx` leaned on a fragile "registration order is deterministic"
 invariant, and — the sharpest edge — immutable structs and sets are *sorted
-arrays* whose order (`TableKey`/`Value` compare symbols by raw id) is
-process-local, so a persisted sorted container is correct only where it was
+arrays* whose order (`TableKey`/`Value` compare symbols by raw id) was
+process-local, so a persisted sorted container was correct only where it was
 built.
 
-The fix is the identity model keywords already use: the id is a 64-bit
-FNV-1a hash of the name, stable across tables, processes, and builds. Then
-symbol values are as portable as keyword values; sort orders are stable by
-construction; the image needs no symbol remap pass, no re-sort pass, no
-symbol watermark; templates lose their `symbol_names` maps; `send` stops
-re-interning for identity; the `CompileCtx` ordering invariant dissolves.
+A `SymbolId` is now the 64-bit FNV-1a hash of the name, and a name lives in a
+per-instance display memo rather than a process-wide table
+([symbol.md](symbol.md) owns the model). Symbol values are as portable as
+keyword values, and sort orders are stable by construction, so the image needs
+no symbol remap pass, no re-sort pass, and no symbol watermark.
 
-No global registry backs this. Minting an id consults nothing — the hash
-is the id — so the only remaining jobs are display (hash→name) and
-collision detection, and both stay per instance. `SymbolTable` survives as
-an instance-local hash→name **display memo** on the plumbing it rides
-today: no lock, because no structure is shared; teardown drops the memo
-with its instance, so the leak guarantee holds without a carve-out. The
-memo learns names at the boundaries where names already travel — the
-reader, `send`'s name field (now display-only data the receiver records),
-hydration's name-table replay, `ConstTemplate` decode — and every learning
-site doubles as the collision check: recording a hash the memo maps to a
-different name is the panic. That catches cross-thread, cross-image, and
-cross-build collisions at the moment they would first confuse a reader,
-which one process-wide table cannot. A CI test hashes every static name —
-the primitive tables and aliases, every symbol read from core, prelude,
-and stdlib — and asserts distinctness, so the built-in vocabulary is
-proven collision-free per build; the runtime panic covers dynamic names,
-where the 64-bit birthday bound is ~3×10⁻¹⁰ at 10⁵ symbols. The keyword
-registry takes the same demotion in this migration.
-
-Migration notes: `SymbolId(u32)` widens to `u64` (the `Value` payload
-already is one); the `SYNTHETIC` sentinel survives as a reserved hash;
-struct and set iteration order changes from intern-order to hash-order —
-deterministic, and measured to churn nothing. Risk item 4 records the
-full site audit and the measured cost: no bytecode operand carries a
-symbol id, no live dense-index site exists, and the widening is ~75
-mechanical seam edits.
+Identity comes free; display does not. A hydrating instance holds none of the
+dump's names, which is what the name table below is for, and replaying it is
+also where a cross-build collision is caught.
 
 ### Region-native immutable structs
 
@@ -199,7 +175,7 @@ inline `RegionSlice<u8>`. Flatten every field: constants as
 `RegionSlice<Value>`, masks and release tables as inline slices, the location
 map as a sorted `RegionSlice<(u32, PackedLoc)>` over an interned file table,
 `child_protos` as `RegionSlice<Value>` of sibling templates, name and doc as
-region strings (`symbol_names` is gone per the above). Payoff now:
+region strings. Payoff now:
 `MakeClosure` clones the blueprint — ~20 `Rc` bumps per closure creation —
 into the instance region; a flattened template is referenced, not cloned.
 Payoff for images: code objects become body data.
@@ -338,7 +314,7 @@ One image is one file (or one embedded blob):
 | relocations | pointer stream: (slot offset, target segment, target offset); primitive stream: (slot offset); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval (Hydration step 3), so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | primitive names in dump-time `prim_id` order |
-| name table | symbol and keyword names in the body — hashes are stable, but the hydrating instance's display memos must learn them |
+| name table | symbol and keyword names in the body — hashes are stable, but the hydrating instance's display memo must learn them |
 | signal table | user-defined signal names in dump-time bit order |
 | watermarks | dump-time counters: parameter id, static-region mint, hygiene scope id, next signal bit |
 | manifest | bindings: name, kind (function / macro / core), value location, signal, arity, doc location; macro entries add parameter lists, template-syntax and transformer-cache locations; inline-fn syntax locations; plus root locations and dependency fingerprints |
@@ -410,8 +386,8 @@ migration.
 
 1. Validate the fingerprint; on failure, fall back (boot: compile sources;
    environment: report the mismatch).
-2. Register the name table in the hydrating instance's symbol and keyword
-   display memos.
+2. Register the name table in the hydrating instance's display memo (one
+   map serves both vocabularies).
    Replay the signal table so user signal bits land where the dump minted
    them. Check the primitive table against the live registry.
 3. Mint a region and map the page section: reserve an aligned `PROT_NONE`
@@ -757,9 +733,10 @@ wrong about. Run these before the foundations land, in this order:
 Foundations first — each lands green on the existing corpus with no image
 code, and each deletes image machinery:
 
-1. **symbol** — stable content-addressed symbol identity; deletes the
-   symbol remap pass, the sorted-container re-sort hazard, `symbol_names`
-   maps, and `send`'s re-interning.
+1. **symbol** — landed. Stable content-addressed symbol identity
+   ([symbol.md](symbol.md)); deleted the symbol remap pass, the
+   sorted-container re-sort hazard, the `symbol_names` maps, and `send`'s
+   re-interning.
 2. **struct** — region-native immutable struct payloads.
 3. **template** — the flattened, region-resident `ClosureTemplate`;
    `MakeClosure` references instead of clones.

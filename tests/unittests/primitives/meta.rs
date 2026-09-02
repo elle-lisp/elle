@@ -29,7 +29,7 @@ fn test_gensym_with_prefix() {
     assert!(sym.as_symbol().is_some(), "gensym should return a symbol");
     // Verify the interned name starts with VAR
     let sym_id = sym.as_symbol().unwrap();
-    let name = symbols.name(elle::value::SymbolId(sym_id)).unwrap();
+    let name = symbols.name(sym_id).unwrap();
     assert!(
         name.starts_with("VAR"),
         "gensym with prefix should start with VAR, got: {}",
@@ -225,7 +225,7 @@ fn test_trace_primitive() {
 
     // Test with symbol label
     let sym_id = symbols.intern("trace-label");
-    let label = Value::symbol(sym_id.0);
+    let label = Value::symbol(sym_id);
     let result = call_primitive(&trace, &[label, value]);
     assert!(result.is_ok());
 

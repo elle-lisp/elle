@@ -55,7 +55,7 @@ pub(crate) fn prim_gensym(
         );
     }
     let id = unsafe { (*symbols_ptr).intern(&sym_name) };
-    (SIG_OK, Value::symbol(id.0))
+    (SIG_OK, Value::symbol(id))
 }
 
 /// Create a syntax object with the lexical context of another syntax object.

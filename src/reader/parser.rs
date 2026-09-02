@@ -105,7 +105,7 @@ impl Reader {
                             Some(OwnedToken::RightBracket) => {
                                 self.advance();
                                 // Build (list e1 e2 e3 ...)
-                                let list_sym = Value::symbol(symbols.intern("list").0);
+                                let list_sym = Value::symbol(symbols.intern("list"));
                                 let result = elements
                                     .into_iter()
                                     .rev()
@@ -125,7 +125,7 @@ impl Reader {
                 } else if let Some(OwnedToken::String(s)) = self.current().cloned() {
                     // @"..." is sugar for (thaw "...")
                     self.advance();
-                    let sb_sym = Value::symbol(symbols.intern("thaw").0);
+                    let sb_sym = Value::symbol(symbols.intern("thaw"));
                     let str_val = ctx.string(s.as_str());
                     let inner = ctx.pair(str_val, Value::EMPTY_LIST);
                     Ok(ctx.pair(sb_sym, inner))
@@ -141,35 +141,35 @@ impl Reader {
             OwnedToken::Quote => {
                 self.advance();
                 let val = self.read(ctx, symbols)?;
-                let quote_sym = Value::symbol(symbols.intern("quote").0);
+                let quote_sym = Value::symbol(symbols.intern("quote"));
                 let inner = ctx.pair(val, Value::EMPTY_LIST);
                 Ok(ctx.pair(quote_sym, inner))
             }
             OwnedToken::Quasiquote => {
                 self.advance();
                 let val = self.read(ctx, symbols)?;
-                let qq_sym = Value::symbol(symbols.intern("quasiquote").0);
+                let qq_sym = Value::symbol(symbols.intern("quasiquote"));
                 let inner = ctx.pair(val, Value::EMPTY_LIST);
                 Ok(ctx.pair(qq_sym, inner))
             }
             OwnedToken::Unquote => {
                 self.advance();
                 let val = self.read(ctx, symbols)?;
-                let uq_sym = Value::symbol(symbols.intern("unquote").0);
+                let uq_sym = Value::symbol(symbols.intern("unquote"));
                 let inner = ctx.pair(val, Value::EMPTY_LIST);
                 Ok(ctx.pair(uq_sym, inner))
             }
             OwnedToken::UnquoteSplicing => {
                 self.advance();
                 let val = self.read(ctx, symbols)?;
-                let uqs_sym = Value::symbol(symbols.intern("unquote-splicing").0);
+                let uqs_sym = Value::symbol(symbols.intern("unquote-splicing"));
                 let inner = ctx.pair(val, Value::EMPTY_LIST);
                 Ok(ctx.pair(uqs_sym, inner))
             }
             OwnedToken::Splice => {
                 self.advance();
                 let val = self.read(ctx, symbols)?;
-                let splice_sym = Value::symbol(symbols.intern("splice").0);
+                let splice_sym = Value::symbol(symbols.intern("splice"));
                 let inner = ctx.pair(val, Value::EMPTY_LIST);
                 Ok(ctx.pair(splice_sym, inner))
             }
@@ -198,12 +198,14 @@ impl Reader {
                 Ok(Value::NIL)
             }
             OwnedToken::Symbol(s) => {
-                let id = symbols.intern(s).0;
+                let id = symbols.intern(s);
                 self.advance();
                 Ok(Value::symbol(id))
             }
             OwnedToken::Keyword(s) => {
-                // Keywords are self-evaluating values (interned strings)
+                // Keywords are self-evaluating; the spelling is learned here —
+                // the value-reader is a learning site like the analyzer.
+                symbols.keyword(s);
                 self.advance();
                 Ok(Value::keyword(s))
             }
@@ -334,7 +336,7 @@ impl Reader {
                 Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (struct k1 v1 k2 v2 ...)
-                    let struct_sym = Value::symbol(symbols.intern("struct").0);
+                    let struct_sym = Value::symbol(symbols.intern("struct"));
                     let result = elements
                         .into_iter()
                         .rev()
@@ -360,7 +362,7 @@ impl Reader {
                 Some(OwnedToken::RightBrace) => {
                     self.advance();
                     // Build (table k1 v1 k2 v2 ...)
-                    let table_sym = Value::symbol(symbols.intern("table").0);
+                    let table_sym = Value::symbol(symbols.intern("table"));
                     let result = elements
                         .into_iter()
                         .rev()

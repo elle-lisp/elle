@@ -66,7 +66,7 @@ impl<'a> Analyzer<'a> {
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame
                 .bindings
-                .entry(name.to_string())
+                .entry(SymbolId::of(name))
                 .or_default()
                 .push(ScopedBinding {
                     scopes: scopes.to_vec(),
@@ -86,7 +86,7 @@ impl<'a> Analyzer<'a> {
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame
                 .bindings
-                .entry(name.to_string())
+                .entry(SymbolId::of(name))
                 .or_default()
                 .push(ScopedBinding {
                     scopes: scopes.to_vec(),
@@ -99,20 +99,17 @@ impl<'a> Analyzer<'a> {
     }
     /// Bind a symbol by its already-interned SymbolId.
     ///
-    /// Used by `bind_primitives` where we already have SymbolIds from
-    /// PrimitiveMeta and need to resolve the name for scope registration.
+    /// Used by `bind_primitives`, which holds ids from `PrimitiveMeta`. The id
+    /// is the scope key, so this needs no spelling — and must not want one:
+    /// those ids were minted against the compile context's table, which is not
+    /// this analyzer's.
     pub(super) fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
-        let name = self
-            .symbols
-            .name(sym)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("sym#{}", sym.0));
         let binding = self.arena.alloc(sym, scope);
 
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame
                 .bindings
-                .entry(name)
+                .entry(sym)
                 .or_default()
                 .push(ScopedBinding {
                     scopes: Vec::new(), // primitives have empty scopes (visible everywhere)
@@ -131,7 +128,7 @@ impl<'a> Analyzer<'a> {
 
         // Walk scopes from innermost to outermost
         for (depth, scope) in self.scopes.iter().enumerate().rev() {
-            if let Some(candidates) = scope.bindings.get(name) {
+            if let Some(candidates) = scope.bindings.get(&SymbolId::of(name)) {
                 // Find the best candidate: binding's scopes must be a subset of
                 // the reference's scopes, and the largest scope set wins.
                 // When multiple candidates share the largest scope-set size,
@@ -304,13 +301,16 @@ impl<'a> Analyzer<'a> {
         ref_scopes: &[ScopeId],
     ) -> Option<Binding> {
         self.scopes.last().and_then(|scope| {
-            scope.bindings.get(name).and_then(|candidates| {
-                candidates
-                    .iter()
-                    .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
-                    .max_by_key(|c| c.scopes.len())
-                    .map(|c| c.binding)
-            })
+            scope
+                .bindings
+                .get(&SymbolId::of(name))
+                .and_then(|candidates| {
+                    candidates
+                        .iter()
+                        .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
+                        .max_by_key(|c| c.scopes.len())
+                        .map(|c| c.binding)
+                })
         })
     }
 }

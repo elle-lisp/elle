@@ -41,21 +41,38 @@ impl Value {
         }
     }
 
-    /// Create a symbol value from a SymbolId.
+    /// Create a symbol value from a `SymbolId`.
+    ///
+    /// Takes the newtype, not a bare `u64`: a keyword hash is also a `u64`, and
+    /// the two payloads would otherwise be swappable at a call site with no
+    /// compile error.
     #[inline]
-    pub fn symbol(id: u32) -> Self {
+    pub fn symbol(id: crate::value::SymbolId) -> Self {
         Value {
             tag: TAG_SYMBOL,
-            payload: id as u64,
+            payload: id.0,
         }
     }
 
-    /// Create a keyword value from a name string.
-    /// The name is hashed and registered in the global keyword table.
-    /// Equality is O(1) hash comparison; name recovery via `as_keyword_name()`.
+    /// Create a keyword value from a name string. Identity only — the
+    /// spelling is recorded nowhere; display resolves it through the
+    /// per-instance memo and the static vocabulary
+    /// (docs/impl/symbol.md § "The display memo"). `const`, so a well-known
+    /// keyword can be a constant.
     #[inline]
-    pub fn keyword(name: &str) -> Self {
-        let hash = crate::value::keyword::intern_keyword(name);
+    pub const fn keyword(name: &str) -> Self {
+        Value {
+            tag: TAG_KEYWORD,
+            payload: crate::value::keyword::keyword_hash(name),
+        }
+    }
+
+    /// Rebuild a keyword from its payload — a hash that came off an existing
+    /// keyword (`keyword_hash()`), a `TableKey::Keyword`, or a decoded
+    /// constant. Not for arbitrary integers: a payload that never came from
+    /// [`keyword_hash`](crate::value::keyword::keyword_hash) names nothing.
+    #[inline]
+    pub(crate) fn keyword_from_hash(hash: u64) -> Self {
         Value {
             tag: TAG_KEYWORD,
             payload: hash,

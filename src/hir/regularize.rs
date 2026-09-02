@@ -32,14 +32,14 @@ pub(crate) fn regularize(
     dispatch_wrappers: &mut DispatchWrapperRegistry,
     fn_inline: &mut FnInlineRegistry,
 ) -> Result<TypeInfo, String> {
-    prune_typeof_match_arms(hir, arena, symbols);
+    prune_typeof_match_arms(hir, arena);
     // Closure dissolution: fuse `(map f xs)` / `(map g (map f xs))` over a proven
     // immutable array into an inlined index-walk loop, before functionalize sees
     // the tree so the loop lowers exactly as `map`'s own body does
     // (docs/impl/dissolution.md). Runs after pruning (which leaves map calls
     // untouched) and before tail-call marking, so the fused loop's `freeze` tail
     // is marked in place of the collapsed `map` call.
-    fuse_map_chains(hir, arena, symbols, fn_inline);
+    fuse_map_chains(hir, arena, fn_inline);
     // Dead binding elimination runs after pruning and fusion, which both make
     // bindings unused, and before functionalize, for the same reason pruning
     // does: the region solver runs after these transforms, so a call deleted
@@ -48,5 +48,5 @@ pub(crate) fn regularize(
     crate::hir::tailcall::mark_tail_calls(hir);
     crate::hir::functionalize::functionalize(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
-    infer_and_rewrite(hir, arena, symbols, dispatch_wrappers)
+    infer_and_rewrite(hir, arena, dispatch_wrappers)
 }

@@ -32,6 +32,40 @@ pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
     }
 }
 
+/// Record every keyword spelling in `syntax` into the instance memo — the
+/// keyword analogue of interning identifiers. Called by the expander on each
+/// tree it enters (macro arguments and quasiquote templates round-trip
+/// keywords as bare hashes, so their spellings must be learned before the
+/// round-trip) and by the analyzer as a pre-pass
+/// (docs/impl/symbol.md § "The display memo"). Idempotent; the memo dedups.
+pub(crate) fn learn_keywords(syntax: &Syntax, symbols: &mut SymbolTable) {
+    match &syntax.kind {
+        SyntaxKind::Keyword(name) => {
+            symbols.keyword(name);
+        }
+        SyntaxKind::List(items)
+        | SyntaxKind::Array(items)
+        | SyntaxKind::ArrayMut(items)
+        | SyntaxKind::Struct(items)
+        | SyntaxKind::StructMut(items)
+        | SyntaxKind::Set(items)
+        | SyntaxKind::SetMut(items)
+        | SyntaxKind::Bytes(items)
+        | SyntaxKind::BytesMut(items) => {
+            for item in items {
+                learn_keywords(item, symbols);
+            }
+        }
+        SyntaxKind::Quote(inner)
+        | SyntaxKind::Quasiquote(inner)
+        | SyntaxKind::Unquote(inner)
+        | SyntaxKind::UnquoteSplicing(inner)
+        | SyntaxKind::Splice(inner) => learn_keywords(inner, symbols),
+        SyntaxKind::SyntaxLiteral(inner) => learn_keywords(inner, symbols),
+        _ => {}
+    }
+}
+
 /// Convert a TableKey back to a Syntax node.
 fn table_key_to_syntax(
     key: &TableKey,
@@ -47,7 +81,11 @@ fn table_key_to_syntax(
             SyntaxKind::Symbol(name.to_string())
         }
         TableKey::String(s) => SyntaxKind::String(s.clone()),
-        TableKey::Keyword(s) => SyntaxKind::Keyword(s.clone()),
+        TableKey::Keyword(hash) => {
+            let name = crate::value::keyword::resolve_keyword_name(Some(symbols), *hash)
+                .ok_or_else(|| format!("Unknown keyword {:#x} in table key", hash))?;
+            SyntaxKind::Keyword(name.to_string())
+        }
         TableKey::EmptyList => SyntaxKind::List(vec![]),
         TableKey::Array(keys) => {
             let elements: Result<Vec<_>, _> = keys
@@ -89,9 +127,15 @@ impl Syntax {
             SyntaxKind::Float(n) => Value::float(*n),
             SyntaxKind::Symbol(s) => {
                 let id = symbols.intern(s);
-                Value::symbol(id.0)
+                Value::symbol(id)
             }
-            SyntaxKind::Keyword(s) => Value::keyword(s),
+            SyntaxKind::Keyword(s) => {
+                // A learning site: read-time keyword data (`read`, `read-all`,
+                // `syntax->datum`) records its spelling like the analyzer does
+                // for compiled source.
+                symbols.keyword(s);
+                Value::keyword(s)
+            }
             SyntaxKind::String(s) => ctx.string(s),
             SyntaxKind::StringMut(s) => ctx.string_mut(s.as_bytes().to_vec()),
             SyntaxKind::List(items) => {
@@ -118,69 +162,69 @@ impl Syntax {
             SyntaxKind::Bytes(items) => {
                 // Convert to (bytes e1 e2 ...) list
                 let bytes_sym = symbols.intern("bytes");
-                let mut values = vec![Value::symbol(bytes_sym.0)];
+                let mut values = vec![Value::symbol(bytes_sym)];
                 values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
                 ctx.list(values)
             }
             SyntaxKind::BytesMut(items) => {
                 // Convert to (@bytes e1 e2 ...) list
                 let bytes_mut_sym = symbols.intern("@bytes");
-                let mut values = vec![Value::symbol(bytes_mut_sym.0)];
+                let mut values = vec![Value::symbol(bytes_mut_sym)];
                 values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
                 ctx.list(values)
             }
             SyntaxKind::Struct(items) => {
                 // Convert to (struct k1 v1 k2 v2 ...) list
                 let struct_sym = symbols.intern("struct");
-                let mut values = vec![Value::symbol(struct_sym.0)];
+                let mut values = vec![Value::symbol(struct_sym)];
                 values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
                 ctx.list(values)
             }
             SyntaxKind::StructMut(items) => {
                 // Convert to (@struct k1 v1 k2 v2 ...) list
                 let struct_mut_sym = symbols.intern("@struct");
-                let mut values = vec![Value::symbol(struct_mut_sym.0)];
+                let mut values = vec![Value::symbol(struct_mut_sym)];
                 values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
                 ctx.list(values)
             }
             SyntaxKind::Set(items) => {
                 // Convert to (set e1 e2 ...) list
                 let set_sym = symbols.intern("set");
-                let mut values = vec![Value::symbol(set_sym.0)];
+                let mut values = vec![Value::symbol(set_sym)];
                 values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
                 ctx.list(values)
             }
             SyntaxKind::SetMut(items) => {
                 // Convert to (@set e1 e2 ...) list
                 let set_mut_sym = symbols.intern("@set");
-                let mut values = vec![Value::symbol(set_mut_sym.0)];
+                let mut values = vec![Value::symbol(set_mut_sym)];
                 values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
                 ctx.list(values)
             }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
                 let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(quote_sym.0), inner_val])
+                ctx.list(vec![Value::symbol(quote_sym), inner_val])
             }
             SyntaxKind::Quasiquote(inner) => {
                 let sym = symbols.intern("quasiquote");
                 let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym.0), inner_val])
+                ctx.list(vec![Value::symbol(sym), inner_val])
             }
             SyntaxKind::Unquote(inner) => {
                 let sym = symbols.intern("unquote");
                 let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym.0), inner_val])
+                ctx.list(vec![Value::symbol(sym), inner_val])
             }
             SyntaxKind::UnquoteSplicing(inner) => {
                 let sym = symbols.intern("unquote-splicing");
                 let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym.0), inner_val])
+                ctx.list(vec![Value::symbol(sym), inner_val])
             }
             SyntaxKind::Splice(inner) => {
                 let sym = symbols.intern("splice");
                 let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym.0), inner_val])
+                ctx.list(vec![Value::symbol(sym), inner_val])
             }
             // A hygiene-bearing template symbol. Materialize a fresh syntax object
             // (ordinary allocation into the ctx's region) wrapping the carried
@@ -322,11 +366,11 @@ impl Syntax {
         } else if let Some(n) = value.as_float() {
             SyntaxKind::Float(n)
         } else if let Some(id) = value.as_symbol() {
-            let name = symbols
-                .name(crate::value::SymbolId(id))
-                .ok_or("Unknown symbol")?;
+            let name = symbols.name(id).ok_or("Unknown symbol")?;
             SyntaxKind::Symbol(name.to_string())
-        } else if let Some(name) = value.as_keyword_name() {
+        } else if let Some(hash) = value.keyword_hash() {
+            let name = crate::value::keyword::resolve_keyword_name(Some(symbols), hash)
+                .ok_or_else(|| format!("Unknown keyword {:#x}", hash))?;
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.with_string(|s| s.to_string()) {
             SyntaxKind::String(s)

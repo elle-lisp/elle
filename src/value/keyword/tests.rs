@@ -84,15 +84,79 @@ fn known_keywords_no_collision() {
     }
 }
 
+// The vocabulary is injective under the hash — the static half of the
+// collision guard the memo enforces at run time.
 #[test]
-fn intern_and_lookup() {
-    let h = intern_keyword("test-intern-lookup");
-    assert_eq!(keyword_name(h).as_deref(), Some("test-intern-lookup"));
+fn vocabulary_is_collision_free() {
+    let mut seen = std::collections::HashMap::new();
+    for name in VOCABULARY {
+        if let Some(prev) = seen.insert(keyword_hash(name), name) {
+            panic!("vocabulary collision: {:?} and {:?}", prev, name);
+        }
+    }
 }
 
+// Resolution order: the memo answers first, then the static vocabulary, then
+// nothing. "error" is in the vocabulary; a fresh spelling is not.
 #[test]
-fn intern_idempotent() {
-    let h1 = intern_keyword("test-idempotent");
-    let h2 = intern_keyword("test-idempotent");
-    assert_eq!(h1, h2);
+fn resolution_reads_memo_then_vocabulary() {
+    let mut memo = crate::symbol::SymbolTable::new();
+    let dynamic = memo.keyword("kw-resolve-order-xt");
+
+    assert_eq!(
+        resolve_keyword_name(Some(&memo), dynamic),
+        Some("kw-resolve-order-xt"),
+        "a learned spelling resolves through the memo"
+    );
+    assert_eq!(
+        resolve_keyword_name(None, dynamic),
+        None,
+        "a run-time spelling is invisible without the memo that learned it"
+    );
+    assert_eq!(
+        resolve_keyword_name(None, keyword_hash("error")),
+        Some("error"),
+        "a vocabulary spelling needs no memo"
+    );
+}
+
+// Every fixed spelling the runtime mints must be in VOCABULARY, or the value
+// it names prints as #<keyword:hash>. The scan covers the literal mint forms;
+// spellings reaching keywords through enum accessors are covered by the
+// corpus, which prints them.
+//
+// Counter-factual: remove "ok" from VOCABULARY and this fails on the
+// `Value::keyword("ok")` sites.
+#[test]
+fn vocabulary_covers_literal_mint_sites() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut missing = std::collections::BTreeSet::new();
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("readable source dir") {
+            let path = entry.expect("readable dir entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                // Test-only literals never reach a user's display path.
+                && !path.to_string_lossy().contains("tests")
+            {
+                let text = std::fs::read_to_string(&path).expect("readable source file");
+                for pat in ["Value::keyword(\"", "TableKey::keyword(\"", "ctx.error(\""] {
+                    for (i, _) in text.match_indices(pat) {
+                        let rest = &text[i + pat.len()..];
+                        let name = &rest[..rest.find('"').expect("terminated literal")];
+                        if static_keyword_name(keyword_hash(name)).is_none() {
+                            missing.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "keyword spellings minted from literals but absent from VOCABULARY: {:?}",
+        missing
+    );
 }

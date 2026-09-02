@@ -19,7 +19,7 @@ use super::arena::BindingArena;
 use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind, IntrinsicOp};
 use super::types::{TyId, TypeInterner};
-use crate::symbol::SymbolTable;
+use crate::value::SymbolId;
 
 use std::collections::HashMap;
 
@@ -52,12 +52,10 @@ const MAX_ITERS: usize = 10;
 pub fn infer_and_rewrite(
     hir: &mut Hir,
     arena: &BindingArena,
-    symbols: &SymbolTable,
     dispatch_wrappers: &mut DispatchWrapperRegistry,
 ) -> Result<TypeInfo, String> {
     let interner = TypeInterner::new();
-    // Build name lookup: SymbolId → name string, for matching callees
-    let symbol_names = symbols.all_names();
+
     let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
     let mut hir_types: HashMap<HirId, TyId> = HashMap::new();
     let mut binding_min_length: HashMap<Binding, usize> = HashMap::new();
@@ -77,7 +75,7 @@ pub fn infer_and_rewrite(
     // `(let [ta (type-of a)] (match ta …))` idiom narrows `a` like the inline
     // dispatch (`collect_typeof_aliases`).
     let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
-    collect_typeof_aliases(hir, arena, &symbol_names, &mut typeof_aliases);
+    collect_typeof_aliases(hir, arena, &mut typeof_aliases);
     // Kleene start: every parameter that CAN be proven by complete call-site
     // enumeration (callee-only binding, unmutated param) begins at BOTTOM, so
     // an identity-passed argument in a self/mutual recursion contributes
@@ -113,7 +111,6 @@ pub fn infer_and_rewrite(
             &mut hir_types,
             &lambda_params,
             &mut lambda_body_type,
-            &symbol_names,
             &mut binding_min_length,
             &value_used,
             &typeof_aliases,
@@ -144,24 +141,16 @@ pub fn infer_and_rewrite(
         hir,
         &hir_types,
         arena,
-        &symbol_names,
         &typeof_aliases,
         dispatch_wrappers,
     );
 
     // The prove-or-reject gate: every call-position %-intrinsic must discharge
     // its operand contract from the (narrowed, per-occurrence) inferred types.
-    contract::check_intrinsic_operand_proofs(hir, &hir_types, arena, &symbol_names)?;
+    contract::check_intrinsic_operand_proofs(hir, &hir_types, arena)?;
 
     // Signal narrowing: strip SIG_ERROR from calls with provably typed args
-    super::narrow::narrow_signals(
-        hir,
-        &interner,
-        arena,
-        &symbol_names,
-        &hir_types,
-        &binding_min_length,
-    );
+    super::narrow::narrow_signals(hir, &interner, arena, &hir_types, &binding_min_length);
 
     // Signal re-propagation: recompute parent signals bottom-up
     super::narrow::repropagate_signals(hir);
@@ -204,8 +193,19 @@ fn unwrap_to_call(hir: &Hir) -> Option<usize> {
 /// names matched here are stdlib *closures* (defined in stdlib.lisp,
 /// not in any primitive table) whose pass-through typing inference
 /// still wants.
-fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterner) -> TyId {
+fn primitive_return_type(sym: SymbolId, arg_types: &[TyId], _interner: &TypeInterner) -> TyId {
     use crate::primitives::def::RetType;
+
+    // Recognition is by id, not by a resolved spelling: `SymbolId::of` is a
+    // `const fn` over the name's hash, so these are integer compares against
+    // constants and need no symbol table (docs/impl/symbol.md § "Reading a
+    // name, and not reading one"). That matters most for the stdlib closures
+    // below, which are in no primitive table — nothing build-time could hand
+    // back their names.
+    const PCT_THAW: SymbolId = SymbolId::of("%thaw");
+    const THAW: SymbolId = SymbolId::of("thaw");
+    const PCT_FREEZE: SymbolId = SymbolId::of("%freeze");
+    const FREEZE: SymbolId = SymbolId::of("freeze");
 
     // %thaw/thaw and %freeze/freeze map a container to its mutable/immutable
     // twin. The native's own RetType is polymorphic (Unknown), but the result
@@ -215,13 +215,13 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterne
     // contract (e.g. `(%string-push @"" "x")`), and types explicit
     // `thaw`/`freeze` calls on a proven container likewise.
     let arg0 = || arg_types.first().copied().unwrap_or(TypeInterner::TOP);
-    match name {
-        "%thaw" | "thaw" => return mutable_twin(arg0()),
-        "%freeze" | "freeze" => return immutable_twin(arg0()),
+    match sym {
+        PCT_THAW | THAW => return mutable_twin(arg0()),
+        PCT_FREEZE | FREEZE => return immutable_twin(arg0()),
         _ => {}
     }
 
-    if let Some(def) = crate::primitives::registration::def_by_name(name) {
+    if let Some(def) = crate::primitives::registration::def_by_symbol(sym) {
         return match def.ret {
             RetType::Unknown => TypeInterner::TOP,
             RetType::Int => TypeInterner::INT,
@@ -248,18 +248,37 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterne
         };
     }
 
-    match name {
+    const PUSH: SymbolId = SymbolId::of("push");
+    const PUT: SymbolId = SymbolId::of("put");
+    const ADD: SymbolId = SymbolId::of("+");
+    const SUB: SymbolId = SymbolId::of("-");
+    const MUL: SymbolId = SymbolId::of("*");
+    const DIV: SymbolId = SymbolId::of("/");
+    const REM: SymbolId = SymbolId::of("rem");
+    const MOD: SymbolId = SymbolId::of("mod");
+    const ABS: SymbolId = SymbolId::of("abs");
+    const MIN: SymbolId = SymbolId::of("min");
+    const MAX: SymbolId = SymbolId::of("max");
+    const INC: SymbolId = SymbolId::of("inc");
+    const DEC: SymbolId = SymbolId::of("dec");
+    const SUM: SymbolId = SymbolId::of("sum");
+    const PRODUCT: SymbolId = SymbolId::of("product");
+    const FLOOR: SymbolId = SymbolId::of("floor");
+    const CEIL: SymbolId = SymbolId::of("ceil");
+    const ROUND: SymbolId = SymbolId::of("round");
+    match sym {
         // stdlib.lisp closures (not primitives): mutating pass-throughs
         // that return their first argument.
-        "push" | "put" => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
+        PUSH | PUT => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
         // The arithmetic wrappers validate their operands and raise on
         // anything non-numeric, so on every path that RETURNS the result is a
         // Number — the same stable-name authority the guard recognition uses
         // for the predicates. This is what lets `(%lt (- b a) 2)`-style
         // measurement code prove its operands without a hand guard.
-        "+" | "-" | "*" | "/" | "rem" | "mod" | "abs" | "min" | "max" | "inc" | "dec" | "sum"
-        | "product" => TypeInterner::NUMBER,
-        "floor" | "ceil" | "round" => TypeInterner::NUMBER,
+        ADD | SUB | MUL | DIV | REM | MOD | ABS | MIN | MAX | INC | DEC | SUM | PRODUCT => {
+            TypeInterner::NUMBER
+        }
+        FLOOR | CEIL | ROUND => TypeInterner::NUMBER,
         _ => TypeInterner::TOP,
     }
 }

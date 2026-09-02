@@ -117,19 +117,15 @@ pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
         return Ok(t.borrow().len());
     }
     if let Some(sid) = val.as_symbol() {
-        let name = ctx
-            .vm()
-            .symbols()
-            .and_then(|s| s.name(crate::value::SymbolId(sid)).map(|n| n.to_string()));
-        if let Some(name) = name {
-            return Ok(crate::segment::grapheme_count(&name, gen));
+        if let Some(name) = ctx.vm().symbols().and_then(|s| s.name(sid)) {
+            return Ok(crate::segment::grapheme_count(name, gen));
         }
         return Err(ctx.error(
             "internal-error",
             format!("unable to resolve symbol name for id {:?}", sid),
         ));
     }
-    if let Some(name) = val.as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(*val) {
         return Ok(crate::segment::grapheme_count(&name, gen));
     }
     if let Some(syntax) = val.as_syntax() {

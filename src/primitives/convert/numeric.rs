@@ -52,7 +52,7 @@ pub(crate) fn prim_parse_int(
     if let Some(result) = args[0].with_string(|s| parse_int(ctx, s, radix)) {
         return result;
     }
-    if let Some(name) = args[0].as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(args[0]) {
         return parse_int(ctx, &name, radix);
     }
     type_error!(ctx, args[0], "parse-int", "string or keyword")
@@ -98,7 +98,7 @@ pub(crate) fn prim_parse_float(
     if let Some(result) = args[0].with_string(|s| parse_float(ctx, s)) {
         return result;
     }
-    if let Some(name) = args[0].as_keyword_name() {
+    if let Some(name) = ctx.keyword_spelling(args[0]) {
         return parse_float(ctx, &name);
     }
     type_error!(ctx, args[0], "parse-float", "string or keyword")

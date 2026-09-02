@@ -76,7 +76,7 @@ fn prim_io_backend(
             Err((kind, msg)) => return (SIG_ERROR, ctx.error(kind, msg)),
         },
     };
-    match args[0].as_keyword_name().as_deref() {
+    match ctx.keyword_spelling(args[0]).as_deref() {
         Some("async") => {
             match AsyncBackend::new_with_unicode(ctx.unicode_generation(), keepalive) {
                 Ok(backend) => {
@@ -298,7 +298,7 @@ fn prim_ev_poll_fd(
         }
     };
 
-    let events: u32 = if let Some(kw) = args[1].as_keyword_name() {
+    let events: u32 = if let Some(kw) = ctx.keyword_spelling(args[1]) {
         match kw.as_str() {
             "read" => libc::POLLIN as u32,
             "write" => libc::POLLOUT as u32,

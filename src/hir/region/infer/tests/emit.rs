@@ -9,8 +9,8 @@ fn let_body_value_region_escapes_let_scope() {
     // `(fn () (let [x (string "a")] x))` — x's region's `decref_point`
     // is at the inner Var(x), NOT a Let HirId. A value's "scope" is
     // just its last-use HirId; the let does not own a region.
-    let (hir, arena, symbols, info) = analyze_with_hir("(fn () (let [x (string \"a\")] x))");
-    let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_hir("(fn () (let [x (string \"a\")] x))");
+    let allocs = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(allocs.len(), 1, "expected one (string ...) call");
     let alloc = allocs[0];
 
@@ -39,9 +39,9 @@ fn yield_value_region_outlives_emit_scope() {
     // `decref_point` is at the Emit node (the last use). The runtime
     // incref at handle_emit keeps the region alive past the matching
     // DecrefRegion at the resume site.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_hir("(fn () (let [x (string \"a\")] (emit :yield x)))");
-    let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let allocs = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(allocs.len(), 1, "expected one (string ...) call");
     let alloc = allocs[0];
     let emit = find_first_emit(&hir).expect("emit present");
@@ -151,9 +151,9 @@ fn dynamic_emit_of_a_captured_payload_is_borrowed() {
     // `s` makes the signal a runtime value, so `(emit s x)` is a Call. `x` belongs
     // to the enclosing lambda, so the emitting body releases it nowhere and the
     // discharge would release the resumer's reference.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(let [s :yield] (fn () (let [x (string \"a\")] (fn () (emit s x)))))");
-    let calls = find_calls_to_primitive(&hir, "emit", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "emit", &arena);
     assert_eq!(calls.len(), 1, "expected one dynamic (emit …) call");
     assert!(
         info.borrowed_emit_payloads.contains(&calls[0]),
@@ -170,9 +170,9 @@ fn dynamic_emit_of_a_body_allocated_payload_is_not_borrowed() {
     // the call: the body allocates what it emits, so its `decref_point` sits in the
     // emitting lambda and a second reference would be stranded at every abandoned
     // park.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(let [s :yield] (fn () (let [x (string \"a\")] (emit s x))))");
-    let calls = find_calls_to_primitive(&hir, "emit", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "emit", &arena);
     assert_eq!(calls.len(), 1, "expected one dynamic (emit …) call");
     assert!(
         !info.borrowed_emit_payloads.contains(&calls[0]),
@@ -189,9 +189,9 @@ fn a_non_emit_delivers_call_records_no_emit_payload() {
     // shares with the other fiber value installers: `fiber/resume` hands its value
     // to a fiber that is already parked and yields nothing of its own, so naming its
     // argument here would mint a reference no park consumes.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(fn () (let [x (string \"a\")] (fn (h) (fiber/resume h x))))");
-    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena);
     assert_eq!(calls.len(), 1, "expected one (fiber/resume …) call");
     assert!(
         !info.borrowed_emit_payloads.contains(&calls[0]),
@@ -212,9 +212,9 @@ fn funnel_containment_recorded_for_push() {
     // site, and `funnel_store_sites` records the stored value for the compensate
     // gate. Needs the real classification so the callee resolves to its declared
     // `Funnel` effect and the `@[]` collection to its MutableArray RetType.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(let [acc @[] x (string \"a\")] (begin (%array-push acc x) acc))");
-    let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let allocs = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(allocs.len(), 1, "expected one (string ...) call");
     let x_alloc = allocs[0];
     let x_region = info.alloc_region.get(&x_alloc).copied().expect("x region");

@@ -17,8 +17,8 @@ fn effect_immediate_call_emits_no_arg_clique() {
     // `identical?` declares Immediate: returns a bool, stores nothing.
     // The call must record NO may-store edges between its two heap
     // (string-literal) arguments.
-    let (hir, arena, symbols, info) = analyze_with_class("(identical? \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "identical?", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(identical? \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "identical?", &arena);
     assert_eq!(calls.len(), 1, "expected one (identical? ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -38,8 +38,8 @@ fn effect_mixed_call_keeps_arg_clique() {
     // *declared* Mixed → clique), the boundary against over-deletion — not a forced
     // effect, which would merely re-exercise the solver's Mixed arm already covered
     // by `effect_unknown_call_keeps_arg_clique`.
-    let (hir, arena, symbols, info) = analyze_with_class("(git \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(git \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena);
     assert_eq!(calls.len(), 1, "expected one (git ...) call");
     let edges = edges_at_site(&info, calls[0]);
     let mutual = edges
@@ -65,11 +65,11 @@ fn effect_mixed_call_keeps_arg_clique() {
 /// template, a retention no compile-time seam records.
 #[test]
 fn effect_mixed_call_pairs_arguments_not_one_arguments_regions() {
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(let [k (if (%lt 1 0) (fn () 1) (fn () 2))] (git k))");
-    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "git", &arena);
     assert_eq!(calls.len(), 1, "expected one (git ...) call");
-    let reader = find_binding_by_name(&hir, "k", &arena, &symbols).expect("the reader binding k");
+    let reader = find_binding_by_name(&hir, "k", &arena).expect("the reader binding k");
     assert!(
         info.binding_source_regions
             .get(&reader)
@@ -100,8 +100,8 @@ fn effect_delivers_call_emits_no_arg_clique() {
     // (tests/elle/region-fiber-install-clique-leak.lisp). Uses the REAL
     // classification, so a regression that re-declares an installer `Mixed` fails
     // here as well as on the rate.
-    let (hir, arena, symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(fiber/resume \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "fiber/resume", &arena);
     assert_eq!(calls.len(), 1, "expected one (fiber/resume ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -117,9 +117,9 @@ fn effect_unknown_call_keeps_arg_clique() {
     // primitives, plugin definitions, and user-supplied functions) is
     // operationally identical to Mixed: the full mutual clique.
     use crate::primitives::def::RegionEffect;
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_effect("(string \"a\" \"b\")", "string", RegionEffect::Unknown);
-    let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(calls.len(), 1, "expected one (string ...) call");
     let edges = edges_at_site(&info, calls[0]);
     let mutual = edges
@@ -136,9 +136,9 @@ fn effect_fresh_call_emits_no_arg_clique() {
     // Fresh: the result is freshly allocated, no argument is stored —
     // no may-store edges between heap args.
     use crate::primitives::def::RegionEffect;
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_effect("(string \"a\" \"b\")", "string", RegionEffect::Fresh);
-    let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(calls.len(), 1);
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -154,9 +154,9 @@ fn effect_passthrough_call_emits_no_arg_clique() {
     // is stored — no may-store edges; the dispatch pass-through retain
     // carries the result's lifetime at runtime.
     use crate::primitives::def::RegionEffect;
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_effect("(string \"a\" \"b\")", "string", RegionEffect::PassThrough);
-    let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(calls.len(), 1);
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -173,12 +173,12 @@ fn effect_stores_call_emits_directed_edges_only() {
     // nothing else. No reverse edges (unlike the Mixed/Unknown mutual
     // clique), no edges among the non-stored arguments.
     use crate::primitives::def::RegionEffect;
-    let (hir, arena, symbols, info) = analyze_with_effect(
+    let (hir, arena, _symbols, info) = analyze_with_effect(
         "(string \"a\" \"b\" \"c\")",
         "string",
         RegionEffect::Stores { args: &[0] },
     );
-    let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(calls.len(), 1);
     let r_a = string_literal_region(&hir, &info, "a");
     let r_b = string_literal_region(&hir, &info, "b");
@@ -212,12 +212,12 @@ fn effect_sends_call_emits_no_arg_clique() {
     // `effect_stores_call_emits_directed_edges_only`, with `string` declared
     // `Sends`.
     use crate::primitives::def::RegionEffect;
-    let (hir, arena, symbols, info) = analyze_with_effect(
+    let (hir, arena, _symbols, info) = analyze_with_effect(
         "(string \"a\" \"b\" \"c\")",
         "string",
         RegionEffect::Sends { args: &[0] },
     );
-    let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(calls.len(), 1);
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -240,8 +240,8 @@ fn hard_edge_sites_marks_native_uncounted_store_sites() {
     // (docs/impl/region/effects.md "Hard edges: how a may-store edge is emitted"). Pins
     // the inclusion side of the hard/soft split, the Mixed companion of
     // `hard_edge_sites_marks_declared_stores_sites`, through the REAL classification.
-    let (hir, arena, symbols, info) = analyze_with_class("(git \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(git \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena);
     assert_eq!(calls.len(), 1, "expected one (git ...) call");
     assert!(
         info.hard_edge_sites.contains(&calls[0]),
@@ -254,12 +254,12 @@ fn hard_edge_sites_marks_declared_stores_sites() {
     // A declared Stores site is hard for the same reason Mixed is: the
     // store is real and uncounted at compile time.
     use crate::primitives::def::RegionEffect;
-    let (hir, arena, symbols, info) = analyze_with_effect(
+    let (hir, arena, _symbols, info) = analyze_with_effect(
         "(string \"a\" \"b\")",
         "string",
         RegionEffect::Stores { args: &[0] },
     );
-    let calls = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "string", &arena);
     assert_eq!(calls.len(), 1);
     assert!(
         info.hard_edge_sites.contains(&calls[0]),
@@ -281,8 +281,8 @@ fn port_write_declares_immediate_no_arg_clique() {
     // result side is oracle-exempt (a SIG_YIELD return is not a normal
     // completion), so the declaration's clique effect is what guards the leak —
     // a regression back to Mixed reintroduces it and goes RED here.
-    let (hir, arena, symbols, info) = analyze_with_class("(port/write \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "port/write", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(port/write \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "port/write", &arena);
     assert_eq!(calls.len(), 1, "expected one (port/write ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -304,8 +304,8 @@ fn udp_send_to_declares_immediate_no_arg_clique() {
     // leak. Yielding, so oracle-exempt; the declaration's clique effect is the
     // guard. Sibling of `port_write_declares_immediate_no_arg_clique`, with a
     // wider clique (the >2-heap-arg case). RED under a regression to Mixed.
-    let (hir, arena, symbols, info) = analyze_with_class("(udp/send-to \"s\" \"d\" \"a\" 9000)");
-    let calls = find_calls_to_primitive(&hir, "udp/send-to", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(udp/send-to \"s\" \"d\" \"a\" 9000)");
+    let calls = find_calls_to_primitive(&hir, "udp/send-to", &arena);
     assert_eq!(calls.len(), 1, "expected one (udp/send-to ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -328,9 +328,9 @@ fn subprocess_exec_declares_opaque_no_arg_clique() {
     // (nothing is stored) — a per-call leak on a no-store primitive, exactly the
     // gap `Opaque` closes (docs/impl/region/effects.md § Opaque: the clique is
     // keyed on the store, not the result shape). RED under a regression to Mixed.
-    let (hir, arena, symbols, info) =
+    let (hir, arena, _symbols, info) =
         analyze_with_class("(subprocess/exec \"echo\" (list \"hi\"))");
-    let calls = find_calls_to_primitive(&hir, "subprocess/exec", &arena, &symbols);
+    let calls = find_calls_to_primitive(&hir, "subprocess/exec", &arena);
     assert_eq!(calls.len(), 1, "expected one (subprocess/exec ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -354,8 +354,8 @@ fn has_declares_opaque_no_arg_clique() {
     // regions per call (tests/elle/region-has-clique-leak.lisp). The sibling of
     // `subprocess_exec_declares_opaque_no_arg_clique` on the trait-dispatch face; RED
     // under a regression to Mixed.
-    let (hir, arena, symbols, info) = analyze_with_class("(has? \"a\" \"b\")");
-    let calls = find_calls_to_primitive(&hir, "has?", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(has? \"a\" \"b\")");
+    let calls = find_calls_to_primitive(&hir, "has?", &arena);
     assert_eq!(calls.len(), 1, "expected one (has? ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
@@ -381,8 +381,8 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
     // § `Opaque`, "The child-chain WIRING is `Opaque` too"). The escape half is
     // `a_fiber_graph_write_does_not_seed_the_store_facet`.
     for name in ["fiber/child", "fiber/propagate"] {
-        let (hir, arena, symbols, info) = analyze_with_class(&format!("({name} \"f\")"));
-        let calls = find_calls_to_primitive(&hir, name, &arena, &symbols);
+        let (hir, arena, _symbols, info) = analyze_with_class(&format!("({name} \"f\")"));
+        let calls = find_calls_to_primitive(&hir, name, &arena);
         assert_eq!(calls.len(), 1, "expected one ({name} ...) call");
         assert!(
             !info.hard_edge_sites.contains(&calls[0]),
@@ -398,8 +398,8 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
     // records. Real, uncounted store: `Mixed`, and a hard-edge site. All three are
     // single-heap-arg, so the clique edge set is empty for each and `hard_edge_sites`
     // is the only thing that separates them.
-    let (hir, arena, symbols, info) = analyze_with_class("(git \"f\")");
-    let calls = find_calls_to_primitive(&hir, "git", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(git \"f\")");
+    let calls = find_calls_to_primitive(&hir, "git", &arena);
     assert_eq!(calls.len(), 1, "expected one (git ...) call");
     assert!(
         info.hard_edge_sites.contains(&calls[0]),
@@ -418,8 +418,8 @@ fn import_declares_opaque_no_hard_edge() {
     // store-facet seed (`import_does_not_seed_the_store_facet`) are what a
     // regression to Mixed brings back. The result stays non-fresh — it lives in
     // neither the call's own region nor the specifier's.
-    let (hir, arena, symbols, info) = analyze_with_class("(import \"std/nonexistent\")");
-    let calls = find_calls_to_primitive(&hir, "import", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("(import \"std/nonexistent\")");
+    let calls = find_calls_to_primitive(&hir, "import", &arena);
     assert_eq!(calls.len(), 1, "expected one (import ...) call");
     assert!(
         !info.hard_edge_sites.contains(&calls[0]),
@@ -535,8 +535,8 @@ fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
         ("(watch-next \"w\")", "watch-next", RegionEffect::Opaque),
     ];
     for (src, prim, effect) in cases {
-        let (hir, arena, symbols, info) = analyze_with_class(src);
-        let calls = find_calls_to_primitive(&hir, prim, &arena, &symbols);
+        let (hir, arena, _symbols, info) = analyze_with_class(src);
+        let calls = find_calls_to_primitive(&hir, prim, &arena);
         assert_eq!(
             calls.len(),
             1,
@@ -592,8 +592,8 @@ fn userfn_call_site_records_no_arg_clique() {
     // course also NOT a hard-edge site (only declared natives are).
     // (docs/impl/region/effects.md "What the solver derives", the
     // user-functions case.)
-    let (hir, arena, symbols, info) = analyze_with_class("((fn (h) (h \"a\" \"b\")) f)");
-    let calls = find_calls_to_primitive(&hir, "h", &arena, &symbols);
+    let (hir, arena, _symbols, info) = analyze_with_class("((fn (h) (h \"a\" \"b\")) f)");
+    let calls = find_calls_to_primitive(&hir, "h", &arena);
     assert_eq!(calls.len(), 1, "expected one (h ...) call");
     let edges = edges_at_site(&info, calls[0]);
     assert!(
