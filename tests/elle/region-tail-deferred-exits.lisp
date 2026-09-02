@@ -173,9 +173,10 @@
 # body that allocates nothing reads 0. It is the body's own pending value: the
 # squelch exit runs no abandoned-frame walk, so the release table's half of what
 # that frame owed stays owed (docs/impl/region/mechanism.md § "An abandoned frame
-# runs the releases it still owes" — a different mechanism, still open there).
-# So each subject is read against its own control rather than against 0, with one
-# window's slack for allocator noise.
+# runs the releases it still owes" — a different mechanism, open at that exit;
+# elle-lisp/elle#1027). So each subject is read against its own control rather
+# than against 0, with one window's slack for allocator noise. When #1027 closes,
+# the squelch control drops to 0 and this reading gets tighter, not wrong.
 (def slack 50)
 
 (assert (%lt d-clean slack)
