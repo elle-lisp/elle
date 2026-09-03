@@ -145,6 +145,7 @@ fn compile_file_to_lir_inner(
     epoch_skip: usize,
 ) -> Result<crate::lir::LirModule, String> {
     let mut syntaxes = read_syntax_all_for(source, source_name)?;
+    crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {

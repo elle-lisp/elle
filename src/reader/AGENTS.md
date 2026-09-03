@@ -18,7 +18,7 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `Lexer` | Tokenizes input string |
+| `Lexer` | Tokenizes input string under a `Lexicon` (epoch-gated rules, `docs/impl/lexicon.md`) |
 | `Token` | Token variants (LParen, Int, Symbol, Pipe, AtPipe, etc.) |
 | `SourceLoc` | Line/column position |
 | `Reader` | Parses tokens to `Value` |
@@ -31,19 +31,36 @@ Does NOT:
 let value = read_str(source, runtime.heap(), &mut symbols)?;
 
 // Parse to Syntax (preferred)
-let syntax = read_syntax(source)?;
+let syntax = read_syntax(source, source_name)?;
 
 // Parse multiple forms
-let forms = read_syntax_all(source)?;
+let forms = read_syntax_all(source, source_name)?;
+
+// Parse multiple forms under the current epoch, whatever the text declares
+let forms = read_syntax_all_current(source, source_name)?;
 ```
+
+Each entry point prescans the source for its `(elle/epoch N)` declaration
+and lexes under `Lexicon::for_epoch(N)` (`docs/impl/lexicon.md`).
+`prescanned_epoch_for` reports that choice without reading, so the pipeline
+can check it against the declaration in the tree.
+`read_syntax_all_current` is the one exception, and the REPL is its one
+caller: prompt input is always current-epoch, so a pasted declaration
+cannot change how the prompt lexes.
+
+`shebang_len` gives the byte length of a leading `#!` line. Everything that
+translates between original-source offsets and lexer offsets measures it
+here.
 
 ## Data flow
 
 ```
 Source string
     │
+    ├─► prescan_epoch() → Lexicon::for_epoch(n)
+    │
     ▼
-Lexer::new(source)
+Lexer::with_file(source, name).in_lexicon(lexicon)
     │
     ├─► next_token_with_loc() → Token + SourceLoc
     │
@@ -126,7 +143,12 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 7. **`:@name` keywords are valid.** The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.
 
-8. **Comments are tokens.** `#` line comments are emitted as `Token::Comment(String)`
+8. **The epoch declaration selects the lexicon.** `(elle/epoch N)` at the top
+   of a source unit decides how that unit tokenizes, before any token is
+   produced (`docs/impl/lexicon.md`). An epoch this compiler has no lexicon
+   for is a read error, not a parse that guesses.
+
+9. **Comments are tokens.** `#` line comments are emitted as `Token::Comment(String)`
    by the lexer. Both `SyntaxReader` and `Reader` skip comment tokens during
    parsing — they do not appear in the output tree. The formatter collects
    them separately via `lex_with_comments()` for comment preservation.

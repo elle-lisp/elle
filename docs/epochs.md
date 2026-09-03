@@ -36,13 +36,20 @@ See [`compile-time.md`](compile-time.md) and [`strings.md`](strings.md).
 The epoch migration pass runs after parsing and before macro expansion:
 
 ```
-Source → Reader → [Epoch Migration] → Expander → HIR → LIR → Bytecode
+Source → [epoch prescan] → Reader → [Epoch Migration] → Expander → HIR → LIR
+       → Bytecode
 ```
 
 If a file declares `(elle/epoch N)` where N is older than the current epoch, the
 compiler applies all migration rules from epoch N+1 through the current epoch
 to the parsed syntax tree. This is transparent — old-epoch code compiles and
 runs exactly as if it had been written using current-epoch syntax.
+
+Because migration operates on parsed trees, it cannot express changes to
+tokenization itself. The reader therefore reads the declaration before it
+lexes, with a frozen micro-grammar, and tokenizes under the lexer rules that
+epoch selects — see [`impl/lexicon.md`](impl/lexicon.md). Every epoch
+registered today shares one set of rules, so no file lexes differently yet.
 
 ## Migration rule types
 
@@ -108,10 +115,16 @@ directly (preserving comments, whitespace, and formatting) and updates the
 elle rewrite [OPTIONS] <file...>
 ```
 
+It reads each file under the lexicon that file's own epoch selects, so a file
+written before a token-level change still tokenizes the way its author meant
+(see [`impl/lexicon.md`](impl/lexicon.md)). Tokens whose spelling changed are
+rewritten in place alongside the tree rules.
+
 **Options:**
 - `--check` — Report files that need changes (exit 1 if any). Does not modify files.
 - `--dry-run` — Show what would change without writing.
-- `--list-rules` — Print all migration rules for the current epoch.
+- `--list-rules` — Print all migration rules for the current epoch, tree rules
+  and lexical changes alike.
 
 **Example workflow:**
 
@@ -135,7 +148,9 @@ To make a breaking change to Elle:
 
 1. Bump `CURRENT_EPOCH` in `src/epoch/rules.rs`.
 2. Add a `Migration` entry to the `MIGRATIONS` array with the new epoch number,
-   a summary, and the rules describing the change.
+   a summary, and the rules describing the change. A change to tokenization
+   also flips a `Lexicon` field in `Lexicon::for_epoch` and names itself in the
+   entry's `lexical` list — see [`impl/lexicon.md`](impl/lexicon.md).
 3. Update `(elle/epoch N)` in `stdlib.lisp` to the new epoch. The WASM backend
    strips stdlib's epoch tag and concatenates the body as-is — it does not run
    migration on stdlib, so stdlib must already use current-epoch syntax.

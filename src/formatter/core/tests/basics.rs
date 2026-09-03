@@ -217,3 +217,17 @@ nil
     let second = format_code(&formatted, &config).unwrap();
     assert_eq!(formatted, second, "full file must be idempotent");
 }
+
+#[test]
+fn formatting_refuses_a_declaration_it_has_no_lexicon_for() {
+    // The formatter lexes under the epoch its input declares
+    // (docs/impl/lexicon.md). An unregistered epoch names no lexicon, so
+    // there are no rules to tokenize the file with — including under
+    // `--no-epoch`, which formats the text exactly as it arrived.
+    let src = format!(
+        "(elle/epoch {})\n(def x 1)\n",
+        crate::epoch::CURRENT_EPOCH + 1
+    );
+    let err = format_code(&src, &FormatterConfig::default()).unwrap_err();
+    assert!(err.contains("only supports up to"), "{err}");
+}

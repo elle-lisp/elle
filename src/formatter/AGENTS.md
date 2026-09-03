@@ -20,7 +20,8 @@ Does NOT:
 ## Architecture
 
 ```
-Source → strip shebang → lex_for_format (separate tokens + comments)
+Source → strip shebang → epoch prescan
+       → lex_for_format (separate tokens + comments)
        → parse to Syntax → collect trivia → attach trivia
        → generate Doc → render → strip leading newline
        → prepend shebang + trailing newline
@@ -148,7 +149,12 @@ or arguments.
 
 3. **Shebang is stripped once.** `strip_shebang()` produces a single stripped
    source that both the parser and trivia collector use, keeping byte offsets
-   consistent.
+   consistent. It measures the line with `reader::shebang_len`, so it agrees
+   with the reader and the rewriter about where Elle's text begins.
+   `format_code` then prescans that stripped source and hands
+   `lex_for_format` the rules of the epoch it declares
+   (`docs/impl/lexicon.md`). Comment text is emitted verbatim, so the
+   spelling that arrived is the spelling that leaves.
 
 4. **String literals are source-sliced.** `SyntaxKind::String(s)` stores the
    unescaped value. The formatter slices `source[span.start..span.end]` to

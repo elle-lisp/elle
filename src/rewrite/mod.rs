@@ -7,3 +7,4 @@ pub mod edit;
 pub mod engine;
 pub mod rule;
 pub mod run;
+pub mod text;

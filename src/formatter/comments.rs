@@ -7,6 +7,7 @@
 //! annotate.
 
 use super::pos::{ByteOffset, ColNum, LineNum};
+use crate::epoch::rules::Lexicon;
 use crate::reader::{Lexer, OwnedToken, SourceLoc, Token};
 
 /// A source comment with its position and text.
@@ -43,33 +44,10 @@ pub struct CommentMap {
 }
 
 impl CommentMap {
-    /// Build a CommentMap from a source string.
-    /// Lexes the source and collects all comment tokens.
+    /// Build a CommentMap from a source string under the current epoch's
+    /// lexicon. Lexes the source and collects all comment tokens.
     pub fn collect(source: &str, source_name: &str) -> Result<Self, String> {
-        let mut lexer = Lexer::with_file(source, source_name);
-        let mut comments = Vec::new();
-
-        loop {
-            match lexer.next_token_with_loc() {
-                Ok(Some(twl)) => {
-                    if let Token::Comment(text) = &twl.token {
-                        // Strip trailing newline — the lexer includes it
-                        // but the formatter handles line breaks itself.
-                        let trimmed = text.trim_end_matches('\n').to_string();
-                        comments.push(SourceComment::new(
-                            trimmed,
-                            twl.byte_offset,
-                            twl.loc.line as u32,
-                            twl.loc.col as u32,
-                        ));
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(CommentMap { comments })
+        Ok(lex_for_format(source, source_name, Lexicon::current())?.comment_map)
     }
 
     /// An empty comment map.
@@ -150,25 +128,27 @@ pub struct LexedForFormat {
 /// Returns (stripped_source, shebang_line).
 /// The shebang_line includes the trailing newline, or is empty if none.
 pub fn strip_shebang(source: &str) -> (&str, &str) {
-    if source.starts_with("#!") {
-        match source.find('\n') {
-            Some(pos) => (&source[pos + 1..], &source[..pos + 1]),
-            None => ("", source),
-        }
-    } else {
-        (source, "")
-    }
+    let len = crate::reader::shebang_len(source);
+    (&source[len..], &source[..len])
 }
 
-/// Lex source for formatting: produces regular tokens for the parser
-/// and collects comment tokens into a CommentMap.
+/// Lex source for formatting under `lexicon`: produces regular tokens for
+/// the parser and collects comment tokens into a CommentMap.
+///
+/// The caller picks the lexicon from the epoch the source declares
+/// (docs/impl/lexicon.md), so a file written before a token-level change
+/// formats as its author wrote it.
 ///
 /// IMPORTANT: `source` must already have its shebang stripped (if any).
 /// Use `strip_shebang()` before calling this function. This ensures
 /// byte offsets in the token stream agree with byte offsets in the
 /// source string passed to `collect_trivia`.
-pub fn lex_for_format(source: &str, source_name: &str) -> Result<LexedForFormat, String> {
-    let mut lexer = Lexer::with_file(source, source_name);
+pub fn lex_for_format(
+    source: &str,
+    source_name: &str,
+    lexicon: Lexicon,
+) -> Result<LexedForFormat, String> {
+    let mut lexer = Lexer::with_file(source, source_name).in_lexicon(lexicon);
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
     let mut lengths = Vec::new();

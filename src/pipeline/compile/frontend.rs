@@ -58,6 +58,7 @@ pub(super) fn compile_file_frontend_xform(
             &format!("{} read", source_name),
             t,
         );
+        crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
         compile_syntaxes_frontend_xform_inner(syntaxes, symbols, cctx, source_name, xform)
     })
 }
