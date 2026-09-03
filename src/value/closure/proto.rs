@@ -122,20 +122,6 @@ impl TemplateProto {
             VarargKind::StrictStruct(_) => VarargTag::StrictStruct,
         }
     }
-
-    /// A human-readable label: the declared name when there is one, else the
-    /// smallest-offset source location, else `<anon>`. Lowering names almost
-    /// nothing, so the location is what identifies a function to a reader.
-    pub fn display_label(&self) -> String {
-        if let Some(name) = self.name.as_deref() {
-            return name.to_string();
-        }
-        self.location_map
-            .iter()
-            .min_by_key(|(off, _)| **off)
-            .map(|(_, loc)| format!("{}", loc))
-            .unwrap_or_else(|| "<anon>".to_string())
-    }
 }
 
 /// Build this blueprint's payload into `region`. Every slice lands in the one

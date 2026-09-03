@@ -162,10 +162,6 @@ impl<'a> MergedSlots<'a> {
         MergedSlots(slots)
     }
 
-    pub(super) fn new(slots: &'a [u32]) -> Self {
-        MergedSlots(slots)
-    }
-
     /// Membership by binary search — correct only because the set is stored
     /// ascending.
     #[inline]
@@ -296,7 +292,7 @@ impl CodePayload {
     }
 
     pub fn merged_slots(&self) -> MergedSlots<'_> {
-        MergedSlots::new(self.merged_slots.as_slice())
+        MergedSlots::from_sorted(self.merged_slots.as_slice())
     }
 
     pub fn frame_release_slots(&self) -> &[u16] {
