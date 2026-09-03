@@ -813,6 +813,25 @@ fn region_error_unwind_uaf() {
     );
 }
 
+// Guard — a deferred tail-call release runs at every end its activation can
+// reach, not only the clean break (docs/impl/region/owner.md § "A deferred
+// tail-call release has the node's life"). Each is a decref the activation
+// genuinely owed, now run where it never ran, so what must survive is every
+// reference the activation does not own: the error PAYLOAD the raiser reached
+// through the tail callee's captured environment, a closure a CONTAINER still
+// holds, the RESUMED body whose completion the release belongs to, a DROPPED
+// fiber's parked payload, and a tail RECURSION that re-enters with one closure
+// and owes it one release. Every read happens after the exit ran, so an
+// over-release faults there — SIGSEGV under guardfree. The leak face is
+// `region-tail-deferred-exits.lisp`.
+#[test]
+fn region_tail_deferred_exits_uaf() {
+    run_elle_script_with_args(
+        "region-tail-deferred-exits-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — an emit-raised error's payload keeps every frame-owed release: the
 // raise minted the delivery reference itself, so the walk and the parked
 // frame's discharge stop exempting the payload's region

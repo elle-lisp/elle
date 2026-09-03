@@ -40,37 +40,6 @@ impl JitCacheEntry {
     }
 }
 
-/// The releases a frame-replacing tail call leaves behind, one per channel.
-///
-/// Everything the lowerer emits after a `TailCall` runs only on the native
-/// fall-through, so a closure callee strands every release the enclosing scopes
-/// put there. Two channels supply the strand, and a single tail call may need
-/// **both**: a letrec body that tail-calls a per-call local closure out of a
-/// closure-cycle merged arena strands the arena's binding-scope `DecrefRegion`
-/// *and* the callee closure's own. The channels name different regions by
-/// construction — a merge MEMBER callee is absent from `cycle_tail_release` and
-/// `tail_callee_defers_release` refuses every `closure_cycle_members` region —
-/// so neither can stand in for the other.
-#[derive(Default, Clone, Copy)]
-pub(crate) struct DeferredReleases {
-    /// The closure-cycle merged arena named by `TailCall::deferred_release_slot`,
-    /// resolved through this activation's region map.
-    pub arena: Option<RuntimeRegion>,
-    /// The callee closure's own per-call region, flagged by
-    /// `TailCall::defer_callee_release`.
-    pub callee: Option<RuntimeRegion>,
-}
-
-impl DeferredReleases {
-    /// The regions to release at the activation's normal completion, in the
-    /// order the channels were earned. Order is immaterial — each is a decref of
-    /// a `Counted` region, and where one holds a counted edge to the other the
-    /// cascade and the direct decref commute.
-    pub fn regions(self) -> impl Iterator<Item = RuntimeRegion> {
-        self.arena.into_iter().chain(self.callee)
-    }
-}
-
 pub(crate) struct TailCallInfo {
     pub code: crate::value::Code,
     pub env: Rc<Vec<Value>>,
@@ -84,25 +53,6 @@ pub(crate) struct TailCallInfo {
     /// always a real closure in practice).
     pub closure: Value,
     pub squelch_mask: SignalBits,
-    /// The releases this tail call stranded past the frame replacement, which the
-    /// new activation TAKES OVER and runs when it completes (the trampoline-loop
-    /// break). Each region stays `Counted` throughout: these are deferred
-    /// decrefs, never ownership-forest adoptions.
-    ///
-    /// The callee channel covers a per-call *local* closure whose
-    /// compiler-emitted `DecrefValueRegion` the lowerer put past the `TailCall`
-    /// (one such region per call through every higher-order stdlib fn:
-    /// `fold`/`map`/`filter`/…, whose recursion tail-calls a `letrec`-bound
-    /// `go`). It is empty for a callee that is NOT a per-call local closure — a
-    /// top-level `defn` (a program-root closure, region held for the program's
-    /// life: it has no per-call decref and tail-calling it never leaked) or a
-    /// native/parameter callee (no frame replacement). The discriminator is
-    /// `VM::tail_callee_release_region`: a local closure's region is recorded in
-    /// the CURRENT activation's region map (and, with its decref dead, never
-    /// cleared); a program-root closure's region was minted in a different,
-    /// popped activation. Releasing a program-root region would be a
-    /// use-after-free.
-    pub deferred: DeferredReleases,
 }
 
 /// Pending fiber resume for the trampoline.
@@ -421,30 +371,35 @@ impl VM {
     /// which also frees the fiber owner node this discard leaves alone — the
     /// fiber survives a squelch and may still own it).
     ///
-    /// Each discarded `BytecodeFrame` may carry its activation's parked owner
-    /// node ([`crate::value::BytecodeFrame::activation_owner_node`], MOVED in at
-    /// the suspend — the node's only home). Its members are `Owned` (count
-    /// consumed by the adopt) with no other release route, and the continuation
-    /// whose normal completion would have freed the node will never run — so the
-    /// discard runs that release here: one tolerant decref takes the node's rc
-    /// 1→0 and subtree-drops node + members (interior cycles reclaim with the
-    /// set; the Shared frontier cascades once). The move discipline makes this
-    /// the sole release path — the slot was emptied at the park, so no
-    /// completion or resume can free the node a second time.
+    /// Each discarded `BytecodeFrame` carries what its activation owed
+    /// ([`crate::value::BytecodeFrame::activation_dues`], MOVED in at the
+    /// suspend — the record's only home): the parked owner node, whose members
+    /// are `Owned` (count consumed by the adopt) with no other release route,
+    /// and the releases the activation took over from its own frame-replacing
+    /// tail calls, whose emitting instruction died with the frame the tail call
+    /// replaced. The continuation whose normal completion would have discharged
+    /// them will never run, so the discard runs them here: one tolerant decref
+    /// each — for the node, rc 1→0 and a subtree drop over node + members
+    /// (interior cycles reclaim with the set; the Shared frontier cascades
+    /// once). The move discipline makes this the sole release path — the slot
+    /// was emptied at the park, so no completion or resume can reach either a
+    /// second time.
     ///
-    /// The node is the ONLY thing released. The frame's `activation_region_map`
-    /// is a borrowed view: a region it names can still be live in an outer,
-    /// non-discarded frame or in the activation that catches the squelch, so a
-    /// per-slot release here over-frees live state. A node's members, by
-    /// contrast, are exactly the regions the inference proved externally unique
-    /// and moved in through `AdoptIntoActivation`, so freeing them cannot touch
-    /// a region any live frame still counts on. The map's regions stay leaked
-    /// on this path until an ownership cut adopts them (UAF-safe, bounded per
-    /// discard; docs/impl/region/owner.md § "Owner nodes").
+    /// The dues are the ONLY thing released. The frame's
+    /// `activation_region_map` is a borrowed view: a region it names can still
+    /// be live in an outer, non-discarded frame or in the activation that
+    /// catches the squelch, so a per-slot release here over-frees live state. A
+    /// node's members, by contrast, are exactly the regions the inference proved
+    /// externally unique and moved in through `AdoptIntoActivation`, and a
+    /// deferred region is one the compiler itself named as this activation's to
+    /// release — so neither can touch a region any live frame still counts on.
+    /// The map's regions stay leaked on this path until an ownership cut adopts
+    /// them (UAF-safe, bounded per discard; docs/impl/region/owner.md § "Owner
+    /// nodes").
     pub(crate) fn discard_suspended_frames(&mut self) {
         if let Some(frames) = self.fiber.suspended.take() {
-            for node in crate::vm::fiber::parked_owner_nodes(frames) {
-                self.heap().decref_region_if_present(node);
+            for region in crate::vm::fiber::parked_activation_dues(frames) {
+                self.heap().decref_region_if_present(region);
             }
         }
         // The abandoned park's funding has no consumer — the delivery funnel

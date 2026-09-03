@@ -101,9 +101,17 @@ pub(crate) struct FunctionTranslator<'a> {
     /// Module's closure list for MakeClosure → ClosureId lookup.
     pub(crate) module_closures: Vec<crate::lir::LirFunction>,
     /// Whether this function's LIR carries an `AdoptIntoActivation` — computed
-    /// once at construction so the `Return` path emits the owner-node release
-    /// (`elle_jit_release_activation_owner_node`) only for a function that can
+    /// once at construction so the `Return` path emits the dues release
+    /// (`elle_jit_release_activation_dues`) only for a function that can
     /// have minted a node; the common path pays no extra helper call.
+    ///
+    /// The node is the whole of what a COMPILED activation can owe: the deferred
+    /// tail-call releases are recorded by the interpreter's `tail_call_inner`
+    /// alone, and the JIT's own tail-call path leaves both channels unwired
+    /// (`jit_tail_call_inner`). Wiring them means gating this on the deferral
+    /// too, or the release the compiled `Return` skips is the one nothing else
+    /// runs (docs/impl/region/owner.md § "A deferred tail-call release has the
+    /// node's life").
     pub(crate) uses_activation_owner_node: bool,
 }
 

@@ -365,12 +365,13 @@ fn jit_tail_call_inner(
             env: new_env,
             closure: func,
             squelch_mask: closure.squelch_mask,
-            // JIT tail-call path: closure-callee adoption not yet wired here.
-            // Leaving the channels empty keeps the region held to the activation's
-            // own teardown — a bounded over-keep, never an over-free — until the
-            // adopt-and-release is extended to the JIT trampolines.
-            deferred: Default::default(),
         });
+        // A deferral this spliced JIT tail call strands is not recorded on the
+        // activation's dues: the callee-release and merged-arena channels are not
+        // wired on this path, so the region stays held to the activation's own
+        // teardown — a bounded over-keep, never an over-free — until they are
+        // (docs/impl/region/owner.md § "A deferred tail-call release has the
+        // node's life").
 
         return TAIL_CALL_SENTINEL;
     }

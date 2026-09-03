@@ -405,7 +405,7 @@ fn adopt_region_freezes_child_and_subtree_drops_with_parent() {
 /// `handle_adopt_into_activation`: it resolves the child Value to its runtime
 /// region, lazily mints the current activation's pages-less owner node, and
 /// moves the child `Counted → Owned` (count consumed). Releasing the node
-/// (`VM::release_activation_owner_node`, the completion free both tiers share)
+/// (`VM::release_activation_dues`, the completion free both tiers share)
 /// then subtree-drops node + member as one unit. A no-op (broken) helper would
 /// leave the child `Counted(1)` and the release would reclaim nothing — both
 /// assertions catch it.
@@ -437,7 +437,7 @@ fn adopt_into_activation_adopts_into_lazily_minted_node() {
     // The node was lazily minted into the current (base) activation slot;
     // releasing it reclaims node + adopted member as one subtree.
     let before = unsafe { &*heap_ptr }.active_region_count();
-    vm.release_activation_owner_node();
+    vm.release_activation_dues();
     let after = unsafe { &*heap_ptr }.active_region_count();
     assert_eq!(
         before - after,
@@ -458,7 +458,7 @@ fn adopt_into_activation_immediate_child_mints_no_node() {
     let n = Value::int(42);
     elle_jit_adopt_into_activation(n.tag, n.payload, &mut vm as *mut VM as *mut ());
     assert!(
-        vm.take_activation_owner_node().is_none(),
+        vm.take_activation_dues().is_empty(),
         "an immediate child must not mint an owner node"
     );
     assert_eq!(

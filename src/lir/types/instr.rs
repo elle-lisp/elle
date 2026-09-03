@@ -131,8 +131,8 @@ pub enum LirInstr {
         /// is dead past this frame-replacing `TailCall`, so when the callee turns
         /// out to be a **closure** at runtime (a redefined operator, a foreign
         /// fn) the new activation resolves this slot through its region map and
-        /// ADOPTS the arena — `deferred_releases` frees it once at the recursion's
-        /// completion. When the callee is a **native** (a `NativeFn` — a funnel
+        /// ADOPTS the arena onto its own dues, which free it once at whichever
+        /// end that activation reaches. When the callee is a **native** (a `NativeFn` — a funnel
         /// op like `%array-push`, or a rebound operator's value-position face) the
         /// frame is NOT replaced, this slot is never consumed, and the live
         /// scope-exit `DecrefRegion` frees the arena instead — the two paths are

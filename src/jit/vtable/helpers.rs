@@ -245,11 +245,11 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_adopt_into_activation",
             &make_sig(module, &[I64, I64, I64], &[]),
         )?,
-        // release_activation_owner_node: (vm) -> () — the compiled Return
+        // release_activation_dues: (vm) -> () — the compiled Return
         // path's owner-node free.
-        release_activation_owner_node: declare(
+        release_activation_dues: declare(
             module,
-            "elle_jit_release_activation_owner_node",
+            "elle_jit_release_activation_dues",
             &make_sig(module, &[I64], &[]),
         )?,
         // release_abandoned_frame: (vm, slots_ptr, num_slots, regions_ptr,

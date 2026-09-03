@@ -48,17 +48,19 @@ pub struct BytecodeFrame {
     /// or — on a static-slot collision — a use-after-free). `resume_suspended`
     /// restores this as the activation's region frame before re-entering.
     pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
-    /// This activation's owner node at the moment of suspension — MOVED (taken,
-    /// never cloned) out of the activation's `Fiber::activation_owner_nodes`
-    /// slot by the suspend site, so the node lives in exactly one place: the
-    /// live slot or one parked frame (docs/impl/region/owner.md § "Owner nodes"
-    /// — "A park moves the node into the suspended frame"). Its members are
-    /// `Owned` (RC frozen) with no other release route, so the node must ride
-    /// the park to the resumed body's completion, where the trampoline's
-    /// clean-break release frees node + members. `resume_suspended` restores it
-    /// into the live slot beside `activation_region_map`. `None` for an
-    /// activation that never adopted (the node is minted lazily).
-    pub activation_owner_node: Option<crate::hir::region::RuntimeRegion>,
+    /// What this activation owed at the moment of suspension — MOVED (taken,
+    /// never cloned) out of the activation's `Fiber::activation_dues` slot by
+    /// the suspend site, so the record lives in exactly one place: the live slot
+    /// or one parked frame (docs/impl/region/owner.md § "Owner nodes" — "A park
+    /// moves the node into the suspended frame"). The owner node's members are
+    /// `Owned` (RC frozen) with no other release route, and the deferred set's
+    /// regions have no route at all — their emitting instruction died with the
+    /// frame the tail call replaced — so both must ride the park to the resumed
+    /// body's completion, where the trampoline's clean-break release runs them.
+    /// `resume_suspended` restores the record into the live slot beside
+    /// `activation_region_map`. Default (no node, nothing deferred) for an
+    /// activation that neither adopted nor tail-called.
+    pub activation_dues: crate::value::fiber::ActivationDues,
     /// The executing-closure register (`Fiber::current_closure`) at the moment this
     /// activation suspended. A yield unwinds the Rust call stack and restores the
     /// live register to the caller's value, so without parking it here a self-edge
@@ -103,7 +105,7 @@ impl BytecodeFrame {
         stack: Vec<Value>,
         push_resume_value: bool,
         activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
-        activation_owner_node: Option<crate::hir::region::RuntimeRegion>,
+        activation_dues: crate::value::fiber::ActivationDues,
         current_closure: Value,
         heap: &crate::value::fiberheap::FiberHeap,
     ) -> Self {
@@ -118,7 +120,7 @@ impl BytecodeFrame {
             stack,
             push_resume_value,
             activation_region_map,
-            activation_owner_node,
+            activation_dues,
             current_closure,
             #[cfg(debug_assertions)]
             region_borrows,

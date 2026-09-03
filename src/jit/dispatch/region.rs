@@ -297,14 +297,14 @@ pub extern "C" fn elle_jit_adopt_into_activation(child_tag: u64, child_payload: 
 
 /// Free the current activation's owner node at the compiled function's normal
 /// completion — the JIT twin of the interpreter trampoline's clean-break
-/// release (`VM::release_activation_owner_node`). Emitted on the `Return` path
+/// release (`VM::release_activation_dues`). Emitted on the `Return` path
 /// (before the region-map pop) of a function whose LIR carries
 /// `AdoptIntoActivation`; a function that cannot mint a node never pays the
 /// call.
 #[no_mangle]
-pub extern "C" fn elle_jit_release_activation_owner_node(vm: *mut ()) {
+pub extern "C" fn elle_jit_release_activation_dues(vm: *mut ()) {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    vm.release_activation_owner_node();
+    vm.release_activation_dues();
 }
 
 /// Run the releases a COMPILED activation abandoned by an **error** still owed —

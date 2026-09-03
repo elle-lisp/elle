@@ -304,15 +304,14 @@ impl<'a> Lowerer<'a> {
         // past the `TailCall`, so the decref never runs and the region leaks. Mark such
         // bindings stranded BEFORE lowering the body, so a tail call to one (`(loop k)`
         // here, or its own `(loop …)` self-call) defers the region's release — the
-        // runtime's
-        // `deferred_releases` supplies the stranded decref exactly once.
+        // activation's own dues supply the stranded decref exactly once.
         //
         // The premise is a tail call to THIS binding, not a body that is wholly one:
         // a body reaches its tail call through statements (`(begin (yield go) (go n))`)
         // and through branches, and the scope end is dead on exactly the paths that
         // take a tail call. A path that falls through instead — a sibling `if` arm, a
         // native callee that keeps the frame — runs the live scope-end decref and
-        // records no deferral (`tail_call_inner` builds `DeferredReleases` only on the
+        // records no deferral (`tail_call_inner` records one only on the
         // closure arm), so the two are mutually exclusive per path rather than
         // alternatives to choose between. Without the tail-call premise a body that
         // never replaces the frame would defer a decref that also fires live — a

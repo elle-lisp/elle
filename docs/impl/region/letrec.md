@@ -234,7 +234,7 @@ channels and lets exactly one fire.
   descending into nested lambdas), `tail_callee_defers_release` returns true for such a callee
   (read through a **non-upvalue** reference only, so a nested closure in the body can
   never free the arena out from under a later use), and the `TailCall` carries
-  `DeferredReleases::callee = region_of(callee)` — the merged arena, because a member lives in it.
+  the callee channel's `region_of(callee)` — the merged arena, because a member lives in it.
   That consumer refuses a callee crossing the **fiber** frontier, and admits the return
   facet — the same reading, for the same reason, as the merge's own frontier gate above,
   and the return half of the argument the cell-free self-recursive deferral makes
@@ -259,9 +259,10 @@ channels and lets exactly one fire.
   (`compute_closure_cycle_merges` → `ClosureCycleMerge::tail_release_sites`), and the
   runtime resolves that slot through the executing activation's region map — the arena
   was minted during the letrec setup and its scope-exit drop is dead. If the callee
-  turns out a **closure**, the frame is replaced and `trampoline_loop`'s
-  `deferred_releases` frees the resolved arena once (deduped) at the recursion's
-  completion; if it turns out a **native**, the frame is not replaced, the slot is
+  turns out a **closure**, the frame is replaced and the activation's own deferred set
+  frees the resolved arena once (deduped) at whichever end that activation reaches
+  ([owner.md](owner.md) § "A deferred tail-call release has the node's life");
+  if it turns out a **native**, the frame is not replaced, the slot is
   never consumed, and the live scope-exit `DecrefRegion` frees the arena — mutually
   exclusive, exactly one release, the compiler having classified nothing.
 

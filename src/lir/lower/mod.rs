@@ -285,8 +285,10 @@ pub struct Lowerer<'a> {
     /// so the closure's scope-end `DecrefRegion` is emitted as dead code past that
     /// frame-replacing `TailCall` and never runs — the per-call closure region would
     /// otherwise leak. `tail_callee_defers_release` routes a tail call to such a binding
-    /// through the runtime's `deferred_releases` release (`vm/execute.rs`), which frees
-    /// the region exactly once at the recursion's normal completion. Gating on the
+    /// through the activation's own deferred set (`ActivationDues`), which frees
+    /// the region exactly once at whichever end that activation reaches
+    /// (docs/impl/region/owner.md § "A deferred tail-call release has the node's
+    /// life"). Gating on the
     /// tail-call body is what keeps the deferral from double-freeing a self-recursive
     /// closure whose `DecrefRegion` instead fires live (a non-tail body) — the
     /// use-after-free that gate prevents.

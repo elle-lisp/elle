@@ -291,14 +291,21 @@ impl VM {
 
             // Take over the callee closure's release when the compiler flagged it
             // as a per-call local closure whose release is dead past this
-            // `TailCall` (`lower_call`'s `defer_callee_release`). The new
-            // activation releases this
-            // region when it completes — the missing decref the frame replacement
-            // skipped. Recorded BEFORE `populate_env` (which copies the closure's
-            // env uncounted): the closure must stay alive through the callee's
-            // run, so the release is deferred to the trampoline-loop break, NOT
-            // done here. A program-root callee is never flagged, so its
-            // program-lifetime region is never released. See `TailCallInfo`.
+            // `TailCall` (`lower_call`'s `defer_callee_release`). The activation
+            // discharges this region when it ENDS — the missing decref the frame
+            // replacement skipped. Recorded BEFORE `populate_env` (which copies
+            // the closure's env uncounted): the closure must stay alive through
+            // the callee's run, so the release is deferred, NOT done here. A
+            // program-root callee is never flagged, so its program-lifetime
+            // region is never released.
+            //
+            // Recorded on the activation's own dues slot rather than carried on
+            // the `TailCallInfo`, because the obligation outlives whoever
+            // consumes the pending call: the interpreter trampoline is one such
+            // consumer, and a park unwinds it entirely
+            // (docs/impl/region/owner.md § "A deferred tail-call release has the
+            // node's life"). The current activation is still the CALLER's here,
+            // which is the activation the frame replacement hands it to.
             //
             // The arena channel: a letrec body tail-calling a NON-member out of a
             // closure-cycle merged arena carries the arena's static slot
@@ -322,13 +329,14 @@ impl VM {
             // name the same region — a merge MEMBER callee is absent from
             // `cycle_tail_release`, and `tail_callee_defers_release` refuses every
             // `closure_cycle_members` region.
-            let deferred = crate::vm::core::DeferredReleases {
-                arena: deferred_release_slot
-                    .and_then(|slot| self.runtime_region_for_release_slot(slot)),
-                callee: defer_callee_release
-                    .then(|| self.tail_callee_release_region(func))
-                    .flatten(),
-            };
+            let arena =
+                deferred_release_slot.and_then(|slot| self.runtime_region_for_release_slot(slot));
+            let callee = defer_callee_release
+                .then(|| self.tail_callee_release_region(func))
+                .flatten();
+            for region in arena.into_iter().chain(callee) {
+                self.defer_activation_release(region);
+            }
 
             // Build proper environment using cached vector. Each env value mints
             // its own fresh region inside `populate_env` (see `env_value_region`),
@@ -364,7 +372,6 @@ impl VM {
                 env: new_env_rc,
                 closure: func,
                 squelch_mask: closure.squelch_mask,
-                deferred,
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));

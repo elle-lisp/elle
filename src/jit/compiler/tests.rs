@@ -132,7 +132,7 @@ fn make_adopt_into_activation_lir() -> LirFunction {
 /// `runtime::tests::ownership::activation_owner_node_frees_adopted_member_on_normal_completion`.
 /// The compiled body adopts its argument's region into the activation's
 /// lazily-minted owner node (`elle_jit_adopt_into_activation`); the compiled
-/// `Return` path must free the node (`elle_jit_release_activation_owner_node`),
+/// `Return` path must free the node (`elle_jit_release_activation_dues`),
 /// whose subtree drop reclaims the member — its generation bumps and the live
 /// region count stays bounded across 50 calls. The member is Owned (count
 /// consumed by the adopt), so if the Return-path release is not emitted, NOTHING

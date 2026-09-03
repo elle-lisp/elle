@@ -90,10 +90,9 @@ impl<'a> FunctionTranslator<'a> {
                     let vm = self.vm_ptr.ok_or_else(|| {
                         JitError::InvalidLir("owner-node release without vm pointer".to_string())
                     })?;
-                    let func_ref = self.module.declare_func_in_func(
-                        self.helpers.release_activation_owner_node,
-                        builder.func,
-                    );
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.release_activation_dues, builder.func);
                     builder.ins().call(func_ref, &[vm]);
                 }
                 self.emit_pop_then_return(builder, tag, payload)?;

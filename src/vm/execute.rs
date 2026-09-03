@@ -90,6 +90,7 @@
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
 
+use crate::value::fiber::ActivationDues;
 use crate::value::{SignalBits, Value, SIG_ERROR};
 use std::rc::Rc;
 
@@ -129,17 +130,17 @@ pub(crate) struct ExecResult {
     /// so the remap survives the yield. Default (empty) for
     /// `execute_bytecode_from_ip`, whose caller manages frames itself.
     pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
-    /// This activation's owner node, TAKEN by `execute_bytecode_saving_stack`
+    /// What this activation owed, TAKEN by `execute_bytecode_saving_stack`
     /// beside `activation_region_map` on a non-OK exit — the channel that
-    /// carries the node out of the already-popped activation to the caller
-    /// that builds its park (`BytecodeFrame::activation_owner_node`): the
-    /// fiber body's pause in `do_fiber_first_resume`, the interrupted callee's
-    /// inner frame in `call_inner`. A suspend handler that parked the frame
-    /// itself (the yield path) already took the node, so this reads `None`
-    /// there — the move discipline holds. Always `None` for
+    /// carries the record out of the already-popped activation to the caller
+    /// that builds its park (`BytecodeFrame::activation_dues`): the fiber
+    /// body's pause in `do_fiber_first_resume`, the interrupted callee's inner
+    /// frame in `call_inner`. A suspend handler that parked the frame itself
+    /// (the yield path) already took the record, so this reads default there —
+    /// the move discipline holds. Always default for
     /// `execute_bytecode_from_ip` (`resume_suspended` manages the slot
     /// directly).
-    pub activation_owner_node: Option<crate::hir::region::RuntimeRegion>,
+    pub activation_dues: crate::value::fiber::ActivationDues,
     /// The executing-closure register (`fiber.current_closure`) at the moment the
     /// trampoline broke — the callee's value, possibly re-installed by tail calls
     /// in this activation. A caller building a `SuspendedFrame` from this returned
@@ -194,20 +195,6 @@ impl VM {
         let mut current_env = closure_env.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        // Releases taken over from frame-replacing tail calls in this activation
-        // (`TailCallInfo::deferred`, one entry per channel — a single tail call
-        // may hand over both a merged closure-cycle arena and its callee closure).
-        // Each is a per-call allocation whose compiler-emitted release is dead
-        // past the `TailCall`; this activation took over that release and runs it
-        // on NORMAL completion below. Deduped by region: a tail-recursive `go`
-        // re-enters with the SAME closure each iteration but carries one dead
-        // decref, so it must be released exactly once. Released only on the clean
-        // break — on a suspending/error/squelch exit the closures may still be
-        // needed (resume) and are left to leak, a bounded over-keep, never a
-        // double-free (unlike the activation owner node, these regions are
-        // `Counted` and not moved into the park, so no discard-time release can
-        // be sound without per-frame liveness).
-        let mut deferred_releases: Vec<crate::hir::region::RuntimeRegion> = Vec::new();
 
         loop {
             let (bits, ip) =
@@ -215,6 +202,14 @@ impl VM {
 
             if !bits.is_empty() {
                 if self.enforce_squelch(bits, accumulated_squelch_mask) {
+                    // The boundary turns the signal into an error this
+                    // activation never catches, so the frame is abandoned
+                    // exactly as an error exit's is and owes what it took over
+                    // from its tail calls (docs/impl/region/owner.md § "What an
+                    // abandoned frame owes, it owes the deferred set too").
+                    if walk_abandoned {
+                        self.release_abandoned_deferred();
+                    }
                     break ExecResult {
                         bits: SIG_ERROR,
                         ip,
@@ -222,18 +217,22 @@ impl VM {
                         env: current_env,
                         stack: vec![],
                         activation_region_map: rustc_hash::FxHashMap::default(),
-                        activation_owner_node: None,
+                        activation_dues: ActivationDues::default(),
                         current_closure: self.fiber.current_closure,
                     };
                 }
                 // The frame's locals are still on the stack, and an error leaves
                 // through the signal machinery without running the rest of its
                 // instructions — so the releases among them run here, before the
-                // locals travel out in `stack` below.
+                // locals travel out in `stack` below. The releases this
+                // activation took over from a frame-replacing tail call are owed
+                // on the same question and have no table to be read off, their
+                // emitting instruction having died with the replaced frame.
                 if walk_abandoned && bits.intersects(SIG_ERROR) {
                     let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
                     let exit_code = current_code.clone();
                     self.release_abandoned_frame(&exit_code, payload);
+                    self.release_abandoned_deferred();
                 }
                 let inner_stack = std::mem::take(&mut self.fiber.stack).into_vec();
                 break ExecResult {
@@ -243,18 +242,13 @@ impl VM {
                     env: current_env,
                     stack: inner_stack,
                     activation_region_map: rustc_hash::FxHashMap::default(),
-                    activation_owner_node: None,
+                    activation_dues: ActivationDues::default(),
                     current_closure: self.fiber.current_closure,
                 };
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
                 accumulated_squelch_mask |= tail.squelch_mask;
-                for r in tail.deferred.regions() {
-                    if !deferred_releases.contains(&r) {
-                        deferred_releases.push(r);
-                    }
-                }
                 // The fresh-frame invariant (docs/impl/region/rules.md Rule 5):
                 // the callee's unwritten local slots must read NIL exactly as on
                 // a fresh activation — a branch-arm temp's scope-end release
@@ -275,19 +269,14 @@ impl VM {
                 current_env = tail.env;
                 current_ip = 0;
             } else {
-                // Normal completion: run the deferred closure-callee releases —
-                // the decrefs the frame-replacing tail calls left dead.
-                for &r in &deferred_releases {
-                    self.heap().decref_region_if_present(r);
-                }
-                // ... and free this activation's owner node, if an
-                // `AdoptIntoActivation` minted one: the node's single decref
-                // subtree-drops every member the activation adopted
-                // (docs/impl/region/owner.md § "Owner nodes"). The same
-                // clean-break discipline as the deferred callee releases above —
-                // a frame-replacing tail call keeps the activation (and its
-                // node) alive to the recursion's completion here.
-                self.release_activation_owner_node();
+                // Normal completion: discharge what this activation owes — the
+                // decrefs its frame-replacing tail calls left dead, and its
+                // owner node, whose single decref subtree-drops every member the
+                // activation adopted (docs/impl/region/owner.md § "Owner
+                // nodes"). One clean-break discipline for both: a
+                // frame-replacing tail call keeps the activation alive to the
+                // recursion's completion here, and so keeps everything it owes.
+                self.release_activation_dues();
                 break ExecResult {
                     bits,
                     ip,
@@ -295,7 +284,7 @@ impl VM {
                     env: current_env,
                     stack: vec![],
                     activation_region_map: rustc_hash::FxHashMap::default(),
-                    activation_owner_node: None,
+                    activation_dues: ActivationDues::default(),
                     current_closure: self.fiber.current_closure,
                 };
             }
@@ -381,12 +370,12 @@ impl VM {
                 .last()
                 .cloned()
                 .unwrap_or_default();
-            // MOVE the activation's owner node out with the map: a suspend
-            // handler that parked a frame already took it (this reads None),
+            // MOVE what the activation owes out with the map: a suspend
+            // handler that parked a frame already took it (this reads default),
             // but a pause with no frame of its own (fuel) leaves it here, and
             // the caller that builds the park from this result re-attaches it
             // (docs/impl/region/owner.md § "Owner nodes").
-            result.activation_owner_node = self.take_activation_owner_node();
+            result.activation_dues = self.take_activation_dues();
         }
         self.pop_activation_region_map();
         // Restore the caller's executing-closure register. On a suspending exit the

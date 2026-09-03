@@ -144,10 +144,10 @@ impl VM {
                     .last()
                     .cloned()
                     .unwrap_or_default();
-                // MOVE the activation's owner node into the frame (its slot is
+                // MOVE what the activation owes into the frame (its slot is
                 // likewise still on top) so it rides the park to the resumed
                 // body's completion (docs/impl/region/owner.md § "Owner nodes").
-                let activation_owner_node = self.take_activation_owner_node();
+                let activation_dues = self.take_activation_dues();
                 // Suspending primitive: this activation's remap is still on top
                 // (the wrapping `saving_stack` pops it after we return), and the
                 // current closure is this activation's — park it for the resume.
@@ -159,7 +159,7 @@ impl VM {
                     saved_stack,
                     true,
                     activation_region_map,
-                    activation_owner_node,
+                    activation_dues,
                     current_closure,
                     self.heap(),
                 ));
@@ -292,8 +292,8 @@ impl VM {
             .last()
             .cloned()
             .unwrap_or_default();
-        // MOVE the activation's owner node into the frame (see the Suspend arm).
-        let activation_owner_node = self.take_activation_owner_node();
+        // MOVE what the activation owes into the frame (see the Suspend arm).
+        let activation_dues = self.take_activation_dues();
         // Capability denial suspends the current activation; its remap is still on
         // top (the wrapping `saving_stack` pops it after return), and its closure
         // is the current one — park it for the resume.
@@ -305,7 +305,7 @@ impl VM {
             saved_stack,
             true,
             activation_region_map,
-            activation_owner_node,
+            activation_dues,
             current_closure,
             self.heap(),
         ));

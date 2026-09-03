@@ -19,7 +19,7 @@ impl VM {
     /// The `frames.is_empty()` guard leaves a deeper yield's already-parked chain
     /// untouched. `push_resume_value` is false for a fuel pause (the interrupted
     /// opcode re-executes from `ip`, injecting no extra value) and true otherwise.
-    /// The callee's region remap and owner node ride out in `result`, moved into
+    /// The callee's region remap and its activation's dues ride out in `result`, moved into
     /// the frame so the remap survives the yield (docs/impl/region/owner.md).
     pub(crate) fn park_suspended_callee_frame(
         &mut self,
@@ -35,7 +35,7 @@ impl VM {
                 result.stack,
                 !bits.intersects(SIG_FUEL),
                 result.activation_region_map,
-                result.activation_owner_node,
+                result.activation_dues,
                 result.current_closure,
                 self.heap(),
             );
@@ -274,10 +274,10 @@ impl VM {
                                 // instruction's result. The JIT callee runs without an
                                 // interpreter region frame; `caller_region_frame` (=
                                 // `activation_region_maps.last()`) is the caller's.
-                                // MOVE the caller's owner node into its park — this
+                                // MOVE what the caller's activation owes into its park — this
                                 // activation unwinds with the suspending signal
                                 // (docs/impl/region/owner.md § "Owner nodes").
-                                let caller_owner_node = self.take_activation_owner_node();
+                                let caller_dues = self.take_activation_dues();
                                 // The JIT callee suspended without entering an
                                 // interpreter activation, so `current_closure` is
                                 // still this caller's — park it for the continuation.
@@ -290,7 +290,7 @@ impl VM {
                                         caller_stack,
                                         true,
                                         caller_region_frame,
-                                        caller_owner_node,
+                                        caller_dues,
                                         caller_closure,
                                         self.heap(),
                                     ));
@@ -434,10 +434,10 @@ impl VM {
                         .last()
                         .cloned()
                         .unwrap_or_default();
-                    // MOVE the caller's owner node into its park — this activation
+                    // MOVE what the caller's activation owes into its park — this activation
                     // unwinds with the suspending signal
                     // (docs/impl/region/owner.md § "Owner nodes").
-                    let caller_owner_node = self.take_activation_owner_node();
+                    let caller_dues = self.take_activation_dues();
                     // `saving_stack` restored `current_closure` to this caller on the
                     // callee's suspending return, so park the caller's value here; the
                     // callee's value rode out in `result.current_closure` (below).
@@ -449,7 +449,7 @@ impl VM {
                         caller_stack,
                         true,
                         caller_region_frame,
-                        caller_owner_node,
+                        caller_dues,
                         caller_closure,
                         self.heap(),
                     ));

@@ -18,6 +18,11 @@ use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR};
 pub(crate) struct FiberOwned {
     /// Each still-parked `BytecodeFrame`'s activation owner node, in chain order.
     parked_nodes: Vec<crate::hir::region::RuntimeRegion>,
+    /// The releases those activations took over from their own frame-replacing
+    /// tail calls (docs/impl/region/owner.md § "A deferred tail-call release has
+    /// the node's life"). A frame this fiber can never re-enter never reaches
+    /// the completion that would have run them.
+    parked_deferred: Vec<crate::hir::region::RuntimeRegion>,
     /// The parked non-terminal signal (a yielded value / io request / denial
     /// payload), whose one park escape retain is released on the resume path —
     /// which will never come for a terminal fiber (`release_discarded_signal`).
@@ -34,18 +39,28 @@ pub(crate) struct FiberOwned {
     fiber_node: Option<crate::hir::region::RuntimeRegion>,
 }
 
-/// The parked activation owner nodes of an abandoned frame chain. The frames'
-/// continuations will never run, so the completion release that would have freed
-/// each node never fires; the release belongs to whoever abandoned the chain —
-/// the discard chokepoint (`VM::discard_suspended_frames`) or the terminal-fiber
-/// teardown ([`take_fiber_owned`]). A `FiberResume` frame owns no node (its
-/// sub-fiber has its own lifecycle).
-pub(crate) fn parked_owner_nodes(
+/// What the activations of an abandoned frame chain still owed: each parked
+/// frame's owner node, and the releases it took over from its own
+/// frame-replacing tail calls. The frames' continuations will never run, so the
+/// completion release that would have discharged them never fires; it belongs to
+/// whoever abandoned the chain — the discard chokepoint
+/// (`VM::discard_suspended_frames`) or the terminal-fiber teardown
+/// ([`take_fiber_owned`]). A `FiberResume` frame owes nothing (its sub-fiber has
+/// its own lifecycle).
+/// Each region here takes one tolerant decref, node and deferred region alike:
+/// a node's rc goes 1→0 and subtree-drops its adopted members, and a deferred
+/// region's decref is the one its emitting instruction never ran. Order between
+/// them is immaterial — where one holds a counted edge to the other, the cascade
+/// and the direct decref commute.
+pub(crate) fn parked_activation_dues(
     frames: Vec<SuspendedFrame>,
 ) -> impl Iterator<Item = crate::hir::region::RuntimeRegion> {
-    frames.into_iter().filter_map(|frame| match frame {
-        SuspendedFrame::Bytecode(f) => f.activation_owner_node,
-        SuspendedFrame::FiberResume { .. } => None,
+    frames.into_iter().flat_map(|frame| match frame {
+        SuspendedFrame::Bytecode(f) => {
+            let dues = f.activation_dues;
+            dues.deferred.into_iter().chain(dues.owner_node)
+        }
+        SuspendedFrame::FiberResume { .. } => Vec::new().into_iter().chain(None),
     })
 }
 
@@ -64,6 +79,7 @@ pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberO
     let parked = fiber.take_parked_state();
     FiberOwned {
         parked_nodes: parked.nodes,
+        parked_deferred: parked.deferred,
         parked_signal: parked.signal,
         parked_owed: parked.owed,
         parked_owed_regions: parked.owed_regions,
@@ -85,6 +101,7 @@ pub(crate) fn release_fiber_owned(
 ) {
     let FiberOwned {
         parked_nodes,
+        parked_deferred,
         parked_signal,
         parked_owed,
         parked_owed_regions,
@@ -111,6 +128,13 @@ pub(crate) fn release_fiber_owned(
             continue;
         }
         heap.decref_region_if_present(m.region);
+    }
+    // The deferred releases run before the nodes, so a closure region a node's
+    // member still holds a counted edge to is not freed twice — the decref here
+    // drops this activation's reference and the member's edge keeps it standing
+    // until the subtree drop below cascades through.
+    for region in parked_deferred {
+        heap.decref_region_if_present(region);
     }
     for node in parked_nodes {
         if let Some(fnode) = fiber_node {
