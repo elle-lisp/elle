@@ -43,6 +43,8 @@ Runtime value representation using a tagged union.
 | `Parameter` | `heap.rs` | Dynamic parameter with id and default value, looked up at runtime |
 | `LSet` | `heap.rs` | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
 | `LSetMut` | `heap.rs` | Mutable set (`Rc<RefCell<BTreeSet<Value>>>`) (type name `:@set`) |
+| `TableKey` | `types.rs` | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory (docs/impl/values.md § "Struct keys") |
+| `SendKey` | `send/mod.rs` | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
 
 ### Fiber fields for parent/child chain
 
@@ -119,6 +121,15 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
      holds the bytecode, constants, env, IP, and operand stack for a suspended
      fiber. Signal suspension has an empty stack; yield suspension captures the
      stack.
+
+8. **A stored struct key is interned into the struct's region.** `TableKey`
+     is `Copy` and its string and array arms hold a `Value`, so a key built by
+     `TableKey::from_value` merely borrows what it was built from — correct for
+     a probe, wrong to store. Every site that puts a key into a struct calls
+     `TableKey::intern_into` first, which copies a string or array payload into
+     the destination region; a `Heap` key keeps aliasing, because its identity
+     is the point. `SendKey` is the owning form for `send` and serde
+     (docs/impl/values.md § "Struct keys").
 
 ## Value encoding
 

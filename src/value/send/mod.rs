@@ -105,16 +105,10 @@ pub enum SendValue {
     Array(Vec<SendValue>, Box<SendValue>),
 
     /// Deep copy of structs (immutable maps, with traits)
-    Struct(
-        BTreeMap<crate::value::heap::TableKey, SendValue>,
-        Box<SendValue>,
-    ),
+    Struct(BTreeMap<SendKey, SendValue>, Box<SendValue>),
 
     /// Deep copy of @structs (mutable maps, with traits)
-    StructMut(
-        BTreeMap<crate::value::heap::TableKey, SendValue>,
-        Box<SendValue>,
-    ),
+    StructMut(BTreeMap<SendKey, SendValue>, Box<SendValue>),
 
     /// Deep copy of arrays (immutable fixed-length sequences, with traits)
     Tuple(Vec<SendValue>, Box<SendValue>),
@@ -196,6 +190,88 @@ pub enum SendValue {
     /// unsendable — their fd is owned and not meaningful in another VM.
     #[allow(private_interfaces)]
     StdioPort(crate::port::PortKind),
+}
+
+/// A struct key in transit — the owning key form, the counterpart of
+/// [`SendValue`] for what `SendValue::Struct` and `SendValue::StructMut` are
+/// keyed on.
+///
+/// A [`TableKey`](crate::value::TableKey) holds raw region pointers, so it is
+/// neither `Send` nor serializable; this owns its bytes. There is no `Heap`
+/// arm: an identity key (a fiber, a closure, a plugin object) cannot be
+/// reproduced on the far side, and its absence here is what refuses one at the
+/// boundary.
+///
+/// Variant order matches `TableKey`'s, because the derived `Ord` decides the
+/// order a received struct's entries land in
+/// (docs/impl/values.md § "Struct keys").
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum SendKey {
+    Nil,
+    Bool(bool),
+    Int(i64),
+    /// The symbol's name hash — the same id names the same symbol in every
+    /// instance (docs/impl/symbol.md).
+    Symbol(u64),
+    String(String),
+    /// The keyword's name hash, for the same reason as `Symbol`.
+    Keyword(u64),
+    EmptyList,
+    Array(Vec<SendKey>),
+}
+
+impl SendKey {
+    /// The wire form of `key`, or `None` if the key cannot cross — which is
+    /// exactly the `Heap` arm, directly or nested inside an array key.
+    pub fn from_key(key: &crate::value::TableKey) -> Option<SendKey> {
+        use crate::value::TableKey as TK;
+        Some(match key {
+            TK::Nil => SendKey::Nil,
+            TK::Bool(b) => SendKey::Bool(*b),
+            TK::Int(i) => SendKey::Int(*i),
+            TK::Symbol(id) => SendKey::Symbol(id.0),
+            TK::String(v) => {
+                SendKey::String(v.as_str().expect("a string key holds a string").to_string())
+            }
+            TK::Keyword(hash) => SendKey::Keyword(*hash),
+            TK::EmptyList => SendKey::EmptyList,
+            TK::Array(v) => {
+                let elements: Option<Vec<SendKey>> = v
+                    .as_array()
+                    .expect("an array key holds an array")
+                    .iter()
+                    .map(|e| {
+                        let k = crate::value::TableKey::from_value(e)
+                            .expect("from_value validated every element");
+                        SendKey::from_key(&k)
+                    })
+                    .collect();
+                SendKey::Array(elements?)
+            }
+            TK::Heap(_) => return None,
+        })
+    }
+
+    /// Rebuild this key on the receiving side. A string or array payload is
+    /// allocated through `ctx`, so it lands in the call's region alongside the
+    /// struct being rebuilt — the receiving-side half of interning.
+    pub(crate) fn to_key(&self, ctx: &mut crate::primitives::ctx::Alloc) -> crate::value::TableKey {
+        use crate::value::TableKey as TK;
+        match self {
+            SendKey::Nil => TK::Nil,
+            SendKey::Bool(b) => TK::Bool(*b),
+            SendKey::Int(i) => TK::Int(*i),
+            SendKey::Symbol(id) => TK::Symbol(crate::value::SymbolId(*id)),
+            SendKey::String(s) => TK::String(ctx.string(s)),
+            SendKey::Keyword(hash) => TK::Keyword(*hash),
+            SendKey::EmptyList => TK::EmptyList,
+            SendKey::Array(elements) => {
+                let values: Vec<Value> =
+                    elements.iter().map(|k| k.to_key(ctx).to_value()).collect();
+                TK::Array(ctx.array(values))
+            }
+        }
+    }
 }
 
 /// Unit of cross-thread value transfer.

@@ -228,8 +228,8 @@ The hot path for builtin types:
 - Linear scan for method keyword (5 entries in the method struct)
 - Native function call (same Rust code as the old type cascade)
 
-`lookup_keyword` avoids allocating a `TableKey` — it compares the
-keyword discriminant and string directly.
+`lookup_keyword` compares the keyword's name hash against each entry's key
+directly, so it builds no key at all.
 
 ---
 

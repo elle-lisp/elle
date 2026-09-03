@@ -101,12 +101,23 @@ pub(super) fn build_collection_methods(heap: &mut FiberHeap) -> Value {
 /// sweep releases the root region by RC (`teardown_process_root_regions`), so the
 /// table is reclaimed when the instance ends.
 pub(super) fn alloc_trait_table(heap: &mut FiberHeap, entries: BTreeMap<TableKey, Value>) -> Value {
+    use crate::value::arena::root_region;
     use crate::value::heap::{alloc_root, HeapObject};
-    let sorted: Vec<(TableKey, Value)> = entries.into_iter().collect();
+    // The entry slice shares the header's region, so it is built through the
+    // root region rather than through `alloc_root` alone. The table carries no
+    // traits of its own: it IS a trait table, and `build::struct_from_sorted`
+    // would ask the registry for a default set that does not exist yet at VM
+    // init.
+    let region = root_region(heap);
+    let sorted: Vec<(TableKey, Value)> = entries
+        .into_iter()
+        .map(|(k, v)| (k.intern_into(heap, region), v))
+        .collect();
+    let slice = heap.alloc_region_slice_in_region::<(TableKey, Value)>(&sorted, region);
     alloc_root(
         heap,
         HeapObject::LStruct {
-            data: sorted,
+            data: slice,
             traits: Value::NIL,
         },
     )

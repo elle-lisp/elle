@@ -41,6 +41,11 @@ pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
 }
 /// Mint-or-get `heap`'s pinned process-lifetime root region, registering it as a
 /// process root on first use so teardown releases it by RC.
+///
+/// `pub(crate)` for the root values whose payload must be built in the same
+/// region as their header — a slice-backed root cannot go through
+/// [`alloc_root`] alone (docs/impl/region/model.md, "RegionSlice contents share
+/// their object's region").
 pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     if let Some(r) = heap.root_region_slot() {
         return r;

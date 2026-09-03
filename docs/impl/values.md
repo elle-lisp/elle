@@ -56,7 +56,7 @@ Tag                   HeapObject variant
 TAG_STRING_MUT (11)   LStringMut { data: Rc<RefCell<Vec<u8>>>, traits }
 TAG_ARRAY (12)        LArray { elements: RegionSlice<Value>, traits }
 TAG_ARRAY_MUT (13)    LArrayMut { data: Rc<RefCell<Vec<Value>>>, traits }
-TAG_STRUCT (14)       LStruct { data: Vec<(TableKey, Value)>, traits }
+TAG_STRUCT (14)       LStruct { data: RegionSlice<(TableKey, Value)>, traits }
 TAG_STRUCT_MUT (15)   LStructMut { data: Rc<RefCell<BTreeMap<TableKey, Value>>>, traits }
 TAG_CONS (16)         Pair { first: Value, rest: Value, traits }
 TAG_CLOSURE (17)      Closure { closure: Closure, traits }
@@ -114,8 +114,8 @@ This structure means:
 
 ### Immutable types use RegionSlice
 
-Immutable collections (arrays, strings, bytes, sets) store their data inline
-in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
+Immutable collections (arrays, strings, bytes, sets, structs) store their data
+inline in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
 region-owned bytes, usually adjacent to the containing `HeapObject` header. This
 avoids inner `Vec` or `Box<str>` allocations for the common case. Mutable types
 use `Rc<RefCell<...>>` for cross-fiber live-update semantics.
@@ -127,6 +127,80 @@ initialized to `NIL`. The five infrastructure variants (`Float`, `LibHandle`,
 `FFISignature`, `FFIType`, `ClosureTemplate`) do not. `with-traits` accepts only
 a struct (`LStruct` or `LStructMut`) as the table to store here. The field is
 invisible to equality, ordering, and hashing.
+
+## Struct keys
+
+A struct key is a `TableKey` (`src/value/types.rs`). Every variant is `Copy`,
+and no variant owns a Rust-heap allocation: a key's payload is either an
+immediate or a `Value` that points into a region. The entries of an immutable
+struct are therefore page bytes, which is what lets an image dump a struct as
+body data (see [impl/image.md](image.md) § Foundations).
+
+### A key is borrowed to probe and interned to store
+
+`TableKey::from_value` builds a **probe** key. It aliases the value it reads
+and allocates nothing, so `(get s "name")` costs no allocation.
+
+`TableKey::intern_into` builds a **stored** key. It copies a string or array
+payload into the destination region, so a struct's entries and the bytes of
+its keys share one region. Storing a probe key instead would leave the struct
+pointing into whatever region the caller's key came from. The struct would
+pin that region for its whole life, and a chain of `put`s would pin one
+region per link.
+
+The split reproduces what the owned representation did. A string key used to
+copy its bytes, and `intern_into` copies them too. A `Heap` key — a pair, a
+set, a struct, a fiber, a closure — used to alias its value, and it still
+aliases: interning one would break the identity that a fiber or closure key
+depends on.
+
+Every store site interns: the constructors in `value/build.rs`, the `@struct`
+store funnel in `value/arena/mutate.rs`, `with-traits`, the trait-table root
+builder, and the receiving side of `send`. A key already resident in the
+destination region is left alone, and a rebind interns nothing — the map keeps
+the key it already holds.
+
+### Keys rank in their own order, not `Value`'s
+
+`TableKey::Ord` ranks variants in declaration order: nil, bool, int, symbol,
+string, keyword, empty list, array, heap. `Value::Ord` ranks the same types
+differently — it puts keywords before strings. The two orders are
+independent, and a struct prints its entries in `TableKey` order, so the key
+ranking is user-visible. A string key compares by content, and an array key
+compares element-wise as keys. That is why both keep a variant of their own
+instead of folding into `Heap`, whose comparison delegates to `Value::Ord`.
+
+### A key's region is counted like a value's
+
+`TableKey::for_each_heap_value` enumerates the `Value`s a key holds. Two
+ledgers walk it: the alloc-time scan (`find_object_cross_refs`) for a struct
+born with its keys, and the `@struct` store funnels (`value/arena/mutate.rs`)
+for a key put or deleted later. Both count a key's heap value on one rule —
+**only when it resolves to a region other than the container's**. On that
+rule a key's region is increfed and its edge recorded exactly as a struct
+value's is, and the free-time cascade releases both.
+
+An interned key resolves to the container's own region, so it is a self-edge
+that neither ledger counts, and a key costs nothing to hold. A `Heap` key is
+not interned, stays a real cross-region reference, and both ledgers count it.
+
+The rule has to be the same on both sides, because the remove half cannot
+tell how the key it removes arrived. Count a self-edge in the put funnel
+alone and the container's region holds a reference to itself that the free
+cascade never releases — the cascade filters `own_id` — so every `put` of a
+string or array key leaks the whole region unless a later `del` cancels it.
+Count one in the remove funnel alone and `del` decrefs a reference the
+constructor never took, which frees the container under its own reader.
+
+### The wire key owns its bytes
+
+`SendKey` (`value/send/mod.rs`) is the key form that crosses a thread or a
+process: an owning enum with no `Value` in it. `SendValue::Struct` and
+`SendValue::StructMut` are keyed on it. A `TableKey` holds raw region
+pointers, so it is never `Send` and never serialized. The conversion reads a
+string key's bytes on the way out and allocates a fresh string in the
+receiving region on the way in. `SendKey` has no `Heap` arm, which is how an
+identity key is refused at the boundary.
 
 ## Closures
 

@@ -101,7 +101,7 @@ All non-immediate values are heap-allocated via `Rc`. Mutable heap objects use `
 - `Cons` — list pair
 - `LArrayMut` — mutable vector
 - `LStructMut` — mutable BTreeMap
-- `LStruct` — immutable BTreeMap
+- `LStruct` — immutable struct: key-value entries sorted by key, inline in the region
 - `LArray` — immutable vector
 - `LStringMut` — mutable byte vector
 - `LBytes` — immutable byte vector

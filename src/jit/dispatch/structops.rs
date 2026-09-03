@@ -119,7 +119,7 @@ pub extern "C" fn elle_jit_struct_rest(
         let result: Vec<_> = struct_map
             .iter()
             .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (k.clone(), *v))
+            .map(|(k, v)| (*k, *v))
             .collect();
         let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
         JitValue::from_value(ctx.struct_from_sorted(result))
@@ -128,9 +128,9 @@ pub extern "C" fn elle_jit_struct_rest(
             .borrow()
             .iter()
             .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (k.clone(), *v))
+            .map(|(k, v)| (*k, *v))
             .collect();
-        result.sort_by(|(a, _), (b, _)| a.cmp(b));
+        result.sort_by_key(|(a, _)| *a);
         let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
         JitValue::from_value(ctx.struct_from_sorted(result))
     } else {

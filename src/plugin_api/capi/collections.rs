@@ -73,7 +73,9 @@ pub(in crate::plugin_api) extern "C" fn struct_key(
                             None => return std::ptr::null(),
                         }
                     }
-                    TableKey::String(s) => intern_str(s.clone()),
+                    TableKey::String(v) => {
+                        intern_str(v.as_str().expect("a string key holds a string").to_string())
+                    }
                     _ => return std::ptr::null(),
                 };
                 *out_len = s.len();

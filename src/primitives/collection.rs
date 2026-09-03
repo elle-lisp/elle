@@ -275,7 +275,7 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
         return Ok(s
             .iter()
             .map(|(k, v)| {
-                let key = k.to_value(ctx);
+                let key = k.to_value();
                 ctx.array(vec![key, *v])
             })
             .collect());
@@ -285,7 +285,7 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
             .borrow()
             .iter()
             .map(|(k, v)| {
-                let key = k.to_value(ctx);
+                let key = k.to_value();
                 ctx.array(vec![key, *v])
             })
             .collect());
@@ -309,10 +309,10 @@ fn struct_entries(
     v: &Value,
 ) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
     v.as_struct()
-        .map(|s| s.iter().map(|(k, v)| (k.clone(), *v)).collect())
+        .map(|s| s.iter().map(|(k, v)| (*k, *v)).collect())
         .or_else(|| {
             v.as_struct_mut()
-                .map(|s| s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect())
+                .map(|s| s.borrow().iter().map(|(k, v)| (*k, *v)).collect())
         })
 }
 

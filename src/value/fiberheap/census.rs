@@ -257,14 +257,6 @@ fn slice_stat<T: 'static>(sl: &RegionSlice<T>, seen: &mut FxHashSet<usize>, stat
     }
 }
 
-fn key_bytes(k: &TableKey) -> usize {
-    match k {
-        TableKey::String(s) => s.len(),
-        TableKey::Array(ks) => ks.iter().map(key_bytes).sum(),
-        _ => 0,
-    }
-}
-
 fn syntax_bytes(s: &Syntax, seen: &mut FxHashSet<usize>) -> usize {
     let mut b = size_of::<Syntax>() + std::mem::size_of_val(s.scopes.as_slice());
     match &s.kind {
@@ -325,9 +317,8 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LStruct { data, .. } => {
-            stat.bytes += data.len() * size_of::<(TableKey, Value)>();
+            slice_stat(data, seen, &mut stat);
             for (k, v) in data.iter() {
-                stat.bytes += key_bytes(k);
                 k.for_each_heap_value(&mut |kv| heap_slot(kv, &mut stat));
                 heap_slot(v, &mut stat);
             }
@@ -386,7 +377,6 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             if let Ok(m) = data.try_borrow() {
                 stat.bytes += m.len() * size_of::<(TableKey, Value)>();
                 for (k, v) in m.iter() {
-                    stat.bytes += key_bytes(k);
                     k.for_each_heap_value(&mut |kv| heap_slot(kv, &mut stat));
                     heap_slot(v, &mut stat);
                 }

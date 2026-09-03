@@ -228,7 +228,7 @@ pub(crate) fn handle_intr_freeze(vm: &mut VM, region: RuntimeRegion) {
     let result = if let Some(a) = val.as_array_mut() {
         crate::value::build::array(heap, a.borrow().clone(), region)
     } else if let Some(t) = val.as_struct_mut() {
-        let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (*k, *v)).collect();
         crate::value::build::struct_from_sorted(heap, entries, region)
     } else if let Some(s) = val.as_set_mut() {
         crate::value::build::set(heap, s.borrow().clone(), region)
@@ -251,8 +251,7 @@ pub(crate) fn handle_intr_thaw(vm: &mut VM, region: RuntimeRegion) {
     let result = if let Some(a) = val.as_array() {
         crate::value::build::array_mut(heap, a.to_vec(), region)
     } else if let Some(s) = val.as_struct() {
-        let entries: std::collections::BTreeMap<_, _> =
-            s.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let entries: std::collections::BTreeMap<_, _> = s.iter().map(|(k, v)| (*k, *v)).collect();
         crate::value::build::struct_mut_from(heap, entries, region)
     } else if let Some(s) = val.as_set() {
         crate::value::build::set_mut(heap, s.iter().cloned().collect(), region)

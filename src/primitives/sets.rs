@@ -24,7 +24,7 @@ pub(crate) fn freeze_value(v: Value, ctx: &mut crate::primitives::ctx::Alloc) ->
         let map: std::collections::BTreeMap<crate::value::TableKey, Value> = tbl
             .borrow()
             .iter()
-            .map(|(k, v)| (k.clone(), freeze_value(*v, ctx)))
+            .map(|(k, v)| (*k, freeze_value(*v, ctx)))
             .collect();
         ctx.struct_from(map)
     } else if let Some(s) = v.as_set_mut() {

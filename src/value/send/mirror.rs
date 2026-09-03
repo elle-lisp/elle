@@ -1,5 +1,6 @@
-//! Bincode serde for [`SendValue`] and [`TableKey`], used by the stdlib disk
-//! cache (`crate::compiler::stdlib_cache`).
+//! Bincode serde for [`SendValue`], used by the stdlib disk cache
+//! (`crate::compiler::stdlib_cache`). [`SendKey`], the key form its maps carry,
+//! owns its bytes and derives serde directly, so it needs no mirror here.
 //!
 //! `SendValue` is the owned deep-copy form the send module produces for
 //! cross-thread transport, and it is exactly the shape a disk format needs:
@@ -17,9 +18,10 @@
 //! `Deserialize`, which reads bincode's enum tag
 //! (`tablekey_map_roundtrips_through_bincode` pins this).
 
+use super::SendKey;
 use super::SendValue;
 use super::SendableClosure;
-use crate::value::{TableKey, Value};
+use crate::value::Value;
 
 /// Symmetric serde mirror for `SendValue`. Both directions go through this
 /// enum so the bincode encoding is identical (a hand-written `Serialize` that
@@ -61,7 +63,7 @@ enum Mirror {
     Seq(SeqKind, Vec<Mirror>, Box<Mirror>),
     Map(
         MapKind,
-        std::collections::BTreeMap<TableKey, Mirror>,
+        std::collections::BTreeMap<SendKey, Mirror>,
         Box<Mirror>,
     ),
     Buffer(BytesKind, Vec<u8>, Box<Mirror>),
@@ -191,90 +193,29 @@ impl<'de> serde::Deserialize<'de> for SendValue {
     }
 }
 
-/// Symmetric serde mirror for `TableKey`, for the same reason as [`Mirror`]:
-/// both directions must share one bincode encoding. A symbol or keyword key
-/// travels as its name's hash, which names the same symbol in the loading
-/// process. `Heap` has no variant — it holds a live `Value` — so it is
-/// rejected at serialize time, which the cache layer turns into a miss.
-#[derive(serde::Serialize, serde::Deserialize)]
-enum KeyMirror {
-    Nil,
-    Bool(bool),
-    Int(i64),
-    String(String),
-    Symbol(u64),
-    Keyword(u64),
-    EmptyList,
-    Array(Vec<KeyMirror>),
-}
-
-impl serde::Serialize for TableKey {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use crate::value::TableKey as TK;
-        use serde::ser::Error;
-        fn to_mirror(k: &TK) -> Result<KeyMirror, String> {
-            Ok(match k {
-                TK::Nil => KeyMirror::Nil,
-                TK::Bool(b) => KeyMirror::Bool(*b),
-                TK::Int(i) => KeyMirror::Int(*i),
-                TK::String(st) => KeyMirror::String(st.clone()),
-                TK::Symbol(id) => KeyMirror::Symbol(id.0),
-                TK::Keyword(hash) => KeyMirror::Keyword(*hash),
-                TK::EmptyList => KeyMirror::EmptyList,
-                TK::Array(a) => {
-                    KeyMirror::Array(a.iter().map(to_mirror).collect::<Result<_, _>>()?)
-                }
-                TK::Heap(_) => {
-                    return Err("TableKey::Heap not serializable by stdlib cache".into());
-                }
-            })
-        }
-        to_mirror(self).map_err(Error::custom)?.serialize(s)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for TableKey {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use crate::value::TableKey as TK;
-        fn from_mirror(m: KeyMirror) -> TK {
-            match m {
-                KeyMirror::Nil => TK::Nil,
-                KeyMirror::Bool(b) => TK::Bool(b),
-                KeyMirror::Int(i) => TK::Int(i),
-                KeyMirror::String(st) => TK::String(st),
-                KeyMirror::Symbol(id) => TK::Symbol(crate::value::SymbolId(id)),
-                KeyMirror::Keyword(hash) => TK::Keyword(hash),
-                KeyMirror::EmptyList => TK::EmptyList,
-                KeyMirror::Array(a) => TK::Array(a.into_iter().map(from_mirror).collect()),
-            }
-        }
-        Ok(from_mirror(KeyMirror::deserialize(d)?))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    /// A struct constant's `TableKey`s must survive bincode. The trap: a
+    /// A struct constant's keys must survive bincode. The trap: a
     /// hand-written `Serialize` that emits `(u8, payload)` tuples against a
     /// derived `Deserialize` that reads bincode's enum tag decodes garbage —
     /// every struct-bearing cache entry would fail to load (and the failure
     /// is silent: the caller just recompiles, forever).
     #[test]
-    fn tablekey_map_roundtrips_through_bincode() {
+    fn sendkey_map_roundtrips_through_bincode() {
         use super::SendValue as SV;
 
-        let mut map: BTreeMap<TableKey, SV> = BTreeMap::new();
-        map.insert(TableKey::Int(7), SV::Immediate(Value::int(1)));
-        map.insert(TableKey::String("s".into()), SV::Immediate(Value::int(2)));
+        let mut map: BTreeMap<SendKey, SV> = BTreeMap::new();
+        map.insert(SendKey::Int(7), SV::Immediate(Value::int(1)));
+        map.insert(SendKey::String("s".into()), SV::Immediate(Value::int(2)));
         map.insert(
-            TableKey::Keyword(crate::value::keyword::keyword_hash("k")),
+            SendKey::Keyword(crate::value::keyword::keyword_hash("k")),
             SV::Immediate(Value::int(3)),
         );
         map.insert(
-            TableKey::Array(vec![TableKey::Bool(true), TableKey::EmptyList]),
+            SendKey::Array(vec![SendKey::Bool(true), SendKey::EmptyList]),
             SV::Immediate(Value::int(4)),
         );
         let sv = SV::Struct(map, Box::new(SV::Immediate(Value::NIL)));
@@ -286,14 +227,14 @@ mod tests {
         };
         assert_eq!(m.len(), 4, "all keys survive");
         for (k, want) in [
-            (TableKey::Int(7), 1),
-            (TableKey::String("s".into()), 2),
+            (SendKey::Int(7), 1),
+            (SendKey::String("s".into()), 2),
             (
-                TableKey::Keyword(crate::value::keyword::keyword_hash("k")),
+                SendKey::Keyword(crate::value::keyword::keyword_hash("k")),
                 3,
             ),
             (
-                TableKey::Array(vec![TableKey::Bool(true), TableKey::EmptyList]),
+                SendKey::Array(vec![SendKey::Bool(true), SendKey::EmptyList]),
                 4,
             ),
         ] {
@@ -304,21 +245,21 @@ mod tests {
         }
     }
 
-    /// A symbol `TableKey` travels as the id it holds, because that id is the
-    /// name's hash and names the same symbol in the loading process. The trap
-    /// this guards: writing the key through any name-shaped detour (intern on
-    /// load, a remap table) reintroduces a step that can disagree with the
-    /// hash the rest of the bundle carries. The counter-factual is a key that
-    /// deserializes to a *different* `SymbolId` than it was stored with — the
-    /// struct then answers to a symbol no source text spells.
+    /// A symbol key travels as the id it holds, because that id is the name's
+    /// hash and names the same symbol in the loading process. The trap this
+    /// guards: writing the key through any name-shaped detour (intern on load,
+    /// a remap table) reintroduces a step that can disagree with the hash the
+    /// rest of the bundle carries. The counter-factual is a key that
+    /// deserializes to a *different* id than it was stored with — the struct
+    /// then answers to a symbol no source text spells.
     #[test]
-    fn tablekey_symbol_key_round_trips_as_its_name_hash() {
+    fn sendkey_symbol_key_round_trips_as_its_name_hash() {
         use super::SendValue as SV;
         use crate::value::SymbolId;
 
         let id = SymbolId::of("a-symbol-key");
-        let mut map: BTreeMap<TableKey, SV> = BTreeMap::new();
-        map.insert(TableKey::Symbol(id), SV::Immediate(Value::int(1)));
+        let mut map: BTreeMap<SendKey, SV> = BTreeMap::new();
+        map.insert(SendKey::Symbol(id.0), SV::Immediate(Value::int(1)));
         let sv = SV::Struct(map, Box::new(SV::Immediate(Value::NIL)));
 
         let bytes = bincode::serialize(&sv).expect("a symbol key serializes");
@@ -326,9 +267,41 @@ mod tests {
         let SV::Struct(m, _) = back else {
             panic!("round-trip changed the container kind");
         };
-        let Some(SV::Immediate(v)) = m.get(&TableKey::Symbol(id)) else {
+        let Some(SV::Immediate(v)) = m.get(&SendKey::Symbol(id.0)) else {
             panic!("the symbol key did not come back as the same id");
         };
         assert_eq!(v.as_int(), Some(1));
+    }
+
+    /// `SendKey` ranks its variants the way `TableKey` does. A received
+    /// struct's entry slice is the map's iteration order, and the slice must be
+    /// sorted by key order for the binary search over it to find anything.
+    #[test]
+    fn sendkey_ranks_its_variants_the_way_a_struct_key_does() {
+        let mut keys = [
+            SendKey::Array(vec![]),
+            SendKey::EmptyList,
+            SendKey::Keyword(0),
+            SendKey::String(String::new()),
+            SendKey::Symbol(0),
+            SendKey::Int(0),
+            SendKey::Bool(false),
+            SendKey::Nil,
+        ];
+        keys.sort();
+        let ranks: Vec<usize> = keys
+            .iter()
+            .map(|k| match k {
+                SendKey::Nil => 0,
+                SendKey::Bool(_) => 1,
+                SendKey::Int(_) => 2,
+                SendKey::Symbol(_) => 3,
+                SendKey::String(_) => 4,
+                SendKey::Keyword(_) => 5,
+                SendKey::EmptyList => 6,
+                SendKey::Array(_) => 7,
+            })
+            .collect();
+        assert_eq!(ranks, vec![0, 1, 2, 3, 4, 5, 6, 7]);
     }
 }

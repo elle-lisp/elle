@@ -119,14 +119,28 @@ unsafe fn clone_with_traits(
             data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,
         })),
-        HeapObject::LStructMut { data, .. } => Ok(ctx.alloc(HeapObject::LStructMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
-            traits: table,
-        })),
-        HeapObject::LStruct { data, .. } => Ok(ctx.alloc(HeapObject::LStruct {
-            data: data.clone(),
-            traits: table,
-        })),
+        HeapObject::LStructMut { data, .. } => {
+            let entries: std::collections::BTreeMap<_, _> = data
+                .borrow()
+                .iter()
+                .map(|(k, v)| (ctx.intern_key(k), *v))
+                .collect();
+            Ok(ctx.alloc(HeapObject::LStructMut {
+                data: std::rc::Rc::new(std::cell::RefCell::new(entries)),
+                traits: table,
+            }))
+        }
+        HeapObject::LStruct { data, .. } => {
+            // Keys are interned into the clone's region like the entry slice
+            // itself: a traited copy that kept the source's key strings would
+            // pin the source's region for its whole life.
+            let entries: Vec<(crate::value::heap::TableKey, Value)> =
+                data.iter().map(|(k, v)| (ctx.intern_key(k), *v)).collect();
+            Ok(ctx.alloc(HeapObject::LStruct {
+                data: ctx.alloc_slice::<(crate::value::heap::TableKey, Value)>(&entries),
+                traits: table,
+            }))
+        }
         HeapObject::Closure { closure, .. } => Ok(ctx.alloc(HeapObject::Closure {
             closure: closure.clone(),
             traits: table,

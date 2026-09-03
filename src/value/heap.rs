@@ -163,11 +163,12 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Immutable struct (sorted array of key-value pairs).
-    /// Keys may contain owned String data, so this stays on the Rust heap
-    /// (Vec) rather than inline in the arena.
+    /// Immutable struct: entries sorted by key, inline in the arena. A
+    /// `TableKey` owns no Rust-heap allocation and a stored key's payload is
+    /// interned into this struct's own region, so the whole entry slice is
+    /// page bytes (docs/impl/values.md § "Struct keys").
     LStruct {
-        data: Vec<(TableKey, Value)>,
+        data: RegionSlice<(TableKey, Value)>,
         traits: Value,
     },
 

@@ -108,15 +108,15 @@ pub(super) fn from_value_inner(
         } => {
             let mut copied = BTreeMap::new();
             for (k, v) in s.iter() {
-                if !k.is_sendable() {
+                let Some(key) = super::SendKey::from_key(k) else {
                     return Err("Cannot send struct with identity keys".to_string());
-                }
+                };
                 match k {
                     crate::value::heap::TableKey::Symbol(id) => ctx.note_symbol(*id),
                     crate::value::heap::TableKey::Keyword(hash) => ctx.note_keyword(*hash),
                     _ => {}
                 }
-                copied.insert(k.clone(), from_value_inner(*v, ctx)?);
+                copied.insert(key, from_value_inner(*v, ctx)?);
             }
             let traits_sv = send_traits(*traits, HeapTag::LStruct, ctx)?;
             Ok(SendValue::Struct(copied, Box::new(traits_sv)))
@@ -192,15 +192,15 @@ pub(super) fn from_value_inner(
                 .map_err(|_| "Cannot borrow @struct for sending".to_string())?;
             let mut copied = BTreeMap::new();
             for (k, v) in borrowed.iter() {
-                if !k.is_sendable() {
+                let Some(key) = super::SendKey::from_key(k) else {
                     return Err("Cannot send @struct with identity keys".to_string());
-                }
+                };
                 match k {
                     crate::value::heap::TableKey::Symbol(id) => ctx.note_symbol(*id),
                     crate::value::heap::TableKey::Keyword(hash) => ctx.note_keyword(*hash),
                     _ => {}
                 }
-                copied.insert(k.clone(), from_value_inner(*v, ctx)?);
+                copied.insert(key, from_value_inner(*v, ctx)?);
             }
             let traits_sv = send_traits(*traits, HeapTag::LStructMut, ctx)?;
             Ok(SendValue::StructMut(copied, Box::new(traits_sv)))

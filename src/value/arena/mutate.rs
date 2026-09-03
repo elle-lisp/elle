@@ -35,6 +35,31 @@ fn unrecord_store(heap: &mut FiberHeap, container: Value, elem: Value) {
     heap.unrecord_outgoing_edge(src, dst);
 }
 
+/// The heap `Value`s of `key` that this seam counts: the ones resolving to a
+/// region other than `container`'s. A stored key is interned into the
+/// container's own region, so its heap value is normally a self-edge, which
+/// neither ledger counts — the rule the free-time cascade follows through its
+/// `own_id` filter. A `Heap` key is not interned, stays a real cross-region
+/// reference, and does come back from here.
+///
+/// Both @struct funnels resolve their key edges here, because the remove half
+/// cannot tell how the key it removes was stored (docs/impl/values.md § "A
+/// key's region is counted like a value's").
+fn counted_key_values(
+    heap: &FiberHeap,
+    container: Value,
+    key: &crate::value::heap::TableKey,
+) -> Vec<Value> {
+    let own = region_of(heap, container);
+    let mut counted = Vec::new();
+    key.for_each_heap_value(&mut |kv| {
+        if region_of(heap, *kv) != own {
+            counted.push(*kv);
+        }
+    });
+    counted
+}
+
 /// Push a value into a mutable @array, tracking the cross-region reference.
 /// Panics if `collection` is not an @array.
 /// Returns the collection value.
@@ -220,20 +245,32 @@ pub fn struct_put_with_rebind(
     key: crate::value::heap::TableKey,
     val: Value,
 ) -> Option<Value> {
-    // A heap-valued KEY (fiber/closure/list) is a cross-region reference the struct
-    // holds, exactly like the value — the free-time content scan enumerates it
-    // (`find_object_cross_refs`'s `LStructMut` arm walks keys). So a NEW key must be
-    // increfed and its outgoing edge recorded here, symmetric with the alloc-scan
-    // that does it for a struct BUILT with keys (region-struct-heap-key-uaf.lisp);
+    // A heap-valued KEY the struct holds outside its own region is a reference
+    // like the value's, and the free-time content scan enumerates it
+    // (`find_object_cross_refs`'s `LStructMut` arm walks keys). A NEW one is
+    // increfed and its edge recorded here, symmetric with the alloc-scan that
+    // does it for a struct BUILT with keys (region-struct-heap-key-uaf.lisp);
     // otherwise the recorded edge table and the free scan disagree (a missed
-    // store-funnel edge the equivalence oracle detonates on). Captured before
-    // `insert` moves the key. A rebind (`Some(old)`) keeps the pre-existing key
-    // (BTreeMap::insert does not replace an equal key), so its edge is untouched.
-    let mut key_heap_vals: Vec<Value> = Vec::new();
-    key.for_each_heap_value(&mut |kv| key_heap_vals.push(*kv));
+    // store-funnel edge the equivalence oracle detonates on). `counted_key_values`
+    // decides WHICH of the key's values that is. A rebind (`Some(old)`) keeps the
+    // pre-existing key (BTreeMap::insert does not replace an equal key), so its
+    // edge is untouched.
+    //
+    // The caller's key borrows whatever it was built from (`TableKey::
+    // from_value`), so a key that is actually stored is interned into the
+    // container's own region first — the discipline the immutable constructors
+    // follow (docs/impl/values.md § "Struct keys"). Membership is probed with
+    // the BORROWED key, because a rebind stores no key and interning one would
+    // leave the copy unreachable in the container's region.
     let map_ref = collection
         .as_struct_mut_raw()
         .expect("struct_put_with_rebind: expected @struct");
+    let replacing = map_ref.borrow().contains_key(&key);
+    let key = match region_of(heap, collection) {
+        Some(r) if !replacing => key.intern_into(heap, r),
+        _ => key,
+    };
+    let key_heap_vals = counted_key_values(heap, collection, &key);
     let old = map_ref.borrow_mut().insert(key, val);
     match old {
         Some(old) => {
@@ -269,17 +306,24 @@ pub fn struct_remove_with_decref(
     // `remove_entry` hands back the STORED key, not the caller's lookup key — for a
     // value-equal-but-distinct heap key (a list) they are two allocations in two
     // regions, and the edge was recorded against the STORED one (mirrors the @set
-    // del fix). Release the stored key's heap edges symmetrically with the incref/
-    // record `struct_put_with_rebind` added.
+    // del fix). Its heap edges are released through `counted_key_values`, which is
+    // also what `struct_put_with_rebind` takes them on: this half cannot tell
+    // whether the key it removes was interned by a constructor or by that funnel,
+    // so the two must agree on which of a key's values is a reference at all.
     let removed = map_ref.borrow_mut().remove_entry(key);
     if let Some((stored_key, v)) = removed {
-        // Un-record before decref (the decref may free `v`'s region — see `pop`).
+        // Every region this call will release is resolved FIRST, and every
+        // un-record runs before any decref: a decref may free a region, and a
+        // freed page can no longer answer `region_of` (see `pop`).
+        let key_heap_vals = counted_key_values(heap, collection, &stored_key);
         unrecord_store(heap, collection, v);
-        decref_removed_element(heap, v);
-        stored_key.for_each_heap_value(&mut |kv| {
+        for kv in &key_heap_vals {
             unrecord_store(heap, collection, *kv);
-            decref_removed_element(heap, *kv);
-        });
+        }
+        decref_removed_element(heap, v);
+        for kv in key_heap_vals {
+            decref_removed_element(heap, kv);
+        }
         return Some(v);
     }
     None

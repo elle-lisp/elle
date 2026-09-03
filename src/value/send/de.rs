@@ -173,22 +173,24 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             })
         }
         SendValue::Struct(map, traits) => {
-            // BTreeMap iterates in sorted order, so Vec is already sorted.
+            // `SendKey` ranks its variants the way `TableKey` does, so the
+            // BTreeMap already iterates in the order the entry slice needs.
             let entries: Vec<_> = map
                 .into_iter()
-                .map(|(k, sv)| (k, into_value_inner(sv, ctx)))
+                .map(|(k, sv)| (k.to_key(ctx.ctx), into_value_inner(sv, ctx)))
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStruct);
+            let slice = ctx.alloc_slice::<(crate::value::heap::TableKey, Value)>(&entries);
             ctx.alloc(HeapObject::LStruct {
-                data: entries,
+                data: slice,
                 traits: traits_val,
             })
         }
         SendValue::StructMut(map, traits) => {
             let entries: BTreeMap<_, _> = map
                 .into_iter()
-                .map(|(k, sv)| (k, into_value_inner(sv, ctx)))
+                .map(|(k, sv)| (k.to_key(ctx.ctx), into_value_inner(sv, ctx)))
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStructMut);

@@ -79,16 +79,23 @@ pub(crate) fn struct_mut(heap: &mut FiberHeap, region: RuntimeRegion) -> Value {
 }
 
 /// Allocate a mutable `@struct` with entries into `region` on `heap`.
+///
+/// The keys are interned into `region` like an immutable struct's, so an
+/// `@struct` never holds a key borrowed from the caller's region.
 #[inline]
 pub(crate) fn struct_mut_from(
     heap: &mut FiberHeap,
     entries: BTreeMap<TableKey, Value>,
     region: RuntimeRegion,
 ) -> Value {
+    let interned: BTreeMap<TableKey, Value> = entries
+        .iter()
+        .map(|(k, v)| (k.intern_into(heap, region), *v))
+        .collect();
     let traits = default_traits_for(heap, HeapTag::LStructMut);
     heap.alloc_in_region(
         HeapObject::LStructMut {
-            data: Rc::new(RefCell::new(entries)),
+            data: Rc::new(RefCell::new(interned)),
             traits,
         },
         region,
@@ -109,18 +116,25 @@ pub(crate) fn struct_from(
 
 /// Allocate an immutable struct (from pre-sorted entries) into `region`.
 ///
-/// Keeps the Vec on the Rust heap because `TableKey::String` carries an owned
-/// allocation; an arena memcpy would leak or double-free the String.
+/// Each key is interned into `region` on the way in, so the entry slice and
+/// the bytes its keys point at share one region and the struct pins nothing
+/// else (docs/impl/values.md § "Struct keys"). Interning preserves key order:
+/// a copied string or array compares equal to the one it was copied from.
 #[inline]
 pub(crate) fn struct_from_sorted(
     heap: &mut FiberHeap,
     entries: Vec<(TableKey, Value)>,
     region: RuntimeRegion,
 ) -> Value {
+    let interned: Vec<(TableKey, Value)> = entries
+        .iter()
+        .map(|(k, v)| (k.intern_into(heap, region), *v))
+        .collect();
+    let slice = heap.alloc_region_slice_in_region::<(TableKey, Value)>(&interned, region);
     let traits = default_traits_for(heap, HeapTag::LStruct);
     heap.alloc_in_region(
         HeapObject::LStruct {
-            data: entries,
+            data: slice,
             traits,
         },
         region,

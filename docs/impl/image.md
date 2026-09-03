@@ -5,8 +5,8 @@ configurations: the **boot** image (core, prelude, and stdlib pre-compiled
 into the binary) and **environment** images (user `save`/`load`) — the same
 format, dumper, and hydrator throughout, differing only in dependency list
 and dump policy (see *One mechanism, two configurations*). This doc owns the
-design argument. Nothing here is implemented yet; the test plan at the end
-names the pins each milestone must land with.
+design argument. *Landing order* below says what has landed and what has not;
+the test plan at the end names the pins each milestone must land with.
 
 ## The problem
 
@@ -159,13 +159,18 @@ Identity comes free; display does not. A hydrating instance holds none of the
 dump's names, which is what the name table below is for, and replaying it is
 also where a cross-build collision is caught.
 
-### Region-native immutable structs
+### Region-native immutable structs — landed
 
-`LStruct` holds `Vec<(TableKey, Value)>` and `TableKey::String` owns a
-`String`. Move the payload to `RegionSlice<(TableKey, Value)>` with string
-keys inline in the region, as arrays and strings already do. Payoff now:
-immutable structs stop allocating on the Rust heap. Payoff for images:
-structs become body data.
+`LStruct` used to hold `Vec<(TableKey, Value)>`, and two `TableKey` arms owned
+Rust heap memory: `String` owned a `String` and `Array` owned a
+`Vec<TableKey>`. The payload is now `RegionSlice<(TableKey, Value)>` and both
+key arms hold a `Value` pointing at a region-resident string or array, as
+arrays and strings already did. `TableKey` is `Copy` and sealed;
+[values.md](values.md) § "Struct keys" owns the key model — a borrowed probe
+key, an interned stored key, and an owning `SendKey` for `send` and the disk
+cache. Payoff now: immutable structs allocate nothing on the Rust heap, and a
+`get` probe builds its key without allocating. Payoff for images: structs are
+body data, and a struct's key bytes are self-edges of its own region.
 
 ### Region-native closure templates
 
@@ -760,7 +765,9 @@ code, and each deletes image machinery:
    ([symbol.md](symbol.md)); deleted the symbol remap pass, the
    sorted-container re-sort hazard, the `symbol_names` maps, and `send`'s
    re-interning.
-2. **struct** — region-native immutable struct payloads.
+2. **struct** — landed. Region-native immutable struct payloads and keys
+   ([values.md](values.md) § "Struct keys"); deleted the per-probe key
+   allocation and the owned-key arms the dumper would have had to encode.
 3. **template** — landed. The blueprint / payload / header split
    ([region/template.md](region/template.md)); deleted the per-creation
    blueprint clone, the `HashMap` location map, and the `Rc`-shared template

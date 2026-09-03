@@ -162,11 +162,11 @@ pub(crate) fn prim_keys(
     if args[0].is_struct_mut() {
         let mstruct = prim_arg!(ctx, args, 0, as_struct_mut, "keys", "struct");
         let borrowed = mstruct.borrow();
-        let keys: Vec<Value> = borrowed.keys().map(|k| k.to_value(ctx)).collect();
+        let keys: Vec<Value> = borrowed.keys().map(|k| k.to_value()).collect();
         (SIG_OK, ctx.list(keys))
     } else if args[0].is_struct() {
         let s = prim_arg!(ctx, args, 0, as_struct, "keys", "struct");
-        let keys: Vec<Value> = s.iter().map(|(k, _)| k.to_value(ctx)).collect();
+        let keys: Vec<Value> = s.iter().map(|(k, _)| k.to_value()).collect();
         (SIG_OK, ctx.list(keys))
     } else {
         type_error!(ctx, args[0], "keys", "struct")

@@ -145,7 +145,7 @@ pub(crate) fn handle_struct_rest(
         let result: Vec<(TableKey, Value)> = struct_map
             .iter()
             .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (k.clone(), *v))
+            .map(|(k, v)| (*k, *v))
             .collect();
         let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
         let rest = ctx.struct_from_sorted(result);
@@ -155,9 +155,9 @@ pub(crate) fn handle_struct_rest(
             .borrow()
             .iter()
             .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (k.clone(), *v))
+            .map(|(k, v)| (*k, *v))
             .collect();
-        result.sort_by(|(a, _), (b, _)| a.cmp(b));
+        result.sort_by_key(|(a, _)| *a);
         let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
         let rest = ctx.struct_from_sorted(result);
         vm.fiber.stack.push(rest);
