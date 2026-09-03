@@ -52,11 +52,12 @@ pub(super) fn compile_file_frontend_xform(
     with_transient(cctx.heap_ptr(), || {
         let t = std::time::Instant::now();
         let syntaxes = read_syntax_all_for(source, source_name)?;
-        crate::trace::phase(
+        crate::phase!(
             crate::trace::compile(),
             "compile",
-            &format!("{} read", source_name),
             t,
+            "{} read",
+            source_name
         );
         crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
         compile_syntaxes_frontend_xform_inner(syntaxes, symbols, cctx, source_name, xform)
@@ -122,7 +123,7 @@ fn compile_syntaxes_frontend_xform_inner(
             }
             Ok::<_, String>((expanded_forms, expander, meta))
         })?;
-    crate::trace::phase(ct, "compile", &format!("{} expand", source_name), t);
+    crate::phase!(ct, "compile", t, "{} expand", source_name);
     let t = std::time::Instant::now();
 
     // A fresh scope for any accumulator/temporaries `xform` injects, minted after
@@ -179,7 +180,7 @@ fn compile_syntaxes_frontend_xform_inner(
 
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
-    crate::trace::phase(ct, "compile", &format!("{} analyze", source_name), t);
+    crate::phase!(ct, "compile", t, "{} analyze", source_name);
 
     Ok((hir, arena, expander, prim_values, signal_projection))
 }

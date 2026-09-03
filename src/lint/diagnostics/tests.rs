@@ -50,23 +50,71 @@ fn code_row(line: &str) -> Option<(&str, &str)> {
 }
 
 #[test]
-fn the_cookbook_code_table_names_exactly_the_warnings_the_linter_raises() {
-    // The cookbook's table is a rule author's index of codes already taken, and
-    // it is prose: nothing but this test stops it drifting from `WARNINGS`.
+fn the_cookbook_code_tables_name_exactly_the_codes_that_are_taken() {
+    // The cookbook's tables are a rule author's index of codes already taken,
+    // and they are prose: nothing but this test stops them drifting from
+    // `WARNINGS` and `ERRORS`.
     //
     // The trap: drift is silent in both directions and neither is cosmetic. A
-    // code the table lists but no rule raises gets skipped as taken, so the
-    // next rule takes a further code and the numbering grows holes. A code a
-    // rule raises but the table omits gets handed to a second rule, and two
-    // rules then answer to one code.
+    // code the table lists but nothing raises gets skipped as taken, so the
+    // next rule takes a further code and the numbering grows holes. A code
+    // something raises but the table omits gets handed to a second rule, and
+    // two rules then answer to one code.
     const COOKBOOK: &str = include_str!("../../../docs/cookbook/lint-rules.md");
 
     let documented: Vec<(&str, &str)> = COOKBOOK.lines().filter_map(code_row).collect();
-    let raised: Vec<(&str, &str)> = WARNINGS.iter().map(|w| (w.code, w.rule)).collect();
+    // Warnings first, then errors — the order the two tables appear in.
+    let taken: Vec<(&str, &str)> = WARNINGS
+        .iter()
+        .chain(ERRORS)
+        .map(|c| (c.code, c.rule))
+        .collect();
 
     assert_eq!(
-        documented, raised,
+        documented, taken,
         "docs/cookbook/lint-rules.md § Diagnostic codes disagrees with \
-         diagnostics::WARNINGS"
+         diagnostics::WARNINGS ++ diagnostics::ERRORS"
     );
+}
+
+// The defect this registry closes: the same failure carried a different code
+// depending on which surface reported it. A syntax error was `E005` from
+// `elle lint`, `E000` from `compile/diagnostics` — whose match had no
+// `SyntaxError` arm and fell through — and `E0001` from the LSP, a four-digit
+// shape the documented `E00x` scheme does not have.
+//
+// The counter-factual: with the mapping written out at each site, this test
+// reads three different codes for one kind.
+#[test]
+fn one_error_kind_reports_one_code() {
+    use crate::error::ErrorKind;
+
+    let syntax = ErrorKind::SyntaxError {
+        message: "unbalanced".to_string(),
+        line: Some(1),
+    };
+    assert_eq!(LintCode::for_error_kind(&syntax), SYNTAX_ERROR);
+    assert_eq!(SYNTAX_ERROR.code, "E005");
+
+    // Every code the mapping can produce is a code the tables publish, so a
+    // consumer filtering by the documented index cannot miss one.
+    for kind in [
+        ErrorKind::SyntaxError {
+            message: String::new(),
+            line: None,
+        },
+        ErrorKind::UndefinedVariable {
+            name: String::new(),
+            suggestions: Vec::new(),
+        },
+        ErrorKind::DivisionByZero,
+    ] {
+        let code = LintCode::for_error_kind(&kind);
+        assert!(
+            ERRORS.contains(&code),
+            "{:?} maps to {}, which no table publishes",
+            kind,
+            code.code
+        );
+    }
 }

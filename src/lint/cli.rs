@@ -86,15 +86,8 @@ impl Linter {
 
     /// Convert an LError to a Diagnostic
     fn lerror_to_diagnostic(error: &crate::error::LError, file: &str) -> Diagnostic {
-        use crate::error::ErrorKind;
-        let (code, rule) = match &error.kind {
-            ErrorKind::UndefinedVariable { .. } => ("E001", "undefined-variable"),
-            ErrorKind::SignalMismatch { .. } => ("E002", "signal-mismatch"),
-            ErrorKind::UnterminatedForm { .. } => ("E003", "unterminated-form"),
-            ErrorKind::CompileError { .. } => ("E004", "compile-error"),
-            ErrorKind::SyntaxError { .. } => ("E005", "syntax-error"),
-            _ => ("E000", "analysis-error"),
-        };
+        let crate::lint::diagnostics::LintCode { code, rule } =
+            crate::lint::diagnostics::LintCode::for_error_kind(&error.kind);
         let loc = error
             .location
             .clone()

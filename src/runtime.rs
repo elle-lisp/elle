@@ -98,7 +98,7 @@ impl RuntimeCore {
         let mut symbols = Box::new(SymbolTable::new());
         let t = std::time::Instant::now();
         let meta = register_primitives(&mut vm, &mut symbols);
-        crate::trace::phase(crate::trace::boot(), "boot", "primitives", t);
+        crate::phase!(crate::trace::boot(), "boot", t, "primitives");
         // Point the VM at this instance's symbol table (stable boxed address),
         // so the runtime `eval` instruction, the meta/read/debug primitives, and
         // value name-resolution resolve in THIS instance's own table. Mirrors

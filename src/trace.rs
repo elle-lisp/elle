@@ -43,13 +43,28 @@ pub(crate) fn compile() -> bool {
 }
 
 /// Print one phase-timing mark: `[trace:SUBSYSTEM] LABEL 12.3ms`.
-pub(crate) fn phase(enabled: bool, subsystem: &str, label: &str, start: std::time::Instant) {
-    if enabled {
-        eprintln!(
-            "[trace:{}] {} {:.1}ms",
-            subsystem,
-            label,
-            start.elapsed().as_secs_f64() * 1000.0
-        );
-    }
+///
+/// The label is a format string plus arguments, and it is formatted *inside*
+/// the `enabled` check — the shape [`etrace!`] uses next door. A function
+/// taking an already-formatted `&str` cannot do that: Rust evaluates arguments
+/// before the call, so every `format!` at a call site allocated a `String` on
+/// every compile phase whether or not `--trace=compile` was on.
+///
+/// `subsystem` must be a literal; it is concatenated into the format string.
+///
+/// Cost when tracing is off: one branch.
+#[macro_export]
+macro_rules! phase {
+    ($enabled:expr, $subsystem:literal, $start:expr, $($label:tt)*) => {
+        if $enabled {
+            eprintln!(
+                concat!("[trace:", $subsystem, "] {} {:.1}ms"),
+                format_args!($($label)*),
+                $start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+    };
 }
+
+#[cfg(test)]
+mod tests;

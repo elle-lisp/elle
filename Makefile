@@ -545,10 +545,16 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
 # CI documents private items too, and most of this crate is private — without
 # the flag rustdoc never resolves a link into a `pub(crate)` item, so a broken
 # one reaches CI unseen. Keep the flag here and in .github/workflows in step.
-qa: crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc
+#
+# `--doc` is separate from `cargo doc` because rendering an example is not
+# compiling one: `cargo doc` will happily render a call whose signature moved
+# under it. Nothing else builds doctests — `test` passes `--lib` and
+# `--test '*'`, both of which exclude them.
+qa: crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
 	cargo fmt --check
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
+	$(MLIR_ENV) cargo test --workspace --doc
 
 test: smoke smoke-nouring qa  ## Rust unit + integration tests + QA (fmt/clippy/crosscheck/rustdoc) after smoke
 	$(MLIR_ENV) cargo test --workspace --lib --all-features

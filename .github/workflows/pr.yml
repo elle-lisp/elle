@@ -90,6 +90,13 @@ jobs:
         run: cargo doc --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
+      # `cargo doc` renders a doc example; it does not compile one. Without
+      # this step a `///` example goes on rendering after the signature it
+      # calls has changed, because no other job builds it: the suite's own
+      # `cargo test` invocations pass `--lib` and `--test '*'`, both of which
+      # exclude doctests.
+      - name: Compile documentation examples
+        run: cargo test --workspace --doc
 
   # The documentation site is generated from docs/*.md plus the Elle sources
   # under src/, so it breaks on a renamed heading or a moved source file as

@@ -113,15 +113,15 @@ impl CompileCtx {
         // `init_stdlib` runs); seed it before `load_prelude`, whose macro
         // expansions evaluate transformer bodies via `eval_syntax`.
         expander.set_eval_meta(build_primitive_meta(&mut init_symbols));
-        crate::trace::phase(boot, "boot", "primitives-macrovm", t);
+        crate::phase!(boot, "boot", t, "primitives-macrovm");
         let t = std::time::Instant::now();
         compile_core(&mut vm, &mut init_symbols, &mut meta, &mut expander);
-        crate::trace::phase(boot, "boot", "core", t);
+        crate::phase!(boot, "boot", t, "core");
         let t = std::time::Instant::now();
         expander
             .load_prelude(&mut init_symbols, &mut vm)
             .expect("prelude loading must succeed");
-        crate::trace::phase(boot, "boot", "prelude", t);
+        crate::phase!(boot, "boot", t, "prelude");
         // `init_symbols` is a throwaway used only for this setup; `expand` pointed
         // the macro VM at it. Reset to null so the dropped table is never reached
         // — the next `expand` (a real compile) re-points the VM at the instance's

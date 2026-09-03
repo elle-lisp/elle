@@ -378,12 +378,12 @@ pub fn load_bytecode(
         symbols,
     )?;
     let tracing = crate::trace::compile();
-    crate::trace::phase(tracing, "compile", "stdlib deserialize_templates", t0);
+    crate::phase!(tracing, "compile", t0, "stdlib deserialize_templates");
     let t1 = std::time::Instant::now();
     let entry = templates
         .pop()
         .expect("deserialize_templates returns one per input");
-    crate::trace::phase(tracing, "compile", "stdlib pop+extract", t1);
+    crate::phase!(tracing, "compile", t1, "stdlib pop+extract");
     // Restore the cross-unit registries the skipped stdlib compile would have
     // populated.
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();

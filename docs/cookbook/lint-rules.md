@@ -112,10 +112,26 @@ that lands without its row here fails that test.
 reads the `is_tail` flag `src/hir/tailcall.rs` sets. Neither rule tracks
 its own state, and neither adds a field to `BindingInner`.
 
+These are the analysis failures, which are not rules — no linter pass raises
+them:
+
+| Code | Rule | Fires on |
+|------|------|----------|
+| `E000` | `analysis-error` | Any analysis failure with no code of its own. |
+| `E001` | `undefined-variable` | A name nothing in scope binds. |
+| `E002` | `signal-mismatch` | A call whose signal the context does not allow. |
+| `E003` | `unterminated-form` | A form the reader reached end of input inside. |
+| `E004` | `compile-error` | A failure raised by a compiler pass. |
+| `E005` | `syntax-error` | Source the reader could not parse. |
+
+`LintCode::for_error_kind` (`src/lint/diagnostics.rs`) maps an `ErrorKind` to
+one of these, and the lint CLI, `compile/diagnostics`, and the LSP all read it
+— so one failure reports one code whichever surface a consumer asks. The same
+test holds this table and `diagnostics::ERRORS` in step.
+
 `W001` is unclaimed and no rule raises it, so the table has no row for it.
-Use `W006+` for new warnings. `E000`–`E005` are analysis failures the lint
-CLI reports (`src/lint/cli.rs`), not rules; take `E006` for a new error and
-`I001` for the first info diagnostic.
+Use `W006+` for new warnings, `E006+` for a new error, and `I001` for the
+first info diagnostic.
 
 ### How linting runs
 

@@ -124,7 +124,8 @@ pub enum Instruction {
     /// Update a capture cell's value
     UpdateCapture,
 
-    /// Emit a signal (suspends execution). Operand: u16 signal bits.
+    /// Emit a signal (suspends execution). Operand: signal bits
+    /// (docs/impl/bytecode.md § "Signal-bits operands").
     /// `(emit :yield val)` emits SIG_YIELD; `(emit :io val)` emits SIG_IO.
     Emit,
 
@@ -207,7 +208,8 @@ pub enum Instruction {
     IsSetMut,
 
     /// Check that a closure's signal satisfies a bound.
-    /// Operand: u32 allowed_bits.
+    /// Operand: `allowed_bits`, signal bits
+    /// (docs/impl/bytecode.md § "Signal-bits operands").
     /// Pops the value from the stack. If it's a closure whose
     /// `signal.bits & !allowed_bits != 0`, signals `:error`.
     /// Non-closures pass silently.

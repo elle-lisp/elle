@@ -47,7 +47,8 @@ bytecodes — see [impl/bytecode.md](bytecode.md) § Arithmetic.
 
 ## Fiber integration
 
-- **Emit** (`Instruction::Emit` with a u16 signal bits operand) — saves
+- **Emit** (`Instruction::Emit` with a signal bits operand — see
+  [impl/bytecode.md](bytecode.md) § "Signal-bits operands") — saves
   the current frame as a `SuspendedFrame`, returns control to the parent
   fiber or scheduler
 - **Signal emission** — checks the fiber's signal mask to decide
