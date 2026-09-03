@@ -11,8 +11,17 @@ adoption is a debug-asserted bug, and the node's demise is one `free_region_set`
 transitive children (interior cycles reclaim with the set; the Shared frontier, read from the
 recorded `outgoing` tables, cascades once). **No new reclamation mode exists** — the node
 rides the same subtree drop a region root does; tearing down its own entry returns zero
-pages. Pinned by `regionstore::tests::forest::pages_less_owner_node_subtree_drops_members`
-and `…::interior_cycle_in_owner_node_reclaims`.
+pages.
+
+That entry is also the node's only trace on the gauges. The node holds no object and claims
+no page, so `arena/count`, `arena/bytes`, and `arena/page-claims` read flat across its whole
+life. `arena/region-count` alone can see it, because `active_region_count` counts entries
+rather than contents ([diagnostics.md](diagnostics.md)) — which is what makes the region
+gauge the dual reading of the object gauge rather than a coarser copy of it.
+
+Pinned by `regionstore::tests::forest::pages_less_owner_node_subtree_drops_members`,
+`…::pages_less_owner_node_counts_in_active_region_count`, and
+`…::interior_cycle_in_owner_node_reclaims`.
 
 **The channel is `AdoptIntoActivation { child }`** — value-resolved like `AdoptRegion` (the
 handler resolves the child's runtime region through `result_region_of`, unwrapping a capture
