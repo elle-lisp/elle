@@ -27,32 +27,32 @@ pub struct Bytecode {
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
     /// Blueprints for this code object's `MakeClosure` instructions. Each
-    /// `MakeClosure` pushes its nested-lambda template here and emits the index;
+    /// `MakeClosure` pushes its nested-lambda blueprint here and emits the index;
     /// the VM/JIT materialize a fresh region-allocated `HeapObject::ClosureTemplate`
-    /// per execution (a heap literal is an ordinary, reclaimable allocation).
-    /// Threaded into the executing `Code` so each template is reclaimed by region
-    /// RC, never pinned for the process lifetime.
-    pub child_protos: Vec<std::rc::Rc<crate::value::closure::ClosureTemplate>>,
+    /// header per execution (a heap literal is an ordinary, reclaimable
+    /// allocation). Threaded into the executing `Code` so each header is
+    /// reclaimed by region RC, never pinned for the process lifetime.
+    pub child_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
     /// The static region slots this (top-level / entry) function's allocations
     /// SHARE after a builder-idiom merge (docs/impl/region/merging.md § Merging),
     /// carried from the entry `LirFunction.merged_slots` so the executing `Code`
     /// can mint-or-reuse them. The per-lambda equivalent rides
-    /// `ClosureTemplate.merged_slots`; this is the entry-function path
+    /// the per-lambda blueprint's `merged_slots`; this is the entry-function path
     /// (`Bytecode → Code`), which would otherwise read empty. Empty unless a merge
     /// fired (a builder idiom seeded by a nested `%pair` literal), so inert when
     /// no merge exists.
-    pub merged_slots: std::rc::Rc<rustc_hash::FxHashSet<u32>>,
+    pub merged_slots: rustc_hash::FxHashSet<u32>,
     /// The local slots this (top-level / entry) function's value-routed releases
     /// read, carried from the entry `LirFunction.frame_release_slots` so the
     /// executing `Code` can walk them at an error exit
     /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
     /// still owes"). The per-lambda equivalent rides
-    /// `ClosureTemplate.frame_release_slots`; this is the entry-function path
-    /// (`Bytecode → Code`), which would otherwise read empty.
-    pub frame_release_slots: std::rc::Rc<Vec<u16>>,
+    /// the per-lambda blueprint's `frame_release_slots`; this is the
+    /// entry-function path (`Bytecode → Code`), which would otherwise read empty.
+    pub frame_release_slots: Vec<u16>,
     /// The `DecrefRegion` half of the same table, carried the same way — the
     /// static region slots this entry function's slot-routed releases name.
-    pub frame_release_regions: std::rc::Rc<Vec<u32>>,
+    pub frame_release_regions: Vec<u32>,
 }
 
 impl Bytecode {
@@ -64,9 +64,33 @@ impl Bytecode {
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
             child_protos: Vec::new(),
-            merged_slots: crate::value::code::empty_merged_slots(),
-            frame_release_slots: crate::value::code::empty_frame_release_slots(),
-            frame_release_regions: crate::value::code::empty_frame_release_regions(),
+            merged_slots: rustc_hash::FxHashSet::default(),
+            frame_release_slots: Vec::new(),
+            frame_release_regions: Vec::new(),
+        }
+    }
+
+    /// This compiled unit as a code-object blueprint: the entry function's own
+    /// bytecode, constants, locations and region tables, plus the
+    /// nested-lambda blueprints its `MakeClosure` instructions index.
+    ///
+    /// The entry paths materialize this exactly as `MakeClosure` materializes a
+    /// nested blueprint, so a top-level or module body reaches its bytecode the
+    /// way every other code object does. Arity is nullary: a compiled unit is
+    /// entered with no arguments.
+    pub fn into_proto(self) -> crate::value::TemplateProto {
+        crate::value::TemplateProto {
+            signal: self.signal,
+            location_map: self.location_map,
+            child_protos: self.child_protos,
+            merged_slots: self.merged_slots,
+            frame_release_slots: self.frame_release_slots,
+            frame_release_regions: self.frame_release_regions,
+            ..crate::value::TemplateProto::new(
+                self.instructions,
+                crate::value::Arity::Exact(0),
+                self.constants,
+            )
         }
     }
 
@@ -216,7 +240,7 @@ pub fn format_bytecode_with_protos(bytecode: &Bytecode) -> String {
     output
 }
 
-fn format_proto(output: &mut String, path: &str, proto: &crate::value::closure::ClosureTemplate) {
+fn format_proto(output: &mut String, path: &str, proto: &crate::value::TemplateProto) {
     output.push_str(&format!(
         "\n── proto [{}] {} (captures={}, params={}) ──\n",
         path,

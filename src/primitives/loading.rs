@@ -235,7 +235,7 @@ pub(crate) fn prim_ffi_callback(
 
     // Validate arity: closure must accept the right number of arguments
     let expected_args = sig.args.len();
-    let arity_ok = match closure_rc.template.arity {
+    let arity_ok = match closure_rc.template.arity() {
         Arity::Exact(n) => n == expected_args,
         Arity::AtLeast(n) => expected_args >= n,
         Arity::Range(min, max) => expected_args >= min && expected_args <= max,
@@ -247,7 +247,8 @@ pub(crate) fn prim_ffi_callback(
                 "arity-error",
                 format!(
                     "ffi/callback: signature has {} args but closure has arity {}",
-                    expected_args, closure_rc.template.arity
+                    expected_args,
+                    closure_rc.template.arity()
                 ),
             ),
         );

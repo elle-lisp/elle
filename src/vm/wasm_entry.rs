@@ -20,7 +20,7 @@ impl VM {
         self_val: Value,
     ) -> Option<Option<SignalBits>> {
         let wasm_tier = self.wasm_tier.as_ref()?;
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode().as_ptr();
 
         // Skip if already rejected
         if self.wasm_rejections.contains_key(&bytecode_ptr) {
@@ -44,7 +44,7 @@ impl VM {
         }
 
         // Need LIR to compile
-        let lir_func = closure.template.lir_function.as_ref()?.clone();
+        let lir_func = std::rc::Rc::clone(closure.template.lir_function()?);
 
         // Try to compile
         let heap_ptr = self.heap_ptr;

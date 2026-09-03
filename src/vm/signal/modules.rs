@@ -372,16 +372,14 @@ impl VM {
         ctx: &mut crate::primitives::ctx::Alloc,
         result: crate::pipeline::CompileResult,
     ) -> (SignalBits, Value) {
-        let bc = result.bytecode;
-        let mut code = crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(bc.location_map),
-            Rc::new(bc.child_protos),
-        );
-        // Carry the module body's builder-idiom merge metadata (mint-or-reuse;
-        // docs/impl/region/merging.md § Merging). Empty unless a merge fired.
-        code.merged_slots = bc.merged_slots;
+        // The blueprint carries the module body's builder-idiom merge metadata
+        // (mint-or-reuse; docs/impl/region/merging.md § Merging) with the rest of
+        // its payload. Empty unless a merge fired.
+        let code = crate::value::ClosureTemplate::for_proto(
+            self.heap(),
+            &Rc::new(result.bytecode.into_proto()),
+        )
+        .code();
         let empty_env = Rc::new(vec![]);
         // Drive the module body, including any nested fiber/resume SIG_SWITCH
         // trampoline, to completion — see VM::run_thunk_to_completion.

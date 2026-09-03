@@ -25,7 +25,7 @@ fn trace_park(
     eprintln!(
         "[park:{helper}] fn={} site={site_index} resume_ip={resume_ip} \
          env[{}]=[{}] stack[{}]=[{}]",
-        closure.template.name.as_deref().unwrap_or("<anonymous>"),
+        closure.template.name().unwrap_or("<anonymous>"),
         env.len(),
         Value::type_name_line(env),
         stack.len(),
@@ -46,7 +46,7 @@ fn check_parked_frame(
     env: &[Value],
     stack: &[Value],
 ) {
-    let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
+    let name = closure.template.name().unwrap_or("<anonymous>");
     for (section, values) in [("env", env), ("stack", stack)] {
         for (i, v) in values.iter().enumerate() {
             if let Some(reason) = v.malformed_reason() {
@@ -59,8 +59,8 @@ fn check_parked_frame(
                     v.payload,
                     env.len(),
                     stack.len(),
-                    closure.template.num_params,
-                    closure.template.num_locals,
+                    closure.template.num_params(),
+                    closure.template.num_locals(),
                 );
             }
         }
@@ -119,7 +119,7 @@ pub extern "C" fn elle_jit_yield(
         .expect("VM bug: elle_jit_yield called with non-closure self");
 
     // Look up yield point metadata from JitCode
-    let bytecode_ptr = closure.template.bytecode.as_ptr();
+    let bytecode_ptr = closure.template.bytecode().as_ptr();
     let jit_code = vm
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield called but no JitCode in cache");
@@ -259,7 +259,7 @@ pub extern "C" fn elle_jit_yield_through_call(
         .expect("VM bug: elle_jit_yield_through_call called with non-closure");
 
     // Look up call site metadata from JitCode
-    let bytecode_ptr = closure.template.bytecode.as_ptr();
+    let bytecode_ptr = closure.template.bytecode().as_ptr();
     let jit_code = vm
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");

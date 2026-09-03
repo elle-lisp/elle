@@ -132,13 +132,14 @@ pub extern "C" fn elle_jit_tail_call_array(
     result
 }
 
-/// Create a closure from a template **blueprint** and captured environment.
-/// `template_ptr`: raw pointer to a `ClosureTemplate` blueprint owned by the
-/// JIT code object (`closure_protos`). `captures_ptr`: pointer to array of
-/// `count` Values (16 bytes each). Materializes a FRESH region-allocated
-/// `HeapObject::ClosureTemplate` from the blueprint into the current alloc
-/// region (set by the surrounding `push_alloc_region` bracket) and builds the
-/// instance referencing it (co-region → region RC, reclaimed when it frees).
+/// Create a closure from a code-object **blueprint** and captured environment.
+/// `template_ptr`: raw pointer to a `TemplateProto` owned by the JIT code
+/// object (`closure_protos`). `captures_ptr`: pointer to array of `count`
+/// Values (16 bytes each). Materializes a FRESH region-allocated
+/// `HeapObject::ClosureTemplate` header over the blueprint's shared payload,
+/// into the current alloc region (set by the surrounding `push_alloc_region`
+/// bracket), and builds the instance referencing it (co-region → region RC,
+/// reclaimed when it frees).
 #[no_mangle]
 pub extern "C" fn elle_jit_make_closure(
     template_ptr: i64,
@@ -147,7 +148,15 @@ pub extern "C" fn elle_jit_make_closure(
     region: u32,
     vm: *mut (),
 ) -> JitValue {
-    let blueprint = unsafe { &*(template_ptr as *const crate::value::ClosureTemplate) };
+    // The blueprint is owned by the JIT code object for as long as any code it
+    // compiled can run, so this pointer is live. The header being built holds
+    // its own counted handle rather than borrowing the code object's, so a
+    // closure outliving its `JitCode` still reaches its blueprint.
+    let blueprint = unsafe {
+        let ptr = template_ptr as *const crate::value::TemplateProto;
+        std::rc::Rc::increment_strong_count(ptr);
+        std::rc::Rc::from_raw(ptr)
+    };
     let count = count as usize;
 
     let env_slice: &[Value] = if count == 0 {
@@ -162,7 +171,7 @@ pub extern "C" fn elle_jit_make_closure(
     // this instance's heap, not a per-thread slot (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     let result =
-        crate::vm::closure::materialize_closure_in_region(heap, blueprint, env_slice, region);
+        crate::vm::closure::materialize_closure_in_region(heap, &blueprint, env_slice, region);
     JitValue::from_value(result)
 }
 
@@ -343,7 +352,7 @@ fn jit_tail_call_inner(
     // handles the call without growing the native stack.  This ensures
     // mutual tail recursion (A→B→A) doesn't overflow.
     if let Some(closure) = func.as_closure() {
-        if !vm.check_arity(&closure.template.arity, nargs as usize) {
+        if !vm.check_arity(&closure.template.arity(), nargs as usize) {
             return JitValue::nil();
         }
 

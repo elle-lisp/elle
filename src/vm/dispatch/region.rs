@@ -6,7 +6,6 @@
 //! it stays a flat one-line-per-opcode jump table; the heavy tracing/freelog
 //! bookkeeping lives here.
 
-use crate::error::LocationMap;
 use crate::vm::core::VM;
 
 /// Set the freelog "reason" for a region demise — the shared body of the three
@@ -18,15 +17,15 @@ use crate::vm::core::VM;
 fn freelog_decref_reason(
     heap: &crate::value::fiberheap::FiberHeap,
     region_id: crate::hir::region::RuntimeRegion,
-    location_map: &LocationMap,
+    locations: crate::value::closure::LocationTable<'_>,
     instr_ip: usize,
     subject: impl FnOnce() -> String,
 ) {
     if !crate::value::fiberheap::freelog::enabled() {
         return;
     }
-    let loc = location_map
-        .get(&instr_ip)
+    let loc = locations
+        .get(instr_ip)
         .map(|l| format!("{l}"))
         .unwrap_or_else(|| "?".to_string());
     let bt = if heap.region_rc(region_id) <= 1 && crate::config::get().has_trace("freebt") {
@@ -65,7 +64,7 @@ pub(crate) fn handle_decref_region(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
-    location_map: &LocationMap,
+    locations: crate::value::closure::LocationTable<'_>,
     instr_ip: usize,
 ) {
     let raw_region = vm.read_static_region(bytecode, ip);
@@ -77,14 +76,18 @@ pub(crate) fn handle_decref_region(
                 vm.heap().len()
             );
         }
-        freelog_decref_reason(vm.heap(), region_id, location_map, instr_ip, || {
+        freelog_decref_reason(vm.heap(), region_id, locations, instr_ip, || {
             format!("DecrefRegion(bytecode slot {raw_region})")
         });
         vm.heap().decref_region(region_id);
     }
 }
 
-pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap, instr_ip: usize) {
+pub(crate) fn handle_decref_value_region(
+    vm: &mut VM,
+    locations: crate::value::closure::LocationTable<'_>,
+    instr_ip: usize,
+) {
     let value = vm
         .fiber
         .stack
@@ -99,8 +102,8 @@ pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap
     if let Some(region_id) = region_id {
         if crate::config::get().has_trace("rc") {
             let rc = vm.heap().region_rc(region_id);
-            let loc = location_map
-                .get(&instr_ip)
+            let loc = locations
+                .get(instr_ip)
                 .map(|l| format!("{l}"))
                 .unwrap_or_else(|| "?".to_string());
             eprintln!(
@@ -108,7 +111,7 @@ pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap
                 value.type_name()
             );
         }
-        freelog_decref_reason(vm.heap(), region_id, location_map, instr_ip, || {
+        freelog_decref_reason(vm.heap(), region_id, locations, instr_ip, || {
             format!(
                 "DecrefValueRegion of {} (runtime region {})",
                 value.type_name(),
@@ -117,8 +120,8 @@ pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap
         });
         vm.heap().decref_region(region_id);
     } else if crate::config::get().has_trace("rc") {
-        let loc = location_map
-            .get(&instr_ip)
+        let loc = locations
+            .get(instr_ip)
             .map(|l| format!("{l}"))
             .unwrap_or_else(|| "?".to_string());
         eprintln!(
@@ -128,7 +131,11 @@ pub(crate) fn handle_decref_value_region(vm: &mut VM, location_map: &LocationMap
     }
 }
 
-pub(crate) fn handle_decref_cell_region(vm: &mut VM, location_map: &LocationMap, instr_ip: usize) {
+pub(crate) fn handle_decref_cell_region(
+    vm: &mut VM,
+    locations: crate::value::closure::LocationTable<'_>,
+    instr_ip: usize,
+) {
     let value = vm
         .fiber
         .stack
@@ -145,7 +152,7 @@ pub(crate) fn handle_decref_cell_region(vm: &mut VM, location_map: &LocationMap,
             let rc = vm.heap().region_rc(region_id);
             eprintln!("[trace:rc] DecrefCellRegion({region_id}) rc={rc}");
         }
-        freelog_decref_reason(vm.heap(), region_id, location_map, instr_ip, || {
+        freelog_decref_reason(vm.heap(), region_id, locations, instr_ip, || {
             format!(
                 "DecrefCellRegion of {} (runtime region {})",
                 value.type_name(),
@@ -158,7 +165,11 @@ pub(crate) fn handle_decref_cell_region(vm: &mut VM, location_map: &LocationMap,
     }
 }
 
-pub(crate) fn handle_incref_value_region(vm: &mut VM, location_map: &LocationMap, instr_ip: usize) {
+pub(crate) fn handle_incref_value_region(
+    vm: &mut VM,
+    locations: crate::value::closure::LocationTable<'_>,
+    instr_ip: usize,
+) {
     // Peek, don't pop: the value is the function result and
     // must remain on the stack for the caller.
     let value = *vm
@@ -167,8 +178,8 @@ pub(crate) fn handle_incref_value_region(vm: &mut VM, location_map: &LocationMap
         .last()
         .expect("VM bug: stack underflow on IncrefValueRegion");
     if crate::config::get().has_trace("rc") {
-        let loc = location_map
-            .get(&instr_ip)
+        let loc = locations
+            .get(instr_ip)
             .map(|l| format!("{l}"))
             .unwrap_or_else(|| "?".to_string());
         eprintln!(

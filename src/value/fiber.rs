@@ -247,27 +247,18 @@ pub struct NativeIter {
     pub cursor: usize,
 }
 
-/// Create a minimal no-op closure for native iterator fibers.
-/// The bytecode is a single Return instruction (opcode 3) which
-/// is never actually executed — native iter fibers short-circuit
-/// in the VM's resume path.
-fn noop_closure() -> Rc<Closure> {
-    use crate::value::closure::ClosureTemplate;
-    use crate::value::types::Arity;
-
-    Rc::new(Closure {
-        template: crate::value::TemplateRef::new(Rc::new(ClosureTemplate {
-            ..ClosureTemplate::new(
-                Rc::new(vec![3, 0, 0, 0]), // Return
-                Arity::Exact(0),
-                Rc::new(vec![]),
-            )
-        })),
+/// A minimal no-op closure for a fiber that executes no bytecode. Its body is
+/// the instance's placeholder code object, never executed — a native-iterator
+/// fiber short-circuits in the VM's resume path, and the root fiber's execution
+/// context is top-level bytecode rather than a closure.
+pub(crate) fn noop_closure(heap: &mut crate::value::fiberheap::FiberHeap) -> Rc<Closure> {
+    Rc::new(Closure::new(
+        heap.placeholder_template(),
         // The no-op closure captures nothing — an empty env slice needs no
-        // region (no allocation), so build it directly (the empty env needs no allocation).
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
-    })
+        // region, so build it directly.
+        crate::value::region_slice::RegionSlice::empty(),
+        SignalBits::EMPTY,
+    ))
 }
 
 /// Everything the activations of a parked frame chain still owe, read off the
@@ -329,7 +320,7 @@ impl ParkedDues {
             // the saved stack (the activation's own frame base, the stack having
             // been emptied at entry), so the emitter's slot indexes address them
             // directly.
-            for slot in f.code.frame_release_slots.iter() {
+            for slot in f.code.frame_release_slots().iter() {
                 match f.stack.get(*slot as usize) {
                     Some(v) if v.as_heap_ptr().is_some() => dues.owed.push(*v),
                     _ => {}
@@ -339,7 +330,7 @@ impl ParkedDues {
             // parked activation is a `DecrefRegion` that did not run, the release
             // having taken the mapping wherever it did. Named by the frame's own
             // function so a caller's leftovers past a tail call stay out.
-            for slot in f.code.frame_release_regions.iter() {
+            for slot in f.code.frame_release_regions().iter() {
                 if let Some(m) = f.activation_region_map.get(slot) {
                     dues.owed_regions.push(*m);
                 }
@@ -477,8 +468,12 @@ impl Fiber {
     ///
     /// Each `fiber/resume` call returns the next element. When all
     /// elements are exhausted, the fiber dies. No bytecode is executed.
-    pub fn native_iter(elements: Vec<Value>, mask: SignalBits) -> Self {
-        let closure = noop_closure();
+    pub fn native_iter(
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        elements: Vec<Value>,
+        mask: SignalBits,
+    ) -> Self {
+        let closure = noop_closure(heap);
         Fiber {
             stack: SmallVec::new(),
             frames: Vec::new(),
@@ -559,7 +554,7 @@ pub fn test_fiber_in_region(
     heap: &mut crate::value::fiberheap::FiberHeap,
     status: FiberStatus,
 ) -> (Value, FiberHandle) {
-    let handle = FiberHandle::new(Fiber::new(noop_closure(), SignalBits::EMPTY));
+    let handle = FiberHandle::new(Fiber::new(noop_closure(heap), SignalBits::EMPTY));
     handle.with_mut(|f| f.status = status);
     let region = heap.new_runtime_region();
     let value = heap.alloc_in_region(

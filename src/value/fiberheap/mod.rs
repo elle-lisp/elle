@@ -91,6 +91,11 @@ pub struct FiberHeap {
     /// Regions held on behalf of this instance — resident roots the teardown
     /// sweep releases by RC (decref once) so their graph can be reclaimed.
     process_roots: Vec<RuntimeRegion>,
+    /// This instance's materialized code payloads, one per compile-time
+    /// blueprint (docs/impl/region/template.md § "Who owns the payload
+    /// region"). The cache holds each payload region's owning reference and
+    /// releases it when the last blueprint packed into it dies.
+    pub(crate) template_payloads: crate::value::closure::cache::TemplatePayloads,
     /// This instance's authoritative trace bitfield (`--trace=` / runtime
     /// `(vm/config-set :trace …)`). The VM's `RuntimeConfig` and the region
     /// pool's `PAGES` gate each hold a clone of this one cell, so a diagnostic
@@ -118,6 +123,7 @@ impl FiberHeap {
             default_traits: Vec::new(),
             root_region: None,
             process_roots: Vec::new(),
+            template_payloads: Default::default(),
             trace,
         }
     }

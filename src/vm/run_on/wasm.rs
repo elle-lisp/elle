@@ -16,16 +16,16 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
-        let lir = match closure.template.lir_function.clone() {
-            Some(l) => l,
+        let lir = match closure.template.lir_function() {
+            Some(l) => Rc::clone(l),
             None => return (SIG_ERROR, rejected(self, "wasm", "closure has no LIR")),
         };
 
-        if !self.check_arity(&closure.template.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity(), args.len()) {
             return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
         }
 
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode().as_ptr();
 
         // Standalone-unservable shapes (tail calls, signal emission,
         // suspending calls, module-less MakeClosure) are refused by the

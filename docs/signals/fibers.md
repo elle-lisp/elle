@@ -123,13 +123,12 @@ pub enum SuspendedFrame {
 }
 
 pub struct BytecodeFrame {
-    pub bytecode: Rc<Vec<u8>>,
-    pub constants: Rc<Vec<Value>>,
-    pub env: Rc<Vec<Value>>,
+    pub code: Code,          // the code object: bytecode, constants, locations
+    pub env: Rc<Vec<Value>>, // the per-instance captured half
     pub ip: usize,
     pub stack: Vec<Value>,
-    pub location_map: Rc<LocationMap>,
     pub push_resume_value: bool,
+    // …plus the activation's region remap and what it owed at suspension
 }
 ```
 
@@ -178,19 +177,21 @@ whether the child completed normally, errored, or suspended. Use
 
 
 
-## Rc Threading
+## Threading the code object
 
 
-Bytecode and constants flow through the dispatch loop as `&Rc<Vec<u8>>`
-and `&Rc<Vec<Value>>`. This eliminates data copying:
+Bytecode, constants and the location table flow through the dispatch loop as
+one `Code` — the code object itself, which is a payload slice plus a blueprint
+pointer ([impl/region/template.md](../impl/region/template.md)). This
+eliminates data copying:
 
-- `execute_bytecode` wraps raw slices in `Rc` once at the public boundary
-- `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take `&Rc`
-- `TailCallInfo` is `(Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>)` —
-  tail calls clone the Rc (cheap), not the Vec
-- `handle_emit` / `handle_call` clone the Rc into `SuspendedFrame`
-- Individual instruction handlers dereference to `&[u8]` / `&[Value]` —
-  they don't need the Rc
+- `execute_proto` materializes the code object once at the public boundary
+- `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
+- `TailCallInfo` carries a `Code` — a tail call copies two words and bumps one
+  refcount, never a buffer
+- `handle_emit` / `handle_call` clone the `Code` into `SuspendedFrame`
+- Individual instruction handlers take `&[u8]` / `&[Value]` — they read the
+  code object's slices, not the object
 
 The inner dispatch loop returns `(SignalBits, usize)` — signal bits and
 the IP at exit. This eliminates the former `suspended_ip` staging field.

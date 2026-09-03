@@ -18,23 +18,23 @@ use std::sync::Arc;
 use crate::jit::{JitCode, JitRejectionInfo};
 
 /// A `jit_cache` entry: the compiled code plus the pin that keeps the keyed
-/// bytecode allocation alive (docs/impl/jit.md § "Cache identity"). The pin
-/// makes the raw-address key sound: a pinned allocation cannot be freed, so
-/// its address cannot be reused by a different function's bytecode while
-/// this entry lives.
+/// bytecode alive (docs/impl/jit.md § "Cache identity"). The pin makes the
+/// raw-address key sound: bytecode lives in a code object's payload, and the
+/// pinned code object holds that payload's region, so the address cannot be
+/// reused by a different function while this entry lives.
 #[cfg(feature = "jit")]
 pub struct JitCacheEntry {
-    _pin: Rc<Vec<u8>>,
+    _pin: crate::value::ClosureTemplate,
     pub code: Arc<JitCode>,
 }
 
 #[cfg(feature = "jit")]
 impl JitCacheEntry {
-    /// Build an entry pinning `bytecode` — the same `Rc` the entry's cache
-    /// key is derived from.
-    pub fn new(bytecode: Rc<Vec<u8>>, code: Arc<JitCode>) -> Self {
+    /// Build an entry pinning `template` — the code object the entry's cache
+    /// key was derived from.
+    pub fn new(template: crate::value::ClosureTemplate, code: Arc<JitCode>) -> Self {
         JitCacheEntry {
-            _pin: bytecode,
+            _pin: template,
             code,
         }
     }
@@ -138,7 +138,7 @@ pub struct VM {
     pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
     /// One-shot "the closure whose body is about to run", set immediately before
     /// entering a body via `execute_bytecode_saving_stack` or the raw
-    /// `execute_bytecode`, which take it (resetting to `NIL`) and install it as
+    /// `execute_proto`, which take it (resetting to `NIL`) and install it as
     /// `fiber.current_closure` for that activation. **Every entrant that runs a
     /// closure body must set it** — the interpreter call path, the JIT helpers'
     /// interpreter fallback and tail-call resolution, the forced-tier entries,
@@ -173,7 +173,7 @@ pub struct VM {
     /// overwriting the child fiber's error origin.
     pub(crate) error_loc: Option<SourceLoc>,
     /// Reason carried by the most recent uncaught `:gated` error to propagate
-    /// out of `execute_bytecode`. A loud `(gate! …)` whose condition is unmet
+    /// out of `execute_proto`. A loud `(gate! …)` whose condition is unmet
     /// raises `{:error :gated :reason …}`; when that escapes to the top level
     /// uncaught, it is an intentional SKIP, not a failure. The top-level driver
     /// (`run_source`) reads this to exit 0 with a notice instead of erroring.
@@ -207,7 +207,7 @@ pub struct VM {
     /// installs (docs/impl/jit.md § "Cache identity"); the pin then moves
     /// into `jit_cache` or `jit_rejections`.
     #[cfg(feature = "jit")]
-    pub(crate) jit_pending: FxHashMap<usize, Rc<Vec<u8>>>,
+    pub(crate) jit_pending: FxHashMap<usize, crate::value::ClosureTemplate>,
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
@@ -482,20 +482,29 @@ impl VM {
             .unwrap_or(0)
     }
 
+    /// Push a synthetic trace frame for `name`, whose call site is at `ip` in a
+    /// code object carrying `location_map`. Both code objects are built here
+    /// from blueprints, so a trace test exercises the same path a real call
+    /// takes.
     #[cfg(test)]
-    fn push_call_frame(
-        &mut self,
-        name: String,
-        ip: usize,
-        location_map: Rc<crate::error::LocationMap>,
-    ) {
+    fn push_call_frame(&mut self, name: &str, ip: usize, location_map: crate::error::LocationMap) {
+        let mut callee =
+            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new());
+        callee.name = Some(name.to_string());
+        let mut caller =
+            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new());
+        caller.location_map = location_map;
+        let heap = self.heap();
+        let callee = crate::value::ClosureTemplate::for_proto(heap, &Rc::new(callee)).code();
+        let caller = crate::value::ClosureTemplate::for_proto(heap, &Rc::new(caller)).code();
+
         let frame_base = self.fiber.stack.len();
         self.fiber.call_depth += 1;
         self.fiber.call_stack.push(crate::value::fiber::CallFrame {
-            name: Rc::from(name.as_str()),
+            callee,
+            caller,
             ip,
             frame_base,
-            location_map,
         });
     }
 }

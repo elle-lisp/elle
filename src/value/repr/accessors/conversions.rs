@@ -166,7 +166,7 @@ impl Value {
     /// Returns a borrow of the arena-resident `Closure`. If you need an
     /// owned `Rc<Closure>` (e.g. for storing in a `Fiber` or `Frame`),
     /// clone explicitly: `Rc::new(value.as_closure().unwrap().clone())`.
-    /// `Closure::clone` is O(1) — every non-Copy field is `Rc`-shared.
+    /// `Closure::clone` is O(1) — every field is `Copy`.
     #[inline]
     pub fn as_closure(&self) -> Option<&crate::value::heap::Closure> {
         use crate::value::heap::{deref, HeapObject};

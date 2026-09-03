@@ -37,8 +37,9 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::Parameter => false,
         HeapTag::LSet => true,
         HeapTag::LSetMut => true,
-        // Holds Rc fields (bytecode, constants, child_protos, …) that must be
-        // dropped when the region frees.
+        // Holds the `Rc` to its blueprint, which must be dropped when the
+        // region frees — it is what keeps the blueprint's payload cached
+        // (docs/impl/region/template.md § "Who owns the payload region").
         HeapTag::ClosureTemplate => true,
     }
 }

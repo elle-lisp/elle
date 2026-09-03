@@ -17,7 +17,7 @@ Runtime value representation using a tagged union.
 | `repr/accessors.rs` | Value field access and type checking |
 | `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
-| `closure.rs` | `Closure` (template + env + squelch mask), `ClosureTemplate`, `TemplateRef` |
+| `closure.rs` | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `proto` (the compile-time `TemplateProto` blueprint), `payload` (`CodePayload`, the region-inline code data), `header` (`ClosureTemplate`), `cache` (the heap's payload cache). docs/impl/region/template.md owns the argument |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
 | `fiber/dues.rs` | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither (docs/impl/region/owner.md § "A deferred tail-call release has the node's life") |
 | `fiber/delivery.rs` | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface (docs/impl/region/owner.md § "A park names its funding in the delivery ledger") |
@@ -35,7 +35,7 @@ Runtime value representation using a tagged union.
 | Type | Location | Purpose |
 |------|----------|---------|
 | `Value` | `repr/mod.rs` | 16-byte tagged-union value (Copy) |
-| `Closure` | `closure.rs` | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code (bytecode, constants, arity, `location_map`, `doc`, `syntax`) lives on the `Rc`-shared `ClosureTemplate`. |
+| `Closure` | `closure.rs` | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code lives on the region-resident `ClosureTemplate` behind that seam. |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
@@ -98,14 +98,17 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
        Both wrap `Rc<RefCell<Value>>`. Immutable captured locals do not need a
        cell — they are captured by value.
 
-5. **Per-function code lives on `ClosureTemplate`, not `Closure`.** A `Closure`
+5. **Per-function code lives on the code object, not on `Closure`.** A `Closure`
      is just a `TemplateRef` + captured env (`RegionSlice<Value>`) + a
-     `squelch_mask`. The code object (`ClosureTemplate`) carries `location_map:
-     Rc<LocationMap>` (bytecode offset → source location), `doc: Option<Rc<str>>`
-     (the docstring extracted from the function body, threaded from HIR through
-     LIR), and `syntax: Option<Rc<Syntax>>` (the original lambda `Syntax` node,
-     used by `eval` to reconstruct closures). The template is `Rc`-shared across
-     closure instances, so cloning a `Closure` is O(1).
+     `squelch_mask`. The code object is three things
+     (docs/impl/region/template.md): a compile-time `TemplateProto` blueprint,
+     a `CodePayload` holding every variable-length field inline in region pages
+     (bytecode, constants, the sorted location table over an interned file
+     table, the region tables, name and doc), and the two-word `ClosureTemplate`
+     header a closure references. One payload serves every header made from one
+     blueprint, so `MakeClosure` copies two words whatever the size of the
+     function's body. Accessors are methods (`template.bytecode()`,
+     `template.arity()`, …), not fields.
 
 6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
      transfer between threads, cloning `Rc` contents as needed. Trait tables

@@ -14,24 +14,6 @@ use std::rc::Rc;
 /// Per-closure compilation result: bytecode, yield points, call sites.
 type ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>);
 
-/// This function's value-route release slots, ascending — the table an error exit
-/// walks (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-/// still owes"). Ascending so the walk's release order is the slot order the body
-/// allocated them in, identical across compiles: the releases commute (each is a
-/// decref) but their cascades must not depend on a hash order.
-fn sorted_release_slots(func: &LirFunction) -> Vec<u16> {
-    let mut slots = func.frame_release_slots.clone();
-    slots.sort_unstable();
-    slots
-}
-
-/// The `DecrefRegion` half of the same table, ascending for the same reason.
-fn sorted_release_regions(func: &LirFunction) -> Vec<u32> {
-    let mut regions: Vec<u32> = func.frame_release_regions.iter().map(|r| r.get()).collect();
-    regions.sort_unstable();
-    regions
-}
-
 /// Emits bytecode from LIR
 pub struct Emitter {
     /// Output bytecode
@@ -217,14 +199,16 @@ impl Emitter {
 
         // Carry this function's builder-idiom merge metadata into the bytecode so
         // the entry-function path (`Bytecode → Code`) mint-or-reuses merged slots —
-        // the lambda path already carries it via `ClosureTemplate.merged_slots` (the
-        // `MakeClosure` template build). Empty unless a merge fired.
-        self.bytecode.merged_slots =
-            std::rc::Rc::new(func.merged_slots.iter().map(|s| s.get()).collect());
+        // the lambda path already carries it on the blueprint the `MakeClosure`
+        // build makes. Empty unless a merge fired. The payload stores both these
+        // and the release tables ascending, so nothing here depends on a hash
+        // order.
+        self.bytecode.merged_slots = func.merged_slots.iter().map(|s| s.get()).collect();
         // Likewise the value-route release table, so the entry function's error
         // exit walks the releases its abandoned frame still owed.
-        self.bytecode.frame_release_slots = std::rc::Rc::new(sorted_release_slots(func));
-        self.bytecode.frame_release_regions = std::rc::Rc::new(sorted_release_regions(func));
+        self.bytecode.frame_release_slots = func.frame_release_slots.clone();
+        self.bytecode.frame_release_regions =
+            func.frame_release_regions.iter().map(|r| r.get()).collect();
 
         (
             std::mem::take(&mut self.bytecode),

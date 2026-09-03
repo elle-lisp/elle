@@ -43,7 +43,7 @@ impl VM {
         instr_ip: usize,
         checked: bool,
     ) -> Option<SignalBits> {
-        let bc: &[u8] = &code.bytecode;
+        let bc: &[u8] = code.bytecode();
         let arg_count = self.read_u16(bc, ip) as usize;
         let region_id = self.read_static_region(bc, ip);
         let func = self
@@ -94,7 +94,7 @@ impl VM {
     ) -> Option<SignalBits> {
         // Both region operands are decoded first, so `ip` is past them however
         // this handler leaves — the type-error arm below returns without calling.
-        let bc: &[u8] = &code.bytecode;
+        let bc: &[u8] = code.bytecode();
         let region_id = self.read_static_region(bc, ip);
         let args_region = self.read_static_region(bc, ip);
         // Claimed before the callee can park: a suspending callee snapshots this
@@ -345,7 +345,7 @@ impl VM {
             ));
         };
         // Arity check — sets fiber.signal on mismatch.
-        if !self.check_arity(&closure.template.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity(), args.len()) {
             let (_, err) = self.fiber.signal.take().unwrap();
             return Err(self.format_error_with_location(err));
         }

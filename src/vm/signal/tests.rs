@@ -1,5 +1,4 @@
 use super::*;
-use crate::error::LocationMap;
 use crate::value::arena::with_test_region;
 use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
 
@@ -7,12 +6,15 @@ use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
 type TestFixtures = (crate::value::Code, Rc<Vec<Value>>);
 fn test_fixtures() -> TestFixtures {
     (
-        crate::value::Code::new(
-            Rc::new(vec![]),
-            Rc::new(vec![]),
-            Rc::new(LocationMap::new()),
-            Rc::new(vec![]),
-        ),
+        crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *crate::value::arena::leaked_test_heap() },
+            &Rc::new(crate::value::TemplateProto::new(
+                Vec::new(),
+                crate::value::Arity::Exact(0),
+                Vec::new(),
+            )),
+        )
+        .code(),
         Rc::new(vec![]),
     )
 }

@@ -64,7 +64,7 @@ pub(crate) fn discover_compilation_group(
             None => continue,
         };
 
-        let lir = match &closure.template.lir_function {
+        let lir = match closure.template.lir_function() {
             Some(lir) => lir.clone(),
             None => continue,
         };

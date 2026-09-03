@@ -18,11 +18,11 @@ fn test_signal_bits() {
 fn test_capture_stack_trace() {
     use std::collections::HashMap;
     let mut vm = VM::new();
-    let empty_map = Rc::new(HashMap::new());
+    let empty_map: HashMap<usize, crate::reader::SourceLoc> = HashMap::new();
 
-    vm.push_call_frame("function_a".to_string(), 10, empty_map.clone());
-    vm.push_call_frame("function_b".to_string(), 20, empty_map.clone());
-    vm.push_call_frame("function_c".to_string(), 30, empty_map.clone());
+    vm.push_call_frame("function_a", 10, empty_map.clone());
+    vm.push_call_frame("function_b", 20, empty_map.clone());
+    vm.push_call_frame("function_c", 30, empty_map.clone());
 
     let trace = vm.capture_stack_trace();
 
@@ -36,10 +36,10 @@ fn test_capture_stack_trace() {
 fn test_wrap_error_with_trace() {
     use std::collections::HashMap;
     let mut vm = VM::new();
-    let empty_map = Rc::new(HashMap::new());
+    let empty_map: HashMap<usize, crate::reader::SourceLoc> = HashMap::new();
 
-    vm.push_call_frame("outer".to_string(), 5, empty_map.clone());
-    vm.push_call_frame("inner".to_string(), 15, empty_map.clone());
+    vm.push_call_frame("outer", 5, empty_map.clone());
+    vm.push_call_frame("inner", 15, empty_map.clone());
 
     let error_msg = "Something went wrong".to_string();
     let wrapped = vm.wrap_error(error_msg);

@@ -1,7 +1,7 @@
 use super::*;
 use crate::lir::testkit::LirFixture;
 use crate::lir::{LirConst, LirFunction, LirInstr, Reg, Terminator};
-use crate::value::closure::{Closure, ClosureTemplate};
+use crate::value::closure::{Closure, TemplateProto};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::HeapObject;
 use crate::value::types::Arity;
@@ -25,18 +25,18 @@ fn make_test_closure(
     name: &str,
     lir: Option<LirFunction>,
 ) -> Value {
-    let template = Rc::new(ClosureTemplate {
+    let proto = TemplateProto {
         num_locals: 1,
         num_params: 1,
         lir_function: lir.map(Rc::new),
-        name: Some(Rc::from(name)),
-        ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
-    });
-    let closure = Closure {
-        template: crate::value::TemplateRef::new(template),
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
+        name: Some(name.to_string()),
+        ..TemplateProto::new(Vec::new(), Arity::Exact(1), Vec::new())
     };
+    let closure = Closure::new(
+        crate::value::closure::test_template(unsafe { &mut *heap }, proto),
+        crate::value::region_slice::RegionSlice::empty(),
+        SignalBits::EMPTY,
+    );
     crate::value::heap::alloc(
         unsafe { &mut *heap },
         HeapObject::Closure {
@@ -80,12 +80,12 @@ fn test_send_bundle_patches_closure_value_const_in_lir() {
         //    referencing `inner`. Store `inner` in the outer closure's
         //    env so it's reachable via the SendBundle intern table.
         let lir = make_lir_with_closure_value_const(inner);
-        let outer_template = Rc::new(ClosureTemplate {
+        let outer_template = TemplateProto {
             num_captures: 1,
             lir_function: Some(Rc::new(lir)),
-            name: Some(Rc::from("outer")),
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
-        });
+            name: Some("outer".to_string()),
+            ..TemplateProto::new(Vec::new(), Arity::Exact(0), Vec::new())
+        };
         // Build the env slice and the closure header in ONE explicit region
         // (slice + header must share a region), on the same heap as `inner`.
         let region = unsafe { (*heap_ptr).new_runtime_region() };
@@ -94,12 +94,12 @@ fn test_send_bundle_patches_closure_value_const_in_lir() {
             &[inner],
             region,
         );
-        let outer_closure = Closure {
-            template: crate::value::TemplateRef::new(outer_template),
+        let outer_closure = Closure::new(
+            crate::value::closure::test_template(unsafe { &mut *heap_ptr }, outer_template),
             // make `inner` reachable from the bundle
             env,
-            squelch_mask: SignalBits::EMPTY,
-        };
+            SignalBits::EMPTY,
+        );
         let outer_val = crate::value::arena::alloc_in_region(
             unsafe { &mut *heap_ptr },
             HeapObject::Closure {
@@ -120,8 +120,7 @@ fn test_send_bundle_patches_closure_value_const_in_lir() {
             .expect("restored value should be a closure");
         let restored_lir = restored_rc
             .template
-            .lir_function
-            .as_ref()
+            .lir_function()
             .expect("LIR must be preserved across SendBundle round-trip");
 
         // 5. The LIR should contain a ValueConst (not a ClosureRef) whose
@@ -363,27 +362,27 @@ fn closure_round_trips_preserving_frame_release_tables() {
     // region an erroring worker frame owed is stranded.
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();
-        let child = Rc::new(ClosureTemplate {
-            frame_release_slots: Rc::new(vec![21u16]),
-            frame_release_regions: Rc::new(vec![23u32]),
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
+        let child = Rc::new(TemplateProto {
+            frame_release_slots: vec![21u16],
+            frame_release_regions: vec![23u32],
+            ..TemplateProto::new(Vec::new(), Arity::Exact(0), Vec::new())
         });
-        let template = Rc::new(ClosureTemplate {
+        let template = TemplateProto {
             num_locals: 1,
             num_params: 1,
-            frame_release_slots: Rc::new(vec![3u16, 7]),
-            frame_release_regions: Rc::new(vec![11u32, 13]),
-            child_protos: Rc::new(vec![child]),
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
-        });
+            frame_release_slots: vec![3u16, 7],
+            frame_release_regions: vec![11u32, 13],
+            child_protos: vec![child],
+            ..TemplateProto::new(Vec::new(), Arity::Exact(1), Vec::new())
+        };
         let val = crate::value::heap::alloc(
             unsafe { &mut *heap_ptr },
             HeapObject::Closure {
-                closure: Closure {
-                    template: crate::value::TemplateRef::new(template),
-                    env: crate::value::region_slice::RegionSlice::empty(),
-                    squelch_mask: SignalBits::EMPTY,
-                },
+                closure: Closure::new(
+                    crate::value::closure::test_template(unsafe { &mut *heap_ptr }, template),
+                    crate::value::region_slice::RegionSlice::empty(),
+                    SignalBits::EMPTY,
+                ),
                 traits: Value::NIL,
             },
         );
@@ -394,18 +393,18 @@ fn closure_round_trips_preserving_frame_release_tables() {
 
         let closure = restored.as_closure().expect("restored value is a closure");
         assert_eq!(
-            &closure.template.frame_release_slots[..],
+            closure.template.frame_release_slots(),
             &[3u16, 7],
             "the value-routed release slots must cross the boundary — an empty \
              table silently strands every region an erroring worker frame owed"
         );
         assert_eq!(
-            &closure.template.frame_release_regions[..],
+            closure.template.frame_release_regions(),
             &[11u32, 13],
             "the slot-routed release regions must cross with them; the two \
              halves of one table are useless apart"
         );
-        let child = &closure.template.child_protos[0];
+        let child = &closure.template.child_protos()[0];
         assert_eq!(
             &child.frame_release_slots[..],
             &[21u16],

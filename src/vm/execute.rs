@@ -53,7 +53,7 @@
 //! inline: to avoid growing the Rust stack per nesting level,
 //! `handle_fiber_resume_signal` suspends the *caller's* continuation and
 //! returns `SIG_SWITCH`, handing the child to a driving trampoline
-//! (`handle_sig_switch`). The top-level dispatch loop ([`VM::execute_bytecode`])
+//! (`handle_sig_switch`). The top-level dispatch loop ([`VM::execute_proto`])
 //! is that trampoline at the root; a re-entrant boundary that runs a thunk on
 //! the current fiber must be one too. If it is not, the `SIG_SWITCH` unwinds
 //! straight out of `execute_bytecode_saving_stack` and the thunk's continuation
@@ -160,13 +160,17 @@ impl VM {
     #[cfg(debug_assertions)]
     pub(crate) fn debug_assert_entry_closure_matches(entering: Value, code: &crate::value::Code) {
         if let Some(cl) = entering.as_closure() {
+            // Identity is the payload's backing address: every header from one
+            // blueprint shares it (docs/impl/region/template.md), so two code
+            // objects for the same function compare equal however each was
+            // built, and two different functions never do.
             debug_assert!(
-                std::rc::Rc::ptr_eq(&cl.template.bytecode, &code.bytecode),
+                std::ptr::eq(cl.template.bytecode().as_ptr(), code.bytecode().as_ptr()),
                 "executing-closure register mismatch at body entry: the entrant handed \
                  a closure whose body (bytecode {:p}) is not the body being entered \
                  (bytecode {:p})",
-                std::rc::Rc::as_ptr(&cl.template.bytecode),
-                std::rc::Rc::as_ptr(&code.bytecode),
+                cl.template.bytecode().as_ptr(),
+                code.bytecode().as_ptr(),
             );
         }
     }
@@ -385,7 +389,7 @@ impl VM {
     /// `arena/allocs`, the test-setup module loader).
     ///
     /// It wraps [`Self::execute_bytecode_saving_stack`] with the same
-    /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_bytecode`])
+    /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_proto`])
     /// runs. A `fiber/resume` inside the thunk, with the program itself inside a
     /// fiber (the async scheduler always runs user code in one), suspends the
     /// thunk's continuation and returns `SIG_SWITCH` for a driving trampoline

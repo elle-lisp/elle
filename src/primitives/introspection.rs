@@ -35,7 +35,7 @@ pub(crate) fn prim_mutates_params(
     if let Some(closure) = args[0].as_closure() {
         (
             SIG_OK,
-            Value::bool(closure.template.capture_params_mask != 0),
+            Value::bool(closure.template.capture_params_mask() != 0),
         )
     } else {
         (SIG_OK, Value::FALSE)
@@ -48,7 +48,7 @@ pub(crate) fn prim_gpu_eligible(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        let eligible = match &closure.template.lir_function {
+        let eligible = match &closure.template.lir_function() {
             Some(lir) => lir.is_gpu_eligible(),
             None => closure.template.is_gpu_candidate(),
         };
@@ -64,7 +64,7 @@ pub(crate) fn prim_errors(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.template.signal.may_error()))
+        (SIG_OK, Value::bool(closure.template.signal().may_error()))
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -86,7 +86,7 @@ pub(crate) fn prim_arity(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        let result = match closure.template.arity {
+        let result = match closure.template.arity() {
             Arity::Exact(n) => Value::int(n as i64),
             Arity::AtLeast(n) => ctx.pair(Value::int(n as i64), Value::NIL),
             Arity::Range(min, max) => ctx.pair(Value::int(min as i64), Value::int(max as i64)),
@@ -115,7 +115,7 @@ pub(crate) fn prim_bytecode_size(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::int(closure.template.bytecode.len() as i64))
+        (SIG_OK, Value::int(closure.template.bytecode().len() as i64))
     } else {
         (SIG_OK, Value::NIL)
     }
@@ -140,13 +140,13 @@ pub(crate) fn prim_doc(
 ) -> (SignalBits, Value) {
     // Closure: extract docstring directly — no VM query needed.
     if let Some(closure) = args[0].as_closure() {
-        return if let Some(doc) = closure.template.doc.as_deref() {
+        return if let Some(doc) = closure.template.doc() {
             // The docstring is plain `Rc<str>` template data — materialize a
             // FRESH ordinary string in the active region, as any native-fn
             // result does.
             (SIG_OK, ctx.string(doc))
         } else {
-            let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
+            let name = closure.template.name().unwrap_or("<anonymous>");
             (
                 SIG_OK,
                 ctx.string(format!("No documentation found for '{}'", name)),
@@ -267,7 +267,7 @@ pub(crate) fn prim_compile_spirv(
         );
     }
     let closure = prim_arg!(ctx, args, 0, as_closure, "mlir/compile-spirv", "closure");
-    let lir = match &closure.template.lir_function {
+    let lir = match closure.template.lir_function() {
         Some(lir) => lir,
         None => {
             return (

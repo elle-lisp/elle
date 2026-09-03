@@ -270,10 +270,10 @@ fn spawn_closure_impl(
                 let mut env_values: Vec<Value> = closure.env.to_vec();
                 let num_locally_defined = closure
                     .template
-                    .num_locals
-                    .saturating_sub(closure.template.num_params);
+                    .num_locals()
+                    .saturating_sub(closure.template.num_params());
                 for i in 0..num_locally_defined {
-                    if closure.template.capture_locals_mask.is_set(i) {
+                    if closure.template.capture_locals_mask().is_set(i) {
                         // Each captured-local cell gets its OWN fresh region, never
                         // recv_region. The spawned closure's body owns these cells
                         // and frees them with `DecrefCellRegion` at scope exit —

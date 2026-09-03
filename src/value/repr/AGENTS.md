@@ -112,7 +112,7 @@ Does NOT:
 
 4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `CaptureCell` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
 
-5. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>` field maps bytecode offsets to source locations for error reporting. The `doc: Option<Value>` field carries the docstring extracted from the function body, threaded from HIR through LIR.
+5. **A closure's source locations and docstring live on its code object.** Both are payload: `template.locations()` is a sorted table mapping bytecode offsets to source locations for error reporting, and `template.doc()` is the docstring extracted from the function body, threaded from HIR through LIR (docs/impl/region/template.md).
 
 6. **Tag encoding is transparent.** Callers use constructors and accessors; they don't manipulate tags directly.
 

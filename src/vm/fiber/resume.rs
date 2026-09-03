@@ -216,12 +216,12 @@ impl VM {
         // Build args from resume_value based on closure arity.
         // fiber/resume provides at most one value, so we pass it as a
         // single argument when the closure expects parameters.
-        let args: &[Value] = match closure.template.arity {
+        let args: &[Value] = match closure.template.arity() {
             crate::value::Arity::Exact(0) => &[],
             _ => &[resume_value],
         };
 
-        if !self.check_arity(&closure.template.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity(), args.len()) {
             return SIG_ERROR;
         }
 

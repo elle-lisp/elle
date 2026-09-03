@@ -23,8 +23,8 @@ impl VM {
             return None;
         }
 
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
-        let num_captures = closure.template.num_captures as u16;
+        let bytecode_ptr = closure.template.bytecode().as_ptr();
+        let num_captures = closure.template.num_captures() as u16;
 
         // Build capture_types bitmask from the closure's environment.
         let mut capture_types: u64 = 0;
@@ -67,7 +67,7 @@ impl VM {
         // Full LIR instruction walk (only for hot functions).
         // Use the stricter MLIR-CPU eligibility check: the return register
         // must round-trip through i64 correctly.
-        let lir = closure.template.lir_function.as_ref()?;
+        let lir = closure.template.lir_function()?;
         if !lir.is_mlir_cpu_eligible() {
             return None;
         }
@@ -79,7 +79,7 @@ impl VM {
                 if crate::config::get().has_trace("jit") {
                     eprintln!(
                         "[mlir] compiled: {}",
-                        closure.template.name.as_deref().unwrap_or("<anon>")
+                        closure.template.name().unwrap_or("<anon>")
                     );
                 }
                 self.run_mlir_cached(closure, bytecode_ptr, args, capture_types, param_types)
@@ -93,7 +93,7 @@ impl VM {
                 if crate::config::get().has_trace("jit") {
                     eprintln!(
                         "[mlir] failed {}: {}",
-                        closure.template.name.as_deref().unwrap_or("<anon>"),
+                        closure.template.name().unwrap_or("<anon>"),
                         e
                     );
                 }
@@ -117,7 +117,7 @@ impl VM {
         capture_types: u64,
         param_types: u64,
     ) -> Option<Option<SignalBits>> {
-        let num_captures = closure.template.num_captures;
+        let num_captures = closure.template.num_captures();
 
         // Unbox captures + args: ints pass through, floats bitcast f64→i64.
         let mut i64_args: Vec<i64> = Vec::with_capacity(num_captures + args.len());

@@ -162,18 +162,18 @@ impl VM {
         }
         buf.extend(closure.env.iter().copied());
 
-        match closure.template.arity {
+        match closure.template.arity() {
             crate::value::Arity::AtLeast(min) => {
                 // Total fixed slots = num_params - 1 (rest slot is last param)
-                let fixed_slots = closure.template.num_params - 1;
+                let fixed_slots = closure.template.num_params() - 1;
 
                 // Determine how many positional args to consume for fixed slots.
                 // For &keys/&named, keyword args should not fill optional slots —
                 // once we see a keyword past the required params, the rest are
                 // keyword arguments for the collector.
                 let collects_keywords = matches!(
-                    closure.template.vararg_kind,
-                    crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
+                    closure.template.vararg_tag(),
+                    crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
                 );
                 let provided_fixed = if collects_keywords {
                     // Always fill required slots, then fill optional slots
@@ -205,8 +205,8 @@ impl VM {
                 } else {
                     &[]
                 };
-                let collected = match &closure.template.vararg_kind {
-                    crate::hir::VarargKind::List => {
+                let collected = match closure.template.vararg_tag() {
+                    crate::value::VarargTag::List => {
                         let list = Self::args_to_list(rest_args, heap);
                         // On a MOVE (`own_params = false`: a tail call / FFI callback),
                         // the caller's owning reference to each arg transferred to us. A
@@ -228,13 +228,14 @@ impl VM {
                         }
                         list
                     }
-                    crate::hir::VarargKind::Struct => {
+                    crate::value::VarargTag::Struct => {
                         match Self::collect_struct_in_own_region(fiber, heap, rest_args, None) {
                             Some(v) => v,
                             None => return false,
                         }
                     }
-                    crate::hir::VarargKind::StrictStruct(ref keys) => {
+                    crate::value::VarargTag::StrictStruct => {
+                        let keys = closure.template.strict_keys();
                         match Self::collect_struct_in_own_region(fiber, heap, rest_args, Some(keys))
                         {
                             Some(v) => v,
@@ -274,10 +275,10 @@ impl VM {
         // a dead, leaked cell.
         let num_locally_defined = closure
             .template
-            .num_locals
-            .saturating_sub(closure.template.num_params);
+            .num_locals()
+            .saturating_sub(closure.template.num_params());
         for i in 0..num_locally_defined {
-            if closure.template.capture_locals_mask.is_set(i) {
+            if closure.template.capture_locals_mask().is_set(i) {
                 use crate::value::heap::HeapObject;
                 use std::cell::RefCell;
                 use std::rc::Rc;
@@ -307,7 +308,7 @@ impl VM {
         val: Value,
         own_params: bool,
     ) {
-        if i < 64 && (closure.template.capture_params_mask & (1 << i)) != 0 {
+        if i < 64 && (closure.template.capture_params_mask() & (1 << i)) != 0 {
             use crate::value::heap::HeapObject;
             use std::cell::RefCell;
             use std::rc::Rc;
@@ -439,7 +440,7 @@ impl VM {
         fiber: &mut crate::value::Fiber,
         heap: &mut crate::value::fiberheap::FiberHeap,
         args: &[Value],
-        valid_keys: Option<&[String]>,
+        valid_keys: Option<crate::value::closure::StrKeys<'_>>,
     ) -> Option<Value> {
         let sr = env_value_region(heap);
         // Build the struct INSIDE `sr` (the per-value region the result lives
@@ -482,7 +483,7 @@ impl VM {
     fn args_to_struct_static(
         heap: &mut crate::value::fiberheap::FiberHeap,
         args: &[Value],
-        valid_keys: Option<&[String]>,
+        valid_keys: Option<crate::value::closure::StrKeys<'_>>,
         region: crate::hir::region::RuntimeRegion,
     ) -> Result<Value, (&'static str, String)> {
         use crate::value::types::TableKey;

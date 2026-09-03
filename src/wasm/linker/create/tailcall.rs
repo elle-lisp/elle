@@ -83,7 +83,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             };
 
             if let Some(closure) = func_val.as_closure() {
-                if let Some(wasm_idx) = closure.template.wasm_func_idx {
+                if let Some(wasm_idx) = closure.template.wasm_func_idx() {
                     // Reset env_stack_ptr to caller's position (frees caller's env)
                     let env_base = caller_env_ptr as usize;
                     caller.data_mut().env_stack_ptr = env_base;

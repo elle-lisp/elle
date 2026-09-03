@@ -198,13 +198,35 @@ pub struct Frame {
     pub base: usize,
 }
 
-/// Call frame for stack traces (name + ip + frame_base).
-/// Separate from Frame because stack traces need human-readable names,
-/// while execution dispatch needs closure references.
+/// Call frame for stack traces (code object + ip + frame_base).
+/// Separate from Frame because stack traces need the function's name and the
+/// source location of its current instruction, while execution dispatch needs
+/// closure references.
+/// A trace line names the function that was entered and the place it was called
+/// from, so the frame holds both code objects. Holding them (rather than copying
+/// a name and a location table out at push time) is also what keeps their
+/// payloads alive for as long as the trace can be printed.
 #[derive(Debug, Clone)]
 pub struct CallFrame {
-    pub name: Rc<str>,
+    /// The code object this frame entered — where the trace line's name comes
+    /// from.
+    pub callee: crate::value::Code,
+    /// The code object that made the call. With `ip`, it gives the trace line's
+    /// source location.
+    pub caller: crate::value::Code,
+    /// The offset of the call instruction in `caller`.
     pub ip: usize,
     pub frame_base: usize,
-    pub location_map: Rc<crate::error::LocationMap>,
+}
+
+impl CallFrame {
+    /// The entered function's name for a trace line.
+    pub fn name(&self) -> &str {
+        self.callee.template().name().unwrap_or("<anonymous>")
+    }
+
+    /// Where the call was made.
+    pub fn location(&self) -> Option<crate::reader::SourceLoc> {
+        self.caller.locations().get(self.ip)
+    }
 }

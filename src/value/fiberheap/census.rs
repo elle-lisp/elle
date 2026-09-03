@@ -105,9 +105,6 @@ pub struct HeapCensus {
     pub prim_slots: usize,
     /// Total non-empty `RegionSlice` fields.
     pub region_slices: usize,
-    /// Closures whose template is an `Rc` blueprint rather than a region
-    /// object — work for the template foundation, visible here.
-    pub shared_templates: usize,
     /// Dump-refused objects, aggregated by (tag, detail).
     pub unsealed: Vec<UnsealedLeaf>,
 }
@@ -125,7 +122,6 @@ struct ObjStat {
     ptr_slots: usize,
     prim_slots: usize,
     region_slices: usize,
-    shared_template: bool,
 }
 
 impl HeapCensus {
@@ -138,7 +134,6 @@ impl HeapCensus {
         let mut ptr_slots = 0usize;
         let mut prim_slots = 0usize;
         let mut region_slices = 0usize;
-        let mut shared_templates = 0usize;
 
         for obj in store.live_objects() {
             let tag = obj.tag();
@@ -148,7 +143,6 @@ impl HeapCensus {
             ptr_slots += stat.ptr_slots;
             prim_slots += stat.prim_slots;
             region_slices += stat.region_slices;
-            shared_templates += stat.shared_template as usize;
 
             let idx = tag as usize;
             if rows.len() <= idx {
@@ -202,7 +196,6 @@ impl HeapCensus {
             ptr_slots,
             prim_slots,
             region_slices,
-            shared_templates,
             unsealed,
         }
     }
@@ -222,7 +215,6 @@ impl HeapCensus {
             ));
         }
         out.push(format!("capture-cells {}", self.capture_cells));
-        out.push(format!("shared-templates {}", self.shared_templates));
         let kib = (self.region_bytes as f64 / 1024.0).max(1.0);
         out.push(format!(
             "ptr-slots {} prim-slots {} region-slices {} per-kib {:.2} {:.2} {:.2}",
@@ -345,30 +337,25 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             for v in closure.env.iter() {
                 heap_slot(v, &mut stat);
             }
-            match &closure.template {
-                crate::value::closure::TemplateRef::Region(tv) => heap_slot(tv, &mut stat),
-                _ => stat.shared_template = true,
-            }
+            heap_slot(&closure.template.value(), &mut stat);
         }
         HeapObject::ClosureTemplate(t) => {
-            if seen.insert(Rc::as_ptr(&t.bytecode) as usize) {
-                stat.bytes += t.bytecode.len();
+            // A header is a payload slice and a blueprint pointer, so its own
+            // relocation load is the one payload backing. The payload's bytes
+            // are counted once per blueprint: every header the same blueprint
+            // materializes names the same backing (docs/impl/region/template.md).
+            stat.region_slices += 1;
+            if seen.insert(t.payload_backing() as usize) {
+                let p = t.payload();
+                stat.bytes += size_of::<crate::value::closure::CodePayload>()
+                    + p.bytecode().len()
+                    + std::mem::size_of_val(p.constants())
+                    + p.locations().len() * size_of::<crate::value::closure::LocEntry>()
+                    + p.name().map_or(0, str::len)
+                    + p.doc().map_or(0, str::len);
             }
-            if seen.insert(Rc::as_ptr(&t.constants) as usize) {
-                stat.bytes += t.constants.len() * size_of::<Value>();
-            }
-            for v in t.constants.iter() {
+            for v in t.constants().iter() {
                 heap_slot(v, &mut stat);
-            }
-            if let Some(name) = &t.name {
-                if seen.insert(Rc::as_ptr(name) as *const u8 as usize) {
-                    stat.bytes += name.len();
-                }
-            }
-            if let Some(doc) = &t.doc {
-                if seen.insert(Rc::as_ptr(doc) as *const u8 as usize) {
-                    stat.bytes += doc.len();
-                }
             }
         }
         HeapObject::Syntax { syntax, .. } => stat.bytes += syntax_bytes(syntax, seen),

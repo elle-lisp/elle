@@ -55,7 +55,7 @@ pub struct JitCode {
     /// `elle_jit_make_closure` re-materializes a fresh region-allocated template
     /// per execution.
     #[allow(dead_code, clippy::vec_box)]
-    pub(crate) closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+    pub(crate) closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
     /// `ConstTemplate`, so they must live as long as the JIT code itself (this
@@ -99,7 +99,7 @@ impl JitCode {
     pub(crate) fn new_shared(
         fn_ptr: *const u8,
         module: Arc<ModuleHolder>,
-        closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+        closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
         templates: Vec<Box<crate::value::ConstTemplate>>,
     ) -> Self {
         JitCode {
@@ -120,7 +120,7 @@ impl JitCode {
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
         call_sites: Vec<super::dispatch::CallSiteMeta>,
-        closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+        closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
         templates: Vec<Box<crate::value::ConstTemplate>>,
     ) -> Self {
         JitCode {

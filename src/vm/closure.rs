@@ -1,36 +1,40 @@
+use std::rc::Rc;
+
 use super::core::VM;
 use crate::hir::region::{RuntimeRegion, StaticRegion};
 use crate::value::arena;
-use crate::value::closure::{ClosureTemplate, TemplateRef};
+use crate::value::closure::{materialize, MergedSlots, TemplateProto, TemplateRef};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::{Closure, HeapObject};
 use crate::value::Value;
 
 /// Materialize a closure instance for `MakeClosure`, into `region_id`.
 ///
-/// The template `blueprint` is plain compile-time data (the enclosing code
-/// object's `child_protos`). We materialize a FRESH `HeapObject::ClosureTemplate`
+/// The `blueprint` is plain compile-time data (the enclosing code object's
+/// `child_protos`). We materialize a FRESH `HeapObject::ClosureTemplate` header
 /// into the SAME region as the instance (co-region → the instance→template edge
 /// is a self-edge, no cross-region RC), build the captured env inline, and
-/// allocate the instance referencing the template. The template is therefore an
+/// allocate the instance referencing the header. The header is therefore an
 /// ordinary region allocation reclaimed by region RC when the instance's region
 /// frees (a heap literal is an ordinary, reclaimable allocation; closure
-/// templates are no exception). Allocates through the VM's heap
-/// (`vm.heap_ptr`/`vm.heap()`), shared by the interpreter and the JIT
-/// `MakeClosure` helper.
+/// templates are no exception).
+///
+/// The header's *payload* — bytecode, constants, location table, region tables
+/// — is not copied here. It is materialized once per blueprint into a payload
+/// region of the heap's own and shared by every header
+/// (docs/impl/region/template.md), so a closure built in a loop costs one
+/// header allocation per iteration rather than a copy of its function's code.
+/// Allocates through the VM's heap (`vm.heap_ptr`/`vm.heap()`), shared by the
+/// interpreter and the JIT `MakeClosure` helper.
 pub(crate) fn materialize_closure_in_region(
     heap: &mut crate::value::fiberheap::FiberHeap,
-    blueprint: &ClosureTemplate,
+    blueprint: &Rc<TemplateProto>,
     captures: &[Value],
     region_id: RuntimeRegion,
 ) -> Value {
-    // Materialize the template heap object into the instance's region first, so
-    // the instance's alloc-scan sees a live template Value (self-edge, filtered).
-    let template_val = arena::alloc_in_region(
-        heap,
-        HeapObject::ClosureTemplate(blueprint.clone()),
-        region_id,
-    );
+    // Materialize the header into the instance's region first, so the
+    // instance's alloc-scan sees a live template Value (self-edge, filtered).
+    let template_val = materialize(heap, blueprint, region_id);
     let env = arena::alloc_region_slice_in_region::<Value>(heap, captures, region_id);
     let closure = Closure::new(TemplateRef::region(template_val), env, SignalBits::EMPTY);
     arena::alloc_in_region(
@@ -47,9 +51,9 @@ pub(crate) fn handle_make_closure(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
-    child_protos: &[std::rc::Rc<ClosureTemplate>],
+    child_protos: &[Rc<TemplateProto>],
     static_region: StaticRegion,
-    merged_slots: &rustc_hash::FxHashSet<u32>,
+    merged_slots: MergedSlots<'_>,
 ) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     let num_upvalues = vm.read_u16(bytecode, ip) as usize;

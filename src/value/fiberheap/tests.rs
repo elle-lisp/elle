@@ -335,7 +335,7 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
 #[test]
 fn closure_sharing_env_increfs_the_env_backing_region() {
     use crate::value::fiber::SignalBits;
-    use crate::value::{Arity, Closure, ClosureTemplate};
+    use crate::value::{Arity, Closure};
     use std::rc::Rc;
 
     let mut heap = FiberHeap::new();
@@ -351,18 +351,21 @@ fn closure_sharing_env_increfs_the_env_backing_region() {
         "A owns its env backing slice (rc=1, the owning-scope ref)"
     );
 
-    let template = Rc::new(ClosureTemplate::new(
-        Rc::new(Vec::new()),
+    let proto = Rc::new(crate::value::TemplateProto::new(
+        Vec::new(),
         Arity::Exact(0),
-        Rc::new(Vec::new()),
+        Vec::new(),
     ));
+    // The code object is co-region with the closure below, so it adds no edge
+    // to A — the env backing is the one under test.
+    let template = crate::value::closure::materialize(&mut heap, &proto, region_b);
     // Mirror prim_squelch: a NEW closure that SHARES the env (backed in A) but
     // is itself allocated into a different region B.
-    let shared = Closure {
-        template: crate::value::TemplateRef::new(template),
+    let shared = Closure::new(
+        crate::value::TemplateRef::region(template),
         env,
-        squelch_mask: SignalBits::EMPTY,
-    };
+        SignalBits::EMPTY,
+    );
     heap.alloc_in_region(
         HeapObject::Closure {
             closure: shared,

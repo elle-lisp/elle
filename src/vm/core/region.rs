@@ -94,9 +94,9 @@ impl VM {
     pub(crate) fn runtime_region_for_alloc_slot_maybe_merged(
         &mut self,
         static_id: StaticRegion,
-        merged_slots: &rustc_hash::FxHashSet<u32>,
+        merged_slots: crate::value::closure::MergedSlots<'_>,
     ) -> RuntimeRegion {
-        if merged_slots.contains(&static_id.get()) {
+        if merged_slots.contains(static_id.get()) {
             return self.runtime_region_for_merged_alloc_slot(static_id);
         }
         self.runtime_region_for_alloc_slot(static_id)
@@ -428,8 +428,8 @@ impl VM {
     /// the executing `Code`, and slot `s` lives on this activation's frame stack.
     pub(crate) fn release_abandoned_frame(&mut self, code: &crate::value::Code, payload: Value) {
         let base = self.current_frame_base();
-        let slots = code.frame_release_slots.clone();
-        let regions = code.frame_release_regions.clone();
+        let slots = code.frame_release_slots().to_vec();
+        let regions = code.frame_release_regions().to_vec();
         self.release_abandoned(&slots, &regions, payload, FrameLocals::Stack(base));
     }
 

@@ -275,38 +275,41 @@ impl<'a> FunctionTranslator<'a> {
                 // `HeapObject::ClosureTemplate` from it per execution (a heap
                 // literal is an ordinary, reclaimable allocation). Its own
                 // `child_protos` are the nested bytecode's.
-                let template = crate::value::ClosureTemplate {
+                let template = crate::value::TemplateProto {
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     num_params: func.num_params,
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask.clone(),
-                    location_map: std::rc::Rc::new(nested_bytecode.location_map),
+                    location_map: nested_bytecode.location_map,
                     lir_function: Some(std::rc::Rc::new(nested_lir)),
-                    doc: func.doc.clone(),
+                    doc: func.doc.as_deref().map(str::to_string),
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
-                    name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
+                    name: func.name.clone(),
                     region_table: func.region_table.clone(),
-                    merged_slots: std::rc::Rc::new(
-                        func.merged_slots.iter().map(|s| s.get()).collect(),
-                    ),
-                    child_protos: std::rc::Rc::new(nested_bytecode.child_protos),
-                    ..crate::value::ClosureTemplate::new(
-                        std::rc::Rc::new(nested_bytecode.instructions),
+                    merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
+                    frame_release_slots: func.frame_release_slots.clone(),
+                    frame_release_regions: func
+                        .frame_release_regions
+                        .iter()
+                        .map(|r| r.get())
+                        .collect(),
+                    child_protos: nested_bytecode.child_protos,
+                    ..crate::value::TemplateProto::new(
+                        nested_bytecode.instructions,
                         func.arity,
-                        std::rc::Rc::new(nested_bytecode.constants),
+                        nested_bytecode.constants,
                     )
                 };
 
-                // Bake a stable raw pointer to the blueprint (owned by JitCode).
-                self.closure_protos.push(Box::new(template));
+                // Bake a stable raw pointer to the blueprint. The `Rc`'s target
+                // address does not move with the vector, and the JIT code object
+                // owns this handle for as long as any code it compiled can run.
+                self.closure_protos.push(std::rc::Rc::new(template));
                 let proto = self.closure_protos.last().expect("just pushed");
-                let template_ptr = builder.ins().iconst(
-                    I64,
-                    (&**proto as *const crate::value::ClosureTemplate) as i64,
-                );
+                let template_ptr = builder.ins().iconst(I64, std::rc::Rc::as_ptr(proto) as i64);
 
                 let (captures_ptr, count_val) = if captures.is_empty() {
                     (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))

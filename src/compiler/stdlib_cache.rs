@@ -31,7 +31,6 @@ use crate::compiler::Bytecode;
 use crate::signals::Signal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::rc::Rc;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
 const FORMAT_VERSION: u32 = 5;
@@ -302,35 +301,11 @@ pub fn store_bytecode(
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<StoredBytecode, String> {
-    use crate::value::ClosureTemplate;
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     let stored_dispatch = dispatch_wrappers.to_stored(symbols);
     let stored_fn_inline = fn_inline.to_stored(symbols);
-    let entry = ClosureTemplate {
-        bytecode: Rc::new(bytecode.instructions.clone()),
-        arity: crate::value::Arity::Exact(0),
-        num_locals: 0,
-        num_captures: 0,
-        num_params: 0,
-        constants: Rc::new(bytecode.constants.clone()),
-        signal: bytecode.signal,
-        capture_params_mask: 0,
-        capture_locals_mask: crate::value::CaptureMask::empty(),
-        location_map: Rc::new(bytecode.location_map.clone()),
-        lir_function: None, // the entry thunk is not JIT'd; closures carry their own LIR
-        doc: None,
-        syntax: None,
-        vararg_kind: crate::hir::VarargKind::List,
-        name: None,
-        wasm_func_idx: None,
-        spirv: std::cell::OnceCell::new(),
-        region_table: Vec::new(),
-        merged_slots: bytecode.merged_slots.clone(),
-        frame_release_slots: bytecode.frame_release_slots.clone(),
-        frame_release_regions: bytecode.frame_release_regions.clone(),
-        child_protos: Rc::new(bytecode.child_protos.clone()),
-    };
-    let entry = std::rc::Rc::new(entry);
+    // The entry thunk is not JIT'd; the nested lambdas carry their own LIR.
+    let entry = std::rc::Rc::new(bytecode.clone().into_proto());
     let sent =
         crate::value::send::serialize_templates(std::slice::from_ref(&entry), vm.heap(), symbols)?;
     let entry = sent
@@ -389,16 +364,29 @@ pub fn load_bytecode(
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     dispatch_wrappers.restore(stored.dispatch_wrappers, symbols);
     fn_inline.restore(stored.fn_inline, symbols);
+    let entry = std::rc::Rc::try_unwrap(entry).unwrap_or_else(|rc| {
+        // One blueprint in, one out — a second holder would mean the intern
+        // table kept a reference, which the entry thunk never enters.
+        crate::value::TemplateProto {
+            location_map: rc.location_map.clone(),
+            child_protos: rc.child_protos.clone(),
+            merged_slots: rc.merged_slots.clone(),
+            frame_release_slots: rc.frame_release_slots.clone(),
+            frame_release_regions: rc.frame_release_regions.clone(),
+            signal: rc.signal,
+            ..crate::value::TemplateProto::new(rc.bytecode.clone(), rc.arity, rc.constants.clone())
+        }
+    });
     Ok(Bytecode {
-        instructions: (*entry.bytecode).clone(),
-        constants: (*entry.constants).clone(),
-        location_map: (*entry.location_map).clone(),
+        instructions: entry.bytecode,
+        constants: entry.constants,
+        location_map: entry.location_map,
         signal: entry.signal,
         signal_projection: stored.signal_projection,
-        child_protos: (*entry.child_protos).clone(),
-        merged_slots: entry.merged_slots.clone(),
-        frame_release_slots: entry.frame_release_slots.clone(),
-        frame_release_regions: entry.frame_release_regions.clone(),
+        child_protos: entry.child_protos,
+        merged_slots: entry.merged_slots,
+        frame_release_slots: entry.frame_release_slots,
+        frame_release_regions: entry.frame_release_regions,
     })
 }
 

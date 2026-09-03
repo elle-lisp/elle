@@ -311,12 +311,11 @@ fn adopt_into_activation_absorbs_redelivery() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Return);
-        let code = crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(bc.into_proto()),
+        )
+        .code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(

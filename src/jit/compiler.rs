@@ -27,7 +27,7 @@ use super::JitError;
 /// closure-template `Value`s referenced by `MakeClosure`, and string-literal
 /// template byte buffers the native code's baked pointers point into.
 type TranslatedConsts = (
-    Vec<Box<crate::value::ClosureTemplate>>,
+    Vec<std::rc::Rc<crate::value::TemplateProto>>,
     Vec<Box<crate::value::ConstTemplate>>,
 );
 
@@ -301,7 +301,7 @@ impl JitCompiler {
 
         // Define each function with the SCC peer map, collecting closure
         // template blueprints so they stay alive as long as the JitCode does.
-        let mut all_closure_protos: Vec<(SymbolId, Vec<Box<crate::value::ClosureTemplate>>)> =
+        let mut all_closure_protos: Vec<(SymbolId, Vec<std::rc::Rc<crate::value::TemplateProto>>)> =
             Vec::new();
         let mut all_templates: Vec<(SymbolId, Vec<Box<crate::value::ConstTemplate>>)> = Vec::new();
         for (i, member) in members.iter().enumerate() {
@@ -350,7 +350,7 @@ impl JitCompiler {
         // string-literal template constants (both kept alive by the JitCode).
         let mut constants_map: std::collections::HashMap<
             SymbolId,
-            Vec<Box<crate::value::ClosureTemplate>>,
+            Vec<std::rc::Rc<crate::value::TemplateProto>>,
         > = all_closure_protos.into_iter().collect();
         let mut templates_map: std::collections::HashMap<
             SymbolId,

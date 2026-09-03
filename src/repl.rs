@@ -566,7 +566,7 @@ fn eval_form(
 /// Extract signal and arity from a runtime value.
 fn extract_signal_arity(value: &Value) -> (Signal, Option<Arity>) {
     match value.as_closure() {
-        Some(closure) => (closure.effective_signal(), Some(closure.template.arity)),
+        Some(closure) => (closure.effective_signal(), Some(closure.template.arity())),
         None => (Signal::silent(), None),
     }
 }

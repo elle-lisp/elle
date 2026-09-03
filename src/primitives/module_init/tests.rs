@@ -41,15 +41,15 @@ fn build_closure_call_env_places_captures_before_locals() {
         .expect("top-level must evaluate to a closure");
 
     assert!(
-        closure.template.num_captures >= 1,
+        closure.template.num_captures() >= 1,
         "the test source must produce a closure with captures; got num_captures={}",
-        closure.template.num_captures
+        closure.template.num_captures()
     );
     assert!(
-        closure.template.num_locals >= 1,
+        closure.template.num_locals() >= 1,
         "the test source must produce a closure with at least one local \
              (otherwise the bug condition isn't exercised); got num_locals={}",
-        closure.template.num_locals
+        closure.template.num_locals()
     );
 
     let env = build_closure_call_env(closure, &[]);
@@ -58,8 +58,8 @@ fn build_closure_call_env_places_captures_before_locals() {
         "env[0] must be the first capture — a nil here means locals \
              were placed before captures and `LoadUpvalue(0)` reads nil. \
              num_captures={}, num_locals={}, env[0]={}",
-        closure.template.num_captures,
-        closure.template.num_locals,
+        closure.template.num_captures(),
+        closure.template.num_locals(),
         env[0],
     );
 }

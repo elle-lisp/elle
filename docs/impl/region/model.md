@@ -98,11 +98,12 @@ second demise mechanism outside `DecrefRegion`, and share one region across ever
 activation of the code object; do not adopt it.
 
 Closure **templates** are no exception: the template is itself a
-region-allocated heap object (its bytecode an inline `RegionSlice<u8>`),
-materialized at its definition site; a closure **instance** holds a normal
-cross-region reference to it, increfed when the instance is built and
-cascade-released when its region frees. Region RC is the single reclamation
-mechanism for code objects too.
+region-allocated heap object, materialized at its definition site; a closure
+**instance** holds a normal cross-region reference to it, increfed when the
+instance is built and cascade-released when its region frees. Region RC is the
+single reclamation mechanism for code objects too. What the materialized
+template holds, and why its bytecode is shared rather than copied per
+execution, is [template.md](template.md).
 
 ## Physical representation
 

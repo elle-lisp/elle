@@ -133,7 +133,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     CallOutcome::value(tag, payload)
                 }
             } else if let Some(closure) = func_val.as_closure() {
-                if let Some(wasm_idx) = closure.template.wasm_func_idx {
+                if let Some(wasm_idx) = closure.template.wasm_func_idx() {
                     // Check for pre-compiled per-closure Module first.
                     let precached = caller
                         .data()

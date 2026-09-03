@@ -369,7 +369,7 @@ pub(super) fn handle_fiber_resume(
         (closure, resume_value, status, unfunded)
     });
 
-    let wasm_idx = match closure.template.wasm_func_idx {
+    let wasm_idx = match closure.template.wasm_func_idx() {
         Some(idx) => idx,
         None => {
             fiber_handle.with_mut(|f| f.status = FiberStatus::Error);

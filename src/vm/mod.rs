@@ -30,24 +30,13 @@ pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::error::LocationMap;
 use crate::pipeline::CompileCtx;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
-        self.execute_bytecode(
-            &bytecode.instructions,
-            &bytecode.constants,
-            &bytecode.child_protos,
-            crate::value::code::CodeTables {
-                merged_slots: bytecode.merged_slots.clone(),
-                frame_release_slots: bytecode.frame_release_slots.clone(),
-                frame_release_regions: bytecode.frame_release_regions.clone(),
-            },
-            None,
-        )
+        self.execute_proto(&Rc::new(bytecode.clone().into_proto()), None)
     }
 
     /// Mint a fresh `RuntimeRegion` from the activation's heap for a VM-produced
@@ -139,35 +128,25 @@ impl VM {
         true
     }
 
-    /// Execute raw bytecode with optional closure environment.
+    /// Execute a code-object blueprint with an optional closure environment.
     ///
-    /// Translation boundary: internally uses SignalBits, externally
-    /// returns `Result<Value, String>`. Wraps slices in `Rc` once at
-    /// the boundary — COPYING the byte buffer into a fresh `Rc`, so a caller
-    /// running a CLOSURE's body must use `Self::execute_code` (crate-private) with
-    /// `closure.template.code()` instead: the executing-closure register's
-    /// dispatch-entry invariant compares the register's template bytecode to
-    /// the executing `Code` by `Rc` identity, which a copy breaks.
-    pub fn execute_bytecode(
+    /// Translation boundary: internally uses SignalBits, externally returns
+    /// `Result<Value, String>`. A caller running a CLOSURE's body must use
+    /// `Self::execute_code` (crate-private) with `closure.template.code()`
+    /// instead: the executing-closure register's dispatch-entry invariant
+    /// compares the register's code object to the executing `Code` by payload
+    /// identity, and a fresh blueprint materializes a payload of its own.
+    pub fn execute_proto(
         &mut self,
-        bytecode: &[u8],
-        constants: &[Value],
-        child_protos: &[Rc<crate::value::ClosureTemplate>],
-        tables: crate::value::code::CodeTables,
+        proto: &Rc<crate::value::TemplateProto>,
         closure_env: Option<&Rc<Vec<Value>>>,
     ) -> Result<Value, String> {
-        // Carry the function's region tables: the builder-idiom merge set the alloc
-        // dispatch mint-or-reuses (docs/impl/region/merging.md § Merging), and the
-        // two release tables an error exit walks (docs/impl/region/mechanism.md
-        // § "An abandoned frame runs the releases it still owes"). The caller
-        // supplies them from the `Bytecode`/`ClosureTemplate` whose body this runs.
-        let code = crate::value::Code::new(
-            Rc::new(bytecode.to_vec()),
-            Rc::new(constants.to_vec()),
-            Rc::new(LocationMap::new()),
-            Rc::new(child_protos.to_vec()),
-        )
-        .with_tables(tables);
+        // The blueprint carries the function's region tables with the rest of
+        // its payload: the builder-idiom merge set the alloc dispatch
+        // mint-or-reuses (docs/impl/region/merging.md § Merging), and the two
+        // release tables an error exit walks (docs/impl/region/mechanism.md
+        // § "An abandoned frame runs the releases it still owes").
+        let code = crate::value::ClosureTemplate::for_proto(self.heap(), proto).code();
         self.execute_code(code, closure_env)
     }
 
@@ -190,7 +169,7 @@ impl VM {
 
         // Install the executing-closure register for this body, bracketed
         // (save/restore) so a re-entrant driver — a native that loads a module
-        // via `execute_bytecode` mid-activation — restores the outer
+        // via `execute_proto` mid-activation — restores the outer
         // activation's register on return, exactly as
         // `execute_bytecode_saving_stack` brackets a closure body. The register
         // arrives through the one-shot `pending_entry_closure`: an entrant that
@@ -336,7 +315,7 @@ impl VM {
             self.fiber.signal = Some((result_bits, result_value));
 
             // Rebuild fiber.suspended for uncaught signals: the outer code
-            // (execute_scheduled, execute_bytecode) needs the suspension chain
+            // (execute_scheduled, execute_proto) needs the suspension chain
             // to resume after handling the signal (e.g., SIG_IO → sync I/O).
             // Prepend a FiberResume frame so resume_suspended can re-enter
             // the child fiber when the signal is handled.
@@ -372,27 +351,12 @@ impl VM {
             None => return self.execute(bytecode),
         };
 
-        // The entry thunk's template is plain compile-time data; the thunk Value
-        // itself is built below into `entry_region` (an ordinary allocation,
-        // reclaimed by the termination sweep). The thunk is program-extent, not a
-        // process-lifetime root, so it is never pinned for the process lifetime.
-        let thunk_template =
-            crate::value::TemplateRef::new(Rc::new(crate::value::ClosureTemplate {
-                signal: bytecode.signal,
-                location_map: Rc::new(bytecode.location_map.clone()),
-                child_protos: Rc::new(bytecode.child_protos.clone()),
-                // The real program's builder-idiom merge metadata: the thunk runs
-                // the top-level bytecode, so its allocations mint-or-reuse merged
-                // slots through this template's `Code` (docs/impl/region/merging.md
-                // § Merging). Without this the top-level merge would diverge from the
-                // unit/embedding paths (which carry it). Empty unless a merge fired.
-                merged_slots: bytecode.merged_slots.clone(),
-                ..crate::value::ClosureTemplate::new(
-                    Rc::new(bytecode.instructions.to_vec()),
-                    crate::value::Arity::Exact(0),
-                    Rc::new(bytecode.constants.to_vec()),
-                )
-            }));
+        // The entry thunk's blueprint is the program's own: it runs the top-level
+        // bytecode, so it carries the real program's location table, nested-lambda
+        // blueprints, and builder-idiom merge metadata (docs/impl/region/merging.md
+        // § Merging). Without them the top-level merge would diverge from the
+        // unit/embedding paths, which carry it. Empty unless a merge fired.
+        let thunk_proto = Rc::new(bytecode.clone().into_proto());
 
         let call_region = crate::lir::lower::new_static_region();
         // The synthetic `Call` below is hand-encoded bytecode, so the slot is
@@ -425,30 +389,33 @@ impl VM {
         // Build the entry thunk as an ordinary allocation into `entry_region`
         // (mortal) — reclaimed by the termination sweep. The synthetic
         // `(ev/run thunk)` bytecode has no MakeClosure of its own; the real
-        // program's nested lambdas ride on the thunk template's child_protos and
+        // program's nested lambdas ride on the thunk blueprint's child_protos and
         // resolve when `ev/run` calls the thunk. The thunk names its region
-        // explicitly and `execute_bytecode`'s allocating opcodes resolve their own
+        // explicitly and the wrapper's allocating opcodes resolve their own
         // static region slots.
-        let thunk = crate::value::build::closure(
-            self.heap(),
-            crate::value::Closure {
-                template: thunk_template,
-                env: crate::value::region_slice::RegionSlice::empty(),
-                squelch_mask: SignalBits::EMPTY,
-            },
-            entry_region,
-        );
+        let thunk = {
+            let heap = self.heap();
+            let template = crate::value::closure::materialize(heap, &thunk_proto, entry_region);
+            crate::value::build::closure(
+                heap,
+                crate::value::Closure::new(
+                    crate::value::TemplateRef::region(template),
+                    crate::value::region_slice::RegionSlice::empty(),
+                    SignalBits::EMPTY,
+                ),
+                entry_region,
+            )
+        };
         let synthetic_constants = vec![thunk, ev_run];
         // The synthetic `(ev/run thunk)` wrapper has no allocations and no releases
-        // of its own; the real program's tables ride the thunk template
-        // (`merged_slots`, set above) and resolve when `ev/run` calls the thunk.
-        self.execute_bytecode(
-            &synthetic_bc,
-            &synthetic_constants,
-            &[],
-            crate::value::code::CodeTables::default(),
-            None,
-        )
+        // of its own; the real program's tables ride the thunk blueprint and
+        // resolve when `ev/run` calls the thunk.
+        let wrapper = crate::value::TemplateProto::new(
+            synthetic_bc,
+            crate::value::Arity::Exact(0),
+            synthetic_constants,
+        );
+        self.execute_proto(&Rc::new(wrapper), None)
     }
 }
 

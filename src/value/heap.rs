@@ -172,9 +172,9 @@ pub enum HeapObject {
     },
 
     /// Function closure (interpreted). The `Closure` lives by value in the
-    /// arena alongside its `HeapObject` header. `ClosureTemplate` remains
-    /// `Rc`-shared across closure instances (bytecode, constants, location
-    /// map, etc.), so cloning a `Closure` is O(1) (Rc bump + Copy fields).
+    /// arena alongside its `HeapObject` header. Its code object is a separate
+    /// region allocation it names by `Value`, so cloning a `Closure` copies
+    /// three `Copy` fields.
     Closure { closure: Closure, traits: Value },
 
     /// Immutable array (fixed-length sequence, inline in arena)
@@ -289,11 +289,14 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// A region-allocated closure **template** (code object). Materialized per
-    /// execution by `MakeClosure` from a compile-time blueprint, into the same
-    /// region as the closure instance that references it (docs/impl/region/model.md
+    /// A region-allocated code object **header**. Materialized per execution by
+    /// `MakeClosure` from a compile-time blueprint, into the same region as the
+    /// closure instance that references it (docs/impl/region/model.md
     /// § "Constants lower as ordinary allocations" — closure templates are no
-    /// exception). Reclaimed by region RC.
+    /// exception). Reclaimed by region RC. Its payload — bytecode, constants,
+    /// locations, region tables — is shared by every header the same blueprint
+    /// makes and lives in a payload region of the heap's own
+    /// (docs/impl/region/template.md).
     /// Never user-visible: it carries no `traits` and is never compared,
     /// hashed, or serialized as a user value.
     ClosureTemplate(crate::value::closure::ClosureTemplate),

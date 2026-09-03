@@ -44,8 +44,8 @@ pub(crate) fn prim_disbit(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        let mut lines = crate::compiler::disassemble_lines(&closure.template.bytecode);
-        for (i, c) in closure.template.constants.iter().enumerate() {
+        let mut lines = crate::compiler::disassemble_lines(closure.template.bytecode());
+        for (i, c) in closure.template.constants().iter().enumerate() {
             lines.push(format!("const[{}] = {:?}", i, c));
         }
         (
@@ -70,7 +70,7 @@ pub(crate) fn prim_disjit(
 ) -> (SignalBits, Value) {
     #[cfg(feature = "jit")]
     if let Some(closure) = args[0].as_closure() {
-        let lir = match &closure.template.lir_function {
+        let lir = match closure.template.lir_function() {
             Some(lir) => lir.clone(),
             None => return (SIG_OK, Value::NIL),
         };
@@ -106,7 +106,7 @@ fn flow_from_closure(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     closure: &crate::value::heap::Closure,
 ) -> (SignalBits, Value) {
-    let lir = match &closure.template.lir_function {
+    let lir = match closure.template.lir_function() {
         Some(lir) => lir,
         None => return (SIG_OK, Value::NIL),
     };
@@ -128,8 +128,7 @@ fn flow_from_closure(
         TableKey::keyword("doc"),
         closure
             .template
-            .doc
-            .as_deref()
+            .doc()
             .map(|s| ctx.string(s))
             .unwrap_or(Value::NIL),
     );

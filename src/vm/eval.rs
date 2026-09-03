@@ -186,16 +186,11 @@ fn eval_inner(
     let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
-    // Execute
-    let mut code = crate::value::Code::new(
-        Rc::new(bytecode.instructions),
-        Rc::new(bytecode.constants),
-        Rc::new(bytecode.location_map),
-        Rc::new(bytecode.child_protos),
-    );
-    // Carry the entry function's builder-idiom merge metadata so the alloc
-    // dispatch mint-or-reuses merged slots (docs/impl/region/merging.md § Merging).
-    code.merged_slots = bytecode.merged_slots;
+    // Execute. The blueprint carries the entry function's builder-idiom merge
+    // metadata with the rest of its payload, so the alloc dispatch mint-or-reuses
+    // merged slots (docs/impl/region/merging.md § Merging).
+    let code =
+        crate::value::ClosureTemplate::for_proto(vm.heap(), &Rc::new(bytecode.into_proto())).code();
     let empty_env = Rc::new(vec![]);
 
     // Drive the evaluated code, including any nested fiber/resume SIG_SWITCH
