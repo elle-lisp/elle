@@ -1,13 +1,22 @@
-//! Owner-node teardown for terminal fibers. A fiber owns state through the
-//! ownership forest (its parked chain's activation nodes and its own fiber
-//! node); when it can never run again, that state must be freed exactly once.
-//! The take/release split keeps heap mutation disjoint from fiber access: the
-//! take empties the fiber's slots under its borrow, and the release — run after
-//! the borrow is dropped — can cascade-free the fiber's own heap value without
-//! invalidating a live borrow (docs/impl/region/owner.md § "Owner nodes").
+//! What an abandoned frame chain owed, and the teardown of a terminal fiber.
+//!
+//! [`release_parked_dues`] is the shared half: a chain nothing can re-enter owes
+//! its activation owner nodes, the releases those activations took over from
+//! their own frame-replacing tail calls, and the two release tables each frame's
+//! `Code` records. A squelch/abort discard and a terminal teardown run the same
+//! set, because what makes each release owed is a property of the frame rather
+//! than of the fiber (docs/impl/region/owner.md § "A discard runs what the
+//! abandoned frames owed").
+//!
+//! A TERMINAL fiber owes more — its own fiber node, and the escape retain on a
+//! parked non-terminal signal — and the take/release split keeps heap mutation
+//! disjoint from fiber access there: the take empties the fiber's slots under
+//! its borrow, and the release, run after the borrow is dropped, can
+//! cascade-free the fiber's own heap value without invalidating a live borrow
+//! (docs/impl/region/owner.md § "Owner nodes").
 
-use crate::value::fiber::FiberStatus;
-use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR};
+use crate::value::fiber::{FiberStatus, ParkedDues};
+use crate::value::{FiberHandle, SignalBits, Value, SIG_ERROR};
 
 /// Everything a fiber owns through the ownership forest, TAKEN out of the fiber
 /// (its slots emptied) so the release can run after the fiber borrow is dropped
@@ -16,52 +25,73 @@ use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR};
 /// disjoint from fiber access: the release's cascades can free the fiber's own
 /// heap value without invalidating a live borrow.
 pub(crate) struct FiberOwned {
-    /// Each still-parked `BytecodeFrame`'s activation owner node, in chain order.
-    parked_nodes: Vec<crate::hir::region::RuntimeRegion>,
-    /// The releases those activations took over from their own frame-replacing
-    /// tail calls (docs/impl/region/owner.md § "A deferred tail-call release has
-    /// the node's life"). A frame this fiber can never re-enter never reaches
-    /// the completion that would have run them.
-    parked_deferred: Vec<crate::hir::region::RuntimeRegion>,
+    /// Everything the still-parked frames owed: their activation owner nodes,
+    /// the releases those activations took over from their own frame-replacing
+    /// tail calls, and their two emitter-recorded release tables.
+    parked: ParkedDues,
     /// The parked non-terminal signal (a yielded value / io request / denial
     /// payload), whose one park escape retain is released on the resume path —
     /// which will never come for a terminal fiber (`release_discarded_signal`).
     parked_signal: Option<(SignalBits, Value)>,
-    /// The values the parked frames still owed a release for, off their own
-    /// value-route slots, and the payload those releases must leave standing
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). A frame that can never be re-entered never reaches the
-    /// release, so it runs here.
-    parked_owed: Vec<Value>,
-    parked_owed_regions: Vec<crate::hir::region::MappedRegion>,
+    /// The payload the parked frames' releases must leave standing.
     parked_protect: Option<Value>,
     /// The fiber's own owner node (`Fiber::fiber_owner_node`).
     fiber_node: Option<crate::hir::region::RuntimeRegion>,
 }
 
-/// What the activations of an abandoned frame chain still owed: each parked
-/// frame's owner node, and the releases it took over from its own
-/// frame-replacing tail calls. The frames' continuations will never run, so the
-/// completion release that would have discharged them never fires; it belongs to
-/// whoever abandoned the chain — the discard chokepoint
-/// (`VM::discard_suspended_frames`) or the terminal-fiber teardown
-/// ([`take_fiber_owned`]). A `FiberResume` frame owes nothing (its sub-fiber has
-/// its own lifecycle).
-/// Each region here takes one tolerant decref, node and deferred region alike:
-/// a node's rc goes 1→0 and subtree-drops its adopted members, and a deferred
-/// region's decref is the one its emitting instruction never ran. Order between
-/// them is immaterial — where one holds a counted edge to the other, the cascade
-/// and the direct decref commute.
-pub(crate) fn parked_activation_dues(
-    frames: Vec<SuspendedFrame>,
-) -> impl Iterator<Item = crate::hir::region::RuntimeRegion> {
-    frames.into_iter().flat_map(|frame| match frame {
-        SuspendedFrame::Bytecode(f) => {
-            let dues = f.activation_dues;
-            dues.deferred.into_iter().chain(dues.owner_node)
+/// Release everything a chain of frames nothing can re-enter still owed
+/// ([`ParkedDues`], docs/impl/region/owner.md § "A discard runs what the
+/// abandoned frames owed"). Shared by the squelch/abort discard chokepoint
+/// (`VM::discard_suspended_frames`), where the fiber runs on, and by the
+/// terminal-fiber teardown ([`release_fiber_owned`]), where it does not: what
+/// makes each release owed is a property of the frame, so the fiber's fate is
+/// not part of the reading.
+///
+/// `protect` is the payload the exit leaves with, whose region no release here
+/// may take — a frame's reference to it funds the delivery its reader consumes.
+/// `gather_under`, when set, reparents each node's members onto that node before
+/// the node's own drop, so the whole set goes in one subtree drop.
+pub(crate) fn release_parked_dues(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    parked: ParkedDues,
+    protect: Option<Value>,
+    gather_under: Option<crate::hir::region::RuntimeRegion>,
+) {
+    // The value-routed half: each is one reference the frame took, whose route
+    // can no longer be reached.
+    let protect_region = protect.and_then(|v| crate::value::arena::region_of(heap, v));
+    for v in parked.owed {
+        let r = crate::value::arena::region_of(heap, v);
+        if r.is_some() && r != protect_region {
+            crate::value::arena::decref_region(heap, r);
         }
-        SuspendedFrame::FiberResume { .. } => Vec::new().into_iter().chain(None),
-    })
+    }
+    // The slot-routed half. The mapping's generation is checked first: a slot
+    // whose region has since been freed and recycled is a leftover the frame's own
+    // release already answered for, and releasing the id's new incarnation would
+    // free a live region.
+    for m in parked.owed_regions {
+        if heap.generation_raw(m.region.get()) != m.gen || protect_region == Some(m.region) {
+            continue;
+        }
+        heap.decref_region_if_present(m.region);
+    }
+    // The deferred releases run before the nodes, so a closure region a node's
+    // member still holds a counted edge to is not freed twice — the decref here
+    // drops this activation's reference and the member's edge keeps it standing
+    // until the subtree drop below cascades through.
+    for region in parked.deferred {
+        heap.decref_region_if_present(region);
+    }
+    // One tolerant decref per node: rc 1→0, subtree drop over node + adopted
+    // members (interior cycles reclaim with the set), the Shared frontier
+    // cascading once from the recorded `outgoing` tables.
+    for node in parked.nodes {
+        if let Some(root) = gather_under {
+            heap.reparent_owned_children(node, root);
+        }
+        heap.decref_region_if_present(node);
+    }
 }
 
 /// Take everything a TERMINAL fiber owns — the parked chain's activation owner
@@ -78,11 +108,8 @@ pub(crate) fn parked_activation_dues(
 pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberOwned {
     let parked = fiber.take_parked_state();
     FiberOwned {
-        parked_nodes: parked.nodes,
-        parked_deferred: parked.deferred,
+        parked: parked.dues,
         parked_signal: parked.signal,
-        parked_owed: parked.owed,
-        parked_owed_regions: parked.owed_regions,
         parked_protect: parked.protect,
         fiber_node: fiber.fiber_owner_node.take(),
     }
@@ -100,48 +127,14 @@ pub(crate) fn release_fiber_owned(
     owned: FiberOwned,
 ) {
     let FiberOwned {
-        parked_nodes,
-        parked_deferred,
+        parked,
         parked_signal,
-        parked_owed,
-        parked_owed_regions,
         parked_protect,
         fiber_node,
     } = owned;
-    // The releases the parked frames still owed. Each is one reference the frame
-    // took and the route that would have dropped it can no longer be reached; the
-    // payload's own region is skipped, its holder being the fiber's result rather
-    // than any frame.
-    let protect_region = parked_protect.and_then(|v| crate::value::arena::region_of(heap, v));
-    for v in parked_owed {
-        let r = crate::value::arena::region_of(heap, v);
-        if r.is_some() && r != protect_region {
-            crate::value::arena::decref_region(heap, r);
-        }
-    }
-    // The slot-routed half. The mapping's generation is checked first: a slot
-    // whose region has since been freed and recycled is a leftover the frame's own
-    // release already answered for, and releasing the id's new incarnation would
-    // free a live region.
-    for m in parked_owed_regions {
-        if heap.generation_raw(m.region.get()) != m.gen || protect_region == Some(m.region) {
-            continue;
-        }
-        heap.decref_region_if_present(m.region);
-    }
-    // The deferred releases run before the nodes, so a closure region a node's
-    // member still holds a counted edge to is not freed twice — the decref here
-    // drops this activation's reference and the member's edge keeps it standing
-    // until the subtree drop below cascades through.
-    for region in parked_deferred {
-        heap.decref_region_if_present(region);
-    }
-    for node in parked_nodes {
-        if let Some(fnode) = fiber_node {
-            heap.reparent_owned_children(node, fnode);
-        }
-        heap.decref_region_if_present(node);
-    }
+    // What the parked frames owed, with the payload's own region skipped: its
+    // holder is the fiber's result rather than any frame.
+    release_parked_dues(heap, parked, parked_protect, fiber_node);
     if let Some(fnode) = fiber_node {
         heap.decref_region_if_present(fnode);
     }

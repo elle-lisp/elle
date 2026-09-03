@@ -201,33 +201,26 @@ impl VM {
                 self.execute_bytecode_inner_impl(&current_code, &current_env, current_ip);
 
             if !bits.is_empty() {
-                if self.enforce_squelch(bits, accumulated_squelch_mask) {
-                    // The boundary turns the signal into an error this
-                    // activation never catches, so the frame is abandoned
-                    // exactly as an error exit's is and owes what it took over
-                    // from its tail calls (docs/impl/region/owner.md § "What an
-                    // abandoned frame owes, it owes the deferred set too").
-                    if walk_abandoned {
-                        self.release_abandoned_deferred();
-                    }
-                    break ExecResult {
-                        bits: SIG_ERROR,
-                        ip,
-                        code: current_code,
-                        env: current_env,
-                        stack: vec![],
-                        activation_region_map: rustc_hash::FxHashMap::default(),
-                        activation_dues: ActivationDues::default(),
-                        current_closure: self.fiber.current_closure,
-                    };
-                }
+                // A squelch/attune boundary turns the signal into an error this
+                // activation never catches, so this exit IS the error exit and is
+                // written as one — a second arm would be a second place to keep
+                // the abandonment accounting in step (docs/impl/region/mechanism.md
+                // § "A squelch boundary abandons frames the same way, so it runs
+                // the same walk").
+                let bits = if self.enforce_squelch(bits, accumulated_squelch_mask) {
+                    SIG_ERROR
+                } else {
+                    bits
+                };
                 // The frame's locals are still on the stack, and an error leaves
                 // through the signal machinery without running the rest of its
                 // instructions — so the releases among them run here, before the
                 // locals travel out in `stack` below. The releases this
                 // activation took over from a frame-replacing tail call are owed
                 // on the same question and have no table to be read off, their
-                // emitting instruction having died with the replaced frame.
+                // emitting instruction having died with the replaced frame
+                // (docs/impl/region/owner.md § "What an abandoned frame owes, it
+                // owes the deferred set too").
                 if walk_abandoned && bits.intersects(SIG_ERROR) {
                     let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
                     let exit_code = current_code.clone();

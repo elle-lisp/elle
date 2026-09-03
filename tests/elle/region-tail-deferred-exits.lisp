@@ -168,15 +168,12 @@
 (println "  squelch exit   " d-sq " (control " d-sq-c ")")
 (println "  clean break    " d-clean " (control)")
 
-# The trap: a control is not always 0. The squelch control reads one object per
-# op, and it is NOT the boundary's own signal-violation error — a squelch of a
-# body that allocates nothing reads 0. It is the body's own pending value: the
-# squelch exit runs no abandoned-frame walk, so the release table's half of what
-# that frame owed stays owed (docs/impl/region/mechanism.md § "An abandoned frame
-# runs the releases it still owes" — a different mechanism, open at that exit;
-# elle-lisp/elle#1027). So each subject is read against its own control rather
-# than against 0, with one window's slack for allocator noise. When #1027 closes,
-# the squelch control drops to 0 and this reading gets tighter, not wrong.
+# The trap: a subject that leaves by a signal carries TWO mechanisms, and only
+# the deferred set is this file's. The other is the release table the same exit
+# runs (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+# still owes"), which every control reaches too. So each subject is read against
+# its OWN control rather than against 0, with one window's slack for allocator
+# noise — a reading that stays right whichever of the two moves.
 (def slack 50)
 
 (assert (%lt d-clean slack)
