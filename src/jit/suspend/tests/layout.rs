@@ -56,8 +56,8 @@ fn test_jit_yield_builds_correct_suspended_frame() {
         let frame = as_bytecode_frame(&frames[0]);
 
         assert_eq!(frame.ip, 42);
-        assert_eq!(&*frame.code.bytecode, &bytecode);
-        assert_eq!(&*frame.code.constants, &constants);
+        assert_eq!(frame.code.bytecode(), &bytecode);
+        assert_eq!(frame.code.constants(), &constants);
         // env = captures [777] + params [10, 20]
         assert_eq!(frame.env.len(), 3);
         assert_eq!(frame.env[0].as_int(), Some(777));

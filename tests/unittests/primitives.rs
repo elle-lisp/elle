@@ -5,7 +5,7 @@ use elle::pipeline::eval as pipeline_eval;
 use elle::primitives::def::PrimitiveMeta;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
-use elle::value::{Closure, ClosureTemplate, Value};
+use elle::value::{Closure, Value};
 use elle::vm::VM;
 
 use crate::common::eval_source;

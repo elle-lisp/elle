@@ -89,7 +89,7 @@ pub(crate) struct FunctionTranslator<'a> {
     /// reclaimed by region RC, never pinned for the process lifetime.
     /// `Box` gives each a stable heap address independent of this Vec's growth.
     #[allow(clippy::vec_box)] // the Box stable-address is the point (see above)
-    pub(crate) closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+    pub(crate) closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
     /// `ConstTemplate`, so they must outlive the JIT code; ownership is

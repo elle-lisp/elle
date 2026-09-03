@@ -284,7 +284,7 @@ impl VM {
 
         if let Some(closure) = func.as_closure() {
             // Validate argument count (skip if compiler verified)
-            if !checked && !self.check_arity(&closure.template.arity, args.len()) {
+            if !checked && !self.check_arity(&closure.template.arity(), args.len()) {
                 // check_arity sets fiber.signal to (SIG_ERROR, ...)
                 return Some(SIG_ERROR);
             }

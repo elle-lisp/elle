@@ -156,21 +156,17 @@ impl VM {
                 crate::config::trace_bits::CALL,
                 "call",
                 "closure {} nargs={}",
-                closure.template.name.as_deref().unwrap_or("<anon>"),
+                closure.template.name().unwrap_or("<anon>"),
                 args.len()
             );
             self.fiber.call_depth += 1;
 
             // Push call frame for stack traces
             self.fiber.call_stack.push(CallFrame {
-                name: closure
-                    .template
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| Rc::from("<anonymous>")),
+                callee: closure.template.code(),
+                caller: code.clone(),
                 ip: instr_ip,
                 frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
-                location_map: code.location_map.clone(),
             });
 
             // Stack overflow guard: resource exhaustion (not a signal-theoretic
@@ -190,7 +186,7 @@ impl VM {
             }
 
             // Validate argument count (skip if compiler verified)
-            if !checked && !self.check_arity(&closure.template.arity, args.len()) {
+            if !checked && !self.check_arity(&closure.template.arity(), args.len()) {
                 self.fiber.call_depth -= 1;
                 self.fiber.call_stack.pop();
                 self.fiber.stack.push(Value::NIL);
@@ -199,7 +195,7 @@ impl VM {
 
             // GPU capability check: if this closure has been GIT'd (has SPIR-V),
             // it requires GPU hardware. Check capability before dispatch.
-            if closure.template.spirv.get().is_some() {
+            if closure.template.spirv().get().is_some() {
                 let gpu_bit = crate::signals::SIG_GPU;
                 let blocked = gpu_bit
                     .intersection(self.fiber.withheld)
@@ -224,7 +220,7 @@ impl VM {
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
             #[cfg(feature = "wasm")]
-            if closure.template.lir_function.is_some() {
+            if closure.template.lir_function().is_some() {
                 if let Some(bits) = self.try_wasm_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -236,7 +232,7 @@ impl VM {
             // Checked before Cranelift — MLIR produces better optimized code
             // for numeric functions (LLVM vectorization, LICM, GVN).
             #[cfg(feature = "mlir")]
-            if self.mlir_enabled && closure.template.lir_function.is_some() {
+            if self.mlir_enabled && closure.template.lir_function().is_some() {
                 if let Some(bits) = self.try_mlir_call(closure, &args) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -248,7 +244,7 @@ impl VM {
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).
             #[cfg(feature = "jit")]
-            if closure.template.lir_function.is_some() {
+            if closure.template.lir_function().is_some() {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -328,7 +324,7 @@ impl VM {
 
             // Guard: WASM-compiled closures have empty bytecode. They
             // cannot be executed by the bytecode VM.
-            if closure.template.bytecode.is_empty() {
+            if closure.template.bytecode().is_empty() {
                 let err =
                     self.escaping_error("exec-error", "cannot execute WASM closure in bytecode VM");
                 self.fiber.stack.push(err);
@@ -354,8 +350,8 @@ impl VM {
             // the body produced ANY signal, that's a purity violation.
             // The programmer asserted purity — any signal (error, yield,
             // I/O) is a programmer bug. Abort with a clear diagnostic.
-            if closure.template.signal.bits.is_empty()
-                && closure.template.signal.propagates == 0
+            if closure.template.signal().bits.is_empty()
+                && closure.template.signal().propagates == 0
                 && self
                     .fiber
                     .signal
@@ -363,7 +359,7 @@ impl VM {
                     .is_some_and(|(b, _)| !b.is_empty())
             {
                 let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
-                let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
+                let name = closure.template.name().unwrap_or("<anonymous>");
                 eprintln!("panic: silence violation in '{}'", name);
                 eprintln!("  A (silence)'d function signaled at runtime.");
                 eprintln!("  silence asserts purity — any signal is a programmer bug.");
@@ -419,7 +415,7 @@ impl VM {
                         eprintln!(
                             "[call_inner suspend] ip={} bc_len={} stack_depth={}",
                             *ip,
-                            code.bytecode.len(),
+                            code.bytecode().len(),
                             caller_stack.len(),
                         );
                         for (si, sv) in caller_stack.iter().enumerate() {
@@ -467,7 +463,7 @@ impl VM {
                     {
                         eprintln!(
                             "[call_inner] suspend: bits={} ip={} bc_len={} inner_frames={} env_len={}",
-                            bits, *ip, code.bytecode.len(), frames.len(), closure_env.len(),
+                            bits, *ip, code.bytecode().len(), frames.len(), closure_env.len(),
                         );
                     }
                     frames.push(caller_frame);

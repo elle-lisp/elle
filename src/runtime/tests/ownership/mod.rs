@@ -14,32 +14,28 @@ mod subtree;
 /// A closure over hand-emitted bytecode, for driving a fiber body no production
 /// lowering can build yet. The zero-arity template wraps the bytecode +
 /// constants exactly as a compiled thunk would.
-pub(super) fn fiber_body_closure(
-    bc: crate::compiler::bytecode::Bytecode,
-) -> std::rc::Rc<crate::value::Closure> {
-    use std::rc::Rc;
-    Rc::new(crate::value::Closure {
-        template: crate::value::TemplateRef::new(Rc::new(crate::value::ClosureTemplate::new(
-            Rc::new(bc.instructions),
-            crate::value::Arity::Exact(0),
-            Rc::new(bc.constants),
-        ))),
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: crate::value::SignalBits::EMPTY,
-    })
-}
-
-/// A child fiber over `closure`, plus its heap value (built through an `Alloc`
-/// ctx into a region of its own, which the caller releases per cycle).
+/// A child fiber over a body of hand-emitted bytecode, plus its heap value.
+///
+/// The code object's header and the fiber value are built through one `Alloc`
+/// ctx, so they share the region the caller releases per cycle. Building the
+/// header anywhere else would leave a live code object behind on every cycle,
+/// and the region-count harnesses below measure exactly that.
 pub(super) fn child_fiber(
     heap: &mut crate::value::fiberheap::FiberHeap,
-    closure: std::rc::Rc<crate::value::Closure>,
+    bc: crate::compiler::bytecode::Bytecode,
 ) -> (crate::value::FiberHandle, crate::value::Value) {
+    use std::rc::Rc;
+    let ctx = crate::primitives::ctx::Alloc::new(heap);
+    let template = ctx.template(&Rc::new(bc.into_proto()));
+    let closure = Rc::new(crate::value::Closure::new(
+        crate::value::TemplateRef::region(template),
+        crate::value::region_slice::RegionSlice::empty(),
+        crate::value::SignalBits::EMPTY,
+    ));
     let handle = crate::value::FiberHandle::new(crate::value::Fiber::new(
         closure,
         crate::value::SignalBits::EMPTY,
     ));
-    let ctx = crate::primitives::ctx::Alloc::new(heap);
     let fiber_value = ctx.fiber_from_handle(handle.clone());
     (handle, fiber_value)
 }

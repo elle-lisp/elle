@@ -25,7 +25,7 @@ impl VM {
         args: &[Value],
     ) -> (SignalBits, Value) {
         // Closure must have LIR — primitives, macros, etc. don't.
-        let mut lir = match &closure.template.lir_function {
+        let mut lir = match closure.template.lir_function() {
             Some(l) => (**l).clone(),
             None => return (SIG_ERROR, rejected(self, "jit", "closure has no LIR")),
         };
@@ -37,12 +37,12 @@ impl VM {
         }
 
         // Arity check writes to fiber.signal on mismatch.
-        if !self.check_arity(&closure.template.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity(), args.len()) {
             return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
         }
 
         // Use the cached JIT code if available, else force-compile.
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode().as_ptr();
         let jit_code = match self.jit_code_for(bytecode_ptr) {
             Some(jc) => jc,
             None => {
@@ -58,7 +58,7 @@ impl VM {
                 match compiler.compile(&lir, None, Vec::new()) {
                     Ok(jc) => {
                         let jc = Arc::new(jc);
-                        self.install_jit_code(closure.template.bytecode.clone(), jc.clone());
+                        self.install_jit_code((*closure.template).clone(), jc.clone());
                         jc
                     }
                     Err(e) => {

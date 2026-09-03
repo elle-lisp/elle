@@ -140,18 +140,18 @@ pub struct JitRejectionInfo {
     pub name: Option<String>,
     /// Why the JIT rejected this closure.
     pub reason: JitError,
-    /// Pin for the bytecode allocation this rejection is keyed by
+    /// Pin for the code object whose bytecode this rejection is keyed by
     /// (docs/impl/jit.md § "Cache identity"): while the entry lives, the
     /// address cannot be reused by a different function, so the negative
     /// cache can never wrongly block a new function from compiling.
-    _pin: Option<std::rc::Rc<Vec<u8>>>,
+    _pin: Option<crate::value::ClosureTemplate>,
 }
 
 impl JitRejectionInfo {
-    /// Build a rejection record pinning the bytecode it is keyed by. `pin`
+    /// Build a rejection record pinning the code object it is keyed by. `pin`
     /// is `None` only when the submission's pin was already lost (a worker
     /// result with no matching pending entry).
-    pub fn new(reason: JitError, pin: Option<std::rc::Rc<Vec<u8>>>) -> Self {
+    pub fn new(reason: JitError, pin: Option<crate::value::ClosureTemplate>) -> Self {
         JitRejectionInfo {
             name: None,
             reason,

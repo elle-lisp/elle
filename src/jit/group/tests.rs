@@ -52,22 +52,22 @@ fn make_leaf() -> LirFunction {
 
 /// Build a mock closure Value with the given LIR function.
 fn make_closure_value(lir: LirFunction) -> Value {
-    use crate::value::ClosureTemplate;
+    use crate::value::TemplateProto;
 
     let arity = lir.arity;
     let signal = lir.signal;
-    let template = Rc::new(ClosureTemplate {
+    let proto = TemplateProto {
         signal,
         lir_function: Some(Rc::new(lir)),
-        ..ClosureTemplate::new(Rc::new(vec![]), arity, Rc::new(vec![]))
-    });
+        ..TemplateProto::new(Vec::new(), arity, Vec::new())
+    };
 
     let h = crate::primitives::ctx::TestHeap::new();
-    let closure = crate::value::Closure {
-        template: crate::value::TemplateRef::new(template),
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
-    };
+    let closure = crate::value::Closure::new(
+        crate::value::TemplateRef::region(h.ctx().template(&Rc::new(proto))),
+        crate::value::region_slice::RegionSlice::empty(),
+        SignalBits::EMPTY,
+    );
     h.ctx().closure(closure)
 }
 
@@ -262,21 +262,17 @@ fn test_discover_non_closure_global() {
 #[test]
 fn test_discover_closure_without_lir() {
     crate::value::arena::with_test_region(|| {
-        use crate::value::ClosureTemplate;
+        use crate::value::TemplateProto;
 
         let sym_g = SymbolId(5);
         let caller = make_caller("f", sym_g);
 
         // Closure with no lir_function
-        let template = Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
-            Arity::Exact(1),
-            Rc::new(vec![]),
-        ));
+        let proto = TemplateProto::new(Vec::new(), Arity::Exact(1), Vec::new());
 
         let h = crate::primitives::ctx::TestHeap::new();
         let closure = crate::value::Closure {
-            template: crate::value::TemplateRef::new(template),
+            template: crate::value::TemplateRef::region(h.ctx().template(&Rc::new(proto))),
             env: crate::value::region_slice::RegionSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };

@@ -22,15 +22,15 @@ Does NOT:
 |------|---------|
 | `VM` | Global state + root Fiber. Per-execution state lives on `vm.fiber` |
 | `SignalBits` | Internal return type (see `signals/AGENTS.md`) |
-| `CallFrame` | Function name, IP, frame base |
+| `CallFrame` | The entered and calling code objects, IP, frame base |
 
 ## Data flow
 
 ```
-Bytecode + Constants (as Rc<Vec<u8>>, Rc<Vec<Value>>)
+A code-object blueprint (TemplateProto)
     │
     ▼
-execute_bytecode()  ← public API, wraps slices in Rc once, returns Result<Value, String>
+execute_proto()  ← public API, materializes the code object, returns Result<Value, String>
     │
     ├─► execute_bytecode_inner_impl() → (SignalBits, usize)
     │       │
@@ -67,16 +67,17 @@ Instruction handlers return `()`. VM bugs panic immediately. User errors set
 `fiber.signal` to `(SIG_ERROR, error_val(kind, msg))` and push `Value::NIL` to
 keep the stack consistent.
 
-## Rc threading
+## Threading the code object
 
-Bytecode and constants are threaded through the dispatch loop as `&Rc<Vec<u8>>`
-and `&Rc<Vec<Value>>`. Individual instruction handlers dereference to slices
-(`&[u8]`, `&[Value]`). Only the dispatch loop and its direct callees
-(`handle_yield`, `handle_call`) need the `Rc` — they clone it cheaply when
-creating `SuspendedFrame`s or `TailCallInfo`.
+Bytecode, constants and the location table are threaded through the dispatch
+loop as one `Code` — the code object itself, a payload slice plus a blueprint
+pointer (docs/impl/region/template.md). Individual instruction handlers take
+slices (`&[u8]`, `&[Value]`) read off it. Only the dispatch loop and its direct
+callees (`handle_yield`, `handle_call`) need the `Code` — they clone it cheaply
+(two words and one refcount) when creating `SuspendedFrame`s or `TailCallInfo`.
 
-- `execute_bytecode` wraps raw slices in `Rc` once at the public boundary
-- `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take `&Rc`
+- `execute_proto` materializes the code object once at the public boundary
+- `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
   value (installed as `fiber.current_closure` on the frame replacement), and its
   squelch mask — tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).

@@ -4,7 +4,7 @@ use elle::value::fiber::SignalBits;
 use elle::primitives::register_primitives;
 use elle::runtime::Runtime;
 use elle::symbol::SymbolTable;
-use elle::value::{Arity, Closure, ClosureTemplate, Value};
+use elle::value::{Arity, Closure, TemplateProto, TemplateRef, Value};
 use elle::vm::VM;
 use std::rc::Rc;
 
@@ -13,6 +13,21 @@ fn setup() -> (VM, SymbolTable) {
     let mut symbols = SymbolTable::new();
     let _signals = register_primitives(&mut vm, &mut symbols);
     (vm, symbols)
+}
+
+/// Materialize a code object for `proto` into a fresh region of `heap` and name
+/// it — the shape `MakeClosure` builds: a header over the blueprint's shared
+/// payload (docs/impl/region/template.md).
+fn template(
+    heap: &mut elle::value::fiberheap::FiberHeap,
+    proto: TemplateProto,
+) -> TemplateRef {
+    let region = heap.new_runtime_region();
+    TemplateRef::region(elle::value::closure::materialize(
+        heap,
+        &Rc::new(proto),
+        region,
+    ))
 }
 
 // Sections 1-5: closure construction, type identity, arity, environment

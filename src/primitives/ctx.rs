@@ -293,6 +293,8 @@ ctx_ctors! {
     );
     /// Allocate a closure into the call's region.
     closure (c: crate::value::heap::Closure);
+    /// Materialize a code object's header into the call's region.
+    template (proto: &std::rc::Rc<crate::value::TemplateProto>);
     /// Allocate a user box (`LBox`) into the call's region.
     lbox (value: Value);
     /// Allocate a compiler capture cell into the call's region.

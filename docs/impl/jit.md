@@ -72,24 +72,26 @@ how many times the function is called.
 ## Cache identity
 
 `jit_cache`, `jit_pending`, and `jit_rejections` key entries by the raw
-address of the template's bytecode allocation (`bytecode.as_ptr()`). A raw
-address identifies a function only while that allocation is alive: templates
-are ordinary reclaimable data (region-allocated per `MakeClosure`, sharing
-one `Rc<Vec<u8>>` bytecode buffer per lambda proto), so a dropped compile
-unit frees its bytecode buffers, and a later compile can allocate a NEW
-function's bytecode at a reused address. A cache entry that outlived its
-template would then serve the old function's code to the new function —
-which runs the wrong body with the new closure's env and args, producing
-healthy-looking wrong values and no memory corruption.
+address of a code object's bytecode (`bytecode().as_ptr()`). A raw address
+identifies a function only while that allocation is alive: bytecode lives in a
+code object's payload, one per lambda blueprint, in a region the heap releases
+when the last blueprint packed into it dies
+([region/template.md](region/template.md)). So a dropped compile unit frees its
+payload pages, and a later blueprint can land a NEW function's bytecode at a
+reused address. A cache entry that outlived its code object would then serve
+the old function's code to the new function — which runs the wrong body with
+the new closure's env and args, producing healthy-looking wrong values and no
+memory corruption.
 
-The invariant that makes the address key sound: **every entry pins the
-bytecode `Rc` it was keyed by** (`JitEntryPin`), from submission until the
-entry is removed. A pinned allocation cannot be freed, so its address cannot
-be reused, so a key collision cannot occur. The pin travels: recorded in
-`jit_pending` at submit, moved into `jit_cache` (or `jit_rejections`) when
-the result installs. The cost is that cached/rejected functions' bytecode
-stays resident for the VM's lifetime — bounded by the amount of code the
-program compiles, the same order as the retained native code itself.
+The invariant that makes the address key sound: **every entry pins the code
+object it was keyed by**, from submission until the entry is removed. The
+pinned header holds its blueprint, the blueprint holds its cache entry, and
+the cache entry holds the payload region — so the address cannot be reused and
+a key collision cannot occur. The pin travels: recorded in `jit_pending` at
+submit, moved into `jit_cache` (or `jit_rejections`) when the result installs.
+The cost is that cached/rejected functions' payloads stay resident for the VM's
+lifetime — bounded by the amount of code the program compiles, the same order
+as the retained native code itself.
 
 An alternative — validating entries at hit time by content — was rejected:
 it puts an O(bytecode) compare (or a hash plus per-template caching) on the

@@ -152,11 +152,11 @@ fn call_closure(vm: &mut VM, closure_val: Value) -> Value {
 /// are filled by the runtime as the body executes.
 pub fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Vec<Value> {
     let template = &closure.template;
-    let num_locally_defined = template.num_locals.saturating_sub(template.num_params);
-    let total = closure.env.len() + template.num_params + num_locally_defined;
+    let num_locally_defined = template.num_locals().saturating_sub(template.num_params());
+    let total = closure.env.len() + template.num_params() + num_locally_defined;
     let mut env = Vec::with_capacity(total);
     env.extend(closure.env.iter().copied());
-    for i in 0..template.num_params {
+    for i in 0..template.num_params() {
         env.push(args.get(i).copied().unwrap_or(Value::NIL));
     }
     for _ in 0..num_locally_defined {
@@ -188,7 +188,7 @@ fn extract_exports(
                 .unwrap_or_else(|| panic!("stdlib export key {:#x} has no learned spelling", hash));
             let sym_id = symbols.intern(&name);
             let signal = if let Some(closure) = value.as_closure() {
-                closure.template.signal
+                closure.template.signal()
             } else if value.is_parameter() {
                 Signal::silent()
             } else {

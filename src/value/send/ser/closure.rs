@@ -35,17 +35,17 @@ pub(super) fn send_closure(
     // Push a placeholder (will be overwritten below).
     ctx.closures.push(SendableClosure {
         bytecode: Vec::new(),
-        arity: closure_rc.template.arity,
+        arity: closure_rc.template.arity(),
         num_locals: 0,
         num_captures: 0,
         num_params: 0,
         constants: Vec::new(),
-        signal: closure_rc.template.signal,
+        signal: closure_rc.template.signal(),
         capture_params_mask: 0,
         capture_locals_mask: crate::value::CaptureMask::empty(),
         location_map: LocationMap::new(),
         doc: None,
-        vararg_kind: closure_rc.template.vararg_kind.clone(),
+        vararg_kind: closure_rc.template.vararg_kind(),
         name: None,
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),
@@ -69,14 +69,14 @@ pub(super) fn send_closure(
     // Serialize constants.
     let constants: Result<Vec<SendValue>, String> = closure_rc
         .template
-        .constants
+        .constants()
         .iter()
         .map(|v| from_value_inner(*v, ctx))
         .collect();
     let constants = constants?;
 
     // Serialize doc (optional) — plain string data, not a heap Value.
-    let doc = closure_rc.template.doc.as_deref().map(str::to_string);
+    let doc = closure_rc.template.doc().map(str::to_string);
 
     // Clone LIR for JIT in spawned threads. Strip doc (Value/Rc) and
     // syntax (Rc<Syntax>), then convert every cross-thread-unsafe
@@ -84,7 +84,7 @@ pub(super) fn send_closure(
     // ValueRef into `lir_value_pool` (serialized through `ctx` so nested
     // closures intern correctly). The LIR is preserved unconditionally —
     // a spawned closure keeps its JIT-able body across the boundary.
-    let (lir_function, lir_value_pool) = match closure_rc.template.lir_function.as_ref() {
+    let (lir_function, lir_value_pool) = match closure_rc.template.lir_function() {
         Some(lir) => {
             let mut lir = (**lir).clone();
             lir.doc = None;
@@ -103,34 +103,34 @@ pub(super) fn send_closure(
     // template carries them and `MakeClosure` resolves by index.
     let child_protos: Vec<SendableClosure> = closure_rc
         .template
-        .child_protos
+        .child_protos()
         .iter()
         .map(|p| sendable_from_template(p, ctx))
         .collect::<Result<_, _>>()?;
 
     // Replace placeholder with complete entry.
     ctx.closures[idx] = SendableClosure {
-        bytecode: (*closure_rc.template.bytecode).clone(),
-        arity: closure_rc.template.arity,
-        num_locals: closure_rc.template.num_locals,
-        num_captures: closure_rc.template.num_captures,
-        num_params: closure_rc.template.num_params,
+        bytecode: closure_rc.template.bytecode().to_vec(),
+        arity: closure_rc.template.arity(),
+        num_locals: closure_rc.template.num_locals(),
+        num_captures: closure_rc.template.num_captures(),
+        num_params: closure_rc.template.num_params(),
         constants,
-        signal: closure_rc.template.signal,
-        capture_params_mask: closure_rc.template.capture_params_mask,
-        capture_locals_mask: closure_rc.template.capture_locals_mask.clone(),
-        location_map: (*closure_rc.template.location_map).clone(),
+        signal: closure_rc.template.signal(),
+        capture_params_mask: closure_rc.template.capture_params_mask(),
+        capture_locals_mask: closure_rc.template.owned_capture_locals_mask(),
+        location_map: closure_rc.template.location_map(),
         doc,
-        vararg_kind: closure_rc.template.vararg_kind.clone(),
-        name: closure_rc.template.name.as_ref().map(|s| s.to_string()),
+        vararg_kind: closure_rc.template.vararg_kind(),
+        name: closure_rc.template.name().map(str::to_string),
         squelch_mask: closure_rc.squelch_mask,
         env,
         lir_function,
         lir_value_pool,
         child_protos,
-        merged_slots: closure_rc.template.merged_slots.iter().copied().collect(),
-        frame_release_slots: (*closure_rc.template.frame_release_slots).clone(),
-        frame_release_regions: (*closure_rc.template.frame_release_regions).clone(),
+        merged_slots: closure_rc.template.merged_slots().as_slice().to_vec(),
+        frame_release_slots: closure_rc.template.frame_release_slots().to_vec(),
+        frame_release_regions: closure_rc.template.frame_release_regions().to_vec(),
     };
 
     Ok(SendValue::Ref(idx))

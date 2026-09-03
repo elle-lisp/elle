@@ -165,28 +165,32 @@ impl Emitter {
                 // ordinary, reclaimable allocation; closure templates are no
                 // exception). The blueprint's own `child_protos` are the nested
                 // bytecode's, so deeper `MakeClosure`s resolve recursively.
-                let template = crate::value::ClosureTemplate {
+                let template = crate::value::TemplateProto {
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     num_params: func.num_params,
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask.clone(),
-                    location_map: Rc::new(nested_bytecode.location_map),
+                    location_map: nested_bytecode.location_map,
                     lir_function: Some(Rc::new(nested_lir)),
-                    doc: func.doc.clone(),
+                    doc: func.doc.as_deref().map(str::to_string),
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
-                    name: func.name.clone().map(|s| Rc::from(s.as_str())),
+                    name: func.name.clone(),
                     region_table: func.region_table.clone(),
-                    merged_slots: Rc::new(func.merged_slots.iter().map(|s| s.get()).collect()),
-                    frame_release_slots: Rc::new(sorted_release_slots(func)),
-                    frame_release_regions: Rc::new(sorted_release_regions(func)),
-                    child_protos: Rc::new(nested_bytecode.child_protos),
-                    ..crate::value::ClosureTemplate::new(
-                        Rc::new(nested_bytecode.instructions),
+                    merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
+                    frame_release_slots: func.frame_release_slots.clone(),
+                    frame_release_regions: func
+                        .frame_release_regions
+                        .iter()
+                        .map(|r| r.get())
+                        .collect(),
+                    child_protos: nested_bytecode.child_protos,
+                    ..crate::value::TemplateProto::new(
+                        nested_bytecode.instructions,
                         func.arity,
-                        Rc::new(nested_bytecode.constants),
+                        nested_bytecode.constants,
                     )
                 };
 

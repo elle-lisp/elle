@@ -27,16 +27,16 @@ impl VM {
     /// the floor, so the region is only guaranteed complete past it.
     #[cfg(debug_assertions)]
     fn debug_assert_locals_intact(&self, code: &crate::value::Code, instr_ip: usize) {
-        if instr_ip < code.reserved_locals {
+        if instr_ip < code.reserved_locals() {
             return;
         }
-        let floor = self.current_frame_base() + code.reserved_locals;
+        let floor = self.current_frame_base() + code.reserved_locals();
         if self.fiber.stack.len() >= floor {
             return;
         }
         let loc = code
-            .location_map
-            .get(&instr_ip)
+            .locations()
+            .get(instr_ip)
             .map(|l| format!("{l}"))
             .unwrap_or_else(|| "<no source location>".to_string());
         panic!(
@@ -46,7 +46,7 @@ impl VM {
              later local reads and writes at this depth address the wrong values \
              (src/vm/dispatch/interp.rs, `debug_assert_locals_intact`)",
             self.fiber.stack.len(),
-            code.reserved_locals,
+            code.reserved_locals(),
             self.current_frame_base(),
         );
     }
@@ -60,9 +60,13 @@ impl VM {
     /// comes from"). `VM::absorbs` takes the record when a mask catches the
     /// error, so the slot an outer frame finds full always belongs to the
     /// error it is carrying.
-    fn record_error_loc(&mut self, location_map: &LocationMap, instr_ip: usize) {
+    fn record_error_loc(
+        &mut self,
+        locations: crate::value::closure::LocationTable<'_>,
+        instr_ip: usize,
+    ) {
         if self.error_loc.is_none() {
-            self.error_loc = location_map.get(&instr_ip).cloned();
+            self.error_loc = locations.get(instr_ip);
         }
     }
 
@@ -90,13 +94,9 @@ impl VM {
         // The template-derived context fields. Aliased here so the instruction
         // handlers below read the same names they always have; `code` bundles
         // them (see crate::value::Code).
-        let bytecode: &Rc<Vec<u8>> = &code.bytecode;
-        let constants: &Rc<Vec<Value>> = &code.constants;
-        let location_map: &Rc<LocationMap> = &code.location_map;
-
-        // Deref to slices for instruction handlers
-        let bc: &[u8] = bytecode;
-        let consts: &[Value] = constants;
+        let bc: &[u8] = code.bytecode();
+        let consts: &[Value] = code.constants();
+        let locations = code.locations();
 
         // The executing-closure register is a possibly-dead borrow here: an
         // activation can outlive its closure's heap value (the region solver
@@ -113,7 +113,7 @@ impl VM {
             // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits, _)) = self.fiber.signal {
                 if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
-                    self.record_error_loc(location_map, instr_ip);
+                    self.record_error_loc(locations, instr_ip);
                     return (bits, ip);
                 }
             }
@@ -133,7 +133,7 @@ impl VM {
                 );
                 self.heap().set_object_limit(saved_limit);
                 self.fiber.signal = Some((SIG_ERROR, err));
-                self.record_error_loc(location_map, instr_ip);
+                self.record_error_loc(locations, instr_ip);
                 return (SIG_ERROR, ip);
             }
 
@@ -174,8 +174,7 @@ impl VM {
                 closure_env,
                 bc,
                 consts,
-                constants,
-                location_map,
+                locations,
                 &mut ip,
                 instr_ip,
             ) {
@@ -186,7 +185,7 @@ impl VM {
                 // raised them.
                 let (exit_bits, _) = exit;
                 if exit_bits.intersects(SIG_ERROR) || exit_bits.intersects(SIG_HALT) {
-                    self.record_error_loc(location_map, instr_ip);
+                    self.record_error_loc(locations, instr_ip);
                 }
                 return exit;
             }
@@ -194,7 +193,7 @@ impl VM {
             // Check for error signal set by this instruction's handler
             if let Some((bits, _)) = self.fiber.signal {
                 if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
-                    self.record_error_loc(location_map, instr_ip);
+                    self.record_error_loc(locations, instr_ip);
                     return (bits, ip);
                 }
             }

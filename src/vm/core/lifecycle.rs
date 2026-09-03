@@ -1,21 +1,11 @@
 use super::*;
 
-/// Create a dummy root closure for the root fiber.
+/// A dummy root closure for the root fiber.
 /// The root fiber doesn't execute a closure directly — it's the
 /// execution context for top-level bytecode. This closure is never
 /// called; it exists only to satisfy Fiber's constructor.
-fn root_closure() -> Rc<Closure> {
-    use crate::value::types::Arity;
-    use crate::value::ClosureTemplate;
-    Rc::new(Closure {
-        template: crate::value::TemplateRef::new(Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
-            Arity::Exact(0),
-            Rc::new(vec![]),
-        ))),
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
-    })
+fn root_closure(heap: &mut crate::value::fiberheap::FiberHeap) -> Rc<Closure> {
+    crate::value::fiber::noop_closure(heap)
 }
 
 impl VM {
@@ -79,7 +69,7 @@ impl VM {
         // Idempotent, so the program and macro VM sharing one heap build it once.
         crate::primitives::traitregistry::init_default_traits(unsafe { &mut *heap_ptr });
 
-        let mut fiber = Fiber::new(root_closure(), SIG_OK);
+        let mut fiber = Fiber::new(root_closure(unsafe { &mut *heap_ptr }), SIG_OK);
         // Root fiber starts alive (it's the currently executing context)
         fiber.status = crate::value::FiberStatus::Alive;
 
@@ -156,8 +146,8 @@ impl VM {
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
         // The VM heap is persistent — don't clear it. Values from previous
-        // execute_bytecode calls remain valid.
-        self.fiber = Fiber::new(root_closure(), SIG_OK);
+        // execute_proto calls remain valid.
+        self.fiber = Fiber::new(root_closure(self.heap()), SIG_OK);
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;
         self.current_fiber_value = None;

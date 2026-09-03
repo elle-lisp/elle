@@ -2,7 +2,7 @@ use super::*;
 use crate::hir::region::RuntimeRegion;
 use crate::value::arena::region_of;
 use crate::value::types::Arity;
-use crate::value::{Closure, ClosureTemplate, SignalBits, Value};
+use crate::value::{Closure, SignalBits, Value};
 use std::rc::Rc;
 
 /// A VM with a live "caller" region — the situation a real C→Elle callback
@@ -18,6 +18,7 @@ fn vm_with_ambient() -> (VM, RuntimeRegion) {
 }
 
 fn closure(
+    heap: &mut crate::value::fiberheap::FiberHeap,
     arity: Arity,
     num_params: usize,
     num_locals: usize,
@@ -25,19 +26,19 @@ fn closure(
     capture_locals_mask: u64,
     env: crate::value::region_slice::RegionSlice<Value>,
 ) -> Rc<Closure> {
-    let template = Rc::new(ClosureTemplate {
+    let proto = crate::value::TemplateProto {
         num_locals,
         num_params,
         num_captures: env.len(),
         capture_params_mask,
         capture_locals_mask: crate::value::CaptureMask::from_u64(capture_locals_mask),
-        ..ClosureTemplate::new(Rc::new(vec![]), arity, Rc::new(vec![]))
-    });
-    Rc::new(Closure {
-        template: crate::value::TemplateRef::new(template),
+        ..crate::value::TemplateProto::new(Vec::new(), arity, Vec::new())
+    };
+    Rc::new(Closure::new(
+        crate::value::closure::test_template(heap, proto),
         env,
-        squelch_mask: SignalBits::EMPTY,
-    })
+        SignalBits::EMPTY,
+    ))
 }
 
 fn empty_env() -> crate::value::region_slice::RegionSlice<Value> {
@@ -49,7 +50,7 @@ fn empty_env() -> crate::value::region_slice::RegionSlice<Value> {
 #[test]
 fn exact_arity_env_has_params() {
     let mut vm = VM::new();
-    let c = closure(Arity::Exact(2), 2, 2, 0, 0, empty_env());
+    let c = closure(vm.heap(), Arity::Exact(2), 2, 2, 0, 0, empty_env());
     let env = vm
         .build_callback_env(&c, &[Value::int(10), Value::int(20)])
         .unwrap();
@@ -70,7 +71,7 @@ fn captured_upvalue_is_copied_then_params() {
         &[Value::int(99)],
         env_region,
     );
-    let c = closure(Arity::Exact(1), 1, 2, 0, 0, env_slice);
+    let c = closure(vm.heap(), Arity::Exact(1), 1, 2, 0, 0, env_slice);
     let env = vm.build_callback_env(&c, &[Value::int(42)]).unwrap();
     assert_eq!(env.len(), 3);
     assert_eq!(env[0].as_int(), Some(99));
@@ -87,7 +88,7 @@ fn captured_upvalue_is_copied_then_params() {
 fn capture_cell_param_gets_its_own_region_not_ambient() {
     let (mut vm, ambient) = vm_with_ambient();
     // param 0 is a captured (mutated-by-nested-closure) param → a cell.
-    let c = closure(Arity::Exact(1), 1, 1, 0b1, 0, empty_env());
+    let c = closure(vm.heap(), Arity::Exact(1), 1, 1, 0b1, 0, empty_env());
     let env = vm.build_callback_env(&c, &[Value::int(42)]).unwrap();
     let cell = env[0];
     assert!(
@@ -107,7 +108,7 @@ fn capture_cell_param_gets_its_own_region_not_ambient() {
 fn rest_list_conses_get_own_regions_not_ambient() {
     let (mut vm, ambient) = vm_with_ambient();
     // variadic: 0 fixed + a rest slot (num_params = 1, the rest slot).
-    let c = closure(Arity::AtLeast(0), 1, 1, 0, 0, empty_env());
+    let c = closure(vm.heap(), Arity::AtLeast(0), 1, 1, 0, 0, empty_env());
     let env = vm
         .build_callback_env(&c, &[Value::int(1), Value::int(2)])
         .unwrap();
@@ -125,7 +126,7 @@ fn rest_list_conses_get_own_regions_not_ambient() {
 fn captured_local_cell_gets_its_own_region_not_ambient() {
     let (mut vm, ambient) = vm_with_ambient();
     // 1 param + 1 captured local (capture_locals_mask bit 0).
-    let c = closure(Arity::Exact(1), 1, 2, 0, 0b1, empty_env());
+    let c = closure(vm.heap(), Arity::Exact(1), 1, 2, 0, 0b1, empty_env());
     let env = vm.build_callback_env(&c, &[Value::int(7)]).unwrap();
     let local_cell = env[1];
     assert!(
@@ -149,7 +150,7 @@ fn captured_local_cell_gets_its_own_region_not_ambient() {
 fn env_capture_cell_gets_a_fresh_region_not_ambient() {
     let (mut vm, ambient) = vm_with_ambient();
     // param 0 is a captured param → wrapped in a cell whose region we read.
-    let c = closure(Arity::Exact(1), 1, 1, 0b1, 0, empty_env());
+    let c = closure(vm.heap(), Arity::Exact(1), 1, 1, 0b1, 0, empty_env());
     let env = vm.build_closure_env(&c, &[Value::int(42)]).unwrap();
     let cell = env[0];
     assert!(cell.is_capture_cell(), "captured param must be a cell");

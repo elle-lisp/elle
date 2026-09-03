@@ -16,8 +16,12 @@
 #[should_panic(expected = "invalid opcode")]
 fn invalid_opcode_byte_panics_with_defined_message() {
     let mut vm = elle::vm::VM::new();
-    // 0xFF is not a valid Instruction discriminant. The merged-slots set is
-    // empty (no builder-idiom merge metadata for a hand-fed byte buffer); its
-    // element type is inferred from the parameter (`Rc<FxHashSet<u32>>`).
-    let _ = vm.execute_bytecode(&[0xFF], &[], &[], Default::default(), None);
+    // 0xFF is not a valid Instruction discriminant. A hand-fed byte buffer
+    // carries no region tables — the blueprint's are empty by construction.
+    let proto = std::rc::Rc::new(elle::value::TemplateProto::new(
+        vec![0xFF],
+        elle::value::Arity::Exact(0),
+        Vec::new(),
+    ));
+    let _ = vm.execute_proto(&proto, None);
 }

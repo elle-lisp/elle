@@ -207,7 +207,7 @@ pub(super) fn trait_seq_iter(
     };
 
     let mask = crate::signals::SIG_YIELD;
-    let fiber = Fiber::native_iter(elements, mask);
+    let fiber = Fiber::native_iter(ctx.heap_mut(), elements, mask);
     (SIG_OK, ctx.fiber(fiber))
 }
 

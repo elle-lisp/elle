@@ -17,7 +17,7 @@ impl VM {
         args: &[Value],
     ) -> (SignalBits, Value) {
         // Arity check.
-        if !self.check_arity(&closure.template.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity(), args.len()) {
             return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
         }
 

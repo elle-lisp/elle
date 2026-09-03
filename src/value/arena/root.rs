@@ -23,6 +23,11 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value) {
 ///
 /// Draining the registry makes a second call a no-op, so teardown is idempotent.
 pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
+    // Code payloads are released alongside the roots: nothing may still be
+    // executing at teardown, so every payload is dead whatever its blueprint's
+    // refcount says (docs/impl/region/template.md § "Who owns the payload
+    // region"). Like a root, each is a decref — the RC cascade does the rest.
+    heap.release_all_template_payloads();
     let roots = heap.take_process_roots();
     // The root region's slot is consumed here too: it was registered at mint, so
     // it is in `roots`; clearing the slot prevents a later mint from aliasing a
@@ -36,7 +41,7 @@ pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
 }
 /// Mint-or-get `heap`'s pinned process-lifetime root region, registering it as a
 /// process root on first use so teardown releases it by RC.
-fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
+pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     if let Some(r) = heap.root_region_slot() {
         return r;
     }

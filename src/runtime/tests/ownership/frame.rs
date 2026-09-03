@@ -40,11 +40,7 @@ fn tail_call_frame_delivers_nil_locals() {
     let callee_region = heap.new_runtime_region();
     let callee_value = crate::vm::closure::materialize_closure_in_region(
         heap,
-        &crate::value::ClosureTemplate::new(
-            std::rc::Rc::new(callee_bc.instructions),
-            crate::value::Arity::Exact(0),
-            std::rc::Rc::new(callee_bc.constants),
-        ),
+        &std::rc::Rc::new(callee_bc.into_proto()),
         &[],
         callee_region,
     );
@@ -67,7 +63,7 @@ fn tail_call_frame_delivers_nil_locals() {
     bc.emit_byte(0); // borrowed_arg_slots: none — a zero-arg call borrows nothing
     bc.emit(Instruction::Return);
 
-    let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
+    let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
     let (bits, result) = vm.do_fiber_resume(&handle, fiber_value);
     assert!(bits.is_empty(), "the tail-called body completes normally");
     assert!(

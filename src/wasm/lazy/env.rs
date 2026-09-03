@@ -15,11 +15,11 @@ pub(super) fn build_env_in_memory(
     env_base: usize,
 ) {
     let template = &closure.template;
-    let num_captures = template.num_captures;
-    let num_params = template.num_params;
-    let num_locals = template.num_locals;
-    let capture_params_mask = template.capture_params_mask;
-    let capture_locals_mask = &template.capture_locals_mask;
+    let num_captures = template.num_captures();
+    let num_params = template.num_params();
+    let num_locals = template.num_locals();
+    let capture_params_mask = template.capture_params_mask();
+    let capture_locals_mask = &template.capture_locals_mask();
     let extra_locals = num_locals.saturating_sub(num_params);
     let total_slots = num_captures + num_params + extra_locals;
 
@@ -166,7 +166,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
             }
 
             if let Some(closure) = func_val.as_closure() {
-                let bytecode_ptr = closure.template.bytecode.as_ptr();
+                let bytecode_ptr = closure.template.bytecode().as_ptr();
                 let current_ptr = caller.data().current_bytecode_ptr;
 
                 // Self-recursive call: dispatch directly through the instance table.

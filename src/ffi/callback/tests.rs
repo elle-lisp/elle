@@ -5,31 +5,32 @@ use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
 use crate::value::fiber::SignalBits;
 use crate::value::Closure;
 
-fn test_closure(arity: usize) -> Rc<Closure> {
+fn test_closure(heap: &mut crate::value::fiberheap::FiberHeap, arity: usize) -> Rc<Closure> {
     use crate::value::types::Arity;
-    use crate::value::ClosureTemplate;
-    let template = Rc::new(ClosureTemplate {
+    use crate::value::TemplateProto;
+    let proto = TemplateProto {
         num_locals: arity,
         num_params: arity,
-        ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(arity), Rc::new(vec![]))
-    });
-    Rc::new(Closure {
-        template: crate::value::TemplateRef::new(template),
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
-    })
+        ..TemplateProto::new(Vec::new(), Arity::Exact(arity), Vec::new())
+    };
+    Rc::new(Closure::new(
+        crate::value::closure::test_template(heap, proto),
+        crate::value::region_slice::RegionSlice::empty(),
+        SignalBits::EMPTY,
+    ))
 }
 
 #[test]
 fn test_create_and_free_callback() {
-    let closure = test_closure(2);
+    let mut vm = crate::vm::VM::new();
+    let closure = test_closure(vm.heap(), 2);
     let sig = Signature {
         convention: CallingConvention::Default,
         ret: TypeDesc::I32,
         args: vec![TypeDesc::Ptr, TypeDesc::Ptr],
         fixed_args: None,
     };
-    let mut vm = crate::vm::VM::new();
+
     // NIL closure-value: these tests create/free the callback without ever
     // invoking it, so no body runs and the register handoff is unexercised.
     let cb = create_callback(closure, Value::NIL, sig, &mut vm as *mut crate::vm::VM).unwrap();
@@ -39,28 +40,30 @@ fn test_create_and_free_callback() {
 
 #[test]
 fn test_variadic_callback_rejected() {
-    let closure = test_closure(2);
+    let mut vm = crate::vm::VM::new();
+    let closure = test_closure(vm.heap(), 2);
     let sig = Signature {
         convention: CallingConvention::Default,
         ret: TypeDesc::I32,
         args: vec![TypeDesc::Ptr, TypeDesc::I32],
         fixed_args: Some(1),
     };
-    let mut vm = crate::vm::VM::new();
+
     let result = create_callback(closure, Value::NIL, sig, &mut vm as *mut crate::vm::VM);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_callback_store() {
-    let closure = test_closure(1);
+    let mut vm = crate::vm::VM::new();
+    let closure = test_closure(vm.heap(), 1);
     let sig = Signature {
         convention: CallingConvention::Default,
         ret: TypeDesc::Void,
         args: vec![TypeDesc::I32],
         fixed_args: None,
     };
-    let mut vm = crate::vm::VM::new();
+
     let mut store = CallbackStore::new();
     let cb = create_callback(closure, Value::NIL, sig, &mut vm as *mut crate::vm::VM).unwrap();
     let ptr = store.insert(cb);

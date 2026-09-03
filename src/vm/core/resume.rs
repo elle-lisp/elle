@@ -104,15 +104,15 @@ impl VM {
                         .runtime_config
                         .has_trace_bit(crate::config::trace_bits::CALL)
                     {
-                        let opcode = if frame.ip < frame.code.bytecode.len() {
-                            frame.code.bytecode[frame.ip]
+                        let opcode = if frame.ip < frame.code.bytecode().len() {
+                            frame.code.bytecode()[frame.ip]
                         } else {
                             255
                         };
                         let env_ptr = std::rc::Rc::as_ptr(&frame.env) as usize;
                         eprintln!(
                             "[resume] frame={} ip={} bc_len={} opcode={} saved_stack={} push_rv={} final_stack={} env_len={} env_ptr={:#x} rv_type={}",
-                            i, frame.ip, frame.code.bytecode.len(), opcode,
+                            i, frame.ip, frame.code.bytecode().len(), opcode,
                             frame.stack.len(), frame.push_resume_value,
                             self.fiber.stack.len(), frame.env.len(),
                             env_ptr, current_value.type_name(),

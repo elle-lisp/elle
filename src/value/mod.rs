@@ -54,7 +54,7 @@ pub use fiberheap::FiberHeap;
 pub use capturemask::CaptureMask;
 
 // Export closure and fiber types
-pub use closure::{Closure, ClosureTemplate, TemplateRef};
+pub use closure::{Closure, ClosureTemplate, TemplateProto, TemplateRef, VarargTag};
 pub use code::Code;
 pub use fiber::{
     BytecodeFrame, CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame,

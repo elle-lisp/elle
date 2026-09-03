@@ -35,12 +35,11 @@ fn activation_owner_node_frees_adopted_member_on_normal_completion() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Return);
-        let code = crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(bc.into_proto()),
+        )
+        .code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -99,12 +98,11 @@ fn activation_owner_node_survives_yield_resume_completion() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let code = crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(bc.into_proto()),
+        )
+        .code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -176,12 +174,11 @@ fn activation_owner_node_survives_repeated_parks() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let code = crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(bc.into_proto()),
+        )
+        .code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -265,12 +262,11 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
         bc.emit(Instruction::Return);
         bc.emit(Instruction::Jump);
         bc.emit_i32(-7);
-        let code = crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(bc.into_proto()),
+        )
+        .code();
 
         vm.fiber.fuel = Some(0);
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));

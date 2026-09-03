@@ -1,17 +1,11 @@
 use super::*;
-use crate::value::types::Arity;
 
+/// A fiber whose body never runs still names a code object; the instance's
+/// placeholder is exactly that. The heap is leaked so the placeholder stays
+/// resident for the test.
 fn test_closure() -> Rc<Closure> {
-    use crate::value::ClosureTemplate;
-    Rc::new(Closure {
-        template: crate::value::TemplateRef::new(Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
-            Arity::Exact(0),
-            Rc::new(vec![]),
-        ))),
-        env: crate::value::region_slice::RegionSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
-    })
+    let heap = crate::value::arena::leaked_test_heap();
+    noop_closure(unsafe { &mut *heap })
 }
 
 #[test]

@@ -35,7 +35,7 @@ fn fiber_owner_node_freed_at_fiber_completion() {
         let mut bc = Bytecode::new();
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
 
         // The fiber's owned state: a pages-less node with one adopted member.
         let (_member, member_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
@@ -103,7 +103,7 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(heap, bc);
 
         // The fiber's own owned state.
         let (_mf, rid_f) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
@@ -139,12 +139,11 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
         let gen_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get());
         let mut bc2 = Bytecode::new();
         bc2.emit(Instruction::Return);
-        let code2 = crate::value::Code::new(
-            Rc::new(bc2.instructions),
-            Rc::new(bc2.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code2 = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(bc2.into_proto()),
+        )
+        .code();
         let frame2 = BytecodeFrame::suspend(
             code2,
             Rc::new(vec![]),
@@ -166,20 +165,31 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         assert!(bits.is_empty(), "the resumed two-frame chain completes");
         assert_eq!(handle.with(|f| f.status), FiberStatus::Dead);
-        let bumped_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a;
         let bumped_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get()) > gen_b;
         let bumped_f = unsafe { &*heap_ptr }.generation_raw(rid_f.get()) > gen_f;
         assert!(
-            bumped_a && bumped_b,
-            "each parked frame's activation node frees at that frame's completion \
-             (frame 1 freed: {bumped_a}, frame 2 freed: {bumped_b})",
+            bumped_b,
+            "a parked frame's activation node frees its member at that frame's \
+             completion",
         );
         assert!(
             bumped_f,
             "the fiber node must ride the parks and free at the fiber's completion",
         );
 
+        // The trap: frame 1's member reaches its body through the code object's
+        // constant pool — the only channel hand-built bytecode has — and a code
+        // object is a region citizen now (docs/impl/region/template.md), so its
+        // region holds a live reference the node's drop must respect. The member
+        // is therefore RESCUED at that drop and freed when the code object goes
+        // (docs/impl/region/ownership.md § "The incoming edge table and the
+        // external-reference rescue"). Frame 2's member, adopted from outside
+        // the bytecode, is what pins the at-completion timing above.
         release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+        assert!(
+            unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a,
+            "a rescued member frees when the last reference to it goes",
+        );
     }
 
     let after = unsafe { &*heap_ptr }.active_region_count();
@@ -223,7 +233,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(heap, bc);
 
         let (_mf, rid_f) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         let node_f = unsafe { &mut *heap_ptr }.new_runtime_region();
@@ -255,20 +265,28 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
             handle.with(|f| f.suspended.is_none()),
             "the cancel consumed the parked chain"
         );
-        let bumped_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a;
-        let bumped_f = unsafe { &*heap_ptr }.generation_raw(rid_f.get()) > gen_f;
         assert!(
-            bumped_a && bumped_f,
-            "the cancel must free the parked frame's node AND the fiber node \
-             (parked member freed: {bumped_a}, fiber member freed: {bumped_f})",
+            unsafe { &*heap_ptr }.generation_raw(rid_f.get()) > gen_f,
+            "the cancel must free the fiber node",
         );
+        // The parked frame's member reaches its body through the code object's
+        // constant pool — the only channel hand-built bytecode has — so the code
+        // object's region references it and the cancel's set drop rescues it
+        // rather than freeing it (docs/impl/region/ownership.md § "The incoming
+        // edge table and the external-reference rescue"). It frees with the code
+        // object, which the fiber value's release takes.
         release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
+        assert!(
+            unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a,
+            "the cancel must leave the parked frame's member with no surviving \
+             reference: it frees as soon as the code object that rescued it goes",
+        );
 
         // ── fiber/abort of a not-yet-started fiber ──
         let mut bc = Bytecode::new();
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
         let (_mn, rid_n) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         let node_n = unsafe { &mut *heap_ptr }.new_runtime_region();
         unsafe { &mut *heap_ptr }.adopt_region(node_n, rid_n);
@@ -326,7 +344,7 @@ fn fiber_kill_park_retains_terminal_payload() {
     bc.emit(Instruction::Emit);
     bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
     bc.emit(Instruction::Return);
-    let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
+    let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
 
     // The payload lives in its OWN region, held live past the fiber's free by
     // an extra test reference — the live-frontier condition under which the
@@ -410,7 +428,10 @@ fn discard_frees_parked_activation_owner_node() {
 
     // The adopt-then-yield body every cycle parks (same shape as
     // `activation_owner_node_survives_yield_resume_completion`).
-    fn adopt_yield_code(child: crate::value::Value) -> crate::value::Code {
+    fn adopt_yield_code(
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        child: crate::value::Value,
+    ) -> crate::value::Code {
         let mut bc = Bytecode::new();
         let idx = bc.add_constant(child);
         bc.emit(Instruction::LoadConst);
@@ -420,12 +441,7 @@ fn discard_frees_parked_activation_owner_node() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        crate::value::Code::new(
-            Rc::new(bc.instructions),
-            Rc::new(bc.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        )
+        crate::value::ClosureTemplate::for_proto(heap, &Rc::new(bc.into_proto())).code()
     }
 
     let mut vm = crate::vm::VM::new();
@@ -436,7 +452,7 @@ fn discard_frees_parked_activation_owner_node() {
     for _ in 0..50 {
         let (child, child_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         let gen_before = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
-        let code = adopt_yield_code(child);
+        let code = adopt_yield_code(unsafe { &mut *heap_ptr }, child);
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -467,11 +483,17 @@ fn discard_frees_parked_activation_owner_node() {
         let gen_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get());
         let gen_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get());
 
-        let result = vm.execute_bytecode_saving_stack(&adopt_yield_code(child_a), &Rc::new(vec![]));
+        let result = vm.execute_bytecode_saving_stack(
+            &adopt_yield_code(unsafe { &mut *heap_ptr }, child_a),
+            &Rc::new(vec![]),
+        );
         assert!(result.bits.intersects(crate::value::fiber::SIG_YIELD));
         let mut chain = vm.fiber.suspended.take().expect("first park");
 
-        let result = vm.execute_bytecode_saving_stack(&adopt_yield_code(child_b), &Rc::new(vec![]));
+        let result = vm.execute_bytecode_saving_stack(
+            &adopt_yield_code(unsafe { &mut *heap_ptr }, child_b),
+            &Rc::new(vec![]),
+        );
         assert!(result.bits.intersects(crate::value::fiber::SIG_YIELD));
         chain.extend(vm.fiber.suspended.take().expect("second park"));
 
@@ -511,24 +533,20 @@ fn discard_frees_parked_activation_owner_node() {
 #[test]
 fn discard_runs_the_abandoned_frames_release_tables() {
     use crate::hir::region::{MappedRegion, RuntimeRegion};
-    use crate::value::code::CodeTables;
-    use crate::value::{BytecodeFrame, SuspendedFrame, Value};
+    use crate::value::{
+        Arity, BytecodeFrame, ClosureTemplate, SuspendedFrame, TemplateProto, Value,
+    };
     use std::rc::Rc;
 
     /// A frame whose function releases value-route slot 1 and slot route 9, and
     /// nothing else.
-    fn tabled_code() -> crate::value::Code {
-        crate::value::Code::new(
-            Rc::new(vec![]),
-            Rc::new(vec![]),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        )
-        .with_tables(CodeTables {
-            frame_release_slots: Rc::new(vec![1]),
-            frame_release_regions: Rc::new(vec![9]),
-            ..CodeTables::default()
-        })
+    fn tabled_code(heap: &mut crate::value::fiberheap::FiberHeap) -> crate::value::Code {
+        let proto = Rc::new(TemplateProto {
+            frame_release_slots: vec![1],
+            frame_release_regions: vec![9],
+            ..TemplateProto::new(Vec::new(), Arity::Exact(0), Vec::new())
+        });
+        ClosureTemplate::for_proto(heap, &proto).code()
     }
 
     /// Park one frame holding `stack`, with `mapped` as its activation's
@@ -541,8 +559,9 @@ fn discard_runs_the_abandoned_frames_release_tables() {
                 (*slot, MappedRegion::new(*region, gen))
             })
             .collect();
+        let code = tabled_code(vm.heap());
         let frame = BytecodeFrame::suspend(
-            tabled_code(),
+            code,
             Rc::new(vec![]),
             0,
             stack,
@@ -663,7 +682,7 @@ fn dropped_parked_fiber_discharges_owned_state() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(heap, bc);
 
         // The fiber's own owned state (the fiber-node tier).
         let (_mf, rid_f) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
@@ -737,7 +756,7 @@ fn dropped_parked_fiber_releases_signal_escape_retain() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(heap, bc);
 
         let gen_p = unsafe { &*heap_ptr }.generation_raw(rid_p.get());
         let (bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
@@ -838,7 +857,7 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
             bc.emit_signal_bits(bits);
         }
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(heap, fiber_body_closure(bc));
+        let (handle, fiber_value) = child_fiber(heap, bc);
 
         let (result_bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         vm.finalize_if_halted(&handle, result_bits);
@@ -868,10 +887,18 @@ fn payload_regions_stranded_over(n: usize, bits: crate::value::SignalBits) -> i6
 /// | stage | rc |
 /// |---|---|
 /// | allocated (the test's own reference) | 1 |
-/// | the fiber left, its result parked | 2 |
-/// | the halt promoted the fiber to `:dead` | 2 |
-/// | the fiber freed, its free-time signal scan run | 1 |
+/// | the code object built, its constant pool naming the payload | 2 |
+/// | the fiber left, its result parked | 3 |
+/// | the halt promoted the fiber to `:dead` | 3 |
+/// | the fiber freed, its free-time signal scan run, its code object with it | 1 |
 /// | the test released its own reference | 0 |
+///
+/// Hand-built bytecode can only name a heap value through the constant pool, so
+/// the code object holds one reference of its own from the moment it is
+/// materialized (docs/impl/region/template.md); it goes when the fiber value's
+/// region does. Compiled code never puts a heap literal in a pool — it
+/// materializes one per execution — so the extra reference is the harness's,
+/// not a shape production produces.
 ///
 /// Both arms leave the same way — the result is parked in `fiber.signal` for a
 /// later `fiber/value` — so both keep the same ledger, at every stage. The park
@@ -914,23 +941,27 @@ fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
             bc.emit_signal_bits(bits);
         }
         bc.emit(Instruction::Return);
-        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(bc));
-        rc!("after the fiber is built — the body has not run", 1);
+        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
+        rc!(
+            "after the fiber is built — its code object names the payload",
+            2
+        );
 
         let (result_bits, _v) = vm.do_fiber_resume(&handle, fiber_value);
         assert_eq!(result_bits, bits, "the body leaves with exactly its signal");
         rc!(
             "after the fiber leaves — one park retain pins the result",
-            2
+            3
         );
 
         vm.finalize_if_halted(&handle, result_bits);
-        rc!("after the halt promotion — the result stays pinned", 2);
+        rc!("after the halt promotion — the result stays pinned", 3);
 
         release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
         drop(handle);
         rc!(
-            "after the fiber frees — its signal scan released the park",
+            "after the fiber frees — its signal scan released the park and its \
+             code object went with the region",
             1
         );
 
@@ -982,16 +1013,14 @@ fn a_primitive_park_delivery_is_worth_one_retain() {
         // would.
         let mut body = Bytecode::new();
         body.emit(Instruction::Return);
-        let (handle, fiber_value) =
-            child_fiber(unsafe { &mut *heap_ptr }, fiber_body_closure(body));
+        let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, body);
         let mut parked = Bytecode::new();
         parked.emit(Instruction::Return);
-        let code = crate::value::Code::new(
-            Rc::new(parked.instructions),
-            Rc::new(parked.constants),
-            Rc::new(crate::error::LocationMap::new()),
-            Rc::new(vec![]),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            unsafe { &mut *heap_ptr },
+            &Rc::new(parked.into_proto()),
+        )
+        .code();
         let frame = BytecodeFrame::suspend(
             code,
             Rc::new(vec![]),

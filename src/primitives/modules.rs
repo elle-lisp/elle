@@ -304,12 +304,11 @@ pub(crate) fn prim_import_file(
         // Save/restore the caller's stack. import executes the
         // module's bytecode on the same VM, which would overwrite the
         // caller's local variable slots without this protection.
-        let code = crate::value::Code::new(
-            std::rc::Rc::new(result.bytecode.instructions),
-            std::rc::Rc::new(result.bytecode.constants),
-            std::rc::Rc::new(result.bytecode.location_map),
-            std::rc::Rc::new(result.bytecode.child_protos),
-        );
+        let code = crate::value::ClosureTemplate::for_proto(
+            vm.heap(),
+            &std::rc::Rc::new(result.bytecode.into_proto()),
+        )
+        .code();
         let empty_env = std::rc::Rc::new(vec![]);
 
         // Drive the module's top-level forms to completion, draining any

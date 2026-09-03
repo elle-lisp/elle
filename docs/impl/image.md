@@ -169,16 +169,29 @@ structs become body data.
 
 ### Region-native closure templates
 
-`ClosureTemplate` is ~20 `Rc`/`Vec` fields. [region/model.md](region/model.md)
-already specifies the target: a region-resident template whose bytecode is an
-inline `RegionSlice<u8>`. Flatten every field: constants as
-`RegionSlice<Value>`, masks and release tables as inline slices, the location
-map as a sorted `RegionSlice<(u32, PackedLoc)>` over an interned file table,
-`child_protos` as `RegionSlice<Value>` of sibling templates, name and doc as
-region strings. Payoff now:
-`MakeClosure` clones the blueprint — ~20 `Rc` bumps per closure creation —
-into the instance region; a flattened template is referenced, not cloned.
-Payoff for images: code objects become body data.
+`ClosureTemplate` was ~20 `Rc`/`Vec` fields, and `MakeClosure` cloned the whole
+blueprint into the instance region on every closure creation — 13 refcount
+bumps and two Rust-heap allocations apiece, in a `HeapObject` variant whose 288
+bytes set the size of every other variant.
+
+A code object is now three things ([region/template.md](region/template.md)
+owns the argument): a compile-time blueprint, a `CodePayload` holding every
+variable-length field inline in region pages, and a two-word region-resident
+header naming that payload. The payload is materialized once per blueprint and
+shared, so `MakeClosure` copies two words and takes one cross-region reference
+rather than copying a function's bytecode per iteration of a loop that builds a
+closure. Payoff for images: the payload is body data — bytecode, constants,
+name and doc as region strings, masks and release tables as inline slices, and
+source locations as a sorted `RegionSlice<LocEntry>` over an interned file
+table, replacing a `HashMap<usize, SourceLoc>` whose `String` file names could
+not be sealed at any price.
+
+The header keeps one `Rc` to its blueprint, for the four questions the payload
+cannot yet answer: the nested-lambda blueprints a `MakeClosure` indexes, the
+LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
+syntax foundation and the LIR side-stream remove two; the image milestone's own
+dump removes the third by making child templates body data; the fourth is the
+GPU cache this design already drops.
 
 ### Region-native syntax
 
@@ -581,32 +594,39 @@ wrong about. Run these before the foundations land, in this order:
    `--trace=census` (landed with this experiment; pinned by
    `tests/integration/census.rs`, whose sealing net fails the moment an
    unsealed variant enters the boot graph) walks every live object in the
-   instance's region store after boot. A warm release boot leaves **405
-   regions**, **630 objects**, 1.62 MiB of committed region pages, and
-   ~455 KiB of estimated body payload:
+   instance's region store after boot. A warm release boot leaves **402
+   regions**, **640 objects**, 3.81 MiB of committed region pages, and
+   1.25 MiB of body payload:
 
    | Tag | Count | Bytes | Heap-ptr slots | Slices |
    |-----|-------|-------|----------------|--------|
-   | ClosureTemplate | 202 | 317,383 | 24 | 0 |
-   | Closure | 202 | 68,320 | 816 | 142 |
-   | CaptureCell | 210 | 63,840 | 205 | 0 |
-   | LStruct | 4 | 12,490 | 197 | 0 |
-   | Parameter | 7 | 2,016 | 3 | 0 |
-   | External | 3 | 864 | 0 | 0 |
-   | LStructMut | 2 | 748 | 3 | 0 |
+   | ClosureTemplate | 202 | 1,227,041 | 13 | 202 |
+   | Closure | 201 | 36,064 | 826 | 148 |
+   | CaptureCell | 220 | 31,680 | 215 | 0 |
+   | LStruct | 4 | 10,400 | 198 | 0 |
+   | Parameter | 8 | 1,024 | 3 | 0 |
+   | External | 3 | 384 | 0 | 0 |
+   | LStructMut | 2 | 400 | 3 | 0 |
 
    The boot residue is code, not data: no pair, string, or array survives
-   to the post-boot heap. The 210 capture cells are the snapping set — the
+   to the post-boot heap. The 220 capture cells are the snapping set — the
    static scan found zero top-level `assign`s in stdlib.lisp, so every
    cell snaps. The unsealed leaves are exactly the reconstruction stream's
    two classes: the three stdio-port `External`s and the two default
    traitsets (§ "Process-owned resources reconstruct in place"); nothing
    else in the graph is refused, so the boot image is dumpable. Relocation
-   load: 1,248 heap-pointer slots + 142 `RegionSlice` ptrs + 682
-   primitive slots ≈ 2,100 relocation entries, ~2.7 heap-pointer slots
-   per KiB of payload. `shared-templates 0`: every boot closure already
-   references a region-resident template object, so the template
-   foundation rewrites representation, not sharing structure.
+   load: 1,258 heap-pointer slots + 350 `RegionSlice` ptrs + 684
+   primitive slots ≈ 2,300 relocation entries.
+
+   Most of the payload is source locations. The template foundation moved a
+   code object's data into region pages, so what the census now measures
+   includes the location tables — 16 bytes an entry over an interned file
+   table, where the `HashMap<usize, SourceLoc>` they replaced held a `String`
+   per entry on the Rust heap, invisible here and several times larger. Every
+   boot closure already referenced a region-resident template object, so that
+   foundation rewrote the representation rather than the sharing structure:
+   the census's `shared-templates` counter, which measured how many closures
+   still held an `Rc` blueprint, retired with that variant.
 3. **The store spike — dispatched, mechanism proven.** `src/image` dumps
    and hydrates data-only graphs (pairs, strings, bytes, arrays, floats,
    portable immediates) end to end, pinned by `tests/integration/image.rs`
@@ -714,9 +734,10 @@ wrong about. Run these before the foundations land, in this order:
    and measure each field's address against the object's base, with
    `offset_of!` covering the nested structs (`Pair`, `Value`,
    `RegionSlice`). Measured layout (rustc 1.95, x86-64): `HeapObject` is
-   288 bytes, align 8 — the by-value `ClosureTemplate` variant sets the
-   size, so a `Float` slot is ~95% padding until the template foundation
-   shrinks it. The discriminant is one byte at offset 0 (declaration index
+   128 bytes, align 8. The by-value `ClosureTemplate` variant used to set
+   that size at 288 bytes, making a `Float` slot ~95% padding; the template
+   foundation reduced the variant to a payload slice plus a blueprint
+   pointer. The discriminant is one byte at offset 0 (declaration index
    plus 3) with bytes 1–7 zero; every probed variant places its payload
    field at 8 and `traits` at 24 (`Pair` nests its whole struct at 8).
    `RegionSlice`'s `u32` len leaves interior padding at bytes 12–16 of the
@@ -740,8 +761,10 @@ code, and each deletes image machinery:
    sorted-container re-sort hazard, the `symbol_names` maps, and `send`'s
    re-interning.
 2. **struct** — region-native immutable struct payloads.
-3. **template** — the flattened, region-resident `ClosureTemplate`;
-   `MakeClosure` references instead of clones.
+3. **template** — landed. The blueprint / payload / header split
+   ([region/template.md](region/template.md)); deleted the per-creation
+   blueprint clone, the `HashMap` location map, and the `Rc`-shared template
+   variant that no image could dump.
 4. **syntax** — the region-native syntax tree; deletes the syntax codec and
    fixes `send`'s syntax defect at the root.
 

@@ -163,11 +163,10 @@ fn env_backing_guard_panics_on_a_freed_env_region() {
             &[crate::value::Value::int(42)],
             region,
         );
-        let template = std::rc::Rc::new(crate::value::ClosureTemplate::new(
-            std::rc::Rc::new(vec![]),
-            crate::value::Arity::Exact(0),
-            std::rc::Rc::new(vec![]),
-        ));
+        let template = crate::value::closure::test_template(
+            heap,
+            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new()),
+        );
         let closure = crate::value::Closure::new(template, env, crate::value::SignalBits::EMPTY);
         heap.decref_region(region); // the env's backing region is freed
         debug_check_env_backing(heap, &closure);
@@ -185,11 +184,10 @@ fn env_backing_guard_accepts_a_live_env_region() {
             &[crate::value::Value::int(42)],
             region,
         );
-        let template = std::rc::Rc::new(crate::value::ClosureTemplate::new(
-            std::rc::Rc::new(vec![]),
-            crate::value::Arity::Exact(0),
-            std::rc::Rc::new(vec![]),
-        ));
+        let template = crate::value::closure::test_template(
+            heap,
+            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new()),
+        );
         let closure = crate::value::Closure::new(template, env, crate::value::SignalBits::EMPTY);
         debug_check_env_backing(heap, &closure);
         heap.decref_region(region);
@@ -201,11 +199,10 @@ fn env_backing_guard_ignores_an_empty_env() {
     crate::value::arena::with_test_region(|| {
         let vm = make_vm();
         let heap = unsafe { &mut *vm.heap_ptr };
-        let template = std::rc::Rc::new(crate::value::ClosureTemplate::new(
-            std::rc::Rc::new(vec![]),
-            crate::value::Arity::Exact(0),
-            std::rc::Rc::new(vec![]),
-        ));
+        let template = crate::value::closure::test_template(
+            heap,
+            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new()),
+        );
         let closure = crate::value::Closure::new(
             template,
             crate::value::region_slice::RegionSlice::empty(),

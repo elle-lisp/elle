@@ -412,17 +412,7 @@ fn compile_core(
         &[],
     ));
     let exports_val = vm
-        .execute_bytecode(
-            &closure.template.bytecode,
-            &closure.template.constants,
-            &closure.template.child_protos,
-            crate::value::code::CodeTables {
-                merged_slots: closure.template.merged_slots.clone(),
-                frame_release_slots: closure.template.frame_release_slots.clone(),
-                frame_release_regions: closure.template.frame_release_regions.clone(),
-            },
-            Some(&env),
-        )
+        .execute_code(closure.template.code(), Some(&env))
         .expect("core.lisp export closure must succeed");
 
     // Root the core export aggregate, not each entry. `exports_val` is the
@@ -456,7 +446,7 @@ fn compile_core(
             // meta: SymbolId-keyed, used by compile_file for user code
             let sym_id = symbols.intern(&name);
             let signal = if let Some(c) = value.as_closure() {
-                c.template.signal
+                c.template.signal()
             } else {
                 Signal::silent()
             };

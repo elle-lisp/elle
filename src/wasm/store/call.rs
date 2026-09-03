@@ -415,11 +415,11 @@ fn build_env_in_store(
     env_base: usize,
 ) {
     let template = &closure.template;
-    let num_captures = template.num_captures;
-    let num_params = template.num_params;
-    let num_locals = template.num_locals;
-    let capture_params_mask = template.capture_params_mask;
-    let capture_locals_mask = &template.capture_locals_mask;
+    let num_captures = template.num_captures();
+    let num_params = template.num_params();
+    let num_locals = template.num_locals();
+    let capture_params_mask = template.capture_params_mask();
+    let capture_locals_mask = &template.capture_locals_mask();
     let extra_locals = num_locals.saturating_sub(num_params);
     let total_slots = num_captures + num_params + extra_locals;
 

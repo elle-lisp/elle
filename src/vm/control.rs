@@ -47,10 +47,10 @@ pub(crate) fn handle_return(vm: &mut VM) -> Value {
     }
 }
 
-// Call and TailCall are complex and need to stay in mod.rs because they call execute_bytecode recursively
+// Call and TailCall are complex and need to stay in mod.rs because they call the executor recursively
 // These functions are just placeholders for documentation purposes
 pub mod note {
     //! Call, TailCall, and MakeClosure handle complex recursive execution logic
-    //! and require access to the full execution context (execute_bytecode method).
+    //! and require access to the full execution context (the executor entry).
     //! These remain in the main execution loop in mod.rs
 }

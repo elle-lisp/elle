@@ -50,8 +50,8 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         bc: &[u8],
         consts: &[Value],
-        constants: &Rc<Vec<Value>>,
-        location_map: &Rc<LocationMap>,
+
+        locations: crate::value::closure::LocationTable<'_>,
         ip: &mut usize,
         instr_ip: usize,
     ) -> Option<(SignalBits, usize)> {
@@ -155,9 +155,9 @@ impl VM {
                     self,
                     bc,
                     ip,
-                    &code.child_protos,
+                    code.child_protos(),
                     region,
-                    &code.merged_slots,
+                    code.merged_slots(),
                 );
             }
 
@@ -165,7 +165,7 @@ impl VM {
             Instruction::Pair => {
                 let region = self.read_static_region(bc, ip);
                 let region_id =
-                    self.runtime_region_for_alloc_slot_maybe_merged(region, &code.merged_slots);
+                    self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 data::handle_list(self, region_id);
             }
             Instruction::First => {
@@ -177,13 +177,13 @@ impl VM {
             Instruction::MakeArrayMut => {
                 let region = self.read_static_region(bc, ip);
                 let region_id =
-                    self.runtime_region_for_alloc_slot_maybe_merged(region, &code.merged_slots);
+                    self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 data::handle_make_array(self, bc, ip, region_id);
             }
             Instruction::MaterializeConst => {
                 let region = self.read_static_region(bc, ip);
                 let region_id =
-                    self.runtime_region_for_alloc_slot_maybe_merged(region, &code.merged_slots);
+                    self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 literals::handle_materialize_const(self, bc, ip, region_id);
             }
             Instruction::ArrayMutRef => {
@@ -210,13 +210,13 @@ impl VM {
                 data::handle_array_slice_from(self, bc, ip);
             }
             Instruction::StructGetOrNil => {
-                data::handle_struct_get_or_nil(self, bc, ip, constants);
+                data::handle_struct_get_or_nil(self, bc, ip, consts);
             }
             Instruction::StructGetDestructure => {
-                data::handle_struct_get_destructure(self, bc, ip, constants);
+                data::handle_struct_get_destructure(self, bc, ip, consts);
             }
             Instruction::StructRest => {
-                data::handle_struct_rest(self, bc, ip, constants);
+                data::handle_struct_rest(self, bc, ip, consts);
             }
 
             // Silent destructuring (parameter context: absent optional params → nil)
@@ -359,7 +359,7 @@ impl VM {
             Instruction::MakeCapture => {
                 let region = self.read_static_region(bc, ip);
                 let region_id =
-                    self.runtime_region_for_alloc_slot_maybe_merged(region, &code.merged_slots);
+                    self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 capture::handle_make_capture(self, region_id);
             }
             Instruction::UnwrapCapture => {
@@ -367,8 +367,8 @@ impl VM {
             }
             Instruction::UpdateCapture => {
                 if crate::value::fiberheap::freelog::enabled() {
-                    let loc = location_map
-                        .get(&instr_ip)
+                    let loc = locations
+                        .get(instr_ip)
                         .map(|l| format!("{l}"))
                         .unwrap_or_else(|| "?".to_string());
                     crate::value::fiberheap::freelog::set_context(format!("UpdateCapture @ {loc}"));
@@ -416,19 +416,19 @@ impl VM {
             }
 
             Instruction::DecrefRegion => {
-                region::handle_decref_region(self, bc, ip, location_map, instr_ip);
+                region::handle_decref_region(self, bc, ip, locations, instr_ip);
             }
 
             Instruction::DecrefValueRegion => {
-                region::handle_decref_value_region(self, location_map, instr_ip);
+                region::handle_decref_value_region(self, locations, instr_ip);
             }
 
             Instruction::DecrefCellRegion => {
-                region::handle_decref_cell_region(self, location_map, instr_ip);
+                region::handle_decref_cell_region(self, locations, instr_ip);
             }
 
             Instruction::IncrefValueRegion => {
-                region::handle_incref_value_region(self, location_map, instr_ip);
+                region::handle_incref_value_region(self, locations, instr_ip);
             }
 
             Instruction::AdoptRegion => {
@@ -538,7 +538,7 @@ impl VM {
                 // debug_assert panics.
                 let region = self.read_static_region(bc, ip);
                 let region_id =
-                    self.runtime_region_for_alloc_slot_maybe_merged(region, &code.merged_slots);
+                    self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 types::handle_intr_freeze(self, region_id);
             }
             Instruction::IntrThaw => {
@@ -547,7 +547,7 @@ impl VM {
                 // region.
                 let region = self.read_static_region(bc, ip);
                 let region_id =
-                    self.runtime_region_for_alloc_slot_maybe_merged(region, &code.merged_slots);
+                    self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 types::handle_intr_thaw(self, region_id);
             }
             Instruction::Identical => {

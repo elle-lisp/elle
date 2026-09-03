@@ -121,12 +121,18 @@ fn test_spawn_primitive() {
 
     // Create a simple closure to spawn
     let closure = h.ctx().closure(Closure {
-        template: std::rc::Rc::new(ClosureTemplate::new(
-            std::rc::Rc::new(vec![0u8]), // dummy bytecode
-            elle::value::Arity::Exact(0),
-            std::rc::Rc::new(vec![]),
-        ))
-        .into(),
+        template: {
+            let region = h.heap().new_runtime_region();
+            elle::value::TemplateRef::region(elle::value::closure::materialize(
+                h.heap(),
+                &std::rc::Rc::new(elle::value::TemplateProto::new(
+                    vec![0u8], // dummy bytecode
+                    elle::value::Arity::Exact(0),
+                    Vec::new(),
+                )),
+                region,
+            ))
+        },
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });

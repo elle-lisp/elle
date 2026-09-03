@@ -61,12 +61,9 @@ impl VM {
             .call_stack
             .iter()
             .rev()
-            .map(|frame| {
-                let location = frame.location_map.get(&frame.ip).cloned();
-                StackFrame {
-                    function_name: Some(frame.name.to_string()),
-                    location,
-                }
+            .map(|frame| StackFrame {
+                function_name: Some(frame.name().to_string()),
+                location: frame.location(),
             })
             .collect()
     }

@@ -240,11 +240,11 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     env_base: usize,
 ) {
     let template = &closure.template;
-    let num_captures = template.num_captures;
-    let num_params = template.num_params;
-    let num_locals = template.num_locals;
-    let capture_params_mask = template.capture_params_mask;
-    let capture_locals_mask = &template.capture_locals_mask;
+    let num_captures = template.num_captures();
+    let num_params = template.num_params();
+    let num_locals = template.num_locals();
+    let capture_params_mask = template.capture_params_mask();
+    let capture_locals_mask = &template.capture_locals_mask();
 
     // Each env value gets its OWN fresh per-execution region (mirroring the
     // interpreter's `env_value_region`, docs/impl/region/rules.md Rule 6, no
@@ -258,14 +258,14 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     // Handle varargs: if arity is AtLeast(n), collect extra args
     // into a list (or array) and pass as the last parameter.
     let effective_args;
-    let args = match template.arity {
+    let args = match template.arity() {
         crate::value::types::Arity::AtLeast(required) => {
             let mut collected = Vec::with_capacity(num_params);
             for arg in args.iter().take(required) {
                 collected.push(*arg);
             }
             let rest: Vec<Value> = args[required..].to_vec();
-            let vararg_val = match template.vararg_kind {
+            let vararg_val = match template.vararg_kind() {
                 crate::hir::VarargKind::List => {
                     // The whole vararg list shares one region.
                     let region = fresh_region();

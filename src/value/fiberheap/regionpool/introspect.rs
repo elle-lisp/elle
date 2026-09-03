@@ -183,14 +183,11 @@ impl RegionPool {
                     check(v);
                 }
                 // The instance→template edge. A `MakeClosure`-materialized
-                // template is co-region with its instance (self-edge, filtered
-                // by `rid == own_id`); a template shared by `squelch`/`attune`
-                // lives in the SOURCE closure's region (a real cross-region edge
-                // keeping that region alive). Both route through `check`. A
-                // `Shared` (Rc) template has no region Value and is skipped.
-                if let crate::value::closure::TemplateRef::Region(tv) = &closure.template {
-                    check(tv);
-                }
+                // header is co-region with its instance (self-edge, filtered by
+                // `rid == own_id`); a header shared by `squelch`/`attune` lives
+                // in the SOURCE closure's region (a real cross-region edge
+                // keeping that region alive). Both route through `check`.
+                check(&closure.template.value());
             }
             HeapObject::Pair(pair) => {
                 check(&pair.first);
@@ -297,9 +294,7 @@ impl RegionPool {
                         let p = fib.closure.env.as_ptr() as *const ();
                         backing = Value::from_heap_ptr(p, crate::value::repr::TAG_ARRAY);
                     }
-                    if let crate::value::closure::TemplateRef::Region(tv) = &fib.closure.template {
-                        template_val = *tv;
-                    }
+                    template_val = fib.closure.template.value();
                     for v in fib.closure.env.iter() {
                         env_vals.push(*v);
                     }
@@ -329,6 +324,17 @@ impl RegionPool {
                 }
             }
             HeapObject::ClosureTemplate(t) => {
+                // The header→payload edge. A code object's payload lives in a
+                // payload region of the heap's own, shared by every header the
+                // same blueprint materializes (docs/impl/region/template.md), so
+                // it is a real cross-region reference: without it the payload
+                // region is freed while a header still reads its bytecode.
+                // Every slice of one payload lands in that one region by
+                // construction, so the payload's own backing covers them all.
+                // Synthesize a heap Value at it, as the closure-env arm does.
+                let payload =
+                    Value::from_heap_ptr(t.payload_backing(), crate::value::repr::TAG_ARRAY);
+                check(&payload);
                 // The template's constant pool. These are immediates
                 // (string/quoted literals are their own `MaterializeConst`
                 // allocations, not pool Values), so this
@@ -336,7 +342,7 @@ impl RegionPool {
                 // region-allocated constant is RC-tracked (alloc-scan increfs,
                 // free-cascade decrefs the same edge). The `child_protos`
                 // blueprints are plain `Rc` data with no region edge — skipped.
-                for v in t.constants.iter() {
+                for v in t.constants().iter() {
                     check(v);
                 }
             }

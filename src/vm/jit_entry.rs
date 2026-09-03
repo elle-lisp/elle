@@ -20,10 +20,14 @@ impl VM {
     /// The single write path into `jit_cache`: the key is derived from the
     /// bytecode here, never passed separately, and the entry pins the
     /// bytecode so the key stays sound (docs/impl/jit.md § "Cache identity").
-    pub fn install_jit_code(&mut self, bytecode: std::rc::Rc<Vec<u8>>, code: Arc<JitCode>) {
+    pub fn install_jit_code(
+        &mut self,
+        template: crate::value::ClosureTemplate,
+        code: Arc<JitCode>,
+    ) {
         self.jit_cache.insert(
-            bytecode.as_ptr(),
-            crate::vm::core::JitCacheEntry::new(bytecode, code),
+            template.bytecode().as_ptr(),
+            crate::vm::core::JitCacheEntry::new(template, code),
         );
     }
 
@@ -35,9 +39,9 @@ impl VM {
     /// Record that a compile for `bytecode` is in flight on the worker. The
     /// entry pins `bytecode` until the result installs, so the key the
     /// worker echoes back still names this function.
-    pub(crate) fn record_jit_pending(&mut self, bytecode: std::rc::Rc<Vec<u8>>) {
+    pub(crate) fn record_jit_pending(&mut self, template: crate::value::ClosureTemplate) {
         self.jit_pending
-            .insert(bytecode.as_ptr() as usize, bytecode);
+            .insert(template.bytecode().as_ptr() as usize, template);
     }
 
     /// Try JIT compilation/dispatch for a closure call.
@@ -60,7 +64,7 @@ impl VM {
         if !self.runtime_config.jit.enabled() {
             return None;
         }
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode().as_ptr();
         let is_hot = self.record_closure_call(bytecode_ptr);
 
         // Poll for completed background compilations (cheap: non-blocking recv)
@@ -82,7 +86,7 @@ impl VM {
             && !self.jit_pending.contains_key(&(bytecode_ptr as usize))
             && !self.jit_rejections.contains_key(&bytecode_ptr)
         {
-            if let Some(ref lir_func) = closure.template.lir_function {
+            if let Some(lir_func) = closure.template.lir_function() {
                 self.submit_jit_task(lir_func, closure, bytecode_ptr);
             }
         }
@@ -144,7 +148,7 @@ impl VM {
         bytecode_ptr: *const u8,
     ) {
         let label = closure.template.display_label();
-        let bytecode = closure.template.bytecode.clone();
+        let template = (*closure.template).clone();
         let task =
             crate::jit::worker::prepare_task(lir_func, None, bytecode_ptr as usize, Some(&label));
 
@@ -170,12 +174,12 @@ impl VM {
                             bytecode_ptr as usize,
                         );
                     }
-                    self.install_jit_code(bytecode, Arc::new(jit_code));
+                    self.install_jit_code(template, Arc::new(jit_code));
                 }
                 Err(e) => {
                     self.jit_rejections
                         .entry(bytecode_ptr)
-                        .or_insert_with(|| JitRejectionInfo::new(e, Some(bytecode)));
+                        .or_insert_with(|| JitRejectionInfo::new(e, Some(template)));
                 }
             }
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
@@ -188,7 +192,7 @@ impl VM {
             .get_or_insert_with(crate::jit::worker::JitWorker::new);
 
         if worker.submit(task) {
-            self.record_jit_pending(bytecode);
+            self.record_jit_pending(template);
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             if self
                 .runtime_config
@@ -198,7 +202,7 @@ impl VM {
                     "[jit] submitted background compilation: label={} bc_ptr={:#x} bclen={}",
                     closure.template.display_label(),
                     bytecode_ptr as usize,
-                    closure.template.bytecode.len(),
+                    closure.template.bytecode().len(),
                 );
             }
         }

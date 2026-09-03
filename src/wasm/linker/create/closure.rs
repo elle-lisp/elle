@@ -81,47 +81,58 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 _ => crate::value::types::Arity::Exact(arity_count),
             };
 
-            // Create a ClosureTemplate with wasm_func_idx.
-            // Also populate bytecode from dual-compiled closures so spawn works.
-            // child_protos are the nested-lambda blueprints the bytecode's
-            // MakeClosure instructions index; an OS-thread VM worker running this
-            // template needs them, so they ride alongside bytecode + constants.
-            let (bytecode, constants, child_protos) = caller
+            // The blueprint: the dual-compiled bytecode, constants and
+            // nested-lambda blueprints for this table index, plus the metadata
+            // this call supplies. An OS-thread VM worker running this code
+            // object needs the child blueprints, so they ride along.
+            let dual = caller
                 .data()
                 .closure_bytecodes
                 .get(table_idx as usize)
-                .map(|(bc, cs, cp)| (bc.clone(), cs.clone(), cp.clone()))
-                .unwrap_or_else(|| {
-                    (
-                        std::rc::Rc::new(vec![]),
-                        std::rc::Rc::new(vec![]),
-                        std::rc::Rc::new(vec![]),
+                .cloned();
+            let proto = std::rc::Rc::new(match dual.as_deref() {
+                Some(d) => crate::value::TemplateProto {
+                    num_locals,
+                    num_captures: num_captures as usize,
+                    num_params,
+                    signal: crate::signals::Signal {
+                        bits: crate::value::fiber::SignalBits::new(signal_bits),
+                        propagates: 0,
+                    },
+                    capture_params_mask,
+                    capture_locals_mask,
+                    wasm_func_idx: Some(table_idx as u32),
+                    child_protos: d.child_protos.clone(),
+                    ..crate::value::TemplateProto::new(
+                        d.bytecode.clone(),
+                        arity,
+                        d.constants.clone(),
                     )
-                });
-            let template = std::rc::Rc::new(crate::value::closure::ClosureTemplate {
-                num_locals,
-                num_captures: num_captures as usize,
-                num_params,
-                signal: crate::signals::Signal {
-                    bits: crate::value::fiber::SignalBits::new(signal_bits),
-                    propagates: 0,
                 },
-                capture_params_mask,
-                capture_locals_mask,
-                wasm_func_idx: Some(table_idx as u32),
-                child_protos,
-                ..crate::value::closure::ClosureTemplate::new(bytecode, arity, constants)
+                None => crate::value::TemplateProto {
+                    num_locals,
+                    num_captures: num_captures as usize,
+                    num_params,
+                    signal: crate::signals::Signal {
+                        bits: crate::value::fiber::SignalBits::new(signal_bits),
+                        propagates: 0,
+                    },
+                    capture_params_mask,
+                    capture_locals_mask,
+                    wasm_func_idx: Some(table_idx as u32),
+                    ..crate::value::TemplateProto::new(Vec::new(), arity, Vec::new())
+                },
             });
 
-            // Build the closure + its captured-env slice through a boundary ctx
-            // over its own fresh result region.
+            // Build the code object, the closure, and its captured-env slice
+            // through a boundary ctx over its own fresh result region.
             let heap = unsafe { &mut *caller.data().heap_ptr() };
             let ctx = crate::primitives::ctx::Alloc::new(heap);
-            let closure = crate::value::closure::Closure {
-                template: crate::value::TemplateRef::new(template),
-                env: ctx.alloc_slice::<Value>(&captures),
-                squelch_mask: crate::value::fiber::SignalBits::EMPTY,
-            };
+            let closure = crate::value::closure::Closure::new(
+                crate::value::TemplateRef::region(ctx.template(&proto)),
+                ctx.alloc_slice::<Value>(&captures),
+                crate::value::fiber::SignalBits::EMPTY,
+            );
 
             let value = ctx.closure(closure);
             let (tag, payload) = caller.data_mut().value_to_wasm(value);

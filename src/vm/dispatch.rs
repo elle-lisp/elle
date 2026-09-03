@@ -4,7 +4,6 @@
 //! instructions to their handlers.
 
 use crate::compiler::bytecode::Instruction;
-use crate::error::LocationMap;
 use crate::value::{
     BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_OK,
 };

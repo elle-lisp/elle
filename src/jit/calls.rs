@@ -240,7 +240,7 @@ pub(crate) fn incref_owned_call_args(
     args: &[Value],
 ) {
     use crate::value::arena::{incref_for_escape, result_region_of, EscapeSite};
-    let mask = closure.template.capture_params_mask;
+    let mask = closure.template.capture_params_mask();
     let mut incref_fixed = |upto: usize| {
         for (i, &arg) in args.iter().take(upto).enumerate() {
             let captured = i < 64 && (mask & (1 << i)) != 0;
@@ -250,20 +250,20 @@ pub(crate) fn incref_owned_call_args(
             }
         }
     };
-    match closure.template.arity {
+    match closure.template.arity() {
         crate::value::Arity::Exact(_) | crate::value::Arity::Range(_, _) => {
             incref_fixed(args.len());
         }
         crate::value::Arity::AtLeast(_) => {
             // Mirror `populate_env`'s `provided_fixed` boundary: only the args
             // that fill non-rest slots are owned params; the rest are collected.
-            let fixed_slots = closure.template.num_params - 1;
+            let fixed_slots = closure.template.num_params() - 1;
             let collects_keywords = matches!(
-                closure.template.vararg_kind,
-                crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
+                closure.template.vararg_tag(),
+                crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
             );
             let provided_fixed = if collects_keywords {
-                let min = closure.template.arity.fixed_params();
+                let min = closure.template.arity().fixed_params();
                 let mut count = args.len().min(min);
                 while count < fixed_slots && count < args.len() {
                     if args[count].is_keyword() {

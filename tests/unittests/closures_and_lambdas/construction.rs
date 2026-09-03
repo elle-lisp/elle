@@ -9,12 +9,11 @@ fn test_closure_type_identification() {
     // Verify closures are properly typed
     let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
+        template: template(h.heap(), TemplateProto::new(
+            vec![],
             Arity::Exact(0),
-            Rc::new(vec![]),
-        ))
-        .into(),
+            vec![],
+        )),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -31,11 +30,9 @@ fn test_closure_display() {
     // Closures should have a reasonable string representation
     let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(h.heap(), TemplateProto {
             num_locals: 1,
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![], Arity::Exact(1), vec![]) }),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -51,11 +48,9 @@ fn test_closure_clone() {
     let mut rt = Runtime::without_stdlib();
     let env = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &[Value::int(42)]);
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(h.heap(), TemplateProto {
             num_locals: 2,
-            ..ClosureTemplate::new(Rc::new(vec![1, 2, 3]), Arity::Exact(2), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![1, 2, 3], Arity::Exact(2), vec![]) }),
         env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -112,14 +107,14 @@ fn test_arity_zero() {
 
 #[test]
 fn test_closure_empty_environment() {
+    let h = elle::primitives::ctx::TestHeap::new();
     // Closure with no captured variables
     let closure = Closure {
-        template: Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
+        template: template(h.heap(), TemplateProto::new(
+            vec![],
             Arity::Exact(0),
-            Rc::new(vec![]),
-        ))
-        .into(),
+            vec![],
+        )),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -133,11 +128,9 @@ fn test_closure_single_captured_variable() {
     let captured = vec![Value::int(42)];
     let env = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &captured);
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(rt.heap(), TemplateProto {
             num_locals: 1,
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![], Arity::Exact(1), vec![]) }),
         env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -158,11 +151,9 @@ fn test_closure_multiple_captured_variables() {
     ];
     let env = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &captured);
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(h.heap(), TemplateProto {
             num_locals: 2,
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(2), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![], Arity::Exact(2), vec![]) }),
         env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -183,21 +174,17 @@ fn test_closure_environment_sharing() {
     );
 
     let closure1 = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(rt.heap(), TemplateProto {
             num_locals: 1,
-            ..ClosureTemplate::new(Rc::new(vec![1]), Arity::Exact(1), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![1], Arity::Exact(1), vec![]) }),
         env: shared_env,
         squelch_mask: SignalBits::EMPTY,
     };
 
     let closure2 = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(rt.heap(), TemplateProto {
             num_locals: 1,
-            ..ClosureTemplate::new(Rc::new(vec![2]), Arity::Exact(1), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![2], Arity::Exact(1), vec![]) }),
         env: shared_env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -213,19 +200,19 @@ fn test_closure_environment_sharing() {
 
 #[test]
 fn test_closure_bytecode_storage() {
+    let h = elle::primitives::ctx::TestHeap::new();
     // Bytecode should be properly stored and retrievable
     let bytecode = vec![1, 2, 3, 4, 5];
     let closure = Closure {
-        template: Rc::new(ClosureTemplate::new(
-            Rc::new(bytecode.clone()),
+        template: template(h.heap(), TemplateProto::new(
+            bytecode.clone(),
             Arity::Exact(0),
-            Rc::new(vec![]),
-        ))
-        .into(),
+            vec![],
+        )),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
-    assert_eq!(*closure.template.bytecode, bytecode);
+    assert_eq!(closure.template.bytecode(), bytecode);
 }
 
 #[test]
@@ -234,32 +221,30 @@ fn test_closure_constants_storage() {
     let h = elle::primitives::ctx::TestHeap::new();
     let constants = vec![Value::int(42), h.ctx().string("hello"), Value::bool(true)];
     let closure = Closure {
-        template: Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
+        template: template(h.heap(), TemplateProto::new(
+            vec![],
             Arity::Exact(0),
-            Rc::new(constants.clone()),
-        ))
-        .into(),
+            constants.clone(),
+        )),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
-    assert_eq!(*closure.template.constants, constants);
+    assert_eq!(closure.template.constants(), constants);
 }
 
 #[test]
 fn test_closure_num_locals() {
+    let h = elle::primitives::ctx::TestHeap::new();
     // num_locals should track local variable count
     for num_locals in 0..10 {
         let closure = Closure {
-            template: Rc::new(ClosureTemplate {
+            template: template(h.heap(), TemplateProto {
                 num_locals,
-                ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
-            })
-            .into(),
+                ..TemplateProto::new(vec![], Arity::Exact(0), vec![]) }),
             env: elle::value::region_slice::RegionSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
-        assert_eq!(closure.template.num_locals, num_locals);
+        assert_eq!(closure.template.num_locals(), num_locals);
     }
 }
 
@@ -269,62 +254,59 @@ fn test_closure_num_locals() {
 
 #[test]
 fn test_closure_zero_parameters() {
+    let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate::new(
-            Rc::new(vec![]),
+        template: template(h.heap(), TemplateProto::new(
+            vec![],
             Arity::Exact(0),
-            Rc::new(vec![]),
-        ))
-        .into(),
+            vec![],
+        )),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
-    assert!(closure.template.arity.matches(0));
-    assert!(!closure.template.arity.matches(1));
+    assert!(closure.template.arity().matches(0));
+    assert!(!closure.template.arity().matches(1));
 }
 
 #[test]
 fn test_closure_single_parameter() {
+    let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(h.heap(), TemplateProto {
             num_locals: 1,
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![], Arity::Exact(1), vec![]) }),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
-    assert!(closure.template.arity.matches(1));
+    assert!(closure.template.arity().matches(1));
 }
 
 #[test]
 fn test_closure_multiple_parameters() {
+    let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(h.heap(), TemplateProto {
             num_locals: 3,
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(3), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![], Arity::Exact(3), vec![]) }),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
-    assert!(closure.template.arity.matches(3));
-    assert!(!closure.template.arity.matches(2));
-    assert!(!closure.template.arity.matches(4));
+    assert!(closure.template.arity().matches(3));
+    assert!(!closure.template.arity().matches(2));
+    assert!(!closure.template.arity().matches(4));
 }
 
 #[test]
 fn test_closure_variadic_parameters() {
+    let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
+        template: template(h.heap(), TemplateProto {
             num_locals: 1,
-            ..ClosureTemplate::new(Rc::new(vec![]), Arity::AtLeast(1), Rc::new(vec![]))
-        })
-        .into(),
+            ..TemplateProto::new(vec![], Arity::AtLeast(1), vec![]) }),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
-    assert!(closure.template.arity.matches(1));
-    assert!(closure.template.arity.matches(2));
-    assert!(closure.template.arity.matches(10));
+    assert!(closure.template.arity().matches(1));
+    assert!(closure.template.arity().matches(2));
+    assert!(closure.template.arity().matches(10));
 }

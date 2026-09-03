@@ -20,36 +20,35 @@ fn setup_yield_test(
 ) -> (crate::vm::VM, Value) {
     use crate::signals::Signal;
     use crate::value::types::Arity;
-    use crate::value::ClosureTemplate;
+    use crate::value::TemplateProto;
 
     use std::rc::Rc;
     use std::sync::Arc;
 
-    let bytecode = Rc::new(bytecode);
-    let constants = Rc::new(constants);
-
-    let template = Rc::new(ClosureTemplate {
+    let proto = Rc::new(TemplateProto {
         signal: Signal::yields(),
-        ..ClosureTemplate::new(bytecode.clone(), Arity::Exact(0), constants)
+        ..TemplateProto::new(bytecode, Arity::Exact(0), constants)
     });
 
     // VM must exist before allocating the closure env slice; it owns the heap.
     let mut vm = crate::vm::VM::new();
 
-    // Build the env slice and the closure header in ONE explicit region (slice
-    // + header share that region, named through the ctx) on the VM's own heap —
-    // the same heap the closure is allocated into below.
+    // Build the env slice, the code object's header, and the closure header in
+    // ONE explicit region (they share that region, named through the ctx) on
+    // the VM's own heap — the same heap the closure is allocated into below,
+    // exactly as `MakeClosure` builds them.
     let region = unsafe { (*vm.heap_ptr).new_runtime_region() };
+    let template = crate::value::closure::materialize(unsafe { &mut *vm.heap_ptr }, &proto, region);
     let env_slice = crate::value::arena::alloc_region_slice_in_region::<Value>(
         unsafe { &mut *vm.heap_ptr },
         &env,
         region,
     );
-    let closure = crate::value::Closure {
-        template: crate::value::TemplateRef::new(template.clone()),
-        env: env_slice,
-        squelch_mask: SignalBits::EMPTY,
-    };
+    let closure = crate::value::Closure::new(
+        crate::value::TemplateRef::region(template),
+        env_slice,
+        SignalBits::EMPTY,
+    );
 
     // The closure header must share `region` with its env slice (see above), so
     // allocate it into `region` explicitly via a NativeCtx over this VM rather
@@ -62,7 +61,8 @@ fn setup_yield_test(
     .closure(closure);
 
     let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
-    vm.install_jit_code(bytecode, jit_code);
+    let template = crate::value::closure::TemplateRef::region(template);
+    vm.install_jit_code((*template).clone(), jit_code);
 
     (vm, closure_val)
 }
@@ -79,20 +79,17 @@ fn setup_yield_test_with_lbox(
 ) -> (crate::vm::VM, Value) {
     use crate::signals::Signal;
     use crate::value::types::Arity;
-    use crate::value::ClosureTemplate;
+    use crate::value::TemplateProto;
 
     use std::rc::Rc;
     use std::sync::Arc;
 
-    let bytecode = Rc::new(bytecode);
-    let constants = Rc::new(constants);
-
-    let template = Rc::new(ClosureTemplate {
+    let proto = Rc::new(TemplateProto {
         num_params,
         signal: Signal::yields(),
         capture_params_mask,
         capture_locals_mask: crate::value::CaptureMask::from_u64(capture_locals_mask),
-        ..ClosureTemplate::new(bytecode.clone(), Arity::Exact(num_params), constants)
+        ..TemplateProto::new(bytecode, Arity::Exact(num_params), constants)
     });
 
     // VM must exist before allocating the closure env slice; it owns the heap.
@@ -102,16 +99,17 @@ fn setup_yield_test_with_lbox(
     // + header share that region, named through the ctx) on the VM's own heap —
     // the same heap the closure is allocated into below.
     let region = unsafe { (*vm.heap_ptr).new_runtime_region() };
+    let template = crate::value::closure::materialize(unsafe { &mut *vm.heap_ptr }, &proto, region);
     let env_slice = crate::value::arena::alloc_region_slice_in_region::<Value>(
         unsafe { &mut *vm.heap_ptr },
         &env,
         region,
     );
-    let closure = crate::value::Closure {
-        template: crate::value::TemplateRef::new(template.clone()),
-        env: env_slice,
-        squelch_mask: SignalBits::EMPTY,
-    };
+    let closure = crate::value::Closure::new(
+        crate::value::TemplateRef::region(template),
+        env_slice,
+        SignalBits::EMPTY,
+    );
 
     // The closure header must share `region` with its env slice (see above), so
     // allocate it into `region` explicitly via a NativeCtx over this VM rather
@@ -124,7 +122,8 @@ fn setup_yield_test_with_lbox(
     .closure(closure);
 
     let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
-    vm.install_jit_code(bytecode, jit_code);
+    let template = crate::value::closure::TemplateRef::region(template);
+    vm.install_jit_code((*template).clone(), jit_code);
 
     (vm, closure_val)
 }

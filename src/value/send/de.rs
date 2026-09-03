@@ -87,7 +87,7 @@ impl<'a, 'h> DeserContext<'a, 'h> {
 
 /// Recursive worker for deserialization. Threads DeserContext through all recursive calls.
 /// Reconstruct a closure **template** blueprint (a `SendableClosure` produced by
-/// `sendable_from_template`) into an `Rc<ClosureTemplate>`. The inverse of
+/// `sendable_from_template`) into an `Rc<TemplateProto>`. The inverse of
 /// `sendable_from_template`: recurses on `child_protos` and ignores
 /// `env`/`squelch_mask` (a blueprint is a pure template). Used to rebuild a
 /// reconstructed template's `child_protos` so the worker's `MakeClosure`
@@ -95,14 +95,13 @@ impl<'a, 'h> DeserContext<'a, 'h> {
 pub(in crate::value::send) fn template_from_sendable(
     sc: SendableClosure,
     ctx: &mut DeserContext<'_, '_>,
-) -> std::rc::Rc<crate::value::ClosureTemplate> {
+) -> std::rc::Rc<crate::value::TemplateProto> {
     use std::rc::Rc;
     let constants: Vec<Value> = sc
         .constants
         .into_iter()
         .map(|cv| into_value_inner(cv, ctx))
         .collect();
-    let doc = sc.doc.map(|d| std::rc::Rc::from(d.as_str()));
     let lir_value_pool: Vec<Value> = sc
         .lir_value_pool
         .into_iter()
@@ -113,33 +112,33 @@ pub(in crate::value::send) fn template_from_sendable(
         patch_lir_value_refs(&mut lir, &lir_value_pool);
         Rc::new(lir)
     });
-    let child_protos: Vec<Rc<crate::value::ClosureTemplate>> = sc
+    let child_protos: Vec<Rc<crate::value::TemplateProto>> = sc
         .child_protos
         .into_iter()
         .map(|p| template_from_sendable(p, ctx))
         .collect();
-    Rc::new(crate::value::ClosureTemplate {
+    Rc::new(crate::value::TemplateProto {
         num_locals: sc.num_locals,
         num_captures: sc.num_captures,
         num_params: sc.num_params,
         signal: sc.signal,
         capture_params_mask: sc.capture_params_mask,
         capture_locals_mask: sc.capture_locals_mask,
-        location_map: Rc::new(sc.location_map),
+        location_map: sc.location_map,
         lir_function,
-        doc,
+        doc: sc.doc,
         vararg_kind: sc.vararg_kind,
-        name: sc.name.map(|s| Rc::from(s.as_str())),
-        child_protos: Rc::new(child_protos),
-        merged_slots: Rc::new(sc.merged_slots.into_iter().collect()),
-        frame_release_slots: Rc::new(sc.frame_release_slots),
-        frame_release_regions: Rc::new(sc.frame_release_regions),
-        ..crate::value::ClosureTemplate::new(Rc::new(sc.bytecode), sc.arity, Rc::new(constants))
+        name: sc.name,
+        child_protos,
+        merged_slots: sc.merged_slots.into_iter().collect(),
+        frame_release_slots: sc.frame_release_slots,
+        frame_release_regions: sc.frame_release_regions,
+        ..crate::value::TemplateProto::new(sc.bytecode, sc.arity, constants)
     })
 }
 
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
-    use crate::value::closure::{Closure, ClosureTemplate};
+    use crate::value::closure::{Closure, TemplateProto};
     use crate::value::heap::{HeapObject, Pair};
     use std::cell::RefCell;
     use std::collections::BTreeSet;
@@ -365,7 +364,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
 
-            let doc = sc.doc.map(|d| std::rc::Rc::from(d.as_str()));
+            let doc = sc.doc;
 
             // Rebuild the compound-value pool lifted out of the LIR on send.
             let lir_value_pool: Vec<Value> = sc
@@ -385,37 +384,41 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
 
             // Reconstruct the nested-lambda blueprints so this template's
             // `MakeClosure`s resolve by index in the worker.
-            let child_protos: Vec<Rc<ClosureTemplate>> = sc
+            let child_protos: Vec<Rc<TemplateProto>> = sc
                 .child_protos
                 .into_iter()
                 .map(|p| template_from_sendable(p, ctx))
                 .collect();
 
-            let template = Rc::new(ClosureTemplate {
+            let proto = Rc::new(TemplateProto {
                 num_locals: sc.num_locals,
                 num_captures: sc.num_captures,
                 num_params: sc.num_params,
                 signal: sc.signal,
                 capture_params_mask: sc.capture_params_mask,
                 capture_locals_mask: sc.capture_locals_mask,
-                location_map: Rc::new(sc.location_map),
+                location_map: sc.location_map,
                 lir_function,
                 doc,
                 vararg_kind: sc.vararg_kind,
-                name: sc.name.map(|s| Rc::from(s.as_str())),
-                child_protos: Rc::new(child_protos),
-                merged_slots: Rc::new(sc.merged_slots.into_iter().collect()),
-                frame_release_slots: Rc::new(sc.frame_release_slots),
-                frame_release_regions: Rc::new(sc.frame_release_regions),
-                ..ClosureTemplate::new(Rc::new(sc.bytecode), sc.arity, Rc::new(constants))
+                name: sc.name,
+                child_protos,
+                merged_slots: sc.merged_slots.into_iter().collect(),
+                frame_release_slots: sc.frame_release_slots,
+                frame_release_regions: sc.frame_release_regions,
+                ..TemplateProto::new(sc.bytecode, sc.arity, constants)
             });
 
+            // The receiving side materializes the header into the closure's own
+            // region, as `MakeClosure` does — a received closure is an ordinary
+            // region allocation here, not an `Rc` blueprint the worker keeps.
+            let template = ctx.ctx.template(&proto);
             let env_slice = ctx.alloc_slice::<Value>(&env);
-            let val = ctx.ctx.closure(Closure {
-                template: crate::value::TemplateRef::new(template),
-                env: env_slice,
-                squelch_mask: sc.squelch_mask,
-            });
+            let val = ctx.ctx.closure(Closure::new(
+                crate::value::TemplateRef::region(template),
+                env_slice,
+                sc.squelch_mask,
+            ));
             ctx.states[idx] = ReconState::Done(val);
             val
         }

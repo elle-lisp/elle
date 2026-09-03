@@ -143,6 +143,19 @@ pub(crate) fn closure(
     )
 }
 
+/// Materialize a code object's header for `proto` into `region` on `heap`. The
+/// shared payload comes from the heap's cache, so this allocates one object
+/// whatever the size of the function's bytecode
+/// (docs/impl/region/template.md).
+#[inline]
+pub(crate) fn template(
+    heap: &mut FiberHeap,
+    proto: &Rc<crate::value::TemplateProto>,
+    region: RuntimeRegion,
+) -> Value {
+    crate::value::closure::materialize(heap, proto, region)
+}
+
 /// Allocate a user box (`LBox`) into `region` on `heap`.
 #[inline]
 pub(crate) fn lbox(heap: &mut FiberHeap, value: Value, region: RuntimeRegion) -> Value {

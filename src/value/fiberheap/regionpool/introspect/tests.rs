@@ -48,11 +48,24 @@ fn obj_with_value_in_every_channel(
     };
     let vals_in_own = |store: &mut RegionStore| store.alloc_region_slice(own, &[v2]);
     let table_key = || crate::value::TableKey::from_value(&Value::int(1)).unwrap();
-    let empty_template = || {
-        Rc::new(crate::value::closure::ClosureTemplate::new(
-            Rc::new(vec![]),
+    // A code object with an empty payload, allocated into `own` — the header is
+    // co-region with its payload here, so the payload backing is a self-edge and
+    // the arm under test is the only channel.
+    let empty_template = |store: &mut RegionStore| {
+        let payload = crate::value::closure::CodePayload::test_with_constants(
+            crate::value::region_slice::RegionSlice::empty(),
+        );
+        let payload = store.alloc_region_slice(own, &[payload]);
+        let proto = Rc::new(crate::value::TemplateProto::new(
+            Vec::new(),
             crate::value::Arity::Exact(0),
-            Rc::new(vec![]),
+            Vec::new(),
+        ));
+        crate::value::TemplateRef::region(store.alloc_obj(
+            own,
+            HeapObject::ClosureTemplate(crate::value::closure::ClosureTemplate::test_header(
+                payload, proto,
+            )),
         ))
     };
     Some(match tag {
@@ -100,7 +113,7 @@ fn obj_with_value_in_every_channel(
             // ClosureTemplate arm's channel below.
             HeapObject::Closure {
                 closure: crate::value::closure::Closure::new(
-                    empty_template(),
+                    empty_template(store),
                     vals_in_own(store),
                     crate::value::SignalBits::EMPTY,
                 ),
@@ -161,7 +174,7 @@ fn obj_with_value_in_every_channel(
             // value is the content channel under test (SIG_OK is
             // terminal).
             let closure = crate::value::closure::Closure::new(
-                empty_template(),
+                empty_template(store),
                 RegionSlice::empty(),
                 crate::value::SignalBits::EMPTY,
             );
@@ -252,11 +265,18 @@ fn obj_with_value_in_every_channel(
         HeapTag::ClosureTemplate => (
             // The constant pool is the template's only channel (no
             // traits field; child_protos are plain Rc data).
-            HeapObject::ClosureTemplate(crate::value::closure::ClosureTemplate::new(
-                Rc::new(vec![]),
-                crate::value::Arity::Exact(0),
-                Rc::new(vec![v2]),
-            )),
+            HeapObject::ClosureTemplate({
+                let payload = crate::value::closure::CodePayload::test_with_constants(
+                    store.alloc_region_slice(own, &[v2]),
+                );
+                let payload = store.alloc_region_slice(own, &[payload]);
+                let proto = Rc::new(crate::value::TemplateProto::new(
+                    Vec::new(),
+                    crate::value::Arity::Exact(0),
+                    Vec::new(),
+                ));
+                crate::value::closure::ClosureTemplate::test_header(payload, proto)
+            }),
             Channels {
                 content: true,
                 traits: false,

@@ -158,7 +158,7 @@ pub(crate) fn prim_squelch(
     // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap,
     // RegionSlice copy is a (ptr, len) pair).
     let new_closure = Closure {
-        template: closure_rc.template.clone(),
+        template: closure_rc.template,
         env: closure_rc.env,
         squelch_mask: closure_rc.squelch_mask.union(new_bits),
     };
@@ -207,7 +207,7 @@ pub(crate) fn prim_attune(
     let suppress_bits = crate::signals::CAP_MASK.subtract(permitted_bits);
 
     let new_closure = Closure {
-        template: closure_rc.template.clone(),
+        template: closure_rc.template,
         env: closure_rc.env,
         squelch_mask: closure_rc.squelch_mask.union(suppress_bits),
     };
@@ -229,7 +229,7 @@ pub(crate) fn prim_meta_origin(
         Some(c) => c,
         None => return (SIG_OK, Value::NIL),
     };
-    let syntax = match closure_rc.template.syntax.as_ref() {
+    let syntax = match closure_rc.template.syntax() {
         Some(s) => s,
         None => return (SIG_OK, Value::NIL),
     };
@@ -270,7 +270,7 @@ pub(crate) fn prim_git(
     {
         let closure = prim_arg!(ctx, args, 0, as_closure, "git", "closure");
         // Fast path: already cached
-        if closure.template.spirv.get().is_some() {
+        if closure.template.spirv().get().is_some() {
             return (SIG_OK, args[0]);
         }
         // Check GPU eligibility upfront
@@ -280,7 +280,7 @@ pub(crate) fn prim_git(
                 ctx.error("mlir-error", "git: closure is not GPU-eligible"),
             );
         }
-        if closure.template.lir_function.is_none() {
+        if closure.template.lir_function().is_none() {
             return (
                 SIG_ERROR,
                 ctx.error("mlir-error", "git: closure has no LIR"),
@@ -305,7 +305,10 @@ pub(crate) fn prim_fn_git(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.template.spirv.get().is_some()))
+        (
+            SIG_OK,
+            Value::bool(closure.template.spirv().get().is_some()),
+        )
     } else {
         (SIG_OK, Value::FALSE)
     }
@@ -319,7 +322,7 @@ pub(crate) fn prim_disgit(
     args: &[Value],
 ) -> (SignalBits, Value) {
     let closure = prim_arg!(ctx, args, 0, as_closure, "disgit", "closure");
-    match closure.template.spirv.get() {
+    match closure.template.spirv().get() {
         Some(bytes) => (SIG_OK, ctx.bytes(bytes.clone())),
         None => (
             SIG_ERROR,

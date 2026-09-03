@@ -62,7 +62,7 @@ impl VM {
         match op_name.as_str() {
             "call-count" => {
                 if let Some(closure) = arg.as_closure() {
-                    let ptr = closure.template.bytecode.as_ptr();
+                    let ptr = closure.template.bytecode().as_ptr();
                     (SIG_OK, Value::int(self.get_closure_call_count(ptr) as i64))
                 } else {
                     (SIG_OK, Value::int(0))
@@ -296,7 +296,7 @@ impl VM {
             #[cfg(feature = "jit")]
             "jit?" => {
                 if let Some(closure) = arg.as_closure() {
-                    let ptr = closure.template.bytecode.as_ptr();
+                    let ptr = closure.template.bytecode().as_ptr();
                     (SIG_OK, Value::bool(self.jit_cache.contains_key(&ptr)))
                 } else {
                     (SIG_OK, Value::FALSE)
@@ -346,7 +346,7 @@ impl VM {
                     Some(c) => c,
                     None => return type_error!(ctx, closure_val, "mlir/compile-spirv", "closure"),
                 };
-                let lir = match &closure.template.lir_function {
+                let lir = match closure.template.lir_function() {
                     Some(lir) => lir,
                     None => {
                         return (
@@ -367,7 +367,7 @@ impl VM {
                         ),
                     );
                 }
-                let key = closure.template.bytecode.as_ptr();
+                let key = closure.template.bytecode().as_ptr();
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
@@ -392,10 +392,10 @@ impl VM {
                     None => return type_error!(ctx, closure_val, "git", "closure"),
                 };
                 // Already cached? Return early.
-                if closure.template.spirv.get().is_some() {
+                if closure.template.spirv().get().is_some() {
                     return (SIG_OK, closure_val);
                 }
-                let lir = match &closure.template.lir_function {
+                let lir = match closure.template.lir_function() {
                     Some(lir) => lir,
                     None => {
                         return (
@@ -410,14 +410,14 @@ impl VM {
                         ctx.error("mlir-error", "git: closure is not GPU-eligible".to_string()),
                     );
                 }
-                let key = closure.template.bytecode.as_ptr();
+                let key = closure.template.bytecode().as_ptr();
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
                 match cache.compile_spirv(key, lir, wg_size) {
                     Ok(bytes) => {
                         // Cache on the template (OnceCell — idempotent).
-                        let _ = closure.template.spirv.set(bytes.to_vec());
+                        let _ = closure.template.spirv().set(bytes.to_vec());
                         (SIG_OK, closure_val)
                     }
                     Err(e) => (SIG_ERROR, ctx.error("mlir-error", format!("git: {}", e))),

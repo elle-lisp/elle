@@ -19,8 +19,8 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
-        let lir = match closure.template.lir_function.as_ref() {
-            Some(l) => l.clone(),
+        let lir = match closure.template.lir_function() {
+            Some(l) => std::rc::Rc::clone(l),
             None => return (SIG_ERROR, rejected(self, "mlir-cpu", "closure has no LIR")),
         };
 
@@ -31,11 +31,11 @@ impl VM {
             );
         }
 
-        if !self.check_arity(&closure.template.arity, args.len()) {
+        if !self.check_arity(&closure.template.arity(), args.len()) {
             return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
         }
 
-        let num_captures = closure.template.num_captures as u16;
+        let num_captures = closure.template.num_captures() as u16;
 
         // Unbox captures to i64. They must be numeric (int or float).
         let mut int_args: Vec<i64> = Vec::with_capacity(closure.env.len() + args.len());
@@ -87,7 +87,7 @@ impl VM {
             }
         }
 
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
+        let bytecode_ptr = closure.template.bytecode().as_ptr();
         let cache = self
             .mlir_cache
             .get_or_insert_with(crate::mlir::MlirCache::new);

@@ -66,11 +66,11 @@ pub struct SendableClosure {
     /// `ValueConst`s. Keeping the LIR shippable lets JIT/MLIR/WASM tiers run a
     /// closure across a thread boundary instead of dropping its LIR.
     pub lir_value_pool: Vec<SendValue>,
-    /// Nested-lambda blueprints (`ClosureTemplate.child_protos`) this code
-    /// object's `MakeClosure` instructions index. Serialized inline (templates
-    /// have no heap identity to intern) so the worker can rebuild them into the
-    /// reconstructed template's `child_protos` and resolve `MakeClosure`. Each
-    /// has empty `env`/`squelch_mask` — a blueprint is a pure template.
+    /// Nested-lambda blueprints (`TemplateProto::child_protos`) this code
+    /// object's `MakeClosure` instructions index. Serialized inline (a blueprint
+    /// has no heap identity to intern) so the worker can rebuild them into the
+    /// reconstructed blueprint's `child_protos` and resolve `MakeClosure`. Each
+    /// has empty `env`/`squelch_mask` — a blueprint is a pure code description.
     pub child_protos: Vec<SendableClosure>,
     /// The static region slots this code object's allocations SHARE after a
     /// builder-idiom merge (`ClosureTemplate.merged_slots`; docs/impl/region/merging.md
@@ -359,7 +359,7 @@ pub(crate) struct SendTemplates {
 /// pool are live heap instances and intern into the returned `intern_table` —
 /// the reconstructed templates reference it by `Ref(idx)`.
 pub(crate) fn serialize_templates(
-    protos: &[std::rc::Rc<crate::value::ClosureTemplate>],
+    protos: &[std::rc::Rc<crate::value::TemplateProto>],
     heap: &crate::value::fiberheap::FiberHeap,
     symbols: &crate::symbol::SymbolTable,
 ) -> Result<SendTemplates, String> {
@@ -391,7 +391,7 @@ pub(crate) fn deserialize_templates(
     stored: SendTemplates,
     alloc: &mut crate::primitives::ctx::Alloc<'_>,
     symbols: &mut crate::symbol::SymbolTable,
-) -> Result<Vec<std::rc::Rc<crate::value::ClosureTemplate>>, String> {
+) -> Result<Vec<std::rc::Rc<crate::value::TemplateProto>>, String> {
     for (hash, name) in &stored.names {
         symbols.record_spelling(*hash, name);
     }
