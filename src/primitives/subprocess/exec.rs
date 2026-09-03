@@ -52,7 +52,9 @@ pub(super) fn parse_exec_opts(
                                 )),
                             }
                         }
-                        TableKey::String(s) => s.clone(),
+                        TableKey::String(v) => {
+                            v.as_str().expect("a string key holds a string").to_string()
+                        }
                         _ => {
                             return Err((
                                 SIG_ERROR,

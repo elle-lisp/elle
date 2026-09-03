@@ -173,7 +173,7 @@ pub(crate) fn prim_sys_env(
     for (key, val) in
         std::env::vars_os().filter_map(|(k, v)| k.into_string().ok().zip(v.into_string().ok()))
     {
-        fields.insert(TableKey::String(key), ctx.string(val));
+        fields.insert(TableKey::String(ctx.string(key)), ctx.string(val));
     }
     (SIG_OK, ctx.struct_from(fields))
 }

@@ -128,6 +128,14 @@ impl<'h> Alloc<'h> {
         let region = self.region;
         self.heap().alloc_region_slice_in_region(items, region)
     }
+
+    /// Build the stored form of a struct key in the ctx's region — the
+    /// forwarder a native body uses before putting a key into a struct it
+    /// builds here (docs/impl/values.md § "Struct keys").
+    pub fn intern_key(&self, key: &crate::value::heap::TableKey) -> crate::value::heap::TableKey {
+        let region = self.region;
+        key.intern_into(self.heap(), region)
+    }
 }
 
 /// The native-call capability: an [`Alloc`] plus the **non-null** driving VM

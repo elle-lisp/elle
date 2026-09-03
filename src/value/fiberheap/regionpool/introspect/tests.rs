@@ -48,6 +48,10 @@ fn obj_with_value_in_every_channel(
     };
     let vals_in_own = |store: &mut RegionStore| store.alloc_region_slice(own, &[v2]);
     let table_key = || crate::value::TableKey::from_value(&Value::int(1)).unwrap();
+    // An immutable struct's entry slice is co-region with its header, so the
+    // only cross-region channel it exposes is the value in the entry.
+    let entries_in_own =
+        |store: &mut RegionStore| store.alloc_region_slice(own, &[(table_key(), v2)]);
     // A code object with an empty payload, allocated into `own` — the header is
     // co-region with its payload here, so the payload backing is a self-edge and
     // the arm under test is the only channel.
@@ -100,7 +104,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LStruct => (
             HeapObject::LStruct {
-                data: vec![(table_key(), v2)],
+                data: entries_in_own(store),
                 traits: vt,
             },
             both,

@@ -1,4 +1,3 @@
-use elle::primitives::ctx::with_test_ctx;
 use elle::value::types::TableKey;
 use elle::Value;
 
@@ -8,21 +7,21 @@ use elle::Value;
 fn test_from_value_nil() {
     let key = TableKey::from_value(&Value::NIL).unwrap();
     assert_eq!(key, TableKey::Nil);
-    assert_eq!(with_test_ctx(|ctx| key.to_value(ctx)), Value::NIL);
+    assert_eq!(key.to_value(), Value::NIL);
 }
 
 #[test]
 fn test_from_value_bool() {
     let key = TableKey::from_value(&Value::TRUE).unwrap();
     assert_eq!(key, TableKey::Bool(true));
-    assert_eq!(with_test_ctx(|ctx| key.to_value(ctx)), Value::TRUE);
+    assert_eq!(key.to_value(), Value::TRUE);
 }
 
 #[test]
 fn test_from_value_int() {
     let key = TableKey::from_value(&Value::int(42)).unwrap();
     assert_eq!(key, TableKey::Int(42));
-    assert_eq!(with_test_ctx(|ctx| key.to_value(ctx)), Value::int(42));
+    assert_eq!(key.to_value(), Value::int(42));
 }
 
 #[test]
@@ -33,7 +32,7 @@ fn test_from_value_keyword() {
         matches!(key, TableKey::Keyword(h) if h == elle::value::keyword::keyword_hash("foo"))
     );
     // to_value produces an equivalent keyword
-    assert!(with_test_ctx(|ctx| key.to_value(ctx)).is_keyword_named("foo"));
+    assert!(key.to_value().is_keyword_named("foo"));
 }
 
 #[test]
@@ -41,7 +40,8 @@ fn test_from_value_string() {
     let h = elle::primitives::ctx::TestHeap::new();
     let val = h.ctx().string("hello");
     let key = TableKey::from_value(&val).unwrap();
-    assert!(matches!(key, TableKey::String(ref s) if s == "hello"));
+    assert_eq!(key.as_str(), Some("hello"));
+    assert_eq!(key.to_value(), val, "a probe key holds the value it read");
 }
 
 // ── EmptyList key ───────────────────────────────────────────
@@ -50,7 +50,7 @@ fn test_from_value_string() {
 fn test_from_value_empty_list() {
     let key = TableKey::from_value(&Value::EMPTY_LIST).unwrap();
     assert_eq!(key, TableKey::EmptyList);
-    assert_eq!(with_test_ctx(|ctx| key.to_value(ctx)), Value::EMPTY_LIST);
+    assert_eq!(key.to_value(), Value::EMPTY_LIST);
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn test_external_key_roundtrip() {
     let h = elle::primitives::ctx::TestHeap::new();
     let ext = h.ctx().external("test-type", 42u32);
     let key = TableKey::from_value(&ext).unwrap();
-    let roundtripped = with_test_ctx(|ctx| key.to_value(ctx));
+    let roundtripped = key.to_value();
     // Must be the exact same Value (same tag and pointer payload)
     assert_eq!(roundtripped, ext, "to_value must return the original Value");
 }
@@ -119,12 +119,30 @@ fn test_from_value_table_rejected() {
 
 #[test]
 fn test_is_sendable_value_keys() {
+    let h = elle::primitives::ctx::TestHeap::new();
+    let text = TableKey::from_value(&h.ctx().string("hello")).unwrap();
     assert!(TableKey::Nil.is_sendable());
     assert!(TableKey::Bool(true).is_sendable());
     assert!(TableKey::Int(42).is_sendable());
-    assert!(TableKey::String("hello".to_string()).is_sendable());
+    assert!(text.is_sendable());
     assert!(TableKey::keyword("foo").is_sendable());
     assert!(TableKey::EmptyList.is_sendable());
+}
+
+// An array key travels only if every element does, because `SendKey::Array`
+// carries element keys and has no arm for an identity key.
+#[test]
+fn test_is_sendable_array_key_follows_its_elements() {
+    let h = elle::primitives::ctx::TestHeap::new();
+    let plain = h.ctx().array(vec![Value::int(1), h.ctx().string("x")]);
+    assert!(TableKey::from_value(&plain).unwrap().is_sendable());
+
+    let ext = h.ctx().external("test-type", 42u32);
+    let with_identity = h.ctx().array(vec![Value::int(1), ext]);
+    assert!(
+        !TableKey::from_value(&with_identity).unwrap().is_sendable(),
+        "an array key holding an identity element must not be sendable"
+    );
 }
 
 #[test]

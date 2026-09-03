@@ -127,12 +127,11 @@ fn test_json_parse_arrays() {
 
 /// Read one string-keyed field out of an immutable struct.
 fn json_field(owner: Value, name: &str) -> Value {
-    use elle::value::TableKey;
     owner
         .as_struct()
         .unwrap_or_else(|| panic!("expected an immutable struct, looking for {:?}", name))
         .iter()
-        .find(|(k, _)| matches!(k, TableKey::String(s) if s == name))
+        .find(|(k, _)| k.as_str() == Some(name))
         .map(|(_, v)| *v)
         .unwrap_or_else(|| panic!("no field {:?}", name))
 }

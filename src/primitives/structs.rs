@@ -185,7 +185,7 @@ fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) 
         let map: BTreeMap<TableKey, Value> = t
             .borrow()
             .iter()
-            .map(|(k, v)| (k.clone(), deep_freeze_val(ctx, *v)))
+            .map(|(k, v)| (*k, deep_freeze_val(ctx, *v)))
             .collect();
         return ctx.struct_from(map);
     }
@@ -193,7 +193,7 @@ fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) 
     if let Some(t) = val.as_struct() {
         let entries: Vec<(TableKey, Value)> = t
             .iter()
-            .map(|(k, v)| (k.clone(), deep_freeze_val(ctx, *v)))
+            .map(|(k, v)| (*k, deep_freeze_val(ctx, *v)))
             .collect();
         return ctx.struct_from_sorted(entries);
     }
@@ -264,7 +264,7 @@ pub(crate) fn prim_thaw(
 
     // struct → @struct
     if let Some(s) = args[0].as_struct() {
-        let map: BTreeMap<_, _> = s.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let map: BTreeMap<_, _> = s.iter().map(|(k, v)| (*k, *v)).collect();
         return (SIG_OK, ctx.struct_mut_from(map));
     }
     if args[0].is_struct_mut() {
@@ -317,9 +317,11 @@ pub(crate) fn prim_pairs(
     ) -> Value {
         let mut result = Value::EMPTY_LIST;
         for (key, value) in entries.iter().rev() {
-            // `to_value` is the single source of truth for TableKey → Value
-            // (docs/impl/region/ctx.md): born in the call's region via `ctx`.
-            let key_val = key.to_value(ctx);
+            // `to_value` is the single source of truth for TableKey → Value.
+            // A stored key IS its value, so this allocates nothing and the
+            // pair below takes an ordinary cross-region reference to the
+            // struct's own key (docs/impl/values.md § "Struct keys").
+            let key_val = key.to_value();
             let pair = ctx.array(vec![key_val, *value]);
             result = ctx.pair(pair, result);
         }
@@ -332,8 +334,7 @@ pub(crate) fn prim_pairs(
 
     if let Some(map) = args[0].as_struct_mut() {
         let borrowed = map.borrow();
-        let entries: Vec<(TableKey, Value)> =
-            borrowed.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let entries: Vec<(TableKey, Value)> = borrowed.iter().map(|(k, v)| (*k, *v)).collect();
         return (SIG_OK, pairs_from_slice(ctx, &entries));
     }
 

@@ -194,16 +194,18 @@ These two fields were missing from `SendableClosure`; adding them makes the
 send/spawn path and the cache path share the same machinery and incidentally
 fixes a send/spawn omission.
 
-### `SendValue` and `TableKey` serialize through symmetric mirror enums
+### `SendValue` serializes through a symmetric mirror enum
 
 Hand-written tuple serialization drifts from derived deserialization
-(bincode's enum-tag encoding differs), so both directions of each impl go
-through one derived mirror enum (`src/value/send/mirror.rs`). A symbol
-`TableKey` or symbol `Value` refuses to serialize: it carries only a
-process-local id, no name a loader could re-intern — symbols cross by name as
-`SendValue::Symbol` or `LirConst::Symbol` instead. Heap `Value`s are likewise
-rejected — compound literals in the constant pool lower to `MaterializeConst`
-templates at compile time and never enter the pool.
+(bincode's enum-tag encoding differs), so both directions go through one
+derived mirror enum (`src/value/send/mirror.rs`). Struct keys travel as
+`SendKey`, the owning key form (docs/impl/values.md § "Struct keys"), which
+owns its bytes and derives serde directly; a symbol or keyword key travels as
+its name hash, which names the same symbol in the loading process
+(docs/impl/symbol.md). An identity key has no `SendKey` form and is refused,
+which the cache layer turns into a miss. Heap `Value`s are rejected too —
+compound literals in the constant pool lower to `MaterializeConst` templates at
+compile time and never enter the pool.
 
 ## Integration point
 

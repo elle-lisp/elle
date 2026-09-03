@@ -222,7 +222,7 @@ pub fn dispatch_data_op(
                 let filtered: Vec<(TableKey, Value)> = s
                     .iter()
                     .filter(|(k, _)| !exclude_keys.contains(k))
-                    .map(|(k, v)| (k.clone(), *v))
+                    .map(|(k, v)| (*k, *v))
                     .collect();
                 (SIG_OK, ctx.struct_from_sorted(filtered))
             } else if let Some(s) = args[0].as_struct_mut() {
@@ -230,9 +230,9 @@ pub fn dispatch_data_op(
                 let mut filtered: Vec<(TableKey, Value)> = b
                     .iter()
                     .filter(|(k, _)| !exclude_keys.contains(k))
-                    .map(|(k, v)| (k.clone(), *v))
+                    .map(|(k, v)| (*k, *v))
                     .collect();
-                filtered.sort_by(|(a, _), (b, _)| a.cmp(b));
+                filtered.sort_by_key(|(a, _)| *a);
                 (SIG_OK, ctx.struct_from_sorted(filtered))
             } else {
                 (SIG_OK, ctx.struct_from_sorted(vec![]))

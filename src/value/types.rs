@@ -17,11 +17,15 @@
 //! rejected. Mutable values could change after insertion, breaking hash invariants.
 //! Floats are rejected because NaN violates Eq/Hash.
 //!
-//! Compound immutable keys store the original `Value` directly in the `Heap`
-//! variant; `from_value()` recursively validates sub-elements but always stores
-//! the original value, not a reconstructed copy.
+//! No key variant owns a Rust-heap allocation: a string, array, or compound
+//! immutable key holds a `Value` pointing into a region. `from_value()`
+//! recursively validates sub-elements but stores the value it read, not a
+//! reconstructed copy, so the key it returns is a borrowed probe;
+//! `intern_into()` makes the form a struct may store. The whole key model —
+//! probe versus stored, and the owning `SendKey` that crosses threads — is in
+//! [docs/impl/values.md](../../docs/impl/values.md) § "Struct keys".
 
-use crate::primitives::ctx::NativeCtx;
+use crate::hir::region::RuntimeRegion;
 use crate::value::heap::HeapTag;
 use crate::value::Value;
 use std::fmt;
@@ -121,14 +125,25 @@ impl fmt::Display for Arity {
     }
 }
 
-/// Wrapper for table/struct keys - allows specific Value types to be keys
-#[derive(Clone)]
+/// A struct key: any immutable, non-float value, in a form that owns no Rust
+/// heap memory. `Copy`, because the string, array, and heap arms hold a
+/// `Value` pointing into a region rather than an allocation of their own —
+/// which is what lets a struct's entries be page bytes.
+///
+/// A key from [`TableKey::from_value`] **borrows** what it read. That is right
+/// for a probe and wrong to store; [`TableKey::intern_into`] builds the stored
+/// form, copying a string or array payload into the destination region. See
+/// [docs/impl/values.md](../../docs/impl/values.md) § "Struct keys".
+#[derive(Clone, Copy)]
 pub enum TableKey {
     Nil,
     Bool(bool),
     Int(i64),
     Symbol(SymbolId),
-    String(String),
+    /// An immutable string key, held as its `LString` value. Compared and
+    /// hashed by content, so keys spelled alike match wherever their bytes
+    /// live. A mutable `@string` is refused: it could change after insertion.
+    String(Value),
     /// A keyword key is its 64-bit name hash — the keyword value's payload,
     /// exactly as `Symbol` is its `SymbolId`. Identity and order are pure
     /// functions of the hash, so a probe builds a key with no lock and no
@@ -137,11 +152,14 @@ pub enum TableKey {
     /// (docs/impl/symbol.md § "The display memo").
     Keyword(u64),
     EmptyList,
-    /// Immutable array key. All elements must themselves be valid TableKeys.
-    /// Mutable arrays are rejected — mutation after insertion would break
-    /// the hash invariant.
-    Array(Vec<TableKey>),
-    /// Any non-scalar immutable heap value used as a struct key.
+    /// An immutable array key, held as its `LArray` value. Every element is
+    /// itself a valid key (`from_value` validates the whole tree), and the
+    /// elements compare and hash as KEYS rather than as values, so an array
+    /// key ranks its elements in the same order the surrounding struct uses.
+    /// Mutable arrays are refused — mutation after insertion would break the
+    /// hash invariant.
+    Array(Value),
+    /// Any other non-scalar immutable heap value used as a struct key.
     ///
     /// Stores the original `Value` directly. `from_value()` recursively validates
     /// that all sub-elements are themselves valid keys (immutable, non-float) but
@@ -160,7 +178,18 @@ impl TableKey {
         TableKey::Keyword(crate::value::keyword::keyword_hash(name))
     }
 
-    /// Convert a Value to a TableKey if possible.
+    /// The spelling of a string key, borrowed from its region pages. `None`
+    /// for every other variant — the one read site for a string key's bytes.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            TableKey::String(v) => v.as_str(),
+            _ => None,
+        }
+    }
+
+    /// Build a **probe** key over `val`. The key borrows what it reads and
+    /// allocates nothing, so a lookup costs no allocation. Storing the result
+    /// needs [`TableKey::intern_into`] first.
     ///
     /// Returns `None` if the value cannot be used as a key.
     /// Callers produce their own error messages from the `None` case.
@@ -175,14 +204,15 @@ impl TableKey {
             Some(TableKey::Symbol(id))
         } else if let Some(hash) = val.keyword_hash() {
             Some(TableKey::Keyword(hash))
-        } else if let Some(s) = val.with_string(|s| s.to_string()) {
-            Some(TableKey::String(s))
+        } else if val.as_str().is_some() {
+            Some(TableKey::String(*val))
         } else if let Some(arr) = val.as_array() {
-            let mut keys = Vec::with_capacity(arr.len());
+            // Validate the whole tree here, once, so every later walk over an
+            // array key may assume each element converts.
             for elem in arr {
-                keys.push(TableKey::from_value(elem)?);
+                TableKey::from_value(elem)?;
             }
-            Some(TableKey::Array(keys))
+            Some(TableKey::Array(*val))
         } else if val.is_empty_list() {
             Some(TableKey::EmptyList)
         } else if val.is_pair() {
@@ -211,65 +241,107 @@ impl TableKey {
         }
     }
 
-    /// Convert a TableKey back to a Value, born in the call's region
-    /// (`ctx`). This is the inverse of `from_value()`. String and array keys
-    /// allocate (through `ctx`); scalar/keyword/heap keys are immediates or
-    /// pass-throughs and need no region.
-    pub fn to_value(&self, ctx: &mut NativeCtx) -> Value {
+    /// Build the **stored** form of this key, owned by `region`: a string or
+    /// array payload is copied there, so a struct's key bytes are part of the
+    /// struct's own body and the struct pins no region but its own. A key
+    /// already resident in `region` is returned unchanged, and a `Heap` key is
+    /// never copied — its identity is the point (docs/impl/values.md
+    /// § "Struct keys").
+    pub fn intern_into(&self, heap: &mut crate::value::FiberHeap, region: RuntimeRegion) -> Self {
+        match self {
+            TableKey::String(v) => {
+                if crate::value::arena::region_of(heap, *v) == Some(region) {
+                    return *self;
+                }
+                let text = v.as_str().expect("a string key holds a string");
+                TableKey::String(crate::value::build::string(heap, text, region))
+            }
+            TableKey::Array(v) => {
+                if crate::value::arena::region_of(heap, *v) == Some(region) {
+                    return *self;
+                }
+                // Rebuild the spine in `region` with each element interned, so
+                // an array key copies exactly what a string key does and
+                // aliases exactly what a `Heap` element does.
+                let elements: Vec<Value> = v
+                    .as_array()
+                    .expect("an array key holds an array")
+                    .to_vec()
+                    .iter()
+                    .map(|e| {
+                        TableKey::from_value(e)
+                            .expect("from_value validated every element")
+                            .intern_into(heap, region)
+                            .to_value()
+                    })
+                    .collect();
+                TableKey::Array(crate::value::build::array(heap, elements, region))
+            }
+            _ => *self,
+        }
+    }
+
+    /// The `Value` this key is. The inverse of `from_value()`, and
+    /// allocation-free: a scalar key is an immediate and every other key
+    /// already holds its value. A stored key's value belongs to the struct's
+    /// region, so a native handing one to its caller pays the ordinary
+    /// pass-through retain (`arena::pass_through_retain`).
+    pub fn to_value(&self) -> Value {
         match self {
             TableKey::Nil => Value::NIL,
             TableKey::Bool(b) => Value::bool(*b),
             TableKey::Int(i) => Value::int(*i),
             TableKey::Symbol(sid) => Value::symbol(*sid),
-            TableKey::String(s) => ctx.string(s.as_str()),
             TableKey::Keyword(hash) => Value::keyword_from_hash(*hash),
             TableKey::EmptyList => Value::EMPTY_LIST,
-            TableKey::Array(keys) => {
-                let items: Vec<Value> = keys.iter().map(|k| k.to_value(ctx)).collect();
-                ctx.array(items)
-            }
-            TableKey::Heap(v) => *v,
+            TableKey::String(v) | TableKey::Array(v) | TableKey::Heap(v) => *v,
         }
     }
 
     /// Visit every heap `Value` this key holds — the cross-region references a
     /// struct key contributes to its owning struct's region.
     ///
-    /// A `Heap` key stores a `Value` pointing into the region the key value was
-    /// born in; an `Array` key can nest `Heap` keys among its elements. Scalar
-    /// keys (nil/bool/int/symbol/string/keyword/empty-list) carry no region
-    /// reference. The region scan (`find_object_cross_refs`) walks these so a
-    /// struct increfs and records the edge to each heap key's region at alloc,
-    /// balanced by the free-time cascade — the same accounting struct VALUES get.
+    /// A string, array, or heap key holds a `Value` pointing into the region
+    /// the key was interned into or built from; the scalar keys
+    /// (nil/bool/int/symbol/keyword/empty-list) are immediates and carry no
+    /// region reference. The region scan (`find_object_cross_refs`) walks
+    /// these so a struct increfs and records the edge to each key's region at
+    /// alloc, balanced by the free-time cascade — the same accounting struct
+    /// VALUES get. An array key needs no recursion: the array object holds its
+    /// own elements' edges, exactly as a set or struct key does.
     pub fn for_each_heap_value(&self, f: &mut impl FnMut(&Value)) {
         match self {
-            TableKey::Heap(v) => f(v),
-            TableKey::Array(keys) => {
-                for k in keys {
-                    k.for_each_heap_value(f);
-                }
-            }
+            TableKey::String(v) | TableKey::Array(v) | TableKey::Heap(v) => f(v),
             TableKey::Nil
             | TableKey::Bool(_)
             | TableKey::Int(_)
             | TableKey::Symbol(_)
-            | TableKey::String(_)
             | TableKey::Keyword(_)
             | TableKey::EmptyList => {}
         }
     }
 
-    /// Whether this key can be safely sent across thread boundaries.
-    ///
-    /// Heap keys contain `Rc` data that is not thread-safe.
-    /// Value-based keys (nil, bool, int, symbol, string, keyword) are always
-    /// sendable.
+    /// Whether this key can cross a thread boundary. The answer is whether
+    /// [`SendKey`](crate::value::send::SendKey) has a form for it, and it is
+    /// asked there so the two cannot drift.
     pub fn is_sendable(&self) -> bool {
-        match self {
-            TableKey::Heap(_) => false,
-            TableKey::Array(keys) => keys.iter().all(|k| k.is_sendable()),
-            _ => true,
-        }
+        crate::value::send::SendKey::from_key(self).is_some()
+    }
+
+    /// Compare the elements of two array keys AS KEYS, so an array key ranks
+    /// its elements in the order the surrounding struct uses rather than in
+    /// `Value`'s order (which ranks keywords before strings).
+    fn cmp_elements(a: &Value, b: &Value) -> std::cmp::Ordering {
+        let (a, b) = (
+            a.as_array().expect("an array key holds an array"),
+            b.as_array().expect("an array key holds an array"),
+        );
+        a.iter()
+            .map(|e| TableKey::from_value(e).expect("from_value validated every element"))
+            .cmp(
+                b.iter()
+                    .map(|e| TableKey::from_value(e).expect("from_value validated every element")),
+            )
     }
 
     fn discriminant_index(&self) -> u8 {
@@ -296,9 +368,21 @@ impl std::hash::Hash for TableKey {
             TableKey::Bool(b) => b.hash(state),
             TableKey::Int(i) => i.hash(state),
             TableKey::Symbol(id) => id.hash(state),
-            TableKey::String(s) => s.hash(state),
+            // By content, not by pointer: two keys spelled alike must land in
+            // the same bucket wherever their bytes live.
+            TableKey::String(v) => v.as_str().expect("a string key holds a string").hash(state),
             TableKey::Keyword(s) => s.hash(state),
-            TableKey::Array(keys) => keys.hash(state),
+            TableKey::Array(v) => {
+                let elements = v.as_array().expect("an array key holds an array");
+                // Length first, as `Vec`'s own `Hash` does: without it
+                // `[[1] [2]]` and `[[1 2]]` hash alike.
+                elements.len().hash(state);
+                for elem in elements {
+                    TableKey::from_value(elem)
+                        .expect("from_value validated every element")
+                        .hash(state);
+                }
+            }
             // Delegate to Value's Hash. For Fiber/ThreadHandle/External
             // that hashes the backing Rc/Arc rather than the slot pointer,
             // so a `with-traits` wrapper is the same map key as the value
@@ -317,10 +401,12 @@ impl PartialEq for TableKey {
             (TableKey::Bool(a), TableKey::Bool(b)) => a == b,
             (TableKey::Int(a), TableKey::Int(b)) => a == b,
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
-            (TableKey::String(a), TableKey::String(b)) => a == b,
+            (TableKey::String(a), TableKey::String(b)) => a.as_str() == b.as_str(),
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
             (TableKey::EmptyList, TableKey::EmptyList) => true,
-            (TableKey::Array(a), TableKey::Array(b)) => a == b,
+            (TableKey::Array(a), TableKey::Array(b)) => {
+                TableKey::cmp_elements(a, b) == std::cmp::Ordering::Equal
+            }
             // Delegate to Value's PartialEq (stable identity for Fiber
             // and friends — see Hash impl above). Structural equality
             // for cons/set/struct/bytes/empty-list.
@@ -353,10 +439,10 @@ impl Ord for TableKey {
             (TableKey::Bool(a), TableKey::Bool(b)) => a.cmp(b),
             (TableKey::Int(a), TableKey::Int(b)) => a.cmp(b),
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
-            (TableKey::String(a), TableKey::String(b)) => a.cmp(b),
+            (TableKey::String(a), TableKey::String(b)) => a.as_str().cmp(&b.as_str()),
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
             (TableKey::EmptyList, TableKey::EmptyList) => std::cmp::Ordering::Equal,
-            (TableKey::Array(a), TableKey::Array(b)) => a.cmp(b),
+            (TableKey::Array(a), TableKey::Array(b)) => TableKey::cmp_elements(a, b),
             // Delegate to Value's Ord. Stable identity for Fiber and
             // friends — see Hash impl above. Structural ordering for
             // cons/set/struct/bytes/empty-list.
@@ -392,7 +478,13 @@ pub(crate) fn fmt_table_key(
                 write!(f, "{:?}", id)
             }
         }
-        TableKey::String(s) => write!(f, "\"{}\"", s),
+        // A formatter never panics on a broken invariant; it shows one. Every
+        // constructor of a string key passes a string, so the fallback is a
+        // marker a reader can act on rather than an empty pair of quotes.
+        TableKey::String(v) => match v.as_str() {
+            Some(s) => write!(f, "\"{}\"", s),
+            None => write!(f, "#<string-key:{:#x}>", v.payload),
+        },
         TableKey::Keyword(hash) => {
             match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
                 Some(name) => write!(f, ":{}", name),
@@ -400,13 +492,19 @@ pub(crate) fn fmt_table_key(
             }
         }
         TableKey::EmptyList => write!(f, "()"),
-        TableKey::Array(keys) => {
+        TableKey::Array(v) => {
+            let Some(elements) = v.as_array() else {
+                return write!(f, "#<array-key:{:#x}>", v.payload);
+            };
             write!(f, "[")?;
-            for (i, k) in keys.iter().enumerate() {
+            for (i, elem) in elements.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
                 }
-                fmt_table_key(k, symbols, debug, f)?;
+                match TableKey::from_value(elem) {
+                    Some(k) => fmt_table_key(&k, symbols, debug, f)?,
+                    None => crate::value::display::fmt_value(elem, symbols, debug, f)?,
+                }
             }
             write!(f, "]")
         }

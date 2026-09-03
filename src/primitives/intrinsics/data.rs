@@ -353,7 +353,7 @@ pub(crate) fn prim_freeze(
     let result = if let Some(a) = val.as_array_mut() {
         ctx.array(a.borrow().clone())
     } else if let Some(t) = val.as_struct_mut() {
-        let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (*k, *v)).collect();
         ctx.struct_from_sorted(entries)
     } else if let Some(s) = val.as_set_mut() {
         ctx.set(s.borrow().clone())
@@ -384,8 +384,7 @@ pub(crate) fn prim_thaw(
     let result = if let Some(a) = val.as_array() {
         ctx.array_mut(a.to_vec())
     } else if let Some(s) = val.as_struct() {
-        let entries: std::collections::BTreeMap<_, _> =
-            s.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let entries: std::collections::BTreeMap<_, _> = s.iter().map(|(k, v)| (*k, *v)).collect();
         ctx.struct_mut_from(entries)
     } else if let Some(s) = val.as_set() {
         ctx.set_mut(s.iter().cloned().collect())

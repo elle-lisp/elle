@@ -48,10 +48,11 @@ impl Value {
     // Heap Value Extractors
     // =========================================================================
 
-    /// Access string contents via closure. Works for heap strings.
-    /// Returns None if this is not a string.
+    /// The contents of an immutable string, borrowed from its region pages.
+    /// `None` for every other value, `@string` included — a mutable store is
+    /// behind a `RefCell` and cannot hand out a bare borrow.
     #[inline]
-    pub fn with_string<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
+    pub fn as_str(&self) -> Option<&str> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
@@ -60,11 +61,17 @@ impl Value {
             HeapObject::LString { s, .. } => {
                 // SAFETY: LString's bytes are always valid UTF-8 (enforced by
                 // constructors). The arena outlives the borrow.
-                let str_ref = unsafe { std::str::from_utf8_unchecked(s.as_slice()) };
-                Some(f(str_ref))
+                Some(unsafe { std::str::from_utf8_unchecked(s.as_slice()) })
             }
             _ => None,
         }
+    }
+
+    /// Access string contents via closure. Works for heap strings.
+    /// Returns None if this is not a string.
+    #[inline]
+    pub fn with_string<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
+        self.as_str().map(f)
     }
 
     /// Compare two string values lexicographically.

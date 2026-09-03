@@ -270,7 +270,7 @@ fn a_symbol_struct_key_names_the_same_symbol_on_both_sides() {
             (TableKey::Symbol(alpha), Value::int(7)),
             (TableKey::Symbol(beta), Value::int(8)),
         ];
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        entries.sort_by_key(|(a, _)| *a);
         let s = h.ctx().struct_from_sorted(entries);
         let bundle =
             SendBundle::from_value(s, h.heap(), Some(&sender)).expect("struct is sendable");

@@ -382,18 +382,19 @@ impl<'a, 'h> JsonParser<'a, 'h> {
             }
 
             let key_value = self.parse_string()?;
-            let key = match key_value.with_string(|s| s.to_string()) {
-                Some(s) => {
-                    if self.use_keyword_keys {
-                        // A JSON key is a spelling that exists only at run
-                        // time — learn it so the struct's keys can print.
-                        self.ctx.keyword(&s);
-                        TableKey::keyword(&s)
-                    } else {
-                        TableKey::String(s)
-                    }
-                }
-                _ => unreachable!(),
+            let key = if self.use_keyword_keys {
+                // A JSON key is a spelling that exists only at run time —
+                // learn it so the struct's keys can print.
+                let name = key_value
+                    .as_str()
+                    .expect("parse_string yields a string")
+                    .to_string();
+                self.ctx.keyword(&name);
+                TableKey::keyword(&name)
+            } else {
+                // The parsed string IS the key; the struct constructor interns
+                // it into the struct's region.
+                TableKey::String(key_value)
             };
 
             self.skip_whitespace();

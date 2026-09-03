@@ -142,8 +142,9 @@ pub(crate) unsafe fn bytes_to_string_in_place(
 /// (an int) into the result struct that was pre-allocated on the requesting
 /// fiber's heap — without re-composing the struct or allocating a new one.
 ///
-/// `LStruct.data` is a plain `Vec<(TableKey, Value)>` (on the Rust heap, not the
-/// arena), so this is an ordinary in-place slot write; the sorted key order is
+/// `LStruct.data` is a `RegionSlice` over the struct's own region pages, which
+/// the region owns and may write; the slice hands out only shared borrows, so
+/// the write goes through the backing pointer. The sorted key order is
 /// preserved because we never change a key.
 ///
 /// # Safety
@@ -164,7 +165,9 @@ pub(crate) unsafe fn set_struct_field_in_place(
         .expect("recv result must be a heap value") as *mut HeapObject;
     match &mut *ptr {
         HeapObject::LStruct { data, .. } => {
-            for entry in data.iter_mut() {
+            let entries = data.as_ptr() as *mut (crate::value::heap::TableKey, Value);
+            for i in 0..data.len() {
+                let entry = &mut *entries.add(i);
                 if &entry.0 == key {
                     entry.1 = val;
                     return;

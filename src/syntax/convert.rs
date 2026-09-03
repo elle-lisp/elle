@@ -80,17 +80,24 @@ fn table_key_to_syntax(
             let name = symbols.name(*id).ok_or("Unknown symbol in table key")?;
             SyntaxKind::Symbol(name.to_string())
         }
-        TableKey::String(s) => SyntaxKind::String(s.clone()),
+        TableKey::String(v) => {
+            SyntaxKind::String(v.as_str().expect("a string key holds a string").to_string())
+        }
         TableKey::Keyword(hash) => {
             let name = crate::value::keyword::resolve_keyword_name(Some(symbols), *hash)
                 .ok_or_else(|| format!("Unknown keyword {:#x} in table key", hash))?;
             SyntaxKind::Keyword(name.to_string())
         }
         TableKey::EmptyList => SyntaxKind::List(vec![]),
-        TableKey::Array(keys) => {
-            let elements: Result<Vec<_>, _> = keys
+        TableKey::Array(v) => {
+            let elements: Result<Vec<_>, String> = v
+                .as_array()
+                .expect("an array key holds an array")
                 .iter()
-                .map(|k| table_key_to_syntax(k, symbols, span))
+                .map(|elem| {
+                    let k = TableKey::from_value(elem).expect("from_value validated every element");
+                    table_key_to_syntax(&k, symbols, span)
+                })
                 .collect();
             return Ok(Syntax::new(SyntaxKind::Array(elements?), span.clone()));
         }

@@ -67,7 +67,9 @@ pub fn serialize_value(
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
+                TableKey::String(v) => {
+                    escape_json_string(v.as_str().expect("a string key holds a string"))
+                }
                 TableKey::Keyword(hash) => {
                     match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
                         Some(name) => escape_json_string(name),
@@ -91,7 +93,9 @@ pub fn serialize_value(
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
+                TableKey::String(v) => {
+                    escape_json_string(v.as_str().expect("a string key holds a string"))
+                }
                 TableKey::Keyword(hash) => {
                     match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
                         Some(name) => escape_json_string(name),
@@ -256,7 +260,9 @@ pub fn serialize_value_pretty(
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
+                TableKey::String(v) => {
+                    escape_json_string(v.as_str().expect("a string key holds a string"))
+                }
                 TableKey::Keyword(hash) => {
                     match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
                         Some(name) => escape_json_string(name),
@@ -288,7 +294,9 @@ pub fn serialize_value_pretty(
         let mut pairs = Vec::new();
         for (k, v) in s.iter() {
             let key_str = match k {
-                TableKey::String(s) => escape_json_string(s),
+                TableKey::String(v) => {
+                    escape_json_string(v.as_str().expect("a string key holds a string"))
+                }
                 TableKey::Keyword(hash) => {
                     match crate::value::keyword::resolve_keyword_name(symbols, *hash) {
                         Some(name) => escape_json_string(name),
