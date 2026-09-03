@@ -813,6 +813,24 @@ fn region_error_unwind_uaf() {
     );
 }
 
+// Guard — a squelch/attune boundary abandons its frames the same way an error
+// does, so the discard runs the releases each of them still owed
+// (docs/impl/region/mechanism.md § "A squelch boundary abandons frames the same
+// way, so it runs the same walk"). The fiber SURVIVES the boundary, so what must
+// be whole afterwards is everything the surviving side still reads: the CATCHING
+// activation's own values, an OUTER non-discarded frame's, a value the abandoned
+// frame STORED into a longer-lived container, a closure released by the SLOT
+// route, and the scheduler machinery behind 160 boundaries. Every read happens
+// after the discard ran, so an over-release faults there — SIGSEGV under
+// guardfree. The leak face is `region-squelch-unwind.lisp`.
+#[test]
+fn region_squelch_unwind_uaf() {
+    run_elle_script_with_args(
+        "region-squelch-unwind-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a deferred tail-call release runs at every end its activation can
 // reach, not only the clean break (docs/impl/region/owner.md § "A deferred
 // tail-call release has the node's life"). Each is a decref the activation

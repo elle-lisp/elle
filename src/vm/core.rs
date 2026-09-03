@@ -359,48 +359,59 @@ impl VM {
             "signal-violation",
             format!("squelch: signal {} caught at boundary", squelched_str),
         );
-        self.discard_suspended_frames();
+        // The error the boundary raises is what leaves with the signal, so it is
+        // the payload the discard's own releases must leave standing — built in a
+        // fresh region of its own, so in practice it exempts nothing and the
+        // abandoned frames' tables run in full.
+        self.discard_suspended_frames(err);
         err
     }
 
     /// Discard the LIVE fiber's suspended frames (squelch / abort) — the
     /// chokepoint for abandoning suspended work while the fiber runs on, the
-    /// discard counterpart of `resume_suspended` (docs/impl/region/diagnostics.md
-    /// § "The squelch/abort discard"; a fiber reaching a TERMINAL state instead
-    /// releases through `vm::fiber::take_fiber_owned`/`release_fiber_owned`,
-    /// which also frees the fiber owner node this discard leaves alone — the
-    /// fiber survives a squelch and may still own it).
+    /// discard counterpart of `resume_suspended` (docs/impl/region/owner.md
+    /// § "A discard runs what the abandoned frames owed"; a fiber reaching a
+    /// TERMINAL state instead releases through
+    /// `vm::fiber::take_fiber_owned`/`release_fiber_owned`, which also frees the
+    /// fiber owner node this discard leaves alone — the fiber survives a squelch
+    /// and may still own it).
     ///
-    /// Each discarded `BytecodeFrame` carries what its activation owed
-    /// ([`crate::value::BytecodeFrame::activation_dues`], MOVED in at the
-    /// suspend — the record's only home): the parked owner node, whose members
-    /// are `Owned` (count consumed by the adopt) with no other release route,
-    /// and the releases the activation took over from its own frame-replacing
-    /// tail calls, whose emitting instruction died with the frame the tail call
-    /// replaced. The continuation whose normal completion would have discharged
-    /// them will never run, so the discard runs them here: one tolerant decref
-    /// each — for the node, rc 1→0 and a subtree drop over node + members
-    /// (interior cycles reclaim with the set; the Shared frontier cascades
-    /// once). The move discipline makes this the sole release path — the slot
-    /// was emptied at the park, so no completion or resume can reach either a
-    /// second time.
+    /// The discarded frames' continuations will never run, so every release that
+    /// lived in one is at its last chance here. What each frame owes it carries
+    /// itself, in three readings [`crate::value::fiber::ParkedDues`] collects
+    /// together: its parked owner node and the releases its activation took over
+    /// from its own frame-replacing tail calls (both MOVED into the frame at the
+    /// suspend — the record's only home, so no completion or resume can reach
+    /// them a second time), and the releases its two emitter-recorded tables name,
+    /// read against its saved locals and its saved activation map.
     ///
-    /// The dues are the ONLY thing released. The frame's
-    /// `activation_region_map` is a borrowed view: a region it names can still
-    /// be live in an outer, non-discarded frame or in the activation that
-    /// catches the squelch, so a per-slot release here over-frees live state. A
-    /// node's members, by contrast, are exactly the regions the inference proved
-    /// externally unique and moved in through `AdoptIntoActivation`, and a
-    /// deferred region is one the compiler itself named as this activation's to
-    /// release — so neither can touch a region any live frame still counts on.
-    /// The map's regions stay leaked on this path until an ownership cut adopts
-    /// them (UAF-safe, bounded per discard; docs/impl/region/owner.md § "Owner
-    /// nodes").
-    pub(crate) fn discard_suspended_frames(&mut self) {
+    /// Each reading names regions this chokepoint is entitled to release: a
+    /// node's members are exactly the regions the inference proved externally
+    /// unique and moved in through `AdoptIntoActivation`, a deferred region is one
+    /// the compiler itself named as this activation's to release, and a table
+    /// entry is a release the executing function emitted for its own slot with a
+    /// receipt that says it did not run. The fiber's survival is not part of that
+    /// reading: a frame's saved stack and saved map were taken and cloned at its
+    /// own park, and its activation returned before this point, so no live frame
+    /// shares the state the receipts are read against.
+    ///
+    /// What stays refused is a blanket release of the rest of the frame's
+    /// `activation_region_map`. It is a borrowed view carrying no receipt, and a
+    /// region it names can still be live in an outer, non-discarded frame or in
+    /// the activation that catches the squelch. Those regions stay leaked on this
+    /// path until an ownership cut adopts them (UAF-safe, bounded per discard).
+    ///
+    /// `payload` is the value the exit leaves with — the boundary's own
+    /// `signal-violation` error — whose region no release here may take, on the
+    /// same reading the abandoned-frame walk makes
+    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
+    /// still owes").
+    pub(crate) fn discard_suspended_frames(&mut self, payload: Value) {
         if let Some(frames) = self.fiber.suspended.take() {
-            for region in crate::vm::fiber::parked_activation_dues(frames) {
-                self.heap().decref_region_if_present(region);
-            }
+            let dues = crate::value::fiber::ParkedDues::of(frames);
+            let protect = Some(payload).filter(|v| !self.fiber.delivery.mint_names(*v));
+            let heap = unsafe { &mut *self.heap_ptr };
+            crate::vm::fiber::release_parked_dues(heap, dues, protect, None);
         }
         // The abandoned park's funding has no consumer — the delivery funnel
         // that would have taken it will never run for these frames.

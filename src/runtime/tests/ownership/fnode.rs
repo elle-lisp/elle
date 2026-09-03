@@ -444,7 +444,7 @@ fn discard_frees_parked_activation_owner_node() {
             "the body parks at the yield"
         );
 
-        vm.discard_suspended_frames();
+        vm.discard_suspended_frames(crate::value::Value::NIL);
         assert!(
             vm.fiber.suspended.is_none(),
             "the discard consumed the parked chain"
@@ -457,7 +457,7 @@ fn discard_frees_parked_activation_owner_node() {
              (gen {gen_before} -> {gen_after})",
         );
         // A second discard finds nothing — the release ran exactly once.
-        vm.discard_suspended_frames();
+        vm.discard_suspended_frames(crate::value::Value::NIL);
     }
 
     // ── multi-frame chain: two parked activations, one discard frees both ──
@@ -476,7 +476,7 @@ fn discard_frees_parked_activation_owner_node() {
         chain.extend(vm.fiber.suspended.take().expect("second park"));
 
         vm.fiber.suspended = Some(chain);
-        vm.discard_suspended_frames();
+        vm.discard_suspended_frames(crate::value::Value::NIL);
         let bumped_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a;
         let bumped_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get()) > gen_b;
         assert!(
@@ -492,6 +492,142 @@ fn discard_frees_parked_activation_owner_node() {
         "node + member must be reclaimed at each discard — live region count \
          must not grow (baseline={baseline}, after 100 park-discard cycles={after})",
     );
+}
+
+/// A squelch/abort DISCARD also runs the releases each abandoned frame still
+/// owed, off the two tables its own `Code` records
+/// (docs/impl/region/owner.md § "A discard runs what the abandoned frames
+/// owed"). The frame is hand-built so both routes are present and each has a
+/// neighbour the emitter did NOT record: slot 1 is a value route and slot 0 is
+/// not, static region slot 9 is a slot route and slot 8 is not. The discard must
+/// release exactly the two the tables name — running the untabled ones would
+/// free a region whose release the frame's own machinery still answers for,
+/// which is what a blanket release of the parked stack or the parked activation
+/// map does.
+///
+/// The second half is the payload exemption: the value the exit leaves with
+/// funds its reader's delivery out of the frame's own reference, so a table
+/// entry naming its region stays owed.
+#[test]
+fn discard_runs_the_abandoned_frames_release_tables() {
+    use crate::hir::region::{MappedRegion, RuntimeRegion};
+    use crate::value::code::CodeTables;
+    use crate::value::{BytecodeFrame, SuspendedFrame, Value};
+    use std::rc::Rc;
+
+    /// A frame whose function releases value-route slot 1 and slot route 9, and
+    /// nothing else.
+    fn tabled_code() -> crate::value::Code {
+        crate::value::Code::new(
+            Rc::new(vec![]),
+            Rc::new(vec![]),
+            Rc::new(crate::error::LocationMap::new()),
+            Rc::new(vec![]),
+        )
+        .with_tables(CodeTables {
+            frame_release_slots: Rc::new(vec![1]),
+            frame_release_regions: Rc::new(vec![9]),
+            ..CodeTables::default()
+        })
+    }
+
+    /// Park one frame holding `stack`, with `mapped` as its activation's
+    /// static→physical remap.
+    fn park(vm: &mut crate::vm::VM, stack: Vec<Value>, mapped: &[(u32, RuntimeRegion)]) {
+        let map = mapped
+            .iter()
+            .map(|(slot, region)| {
+                let gen = vm.heap().generation_raw(region.get());
+                (*slot, MappedRegion::new(*region, gen))
+            })
+            .collect();
+        let frame = BytecodeFrame::suspend(
+            tabled_code(),
+            Rc::new(vec![]),
+            0,
+            stack,
+            true,
+            map,
+            crate::value::fiber::ActivationDues::default(),
+            Value::NIL,
+            vm.heap(),
+        );
+        vm.fiber.suspended = Some(vec![SuspendedFrame::Bytecode(frame)]);
+    }
+
+    let mut vm = crate::vm::VM::new();
+    let heap_ptr = vm.heap_ptr;
+
+    // ── both routes run, and only for the slots the tables name ──
+    {
+        let (untabled, untabled_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        let (owed, owed_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        // Each slot-route region holds one object, so its birth reference is the
+        // one the abandoned `DecrefRegion` would have dropped.
+        let (_, mapped_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        let (_, unmapped_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        park(
+            &mut vm,
+            vec![untabled, owed],
+            &[(9, mapped_rid), (8, unmapped_rid)],
+        );
+
+        vm.discard_suspended_frames(Value::NIL);
+
+        assert_eq!(
+            vm.heap().region_rc(owed_rid),
+            0,
+            "the value route slot 1 names is a release the frame still owed",
+        );
+        assert_eq!(
+            vm.heap().region_rc(mapped_rid),
+            0,
+            "the slot route static slot 9 names is one too — its receipt is the \
+             mapping the release would have taken",
+        );
+        assert_eq!(
+            vm.heap().region_rc(untabled_rid),
+            1,
+            "slot 0 is not in the value-route table, so the frame's reference to \
+             what it holds stays standing",
+        );
+        assert_eq!(
+            vm.heap().region_rc(unmapped_rid),
+            1,
+            "static slot 8 is not in the slot-route table, so its mapping is a \
+             borrowed view the discard must not release",
+        );
+    }
+
+    // ── the payload the exit leaves with is exempt ──
+    {
+        let (payload, payload_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        park(&mut vm, vec![Value::NIL, payload], &[]);
+
+        vm.discard_suspended_frames(payload);
+
+        assert_eq!(
+            vm.heap().region_rc(payload_rid),
+            1,
+            "the skipped release is the delivery the payload's reader consumes",
+        );
+    }
+
+    // ── unless the raise minted the delivery itself ──
+    {
+        let (payload, payload_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        park(&mut vm, vec![Value::NIL, payload], &[]);
+        vm.fiber.delivery.record_mint(payload);
+
+        vm.discard_suspended_frames(payload);
+
+        assert_eq!(
+            vm.heap().region_rc(payload_rid),
+            0,
+            "a recorded mint funds the delivery, so the frame's own reference is \
+             reclaimed at the discard too",
+        );
+    }
 }
 
 /// A parked fiber whose last counted reference DROPS — no terminal transition

@@ -1698,6 +1698,43 @@ own discharge reads the same two tables off each parked `BytecodeFrame`, its sav
 locals and its saved activation map standing in for the live ones
 ([owner.md](owner.md) § "The bounded residual").
 
+**A squelch boundary abandons frames the same way, so it runs the same walk.** A
+`squelch`/`attune` boundary raises a `signal-violation` the activation it breaks out of
+never catches (`VM::enforce_squelch`), so that activation reaches none of its remaining
+instructions either. The exit **is** the error exit, and the trampoline writes it as
+one: the squelch arm turns the bits into `SIG_ERROR` and falls through to the walk
+below it. One arm is what keeps the two exits from drifting, and it hands the frame's
+operand stack out exactly as an error's does — a fiber body's first run parks that
+frame, and what a parked frame owes runs at its discharge.
+
+The boundary abandons a whole chain rather than one frame. Every frame parked between
+the emitting site and the boundary is discarded at one chokepoint,
+`VM::discard_suspended_frames`, which each enforcement site reaches through
+`squelch_violation`. So the discard reads each discarded `BytecodeFrame`'s two tables
+off its own `Code` — the reading `Fiber::take_parked_state` already makes for a fiber
+that can never run again, with the frame's saved locals and saved activation map
+standing in for the live ones ([owner.md](owner.md) § "A discard runs what the
+abandoned frames owed").
+
+The fiber **survives** a squelch, and that is what the reading has to answer for: an
+outer, non-discarded frame and the activation that catches the violation both run on.
+The tables answer it, and the fiber's survival never enters the argument. A discarded
+frame's saved stack and its map were taken and cloned at that frame's own park, and the
+activation they came from returned before the boundary was reached, so no live frame
+reads either. Within them, each route names only the executing function's own slots and
+carries its own receipt, so a slot still holding a heap value, or still mapped, is a
+release that frame genuinely owed and did not run. The rest of the parked map stays
+untouched for the opposite reason: a blanket release of it has no receipt at all, and
+the regions it names may be an outer frame's.
+
+**What the boundary raises exempts nothing, and neither does what it displaces.** The
+`signal-violation` is built by `escaping_error` in a fresh region of its own and records
+no delivery mint, so no frame's reference funds its delivery and every release the
+tables name runs. The signal the boundary displaces is not the exemption's subject
+either: a squelched park's payload is delivered to nobody, and the park's own escape
+retain holds it independently of any frame, so a frame's reference to it is that
+frame's to release like any other.
+
 **The compiled tier runs the same walk.** A compiled frame leaves by an error at two
 points, and each runs the walk before its activation's region-map pop: the check after
 a call, which finds the callee's raise, and an `Emit` of `SIG_ERROR`, which parks no
@@ -1764,7 +1801,16 @@ and `tests/elle/region-error-unwind-uaf.lisp` (the
 soundness complement — the payload the raising native builds while the frame holds its
 argument, a value the frame stored into a container that outlives it, a parked frame the
 restarts system replays, and a catching frame's own values, all under
-`--trace=guardfree`).
+`--trace=guardfree`). The squelch face carries the same pair —
+`tests/elle/region-squelch-unwind.lisp` (the leak gauge: a pending value in the emitting
+frame, two of them, an enclosing frame's, and the same under an `attune` boundary, each
+bounded beside a violation that has nothing pending) and
+`tests/elle/region-squelch-unwind-uaf.lisp` (the soundness complement: what the catching
+activation, an outer non-discarded frame, and a longer-lived container still read after
+the discard ran) — with
+`runtime::tests::ownership::discard_runs_the_abandoned_frames_release_tables` driving the
+chokepoint directly, where both routes and the untabled slot beside each are visible
+without a program that allocates into them.
 
 ## Compile-time region selection (coalescing)
 

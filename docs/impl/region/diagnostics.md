@@ -223,20 +223,26 @@ above so its growth is not mistaken for a gauge artifact.
 
 Abandoning suspended work routes through one chokepoint, `VM::discard_suspended_frames`
 (src/vm/core.rs), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
-squelch enforcement, and the JIT call paths. The chokepoint subtree-drops each discarded
-frame's parked activation owner node
-([owner.md](owner.md) § "Owner nodes") and releases nothing else: the
-frame's `activation_region_map` is a borrowed view of regions that may be shared with an
-outer, non-discarded frame or with the activation that catches the squelch, so a per-slot
-release there over-frees (the historical squelch double-free — a non-unwinding abort in
-scheduler-heavy programs); the node's members are exactly the regions adoption moved in,
-so their release at the discard is sound by construction. The pin is two-sided:
-`runtime::tests::ownership::discard_frees_parked_activation_owner_node` proves the node
-and its members ARE freed at the discard (bounded, generation bump), and the squelch
-corpus (`region-squelch-nested.lisp`, `region-loop-capture-squelch.lisp`, and the
-redis-driven `redis.lisp` scheduler shape when a live Redis is present) under
-`--trace=guardfree` with the full stdlib proves the discard frees nothing more
-(panic-clean).
+squelch enforcement, and the JIT call paths. The chokepoint runs everything a discarded
+frame chain owed and nothing else ([owner.md](owner.md) § "A discard runs what the
+abandoned frames owed"): each frame's parked activation owner node, the releases its
+activation took over from its own frame-replacing tail calls, and the releases its two
+emitter-recorded tables name. What stays refused is the rest of the frame's
+`activation_region_map` — a borrowed view of regions that may be shared with an outer,
+non-discarded frame or with the activation that catches the squelch, so a blanket
+per-slot release there over-frees (the historical squelch double-free — a non-unwinding
+abort in scheduler-heavy programs). The three the chokepoint does run each carry their
+own warrant: the node's members are exactly the regions adoption moved in, a deferred
+region is one the compiler named as this activation's, and a table entry carries a
+receipt that says the release did not run. The pin is two-sided:
+`runtime::tests::ownership::discard_frees_parked_activation_owner_node` and
+`…::discard_runs_the_abandoned_frames_release_tables` prove the set IS freed at the
+discard (bounded, generation bump), and the squelch corpus
+(`region-squelch-unwind-uaf.lisp`, `region-squelch-nested.lisp`,
+`region-loop-capture-squelch.lisp`, and the redis-driven `redis.lisp` scheduler shape
+when a live Redis is present) under `--trace=guardfree` with the full stdlib proves the
+discard frees nothing more (panic-clean). The rate the tables carry is gauged by
+`tests/elle/region-squelch-unwind.lisp`.
 
 ## The terminal-fiber teardown
 

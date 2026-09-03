@@ -279,7 +279,7 @@ impl RegionStore {
                     };
                     handle.try_with_mut(|fib| {
                         let parked = fib.take_parked_state();
-                        discharged.extend(parked.nodes.iter().map(|r| r.get()));
+                        discharged.extend(parked.dues.nodes.iter().map(|r| r.get()));
                         // The releases those activations took over from their own
                         // frame-replacing tail calls (docs/impl/region/owner.md
                         // § "A deferred tail-call release has the node's life").
@@ -289,7 +289,7 @@ impl RegionStore {
                         // be: a deferred region is the tail callee's own closure
                         // region or a merged arena, and a raise's payload is
                         // neither.
-                        discharged.extend(parked.deferred.iter().map(|r| r.get()));
+                        discharged.extend(parked.dues.deferred.iter().map(|r| r.get()));
                         if let Some(node) = fib.fiber_owner_node.take() {
                             discharged.push(node.get());
                         }
@@ -308,7 +308,7 @@ impl RegionStore {
                                 )
                             })
                         });
-                        for v in &parked.owed {
+                        for v in &parked.dues.owed {
                             let Some(ptr) = v.as_heap_ptr() else {
                                 continue;
                             };
@@ -330,7 +330,7 @@ impl RegionStore {
                         // checked first: a mapping whose region has since been
                         // freed and recycled is a leftover the frame's own release
                         // already answered for.
-                        for m in &parked.owed_regions {
+                        for m in &parked.dues.owed_regions {
                             let rid = m.region.get();
                             let live = self.generation_raw(rid) == m.gen
                                 && self.regions.get(rid as usize).is_some_and(|s| s.is_some());

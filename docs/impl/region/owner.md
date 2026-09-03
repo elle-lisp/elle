@@ -243,13 +243,15 @@ sentinel arms and the top-level driver each consume the pending tail call themse
 deferral is recorded where the tail call is BUILT (`tail_call_inner`) rather than where it
 happens to be consumed.
 
-**What an abandoned frame owes, it owes the deferred set too.** The exits no resume can
-reach run the set rather than parking it: an **error** exit whose frame the entrant does not
-park — the same `walk_abandoned` question the release table's walk asks
-([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes") — and a
-**squelch** boundary, which turns the signal into an error the abandoned activation never
-catches. Both stand exactly where the clean break stands: nothing replays the frame, so the
-decref the activation took over is at its last chance to run.
+**What an abandoned frame owes, it owes the deferred set too.** The exit no resume can
+reach runs the set rather than parking it: an **error** exit whose frame the entrant does
+not park — the same `walk_abandoned` question the release table's walk asks
+([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still owes"). A
+**squelch** boundary is that exit rather than a second one: it turns the signal into an
+error the abandoned activation never catches, and the trampoline writes the two as one arm
+([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so it
+runs the same walk"). The exit stands exactly where the clean break stands: nothing replays
+the frame, so the decref the activation took over is at its last chance to run.
 
 The signal's payload needs no exemption here, unlike the release table's own routes. A
 deferred region is a per-call closure region or a merged arena; a raise's payload is either a
@@ -589,29 +591,47 @@ unrepresentable by construction. Pinned by
 re-park / caller-built park), and `jit::suspend::tests::park` (the JIT yield side-exit
 parks the node; the interpreted resume completes and frees it).
 
-**A discard frees the parked dues (squelch/abort = subtree drop).** Abandoning suspended
+**A discard runs what the abandoned frames owed (squelch/abort).** Abandoning suspended
 work — a squelch/attune signal-violation, an abort — flows through one chokepoint,
 `VM::discard_suspended_frames` (reached from `enforce_squelch` on every tier: the
 interpreter trampoline, `compile/run-on`, and the JIT call paths). The discarded frames'
-continuations will never run, so the completion release above never fires for them; the
-chokepoint therefore runs it *at the discard*: each discarded `BytecodeFrame`'s parked node
-gets the same one tolerant decref — rc 1→0, subtree drop over node + adopted members, the
-Shared frontier cascading once from the recorded `outgoing` tables — and each release the
-frame's activation took over from its own tail calls gets the plain decref its emitting
-instruction never ran. This frees **only** the dues: the regions named by the frame's
-`activation_region_map` are a borrowed view — possibly shared with an outer, non-discarded
-frame or the activation that catches the squelch — and releasing them here would
-over-release (the historical squelch double-free); a node's members, by contrast, are
-exactly the regions the inference proved externally unique and moved in through
-`AdoptIntoActivation`, and a deferred region is one the compiler itself named as this
-activation's to release, so the discard cannot touch a region any live frame still counts
-on. A frame dropped *outside* the chokepoint (an abandoned error park) still abandons its
-dues — a bounded leak, never a double-free (the members have no count for any other release
-route to reach). Pinned by
+continuations will never run, so every release that lived in one is at its last chance
+here, and the chokepoint runs the whole set a frame chain can owe — the same set
+`Fiber::take_parked_state` hands the terminal teardown and the free-path discharge, read
+the same way (`ParkedDues::of`). Three readings:
+
+- each frame's parked **owner node**, one tolerant decref — rc 1→0, subtree drop over
+  node + adopted members, the Shared frontier cascading once from the recorded `outgoing`
+  tables;
+- each release the frame's activation took over from its own **frame-replacing tail
+  calls**, the plain decref its emitting instruction never ran;
+- the releases the frame still owed off its **two release tables**, read against its
+  saved locals and its saved activation map ([mechanism.md](mechanism.md) § "An abandoned
+  frame runs the releases it still owes").
+
+Each reading names regions the discard is entitled to release, and none of them names a
+region a live frame still counts on. A node's members are exactly the regions the
+inference proved externally unique and moved in through `AdoptIntoActivation`. A deferred
+region is one the compiler itself named as this activation's to release. A table entry is
+a release the *executing function* emitted for its own slot, with a receipt that says it
+did not run — the value route's nil stamp, and the mapping the slot route takes. The
+frame's saved stack and saved map were taken and cloned at that frame's own park and its
+activation returned before the boundary was reached, so the receipts are read against
+state no live frame shares.
+
+What stays refused is the rest of the parked `activation_region_map`: a blanket per-slot
+release of it carries no receipt, and the regions it names may be an outer, non-discarded
+frame's or the catching activation's — the historical squelch double-free. A frame
+dropped *outside* the chokepoint (an abandoned error park) still abandons its dues — a
+bounded leak, never a double-free (the members have no count for any other release route
+to reach). Pinned by
 `runtime::tests::ownership::discard_frees_parked_activation_owner_node` (single frame and
 multi-frame chains; the member's generation bumps at the discard, bounded across repeated
-park-discard cycles) with the full-stdlib squelch corpus under `--trace=guardfree` as the
-panic-clean gate.
+park-discard cycles), `…::discard_runs_the_abandoned_frames_release_tables` (both routes,
+against a frame whose slot the emitter never recorded), and the leak gauge
+`tests/elle/region-squelch-unwind.lisp`, with
+`tests/elle/region-squelch-unwind-uaf.lisp` and the full-stdlib squelch corpus under
+`--trace=guardfree` as the panic-clean gate.
 
 **Exactly one reclamation path (the double-free invariant, positively).** A node member is
 `Owned`: it has no count for any other release route to reach, the inference that emits its
