@@ -17,7 +17,7 @@
 # Each assertion compares FUSED (inline lambdas over a proven immutable array — the
 # shape `fuse.rs` collapses) against an UN-FUSED reference computing the identical
 # value through a named function with a `match` body. That body introduces a binding
-# the inline-clone whitelist declines (docs/impl/dissolution.md § "Named same-unit
+# a fragment cannot close over (docs/impl/dissolution.md § "Named same-unit
 # functions"), so the call stays the real stdlib op: a per-element indirect call
 # through a closure value and, in a composition, the staged intermediate array.
 # Two shapes are NOT valid references here. A named fn with a whitelisted body
@@ -36,7 +36,7 @@
 
 (def base [0 1 2 3 4 5 6 7 8 9])
 
-# The un-fused oracles: same value, `match` body, so each declines the inline clone
+# The un-fused oracles: same value, `match` body, so each cannot close into a fragment
 # and runs the real stdlib op.
 (defn r-mul3 [x]
   (match x
@@ -141,8 +141,9 @@
 # § "Raw `%`-intrinsic bodies"), so the numeric kernel — the shape a SIMD/GPU
 # realization tier consumes — becomes one index-walk loop with the opcode inline
 # and no per-element closure. The un-fused reference is the same kernel with the
-# same declaration and the same opcode behind a `match` body, which declines the
-# inline clone. Composed, the fused form additionally sheds the intermediate array,
+# same declaration and the same opcode behind a `match` body, which a fragment
+# cannot close over. Composed, the fused form additionally sheds the intermediate
+# array,
 # so its saving is strictly larger — the intermediate-elimination signature, not a
 # fixed per-call constant.
 (defn k-mul3 [x]

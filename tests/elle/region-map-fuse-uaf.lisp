@@ -93,9 +93,10 @@
 (def joined (fold joinf "" ["p" "q" "r"]))
 (assert (= joined "pqr") "named-combinator fold over heap accumulators")
 
-# A named LET-body function inlined over heap element values: the clone whitelist
-# admits `let`, so `tag`'s body — a `let` binding a fresh heap string, then wrapping
-# it — is cloned inline with the let's own binding freshened per element. Driving it
+# A named LET-body function inlined over heap element values: a fragment closes
+# over `let` bindings, so `tag`'s body — a `let` binding a fresh heap string, then
+# wrapping it — is grafted inline with the let's own binding re-minted per element.
+# Driving it
 # over heap elements under --trace=guardfree faults on any over-free of the inner
 # let-bound heap value under the loop's read, or of an accumulator member before the
 # result is consumed. The definition persists (cloned, not moved), so it is also

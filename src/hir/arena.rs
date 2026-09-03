@@ -11,7 +11,7 @@ use super::binding::Binding;
 use crate::value::SymbolId;
 
 /// Where a binding lives at runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BindingScope {
     /// Lambda parameter
     Parameter,
@@ -20,7 +20,12 @@ pub enum BindingScope {
 }
 
 /// Internal binding metadata.
-#[derive(Debug)]
+///
+/// `Clone` and the serde impls exist for [`crate::hir::fragment::HirFragment`],
+/// which carries one of these per binding its body introduces so that a body
+/// travelling to another arena — another compile unit, another process — takes
+/// every binding fact with it rather than a hand-picked subset.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BindingInner {
     /// Original symbol name (for error messages and global lookup)
     pub name: SymbolId,
@@ -92,6 +97,25 @@ pub struct BindingInner {
 }
 
 impl BindingInner {
+    /// A fresh binding's metadata: named, scoped, and nothing else yet claimed.
+    /// Analysis sets the flags as it learns them.
+    pub fn new(name: SymbolId, scope: BindingScope) -> Self {
+        BindingInner {
+            name,
+            scope,
+            is_mutated: false,
+            is_captured: false,
+            is_immutable: false,
+            is_prebound: false,
+            init_pending: false,
+            prebind_fn_depth: 0,
+            is_primitive: false,
+            is_synthetic: false,
+            declared_numeric: false,
+            is_file_scope: false,
+        }
+    }
+
     /// A binding needs a cell if captured (for locals) or mutated (for params).
     ///
     /// Immutable locals skip cell wrapping — they are captured by value.
@@ -195,21 +219,16 @@ impl BindingArena {
 
     /// Allocate a new binding. Analysis phase only.
     pub fn alloc(&mut self, name: SymbolId, scope: BindingScope) -> Binding {
+        self.alloc_from(BindingInner::new(name, scope))
+    }
+
+    /// Allocate a binding from ready-made metadata. The graft of an
+    /// [`HirFragment`](crate::hir::fragment::HirFragment) enters here: the
+    /// fragment holds a whole `BindingInner` per binding its body introduces,
+    /// so re-hosting reproduces the binding rather than describing it again.
+    pub fn alloc_from(&mut self, inner: BindingInner) -> Binding {
         let index = self.bindings.len() as u32;
-        self.bindings.push(BindingInner {
-            name,
-            scope,
-            is_mutated: false,
-            is_captured: false,
-            is_immutable: false,
-            is_prebound: false,
-            init_pending: false,
-            prebind_fn_depth: 0,
-            is_primitive: false,
-            is_synthetic: false,
-            declared_numeric: false,
-            is_file_scope: false,
-        });
+        self.bindings.push(inner);
         Binding(index)
     }
 

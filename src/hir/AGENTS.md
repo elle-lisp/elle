@@ -26,6 +26,7 @@ Does NOT:
 | `BindingArena` | Owns all `BindingInner` values for a compilation unit; `&mut` in analysis, `&` in lowering |
 | `BindingInner` | Binding metadata: name, scope, mutation/capture/immutability flags |
 | `BindingScope` | `Parameter` or `Local` (in `hir::arena`) |
+| `HirFragment` | An HIR body closed over its own binding table — portable across arenas, units, and processes (in `hir::fragment`) |
 | `CaptureInfo` | What a closure captures and how |
 | `CaptureKind` | `Local` or `Capture` (transitive) |
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
@@ -224,3 +225,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
      deleted call. A silent callee is not enough: silence means no signal bits,
      and `%push-array-mut` is silent and mutates. See
      [docs/impl/hir.md](../../docs/impl/hir.md) § "Dead binding elimination".
+
+ 24. **A body that leaves its unit travels as an `HirFragment`.** A `Binding` is
+     an index into one arena, so an HIR body alone is meaningless elsewhere.
+     `HirFragment::close` renumbers a body's bindings against its own table —
+     a `BindingInner` per binding the body introduces, a `SymbolId` per free
+     global — and `graft` re-hosts it in any arena. Nothing may hoist selected
+     `BindingInner` fields beside a body instead. See
+     [docs/impl/hir.md](../../docs/impl/hir.md) § "A fragment is closed over its
+     bindings".

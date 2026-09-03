@@ -20,7 +20,7 @@
 # sentinel is read) lives in `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies each op through a named function with a
-# `match` body — a binding-introducing form the inline-clone whitelist declines —
+# `match` body — a binding-introducing form a fragment cannot close over —
 # so those calls stay plain stdlib dispatches and mint what the fused form does
 # not. Same value.
 

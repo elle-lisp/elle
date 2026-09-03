@@ -17,7 +17,7 @@
 # outer) from the interleaved one the fused loop would run.
 #
 # The un-fused oracles here are named functions with a `match` body — a
-# binding-introducing form the inline-clone whitelist declines — so each stays a real
+# binding-introducing form a fragment cannot close over — so each stays a real
 # stdlib call.
 
 (defn allocs [thunk]

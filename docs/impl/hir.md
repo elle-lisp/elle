@@ -17,6 +17,47 @@ signal profiles.
 - **`Signal`** — inferred effect profile: a `SignalBits` set plus a
   `propagates` parameter mask (silent, yields, polymorphic, …)
 
+## A fragment is closed over its bindings
+
+A `Binding` addresses a `BindingArena`, and the arena is not part of the term.
+An HIR body on its own therefore means nothing outside the unit that analyzed
+it: its indices name a table the reader does not hold. Carrying such a body to
+another unit, or to a file, means carrying the binding facts it needs — and a
+carrier that hoists a chosen few of them out of `BindingInner` is wrong the day
+someone adds the twelfth field.
+
+An `HirFragment` (`src/hir/fragment.rs`) closes the body over its own table
+instead. Every `Binding` in a fragment's body is an index into that table, and
+each entry says what the binding is:
+
+| Entry | The binding | What `graft` does with it |
+|---|---|---|
+| `Local(BindingInner)` | one the body introduces — a parameter, or a `let` binding | mints a fresh binding in the host arena carrying this metadata |
+| `Global(SymbolId)` | a free variable, which must be a module name (`is_file_scope`) or a primitive | resolves the name against the host unit, and declines if it does not resolve |
+
+`HirFragment::close` builds a fragment from a body, its parameters, and the
+defining arena. `HirFragment::graft` re-hosts one into any arena, minting fresh
+`HirId`s — a reused id collides in the region walk's per-id side tables. Both
+run over one rebuild (`rebind`), so `close` declines exactly the forms `graft`
+could not rebuild: a fragment that exists always rebuilds, and the only thing
+left for `graft` to refuse is a global the host unit cannot name.
+
+The admitted forms are the pure-expression ones (literals, `Var`, `Call`, `if`,
+`cond`, `begin`, `and`/`or`, and a raw `%`-intrinsic) plus `let`. `let` is
+closable because its bindings are introduced in evaluation order: each value is
+rebuilt before its own binding enters the table, so a sequential `let`'s later
+value sees the earlier binding and no value ever refers to itself. `letrec` is
+that same order defeated — its value may name its own binding — and every other
+binding form (`loop`, a `match` pattern, a nested `lambda`) introduces through a
+route this walk does not model. All of them decline.
+
+Because a fragment holds a `BindingInner` per local rather than a summary of
+one, a `let` binding's mutability and a parameter's `(numeric!)` floor travel
+with it like any other field, and the whole fragment is plain serializable data.
+The stdlib disk cache stores the cross-unit inline registry as fragments
+(`src/compiler/stdlib_cache.rs`), so a cache hit compiles user code to the same
+bytecode a stdlib compile does.
+
 ## What analysis does
 
 1. **Binding resolution** — names → `Binding` arena indices, recording

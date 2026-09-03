@@ -16,8 +16,8 @@
 # `match`-body: a top-level named fn with a PURE body now inlines, and a `let` body
 # inlines too (docs § "Named same-unit functions"), so to keep a genuinely UN-fused
 # oracle — one that still mints the intermediate array the realization gauge below
-# weighs — these wrap the body in a `match`, a binding-introducing form the
-# inline-clone whitelist declines, so they stay plain staged `fold`/`map`/`filter`
+# weighs — these wrap the body in a `match`, a binding-introducing form a
+# fragment cannot close over, so they stay plain staged `fold`/`map`/`filter`
 # calls. Same value. Fused inline-lambda and the un-fused match-body form must agree.
 # `addf-let` is the fusing let-body counterpart, checked by value.
 
@@ -37,7 +37,7 @@
   (match x
     _ (even? x)))
 
-# A fusing let-body combinator (the clone whitelist admits `let`); value-checked
+# A fusing let-body combinator (a fragment closes over `let` bindings); value-checked
 # against the un-fused `addf` below.
 (defn addf-let [a x]
   (let [s (+ a x)]
@@ -110,7 +110,7 @@
 # ── Realization: the intermediate array between the prefix and the fold ─
 # `arena/total-allocs` is a cumulative, monotonic count of objects ever minted
 # (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the match-body
-# named fns, declined by the inline-clone whitelist) mints the intermediate array
+# named fns, which a fragment cannot close over) mints the intermediate array
 # that the map prefix would hand the fold; the fused single loop never allocates it.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]

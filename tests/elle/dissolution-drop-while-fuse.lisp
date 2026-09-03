@@ -13,7 +13,7 @@
 # flag where it belongs) lives in `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form the inline-clone whitelist declines —
+# `match` body — a binding-introducing form a fragment cannot close over —
 # so they stay plain staged calls and mint what the fused form does not. Same
 # value.
 
@@ -43,7 +43,7 @@
         "0 is truthy — the guard follows Elle truthiness")
 (assert (= (length (drop-while (fn [x] nil) [1 2 3])) 3) "nil is falsy")
 
-# A named same-unit predicate inlines by cloning, and a stdlib `defn` carried
+# A named same-unit predicate inlines by grafting, and a stdlib `defn` carried
 # across the compile-unit boundary does too.
 (defn small? [x]
   (even? x))

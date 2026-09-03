@@ -15,7 +15,7 @@
 # `while`s, one accumulator) lives in `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form the inline-clone whitelist declines — so
+# `match` body — a binding-introducing form a fragment cannot close over — so
 # they stay plain staged calls and mint what the fused form does not. Same value.
 
 (defn mc [x]

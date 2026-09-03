@@ -12,7 +12,7 @@
 # inline, a scalar tally, one loop) lives in `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form the inline-clone whitelist declines —
+# `match` body — a binding-introducing form a fragment cannot close over —
 # so they stay plain staged `count`/`map`/`filter` calls and mint what the fused
 # form does not. Same value.
 
@@ -41,7 +41,7 @@
         "0 is truthy — the guard follows Elle truthiness, not the value's shape")
 (assert (= (count (fn [x] nil) [1 2 3]) 0) "nil is falsy")
 
-# A named same-unit predicate inlines by cloning, and a stdlib `defn` carried
+# A named same-unit predicate inlines by grafting, and a stdlib `defn` carried
 # across the compile-unit boundary does too — the tally terminal puts no new
 # requirement on how the function is resolved. `inc` is truthy for every number,
 # so it counts them all.

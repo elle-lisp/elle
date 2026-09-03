@@ -287,7 +287,7 @@ boot never filled stays empty and fills lazily as today.
 The heap is not the whole boot product. Compiling stdlib also fills
 compile-side registries on `CompileCtx` that later user compiles read:
 
-- `FnInlineRegistry` — per-name HIR templates of cross-unit-inlineable
+- `FnInlineRegistry` — per-name HIR fragments of cross-unit-inlineable
   stdlib functions; user code inlines through it.
 - `DispatchWrapperRegistry` and the signal-projection memo.
 
@@ -296,11 +296,13 @@ a source boot — silently worse code, and divergent artifacts for anything
 keyed on compiler output. That is not acceptable: the two boot modes must
 produce identical user-code compiles.
 
-With region-native syntax the fix is small: the manifest records each
-inlineable function's *syntax* as a body value, and the registry re-derives
-the HIR template lazily (expand + analyze of one small form) the first time
-a user compile asks for that name. The parity test below is the acceptance
-gate, and it belongs to the **boot** milestone, not a follow-up.
+`FnInlineRegistry` holds `HirFragment`s — HIR bodies closed over their own
+binding tables ([impl/hir.md](hir.md) § "A fragment is closed over its
+bindings") — so the registry is plain data that crosses a process boundary as
+it stands. The image records it the way the stdlib disk cache already does,
+with no re-derivation from syntax and no dependency on the syntax foundation.
+The parity test below is the acceptance gate, and it belongs to the **boot**
+milestone, not a follow-up.
 
 ## File format
 
@@ -784,7 +786,7 @@ Then the image milestones:
   with a named error.
 - Compile parity: compile the same user file under image boot and source
   boot and assert byte-identical bytecode — the acceptance gate for the
-  persisted compiler state (inline templates, dispatch wrappers).
+  persisted compiler state (inline fragments, dispatch wrappers).
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the lazy LIR decode feeds `submit_jit_task`
   and the compiled result executes.
