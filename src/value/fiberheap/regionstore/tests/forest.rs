@@ -322,6 +322,63 @@ fn pages_less_owner_node_subtree_drops_members() {
     );
 }
 
+/// The region gauge sees a LIVE owner node. `active_region_count` — the backend
+/// of `arena/region-count` — counts entries, so the node's `ensure`d entry is
+/// counted for exactly as long as the node lives, even though the node holds no
+/// object and claims no page (docs/impl/region/owner.md § "Owner nodes — an
+/// activation as a forest root"). That inclusion is what makes the region gauge
+/// the object gauge's dual: an activation's owner node is a strand
+/// `arena/count` cannot see at all.
+///
+/// The counter-factual is a filter on object count or on pages, which is
+/// representable and which every pin in this file survives: the drop pin
+/// (`pages_less_owner_node_subtree_drops_members`) reads the node after it is
+/// gone, and `reparent_degenerate_cases_are_noops` reads an id that never
+/// adopted and so has no entry under either reading. Measured, each filter
+/// detonates exactly one other test — the JIT helper's
+/// `adopt_into_activation_adopts_into_lazily_minted_node`, whose subject is the
+/// adopt rather than the gauge: it reads a release DELTA of 2 and blames a
+/// failed adopt for a 1, so a maintainer who narrowed the gauge would go
+/// hunting in the helper. Naming the reading here is what points at the gauge.
+///
+/// Each of the three assertions below is needed: the first fixes what the
+/// entry-less baseline is, the second is the live reading a filter would blind,
+/// and the third proves the reading tracks the node's demise rather than
+/// standing at a constant.
+#[test]
+fn pages_less_owner_node_counts_in_active_region_count() {
+    let mut store = RegionStore::default();
+    let base = store.active_region_count();
+    let node = store.new_runtime_region(); // never allocated into
+    let member = store.new_runtime_region();
+    store.alloc_obj(member, cons_obj());
+    assert_eq!(
+        store.active_region_count(),
+        base + 1,
+        "minting the node's id materializes no entry — only the member has one"
+    );
+
+    store.adopt_region(node, member);
+    assert_eq!(
+        store.region_obj_count(node),
+        0,
+        "the node owns no object of its own"
+    );
+    assert_eq!(
+        store.active_region_count(),
+        base + 2,
+        "the adopt's `ensure` mints the node's entry and the gauge counts it while \
+         both are LIVE: one entry for the member, one for the pages-less node"
+    );
+
+    store.decref(node); // rc 1→0 → subtree drop over node + member
+    assert_eq!(
+        store.active_region_count(),
+        base,
+        "the drop returns both entries, so the gauge tracks the node's whole life"
+    );
+}
+
 /// An interior reference cycle whose members are adopted by a pages-less owner
 /// node reclaims with the node's drop — the `(push a b)(push b a)` knot per-region
 /// RC cannot collect (region/rules.md Rule 8), rooted at an owner that owns no
