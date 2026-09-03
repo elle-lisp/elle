@@ -17,8 +17,8 @@
 # `match`-body: a top-level named fn with a PURE body now inlines, and a `let` body
 # inlines too (docs § "Named same-unit functions"), so to keep a genuinely UN-fused
 # oracle — one that still mints the intermediate array the realization gauge below
-# weighs — these wrap the body in a `match`, a binding-introducing form the
-# inline-clone whitelist declines, so they stay plain staged `map`/`filter` calls.
+# weighs — these wrap the body in a `match`, a binding-introducing form a
+# fragment cannot close over, so they stay plain staged `map`/`filter` calls.
 # Same value. Fused inline-lambda and the un-fused match-body form must agree.
 
 (defn t10 [x]
@@ -85,7 +85,7 @@
 # ── Realization: the intermediate array between the two ops is gone ────
 # `arena/total-allocs` is a cumulative, monotonic count of objects ever minted
 # (docs/impl/dissolution.md § "The gauge"). The un-fused reference (the match-body
-# named fns, declined by the inline-clone whitelist) mints the intermediate array
+# named fns, which a fragment cannot close over) mints the intermediate array
 # that the fused single loop never allocates; both compute the same value.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]

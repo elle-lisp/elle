@@ -13,7 +13,7 @@
 # `src/hir/typeinfer/fuse.rs`.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form the inline-clone whitelist declines — so
+# `match` body — a binding-introducing form a fragment cannot close over — so
 # they stay plain staged calls and mint what the fused form does not. Same value.
 
 (defn mi [i x]
@@ -34,7 +34,7 @@
 (assert (= (->list (map-indexed (fn [i x] i) [])) ())
         "an empty base runs the function nowhere")
 
-# A named same-unit function inlines by cloning, and the arity is the op's: a
+# A named same-unit function inlines by grafting, and the arity is the op's: a
 # one-parameter function is a `map`'s, so the chain declines rather than splicing a
 # body with an unbound parameter.
 (defn scale [i x]

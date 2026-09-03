@@ -85,9 +85,9 @@ pub struct StoredBytecode {
     /// compile that would otherwise populate it.
     pub(crate) dispatch_wrappers: crate::hir::typeinfer::StoredDispatchRegistry,
     /// Cross-unit inline-fn registry (stdlib `inc`/`dec`/… HOF-argument
-    /// inlining), likewise snapshotted. Templates whose body contains a `let`
-    /// are omitted (their clone needs the defining arena); a performance-only
-    /// difference on the cached path.
+    /// inlining), likewise snapshotted. Its entries are `HirFragment`s — bodies
+    /// closed over their own binding tables — so the whole registry crosses,
+    /// and a cache hit compiles user code the way a stdlib compile does.
     pub(crate) fn_inline: crate::hir::typeinfer::StoredFnInlineRegistry,
 }
 /// Where a runtime caches its compiled stdlib.
@@ -727,6 +727,131 @@ mod tests {
             left.len(),
             1,
             "a store must leave only the file it just wrote; found {left:?}"
+        );
+    }
+
+    /// The registry a cache hit restores must be the registry the stdlib
+    /// compile recorded. It drives an HIR rewrite in every later compile, so a
+    /// snapshot that drops entries makes the cached path compile user code
+    /// differently from the compiled path — and caching is on by default, so
+    /// the first run of a program and every run after it disagree.
+    ///
+    /// The counter-factual: a snapshot that omits the templates whose body is a
+    /// `let` — the shape whose clone needed the defining arena — loses seven of
+    /// the stdlib's thirty-six, and the assertion names them.
+    #[test]
+    fn the_stored_inline_registry_keeps_every_template_the_compile_recorded() {
+        use std::collections::BTreeSet;
+
+        fn names(
+            reg: &crate::hir::typeinfer::FnInlineRegistry,
+            symbols: &crate::symbol::SymbolTable,
+        ) -> BTreeSet<String> {
+            reg.by_name
+                .keys()
+                .map(|n| symbols.name(*n).unwrap_or("?").to_string())
+                .collect()
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut rt = Runtime::with_stdlib_cache(StdlibCache::Dir(dir.path().to_path_buf()));
+        let (_vm, symbols, cctx) = rt.parts();
+
+        let (recorded, stored) = {
+            let (_, fn_inline) = cctx.compile_registries_mut();
+            (names(fn_inline, symbols), fn_inline.to_stored(symbols))
+        };
+        assert!(
+            !recorded.is_empty(),
+            "the stdlib compile must record cross-unit inline templates, or \
+             this test proves nothing about what the snapshot keeps"
+        );
+
+        let mut restored = crate::hir::typeinfer::FnInlineRegistry::default();
+        restored.restore(stored, symbols);
+
+        let survived = names(&restored, symbols);
+        let lost: Vec<_> = recorded.difference(&survived).collect();
+        assert!(
+            lost.is_empty(),
+            "a cache hit must inline what a stdlib compile inlines; these \
+             templates do not survive the snapshot: {lost:?}"
+        );
+    }
+
+    /// Two boot paths, one rewrite. `fn/cfg-label` is a stdlib `defn` whose body
+    /// is a `let` — the shape a registry that could not carry bindings had to
+    /// drop — and fusing it into a `map` splices that body into the emitted
+    /// loop, leaving no call to it at all.
+    ///
+    /// The trap: the two paths' instruction streams are not byte-identical even
+    /// for `(+ 1 2)`, because bytecode operands carry ids from a process-global
+    /// mint counter that the stdlib compile advances and a cache hit does not.
+    /// So the claim is asserted where it lives — in the rewritten HIR — with the
+    /// stream lengths as corroboration.
+    #[test]
+    fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
+        use crate::hir::{BindingArena, Hir, HirKind};
+        use crate::pipeline::{compile_file_repl, compile_file_to_fhir};
+
+        const SRC: &str = r#"(map fn/cfg-label [{:name "a"} {:name "b"}])"#;
+        const INLINED: &str = "fn/cfg-label";
+
+        fn calls_named(
+            h: &Hir,
+            arena: &BindingArena,
+            symbols: &crate::symbol::SymbolTable,
+            want: &str,
+        ) -> usize {
+            let mut n = 0;
+            if let HirKind::Call { func, .. } = &h.kind {
+                if let HirKind::Var(b) = &func.kind {
+                    n += usize::from(symbols.name(arena.get(*b).name) == Some(want));
+                }
+            }
+            h.for_each_child(|c| n += calls_named(c, arena, symbols, want));
+            n
+        }
+
+        fn probe(rt: &mut Runtime) -> (usize, usize) {
+            let (_vm, symbols, cctx) = rt.parts();
+            let (hir, arena) =
+                compile_file_to_fhir(SRC, symbols, cctx, "<parity>").expect("compiles to HIR");
+            let calls = calls_named(&hir, &arena, symbols, INLINED);
+            let len = compile_file_repl(SRC, symbols, cctx, "<parity>")
+                .expect("compiles")
+                .0
+                .bytecode
+                .instructions
+                .len();
+            (calls, len)
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+        let mut compiled = Runtime::with_stdlib_cache(cache.clone());
+        assert_eq!(compiled.stdlib_source(), StdlibSource::Compiled);
+        let (compiled_calls, compiled_len) = probe(&mut compiled);
+        drop(compiled);
+
+        let mut hit = Runtime::with_stdlib_cache(cache);
+        assert_eq!(hit.stdlib_source(), StdlibSource::Cache);
+        let (cached_calls, cached_len) = probe(&mut hit);
+
+        assert_eq!(
+            compiled_calls, 0,
+            "the stdlib compile records the fragment, so the `map` fuses and \
+             the call to `{INLINED}` is gone"
+        );
+        assert_eq!(
+            cached_calls, 0,
+            "a cache hit must fuse the same call; a registry that dropped the \
+             fragment leaves the un-fused call behind"
+        );
+        assert_eq!(
+            compiled_len, cached_len,
+            "and the two paths must emit the same amount of code for it"
         );
     }
 

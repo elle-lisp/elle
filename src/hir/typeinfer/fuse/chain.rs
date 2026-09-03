@@ -476,8 +476,8 @@ pub(super) fn qualifies_lambda<'a>(
 /// Does this function argument read a binding through a **capture** — a name the
 /// closure would have carried in its environment, rather than one of its own
 /// parameters or a constant the lowerer folds in? Only a call-site lambda literal
-/// can answer yes: the two template paths refuse a capture outright, a cloned body
-/// naming the scope its function was DEFINED in.
+/// can answer yes: a fragment refuses a capture outright, its body naming the
+/// scope its function was DEFINED in.
 ///
 /// A capture is a cross-element channel the reorder gate cannot see — a mutable
 /// local two bodies share, or a mutable value an immutable local names, neither of
@@ -755,8 +755,8 @@ pub(super) struct FusedChain {
 /// `plan.terminal` and `plan.kinds` are the chain's shape in outer→inner order
 /// (from `validate_chain`); the terminal is peeled first (it wraps the pipeline),
 /// then the pipeline ops. Each op's function is resolved by
-/// `FnResolver::take_parts` — moved (a lambda literal) or cloned fresh (a named
-/// template). Validation guarantees the structure, so every destructuring is total.
+/// `FnResolver::take_parts` — moved (a lambda literal) or grafted fresh (a named
+/// function). Validation guarantees the structure, so every destructuring is total.
 ///
 /// The stage a `count` appends keeps what its predicate admits; an `all?` appends
 /// the one that keeps what its predicate rejects (docs/impl/dissolution.md

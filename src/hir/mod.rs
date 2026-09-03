@@ -20,6 +20,7 @@ mod defuse;
 pub mod display;
 pub mod escape;
 mod expr;
+pub mod fragment;
 pub mod functionalize;
 pub mod lint;
 mod liveness;
@@ -44,6 +45,7 @@ pub use escape::{analyze_escape, EscapeInfo};
 pub use expr::{
     reset_hir_ids, BlockId, CallArg, Hir, HirId, HirKind, IntrinsicOp, ParamBound, VarargKind,
 };
+pub use fragment::{FragmentBinding, HirFragment};
 pub use lint::HirLinter;
 pub use liveness::BitSet;
 pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};

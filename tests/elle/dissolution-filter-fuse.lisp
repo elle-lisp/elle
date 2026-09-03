@@ -13,8 +13,8 @@
 # The cross-check reference is `filter` applied to a named predicate with a
 # `match`-body (`big?`): a top-level named fn with a PURE body now inlines too, and
 # a `let` body inlines as well (docs § "Named same-unit functions"), so the un-fused
-# oracle uses a `match` body — a binding-introducing form the inline-clone whitelist
-# declines — to keep it a genuinely un-fused plain `filter` call. `big-let?` is the
+# oracle uses a `match` body — a binding-introducing form a fragment cannot close
+# over — to keep it a genuinely un-fused plain `filter` call. `big-let?` is the
 # fusing let-body counterpart. Same survivors: fused inline-predicate, fused
 # let-body, and the un-fused match-body form must agree.
 
@@ -138,7 +138,7 @@
 # the parameter at Number, which discharges `%gt`'s comparable-family obligation,
 # and the floor is carried onto the spliced binding — so the guard stage holds the
 # opcode itself. The un-fused oracle carries the same declaration and opcode behind
-# a `match` body, which declines the inline clone.
+# a `match` body, which cannot close into a fragment.
 (defn big? [x]
   (numeric!)
   (%gt x 2))

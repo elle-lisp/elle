@@ -768,82 +768,69 @@ pre-order recursion still fuses its inner run.
 
 A HOF's function argument need not be a call-site lambda literal. When it is a
 `Var` referencing a binding **in the same compile unit** whose initializer is a
-qualifying non-capturing lambda — a top-level `(defn f …)` (which desugars to
-`(def f (fn …))`) or any `let`/`def`-bound `(fn …)` — the function's body is
-inlined into the fused loop, exactly as a literal's would be. The map from a
-binding to its lambda template is collected by the same walk `prune.rs` uses for
-init keywords (over `Let`/`Letrec`/`Define` bindings), restricted to immutable,
-singly-bound, non-capturing lambdas with the op's arity.
+qualifying lambda — a top-level `(defn f …)` (which desugars to `(def f (fn …))`)
+or any `let`/`def`-bound `(fn …)` — the function's body is inlined into the fused
+loop, exactly as a literal's would be. The map from a binding to its fragment is
+collected by the same walk `prune.rs` uses for init keywords (over
+`Let`/`Letrec`/`Define` bindings), restricted to immutable, singly-bound lambdas
+of the op's arity whose body closes.
 
 The one structural difference from a literal is **who owns the body**. A literal
-is consumed — moved out of the call — so its parameter and node ids belong
-uniquely to the splice. A **named** function *persists*: it stays bound and may be
-called elsewhere as a first-class value, so its body cannot be moved. It is
-**cloned with fresh bindings and fresh HirIds** per call site (an alpha-rename):
-every parameter is re-minted and its references rewritten, and every node is
-rebuilt through `Hir::new` (ids come from a global counter, and a plain `.clone()`
-would duplicate them, colliding in the region walk's per-id side tables). Globals
-the body references stay **shared** — a global is already referenced from many
-sites, so sharing its binding is the norm, not a duplication hazard; only the
-lambda's own parameters are freshened.
+is consumed — moved out of the call — so its parameters and node ids belong
+uniquely to the splice. A **named** function *persists*: it stays bound and may
+be called elsewhere as a first-class value, so its body cannot be moved. It is
+collected as an `HirFragment` — a body closed over its own bindings
+([impl/hir.md](hir.md) § "A fragment is closed over its bindings") — and each
+call site **grafts** a copy: the parameters and any `let` bindings are re-minted
+in this unit's arena, the free globals resolve by name, and every node is rebuilt
+with a fresh `HirId`. The fragment decides which bodies qualify, so a body that
+binds through a form the close cannot model declines here: the HOF stays a plain
+call and the definition's own bindings are never duplicated.
 
-The clone is a **whitelist** over pure-expression forms — literals, `Var`, `Call`,
-`if`, `cond`, `begin`, `and`/`or` — plus `let`. A `let` body is cloned with its
-**own** bindings freshened exactly as the parameters are: each `let`-bound binding
-is re-minted (faithful to the source's mutability) and added to the rename map
-before the body and any later sibling values are cloned, so a sequential `let`'s
-later value that references an earlier binding rewrites to the fresh one. `letrec`
-is **not** admitted — its value may reference its own binding (a forward/self
-reference the sequential rename order cannot satisfy), and the recursive-closure
-cell it builds is the shape this fusion exists to avoid. A body that introduces a
-binding through any **other** form (a `loop`, a `match` pattern, or a nested
-lambda) or uses any unrecognized form **declines**: the clone returns nothing and
-the HOF stays a plain call, so the definition's own bindings are never duplicated
-(correct-by-construction — an unhandled form is left un-optimized, never
-miscompiled).
+Resolving a free global by name gives back the binding it had: `bind_primitives`
+binds each primitive name once, so name and binding stand in one-to-one
+correspondence within a unit. The other two cases cannot mis-resolve either. A
+free variable that is an enclosing runtime local never reaches a fragment — the
+close refuses it. One that is a module name of *this* unit is recorded, but it
+is not `is_primitive` here, so the graft finds nothing and declines. That last
+case is what separates this section from the next.
 
 ## Cross-unit named functions
 
 A named function need not live in the unit that calls it. A **stdlib** `defn` —
-`inc`, `dec`, and any non-capturing lambda with a whitelisted body — is defined in
-the `<stdlib>` compile unit, so a later user unit that writes `(map inc xs)` has no
-body for `inc` in its own tree: `collect_inline_fns` finds nothing, and the
-same-unit path declines. The cross-unit path carries the body across the
-compile-unit boundary, mirroring the dispatch-wrapper registry
+`inc`, `dec`, and any lambda whose body closes — is defined in the `<stdlib>`
+compile unit, so a later user unit that writes `(map inc xs)` has no body for
+`inc` in its own tree and its by-binding map holds nothing for it. The
+by-name registry carries the body across the compile-unit boundary, mirroring
+the dispatch-wrapper registry
 (`monomorphize.rs`): a per-instance registry keyed by function **name**
 (`SymbolId`, stable across arenas where a `Binding` is not) is populated as each
 unit compiles — the `<stdlib>` compile records `inc` — and consulted by every later
 unit, gated on the callee being `is_primitive` (a `bind_primitives` stdlib export;
 a user redefinition shadows it with a non-primitive binding and is left alone).
 
-The registry entry carries the template body plus its **free globals**, each recorded
-by `SymbolId`. A `Binding` is a per-arena index, meaningless in the consuming unit,
-so every global the body references — the arithmetic op in `(+ x 1)`, say — is
-re-resolved by name against the consuming unit's own primitive bindings at the call
-site. If any free global fails to resolve there, the inline **declines** (the HOF
-stays a plain call) — correct-by-construction, never a mis-resolved reference.
+The registry entry is the same `HirFragment` the same-unit map holds. Nothing of
+the defining unit is consulted at the call site: the fragment's own table carries
+the metadata of every binding its body introduces, and the graft's `Global`
+resolution — the arithmetic op in `(+ x 1)`, say — is the by-name re-resolution
+the boundary needs. If a free global does not resolve in the consuming unit, the
+graft **declines** (the HOF stays a plain call) — correct-by-construction, never
+a mis-resolved reference. A fragment is plain data, so the registry also crosses
+the stdlib disk cache whole: a cache hit inlines the set a stdlib compile
+records, not a subset of it (`src/compiler/stdlib_cache.rs`).
 
-The free-global gate is what admits a stdlib body the *same-unit* gate would reject.
-When the stdlib compiles, its own exports are **not yet** `is_primitive` — `+` is a
-file-scope (`is_file_scope`) letrec sibling, so `inc`'s lambda *captures* it, and the
-non-capturing same-unit gate declines. The cross-unit collector instead admits a
-lambda whose every free variable is a genuine **global** — an `is_file_scope`
-module name or an `is_primitive` binding — and records those names for re-resolution;
-a free variable that is a plain enclosing local (a real capture of a runtime value)
-declines, exactly as the same-unit gate intends. So a stdlib `defn` referencing only
-other globals inlines, while a capturing local function never does.
+One gate fills both maps, and what separates the two paths is **where a
+fragment's free globals resolve**. When the stdlib compiles, its own exports are
+not yet `is_primitive` — `+` is a file-scope (`is_file_scope`) letrec sibling —
+so `inc`'s fragment records `+` as a global that the defining unit cannot itself
+resolve, and a `(map inc …)` written inside stdlib declines. In a later unit `+`
+is a `bind_primitives` export, so the same fragment resolves and grafts. A stdlib
+`defn` referencing only other globals therefore inlines into user code, while a
+function reading an enclosing runtime local never becomes a fragment at all.
 
-The clone is otherwise identical to the same-unit one (`clone_fresh`): the
-parameters and any `let`-bound bindings are freshened per call site, and every node
-is rebuilt with a fresh `HirId`. The only addition is that the free globals are
-seeded into the rename map up front — each mapped to the consuming unit's binding for
-that name — so the shared `clone_fresh` rewrites them with no further machinery. The
-same whitelist (pure-expression forms plus `let`), arity, unmutated-parameter, and
-composition-reorder gates apply.
-
-Everything else in the gate is identical — non-capturing, fixed arity, no rest
-parameter, unmutated parameters, and the composition reorder requirement (read
-from the template body's signal).
+Everything else in the gate is identical — fixed arity, no rest parameter,
+unmutated parameters, and the composition reorder requirement, read from the
+body signal the fragment records.
 
 Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/
 `length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
@@ -889,8 +876,9 @@ inference applies that floor wherever such a binding gets its type: as a
 lambda parameter, as a parameter joined from its call sites, and as the
 `let`-bound loop local the splice turns the parameter into. Fusion carries the
 flag with the parameter — a call-site lambda literal is *moved*, so its
-(already-flagged) parameter binding travels as-is; a cloned template mints fresh
-parameters and copies the flag onto them. The fact that discharged the intrinsic
+(already-flagged) parameter binding travels as-is; a fragment holds the whole
+`BindingInner` per parameter, so the graft mints one carrying the flag along
+with every other binding fact. The fact that discharged the intrinsic
 inside the function is the same fact that discharges it inside the loop, so
 fusion leaves *whether the program compiles* unchanged.
 

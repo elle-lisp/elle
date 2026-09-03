@@ -114,11 +114,11 @@ use std::collections::HashMap;
 
 // The pass in reading order: `Ops` resolves the stdlib bindings the fused loop
 // is built from; `chain` recognizes a fusable HOF chain and validates it;
-// `registry` and `clone` supply the function bodies to splice, from this unit
-// and from earlier ones; `build` emits the loop.
+// `collect` closes this unit's inlineable function bodies into fragments and
+// `registry` holds the ones earlier units left; `build` emits the loop.
 mod build;
 mod chain;
-mod clone;
+mod collect;
 mod ops;
 mod registry;
 
@@ -126,7 +126,7 @@ mod registry;
 // the five split parts form one pass and refer to each other freely.
 use build::*;
 use chain::*;
-use clone::*;
+use collect::*;
 use ops::*;
 use registry::*;
 
@@ -142,34 +142,33 @@ pub(crate) fn fuse_map_chains(
     arena: &mut BindingArena,
     registry: &mut FnInlineRegistry,
 ) {
-    // The same-unit function templates: a `Var` naming a non-capturing lambda
-    // (a top-level `defn` or a `let`/`def`-bound `fn`) inlines like a literal
-    // (docs/impl/dissolution.md § "Named same-unit functions"). Built once over
-    // the pre-rewrite tree; each use clones a fresh copy, so the map stays valid
-    // as calls collapse.
-    let mut templates: FxHashMap<Binding, FnTemplate> = FxHashMap::default();
-    collect_inline_fns(hir, arena, &mut templates, &mut FxHashSet::default());
-    // Record this unit's cross-unit-inlineable functions by NAME so later units can
-    // reach them (docs/impl/dissolution.md § "Cross-unit named functions"). Done
-    // BEFORE `Ops::resolve` below: during the `<stdlib>` compile the loop-scaffold
-    // primitives are not yet `is_primitive`, so `Ops::resolve` fails and fusion is
-    // inert here — but the stdlib is exactly where the `inc`/`dec` templates that
-    // later units inline are defined, so the recording must not sit behind that gate.
-    record_cross_unit_fns(hir, arena, registry);
-    let Some(ops) = Ops::resolve(arena) else {
-        return;
-    };
     // The sound `binding → type-of keyword` proof dead-arm pruning already
     // computes (`prune::concrete_init_keywords`). A `map`'s base collection may be
     // a `Var` alias of an immutable array, not only a call-site literal; this map
     // is what proves the alias `array`. Built once over the pre-rewrite tree — the
     // base-var bindings live in enclosing `let`s that fusion never mutates, so the
-    // proof stays valid as inner map calls collapse.
+    // proof stays valid as inner map calls collapse. A collected fragment reads it
+    // too, for the array proof a `mapcat` asks of its function.
     let bases = concrete_init_keywords(hir, arena);
-    // This unit's primitives by name, so a cross-unit template's free globals
-    // (recorded by name in a different arena) re-resolve to this arena's bindings.
-    // `bind_primitives` binds each primitive/stdlib-export once, so first-wins is
-    // exact — the same map `monomorphize.rs` builds for the dispatch registry.
+    // Close this unit's inlineable functions into fragments: by `Binding` for a
+    // `Var` naming one here (docs/impl/dissolution.md § "Named same-unit
+    // functions"), and by NAME into the registry so later units can reach them
+    // (§ "Cross-unit named functions"). Done over the pre-rewrite tree, and BEFORE
+    // `Ops::resolve` below: during the `<stdlib>` compile the loop-scaffold
+    // primitives are not yet `is_primitive`, so `Ops::resolve` fails and fusion is
+    // inert here — but the stdlib is exactly where the `inc`/`dec` fragments that
+    // later units inline are defined, so the recording must not sit behind that gate.
+    let mut collector = Collector::new(arena, &bases);
+    collector.walk(hir, registry);
+    let templates = collector.templates;
+    let Some(ops) = Ops::resolve(arena) else {
+        return;
+    };
+    // This unit's primitives by name, so a fragment's free globals — recorded by
+    // name, since a `Binding` means nothing outside the arena that minted it —
+    // resolve to this arena's bindings. `bind_primitives` binds each
+    // primitive/stdlib-export once, so first-wins is exact, and the map is the
+    // same one `monomorphize.rs` builds for the dispatch registry.
     let mut prim_by_name: FxHashMap<SymbolId, Binding> = FxHashMap::default();
     for i in 0..arena.len() as u32 {
         let b = Binding(i);
@@ -184,6 +183,31 @@ pub(crate) fn fuse_map_chains(
         prim_by_name: &prim_by_name,
     };
     rewrite(hir, arena, &ops, &bases, &fns);
+}
+
+/// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
+/// chain, including its inner HOF calls); whether or not it fused, recurse into
+/// the resulting node's children (which fuses nested HOFs in the spliced lambda
+/// bodies or the base array's elements). A chain of any `map`/`filter` mix under
+/// an optional outermost scalar terminal, over the same proven base, fuses to one
+/// loop; the recursion still reaches HOFs nested inside a spliced lambda body or a
+/// declined chain's inner run (a chain declined by the reorder gate, say, whose
+/// inner map/filter run then fuses on its own).
+fn rewrite(
+    hir: &mut Hir,
+    arena: &mut BindingArena,
+    ops: &Ops,
+    bases: &FxHashMap<Binding, &'static str>,
+    fns: &FnResolver,
+) {
+    if let Some(plan) = validate_chain(hir, arena, bases, fns) {
+        let sig = hir.signal;
+        let span = hir.span.clone();
+        let owned = std::mem::replace(hir, Hir::error(span.clone()));
+        let chain = take_chain(owned, plan, arena, fns);
+        *hir = build_loop(chain, arena, ops, sig, span);
+    }
+    hir.for_each_child_mut(|c| rewrite(c, arena, ops, bases, fns));
 }
 
 #[cfg(test)]

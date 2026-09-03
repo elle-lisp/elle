@@ -10,12 +10,12 @@
 # unchanged.
 #
 # `dbl`/`inc` are top-level named functions with pure bodies, so a `(map dbl xs)`
-# now ALSO fuses (docs/impl/dissolution.md § "Named same-unit functions"): the
-# function's body is cloned inline. A `let` body fuses too (the clone whitelist
-# admits `let`, freshening the let's own bindings) — `dbl-let`/`inc-let` below are
+# also fuses (docs/impl/dissolution.md § "Named same-unit functions"): the
+# function's body is grafted inline. A `let` body fuses too (a fragment closes
+# over `let` bindings, so the graft re-mints them) — `dbl-let`/`inc-let` below are
 # such fusing let-body oracles. The genuinely UN-fused cross-check oracle is
-# `dbl-decl`/`inc-decl` — same value, but a `match` body declines the inline clone
-# (the whitelist covers pure-expression forms plus `let`, not a `match` pattern),
+# `dbl-decl`/`inc-decl` — same value, but a `match` body cannot close (the
+# admitted forms are the pure-expression ones plus `let`, not a `match` pattern),
 # so it stays a plain `map` call. Fused inline-lambda, fused named-fn, fused
 # let-body, and the un-fused match-body oracle must all agree.
 
@@ -25,7 +25,7 @@
 (defn inc [x]
   (+ x 1))
 
-# Fusing let-body named fns: a `let`-body clones inline, its own binding freshened
+# Fusing let-body named fns: a `let` body grafts inline, its own binding re-minted
 # per call site. `dbl-let` uses a single binding; `inc-let` a SEQUENTIAL two-binding
 # `let` whose second value references the first — the rename must rewrite that
 # reference to the fresh id, so the value proves the sequential-rename order.
@@ -38,7 +38,7 @@
     (let [b (+ a 0)]
       b)))
 
-# Un-fused oracles: a `match` body declines the named-fn inline clone, so these run
+# Un-fused oracles: a `match` body cannot close into a fragment, so these run
 # the real stdlib `map`. Same value as `dbl`/`inc`.
 (defn dbl-decl [x]
   (match x
@@ -59,11 +59,11 @@
 (assert (= (map dbl [1 2 3]) (map dbl-decl [1 2 3]))
         "fused named-fn agrees with the un-fused match-body oracle")
 # A named fn is still usable as a first-class value after its inline at a call
-# site (the inline clones it; the definition persists).
+# site (the graft copies it; the definition persists).
 (assert (= (map dbl [1 2 3]) (map (fn [x] (dbl x)) [1 2 3]))
         "the inlined named fn is still callable as a value")
 
-# Let-body named fns fuse (the clone whitelist admits `let`), and must agree with
+# Let-body named fns fuse (a fragment closes over `let` bindings), and must agree with
 # the un-fused match-body oracle. `inc-let`'s SEQUENTIAL two-binding `let` (the
 # second value reads the first) proves the rename rewrites the cross-binding
 # reference to the fresh id.
@@ -77,7 +77,7 @@
 # Cross-unit named-fn inlining (docs/impl/dissolution.md § "Cross-unit named
 # functions"): `dec` is a stdlib `defn` NOT redefined in this file, so `(map dec
 # xs)` inlines a body carried across the compile-unit boundary. `dec-decl` is the
-# un-fused oracle — a `match` body declines the clone, so it runs the real stdlib
+# un-fused oracle — a `match` body cannot close, so it runs the real stdlib
 # `map`; fused and un-fused must agree.
 (defn dec-decl [x]
   (match x
@@ -87,6 +87,20 @@
 (assert (= (map dec [1 2 3]) (map dec-decl [1 2 3]))
         "fused cross-unit stdlib fn agrees with the un-fused oracle")
 (assert (= (map dec []) []) "cross-unit stdlib-fn map over empty fuses to empty")
+
+# A cross-unit stdlib fn whose body is a `let`. Its `let` binding belongs to the
+# stdlib's compile unit, so nothing here can read it: the fragment carries the
+# binding itself (docs/impl/hir.md § "A fragment is closed over its bindings").
+# The counter-factual is a compile that never runs — a splice reading the
+# defining unit's arena indexes an arena this unit does not own.
+(defn cfg-label-decl [c]
+  (match c
+    _ (fn/cfg-label c)))
+(assert (= (map fn/cfg-label [{:name "a"} {:doc "d"} {}]) ["a" "d" "anonymous"])
+        "a cross-unit let-body stdlib fn fuses to the right value")
+(assert (= (map fn/cfg-label [{:name "a"} {:doc "d"} {}])
+           (map cfg-label-decl [{:name "a"} {:doc "d"} {}]))
+        "fused cross-unit let-body agrees with the un-fused oracle")
 
 # Boundary sizes.
 (assert (= (map (fn [x] (* x 2)) []) []) "empty array fuses to empty")
@@ -170,7 +184,7 @@
 # the lambda. Two things are asserted at once: the file compiles at all (an
 # uncarried floor would make the spliced `%add` unprovable — a compile error), and
 # the fused value equals the un-fused oracle's. `sq-decl` is that oracle: same
-# declaration and same opcode, but a `match` body declines the inline clone, so it
+# declaration and same opcode, but a `match` body cannot close into a fragment, so it
 # runs the real stdlib `map`.
 (defn sq [x]
   (numeric!)

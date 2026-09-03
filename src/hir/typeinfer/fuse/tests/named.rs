@@ -3,8 +3,8 @@ use super::*;
 /// Named same-unit function inlining (docs/impl/dissolution.md § "Named
 /// same-unit functions"): a `map` whose function argument is a `Var` naming a
 /// top-level `(defn dbl …)` fuses just as an inline lambda does — the `map`
-/// dispatch is gone and `dbl`'s body is CLONED inline. The definition PERSISTS
-/// (it is cloned, not moved), so its own `(fn …)` still stands — hence the body
+/// dispatch is gone and `dbl`'s body is GRAFTED inline. The definition PERSISTS
+/// (it is copied, not moved), so its own `(fn …)` still stands — hence the body
 /// op `*` now appears TWICE (the surviving definition + the inlined copy) where
 /// before fusion it appeared once and the `map` call survived.
 
@@ -82,12 +82,11 @@ fn named_fn_composition_fuses_to_one_loop() {
     );
 }
 
-/// A named function whose body is a `let` inlines: the clone whitelist admits
-/// `let`, freshening the let's own binding (`y`) with a fresh id per call site
-/// exactly as it freshens the parameters. The `map` dispatch is gone, and the
+/// A named function whose body is a `let` inlines: a fragment closes over `let`
+/// bindings, so the graft re-mints the let's own binding (`y`) per call site
+/// exactly as it re-mints the parameters. The `map` dispatch is gone, and the
 /// body ops (`*` and `+`) appear TWICE — the surviving definition plus the
-/// inlined copy. Fails before the let-body clone widening lands: the body
-/// declines and the `map` call survives.
+/// inlined copy.
 #[test]
 fn named_fn_with_let_body_inlines() {
     let (hir, arena, mut rt) = compile("(defn g [x] (let [y (* x 2)] (+ y 1))) (map g [1 2 3])");
@@ -109,11 +108,11 @@ fn named_fn_with_let_body_inlines() {
     );
 }
 
-/// Decline: a named function whose body introduces a binding through a form the
-/// clone whitelist does NOT cover (a `match` pattern — `let` is admitted, but a
+/// Decline: a named function whose body introduces a binding through a form a
+/// fragment cannot close over (a `match` pattern — `let` is admitted, but a
 /// `match` binding is not) stays a plain `map` call, so the definition's own
-/// pattern bindings are never duplicated. The whitelist is a positive list of
-/// pure-expression forms plus `let`; anything else declines
+/// pattern bindings are never duplicated. The admitted forms are a positive list
+/// of pure-expression forms plus `let`; anything else declines
 /// correct-by-construction.
 #[test]
 fn named_fn_with_match_body_declines() {
@@ -125,11 +124,11 @@ fn named_fn_with_match_body_declines() {
     );
 }
 
-/// A `let`-body named function CLONED at two call sites in one composition:
+/// A `let`-body named function GRAFTED at two call sites in one composition:
 /// `(map g (map g xs))` where `g` has a `let` body inlines both copies into one
 /// loop. The let's own binding is re-minted with a fresh id per copy, so the two
 /// spliced bodies never collide in the region walk's per-id side tables — the
-/// hazard the alpha-renaming clone exists to prevent. `g`'s body op `*` appears
+/// hazard the graft's re-minting exists to prevent. `g`'s body op `*` appears
 /// THREE times (the definition plus two inlined copies) over one accumulator.
 /// (`*` is the clean discriminator, not `+`: the loop scaffold's own `(+ i 1)`
 /// increment also uses `+`.)
@@ -155,9 +154,9 @@ fn named_let_body_fn_composition_fuses_to_one_loop() {
 }
 
 /// Safety: a `let`-bound local function that CAPTURES a free variable is not
-/// inlined. A template is CLONED, and its body names the scope the function was
-/// defined in — which the call site need not sit inside, so the clone could splice
-/// an out-of-scope reference. That is the one place the capture refusal still
+/// inlined. Its body names the scope the function was defined in — which the call
+/// site need not sit inside, so a graft could splice an out-of-scope reference.
+/// That is the one place the capture refusal still
 /// belongs; a call-site literal is spliced AT its own scope and keeps its captures
 /// (docs/impl/dissolution.md § "Captures"). The `map` call survives.
 #[test]
@@ -219,10 +218,10 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
     );
 }
 
-/// Safety: a stdlib fn whose body is NOT clone-whitelisted is not inlined
-/// cross-unit either — the same `is_inlineable_body` gate applies. `distinct`
-/// has a `letrec` body (excluded from the whitelist), so it is never recorded
-/// as an inlineable template, and `(map distinct …)` stays a plain `map` call.
+/// Safety: a stdlib fn whose body does not close into a fragment is not inlined
+/// cross-unit either — one gate serves both paths. `distinct` has a `letrec`
+/// body, which a fragment cannot represent, so it is never recorded and
+/// `(map distinct …)` stays a plain `map` call.
 #[test]
 fn cross_unit_non_inlineable_stdlib_fn_declines() {
     let (hir, arena, mut rt) = compile("(map distinct [[1] [2]])");
@@ -248,5 +247,52 @@ fn named_fn_inlined_and_still_first_class() {
     assert!(
         count_lambdas(&hir) >= 1,
         "the cloned-from definition `dbl` must still stand as a lambda",
+    );
+}
+
+/// A grafted body binds only compiler temporaries. The splice binds the
+/// parameter with the loop's own `let`, once per element, so it no longer lives
+/// where the definition put it — and the body's own `let` bindings are re-minted
+/// per call site, so neither answers to a name the user wrote. Anything reading
+/// `BindingScope` or `is_synthetic` off the fused tree (dead-binding
+/// elimination, `(environment)` reification) must see that.
+///
+/// The counter-factual: carrying the defining unit's metadata through verbatim
+/// leaves a `BindingScope::Parameter` on a binding the loop `let`-binds, and a
+/// user-named binding the compiler generated.
+#[test]
+fn a_grafted_body_binds_only_compiler_temporaries() {
+    use crate::hir::BindingScope;
+
+    fn check(h: &Hir, arena: &BindingArena, in_loop: bool, seen: &mut usize) {
+        // The pass emits a `while`, which `functionalize` — which the fixture
+        // runs — has turned into a `loop`/`recur` by the time a test sees it.
+        let in_loop = in_loop || matches!(h.kind, HirKind::Loop { .. } | HirKind::While { .. });
+        if in_loop {
+            if let HirKind::Let { bindings, .. } = &h.kind {
+                for (b, _) in bindings {
+                    let inner = arena.get(*b);
+                    assert_eq!(
+                        inner.scope,
+                        BindingScope::Local,
+                        "a binding the loop `let`-binds is a local, not a parameter",
+                    );
+                    assert!(
+                        inner.is_synthetic,
+                        "a binding the splice minted has no source-level name",
+                    );
+                    *seen += 1;
+                }
+            }
+        }
+        h.for_each_child(|c| check(c, arena, in_loop, seen));
+    }
+
+    let (hir, arena, _rt) = compile("(defn dbl-let [x] (let [y (* x 2)] y)) (map dbl-let [1 2 3])");
+    let mut seen = 0;
+    check(&hir, &arena, false, &mut seen);
+    assert!(
+        seen >= 2,
+        "the fused loop must bind the element and the body's own `let`; saw {seen}",
     );
 }

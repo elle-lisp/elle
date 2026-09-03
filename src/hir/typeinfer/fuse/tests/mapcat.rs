@@ -294,8 +294,9 @@ fn capturing_mapcat_fn_fuses() {
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
 }
 
-/// A `mapcat` whose function is a `Var` naming a same-unit `defn` inlines its body by
-/// cloning, and the array proof reads that body exactly as it reads a literal's.
+/// A `mapcat` whose function is a `Var` naming a same-unit `defn` grafts its
+/// body, and the array proof — run where the body's bindings are readable, and
+/// carried on the fragment — admits it exactly as a literal's does.
 #[test]
 fn named_mapcat_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn pairup [x] [x (* x 10)]) (mapcat pairup [1 2 3])");
@@ -305,4 +306,18 @@ fn named_mapcat_fn_inlines() {
         "the dispatch must be gone for a named function; callees were {cs:?}",
     );
     assert_eq!(count_loops(&hir), 2, "the base walk, and the fan-out's own");
+}
+
+/// The complement, and what makes the recorded proof worth recording: a named
+/// function whose body returns a LIST is refused, because the fan-out walk is
+/// indexed and would be quadratic over one. Fusing it would be a silent
+/// pessimization, so the `mapcat` dispatch must stand.
+#[test]
+fn named_mapcat_fn_returning_a_list_declines() {
+    let (hir, arena, mut rt) = compile("(defn pairup [x] (list x x)) (mapcat pairup [1 2 3])");
+    let cs = callees(&hir, &arena, &mut rt);
+    assert!(
+        cs.iter().any(|n| n == "mapcat"),
+        "a function proving no array must leave the dispatch alone; callees were {cs:?}",
+    );
 }
