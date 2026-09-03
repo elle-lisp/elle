@@ -248,10 +248,17 @@ jobs:
   # Checking out at the recorded pointer is also what keeps the pointer fresh: a
   # pointer left behind an ABI change names plugins that no longer compile.
   #
-  # `make plugins` builds; `make smoke-plugins` asserts every artifact and then
-  # runs the corpus. Without the assertion the corpus reports success over a
-  # plugin that never built — see docs/analysis/ci.md § "Why the job asserts its
-  # build output".
+  # `make plugins-all` builds, and it is `plugins-all` rather than `plugins`
+  # because the break above is a compile error: five plugins sit outside the
+  # `PORTABLE` list, and a job that skipped them would leave the hole open for
+  # them. They need nothing extra on this runner — each opens its system library
+  # with dlopen rather than the linker. See docs/analysis/ci.md § "Why the job
+  # builds every plugin, not the portable set".
+  #
+  # `make smoke-plugins` then asserts every portable artifact and runs the
+  # corpus. Without the assertion the corpus reports success over a plugin that
+  # never built — see docs/analysis/ci.md § "Why the job asserts its build
+  # output".
   plugins:
     name: Plugin Tests
     needs: changes
@@ -292,8 +299,8 @@ jobs:
           echo "LIBCLANG_PATH=$(dirname "$lib")" >> "$GITHUB_ENV"
       - name: make elle
         run: make elle
-      - name: make plugins
-        run: make plugins
+      - name: make plugins-all
+        run: make plugins-all
       - name: make smoke-plugins
         run: make smoke-plugins
 

@@ -211,19 +211,26 @@ fn no_job_serializes_the_corpus_and_the_rust_suite() {
 // The counter-factual: this is the state main was in. Delete the job, or leave
 // it building a `plugins/` it never checked out, and an ABI change breaks every
 // plugin with nothing going red.
+//
+// The target matters as much as the job. `make plugins` builds `PORTABLE`,
+// which is five plugins short of the workspace, so it reproduces the same
+// silence for `elle-arrow`, `elle-polars`, `elle-vulkan`, `elle-egui` and
+// `elle-wayland`. The trap: `make plugins-all` carries `make plugins` as a
+// prefix, so a search for the shorter string accepts either target and lets
+// that substitution through.
 #[test]
-fn a_job_builds_the_plugins_submodule() {
+fn a_job_builds_every_plugin_in_the_submodule() {
     let text = workflow_text();
 
     let building: Vec<(String, String)> = jobs(&text)
         .into_iter()
-        .filter(|(_, body)| body.contains("make plugins") && body.contains("make smoke-plugins"))
+        .filter(|(_, body)| body.contains("make plugins-all") && body.contains("make smoke-plugins"))
         .collect();
     assert!(
         !building.is_empty(),
-        "no job in {} runs both `make plugins` and `make smoke-plugins`, so \
-         nothing in CI compiles the `plugins/` workspace against this tree's \
-         `elle-plugin`",
+        "no job in {} runs both `make plugins-all` and `make smoke-plugins`, so \
+         nothing in CI compiles the whole `plugins/` workspace against this \
+         tree's `elle-plugin`",
         workflow_path().display()
     );
 
