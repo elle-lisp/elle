@@ -294,7 +294,7 @@ fn compile_file_inner(
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
-    crate::trace::phase(ct, "compile", &format!("{} regions", source_name), t);
+    crate::phase!(ct, "compile", t, "{} regions", source_name);
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
         eprintln!(
             "[trace:regions] compile_file:\n{}",
@@ -309,14 +309,14 @@ fn compile_file_inner(
         .with_region_info(region_info);
 
     let lir_module = lowerer.lower(&hir)?;
-    crate::trace::phase(ct, "compile", &format!("{} lower", source_name), t);
+    crate::phase!(ct, "compile", t, "{} lower", source_name);
 
     // Emit bytecode
     let t = std::time::Instant::now();
     let signal = lir_module.entry.signal;
     let mut emitter = Emitter::new();
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
-    crate::trace::phase(ct, "compile", &format!("{} emit", source_name), t);
+    crate::phase!(ct, "compile", t, "{} emit", source_name);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
 

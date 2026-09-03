@@ -39,24 +39,19 @@ pub fn init_stdlib(
     let (bytecode, source) =
         match crate::compiler::stdlib_cache::try_load(STDLIB, cache, vm, symbols, cctx) {
             Some(Ok(bc)) => {
-                crate::trace::phase(boot, "boot", "stdlib-compile (cache hit)", t);
+                crate::phase!(boot, "boot", t, "stdlib-compile (cache hit)");
                 (bc, StdlibSource::Cache)
             }
             absent_or_rejected => {
                 if let Some(Err(e)) = absent_or_rejected {
-                    crate::trace::phase(
-                        boot,
-                        "boot",
-                        &format!("stdlib-cache-rejected ({e}); recompiling"),
-                        t,
-                    );
+                    crate::phase!(boot, "boot", t, "stdlib-cache-rejected ({e}); recompiling");
                 }
                 let t = std::time::Instant::now();
                 let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
                     Ok(r) => r,
                     Err(e) => panic!("stdlib compilation failed: {}", e),
                 };
-                crate::trace::phase(boot, "boot", "stdlib-compile", t);
+                crate::phase!(boot, "boot", t, "stdlib-compile");
                 let t = std::time::Instant::now();
                 // Persist so the next process start skips the front end. A write
                 // failure is not fatal — the cache is a speedup, and a fresh
@@ -69,7 +64,7 @@ pub fn init_stdlib(
                     symbols,
                     cctx,
                 );
-                crate::trace::phase(boot, "boot", "stdlib-cache-store", t);
+                crate::phase!(boot, "boot", t, "stdlib-cache-store");
                 (result.bytecode, StdlibSource::Compiled)
             }
         };
@@ -79,7 +74,7 @@ pub fn init_stdlib(
         Ok(v) => v,
         Err(e) => panic!("stdlib execution failed: {}", e),
     };
-    crate::trace::phase(boot, "boot", "stdlib-execute", t);
+    crate::phase!(boot, "boot", t, "stdlib-execute");
     // Call the returned closure to get the exports struct.
     let exports_val = call_closure(vm, closure_val);
     register_exports(vm, symbols, cctx, closure_val, exports_val);
@@ -125,7 +120,7 @@ fn register_exports(
     // Extract exports from the struct and register them.
     let exports = extract_exports(exports_val, symbols);
     register_stdlib_exports(cctx, symbols, &exports);
-    crate::trace::phase(boot, "boot", "stdlib-exports", t);
+    crate::phase!(boot, "boot", t, "stdlib-exports");
     // Arm guardfree page-protection (no-op unless --trace=guardfree): from
     // here on, freed pages are mprotected so the first user-program
     // use-after-free faults at the exact dereference. Stdlib init has its

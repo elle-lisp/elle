@@ -38,6 +38,31 @@ impl LintCode {
     }
 }
 
+impl LintCode {
+    /// The code an analysis failure reports under, on **every** surface.
+    ///
+    /// The lint CLI, `compile/diagnostics`, and the LSP each used to spell this
+    /// mapping out for themselves, and they disagreed: a syntax error was
+    /// `E005` from `elle lint`, `E000` from `compile/diagnostics` (whose match
+    /// had no `SyntaxError` arm at all), and `E0001` from the LSP — a shape the
+    /// documented `E00x` scheme does not even have. A consumer that filters or
+    /// counts by code could not do it across surfaces.
+    ///
+    /// Kinds with no code of their own report as [`ANALYSIS_ERROR`], which is
+    /// what each site's fallback arm already did.
+    pub fn for_error_kind(kind: &crate::error::ErrorKind) -> LintCode {
+        use crate::error::ErrorKind;
+        match kind {
+            ErrorKind::UndefinedVariable { .. } => UNDEFINED_VARIABLE,
+            ErrorKind::SignalMismatch { .. } => SIGNAL_MISMATCH,
+            ErrorKind::UnterminatedForm { .. } => UNTERMINATED_FORM,
+            ErrorKind::CompileError { .. } => COMPILE_ERROR,
+            ErrorKind::SyntaxError { .. } => SYNTAX_ERROR,
+            _ => ANALYSIS_ERROR,
+        }
+    }
+}
+
 pub const ARITY_MISMATCH: LintCode = LintCode::new("W002", "arity-mismatch");
 pub const MUTABLE_BINDING_NEVER_ASSIGNED: LintCode =
     LintCode::new("W003", "mutable-binding-never-assigned");
@@ -54,6 +79,28 @@ pub const WARNINGS: &[LintCode] = &[
     MUTABLE_BINDING_NEVER_ASSIGNED,
     UNUSED_BINDING,
     NON_TAIL_SELF_RECURSION,
+];
+
+pub const ANALYSIS_ERROR: LintCode = LintCode::new("E000", "analysis-error");
+pub const UNDEFINED_VARIABLE: LintCode = LintCode::new("E001", "undefined-variable");
+pub const SIGNAL_MISMATCH: LintCode = LintCode::new("E002", "signal-mismatch");
+pub const UNTERMINATED_FORM: LintCode = LintCode::new("E003", "unterminated-form");
+pub const COMPILE_ERROR: LintCode = LintCode::new("E004", "compile-error");
+pub const SYNTAX_ERROR: LintCode = LintCode::new("E005", "syntax-error");
+
+/// Every analysis failure a surface reports, in code order.
+///
+/// These are not rules — no linter pass raises them. They are the codes
+/// [`LintCode::for_error_kind`] hands to the lint CLI, `compile/diagnostics`,
+/// and the LSP, published to rule authors for the same reason [`WARNINGS`] is:
+/// as the index of codes already taken.
+pub const ERRORS: &[LintCode] = &[
+    ANALYSIS_ERROR,
+    UNDEFINED_VARIABLE,
+    SIGNAL_MISMATCH,
+    UNTERMINATED_FORM,
+    COMPILE_ERROR,
+    SYNTAX_ERROR,
 ];
 
 /// A linter diagnostic with source location

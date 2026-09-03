@@ -82,14 +82,8 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
 
     // Convert accumulated analysis errors to diagnostics
     for err in &result.errors {
-        use crate::error::ErrorKind;
-        let (code, rule) = match &err.kind {
-            ErrorKind::UndefinedVariable { .. } => ("E001", "undefined-variable"),
-            ErrorKind::SignalMismatch { .. } => ("E002", "signal-mismatch"),
-            ErrorKind::UnterminatedForm { .. } => ("E003", "unterminated-form"),
-            ErrorKind::CompileError { .. } => ("E004", "compile-error"),
-            _ => ("E000", "analysis-error"),
-        };
+        let crate::lint::diagnostics::LintCode { code, rule } =
+            crate::lint::diagnostics::LintCode::for_error_kind(&err.kind);
         let loc = err
             .location
             .clone()

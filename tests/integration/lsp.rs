@@ -194,7 +194,11 @@ fn test_lsp_syntax_error_diagnostic_location() {
     assert!(!diags.is_empty(), "should have at least one diagnostic");
 
     let d = &diags[0];
-    assert_eq!(d["code"], "E0001");
+    // The code comes from `diagnostics::SYNTAX_ERROR`, the same entry the lint
+    // CLI and `compile/diagnostics` read, so an editor and `elle lint` agree
+    // about one file. It used to be a hard-coded `E0001` here — four digits,
+    // matching neither surface nor the documented `E00x` shape.
+    assert_eq!(d["code"], "E005");
 
     // Verify no u32::MAX (4294967295) from underflow
     let start_line = d["range"]["start"]["line"].as_u64().unwrap();

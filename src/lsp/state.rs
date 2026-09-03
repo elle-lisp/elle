@@ -146,10 +146,15 @@ impl CompilerState {
             Err(e) => {
                 // Analysis error - add as diagnostic
                 let location = extract_location_from_error(&e);
+                // `analyze_file` hands back a message, not an `ErrorKind`, so
+                // the classification is fixed here rather than looked up —
+                // but the code comes from the registry, so the LSP reports the
+                // same one the lint CLI and `compile/diagnostics` do.
+                let syntax_error = crate::lint::diagnostics::SYNTAX_ERROR;
                 doc.diagnostics.push(Diagnostic::new(
                     Severity::Error,
-                    "E0001",
-                    "syntax-error",
+                    syntax_error.code,
+                    syntax_error.rule,
                     e,
                     location,
                 ));
