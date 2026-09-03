@@ -104,11 +104,32 @@ a plugin loads, so it catches a stale `.so` built against an older SDK. A
 source break never reaches a load. Only a job that compiles the submodule sees
 one.
 
-So `Plugin Tests` checks the submodule out at its recorded pointer, builds the
-portable plugins, asserts the artifacts, and runs `plugins/tests/*.lisp`
-against the release binary. Building at the recorded pointer is also what keeps
-the pointer fresh: a pointer left behind an ABI change names plugins that no
-longer compile, and the job fails on them.
+So `Plugin Tests` checks the submodule out at its recorded pointer, builds
+every plugin in the workspace, asserts the portable artifacts, and runs
+`plugins/tests/*.lisp` against the release binary. Building at the recorded
+pointer is also what keeps the pointer fresh: a pointer left behind an ABI
+change names plugins that no longer compile, and the job fails on them.
+
+#### Why the job builds every plugin, not the portable set
+
+`make plugins` builds the packages in `plugins/Makefile`'s `PORTABLE` list.
+Five plugins sit outside that list — `elle-arrow`, `elle-polars`,
+`elle-vulkan`, `elle-egui` and `elle-wayland` — so a job that stopped at `make
+plugins` left the hole above open for them. The break this job exists to catch
+is a compile error, so compiling every plugin is the whole gate. The job runs
+`make plugins-all`, which builds the workspace.
+
+The five cost nothing extra on the runner. Each reaches its system library
+through `dlopen` rather than through the linker: `ash` is taken with the
+`loaded` feature, and `wayland-client`, `winit` and `glutin` open theirs at run
+time. `ldd` over the five artifacts names nothing outside libc, and the five
+build from a cold target directory with `PKG_CONFIG` pointed at a program that
+always fails. The install list below is therefore the same list `make plugins`
+needed.
+
+`PORTABLE` still decides what the artifact assertion demands and what the
+corpus can rely on. It is a statement about what is safe to **run** on a
+headless runner, not about what compiles.
 
 #### What the runner has to install
 
@@ -154,12 +175,18 @@ the artifacts asserted, the self-gating is harmless — the tests never have to 
 the thing that detects a missing plugin. `make smoke-plugins` runs the
 assertion before the corpus for the same reason.
 
-The assertion names the portable set, not every plugin. `elle-polars` does not
-build on the current toolchain: its `ethnum` dependency fails a
-`mem::transmute` size check under this rustc, unrelated to elle. `elle-arrow`
-carries heavy optional dependencies, and `elle-vulkan`, `elle-egui` and
-`elle-wayland` need a GPU or a display to exercise. The tests for those plugins
-gate themselves out of the run.
+The assertion names the portable set, not every plugin, because the two lists
+answer different questions. Compiling is what the job builds all of them for.
+Asserting an artifact matters where a corpus file would otherwise report
+success over a plugin that never built, and `elle-vulkan`, `elle-egui` and
+`elle-wayland` need a GPU or a display before they can do anything a corpus
+file could assert.
+
+That leaves one thing for a test to hold. `make plugins-all` compiles the
+members of `plugins/Cargo.toml`'s workspace, so a plugin directory missing from
+that list is compiled by nothing and asserted by nothing, and the job stays
+green over it. `tests/integration/plugins.rs` pins every plugin directory to a
+workspace member.
 
 ### Adding a job
 

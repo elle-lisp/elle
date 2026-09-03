@@ -8,9 +8,10 @@
 // every gate stayed green (#1023). The argument, and why the ABI version guard
 // cannot stand in for the job, are in docs/analysis/ci.md § "The plugins job".
 //
-// These tests cover the two halves the job cannot check for itself: that the
-// list of artifacts it demands still describes the submodule, and that the
-// demand actually fails when an artifact is absent.
+// These tests cover the halves the job cannot check for itself: that every
+// plugin is inside the workspace the job compiles, that the list of artifacts
+// it demands still describes the submodule, and that the demand actually fails
+// when an artifact is absent.
 
 use std::fs;
 use std::path::PathBuf;
@@ -37,10 +38,10 @@ fn run_make(target: &str, overrides: &[&str]) -> (bool, String) {
     (out.status.success(), text)
 }
 
-/// The plugins the assertion must not demand: `elle-polars` fails to build on
-/// the current toolchain, `elle-arrow` carries heavy optional dependencies, and
-/// the last three need a GPU or a display. docs/analysis/ci.md § "The plugins
-/// job" owns the reasons.
+/// The plugins the artifact assertion must not demand. `make plugins-all`
+/// compiles them and `make plugins` does not build them, so a `plugins-verify`
+/// that named them would fail every portable build.
+/// docs/analysis/ci.md § "The plugins job" owns the split.
 const NOT_PORTABLE: &[&str] = &["polars", "arrow", "vulkan", "egui", "wayland"];
 
 /// The package name a plugin directory declares, or `None` when the directory
@@ -49,6 +50,92 @@ fn package_name(dir: &str) -> Option<String> {
     let text = fs::read_to_string(repo_root().join("plugins").join(dir).join("Cargo.toml")).ok()?;
     let line = text.lines().find(|l| l.trim_start().starts_with("name = "))?;
     Some(line.split('"').nth(1)?.to_string())
+}
+
+/// The directories under `plugins/` that hold a crate.
+fn plugin_directories() -> Vec<String> {
+    let root = repo_root().join("plugins");
+    let mut dirs: Vec<String> = fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|dir| root.join(dir).join("Cargo.toml").is_file())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+/// The `members` list of `plugins/Cargo.toml`'s `[workspace]` table.
+fn workspace_members() -> Vec<String> {
+    let path = repo_root().join("plugins/Cargo.toml");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let (_, rest) = text
+        .split_once("members = [")
+        .unwrap_or_else(|| panic!("{} declares no `members` list", path.display()));
+    let (inner, _) = rest
+        .split_once(']')
+        .unwrap_or_else(|| panic!("{}'s `members` list does not close", path.display()));
+    // The list is one quoted directory name per line, so the odd fields of a
+    // split on the quote character are the names.
+    inner
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
+}
+
+// The job compiles the workspace, and `plugins/Cargo.toml` decides what that
+// is. A plugin directory the `members` list does not name is compiled by
+// nothing: `cargo build` over the workspace never descends into it, the
+// artifact assertion cannot demand a `.so` that no target produces, and the
+// corpus file for it exits 0 on the import it could not resolve. Three gates
+// agree, and none of them looked.
+//
+// The trap: cargo reports an unlisted directory only when a build STARTS
+// inside it ("current package believes it's in a workspace when it's not"), and
+// CI never starts a build there. From the workspace root the directory is
+// invisible, not an error.
+//
+// The counter-factual: drop `csv` from `members`, and `make plugins-all`,
+// `make plugins-verify` and the plugin corpus all stay green over a plugin
+// that no longer compiles at all.
+#[test]
+fn every_plugin_directory_is_a_workspace_member() {
+    if !repo_root().join("plugins/Cargo.toml").exists() {
+        eprintln!("SKIPPED: the `plugins/` submodule is not checked out");
+        return;
+    }
+
+    let members = workspace_members();
+    // A parse that returned nothing would assert nothing. The workspace has
+    // held around twenty-five crates since the submodule was split out.
+    assert!(
+        members.len() > 10,
+        "plugins/Cargo.toml names only {members:?} as workspace members; the \
+         parse of the `members` list is broken, not the manifest"
+    );
+
+    let unlisted: Vec<String> = plugin_directories()
+        .into_iter()
+        .filter(|dir| !members.contains(dir))
+        .collect();
+    assert!(
+        unlisted.is_empty(),
+        "these plugin directories hold a crate that plugins/Cargo.toml's \
+         `members` list does not name, so `make plugins-all` never compiles \
+         them and an ABI break in them reaches no gate: {unlisted:?}"
+    );
+
+    let empty: Vec<&String> = members
+        .iter()
+        .filter(|dir| package_name(dir).is_none())
+        .collect();
+    assert!(
+        empty.is_empty(),
+        "plugins/Cargo.toml names these members, which declare no package: \
+         {empty:?}"
+    );
 }
 
 // The artifact list is derived, not written down: the Makefile reads `PORTABLE`

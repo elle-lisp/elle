@@ -156,7 +156,7 @@ MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.pat
 plugins:  ## Build all portable plugins (from plugins submodule)
 	$(MAKE) -C plugins portable
 
-plugins-all:  ## Build all plugins including system-dep ones (vulkan, egui, etc.)
+plugins-all:  ## Build every plugin in the submodule's workspace
 	$(MAKE) -C plugins all
 
 mcp: elle  ## Build elle + MCP plugins (oxigraph, syn)

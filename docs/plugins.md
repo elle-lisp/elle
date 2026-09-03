@@ -59,10 +59,17 @@ git submodule update --init plugins
 Then build from the elle repo root:
 
 ```bash
-make plugins          # portable plugins (no system deps)
-make plugins-all      # all plugins (requires vulkan, wayland, egui libs)
+make plugins          # portable plugins
+make plugins-all      # every plugin in the workspace
 make mcp              # just oxigraph + syn (for the MCP server)
 ```
+
+`make plugins` builds the `PORTABLE` list in `plugins/Makefile`.
+`make plugins-all` adds `elle-arrow`, `elle-polars`, `elle-vulkan`,
+`elle-egui` and `elle-wayland`. All five compile on a stock toolchain — each
+opens its system library with dlopen — but the last three need a GPU or a
+display before they can do anything. That is what keeps them out of the
+portable list; docs/analysis/ci.md § "The plugins job" owns the split.
 
 Or build individual plugins:
 
