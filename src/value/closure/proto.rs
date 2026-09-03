@@ -171,8 +171,16 @@ pub(super) fn materialize_payload(
     let region_table =
         alloc_region_slice_in_region::<StaticRegion>(heap, &proto.region_table, region);
 
+    // The merge set is stored ascending: the alloc dispatch resolves membership
+    // by binary search, so an unsorted set would answer wrongly rather than
+    // slowly. This is where that invariant is established, so it is where it is
+    // checked — the reader on the hot path takes it on trust.
     let mut merged: Vec<u32> = proto.merged_slots.iter().copied().collect();
     merged.sort_unstable();
+    debug_assert!(
+        merged.windows(2).all(|w| w[0] < w[1]),
+        "a merge set is ascending and deduplicated"
+    );
     let merged_slots = alloc_region_slice_in_region::<u32>(heap, &merged, region);
 
     // Both release tables are stored ascending: a value route's identity is its

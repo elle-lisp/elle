@@ -154,11 +154,10 @@ pub struct MergedSlots<'a>(&'a [u32]);
 impl<'a> MergedSlots<'a> {
     /// View `slots` as a merge set. The slice must be ascending — membership is
     /// a binary search, so an unsorted one answers wrongly rather than slowly.
+    /// The payload's own set is sorted where it is built, which is where that
+    /// invariant is asserted; this constructor is on the alloc-resolution path
+    /// and does not re-walk the slice.
     pub fn from_sorted(slots: &'a [u32]) -> Self {
-        debug_assert!(
-            slots.windows(2).all(|w| w[0] < w[1]),
-            "a merge set is stored ascending and deduplicated"
-        );
         MergedSlots(slots)
     }
 
