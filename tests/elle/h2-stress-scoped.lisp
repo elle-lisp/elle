@@ -1,18 +1,56 @@
 (elle/epoch 12)
-# h2 request loops written so escape analysis can scope them.
+# h2 request loops written so escape analysis can scope them, and the heap
+# residue those loops leave behind.
 #
 # `each` desugars to a fiber, which blocks escape analysis; `while` with
 # let-bound loop vars keeps each iteration's allocations inside a scope the
 # compiler can reclaim. Every loop here is a `while` for that reason.
 #
-# What each case asserts is the status, the body length that came back, and an
-# empty stream table at the end. The `arena/bytes` deltas around them are
-# printed for a reader, not asserted.
+# Three shapes pin protocol behaviour — the response status, the body length
+# that came back, and an empty stream table at the end. A fourth reads MEMORY,
+# and it is the only one that can say anything about the scoping the loops are
+# written for.
 #
-# The counts are named below and kept small on purpose: none of the assertions
-# needs volume, and the cost is per-request. The shape this file had before —
-# 200 requests of 50k, then 200 of 10k — ran eight seconds here and outran a
-# 30 s budget on a CI runner.
+# ── What the residue drive measures ──────────────────────────────────
+#
+# The same request loop runs at two counts over one session, and each drive's
+# heap delta is held under `ceiling × requests`. Two counts rather
+# than one, because a ceiling on a single delta admits any shape that fits
+# under it: a residue that grows faster than the request count passes at the
+# small count and fails at the large one, which is the whole reason the large
+# one is here. A rate of 0 at both is what "bounded" means.
+#
+# The gauges are `arena/count` (live objects summed across active regions) and
+# `arena/region-count` (active region entries) — the live per-region reads
+# `arena-count.lisp` argues for. `arena/bytes` is deliberately NOT read: it
+# adds the page pool's cached bytes to the regions' own, so growth in it
+# belongs to neither until a second gauge says which, and its page geometry
+# makes it swing with the body size while the residue does not.
+#
+# Both drives share one session, so connecting is outside every window; each
+# window is also preceded by an uncounted run, for the reason recorded at
+# `residue` below.
+#
+# ── The pins ─────────────────────────────────────────────────────────
+#
+# `max-objects-per-request` and `max-regions-per-request` are ceilings on the
+# measured rate. They are shrink-only: a change that reclaims more lowers
+# them, and nothing may raise them. Both reach 0 when a request leaves nothing
+# behind.
+#
+# ── The gauge-live gate ──────────────────────────────────────────────
+#
+# A ceiling passes for two reasons: the loop reclaims, or the gauge is dead. A
+# dead gauge reads flat and paints every leak green, so a known unbounded
+# shape — a module-level sink that keeps every value handed to it — is
+# measured first, through the same helper, and must read at least one object
+# and one region per run. If that gate fails, every ceiling below is void.
+#
+# ── The counts ───────────────────────────────────────────────────────
+#
+# The counts are named below and kept small on purpose: none of the protocol
+# assertions needs volume, the cost is per request, and this file shares the
+# corpus's per-file budget.
 
 (def http2 ((import "std/http2")))
 
@@ -20,6 +58,13 @@
 (def reconnect-cycles 5)
 (def reconnect-requests 10)
 (def durability-requests 60)
+
+# The residue drive's two counts, and the per-request ceilings a drive's heap
+# delta must fit under. Shrink-only — see "The pins" above.
+(def residue-small 10)
+(def residue-large 30)
+(def max-objects-per-request 83)
+(def max-regions-per-request 61)
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -52,6 +97,48 @@
         (protect (port/close listener))
         (protect (ev/abort sf)))
       (test-fn session))))
+
+# ── The residue gauge ────────────────────────────────────────────────
+#
+# Objects and regions still live after `n` runs of `body`, as a raw delta. The
+# caller divides by nothing: an integer division would floor a sub-integer
+# rate to 0 and report a real leak as reclaimed, so the delta is compared
+# against `ceiling × n` instead and the arithmetic stays exact.
+#
+# Both gauges are Immediate primitives, so sampling them allocates nothing and
+# cannot perturb what they read.
+#
+# One run happens ahead of every window and is not counted. A window opened
+# straight after other work reads 13 objects and 13 regions above the same
+# window opened after a run of `body`, whatever `n` is — a one-off the first
+# run of the window absorbs, not a per-run cost. Paying it outside the window
+# is what makes the rate reproducible: with the lead run, a drive of n
+# requests reads exactly n times the same number, every time.
+
+(defn residue [n body]
+  (body 0)
+  (let [c0 (arena/count)
+        r0 (arena/region-count)]
+    (def @i 0)
+    (while (< i n)
+      (body i)
+      (assign i (+ i 1)))
+    [(- (arena/count) c0) (- (arena/region-count) r0)]))
+
+(defn check-residue [label n body max-objects max-regions]
+  (let [[objects regions] (residue n body)]
+    # Printed before the asserts, so a run that fails the second count still
+    # shows what the first one read.
+    (println "  " label " n=" n ": " objects " objects, " regions " regions")
+    (assert (<= objects (* max-objects n))
+            (string label " n=" n ": " objects " objects over " n
+                    " requests exceeds the " max-objects
+                    "/request ceiling (budget " (* max-objects n) ")"))
+    (assert (<= regions (* max-regions n))
+            (string label " n=" n ": " regions " regions over " n
+                    " requests exceeds the " max-regions
+                    "/request ceiling (budget " (* max-regions n) ")"))
+    [objects regions]))
 
 # ── Test: sequential requests with scoped response ──────────────────
 #
@@ -118,6 +205,30 @@
                            "durability: no stream leak")
                    true))))
 
+# ── Test: per-request residue of the sequential loop ─────────────────
+#
+# The same `while` body the sequential case runs, driven at two counts. The
+# body is small because the residue does not scale with it, and a small body
+# keeps the drive cheap.
+
+(def residue-body (bytes "residue"))
+
+(defn test-residue-scoped []
+  (with-server (make-handler)
+               (fn [session]
+                 (let [send-one (fn [i]
+                                  (let [resp (http2:send session "POST" "/echo"
+                                        :body residue-body)]
+                                    (assert (= resp:status 200)
+                                    (string "residue: request " i))))]
+                   (check-residue "sequential" residue-small send-one
+                                  max-objects-per-request
+                                  max-regions-per-request)
+                   (check-residue "sequential" residue-large send-one
+                                  max-objects-per-request
+                                  max-regions-per-request))
+                 true)))
+
 # ── Run ──────────────────────────────────────────────────────────────
 
 (def body-10k (make-body 10000))
@@ -127,21 +238,36 @@
 # report a shape that did not run.
 
 (println "sequential " seq-requests "x50k...")
-(def before (arena/bytes))
 (test-sequential-scoped seq-requests body-50k)
-(def after (arena/bytes))
-(println "  arena delta: " (- after before) " bytes")
 
 (println "reconnect " reconnect-cycles "x" reconnect-requests "...")
-(def before2 (arena/bytes))
 (test-reconnect-scoped reconnect-cycles reconnect-requests)
-(def after2 (arena/bytes))
-(println "  arena delta: " (- after2 before2) " bytes")
 
 (println "durability " durability-requests "x10k...")
-(def before3 (arena/bytes))
 (test-durability-scoped durability-requests body-10k)
-(def after3 (arena/bytes))
-(println "  arena delta: " (- after3 before3) " bytes")
+
+# The gauge-live gate runs before any ceiling it makes meaningful. The sink is
+# module-level, so nothing it is handed is ever reclaimed and both gauges must
+# climb at least one per run.
+
+(println "gauge-live gate...")
+(def @gauge-sink @[])
+(defn gauge-growth [i]
+  (push gauge-sink {:k i}))
+
+(let [[objects regions] (residue residue-large gauge-growth)]
+  (println "  live-growth n=" residue-large ": " objects " objects, " regions
+           " regions")
+  (assert (<= residue-large objects)
+          (string "OBJECT GAUGE DEAD: an unbounded shape read " objects
+                  " objects over " residue-large
+                  " runs — every residue ceiling this run is void"))
+  (assert (<= residue-large regions)
+          (string "REGION GAUGE DEAD: an unbounded shape read " regions
+                  " regions over " residue-large
+                  " runs — every residue ceiling this run is void")))
+
+(println "residue " residue-small "/" residue-large "...")
+(test-residue-scoped)
 
 (println "all scoped h2 stress tests passed")
