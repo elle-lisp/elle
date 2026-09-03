@@ -1,10 +1,10 @@
 //! Unit tests (`super` is the parent impl module).
 
 use super::*;
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{thread_arena, Span, Syntax, SyntaxKind};
 
 fn sym(name: &str) -> Syntax {
-    Syntax::new(SyntaxKind::Symbol(name.to_string()), Span::synthetic())
+    Syntax::symbol(&thread_arena(), name, Span::synthetic())
 }
 
 fn int(n: i64) -> Syntax {
@@ -12,7 +12,7 @@ fn int(n: i64) -> Syntax {
 }
 
 fn list(items: Vec<Syntax>) -> Syntax {
-    Syntax::new(SyntaxKind::List(items), Span::synthetic())
+    Syntax::list(&thread_arena(), &items, Span::synthetic())
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn test_extract_epoch_wrong_arity() {
 #[test]
 fn test_migrate_forms_current_epoch() {
     let mut forms = vec![list(vec![sym("foo"), int(1)])];
-    let count = migrate_forms(&mut forms, CURRENT_EPOCH).unwrap();
+    let count = migrate_forms(&thread_arena(), &mut forms, CURRENT_EPOCH).unwrap();
     assert_eq!(count, 0);
 }
 
@@ -174,7 +174,7 @@ fn test_lexicon_identical_across_all_registered_epochs() {
 
 /// The forms of `source`, read the way the pipeline reads them.
 fn forms_of(source: &str) -> Vec<Syntax> {
-    read_syntax_all(source, "t.lisp").unwrap()
+    read_syntax_all(thread_arena(), source, "t.lisp").unwrap()
 }
 
 #[test]

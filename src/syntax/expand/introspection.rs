@@ -33,7 +33,7 @@ impl Expander {
             false
         };
 
-        Ok(Syntax::new(SyntaxKind::Bool(is_macro), span.clone()))
+        Ok(Syntax::new(SyntaxKind::Bool(is_macro), *span))
     }
 
     /// Handle (expand-macro '(macro-call ...)) - returns the expanded form as data
@@ -58,11 +58,11 @@ impl Expander {
 
         // The argument should be a quoted form
         let form = match &items[1].kind {
-            SyntaxKind::Quote(inner) => (**inner).clone(),
+            SyntaxKind::Quote(inner) => **inner,
             _ => {
                 // Not a quoted form - just return the argument unchanged
                 // (This allows expand-macro to be a no-op for non-quoted args)
-                return Ok(items[1].clone());
+                return Ok(items[1]);
             }
         };
 
@@ -70,9 +70,6 @@ impl Expander {
         let expanded = self.expand(form, symbols, vm)?;
 
         // Wrap the result in a quote so it becomes data at runtime
-        Ok(Syntax::new(
-            SyntaxKind::Quote(Box::new(expanded)),
-            span.clone(),
-        ))
+        Ok(Syntax::quote(&self.arena(), expanded, *span))
     }
 }

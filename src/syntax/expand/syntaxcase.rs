@@ -22,7 +22,7 @@
 
 use super::Expander;
 use crate::symbol::SymbolTable;
-use crate::syntax::{ScopeId, Span, Syntax, SyntaxKind};
+use crate::syntax::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind};
 use crate::vm::VM;
 use std::collections::HashSet;
 
@@ -67,11 +67,11 @@ impl PatternBinding {
     }
 
     /// Render to a (binding-symbol, accessor-expr) pair for `let*`.
-    fn into_let_binding(self, span: Span, scope: ScopeId) -> (Syntax, Syntax) {
+    fn into_let_binding(self, arena: &SyntaxArena, span: Span, scope: ScopeId) -> (Syntax, Syntax) {
         let bsym = if self.synthetic {
-            make_scoped_symbol(&self.name, span, scope)
+            make_scoped_symbol(arena, &self.name, span, scope)
         } else {
-            Syntax::new(SyntaxKind::Symbol(self.name), span)
+            Syntax::symbol(arena, &self.name, span)
         };
         (bsym, self.expr)
     }
@@ -126,7 +126,8 @@ impl Expander {
             ));
         }
 
-        let scrutinee_expr = items[1].clone();
+        let arena = self.arena();
+        let scrutinee_expr = items[1];
         let clauses = &items[2..];
 
         // Generate a fresh scope for all synthetic bindings.
@@ -136,17 +137,18 @@ impl Expander {
 
         // Bind scrutinee to a gensym at the outermost level.
         let scrut_name = counter.next(); // __sc0
-        let scrut_sym = make_scoped_symbol(&scrut_name, span.clone(), synthetic_scope);
+        let scrut_sym = make_scoped_symbol(&arena, &scrut_name, *span, synthetic_scope);
 
         // Generate the clause chain (inner body of the outer let).
         let clause_chain =
             self.compile_clauses(clauses, &scrut_sym, span, synthetic_scope, &mut counter)?;
 
-        // Wrap everything: (let ((__sc0 <scrutinee>)) <clause_chain>)
+        // Wrap everything: (let [__sc0 <scrutinee>] <clause_chain>)
         let outer_let = make_let(
-            vec![(scrut_sym.clone(), scrutinee_expr)],
+            &arena,
+            vec![(scrut_sym, scrutinee_expr)],
             clause_chain,
-            span.clone(),
+            *span,
         );
 
         // Recursively expand the result (clause bodies may contain macro calls).
@@ -162,9 +164,10 @@ impl Expander {
         scope: ScopeId,
         counter: &mut GensymCounter,
     ) -> Result<Syntax, String> {
+        let arena = self.arena();
         if clauses.is_empty() {
             // No clauses — unreachable in practice (arity check above requires >= 1)
-            return Ok(make_no_match_error(span.clone()));
+            return Ok(make_no_match_error(&arena, *span));
         }
 
         let clause = &clauses[0];
@@ -206,16 +209,16 @@ impl Expander {
         collect_pattern_vars(&pattern, &mut seen, pattern_syn)?;
 
         // Compile the pattern.
-        let (test_expr, bindings) = compile_pattern(&pattern, scrut, span, scope, counter)?;
+        let (test_expr, bindings) = compile_pattern(&arena, &pattern, scrut, span, scope, counter)?;
 
         // The else branch: rest of clauses or no-match error.
         let else_branch = self.compile_clauses(rest, scrut, span, scope, counter)?;
 
         // The body: multiple body forms wrapped in (begin ...) if more than one.
         let body = if body_parts.len() == 1 {
-            body_parts[0].clone()
+            body_parts[0]
         } else {
-            make_begin(body_parts, &clause.span)
+            make_begin(&arena, body_parts, &clause.span)
         };
 
         // Build the result depending on whether there's a test.
@@ -225,17 +228,18 @@ impl Expander {
                 if bindings.is_empty() {
                     // Wildcard case.
                     if let Some(guard) = guard_opt {
-                        // Wildcard with guard: (if guard (let () body) else)
+                        // Wildcard with guard: (if guard (let [] body) else)
                         let guarded = make_if(
-                            guard.clone(),
-                            make_let(vec![], body, clause.span.clone()),
+                            &arena,
+                            *guard,
+                            make_let(&arena, vec![], body, clause.span),
                             else_branch,
-                            clause.span.clone(),
+                            clause.span,
                         );
-                        make_let(vec![], guarded, clause.span.clone())
+                        make_let(&arena, vec![], guarded, clause.span)
                     } else {
-                        // (let () body)
-                        make_let(vec![], body, clause.span.clone())
+                        // (let [] body)
+                        make_let(&arena, vec![], body, clause.span)
                     }
                 } else {
                     // Variable/list pattern: bind pattern variables.
@@ -247,54 +251,51 @@ impl Expander {
                     // depends on the prior).
                     let scoped_bindings = bindings
                         .into_iter()
-                        .map(|b| b.into_let_binding(clause.span.clone(), scope))
+                        .map(|b| b.into_let_binding(&arena, clause.span, scope))
                         .collect();
                     if let Some(guard) = guard_opt {
-                        // Build: (let* (...) (if guard body else))
+                        // Build: (let* [...] (if guard body else))
                         let guarded = make_if(
-                            guard.clone(),
-                            make_let(vec![], body, clause.span.clone()),
+                            &arena,
+                            *guard,
+                            make_let(&arena, vec![], body, clause.span),
                             else_branch,
-                            clause.span.clone(),
+                            clause.span,
                         );
-                        make_let_star(scoped_bindings, guarded, clause.span.clone())
+                        make_let_star(&arena, scoped_bindings, guarded, clause.span)
                     } else {
-                        make_let_star(scoped_bindings, body, clause.span.clone())
+                        make_let_star(&arena, scoped_bindings, body, clause.span)
                     }
                 }
             }
             Some(test) => {
                 // Has a test expression.
                 let then_body = if bindings.is_empty() {
-                    let body_let = make_let(vec![], body, clause.span.clone());
+                    let body_let = make_let(&arena, vec![], body, clause.span);
                     if let Some(guard) = guard_opt {
-                        make_if(
-                            guard.clone(),
-                            body_let,
-                            else_branch.clone(),
-                            clause.span.clone(),
-                        )
+                        make_if(&arena, *guard, body_let, else_branch, clause.span)
                     } else {
                         body_let
                     }
                 } else {
                     let scoped_bindings: Vec<(Syntax, Syntax)> = bindings
                         .into_iter()
-                        .map(|b| b.into_let_binding(clause.span.clone(), scope))
+                        .map(|b| b.into_let_binding(&arena, clause.span, scope))
                         .collect();
                     if let Some(guard) = guard_opt {
                         let guarded = make_if(
-                            guard.clone(),
-                            make_let(vec![], body, clause.span.clone()),
-                            else_branch.clone(),
-                            clause.span.clone(),
+                            &arena,
+                            *guard,
+                            make_let(&arena, vec![], body, clause.span),
+                            else_branch,
+                            clause.span,
                         );
-                        make_let_star(scoped_bindings, guarded, clause.span.clone())
+                        make_let_star(&arena, scoped_bindings, guarded, clause.span)
                     } else {
-                        make_let_star(scoped_bindings, body, clause.span.clone())
+                        make_let_star(&arena, scoped_bindings, body, clause.span)
                     }
                 };
-                make_if(test, then_body, else_branch, clause.span.clone())
+                make_if(&arena, test, then_body, else_branch, clause.span)
             }
         };
 
@@ -307,44 +308,49 @@ impl Expander {
 // =============================================================================
 
 /// Make a symbol node stamped with `scope`.
-fn make_scoped_symbol(name: &str, span: Span, scope: ScopeId) -> Syntax {
-    let mut s = Syntax::new(SyntaxKind::Symbol(name.to_string()), span);
-    s.add_scope(scope);
-    s
+fn make_scoped_symbol(arena: &SyntaxArena, name: &str, span: Span, scope: ScopeId) -> Syntax {
+    Syntax::symbol_scoped(arena, name, span, &[scope])
 }
 
 /// Make `(f arg1 arg2 ...)`.
-fn make_call(f: &str, args: Vec<Syntax>, span: Span) -> Syntax {
-    let mut items = vec![Syntax::new(SyntaxKind::Symbol(f.to_string()), span.clone())];
+fn make_call(arena: &SyntaxArena, f: &str, args: Vec<Syntax>, span: Span) -> Syntax {
+    let mut items = vec![Syntax::symbol(arena, f, span)];
     items.extend(args);
-    Syntax::new(SyntaxKind::List(items), span)
+    Syntax::list(arena, &items, span)
 }
 
 /// Make `(if test then else)`.
-fn make_if(test: Syntax, then: Syntax, else_: Syntax, span: Span) -> Syntax {
-    Syntax::new(
-        SyntaxKind::List(vec![
-            Syntax::new(SyntaxKind::Symbol("if".to_string()), span.clone()),
-            test,
-            then,
-            else_,
-        ]),
+fn make_if(arena: &SyntaxArena, test: Syntax, then: Syntax, else_: Syntax, span: Span) -> Syntax {
+    Syntax::list(
+        arena,
+        &[Syntax::symbol(arena, "if", span), test, then, else_],
         span,
     )
 }
 
-/// Make `(let ((b1 e1) (b2 e2) ...) body)`.
+/// Make `(let [b1 e1 b2 e2 ...] body)`.
 /// `bindings` is a vec of (binding-symbol, expr).
-fn make_let(bindings: Vec<(Syntax, Syntax)>, body: Syntax, span: Span) -> Syntax {
-    make_let_form("let", bindings, body, span)
+fn make_let(
+    arena: &SyntaxArena,
+    bindings: Vec<(Syntax, Syntax)>,
+    body: Syntax,
+    span: Span,
+) -> Syntax {
+    make_let_form(arena, "let", bindings, body, span)
 }
 
 /// Make `(let* [b1 e1 b2 e2 ...] body)` for sequential bindings.
-fn make_let_star(bindings: Vec<(Syntax, Syntax)>, body: Syntax, span: Span) -> Syntax {
-    make_let_form("let*", bindings, body, span)
+fn make_let_star(
+    arena: &SyntaxArena,
+    bindings: Vec<(Syntax, Syntax)>,
+    body: Syntax,
+    span: Span,
+) -> Syntax {
+    make_let_form(arena, "let*", bindings, body, span)
 }
 
 fn make_let_form(
+    arena: &SyntaxArena,
     keyword: &str,
     bindings: Vec<(Syntax, Syntax)>,
     body: Syntax,
@@ -356,47 +362,39 @@ fn make_let_form(
         flat_bindings.push(bsym);
         flat_bindings.push(expr);
     }
-    let bindings_node = Syntax::new(SyntaxKind::Array(flat_bindings), span.clone());
-    Syntax::new(
-        SyntaxKind::List(vec![
-            Syntax::new(SyntaxKind::Symbol(keyword.to_string()), span.clone()),
-            bindings_node,
-            body,
-        ]),
+    let bindings_node = Syntax::array(arena, &flat_bindings, span);
+    Syntax::list(
+        arena,
+        &[Syntax::symbol(arena, keyword, span), bindings_node, body],
         span,
     )
 }
 
 /// Make `(begin form1 form2 ...)` for multiple body forms.
-fn make_begin(forms: &[Syntax], span: &Span) -> Syntax {
-    let mut items = vec![Syntax::new(
-        SyntaxKind::Symbol("begin".to_string()),
-        span.clone(),
-    )];
+fn make_begin(arena: &SyntaxArena, forms: &[Syntax], span: &Span) -> Syntax {
+    let mut items = vec![Syntax::symbol(arena, "begin", *span)];
     items.extend_from_slice(forms);
-    Syntax::new(SyntaxKind::List(items), span.clone())
+    Syntax::list(arena, &items, *span)
 }
 
 /// Make the no-match runtime error:
 /// `(emit 1 {:error :match-error :message "syntax-case: no matching clause"})`.
-fn make_no_match_error(span: Span) -> Syntax {
+fn make_no_match_error(arena: &SyntaxArena, span: Span) -> Syntax {
     // Build the struct literal {:error :match-error :message "syntax-case: no matching clause"}
     let struct_node = Syntax::new(
-        SyntaxKind::Struct(vec![
-            Syntax::new(SyntaxKind::Keyword("error".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Keyword("match-error".to_string()), span.clone()),
-            Syntax::new(SyntaxKind::Keyword("message".to_string()), span.clone()),
-            Syntax::new(
-                SyntaxKind::String("syntax-case: no matching clause".to_string()),
-                span.clone(),
-            ),
-        ]),
-        span.clone(),
+        SyntaxKind::Struct(arena.nodes(&[
+            Syntax::keyword(arena, "error", span),
+            Syntax::keyword(arena, "match-error", span),
+            Syntax::keyword(arena, "message", span),
+            Syntax::string(arena, "syntax-case: no matching clause", span),
+        ])),
+        span,
     );
     make_call(
+        arena,
         "emit",
         vec![
-            Syntax::new(SyntaxKind::Int(1), span.clone()), // SIG_ERROR = 1
+            Syntax::new(SyntaxKind::Int(1), span), // SIG_ERROR = 1
             struct_node,
         ],
         span,

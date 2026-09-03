@@ -108,7 +108,9 @@ impl CompileCtx {
         let mut init_symbols = SymbolTable::new();
         let t = std::time::Instant::now();
         let mut meta = register_primitives(&mut vm, &mut init_symbols);
-        let mut expander = Expander::new();
+        // The expander's template arena is this macro VM's heap — the
+        // instance's, when built through `new_with_heap`.
+        let mut expander = Expander::on_vm(&mut vm);
         // Macro-transformer bodies compile against primitives (+ stdlib once
         // `init_stdlib` runs); seed it before `load_prelude`, whose macro
         // expansions evaluate transformer bodies via `eval_syntax`.
@@ -154,20 +156,34 @@ impl CompileCtx {
     /// `Expander` (independent expansion state), and a clone of the compile
     /// `meta`. The clones decouple `f` from `self`'s borrow so a nested compile
     /// during `f` (a `begin-for-syntax` that imports, say) does not alias.
-    pub fn with_macro_expansion<F, R>(&mut self, f: F) -> R
+    ///
+    /// `arena` is the unit's working syntax arena, and the handed-out clone is
+    /// already pointed at it. Taking it here rather than leaving it to the
+    /// caller is what keeps an expansion from allocating into the instance's
+    /// process-root template arena, which nothing would ever reclaim
+    /// (docs/impl/syntax.md § "Where a node lives").
+    pub fn with_macro_expansion<F, R>(&mut self, arena: crate::syntax::SyntaxArena, f: F) -> R
     where
         F: FnOnce(&mut VM, Expander, PrimitiveMeta) -> R,
     {
         self.vm.reset_fiber();
-        let expander = self.expander.clone();
+        let mut expander = self.expander.clone();
+        expander.set_arena(arena);
         let meta = self.meta.clone();
         f(&mut self.vm, expander, meta)
     }
 
-    /// A cloned `Expander` and compile `meta` without borrowing the macro VM.
-    /// Used by `eval`/`analyze`, which run expansion on their own VM.
-    pub fn expander_and_meta(&self) -> (Expander, PrimitiveMeta) {
-        (self.expander.clone(), self.meta.clone())
+    /// A cloned `Expander` — pointed at `arena`, as in
+    /// [`with_macro_expansion`](Self::with_macro_expansion) — and compile
+    /// `meta`, without borrowing the macro VM. Used by `eval`/`analyze`, which
+    /// run expansion on their own VM.
+    pub fn expander_and_meta(
+        &self,
+        arena: crate::syntax::SyntaxArena,
+    ) -> (Expander, PrimitiveMeta) {
+        let mut expander = self.expander.clone();
+        expander.set_arena(arena);
+        (expander, self.meta.clone())
     }
 
     /// Every globally-bound callable's `SymbolId`: Rust primitives, core.lisp
@@ -320,10 +336,16 @@ fn compile_core(
     use crate::syntax::Span;
     use std::rc::Rc;
 
-    let syntaxes = read_syntax_all(CORE, "<core>").expect("core.lisp parsing must succeed");
+    // core.lisp is one compilation unit with its own working arena, freed
+    // when this returns; its exports are `Value`s, which carry no syntax.
+    let heap_ptr = vm.heap_ptr;
+    let syntax_arena = crate::syntax::SyntaxArena::mint(unsafe { &mut *heap_ptr });
+    let syntaxes =
+        read_syntax_all(syntax_arena, CORE, "<core>").expect("core.lisp parsing must succeed");
 
     // Expand with bare expander (no prelude)
-    let mut bare_expander = Expander::new();
+    let mut bare_expander = unsafe { Expander::new(heap_ptr) };
+    bare_expander.set_arena(syntax_arena);
     let expanded_forms: Vec<_> = syntaxes
         .into_iter()
         .map(|s| bare_expander.expand(s, symbols, vm))
@@ -454,4 +476,9 @@ fn compile_core(
             meta.functions.insert(sym_id, *value);
         }
     }
+
+    // core.lisp's tree has done its work: nothing beyond this point reads it,
+    // and the macros it might have defined were copied to the template arena
+    // as they were registered.
+    unsafe { (*heap_ptr).decref_region_if_present(syntax_arena.region()) };
 }

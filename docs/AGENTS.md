@@ -52,6 +52,7 @@ Design documents, language references, and contributor guides for Elle.
 | `impl/differential.md` | Cross-tier agreement: `compile/run-on` + the runner's diverge status |
 | `impl/values.md` | Value representation, tagged union |
 | `impl/symbol.md` | Symbol and keyword identity: name hash, per-instance display memo, collision rule |
+| `impl/syntax.md` | The syntax tree: region-native nodes, arenas, packed spans |
 | `impl/image.md` | Image persistence design: boot image, environment save/load |
 | `impl/fleet.md` | Distributed runtime design: content-addressed tasks over environment images |
 

@@ -247,7 +247,9 @@ pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String>
     // translate back to original-source byte positions.
     let shebang_offset = crate::reader::shebang_len(source);
 
-    let syntaxes = read_syntax_all(source, "<detect-epoch>")?;
+    // Standalone: this runs from the CLI rewriter, with no runtime in reach.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let syntaxes = read_syntax_all(home.arena(), source, "<detect-epoch>")?;
     let Some(n) = syntaxes.first().and_then(epoch_declaration) else {
         return Ok(None);
     };
@@ -263,8 +265,8 @@ pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String>
     }
     Ok(Some(EpochInfo {
         epoch,
-        byte_start: syntaxes[0].span.start + shebang_offset,
-        byte_end: syntaxes[0].span.end + shebang_offset,
+        byte_start: syntaxes[0].span.start as usize + shebang_offset,
+        byte_end: syntaxes[0].span.end as usize + shebang_offset,
     }))
 }
 
@@ -272,14 +274,18 @@ pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String>
 ///
 /// Returns the number of rewrites applied. If the source epoch is
 /// already current, this is a no-op.
-pub fn migrate_forms(forms: &mut [Syntax], from_epoch: u64) -> Result<usize, String> {
+pub fn migrate_forms(
+    arena: &crate::syntax::SyntaxArena,
+    forms: &mut [Syntax],
+    from_epoch: u64,
+) -> Result<usize, String> {
     // Allow: CURRENT_EPOCH is 0 today so this is always-true for u64,
     // but it becomes meaningful once CURRENT_EPOCH is bumped.
     #[allow(clippy::absurd_extreme_comparisons)]
     if from_epoch >= CURRENT_EPOCH {
         return Ok(0);
     }
-    transform::migrate(forms, from_epoch, CURRENT_EPOCH)
+    transform::migrate(arena, forms, from_epoch, CURRENT_EPOCH)
 }
 
 #[cfg(test)]

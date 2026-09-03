@@ -256,7 +256,7 @@ pub(crate) fn collect_vars_in_range(
     defined: &mut BTreeSet<Binding>,
     signal: &mut Signal,
 ) {
-    if hir.span.start >= end || hir.span.end <= start {
+    if hir.span.start as usize >= end || (hir.span.end as usize) <= start {
         return;
     }
     *signal = signal.combine(hir.signal);

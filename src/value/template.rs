@@ -195,17 +195,18 @@ impl ConstTemplate {
                 span,
                 scope_exempt,
             } => {
-                use crate::syntax::{ScopeId, Syntax, SyntaxKind};
-                let mut syn = Syntax::with_scopes(
-                    SyntaxKind::Symbol(name.clone()),
-                    span.clone(),
-                    scopes.iter().map(|&s| ScopeId(s)).collect(),
-                );
+                use crate::syntax::{ScopeId, Syntax, SyntaxArena};
+                // The node is born in the region the materialized value lives
+                // in, so the `Value` owns its tree outright
+                // (docs/impl/syntax.md § "A syntax `Value` owns its tree").
+                let arena = unsafe { SyntaxArena::from_raw(heap as *mut _, region) };
+                let scope_ids: Vec<ScopeId> = scopes.iter().map(|&s| ScopeId(s)).collect();
+                let mut syn = Syntax::symbol_scoped(&arena, name, *span, &scope_ids);
                 syn.scope_exempt = *scope_exempt;
                 alloc_in_region(
                     heap,
                     HeapObject::Syntax {
-                        syntax: Box::new(syn),
+                        syntax: syn,
                         traits: Value::NIL,
                     },
                     region,
@@ -286,7 +287,7 @@ impl ConstTemplate {
                 out.extend_from_slice(&(span.end as u64).to_be_bytes());
                 out.extend_from_slice(&span.line.to_be_bytes());
                 out.extend_from_slice(&span.col.to_be_bytes());
-                match &span.file {
+                match span.file() {
                     Some(f) => {
                         out.push(1);
                         put_str(out, f);
@@ -368,7 +369,9 @@ impl ConstTemplate {
                 let scope_exempt = bytes[*ip] != 0;
                 *ip += 1;
                 let mut span = crate::syntax::Span::new(start, end, line, col);
-                span.file = file;
+                if let Some(f) = file {
+                    span = span.with_file(f);
+                }
                 ConstTemplate::SyntaxSymbol {
                     name,
                     scopes,

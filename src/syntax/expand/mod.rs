@@ -10,7 +10,7 @@ mod syntaxcase;
 #[cfg(test)]
 mod tests;
 
-use super::{ScopeId, Span, Syntax, SyntaxKind};
+use super::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind};
 use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
@@ -47,6 +47,16 @@ pub struct MacroDef {
 
 /// Hygienic macro expander
 pub struct Expander {
+    /// Where the tree being expanded is born — the working arena of the
+    /// compilation unit under expansion. Set per unit; a bare expander starts
+    /// on the template arena so a test that never sets one still allocates
+    /// somewhere live.
+    arena: SyntaxArena,
+    /// Where macro templates are copied to when a macro is defined. This is
+    /// the instance's process-root syntax arena: a `MacroDef` outlives the
+    /// unit that defined it and every unit that expands it
+    /// (docs/impl/syntax.md § "Where a node lives").
+    templates: SyntaxArena,
     macros: HashMap<String, MacroDef>,
     /// Compile-time values defined by `begin-for-syntax` blocks.
     /// Always starts empty — the manual `Clone` impl resets it so that
@@ -72,6 +82,8 @@ pub struct Expander {
 impl Clone for Expander {
     fn clone(&self) -> Self {
         Expander {
+            arena: self.arena,
+            templates: self.templates,
             macros: self.macros.clone(),
             compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
             core_env: self.core_env.clone(),  // persists — needed by macro bodies
@@ -95,8 +107,15 @@ enum ScopeOp {
 }
 
 impl Expander {
-    pub fn new() -> Self {
+    /// Build an expander over `heap`'s process-root syntax arena.
+    ///
+    /// # Safety
+    /// `heap` must point at a live `FiberHeap` for the expander's whole life.
+    pub unsafe fn new(heap: *mut crate::value::fiberheap::FiberHeap) -> Self {
+        let templates = SyntaxArena::templates(heap);
         Expander {
+            arena: templates,
+            templates,
             macros: HashMap::new(),
             compile_time_env: HashMap::new(),
             core_env: HashMap::new(),
@@ -104,6 +123,33 @@ impl Expander {
             next_scope_id: 1, // 0 is reserved for top-level
             expansion_depth: 0,
         }
+    }
+
+    /// Build an expander over `vm`'s heap — the safe form of [`new`](Self::new)
+    /// for a caller that already holds the VM its transformers will run on.
+    pub fn on_vm(vm: &mut VM) -> Self {
+        // Safe: the heap the VM points at is leaked for the process (or owned
+        // by the instance that built the VM), so it outlives the expander.
+        unsafe { Expander::new(vm.heap_ptr) }
+    }
+
+    /// The arena the tree under expansion is born in.
+    pub fn arena(&self) -> SyntaxArena {
+        self.arena
+    }
+
+    /// Point this expander at the working arena of the unit it is about to
+    /// expand: the arena's region dies with the unit, so every node the
+    /// expansion builds dies with it too.
+    ///
+    /// The pipeline does not call this directly — `CompileCtx`'s
+    /// `with_macro_expansion` and `expander_and_meta` take the arena and hand
+    /// out an expander already pointed at it, so an expansion cannot end up
+    /// allocating into the process-root template arena by omission. It is here
+    /// for the two expanders the pipeline does not own: the VM's cached `eval`
+    /// expander and the bare one that loads core.lisp.
+    pub fn set_arena(&mut self, arena: SyntaxArena) {
+        self.arena = arena;
     }
 
     /// The primitive(+stdlib) metadata for compiling macro-transformer bodies
@@ -151,7 +197,25 @@ impl Expander {
     /// has primitives registered but before user code expansion.
     pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
         const PRELUDE: &str = include_str!("../../prelude.lisp");
-        let syntaxes = crate::reader::read_syntax_all(PRELUDE, "<internal>")?;
+        // The prelude is a compilation unit like any other: its tree lives in
+        // its own working region, and only the macro templates it registers
+        // (copied into the template arena by `handle_defmacro`) outlive it.
+        let heap = vm.heap_ptr;
+        let work = SyntaxArena::mint(unsafe { &mut *heap });
+        let previous = std::mem::replace(&mut self.arena, work);
+        let result = self.load_prelude_into(PRELUDE, symbols, vm);
+        self.arena = previous;
+        unsafe { (*heap).decref_region_if_present(work.region()) };
+        result
+    }
+
+    fn load_prelude_into(
+        &mut self,
+        prelude: &str,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<(), String> {
+        let syntaxes = crate::reader::read_syntax_all(self.arena, prelude, "<internal>")?;
         // Use ScopeId(0) — the reserved primitive scope — so that
         // prelude symbols match primitive bindings (which are also
         // bound with ScopeId(0)). This is critical for macro hygiene:
@@ -200,12 +264,12 @@ impl Expander {
 
     /// Create a symbol syntax node
     fn make_symbol(&self, name: &str, span: Span) -> Syntax {
-        Syntax::new(SyntaxKind::Symbol(name.to_string()), span)
+        Syntax::symbol(&self.arena, name, span)
     }
 
     /// Create a list syntax node
     fn make_list(&self, items: Vec<Syntax>, span: Span) -> Syntax {
-        Syntax::new(SyntaxKind::List(items), span)
+        Syntax::list(&self.arena, &items, span)
     }
 
     /// Stamp a fresh file scope onto a syntax tree. This distinguishes
@@ -278,63 +342,24 @@ impl Expander {
                     }
                 }
                 // Not a macro call - expand children recursively
-                self.expand_seq(
-                    items,
-                    syntax.span,
-                    syntax.scopes,
-                    symbols,
-                    vm,
-                    SyntaxKind::List,
-                )
+                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
             }
-            SyntaxKind::Array(items) => self.expand_seq(
-                items,
-                syntax.span,
-                syntax.scopes,
-                symbols,
-                vm,
-                SyntaxKind::Array,
-            ),
-            SyntaxKind::ArrayMut(items) => self.expand_seq(
-                items,
-                syntax.span,
-                syntax.scopes,
-                symbols,
-                vm,
-                SyntaxKind::ArrayMut,
-            ),
-            SyntaxKind::Struct(items) => self.expand_seq(
-                items,
-                syntax.span,
-                syntax.scopes,
-                symbols,
-                vm,
-                SyntaxKind::Struct,
-            ),
-            SyntaxKind::StructMut(items) => self.expand_seq(
-                items,
-                syntax.span,
-                syntax.scopes,
-                symbols,
-                vm,
-                SyntaxKind::StructMut,
-            ),
-            SyntaxKind::Set(items) => self.expand_seq(
-                items,
-                syntax.span,
-                syntax.scopes,
-                symbols,
-                vm,
-                SyntaxKind::Set,
-            ),
-            SyntaxKind::SetMut(items) => self.expand_seq(
-                items,
-                syntax.span,
-                syntax.scopes,
-                symbols,
-                vm,
-                SyntaxKind::SetMut,
-            ),
+            SyntaxKind::Array(items) => {
+                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Array)
+            }
+            SyntaxKind::ArrayMut(items) => {
+                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::ArrayMut)
+            }
+            SyntaxKind::Struct(items) => {
+                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Struct)
+            }
+            SyntaxKind::StructMut(items) => {
+                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::StructMut)
+            }
+            SyntaxKind::Set(items) => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Set),
+            SyntaxKind::SetMut(items) => {
+                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::SetMut)
+            }
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
                 Ok(syntax)
@@ -344,11 +369,11 @@ impl Expander {
                 self.quasiquote_to_code(inner, 1, &syntax.span, symbols, vm)
             }
             SyntaxKind::Splice(inner) => {
-                let expanded = self.expand((**inner).clone(), symbols, vm)?;
-                Ok(Syntax::with_scopes(
-                    SyntaxKind::Splice(Box::new(expanded)),
+                let expanded = self.expand(**inner, symbols, vm)?;
+                Ok(Syntax::with_scope_slice(
+                    SyntaxKind::Splice(self.arena.node(expanded)),
                     syntax.span,
-                    syntax.scopes,
+                    syntax.scope_slice(),
                 ))
             }
             SyntaxKind::StringMut(s) => {
@@ -358,20 +383,17 @@ impl Expander {
                 // types Top). `%thaw` is Total (never rejects) and lowers to the
                 // same funnel native as the wrapper, so the runtime is identical.
                 // The op symbol carries ScopeId(0) (primitive scope).
-                let thaw_sym = Syntax::with_scopes(
-                    SyntaxKind::Symbol("%thaw".into()),
-                    syntax.span.clone(),
-                    vec![ScopeId(0)],
-                );
-                let str_lit = Syntax::with_scopes(
-                    SyntaxKind::String(s.clone()),
-                    syntax.span.clone(),
-                    syntax.scopes.clone(),
-                );
-                Ok(Syntax::with_scopes(
-                    SyntaxKind::List(vec![thaw_sym, str_lit]),
+                let thaw_sym =
+                    Syntax::symbol_scoped(&self.arena, "%thaw", syntax.span, &[ScopeId(0)]);
+                let str_lit = Syntax::with_scope_slice(
+                    SyntaxKind::String(*s),
                     syntax.span,
-                    syntax.scopes,
+                    syntax.scope_slice(),
+                );
+                Ok(Syntax::with_scope_slice(
+                    SyntaxKind::List(self.arena.nodes(&[thaw_sym, str_lit])),
+                    syntax.span,
+                    syntax.scope_slice(),
                 ))
             }
             _ => Ok(syntax),
@@ -392,90 +414,43 @@ impl Expander {
         self.map_scope_recursive(syntax, scope, ScopeOp::Flip)
     }
 
-    fn map_scope_recursive(&self, mut syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
+    /// Stamp `scope` onto `syntax` and, where it applies, onto its children.
+    ///
+    /// The walk COPIES: it builds a new node and a new child slice at every
+    /// level it touches. Subtrees are shared by pointer, so a walk that wrote
+    /// through the source would stamp trees the caller still holds — a macro
+    /// argument's identifiers would gain a scope they never entered.
+    fn map_scope_recursive(&self, syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
         // datum->syntax nodes keep their exact scopes — neither ordinary
         // stamping nor the hygiene flip touches them.
         if syntax.scope_exempt {
             return syntax;
         }
 
+        let mut out = syntax;
         match op {
-            ScopeOp::Add => syntax.add_scope(scope),
-            ScopeOp::Flip => syntax.flip_scope(scope),
+            ScopeOp::Add => out.add_scope(&self.arena, scope),
+            ScopeOp::Flip => out.flip_scope(&self.arena, scope),
         }
 
-        // Recurse into children
-        syntax.kind = match syntax.kind {
-            SyntaxKind::List(items) => SyntaxKind::List(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::Array(items) => SyntaxKind::Array(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::ArrayMut(items) => SyntaxKind::ArrayMut(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::Struct(items) => SyntaxKind::Struct(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::StructMut(items) => SyntaxKind::StructMut(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::Set(items) => SyntaxKind::Set(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::SetMut(items) => SyntaxKind::SetMut(
-                items
-                    .into_iter()
-                    .map(|item| self.map_scope_recursive(item, scope, op))
-                    .collect(),
-            ),
-            SyntaxKind::Quote(inner) => {
-                // Don't add scope inside quote - it's literal data
-                SyntaxKind::Quote(inner)
-            }
-            SyntaxKind::Quasiquote(inner) => {
-                SyntaxKind::Quasiquote(Box::new(self.map_scope_recursive(*inner, scope, op)))
-            }
-            SyntaxKind::Unquote(inner) => {
-                SyntaxKind::Unquote(Box::new(self.map_scope_recursive(*inner, scope, op)))
-            }
-            SyntaxKind::UnquoteSplicing(inner) => {
-                SyntaxKind::UnquoteSplicing(Box::new(self.map_scope_recursive(*inner, scope, op)))
-            }
-            SyntaxKind::Splice(inner) => {
-                SyntaxKind::Splice(Box::new(self.map_scope_recursive(*inner, scope, op)))
-            }
-            // Don't recurse into syntax literals — the inner Value::syntax
-            // already carries its correct scopes from the original context.
-            SyntaxKind::SyntaxLiteral(_) => syntax.kind,
-            other => other,
-        };
+        // A quote's contents are literal data, and a syntax literal already
+        // carries the scopes of the context it was captured in. Neither
+        // descends. (`SyntaxKind::children` reports no children for a syntax
+        // literal, so only quote needs saying here.)
+        if matches!(out.kind, SyntaxKind::Quote(_)) {
+            return out;
+        }
 
-        syntax
-    }
-}
-
-impl Default for Expander {
-    fn default() -> Self {
-        Self::new()
+        let kind = out.kind;
+        let children = kind.children();
+        if children.is_empty() {
+            return out;
+        }
+        let mapped: Vec<Syntax> = children
+            .iter()
+            .map(|item| self.map_scope_recursive(*item, scope, op))
+            .collect();
+        out.kind = kind.rebuild(&self.arena, &mapped);
+        out
     }
 }

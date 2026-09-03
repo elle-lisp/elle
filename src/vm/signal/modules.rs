@@ -317,7 +317,7 @@ impl VM {
         let mut syntaxes = Vec::with_capacity(form_vals.len());
         for v in &form_vals {
             match v.as_syntax() {
-                Some(s) => syntaxes.push(s.clone()),
+                Some(s) => syntaxes.push(*s),
                 None => {
                     return (
                         SIG_ERROR,

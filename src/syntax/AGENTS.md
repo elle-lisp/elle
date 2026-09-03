@@ -18,20 +18,43 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `Syntax` | Tree node with kind, span, scopes |
+| `Syntax` | Tree node with kind, span, scopes — `Copy` POD, region-resident |
 | `SyntaxKind` | Node variants (Int, Symbol, List, Quote, Set, SetMut, etc.) |
-| `Span` | Source range with line/col |
+| `SynRef` | A pointer to one node: the payload of the single-child kinds |
+| `Span` | Source range with line/col, over an interned `FileId` |
 | `ScopeId` | Unique scope identifier for hygiene |
+| `SyntaxArena` | Where nodes are born: a heap and a region on it |
+| `SyntaxHeap` | An arena plus the heap under it, for callers with no runtime |
 | `Expander` | Macro expansion engine |
 | `MacroDef` | Macro definition |
 | `expand()` | Entry point: takes `&mut SymbolTable` and `&mut VM` |
+
+## The tree is region data
+
+Nodes, child slices, and string payloads live in region pages, and a node is
+`Copy` POD with no `Drop`. Every constructor therefore names a `SyntaxArena`:
+`Syntax::list(arena, &items, span)`, `Syntax::symbol(arena, name, span)`.
+`Syntax::new(kind, span)` still takes no arena, because the payload inside
+`kind` was already built through one.
+
+Payloads dereference to what the owned representation held — `&str` for a
+name, `&[Syntax]` for children, `&Syntax` for a wrapped form — so a reader of
+the tree matches and walks it unchanged.
+
+`SyntaxKind::children` and `SyntaxKind::rebuild` are the pair every recursive
+pass goes through: they take a compound apart and put an equivalent one back
+together, so a walk states its own logic and not a fifteen-arm match.
+
+[docs/impl/syntax.md](../../docs/impl/syntax.md) owns the model — which arena
+a node belongs to, why a scope walk copies, and when in-place mutation is
+legal.
 
 ## SyntaxKind variants for sets
 
 | Variant | Purpose |
 |---------|---------|
-| `Set(Vec<Syntax>)` | Immutable set literal `\|...\|` |
-| `SetMut(Vec<Syntax>)` | Mutable set literal `@\|...\|` |
+| `Set(RegionSlice<Syntax>)` | Immutable set literal `\|...\|` |
+| `SetMut(RegionSlice<Syntax>)` | Mutable set literal `@\|...\|` |
 
 ## Data flow
 
@@ -105,6 +128,13 @@ Analyzer (hir)
    respectively. This keeps the Expander simple and defers collection
    construction to the analysis phase.
 
+10. **A subtree is shared, so a scope walk copies.** `Syntax` is `Copy` and
+    a child slice is a region handle, so handing a subtree to two holders
+    costs nothing — and writing a scope through one of them would be visible
+    to the other. `stamp_scope` and `flip_scope_recursive` therefore build a
+    new tree in the working arena. In-place mutation is legal only on a
+    uniquely owned tree, through `Syntax::children_mut`.
+
 ## Hygiene
 
 Each macro expansion creates a fresh `ScopeId`. Identifiers introduced by
@@ -122,11 +152,11 @@ Analyzer uses scope-set subset matching to prevent accidental capture:
 
 ### Syntax objects in the Value system
 
-`SyntaxKind::SyntaxLiteral(Value)` is an internal-only variant used by
-`expand_macro_call_inner` to inject `Value::syntax(arg)` into the
-compilation pipeline. This preserves scope sets through the Value
-round-trip during macro expansion. The Analyzer handles it by producing
-`HirKind::Quote(value)`.
+`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a
+hygiene-bearing template symbol as plain compile-time data. Quasiquote creates
+it so a template symbol's scope set survives the Value round-trip during macro
+expansion; the Analyzer materializes it as an ordinary allocation per
+execution via `ConstTemplate::SyntaxSymbol`.
 
 **Hybrid argument wrapping:** Atoms (nil, bool, int, float, string,
 keyword) are wrapped via `Quote` to preserve runtime semantics (e.g.,

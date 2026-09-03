@@ -20,7 +20,6 @@
 //! counted — the foundations delete them from persistable objects.
 
 use std::mem::size_of;
-use std::rc::Rc;
 
 use rustc_hash::FxHashSet;
 
@@ -258,32 +257,26 @@ fn slice_stat<T: 'static>(sl: &RegionSlice<T>, seen: &mut FxHashSet<usize>, stat
 }
 
 fn syntax_bytes(s: &Syntax, seen: &mut FxHashSet<usize>) -> usize {
-    let mut b = size_of::<Syntax>() + std::mem::size_of_val(s.scopes.as_slice());
+    let mut b = size_of::<Syntax>() + std::mem::size_of_val(s.scopes());
     match &s.kind {
         SyntaxKind::Symbol(x)
         | SyntaxKind::Keyword(x)
         | SyntaxKind::String(x)
         | SyntaxKind::StringMut(x) => b += x.len(),
-        SyntaxKind::List(v)
-        | SyntaxKind::Array(v)
-        | SyntaxKind::ArrayMut(v)
-        | SyntaxKind::Struct(v)
-        | SyntaxKind::StructMut(v)
-        | SyntaxKind::Set(v)
-        | SyntaxKind::SetMut(v)
-        | SyntaxKind::Bytes(v)
-        | SyntaxKind::BytesMut(v) => b += v.iter().map(|c| syntax_bytes(c, seen)).sum::<usize>(),
-        SyntaxKind::Quote(c)
-        | SyntaxKind::Quasiquote(c)
-        | SyntaxKind::Unquote(c)
-        | SyntaxKind::UnquoteSplicing(c)
-        | SyntaxKind::Splice(c) => b += syntax_bytes(c, seen),
-        SyntaxKind::SyntaxLiteral(rc) => {
-            if seen.insert(Rc::as_ptr(rc) as usize) {
-                b += syntax_bytes(rc, seen);
+        // A syntax literal's captured node is shared by pointer, so it is
+        // counted once — the `seen` set is what makes that true.
+        SyntaxKind::SyntaxLiteral(inner) => {
+            if seen.insert(inner.as_ptr() as usize) {
+                b += syntax_bytes(inner, seen);
             }
         }
-        SyntaxKind::Nil | SyntaxKind::Bool(_) | SyntaxKind::Int(_) | SyntaxKind::Float(_) => {}
+        other => {
+            b += other
+                .children()
+                .iter()
+                .map(|c| syntax_bytes(c, seen))
+                .sum::<usize>()
+        }
     }
     b
 }

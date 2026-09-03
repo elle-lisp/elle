@@ -33,7 +33,7 @@ impl JsParser {
                 if let JsToken::Ident(_) = self.peek() {
                     let name = self.expect_ident()?;
                     let func = self.parse_function_body(&loc)?;
-                    let span = func.span.clone();
+                    let span = func.span;
                     Ok(self.list(
                         vec![self.sym("def", &loc), self.sym(&name, &loc), func],
                         span,
@@ -56,12 +56,7 @@ impl JsParser {
                         if let SyntaxKind::List(ref items) = expr.kind {
                             if items.len() == 3 && items[0].is_symbol("get") {
                                 return Ok(self.list(
-                                    vec![
-                                        self.sym("put", &loc),
-                                        items[1].clone(),
-                                        items[2].clone(),
-                                        rhs,
-                                    ],
+                                    vec![self.sym("put", &loc), items[1], items[2], rhs],
                                     span,
                                 ));
                             }
@@ -73,8 +68,7 @@ impl JsParser {
                         let rhs = self.parse_expr()?;
                         self.eat_semicolon();
                         let span = expr.span.merge(&rhs.span);
-                        let add =
-                            self.list(vec![self.sym("+", &loc), expr.clone(), rhs], span.clone());
+                        let add = self.list(vec![self.sym("+", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, add], span))
                     }
                     JsToken::MinusAssign => {
@@ -82,8 +76,7 @@ impl JsParser {
                         let rhs = self.parse_expr()?;
                         self.eat_semicolon();
                         let span = expr.span.merge(&rhs.span);
-                        let sub =
-                            self.list(vec![self.sym("-", &loc), expr.clone(), rhs], span.clone());
+                        let sub = self.list(vec![self.sym("-", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, sub], span))
                     }
                     JsToken::StarAssign => {
@@ -91,8 +84,7 @@ impl JsParser {
                         let rhs = self.parse_expr()?;
                         self.eat_semicolon();
                         let span = expr.span.merge(&rhs.span);
-                        let mul =
-                            self.list(vec![self.sym("*", &loc), expr.clone(), rhs], span.clone());
+                        let mul = self.list(vec![self.sym("*", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, mul], span))
                     }
                     JsToken::SlashAssign => {
@@ -100,8 +92,7 @@ impl JsParser {
                         let rhs = self.parse_expr()?;
                         self.eat_semicolon();
                         let span = expr.span.merge(&rhs.span);
-                        let div =
-                            self.list(vec![self.sym("/", &loc), expr.clone(), rhs], span.clone());
+                        let div = self.list(vec![self.sym("/", &loc), expr, rhs], span);
                         Ok(self.list(vec![self.sym("assign", &loc), expr, div], span))
                     }
                     _ => {
@@ -136,8 +127,8 @@ impl JsParser {
                 self.expect(&JsToken::RBracket)?;
                 self.expect(&JsToken::Assign)?;
                 let value = self.parse_expr()?;
-                let span = value.span.clone();
-                let pattern = Syntax::new(SyntaxKind::Array(names), self.span_from(loc));
+                let span = value.span;
+                let pattern = self.arr(names, self.span_from(loc));
                 Ok(self.list(vec![self.sym(bind_kind, loc), pattern, value], span))
             }
             JsToken::LBrace => {
@@ -154,8 +145,8 @@ impl JsParser {
                 self.expect(&JsToken::RBrace)?;
                 self.expect(&JsToken::Assign)?;
                 let value = self.parse_expr()?;
-                let span = value.span.clone();
-                let pattern = Syntax::new(SyntaxKind::Array(names), self.span_from(loc));
+                let span = value.span;
+                let pattern = self.arr(names, self.span_from(loc));
                 Ok(self.list(vec![self.sym(bind_kind, loc), pattern, value], span))
             }
             _ => {
@@ -166,7 +157,7 @@ impl JsParser {
                 } else {
                     self.nil_syntax(loc)
                 };
-                let span = value.span.clone();
+                let span = value.span;
                 Ok(self.list(
                     vec![self.sym(bind_kind, loc), self.sym(&name, loc), value],
                     span,
@@ -255,7 +246,7 @@ impl JsParser {
                     let body = self.parse_brace_block()?;
 
                     let span = self.span_from(&loc);
-                    let keys_call = self.list(vec![self.sym("keys", &loc), obj], span.clone());
+                    let keys_call = self.list(vec![self.sym("keys", &loc), obj], span);
                     return Ok(self.list(
                         vec![
                             self.sym("each", &loc),
@@ -317,8 +308,8 @@ impl JsParser {
         let body = self.parse_brace_block()?;
         let span = self.span_from(loc);
 
-        let while_body = self.list(vec![self.sym("begin", loc), body, update], span.clone());
-        let while_form = self.list(vec![self.sym("while", loc), cond, while_body], span.clone());
+        let while_body = self.list(vec![self.sym("begin", loc), body, update], span);
+        let while_form = self.list(vec![self.sym("while", loc), cond, while_body], span);
         Ok(self.list(vec![self.sym("block", loc), init, while_form], span))
     }
 
@@ -334,10 +325,10 @@ impl JsParser {
                 let add = self.list(
                     vec![
                         self.sym("+", &loc),
-                        expr.clone(),
-                        Syntax::new(SyntaxKind::Int(1), span.clone()),
+                        expr,
+                        Syntax::new(SyntaxKind::Int(1), span),
                     ],
-                    span.clone(),
+                    span,
                 );
                 Ok(self.list(vec![self.sym("assign", &loc), expr, add], span))
             }
@@ -347,10 +338,10 @@ impl JsParser {
                 let sub = self.list(
                     vec![
                         self.sym("-", &loc),
-                        expr.clone(),
-                        Syntax::new(SyntaxKind::Int(1), span.clone()),
+                        expr,
+                        Syntax::new(SyntaxKind::Int(1), span),
                     ],
-                    span.clone(),
+                    span,
                 );
                 Ok(self.list(vec![self.sym("assign", &loc), expr, sub], span))
             }
@@ -358,14 +349,14 @@ impl JsParser {
                 self.advance();
                 let rhs = self.parse_expr()?;
                 let span = self.span_from(&loc);
-                let add = self.list(vec![self.sym("+", &loc), expr.clone(), rhs], span.clone());
+                let add = self.list(vec![self.sym("+", &loc), expr, rhs], span);
                 Ok(self.list(vec![self.sym("assign", &loc), expr, add], span))
             }
             JsToken::MinusAssign => {
                 self.advance();
                 let rhs = self.parse_expr()?;
                 let span = self.span_from(&loc);
-                let sub = self.list(vec![self.sym("-", &loc), expr.clone(), rhs], span.clone());
+                let sub = self.list(vec![self.sym("-", &loc), expr, rhs], span);
                 Ok(self.list(vec![self.sym("assign", &loc), expr, sub], span))
             }
             _ => Ok(expr),
@@ -385,8 +376,8 @@ impl JsParser {
         self.eat_semicolon();
 
         let span = self.span_from(&loc);
-        let not_cond = self.list(vec![self.sym("not", &loc), cond], span.clone());
-        let break_call = self.list(vec![self.sym("break", &loc)], span.clone());
+        let not_cond = self.list(vec![self.sym("not", &loc), cond], span);
+        let break_call = self.list(vec![self.sym("break", &loc)], span);
         let check = self.list(
             vec![
                 self.sym("if", &loc),
@@ -394,9 +385,9 @@ impl JsParser {
                 break_call,
                 self.nil_syntax(&loc),
             ],
-            span.clone(),
+            span,
         );
-        let loop_body = self.list(vec![self.sym("begin", &loc), body, check], span.clone());
+        let loop_body = self.list(vec![self.sym("begin", &loc), body, check], span);
         Ok(self.list(vec![self.sym("forever", &loc), loop_body], span))
     }
 
@@ -427,36 +418,29 @@ impl JsParser {
 
         // Build: (protect ((fn () try_body)))
         let try_fn = self.list(
-            vec![
-                self.sym("fn", &loc),
-                self.list(vec![], span.clone()),
-                try_body,
-            ],
-            span.clone(),
+            vec![self.sym("fn", &loc), self.list(vec![], span), try_body],
+            span,
         );
         let protect_call = self.list(
-            vec![
-                self.sym("protect", &loc),
-                self.list(vec![try_fn], span.clone()),
-            ],
-            span.clone(),
+            vec![self.sym("protect", &loc), self.list(vec![try_fn], span)],
+            span,
         );
 
         // Build result pattern [__ok __val]
         let ok_sym = self.sym(TRY_OK, &loc);
         let val_sym = self.sym(TRY_VAL, &loc);
-        let pattern = Syntax::new(SyntaxKind::Array(vec![ok_sym, val_sym]), span.clone());
+        let pattern = self.arr(vec![ok_sym, val_sym], span);
 
         // Build catch handler
         let catch_fn = self.list(
             vec![
                 self.sym("fn", &loc),
-                self.list(vec![self.sym(&err_name, &loc)], span.clone()),
+                self.list(vec![self.sym(&err_name, &loc)], span),
                 catch_body,
             ],
-            span.clone(),
+            span,
         );
-        let catch_call = self.list(vec![catch_fn, self.sym(TRY_VAL, &loc)], span.clone());
+        let catch_call = self.list(vec![catch_fn, self.sym(TRY_VAL, &loc)], span);
 
         // Build if expression
         let if_expr = self.list(
@@ -466,17 +450,17 @@ impl JsParser {
                 self.sym(TRY_VAL, &loc),
                 catch_call,
             ],
-            span.clone(),
+            span,
         );
 
         // Build let binding
-        let binding = self.list(vec![pattern, protect_call], span.clone());
-        let bindings = self.list(vec![binding], span.clone());
+        let binding = self.list(vec![pattern, protect_call], span);
+        let bindings = self.list(vec![binding], span);
 
         let mut let_items = vec![self.sym("let", &loc), bindings, if_expr];
         if let Some(fin) = finally_body {
             // Wrap in begin to add finally
-            let inner = self.list(let_items, span.clone());
+            let inner = self.list(let_items, span);
             let_items = vec![self.sym("begin", &loc), inner, fin];
         }
 
@@ -493,7 +477,7 @@ impl JsParser {
         let body = self.parse_brace_block()?;
 
         let span = self.span_from(loc);
-        let param_list = self.list(params, span.clone());
+        let param_list = self.list(params, span);
         Ok(self.list(vec![self.sym("fn", loc), param_list, body], span))
     }
 

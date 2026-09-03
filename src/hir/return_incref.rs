@@ -220,9 +220,9 @@ fn is_wrappable(kind: &HirKind) -> bool {
 /// Replace `*hir` with `Return { value: <old hir> }`, preserving the
 /// inner node's span and signal on the wrapper.
 fn wrap_in_return(hir: &mut Hir) {
-    let span = hir.span.clone();
+    let span = hir.span;
     // Temporarily move the inner node out behind a placeholder.
-    let inner = std::mem::replace(hir, Hir::silent(HirKind::Error, span.clone()));
+    let inner = std::mem::replace(hir, Hir::silent(HirKind::Error, span));
     let signal = inner.signal;
     hir.kind = HirKind::Return {
         value: Box::new(inner),

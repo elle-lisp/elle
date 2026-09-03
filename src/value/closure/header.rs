@@ -31,7 +31,7 @@ pub struct ClosureTemplate {
     /// The blueprint this header came from — the one Rust-heap owner left on a
     /// code object. It answers what the payload cannot yet hold: the
     /// nested-lambda blueprints a `MakeClosure` indexes, the LIR the JIT
-    /// promotes from, the defining syntax, and the SPIR-V cache. Holding it
+    /// promotes from, the defining span, and the SPIR-V cache. Holding it
     /// strongly is also what stops the heap's payload cache from sweeping a
     /// payload this header still reads.
     proto: Rc<TemplateProto>,
@@ -209,8 +209,8 @@ impl ClosureTemplate {
     }
 
     #[inline]
-    pub fn syntax(&self) -> Option<&Rc<crate::syntax::Syntax>> {
-        self.proto.syntax.as_ref()
+    pub fn origin(&self) -> Option<crate::syntax::Span> {
+        self.proto.origin
     }
 
     #[inline]

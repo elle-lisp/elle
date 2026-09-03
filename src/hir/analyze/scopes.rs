@@ -23,7 +23,7 @@ impl DuplicateGuard {
     ) -> Result<(), String> {
         let mut key_scopes = scopes.to_vec();
         key_scopes.sort_unstable_by_key(|s| s.0);
-        if let Some(prev) = self.seen.insert((sym, key_scopes), span.clone()) {
+        if let Some(prev) = self.seen.insert((sym, key_scopes), *span) {
             return Err(format!(
                 "{}: duplicate binding '{}' (previously defined at {})",
                 span, name, prev

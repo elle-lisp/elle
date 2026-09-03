@@ -22,7 +22,7 @@ fn count_7(s: &Syntax, ints: &mut usize, floats: &mut usize) {
 #[test]
 fn splice_includes_preserves_integral_float() {
     let spliced = splice_includes("(type-of 7.0)", "<t>").unwrap();
-    let forms = read_syntax_all_for(&spliced, "<t>").unwrap();
+    let forms = read_syntax_all_for(crate::syntax::thread_arena(), &spliced, "<t>").unwrap();
     let (mut ints, mut floats) = (0, 0);
     for f in &forms {
         count_7(f, &mut ints, &mut floats);

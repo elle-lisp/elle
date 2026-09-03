@@ -47,8 +47,10 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Bool(b) => Ok(HirPattern::Literal(PatternLiteral::Bool(*b))),
             SyntaxKind::Int(n) => Ok(HirPattern::Literal(PatternLiteral::Int(*n))),
             SyntaxKind::Float(f) => Ok(HirPattern::Literal(PatternLiteral::Float(*f))),
-            SyntaxKind::String(s) => Ok(HirPattern::Literal(PatternLiteral::String(s.clone()))),
-            SyntaxKind::Keyword(k) => Ok(HirPattern::Literal(PatternLiteral::Keyword(k.clone()))),
+            SyntaxKind::String(s) => Ok(HirPattern::Literal(PatternLiteral::String(s.to_string()))),
+            SyntaxKind::Keyword(k) => {
+                Ok(HirPattern::Literal(PatternLiteral::Keyword(k.to_string())))
+            }
             SyntaxKind::List(items) => {
                 // Or-pattern check FIRST — before any other list pattern logic
                 if items
@@ -150,7 +152,7 @@ impl<'a> Analyzer<'a> {
                 let mut entries = Vec::new();
                 for pair in key_val_items.chunks(2) {
                     let key = match &pair[0].kind {
-                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
+                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.to_string()),
                         SyntaxKind::Quote(inner) => match &inner.kind {
                             SyntaxKind::Symbol(name) => {
                                 PatternKey::Symbol(self.symbols.intern(name))
@@ -184,7 +186,7 @@ impl<'a> Analyzer<'a> {
                 let mut entries = Vec::new();
                 for pair in key_val_items.chunks(2) {
                     let key = match &pair[0].kind {
-                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
+                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.to_string()),
                         SyntaxKind::Quote(inner) => match &inner.kind {
                             SyntaxKind::Symbol(name) => {
                                 PatternKey::Symbol(self.symbols.intern(name))

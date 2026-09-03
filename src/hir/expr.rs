@@ -5,7 +5,6 @@ use super::pattern::HirPattern;
 use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::Value;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 mod op;
@@ -166,9 +165,12 @@ pub enum HirKind {
         /// ordinary (reclaimable) allocation when `(doc f)` reads it.
         #[serde(skip)]
         doc: Option<std::rc::Rc<str>>,
-        /// Original lambda Syntax node for eval environment reconstruction
+        /// Where this lambda was written, for `(meta/origin f)`. A span, not
+        /// the lambda's syntax tree: `meta/origin` reads a file, a line, and a
+        /// column, and nothing has ever read the tree
+        /// (docs/impl/syntax.md § "What the migration deleted").
         #[serde(skip)]
-        syntax: Option<Rc<crate::syntax::Syntax>>,
+        origin: Option<crate::syntax::Span>,
         /// True if the function body contains `(numeric!)` assertion.
         /// The lowerer checks `is_gpu_eligible()` after lowering.
         assert_numeric: bool,

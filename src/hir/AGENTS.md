@@ -170,12 +170,11 @@ Lowerer (&BindingArena) — read-only access to binding metadata
       The `set` and `mutable-set` bindings resolve to global primitives.
       All synthesized nodes carry the original set literal's span.
 
-18. **Original syntax is captured for eval reconstruction.**
-       `HirKind::Lambda` has a `syntax: Option<Rc<Syntax>>` field that stores
-       the original lambda `Syntax` node, captured in `analyze_lambda` from
-       the input `Syntax`. This enables `eval` to reconstruct closures in the
-       environment. The field is threaded through LIR and set on `Closure.syntax`
-       by the emitter.
+18. **A lambda's source location is captured for `meta/origin`.**
+       `HirKind::Lambda` has an `origin: Option<Span>` field, set in
+       `analyze_lambda` from the form's span. It is threaded through LIR and
+       set on `ClosureTemplate.origin` by the emitter, and `(meta/origin f)`
+       reads the file, line, and column from it.
 
 19. **Qualified symbols are desugared to nested `get` calls.**
       `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to

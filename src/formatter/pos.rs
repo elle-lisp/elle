@@ -39,6 +39,18 @@ impl ByteOffset {
         ByteOffset(n)
     }
 
+    /// Where `span` starts. A `Span` stores its offsets as `u32`
+    /// (docs/impl/syntax.md § "Span"), so the widening lives here rather than
+    /// at each of the trivia layer's comparison sites.
+    pub fn start_of(span: &crate::syntax::Span) -> Self {
+        ByteOffset(span.start as usize)
+    }
+
+    /// Where `span` ends.
+    pub fn end_of(span: &crate::syntax::Span) -> Self {
+        ByteOffset(span.end as usize)
+    }
+
     /// The raw byte position.
     pub fn get(self) -> usize {
         self.0

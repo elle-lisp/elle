@@ -1,12 +1,12 @@
 use super::*;
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{thread_arena, Span, Syntax, SyntaxKind};
 
 // Every `rewrite_node` test names only the rules it exercises and takes the
 // rest from `Rules::none()`. Spelling all six tables out per test hid which
 // one each was actually about.
 
 fn sym(name: &str) -> Syntax {
-    Syntax::new(SyntaxKind::Symbol(name.to_string()), Span::synthetic())
+    Syntax::symbol(&thread_arena(), name, Span::synthetic())
 }
 
 fn int(n: i64) -> Syntax {
@@ -14,7 +14,7 @@ fn int(n: i64) -> Syntax {
 }
 
 fn list(items: Vec<Syntax>) -> Syntax {
-    Syntax::new(SyntaxKind::List(items), Span::synthetic())
+    Syntax::list(&thread_arena(), &items, Span::synthetic())
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn test_rename_symbol() {
     };
 
     let mut form = sym("foo");
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert_eq!(count, 1);
     assert_eq!(form.as_symbol(), Some("bar"));
@@ -39,7 +39,7 @@ fn test_rename_in_list() {
     };
 
     let mut form = list(vec![sym("old"), int(1), sym("old")]);
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert_eq!(count, 2);
     if let SyntaxKind::List(items) = &form.kind {
@@ -57,8 +57,11 @@ fn test_no_rewrite_inside_quote() {
         ..Rules::none()
     };
 
-    let mut form = Syntax::new(SyntaxKind::Quote(Box::new(sym("foo"))), Span::synthetic());
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let mut form = Syntax::new(
+        SyntaxKind::Quote(thread_arena().node(sym("foo"))),
+        Span::synthetic(),
+    );
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert_eq!(count, 0);
     if let SyntaxKind::Quote(inner) = &form.kind {
@@ -74,10 +77,10 @@ fn test_rewrite_inside_quasiquote() {
     };
 
     let mut form = Syntax::new(
-        SyntaxKind::Quasiquote(Box::new(sym("foo"))),
+        SyntaxKind::Quasiquote(thread_arena().node(sym("foo"))),
         Span::synthetic(),
     );
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert_eq!(count, 1);
     if let SyntaxKind::Quasiquote(inner) = &form.kind {
@@ -93,7 +96,7 @@ fn test_removal_errors() {
     };
 
     let mut form = sym("gone");
-    let result = rewrite_node(&mut form, &rules);
+    let result = rewrite_node(&thread_arena(), &mut form, &rules);
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("has been removed"));
@@ -104,7 +107,7 @@ fn test_no_changes_no_rules() {
     let rules = Rules::none();
 
     let mut form = list(vec![sym("foo"), int(1)]);
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert_eq!(count, 0);
 }
@@ -112,7 +115,7 @@ fn test_no_changes_no_rules() {
 #[test]
 fn test_migrate_empty_range() {
     let mut forms = vec![list(vec![sym("foo"), int(1)])];
-    let count = migrate(&mut forms, 0, 0).unwrap();
+    let count = migrate(&thread_arena(), &mut forms, 0, 0).unwrap();
     assert_eq!(count, 0);
 }
 
@@ -130,9 +133,9 @@ fn test_replace_basic() {
         sym("assert-eq"),
         int(1),
         int(2),
-        Syntax::new(SyntaxKind::String("msg".to_string()), Span::synthetic()),
+        Syntax::string(&thread_arena(), "msg", Span::synthetic()),
     ]);
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert!(count >= 1);
     // Result should be (assert (= 1 2) "msg")
@@ -160,9 +163,9 @@ fn test_replace_with_complex_args() {
         sym("assert-eq"),
         list(vec![sym("+"), int(1), int(2)]),
         list(vec![sym("-"), int(5), int(2)]),
-        Syntax::new(SyntaxKind::String("arith".to_string()), Span::synthetic()),
+        Syntax::string(&thread_arena(), "arith", Span::synthetic()),
     ]);
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert!(count >= 1);
     if let SyntaxKind::List(items) = &form.kind {
@@ -192,7 +195,7 @@ fn test_replace_arity_mismatch_passthrough() {
     };
 
     let mut form = list(vec![sym("assert-eq"), int(1), int(2)]);
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert_eq!(count, 0);
     if let SyntaxKind::List(items) = &form.kind {
@@ -213,7 +216,7 @@ fn test_replace_and_rename_together() {
     };
 
     let mut form = list(vec![sym("old-fn"), sym("old-sym"), int(2)]);
-    let count = rewrite_node(&mut form, &rules).unwrap();
+    let count = rewrite_node(&thread_arena(), &mut form, &rules).unwrap();
 
     assert!(count >= 2); // at least 1 replace + 1 rename
     if let SyntaxKind::List(items) = &form.kind {
@@ -239,7 +242,7 @@ fn test_epoch_12_coro_new_replace() {
             list(vec![sym("yield"), int(1)]),
         ]),
     ])];
-    let count = migrate(&mut forms, 11, 12).unwrap();
+    let count = migrate(&thread_arena(), &mut forms, 11, 12).unwrap();
     assert!(count >= 1);
     if let SyntaxKind::List(items) = &forms[0].kind {
         assert_eq!(items[0].as_symbol(), Some("fiber/new"));
@@ -265,7 +268,7 @@ fn test_epoch_12_coro_new_replace() {
 fn test_epoch_12_make_coroutine_replace() {
     // (make-coroutine f) → (fiber/new f |:yield|)
     let mut forms = vec![list(vec![sym("make-coroutine"), sym("f")])];
-    let count = migrate(&mut forms, 11, 12).unwrap();
+    let count = migrate(&thread_arena(), &mut forms, 11, 12).unwrap();
     assert!(count >= 1);
     if let SyntaxKind::List(items) = &forms[0].kind {
         assert_eq!(items[0].as_symbol(), Some("fiber/new"));
@@ -290,7 +293,7 @@ fn test_epoch_12_coro_renames() {
         list(vec![sym("coroutine?"), sym("x")]),
         list(vec![sym("yield-from"), sym("sub")]),
     ];
-    let count = migrate(&mut forms, 11, 12).unwrap();
+    let count = migrate(&thread_arena(), &mut forms, 11, 12).unwrap();
     assert!(count >= 4);
     if let SyntaxKind::List(items) = &forms[0].kind {
         assert_eq!(items[0].as_symbol(), Some("fiber/resume"));
@@ -309,7 +312,7 @@ fn test_epoch_12_coro_renames() {
 #[test]
 fn test_epoch_12_coro_iterator_removed() {
     let mut forms = vec![list(vec![sym("coro/>iterator"), sym("co")])];
-    let result = migrate(&mut forms, 11, 12);
+    let result = migrate(&thread_arena(), &mut forms, 11, 12);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("natively iterable"));
 }
@@ -317,7 +320,7 @@ fn test_epoch_12_coro_iterator_removed() {
 #[test]
 fn test_epoch_12_coroutine_next_removed() {
     let mut forms = vec![list(vec![sym("coroutine-next"), sym("co")])];
-    let result = migrate(&mut forms, 11, 12);
+    let result = migrate(&thread_arena(), &mut forms, 11, 12);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("fiber/resume"));
 }
@@ -334,7 +337,7 @@ fn test_epoch_10_cons_car_cdr_renames() {
             list(vec![sym("cons"), int(2), sym("nil")]),
         ]),
     ])];
-    let count = migrate(&mut forms, 9, 10).unwrap();
+    let count = migrate(&thread_arena(), &mut forms, 9, 10).unwrap();
     assert!(count >= 2);
     // (def x (pair 1 (pair 2 nil)))
     if let SyntaxKind::List(items) = &forms[0].kind {

@@ -76,9 +76,9 @@ fn wrap_macro_arg_value(
         }
         SyntaxKind::Int(n) => Value::int(*n),
         SyntaxKind::Float(f) => Value::float(*f),
-        SyntaxKind::String(s) => crate::value::build::string(heap, s.clone(), region),
+        SyntaxKind::String(s) => crate::value::build::string(heap, s, region),
         SyntaxKind::Keyword(k) => Value::keyword(k),
-        _ => crate::value::build::syntax(heap, arg.clone(), region),
+        _ => crate::value::build::syntax(heap, *arg, region),
     }
 }
 
@@ -123,40 +123,36 @@ impl Expander {
         }
 
         // Build the fn parameter list: required, &opt optional, & rest.
+        // The wrapper is scratch for this compilation unit, so it is born in
+        // the working arena; only `template`, which came from the template
+        // arena, outlives it.
+        let arena = self.arena();
         let mut param_items: Vec<Syntax> = macro_def
             .params
             .iter()
-            .map(|p| Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()))
+            .map(|p| Syntax::symbol(&arena, p, *span))
             .collect();
         if !macro_def.optional_params.is_empty() {
-            param_items.push(Syntax::new(
-                SyntaxKind::Symbol("&opt".to_string()),
-                span.clone(),
-            ));
+            param_items.push(Syntax::symbol(&arena, "&opt", *span));
             for p in &macro_def.optional_params {
-                param_items.push(Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()));
+                param_items.push(Syntax::symbol(&arena, p, *span));
             }
         }
         if let Some(ref rest_name) = macro_def.rest_param {
-            param_items.push(Syntax::new(
-                SyntaxKind::Symbol("&".to_string()),
-                span.clone(),
-            ));
-            param_items.push(Syntax::new(
-                SyntaxKind::Symbol(rest_name.clone()),
-                span.clone(),
-            ));
+            param_items.push(Syntax::symbol(&arena, "&", *span));
+            param_items.push(Syntax::symbol(&arena, rest_name, *span));
         }
-        let params_list = Syntax::new(SyntaxKind::List(param_items), span.clone());
+        let params_list = Syntax::list(&arena, &param_items, *span);
 
         // Build `(fn (params...) template)`.
-        let fn_expr = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("fn".to_string()), span.clone()),
+        let fn_expr = Syntax::list(
+            &arena,
+            &[
+                Syntax::symbol(&arena, "fn", *span),
                 params_list,
-                macro_def.template.clone(),
-            ]),
-            span.clone(),
+                macro_def.template,
+            ],
+            *span,
         );
 
         let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
@@ -233,7 +229,7 @@ impl Expander {
         symbols: &mut SymbolTable,
         vm: &mut VM,
     ) -> Result<Syntax, String> {
-        let span = call_site.span.clone();
+        let span = call_site.span;
 
         // --- Phase 1: Get or compile the transformer closure ---
         let transformer: Value = self.ensure_transformer(macro_def, &span, symbols, vm)?;
@@ -293,7 +289,7 @@ impl Expander {
             let stamp = |arg: &Syntax| -> Value {
                 wrap_macro_arg_value(
                     unsafe { &mut *heap_ptr },
-                    &self.add_scope_recursive(arg.clone(), intro_scope),
+                    &self.add_scope_recursive(*arg, intro_scope),
                     region,
                 )
             };
@@ -310,8 +306,7 @@ impl Expander {
 
             crate::value::fiberheap::freelog::set_context(format!(
                 "macro '{}' at {}",
-                macro_def.name,
-                span.clone()
+                macro_def.name, span
             ));
             // Publish this expansion's intro scope while the transformer
             // runs: datum->syntax strips it from copied context scopes so
@@ -329,7 +324,7 @@ impl Expander {
             // `ReturnValue` escape on its root and one on every tail-flowing
             // node whose decref the solver suppressed; the reclaim balances them
             // uniformly, so no per-result decref is needed here.
-            Syntax::from_value(&result_value, symbols, span.clone())
+            Syntax::from_value(&self.arena(), &result_value, symbols, span)
         })();
         // Close the mint scope: reclaim every region the transformer minted that
         // is not held alive by a live edge (and is not a process-lifetime root).

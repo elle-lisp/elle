@@ -428,13 +428,16 @@ fn try_read(source: &str) -> ReadResult {
         return ReadResult::Incomplete;
     }
 
-    match read_syntax_all_current(trimmed, "<repl>") {
+    // The prompt's tree is read only to split the input into forms and name
+    // their bindings; nothing outlives this call, so it gets its own heap.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    match read_syntax_all_current(home.arena(), trimmed, "<repl>") {
         Ok(syntaxes) if syntaxes.is_empty() => ReadResult::Incomplete,
         Ok(syntaxes) => {
             let forms = syntaxes
                 .iter()
                 .map(|syn| FormInfo {
-                    source: trimmed[syn.span.start..syn.span.end].to_string(),
+                    source: trimmed[syn.span.start as usize..syn.span.end as usize].to_string(),
                     bindings: extract_def_bindings(syn),
                 })
                 .collect();

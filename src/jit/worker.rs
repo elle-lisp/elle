@@ -128,7 +128,6 @@ pub(crate) fn prepare_task(
     display_name: Option<&str>,
 ) -> JitTask {
     let mut lir = lir.clone();
-    lir.syntax = None;
     lir.doc = None;
     if lir.name.is_none() {
         lir.name = display_name.map(String::from);

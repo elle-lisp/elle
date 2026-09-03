@@ -148,7 +148,7 @@ fn sf_signal(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, Stri
         return Err(format!("{}: signal requires exactly 1 argument", span));
     }
     let keyword = match &items[1].kind {
-        SyntaxKind::Keyword(k) => k.clone(),
+        SyntaxKind::Keyword(k) => *k,
         _ => {
             return Err(format!(
                 "{}: signal requires a keyword argument, got {}",

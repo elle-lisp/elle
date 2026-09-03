@@ -296,7 +296,7 @@ fn rebind(h: &Hir, r: &mut impl Rebind) -> Option<Hir> {
         }
         _ => return None,
     };
-    Some(Hir::new(kind, h.span.clone(), h.signal))
+    Some(Hir::new(kind, h.span, h.signal))
 }
 
 /// Rebuild an operand list (a `begin`/`and`/`or` body, an intrinsic's

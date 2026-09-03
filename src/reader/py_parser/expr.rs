@@ -89,7 +89,7 @@ impl PyParser {
 
             let span = lhs.span.merge(&rhs.span);
             if is_neq {
-                let eq = self.list(vec![self.sym("=", &loc), lhs, rhs], span.clone());
+                let eq = self.list(vec![self.sym("=", &loc), lhs, rhs], span);
                 lhs = self.list(vec![self.sym("not", &loc), eq], span);
             } else if is_in {
                 // x in y → (contains? y x) — note argument order
@@ -108,7 +108,7 @@ impl PyParser {
                 self.advance();
                 let rhs = self.parse_pratt(4)?;
                 let span = lhs.span.merge(&rhs.span);
-                let contains = self.list(vec![self.sym("contains?", &loc), rhs, lhs], span.clone());
+                let contains = self.list(vec![self.sym("contains?", &loc), rhs, lhs], span);
                 lhs = self.list(vec![self.sym("not", &loc), contains], span);
             } else {
                 self.cursor.seek(saved); // not a `not in`, backtrack
@@ -169,7 +169,10 @@ impl PyParser {
                     self.advance();
                     let field = self.expect_ident()?;
                     let span = expr.span.merge(&self.span_from(&loc));
-                    let kw = Syntax::new(SyntaxKind::Keyword(field), self.span_from(&loc));
+                    let kw = Syntax::new(
+                        SyntaxKind::Keyword(self.arena.text(&field)),
+                        self.span_from(&loc),
+                    );
                     expr = self.list(vec![self.sym("get", &loc), expr, kw], span);
                 }
                 // Index access: obj[key] → (get obj key)
@@ -191,7 +194,8 @@ impl PyParser {
     pub(super) fn parse_call(&mut self, func: Syntax) -> Result<Syntax, String> {
         let args = self.parse_arglist()?;
         let loc = &func.span.clone();
-        let span = Span::new(loc.start, loc.end, loc.line, loc.col).with_file(self.file.clone());
+        let span = Span::new(loc.start as usize, loc.end as usize, loc.line, loc.col)
+            .with_file(&self.file);
         let mut items = vec![func];
         items.extend(args);
         Ok(self.list(items, span))
@@ -207,7 +211,7 @@ impl PyParser {
                 self.advance();
                 let expr = self.parse_expr()?;
                 let span = self.span_from(&loc);
-                args.push(Syntax::new(SyntaxKind::Splice(Box::new(expr)), span));
+                args.push(Syntax::new(SyntaxKind::Splice(self.arena.node(expr)), span));
             } else {
                 args.push(self.parse_expr()?);
             }
@@ -221,7 +225,7 @@ impl PyParser {
                     self.advance();
                     let expr = self.parse_expr()?;
                     let span = self.span_from(&loc);
-                    args.push(Syntax::new(SyntaxKind::Splice(Box::new(expr)), span));
+                    args.push(Syntax::new(SyntaxKind::Splice(self.arena.node(expr)), span));
                 } else {
                     // Check for keyword arg: name=value — skip name, use value
                     let expr = self.parse_expr()?;
@@ -261,7 +265,7 @@ impl PyParser {
                     result.push_str(&s2);
                 }
                 Ok(Syntax::new(
-                    SyntaxKind::String(result),
+                    SyntaxKind::String(self.arena.text(&result)),
                     self.make_span(&loc, len),
                 ))
             }
@@ -290,7 +294,7 @@ impl PyParser {
             PyToken::Ident(name) => {
                 self.advance();
                 Ok(Syntax::new(
-                    SyntaxKind::Symbol(name),
+                    SyntaxKind::Symbol(self.arena.text(&name)),
                     self.make_span(&loc, len),
                 ))
             }
@@ -316,7 +320,7 @@ impl PyParser {
                     }
                     self.expect(&PyToken::RParen)?;
                     return Ok(Syntax::new(
-                        SyntaxKind::Array(elements),
+                        SyntaxKind::Array(self.arena.nodes(&elements)),
                         self.span_from(&loc),
                     ));
                 }
@@ -360,7 +364,7 @@ impl PyParser {
                 self.expect(&PyToken::Colon)?;
                 let body = self.parse_expr()?;
                 let span = self.span_from(&loc);
-                let param_list = self.list(params, span.clone());
+                let param_list = self.list(params, span);
                 Ok(self.list(vec![self.sym("fn", &loc), param_list, body], span))
             }
 
@@ -381,7 +385,7 @@ impl PyParser {
         let span = self.span_from(loc);
         if parts.len() == 1 {
             if let FStringPart::Lit(s) = &parts[0] {
-                return Ok(Syntax::new(SyntaxKind::String(s.clone()), span));
+                return Ok(self.str_lit(s, span));
             }
         }
 
@@ -390,12 +394,13 @@ impl PyParser {
             match part {
                 FStringPart::Lit(s) => {
                     if !s.is_empty() {
-                        items.push(Syntax::new(SyntaxKind::String(s), span.clone()));
+                        items.push(self.str_lit(&s, span));
                     }
                 }
                 FStringPart::Expr(expr_str) => {
                     // Parse the expression string
-                    let syntax = crate::reader::read_syntax_all_for(&expr_str, &self.file)?;
+                    let syntax =
+                        crate::reader::read_syntax_all_for(self.arena, &expr_str, &self.file)?;
                     if let Some(s) = syntax.into_iter().next() {
                         items.push(s);
                     }
@@ -417,7 +422,7 @@ impl PyParser {
                 self.advance();
                 let expr = self.parse_expr()?;
                 elements.push(Syntax::new(
-                    SyntaxKind::Splice(Box::new(expr)),
+                    SyntaxKind::Splice(self.arena.node(expr)),
                     self.span_from(&spread_loc),
                 ));
             } else {
@@ -430,7 +435,7 @@ impl PyParser {
         self.expect(&PyToken::RBracket)?;
         // Python lists are mutable
         Ok(Syntax::new(
-            SyntaxKind::ArrayMut(elements),
+            SyntaxKind::ArrayMut(self.arena.nodes(&elements)),
             self.span_from(&loc),
         ))
     }
@@ -448,10 +453,7 @@ impl PyParser {
             // If key is a string literal, use it as keyword
             match &key_expr.kind {
                 SyntaxKind::String(s) => {
-                    elements.push(Syntax::new(
-                        SyntaxKind::Keyword(s.clone()),
-                        self.span_from(&loc),
-                    ));
+                    elements.push(Syntax::new(SyntaxKind::Keyword(*s), self.span_from(&loc)));
                 }
                 _ => {
                     // Dynamic key — can't use keyword syntax
@@ -468,7 +470,7 @@ impl PyParser {
         self.expect(&PyToken::RBrace)?;
         // Python dicts are mutable
         Ok(Syntax::new(
-            SyntaxKind::StructMut(elements),
+            SyntaxKind::StructMut(self.arena.nodes(&elements)),
             self.span_from(&loc),
         ))
     }

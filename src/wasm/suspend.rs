@@ -355,10 +355,8 @@ impl WasmEmitter {
                 next_label += 1;
                 let mut split_block = BasicBlock::new(current_label);
                 split_block.instructions = block.instructions[start..=call_pos].to_vec();
-                split_block.terminator = SpannedTerminator::new(
-                    Terminator::Jump(cont_label),
-                    block.terminator.span.clone(),
-                );
+                split_block.terminator =
+                    SpannedTerminator::new(Terminator::Jump(cont_label), block.terminator.span);
                 result.push(split_block);
                 start = call_pos + 1;
                 current_label = cont_label;

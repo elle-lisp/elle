@@ -1,7 +1,7 @@
 use super::*;
 
 /// What a collection literal does with a `;splice` among its items.
-enum SpliceRule {
+pub(crate) enum SpliceRule {
     /// The splice spreads into the constructor call: `[1 ;xs 2]` passes the
     /// elements of `xs` as separate arguments.
     Spread,
@@ -27,7 +27,7 @@ impl<'a> Analyzer<'a> {
     /// into.
     ///
     /// The call's signal is the combination of its items'.
-    fn analyze_collection_literal(
+    pub(crate) fn analyze_collection_literal(
         &mut self,
         prim: &str,
         items: &[Syntax],
@@ -48,7 +48,7 @@ impl<'a> Analyzer<'a> {
             args.push(CallArg { expr: hir, spliced });
         }
         let binding = self.resolve_primitive(prim);
-        let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
+        let func = Hir::new(HirKind::Var(binding), span, Signal::silent());
         Ok(Hir::new(
             HirKind::Call {
                 func: Box::new(func),
@@ -81,7 +81,7 @@ impl<'a> Analyzer<'a> {
     }
 
     fn analyze_expr_dispatch(&mut self, syntax: &Syntax) -> Result<Hir, String> {
-        let span = syntax.span.clone();
+        let span = syntax.span;
 
         match &syntax.kind {
             // Literals
@@ -89,12 +89,12 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Bool(b) => Ok(Hir::silent(HirKind::Bool(*b), span)),
             SyntaxKind::Int(n) => Ok(Hir::silent(HirKind::Int(*n), span)),
             SyntaxKind::Float(f) => Ok(Hir::silent(HirKind::Float(*f), span)),
-            SyntaxKind::String(s) => Ok(Hir::silent(HirKind::String(s.clone()), span)),
+            SyntaxKind::String(s) => Ok(Hir::silent(HirKind::String(s.to_string()), span)),
             SyntaxKind::StringMut(_) => {
                 // Should never reach HIR — the expander desugars @"..." to (thaw "...")
                 unreachable!("StringMut should be desugared by the expander")
             }
-            SyntaxKind::Keyword(k) => Ok(Hir::silent(HirKind::Keyword(k.clone()), span)),
+            SyntaxKind::Keyword(k) => Ok(Hir::silent(HirKind::Keyword(k.to_string()), span)),
 
             // Variable reference
             SyntaxKind::Symbol(name) => {
@@ -121,7 +121,7 @@ impl<'a> Analyzer<'a> {
                             None => {
                                 // Undefined variable — accumulate error with suggestions
                                 let suggestions = self.suggest_similar(name);
-                                let error = span.undefined_var_suggest(name, suggestions);
+                                let error = span.undefined_var_suggest(name.as_str(), suggestions);
                                 Ok(self.accumulate_error(error, &span))
                             }
                         }
@@ -165,9 +165,9 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::SyntaxLiteral(s) => {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     let template = crate::value::ConstTemplate::SyntaxSymbol {
-                        name: name.clone(),
-                        scopes: s.scopes.iter().map(|sc| sc.0).collect(),
-                        span: s.span.clone(),
+                        name: name.to_string(),
+                        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+                        span: s.span,
                         scope_exempt: s.scope_exempt,
                     };
                     Ok(Hir::silent(HirKind::QuoteConst(template), span))
@@ -255,9 +255,9 @@ impl<'a> Analyzer<'a> {
                                 if !has_closure_value {
                                     let mut rewritten = items.to_vec();
                                     rewritten[1] = Syntax {
-                                        kind: SyntaxKind::String(sym_name.clone()),
-                                        span: items[1].span.clone(),
-                                        scopes: items[1].scopes.clone(),
+                                        kind: SyntaxKind::String(*sym_name),
+                                        span: items[1].span,
+                                        scopes: items[1].scopes,
                                         scope_exempt: items[1].scope_exempt,
                                     };
                                     return self.analyze_call(&rewritten, span);

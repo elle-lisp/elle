@@ -25,10 +25,12 @@ fn test_print_hir_failing_case() {
         (my-fold process 0 (list 1 2)))"#;
 
     // Parse
-    let syntax = read_syntax(code, "<test>").expect("parse failed");
+    let arena = elle::syntax::SyntaxArena::mint(vm.heap());
+    let syntax = read_syntax(arena, code, "<test>").expect("parse failed");
 
     // Expand
-    let mut expander = Expander::new();
+    let mut expander = Expander::on_vm(&mut vm);
+    expander.set_arena(arena);
     let expanded = expander
         .expand(syntax, &mut symbols, &mut vm)
         .expect("expand failed");

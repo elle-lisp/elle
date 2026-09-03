@@ -113,8 +113,8 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 
 ## Set literals
 
-- `|...|` reads as `SyntaxKind::Set(Vec<Syntax>)` — immutable set literal
-- `@|...|` reads as `SyntaxKind::SetMut(Vec<Syntax>)` — mutable set literal
+- `|...|` reads as `SyntaxKind::Set(RegionSlice<Syntax>)` — immutable set literal
+- `@|...|` reads as `SyntaxKind::SetMut(RegionSlice<Syntax>)` — mutable set literal
 - Inside a list `(...)`, `[...]`, `{...}`, or `@{...}`, a bare `|` starts a
   nested set literal (delegates to `read_set`), producing a `SyntaxKind::Set`
   node. `|` is purely a set delimiter in all contexts.

@@ -20,7 +20,7 @@ pub(crate) fn prim_first(
             if items.is_empty() {
                 return (SIG_OK, Value::NIL);
             }
-            return (SIG_OK, ctx.syntax(items[0].clone()));
+            return (SIG_OK, ctx.syntax(items[0]));
         }
     }
     // Empty list is an immediate — no traitset, error explicitly
@@ -57,15 +57,12 @@ pub(crate) fn prim_rest(
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
+            let arena = ctx.syntax_arena();
             if items.is_empty() {
-                let empty =
-                    crate::syntax::Syntax::new(SyntaxKind::List(vec![]), syntax.span.clone());
+                let empty = crate::syntax::Syntax::list(&arena, &[], syntax.span);
                 return (SIG_OK, ctx.syntax(empty));
             }
-            let rest = crate::syntax::Syntax::new(
-                SyntaxKind::List(items[1..].to_vec()),
-                syntax.span.clone(),
-            );
+            let rest = crate::syntax::Syntax::list(&arena, &items[1..], syntax.span);
             return (SIG_OK, ctx.syntax(rest));
         }
     }

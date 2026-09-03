@@ -74,8 +74,11 @@ impl Expander {
             i += 1;
         }
 
-        // Get the body template
-        let template = items[3].clone();
+        // Copy the body template into the template arena: a `MacroDef`
+        // outlives the compilation unit that defined it, and the working
+        // arena this tree came from dies with that unit
+        // (docs/impl/syntax.md § "Where a node lives").
+        let template = items[3].copy_into(&self.templates);
 
         // Create and register the macro
         let macro_def = MacroDef {
@@ -90,6 +93,6 @@ impl Expander {
         self.define_macro(macro_def);
 
         // Return nil - the macro definition itself doesn't produce code
-        Ok(Syntax::new(SyntaxKind::Nil, span.clone()))
+        Ok(Syntax::new(SyntaxKind::Nil, *span))
     }
 }

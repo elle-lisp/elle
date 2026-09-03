@@ -119,7 +119,9 @@ impl<'a> DoubleEndedIterator for Graphemes<'a> {
 /// or an error when two declarations disagree. Non-integer components are
 /// left for the analyzer to reject with a proper span.
 pub fn scan_unicode_request(source: &str, source_name: &str) -> Result<Option<Vec<i64>>, String> {
-    let forms = read_syntax_all(source, source_name)?;
+    // Runs before any VM exists, so it brings its own heap.
+    let mut home = crate::syntax::SyntaxHeap::new();
+    let forms = read_syntax_all(home.arena(), source, source_name)?;
     let mut agreed: Option<Vec<i64>> = None;
     for form in &forms {
         let SyntaxKind::List(items) = &form.kind else {

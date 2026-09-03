@@ -5,7 +5,7 @@ fn advance_past_eof_is_bounds_safe() {
     // Driving the cursor past the last token must not panic; it yields the
     // Eof sentinel. (The old raw `self.tokens[self.pos]` form index-panicked
     // here.)
-    let mut p = JsParser::new(vec![], "<test>");
+    let mut p = JsParser::new(vec![], "<test>", crate::syntax::thread_arena());
     assert_eq!(p.advance().token, JsToken::Eof);
     assert_eq!(p.advance().token, JsToken::Eof);
 }
@@ -14,7 +14,7 @@ fn advance_past_eof_is_bounds_safe() {
 fn parse(input: &str) -> Vec<Syntax> {
     let mut lexer = JsLexer::new(input, "<test>");
     let tokens = lexer.tokenize().expect("lex failed");
-    let mut parser = JsParser::new(tokens, "<test>");
+    let mut parser = JsParser::new(tokens, "<test>", crate::syntax::thread_arena());
     parser.parse_file().expect("parse failed")
 }
 

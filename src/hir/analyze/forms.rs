@@ -4,7 +4,7 @@ use super::*;
 use crate::hir::expr::CallArg;
 use crate::syntax::{Syntax, SyntaxKind};
 
-mod expr;
+pub(crate) mod expr;
 
 pub(crate) mod registry;
 
@@ -107,7 +107,7 @@ impl<'a> Analyzer<'a> {
         let else_branch = if items.len() == 4 {
             self.analyze_expr(&items[3])?
         } else {
-            Hir::silent(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span)
         };
 
         let signal = cond
@@ -189,7 +189,7 @@ impl<'a> Analyzer<'a> {
         // Check if the first item is a keyword (block name)
         let (name, body_items) = if let Some(first) = items.first() {
             if let SyntaxKind::Keyword(kw) = &first.kind {
-                (Some(kw.clone()), &items[1..])
+                (Some(kw.to_string()), &items[1..])
             } else {
                 (None, items)
             }
@@ -207,7 +207,7 @@ impl<'a> Analyzer<'a> {
         });
 
         self.push_scope(false);
-        let result = self.analyze_begin(body_items, span.clone())?;
+        let result = self.analyze_begin(body_items, span)?;
         self.pop_scope();
 
         self.block_contexts.pop();
@@ -234,14 +234,14 @@ impl<'a> Analyzer<'a> {
             0 => (None, None),
             1 => {
                 if let SyntaxKind::Keyword(kw) = &items[0].kind {
-                    (Some(kw.clone()), None)
+                    (Some(*kw), None)
                 } else {
                     (None, Some(&items[0]))
                 }
             }
             2 => {
                 if let SyntaxKind::Keyword(kw) = &items[0].kind {
-                    (Some(kw.clone()), Some(&items[1]))
+                    (Some(*kw), Some(&items[1]))
                 } else {
                     return Err(format!(
                         "{}: break takes at most 2 arguments: optional :name and optional value",
@@ -281,7 +281,7 @@ impl<'a> Analyzer<'a> {
         let value = if let Some(val_syn) = value_syntax {
             self.analyze_expr(val_syn)?
         } else {
-            Hir::silent(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span)
         };
 
         let signal = value.signal;
@@ -330,7 +330,7 @@ impl<'a> Analyzer<'a> {
                 signal = signal.combine(hir.signal);
                 exprs.push(hir);
             }
-            Hir::new(HirKind::Begin(exprs), span.clone(), signal)
+            Hir::new(HirKind::Begin(exprs), span, signal)
         };
 
         self.block_contexts.pop();
@@ -342,7 +342,7 @@ impl<'a> Analyzer<'a> {
                 cond: Box::new(cond),
                 body: Box::new(body),
             },
-            span.clone(),
+            span,
             signal,
         );
 
@@ -404,7 +404,7 @@ impl<'a> Analyzer<'a> {
         let env = if items.len() == 3 {
             self.analyze_expr(&items[2])?
         } else {
-            Hir::silent(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span)
         };
         let signal = Signal::yields().combine(expr.signal).combine(env.signal);
         Ok(Hir::new(

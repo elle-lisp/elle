@@ -62,7 +62,7 @@ impl JsParser {
 
             let span = lhs.span.merge(&rhs.span);
             if is_neq {
-                let eq = self.list(vec![self.sym("=", &loc), lhs, rhs], span.clone());
+                let eq = self.list(vec![self.sym("=", &loc), lhs, rhs], span);
                 lhs = self.list(vec![self.sym("not", &loc), eq], span);
             } else {
                 lhs = self.list(vec![self.sym(op_name, &loc), lhs, rhs], span);
@@ -126,10 +126,10 @@ impl JsParser {
                 let add = self.list(
                     vec![
                         self.sym("+", &loc),
-                        operand.clone(),
-                        Syntax::new(SyntaxKind::Int(1), span.clone()),
+                        operand,
+                        Syntax::new(SyntaxKind::Int(1), span),
                     ],
-                    span.clone(),
+                    span,
                 );
                 Ok(self.list(vec![self.sym("assign", &loc), operand, add], span))
             }
@@ -141,10 +141,10 @@ impl JsParser {
                 let sub = self.list(
                     vec![
                         self.sym("-", &loc),
-                        operand.clone(),
-                        Syntax::new(SyntaxKind::Int(1), span.clone()),
+                        operand,
+                        Syntax::new(SyntaxKind::Int(1), span),
                     ],
-                    span.clone(),
+                    span,
                 );
                 Ok(self.list(vec![self.sym("assign", &loc), operand, sub], span))
             }
@@ -167,7 +167,10 @@ impl JsParser {
                     self.advance();
                     let field = self.expect_ident()?;
                     let span = expr.span.merge(&self.span_from(&loc));
-                    let kw = Syntax::new(SyntaxKind::Keyword(field), self.span_from(&loc));
+                    let kw = Syntax::new(
+                        SyntaxKind::Keyword(self.arena.text(&field)),
+                        self.span_from(&loc),
+                    );
                     expr = self.list(vec![self.sym("get", &loc), expr, kw], span);
                 }
                 // Index access: obj[key] → (get obj key)
@@ -188,10 +191,10 @@ impl JsParser {
                     let add = self.list(
                         vec![
                             self.sym("+", &loc),
-                            expr.clone(),
-                            Syntax::new(SyntaxKind::Int(1), span.clone()),
+                            expr,
+                            Syntax::new(SyntaxKind::Int(1), span),
                         ],
-                        span.clone(),
+                        span,
                     );
                     expr = self.list(vec![self.sym("assign", &loc), expr, add], span);
                 }
@@ -202,10 +205,10 @@ impl JsParser {
                     let sub = self.list(
                         vec![
                             self.sym("-", &loc),
-                            expr.clone(),
-                            Syntax::new(SyntaxKind::Int(1), span.clone()),
+                            expr,
+                            Syntax::new(SyntaxKind::Int(1), span),
                         ],
-                        span.clone(),
+                        span,
                     );
                     expr = self.list(vec![self.sym("assign", &loc), expr, sub], span);
                 }
@@ -218,8 +221,9 @@ impl JsParser {
 
     pub(super) fn parse_call(&mut self, func: Syntax) -> Result<Syntax, String> {
         let args = self.parse_arglist()?;
-        let loc = &func.span.clone();
-        let span = Span::new(loc.start, loc.end, loc.line, loc.col).with_file(self.file.clone());
+        let loc = func.span;
+        let span = Span::new(loc.start as usize, loc.end as usize, loc.line, loc.col)
+            .with_file(&self.file);
         let mut items = vec![func];
         items.extend(args);
         Ok(self.list(items, span))
@@ -235,7 +239,7 @@ impl JsParser {
                 self.advance();
                 let expr = self.parse_expr()?;
                 let span = self.span_from(&loc);
-                args.push(Syntax::new(SyntaxKind::Splice(Box::new(expr)), span));
+                args.push(Syntax::new(SyntaxKind::Splice(self.arena.node(expr)), span));
             } else {
                 args.push(self.parse_expr()?);
             }
@@ -246,7 +250,7 @@ impl JsParser {
                     self.advance();
                     let expr = self.parse_expr()?;
                     let span = self.span_from(&loc);
-                    args.push(Syntax::new(SyntaxKind::Splice(Box::new(expr)), span));
+                    args.push(Syntax::new(SyntaxKind::Splice(self.arena.node(expr)), span));
                 } else {
                     args.push(self.parse_expr()?);
                 }
@@ -271,14 +275,14 @@ impl JsParser {
             JsToken::String(s) => {
                 self.advance();
                 Ok(Syntax::new(
-                    SyntaxKind::String(s),
+                    SyntaxKind::String(self.arena.text(&s)),
                     self.make_span(&loc, len),
                 ))
             }
             JsToken::TemplateNoSub(s) => {
                 self.advance();
                 Ok(Syntax::new(
-                    SyntaxKind::String(s),
+                    SyntaxKind::String(self.arena.text(&s)),
                     self.make_span(&loc, len),
                 ))
             }
@@ -312,7 +316,7 @@ impl JsParser {
                     return self.parse_arrow_body(&[name], &loc);
                 }
                 Ok(Syntax::new(
-                    SyntaxKind::Symbol(name),
+                    SyntaxKind::Symbol(self.arena.text(&name)),
                     self.make_span(&loc, len),
                 ))
             }
@@ -350,7 +354,7 @@ impl JsParser {
                 self.advance();
                 let expr = self.parse_pratt(12)?;
                 let span = self.span_from(&loc);
-                Ok(Syntax::new(SyntaxKind::Splice(Box::new(expr)), span))
+                Ok(Syntax::new(SyntaxKind::Splice(self.arena.node(expr)), span))
             }
 
             _ => Err(format!(
@@ -439,7 +443,7 @@ impl JsParser {
 
         let span = self.span_from(loc);
         let params: Vec<Syntax> = param_names.iter().map(|n| self.sym(n, loc)).collect();
-        let param_list = self.list(params, span.clone());
+        let param_list = self.list(params, span);
         Ok(self.list(vec![self.sym("fn", loc), param_list, body], span))
     }
 
@@ -453,7 +457,10 @@ impl JsParser {
         let span = self.span_from(loc);
         let mut parts: Vec<Syntax> = vec![self.sym("string", loc)];
         if !head.is_empty() {
-            parts.push(Syntax::new(SyntaxKind::String(head), span.clone()));
+            parts.push(Syntax::new(
+                SyntaxKind::String(self.arena.text(&head)),
+                span,
+            ));
         }
 
         // Parse the interpolated expression
@@ -466,14 +473,17 @@ impl JsParser {
                 JsToken::TemplateTail(tail) => {
                     self.advance();
                     if !tail.is_empty() {
-                        parts.push(Syntax::new(SyntaxKind::String(tail), span.clone()));
+                        parts.push(Syntax::new(
+                            SyntaxKind::String(self.arena.text(&tail)),
+                            span,
+                        ));
                     }
                     break;
                 }
                 JsToken::TemplateMiddle(mid) => {
                     self.advance();
                     if !mid.is_empty() {
-                        parts.push(Syntax::new(SyntaxKind::String(mid), span.clone()));
+                        parts.push(Syntax::new(SyntaxKind::String(self.arena.text(&mid)), span));
                     }
                     let expr = self.parse_expr()?;
                     parts.push(expr);
@@ -504,7 +514,7 @@ impl JsParser {
                 self.advance();
                 let expr = self.parse_expr()?;
                 elements.push(Syntax::new(
-                    SyntaxKind::Splice(Box::new(expr)),
+                    SyntaxKind::Splice(self.arena.node(expr)),
                     self.span_from(&spread_loc),
                 ));
             } else {
@@ -517,7 +527,7 @@ impl JsParser {
         self.expect(&JsToken::RBracket)?;
         // JS arrays are mutable → @array
         Ok(Syntax::new(
-            SyntaxKind::ArrayMut(elements),
+            SyntaxKind::ArrayMut(self.arena.nodes(&elements)),
             self.span_from(&loc),
         ))
     }
@@ -542,23 +552,29 @@ impl JsParser {
                         if *self.peek() == JsToken::Colon {
                             self.advance();
                             let value = self.parse_expr()?;
-                            elements
-                                .push(Syntax::new(SyntaxKind::Keyword(name), self.span_from(&loc)));
+                            elements.push(Syntax::new(
+                                SyntaxKind::Keyword(self.arena.text(&name)),
+                                self.span_from(&loc),
+                            ));
                             elements.push(value);
                         } else if *self.peek() == JsToken::LParen {
                             // Method shorthand: name(params) { body }
                             let func = self.parse_function_body(&loc)?;
-                            elements
-                                .push(Syntax::new(SyntaxKind::Keyword(name), self.span_from(&loc)));
+                            elements.push(Syntax::new(
+                                SyntaxKind::Keyword(self.arena.text(&name)),
+                                self.span_from(&loc),
+                            ));
                             elements.push(func);
                         } else {
                             // Shorthand: {x} → {:x x}
                             elements.push(Syntax::new(
-                                SyntaxKind::Keyword(name.clone()),
+                                SyntaxKind::Keyword(self.arena.text(&name)),
                                 self.span_from(&loc),
                             ));
-                            elements
-                                .push(Syntax::new(SyntaxKind::Symbol(name), self.span_from(&loc)));
+                            elements.push(Syntax::new(
+                                SyntaxKind::Symbol(self.arena.text(&name)),
+                                self.span_from(&loc),
+                            ));
                         }
                         if *self.peek() == JsToken::Comma {
                             self.advance();
@@ -579,7 +595,10 @@ impl JsParser {
                 };
                 self.expect(&JsToken::Colon)?;
                 let value = self.parse_expr()?;
-                elements.push(Syntax::new(SyntaxKind::Keyword(key), self.span_from(&loc)));
+                elements.push(Syntax::new(
+                    SyntaxKind::Keyword(self.arena.text(&key)),
+                    self.span_from(&loc),
+                ));
                 elements.push(value);
             }
 
@@ -590,7 +609,7 @@ impl JsParser {
         self.expect(&JsToken::RBrace)?;
         // JS objects are mutable → @struct
         Ok(Syntax::new(
-            SyntaxKind::StructMut(elements),
+            SyntaxKind::StructMut(self.arena.nodes(&elements)),
             self.span_from(&loc),
         ))
     }

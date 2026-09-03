@@ -201,7 +201,7 @@ impl<'a> Analyzer<'a> {
                     // to nil) so the lowerer allocates slots for them before
                     // lowering any lambda values that might capture them.
                     for leaf_binding in &pattern.bindings().bindings {
-                        bindings.push((*leaf_binding, Hir::silent(HirKind::Nil, span.clone())));
+                        bindings.push((*leaf_binding, Hir::silent(HirKind::Nil, span)));
                     }
                     destructures.push((pattern, tmp));
                 }
@@ -270,7 +270,7 @@ impl<'a> Analyzer<'a> {
         }
 
         // The body reads the converged signals, so it is analyzed last.
-        let body = self.analyze_body(&items[2..], span.clone())?;
+        let body = self.analyze_body(&items[2..], span)?;
 
         // Aggregate from the post-fixpoint HIR. Accumulating during the pass
         // above would bake in the pre-convergence values.
@@ -291,15 +291,15 @@ impl<'a> Analyzer<'a> {
                     Hir::silent(
                         HirKind::Destructure {
                             pattern,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
                             strict: true,
                         },
-                        span.clone(),
+                        span,
                     )
                 })
                 .collect();
             exprs.push(body);
-            Hir::new(HirKind::Begin(exprs), span.clone(), signal)
+            Hir::new(HirKind::Begin(exprs), span, signal)
         };
 
         Ok(Hir::new(

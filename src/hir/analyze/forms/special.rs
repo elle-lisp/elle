@@ -59,18 +59,18 @@ impl<'a> Analyzer<'a> {
 
         // Build: (struct 'sym1 sym1 'sym2 sym2 ...)
         let struct_binding = self.resolve_primitive("struct");
-        let func = Hir::new(HirKind::Var(struct_binding), span.clone(), Signal::silent());
+        let func = Hir::new(HirKind::Var(struct_binding), span, Signal::silent());
 
         let mut args = Vec::new();
         for &(sym_id, binding) in &pairs {
             // quoted symbol key
-            let key = Hir::silent(HirKind::Quote(Value::symbol(sym_id)), span.clone());
+            let key = Hir::silent(HirKind::Quote(Value::symbol(sym_id)), span);
             args.push(crate::hir::expr::CallArg {
                 expr: key,
                 spliced: false,
             });
             // variable reference
-            let var = Hir::silent(HirKind::Var(binding), span.clone());
+            let var = Hir::silent(HirKind::Var(binding), span);
             args.push(crate::hir::expr::CallArg {
                 expr: var,
                 spliced: false,
@@ -136,7 +136,7 @@ impl<'a> Analyzer<'a> {
             bindings.push((param, value));
         }
 
-        let body = self.analyze_body(&items[2..], span.clone())?;
+        let body = self.analyze_body(&items[2..], span)?;
         signal = signal.combine(body.signal);
 
         Ok(Hir::new(
@@ -208,9 +208,9 @@ impl<'a> Analyzer<'a> {
         // First segment: resolve as variable
         let first = segments[0];
         let mut result = match self.lookup(first, scopes) {
-            Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
+            Some(binding) => Hir::silent(HirKind::Var(binding), *span),
             None => match self.lookup(first, &[]) {
-                Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
+                Some(binding) => Hir::silent(HirKind::Var(binding), *span),
                 None => {
                     let suggestions = self.suggest_similar(first);
                     let error = span.undefined_var_suggest(first, suggestions);
@@ -224,8 +224,8 @@ impl<'a> Analyzer<'a> {
         // get is a pure primitive with known arity Range(2,3).
         let get_binding = self.resolve_primitive("get");
         for segment in &segments[1..] {
-            let get_func = Hir::silent(HirKind::Var(get_binding), span.clone());
-            let key = Hir::silent(HirKind::Keyword(segment.to_string()), span.clone());
+            let get_func = Hir::silent(HirKind::Var(get_binding), *span);
+            let key = Hir::silent(HirKind::Keyword(segment.to_string()), *span);
             // Use projected signal if the binding has a projection for this field.
             let call_signal = if let HirKind::Var(binding) = &result.kind {
                 if let Some(proj) = self.projection_env.get(binding) {
@@ -251,7 +251,7 @@ impl<'a> Analyzer<'a> {
                     ],
                     is_tail: false,
                 },
-                span.clone(),
+                *span,
                 call_signal,
             );
         }

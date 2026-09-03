@@ -248,8 +248,9 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
         SyntaxKind::Int(_) | SyntaxKind::Float(_) => {
             // Preserve original source representation (e.g. 1.7e308, 0xff)
             let span = &node.syntax.span;
-            if span.start < source.len() && span.end <= source.len() {
-                Doc::text(&source[span.start..span.end])
+            let (start, end) = (span.start as usize, span.end as usize);
+            if start < source.len() && end <= source.len() {
+                Doc::text(&source[start..end])
             } else {
                 match &node.syntax.kind {
                     SyntaxKind::Int(n) => Doc::text(n.to_string()),
@@ -258,14 +259,15 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
                 }
             }
         }
-        SyntaxKind::Symbol(s) => Doc::text(s.clone()),
+        SyntaxKind::Symbol(s) => Doc::text(s.to_string()),
         SyntaxKind::Keyword(s) => Doc::text(format!(":{}", s)),
         SyntaxKind::String(_) | SyntaxKind::StringMut(_) => {
             // Slice from source to preserve the raw literal (escapes, quotes).
             // SyntaxKind::String stores the unescaped value, not the source text.
             let span = &node.syntax.span;
-            if span.start < source.len() && span.end <= source.len() {
-                Doc::text(&source[span.start..span.end])
+            let (start, end) = (span.start as usize, span.end as usize);
+            if start < source.len() && end <= source.len() {
+                Doc::text(&source[start..end])
             } else {
                 // Synthetic or detached span — fall back to escaped display
                 match &node.syntax.kind {

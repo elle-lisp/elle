@@ -31,13 +31,30 @@ fn default_cache_dir() -> Option<String> {
     Some(format!("{}/elle-cache", base))
 }
 
-/// Read the global config. Returns default if `init` hasn't been called.
+/// The defaults a read before [`init`] answers from. A separate cell, so
+/// reading early does not decide what [`init`] may install.
+static DEFAULTS: OnceLock<Config> = OnceLock::new();
+
+/// Read the global config. Before [`init`], answers from the defaults.
+///
+/// The read does NOT install those defaults. A `get_or_init` here would let
+/// any incidental early read — a scratch heap sizing its page pool, a page
+/// claim asking whether `--stats` is on — decide the whole process's
+/// configuration and silently discard every flag the user passed. Startup
+/// order then becomes a standing hazard: it held while nothing allocated
+/// before `init`, and broke the moment something did (the pre-VM `unicode!`
+/// prescan parses source, and parsing allocates). Answering from a separate
+/// cell removes the hazard rather than restating the ordering rule.
+/// `tests/integration/trace_boot.rs` pins it: those runs pass a file, which
+/// is the path that takes the prescan.
 pub fn get() -> &'static Config {
-    CONFIG.get_or_init(Config::default)
+    match CONFIG.get() {
+        Some(c) => c,
+        None => DEFAULTS.get_or_init(Config::default),
+    }
 }
 
-/// Initialize the global config. Must be called before `get` for
-/// CLI-parsed values to take effect. No-op if already initialized.
+/// Initialize the global config. The first call wins; later calls are no-ops.
 pub fn init(config: Config) {
     let _ = CONFIG.set(config);
 }

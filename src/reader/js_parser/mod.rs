@@ -47,10 +47,18 @@ impl Nav for JsParser {
     }
 }
 
-impl SynBuild for JsParser {}
+impl SynBuild for JsParser {
+    fn arena(&self) -> &crate::syntax::SyntaxArena {
+        &self.arena
+    }
+}
 
 /// Parse a `.js` file into top-level `Syntax` forms.
-pub fn parse_js_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
+pub fn parse_js_file(
+    arena: crate::syntax::SyntaxArena,
+    input: &str,
+    source_name: &str,
+) -> Result<Vec<Syntax>, String> {
     // Strip shebang if present
     let input_clean = if input.starts_with("#!") {
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
@@ -60,20 +68,22 @@ pub fn parse_js_file(input: &str, source_name: &str) -> Result<Vec<Syntax>, Stri
 
     let mut lexer = JsLexer::new(&input_clean, source_name);
     let tokens = lexer.tokenize()?;
-    let mut parser = JsParser::new(tokens, source_name);
+    let mut parser = JsParser::new(tokens, source_name, arena);
     parser.parse_file()
 }
 
 struct JsParser {
     cursor: TokenCursor<JsTokenLoc>,
     file: String,
+    arena: crate::syntax::SyntaxArena,
 }
 
 impl JsParser {
-    fn new(tokens: Vec<JsTokenLoc>, file: &str) -> Self {
+    fn new(tokens: Vec<JsTokenLoc>, file: &str, arena: crate::syntax::SyntaxArena) -> Self {
         JsParser {
             cursor: TokenCursor::new(tokens),
             file: file.to_string(),
+            arena,
         }
     }
 
@@ -135,7 +145,7 @@ impl JsParser {
                 self.advance();
                 let name = self.expect_ident()?;
                 let func = self.parse_function_body(&loc)?;
-                let span = func.span.clone();
+                let span = func.span;
                 let def = self.list(
                     vec![self.sym("def", &loc), self.sym(&name, &loc), func],
                     span,

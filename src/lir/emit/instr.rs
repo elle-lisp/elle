@@ -175,7 +175,7 @@ impl Emitter {
                     location_map: nested_bytecode.location_map,
                     lir_function: Some(Rc::new(nested_lir)),
                     doc: func.doc.as_deref().map(str::to_string),
-                    syntax: func.syntax.clone(),
+                    origin: func.origin,
                     vararg_kind: func.vararg_kind.clone(),
                     name: func.name.clone(),
                     region_table: func.region_table.clone(),

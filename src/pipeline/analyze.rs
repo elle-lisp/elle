@@ -17,9 +17,25 @@ pub fn analyze(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
-    let syntax = read_syntax(source, source_name)?;
+    // One working arena per analysis, freed when the HIR is built: the result
+    // carries spans, not nodes, so nothing in it points here.
+    let arena = unsafe { crate::syntax::SyntaxArena::mint(&mut *cctx.heap_ptr()) };
+    let out = analyze_in_arena(arena, source, symbols, vm, cctx, source_name);
+    unsafe { (*cctx.heap_ptr()).decref_region_if_present(arena.region()) };
+    out
+}
 
-    let (mut expander, meta) = cctx.expander_and_meta();
+fn analyze_in_arena(
+    arena: crate::syntax::SyntaxArena,
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<AnalyzeResult, String> {
+    let syntax = read_syntax(arena, source, source_name)?;
+
+    let (mut expander, meta) = cctx.expander_and_meta(arena);
 
     let expanded = expander.expand(syntax, symbols, vm)?;
     let mut arena = BindingArena::new();
@@ -50,9 +66,23 @@ pub fn analyze_file(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
-    let syntaxes = read_syntax_all(source, source_name)?;
+    let arena = unsafe { crate::syntax::SyntaxArena::mint(&mut *cctx.heap_ptr()) };
+    let out = analyze_file_in_arena(arena, source, symbols, vm, cctx, source_name);
+    unsafe { (*cctx.heap_ptr()).decref_region_if_present(arena.region()) };
+    out
+}
 
-    let (mut expander, meta) = cctx.expander_and_meta();
+fn analyze_file_in_arena(
+    arena: crate::syntax::SyntaxArena,
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<AnalyzeResult, String> {
+    let syntaxes = read_syntax_all(arena, source, source_name)?;
+
+    let (mut expander, meta) = cctx.expander_and_meta(arena);
 
     // Expand all forms
     let mut expanded_forms = Vec::new();

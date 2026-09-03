@@ -56,8 +56,8 @@ pub struct TemplateProto {
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
     /// Docstring from the source lambda.
     pub doc: Option<String>,
-    /// The defining syntax node, for `eval`'s closure reconstruction.
-    pub syntax: Option<Rc<crate::syntax::Syntax>>,
+    /// Where the source lambda was written, for `(meta/origin f)`.
+    pub origin: Option<crate::syntax::Span>,
     /// How varargs collect. Only meaningful when `arity` is `AtLeast`.
     pub vararg_kind: VarargKind,
     /// Declared name, for stack traces and diagnostics.
@@ -101,7 +101,7 @@ impl TemplateProto {
             location_map: LocationMap::new(),
             lir_function: None,
             doc: None,
-            syntax: None,
+            origin: None,
             vararg_kind: VarargKind::List,
             name: None,
             wasm_func_idx: None,

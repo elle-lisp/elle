@@ -10,7 +10,7 @@ pub(crate) fn prim_syntax_to_list(
     };
     match &stx.kind {
         SyntaxKind::List(items) => {
-            let elems: Vec<Value> = items.iter().map(|item| ctx.syntax(item.clone())).collect();
+            let elems: Vec<Value> = items.iter().map(|item| ctx.syntax(*item)).collect();
             (SIG_OK, ctx.array(elems))
         }
         _ => (
@@ -35,7 +35,7 @@ pub(crate) fn prim_syntax_first(
         Err(e) => return e,
     };
     match &stx.kind {
-        SyntaxKind::List(items) if !items.is_empty() => (SIG_OK, ctx.syntax(items[0].clone())),
+        SyntaxKind::List(items) if !items.is_empty() => (SIG_OK, ctx.syntax(items[0])),
         SyntaxKind::List(_) => (
             SIG_ERROR,
             ctx.error("type-error", "syntax-first: expected non-empty syntax list"),
@@ -63,7 +63,7 @@ pub(crate) fn prim_syntax_rest(
     };
     match &stx.kind {
         SyntaxKind::List(items) if !items.is_empty() => {
-            let rest = Syntax::new(SyntaxKind::List(items[1..].to_vec()), stx.span.clone());
+            let rest = Syntax::list(&ctx.syntax_arena(), &items[1..], stx.span);
             (SIG_OK, ctx.syntax(rest))
         }
         SyntaxKind::List(_) => (
@@ -96,7 +96,7 @@ pub(crate) fn prim_syntax_e(
         SyntaxKind::Bool(b) => (SIG_OK, Value::bool(*b)),
         SyntaxKind::Int(n) => (SIG_OK, Value::int(*n)),
         SyntaxKind::Float(f) => (SIG_OK, Value::float(*f)),
-        SyntaxKind::String(s) => (SIG_OK, ctx.string(s.clone())),
+        SyntaxKind::String(s) => (SIG_OK, ctx.string(*s)),
         SyntaxKind::Keyword(k) => (SIG_OK, Value::keyword(k)),
         SyntaxKind::Symbol(name) => {
             // Intern into this instance's table via the driving VM. Mirrors the
@@ -229,21 +229,18 @@ pub(crate) fn prim_meta_origin(
         Some(c) => c,
         None => return (SIG_OK, Value::NIL),
     };
-    let syntax = match closure_rc.template.syntax() {
-        Some(s) => s,
+    let origin = match closure_rc.template.origin() {
+        Some(span) => span,
         None => return (SIG_OK, Value::NIL),
     };
-    let file = match syntax.span.file.as_ref() {
-        Some(f) => f.clone(),
+    let file = match origin.file() {
+        Some(f) => f,
         None => return (SIG_OK, Value::NIL),
     };
     let mut fields = std::collections::BTreeMap::new();
-    fields.insert(TableKey::keyword("file"), ctx.string(&*file));
-    fields.insert(
-        TableKey::keyword("line"),
-        Value::int(syntax.span.line as i64),
-    );
-    fields.insert(TableKey::keyword("col"), Value::int(syntax.span.col as i64));
+    fields.insert(TableKey::keyword("file"), ctx.string(file));
+    fields.insert(TableKey::keyword("line"), Value::int(origin.line as i64));
+    fields.insert(TableKey::keyword("col"), Value::int(origin.col as i64));
     (SIG_OK, ctx.struct_from(fields))
 }
 

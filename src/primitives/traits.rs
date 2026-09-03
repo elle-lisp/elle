@@ -173,10 +173,19 @@ unsafe fn clone_with_traits(
             handle: handle.clone(),
             traits: table,
         })),
-        HeapObject::Syntax { syntax, .. } => Ok(ctx.alloc(HeapObject::Syntax {
-            syntax: syntax.clone(),
-            traits: table,
-        })),
+        // COPY the tree, do not share it: a `Syntax` node is `Copy`, so
+        // assigning one would leave this clone's child slices and string
+        // payloads in the SOURCE's region — freed-page reads once the source
+        // dies. Every slice-backed arm above copies for the same reason (see
+        // `RegionSlice`'s module docs and
+        // tests/elle/region-withtraits-slice-uaf.lisp).
+        HeapObject::Syntax { syntax, .. } => {
+            let owned = syntax.copy_into(&ctx.syntax_arena());
+            Ok(ctx.alloc(HeapObject::Syntax {
+                syntax: owned,
+                traits: table,
+            }))
+        }
         HeapObject::ManagedPointer { addr, .. } => Ok(ctx.alloc(HeapObject::ManagedPointer {
             addr: std::cell::Cell::new(addr.get()),
             traits: table,
@@ -257,5 +266,70 @@ primitive! {
         category: "traits",
         example: "(traits (with-traits [1 2 3] {:Seq {:first (fn (v) (get v 0))}}))",
         effect: RegionEffect::PassThrough,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::syntax::SyntaxHeap;
+    use crate::value::arena::region_of;
+
+    /// `with-traits` on a syntax object copies the tree into the clone's own
+    /// region, like every other slice-backed arm of `clone_with_traits`.
+    ///
+    /// The counter-factual, and the reason this is a Rust test rather than an
+    /// Elle one: a `Syntax` node is `Copy`, so writing `syntax: *syntax`
+    /// compiles and leaves the clone's children and name bytes in the SOURCE's
+    /// region. Nothing observable happens until that region is freed, which
+    /// the region solver defers past every shape an Elle test can write — so
+    /// the assertion is on ownership, where the mistake is always visible.
+    #[test]
+    fn with_traits_copies_a_syntax_tree_into_the_clones_region() {
+        let mut vm = crate::vm::VM::new();
+        let vm_ptr: *mut crate::vm::VM = &mut vm as *mut _;
+        let heap_ptr = vm.heap_ptr;
+        let heap = unsafe { &mut *heap_ptr };
+
+        // The source value lives in its own region, read through a scratch
+        // heap that is dropped before the clone is even built.
+        let source_region = heap.new_runtime_region();
+        let source = {
+            let mut scratch = SyntaxHeap::new();
+            let read = crate::reader::read_syntax(scratch.arena(), "(alpha beta)", "<t>").unwrap();
+            crate::value::build::syntax(heap, read, source_region)
+        };
+
+        // The clone is built through a ctx over a different region.
+        let clone_region = unsafe { (*heap_ptr).new_runtime_region() };
+        let clone = {
+            let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
+                clone_region,
+                unsafe { &mut *heap_ptr },
+                vm_ptr,
+            );
+            let table = ctx.struct_from(std::collections::BTreeMap::new());
+            let (bits, v) = super::prim_with_traits(&mut ctx, &[source, table]);
+            assert_eq!(bits, crate::value::fiber::SIG_OK, "with-traits succeeds");
+            v
+        };
+
+        let heap = unsafe { &mut *heap_ptr };
+        assert_eq!(region_of(heap, clone), Some(clone_region));
+        let tree = clone.as_syntax().expect("a syntax value");
+        let kids = tree.kind.children();
+        assert_eq!(kids.len(), 2);
+        assert_eq!(kids[0].as_symbol(), Some("alpha"));
+        assert_eq!(
+            heap.region_of_ptr(kids.as_ptr() as *const ()),
+            clone_region.get(),
+            "the clone's children must live in the clone's region, not the source's"
+        );
+
+        // The source keeps its own tree, in its own region.
+        let src_tree = source.as_syntax().expect("a syntax value");
+        assert_eq!(
+            heap.region_of_ptr(src_tree.kind.children().as_ptr() as *const ()),
+            source_region.get()
+        );
     }
 }

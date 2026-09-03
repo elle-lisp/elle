@@ -52,7 +52,7 @@ impl LuaParser {
             let span = lhs.span.merge(&rhs.span);
             if is_neq {
                 // ~= → (not (= lhs rhs))
-                let eq = self.list(vec![self.sym("=", &loc), lhs, rhs], span.clone());
+                let eq = self.list(vec![self.sym("=", &loc), lhs, rhs], span);
                 lhs = self.list(vec![self.sym("not", &loc), eq], span);
             } else {
                 lhs = self.list(vec![self.sym(op_name, &loc), lhs, rhs], span);
@@ -122,7 +122,10 @@ impl LuaParser {
                     self.advance();
                     let field = self.expect_ident()?;
                     let span = expr.span.merge(&self.span_from(&loc));
-                    let kw = Syntax::new(SyntaxKind::Keyword(field), self.span_from(&loc));
+                    let kw = Syntax::new(
+                        SyntaxKind::Keyword(self.arena.text(&field)),
+                        self.span_from(&loc),
+                    );
                     expr = self.list(vec![self.sym("get", &loc), expr, kw], span);
                 }
                 // Index access: t[k] → (get t k)
@@ -153,9 +156,11 @@ impl LuaParser {
                         // Complex receiver: desugar to ((get obj :method) obj args...)
                         let args = self.parse_arglist()?;
                         let span = self.span_from(&loc);
-                        let kw = Syntax::new(SyntaxKind::Keyword(method), self.span_from(&loc));
-                        let getter =
-                            self.list(vec![self.sym("get", &loc), expr.clone(), kw], span.clone());
+                        let kw = Syntax::new(
+                            SyntaxKind::Keyword(self.arena.text(&method)),
+                            self.span_from(&loc),
+                        );
+                        let getter = self.list(vec![self.sym("get", &loc), expr, kw], span);
                         let mut items = vec![getter, expr];
                         items.extend(args);
                         expr = self.list(items, span);
@@ -171,7 +176,8 @@ impl LuaParser {
     pub(super) fn parse_call(&mut self, func: Syntax) -> Result<Syntax, String> {
         let args = self.parse_arglist()?;
         let loc = &func.span.clone();
-        let span = Span::new(loc.start, loc.end, loc.line, loc.col).with_file(self.file.clone());
+        let span = Span::new(loc.start as usize, loc.end as usize, loc.line, loc.col)
+            .with_file(&self.file);
         let mut items = vec![func];
         items.extend(args);
         Ok(self.list(items, span))
@@ -206,7 +212,7 @@ impl LuaParser {
             LuaToken::String(s) => {
                 self.advance();
                 Ok(Syntax::new(
-                    SyntaxKind::String(s),
+                    SyntaxKind::String(self.arena.text(&s)),
                     self.make_span(&loc, len),
                 ))
             }
@@ -231,7 +237,7 @@ impl LuaParser {
             LuaToken::Ident(name) => {
                 self.advance();
                 Ok(Syntax::new(
-                    SyntaxKind::Symbol(name),
+                    SyntaxKind::Symbol(self.arena.text(&name)),
                     self.make_span(&loc, len),
                 ))
             }
@@ -249,7 +255,10 @@ impl LuaParser {
                 self.advance();
                 let inner = self.sym(VARARGS, &loc);
                 let span = self.make_span(&loc, 3);
-                Ok(Syntax::new(SyntaxKind::Splice(Box::new(inner)), span))
+                Ok(Syntax::new(
+                    SyntaxKind::Splice(self.arena.node(inner)),
+                    span,
+                ))
             }
 
             // Table constructor
@@ -285,7 +294,7 @@ impl LuaParser {
             self.advance();
             // Empty table → empty mutable struct (works as Lua "object")
             return Ok(Syntax::new(
-                SyntaxKind::StructMut(Vec::new()),
+                SyntaxKind::StructMut(self.arena.nodes(&[])),
                 self.span_from(&loc),
             ));
         }
@@ -324,7 +333,7 @@ impl LuaParser {
             let key = self.expect_ident()?;
             self.expect(&LuaToken::Assign)?;
             let value = self.parse_expr()?;
-            elements.push(Syntax::new(SyntaxKind::Keyword(key), self.span_from(loc)));
+            elements.push(self.kw(&key, self.span_from(loc)));
             elements.push(value);
 
             match self.peek() {
@@ -336,7 +345,7 @@ impl LuaParser {
         }
         self.expect(&LuaToken::RBrace)?;
         Ok(Syntax::new(
-            SyntaxKind::StructMut(elements),
+            SyntaxKind::StructMut(self.arena.nodes(&elements)),
             self.span_from(loc),
         ))
     }
@@ -360,7 +369,7 @@ impl LuaParser {
         }
         self.expect(&LuaToken::RBrace)?;
         Ok(Syntax::new(
-            SyntaxKind::ArrayMut(elements),
+            SyntaxKind::ArrayMut(self.arena.nodes(&elements)),
             self.span_from(loc),
         ))
     }
@@ -402,7 +411,7 @@ impl LuaParser {
         }
 
         // Parse the collected s-expression using the Elle reader
-        let syntaxes = crate::reader::read_syntax(&sexpr_text, &self.file)?;
+        let syntaxes = crate::reader::read_syntax(self.arena, &sexpr_text, &self.file)?;
         Ok(syntaxes)
     }
 

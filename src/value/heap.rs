@@ -243,11 +243,13 @@ pub enum HeapObject {
     /// references compile-time types — an intentional coupling required
     /// for first-class syntax objects in hygienic macros.
     ///
-    /// Uses `Box<Syntax>` rather than `Rc<Syntax>` because the tree is
-    /// always cloned on extraction — `Rc` would add indirection without
-    /// sharing benefits, and creates a dangling-pointer hazard when the
-    /// slab slot is recycled.
-    Syntax { syntax: Box<Syntax>, traits: Value },
+    /// The node is stored inline, not behind a `Box`: `Syntax` is region-
+    /// resident POD, and `value::build::syntax` copies the whole tree into
+    /// this object's own region. The object is therefore self-contained —
+    /// page bytes ARE the value, with no Rust-heap ownership inside and no
+    /// cross-region edge to record (docs/impl/syntax.md § "A syntax `Value`
+    /// owns its tree").
+    Syntax { syntax: Syntax, traits: Value },
 
     /// Reified FFI function signature with optional cached CIF.
     /// The CIF is lazily prepared on first use and reused thereafter.

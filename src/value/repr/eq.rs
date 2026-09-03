@@ -236,9 +236,11 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
                 h1.id() == h2.id()
             }
 
-            // Syntax comparison (by reference — same Box)
+            // Syntax comparison: by identity, as it always was. The node is
+            // stored inline now, so the address to compare is the object's
+            // own field rather than a `Box`'s target.
             (HeapObject::Syntax { syntax: s1, .. }, HeapObject::Syntax { syntax: s2, .. }) => {
-                std::ptr::eq(&**s1, &**s2)
+                std::ptr::eq(s1, s2)
             }
 
             // FFI signature comparison (structural equality, skip CIF cache)

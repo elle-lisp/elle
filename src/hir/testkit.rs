@@ -116,8 +116,10 @@ impl HirFixture {
         } else {
             format!("(letrec [{}] {})", self.stubs, source)
         };
-        let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
-        let mut expander = Expander::new();
+        let syntax_arena = crate::syntax::SyntaxArena::mint(vm.heap());
+        let syntax = read_syntax(syntax_arena, &wrapped, "<test>").expect("parse failed");
+        let mut expander = Expander::on_vm(&mut vm);
+        expander.set_arena(syntax_arena);
         let expanded = expander
             .expand(syntax, symbols, &mut vm)
             .expect("expand failed");
