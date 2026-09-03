@@ -183,6 +183,9 @@ mod bytecode_doc {
 mod workflows {
     include!("workflows.rs");
 }
+mod plugins {
+    include!("plugins.rs");
+}
 mod budget {
     include!("budget.rs");
 }

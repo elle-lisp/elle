@@ -115,10 +115,11 @@ dependency, so the document has to go red for it.
 
 ### API reference
 
-The `api()` function returns a reference to the resolved `Api` struct. The
-constructors that allocate take the call's `ctx` first; the ones that do not
-allocate — integers, floats, booleans, nil, and keywords, which are immediate
-or interned — do not. Common methods:
+The `api()` function returns a reference to the resolved `Api` struct. A
+method takes the call's `ctx` first when it allocates, and also when it reads
+or writes a name: a symbol or keyword is a bare hash, and the spelling behind
+that hash lives in the calling instance's memo, which `ctx` is the way to
+reach (see [`docs/impl/symbol.md`](../impl/symbol.md)). Common methods:
 
 ```rust
 let a = api();
@@ -128,11 +129,11 @@ a.int(42)                       // i64 → ElleValue
 a.float(3.14)                   // f64 → ElleValue
 a.boolean(true)                 // bool → ElleValue
 a.nil()                         // nil
-a.keyword("error")              // &str → ElleValue (keyword)
 
-// Constructors that allocate, and so take ctx
+// Constructors that allocate or name, and so take ctx
 a.string(ctx, "hello")          // &str → ElleValue
 a.bytes(ctx, &[1, 2, 3])        // &[u8] → ElleValue
+a.keyword(ctx, "error")         // &str → ElleValue (keyword)
 a.array(ctx, &[v1, v2])         // &[ElleValue] → ElleValue
 a.set(ctx, &[v1, v2])           // &[ElleValue] → ElleValue
 a.build_struct(ctx, &[("key", val)])  // &[(&str, ElleValue)] → ElleValue
@@ -145,6 +146,12 @@ a.get_string(v)                 // Option<&str>
 a.get_bytes(v)                  // Option<&[u8]>
 a.get_bool(v)                   // Option<bool>
 a.get_external::<T>(v, "name")  // Option<&T>
+
+// Accessors that read a spelling back, and so take ctx
+a.get_keyword_name(ctx, v)      // Option<&str>
+a.get_struct_key(ctx, v, i)     // Option<&str>
+a.struct_entries(ctx, v)        // Vec<(&str, ElleValue)>
+a.kw_name(ctx, hash)            // Option<&str>
 
 // Results
 a.ok(value)                     // ElleResult with SIG_OK

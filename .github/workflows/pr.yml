@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source: ${{ steps.filter.outputs.source }}
+      plugins: ${{ steps.filter.outputs.plugins }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,9 +32,20 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
           if echo "$CHANGED" | grep -qE '\.(rs|lisp)$|^Cargo\.|^Makefile$|^\.cargo/'; then
-            echo "source=true" >> "$GITHUB_OUTPUT"
+            SOURCE=true
           else
-            echo "source=false" >> "$GITHUB_OUTPUT"
+            SOURCE=false
+          fi
+          echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
+          # The submodule's recorded pointer is the bare path `plugins` with no
+          # extension, so the pattern above never matches a pointer bump — and a
+          # pointer bump changes exactly what the plugins job compiles. It gets
+          # its own output rather than widening `source`, which would run the
+          # whole matrix, macOS included, for a one-line gitlink move.
+          if [ "$SOURCE" = true ] || echo "$CHANGED" | grep -qx 'plugins'; then
+            echo "plugins=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "plugins=false" >> "$GITHUB_OUTPUT"
           fi
 
   qa:
@@ -217,6 +229,66 @@ jobs:
       # parallel install it needs) when the tier is brought back up.
       - name: make check-wasm
         run: make check-wasm
+
+  # The `plugins/` submodule is a separate cargo workspace whose crates take
+  # `elle-plugin` by path, so an `elle_api!` change moves the SDK and the plugin
+  # together and the workspace either compiles or does not. Nothing in CI
+  # checked it out until this job: #997 changed six declarations, stopped 17
+  # plugins from compiling at about 90 call sites, and every gate stayed green
+  # (#1023). The ABI version guard cannot stand in — it compares `ABI_VERSION`
+  # at load time, and a source break never reaches a load.
+  #
+  # Checking out at the recorded pointer is also what keeps the pointer fresh: a
+  # pointer left behind an ABI change names plugins that no longer compile.
+  #
+  # `make plugins` builds; `make smoke-plugins` asserts every artifact and then
+  # runs the corpus. Without the assertion the corpus reports success over a
+  # plugin that never built — see docs/analysis/ci.md § "Why the job asserts its
+  # build output".
+  plugins:
+    name: Plugin Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.plugins == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      # Named, not `submodules: true`: that would also fetch `mcp`, which this
+      # job never builds — and an unreachable `mcp` pointer would then fail the
+      # one job that reports on the plugins.
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: plugins
+      # Two plugins in the portable set are not pure Rust, and neither says so
+      # in its own Cargo.toml — the dependencies arrive several crates deep.
+      # elle-plotters reaches font-kit, which wants fontconfig through
+      # pkg-config; libfontconfig1-dev brings the freetype, expat and png
+      # headers behind it. elle-oxigraph reaches oxrocksdb-sys, which runs
+      # bindgen over vendored RocksDB.
+      #
+      # See docs/analysis/ci.md § "What the runner has to install" for how to
+      # find this set, which is not by reading manifests.
+      - name: Install GNU parallel and the plugin build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel clang libclang-dev \
+                                  pkg-config libfontconfig1-dev
+          # bindgen dlopens libclang by soname, and libclang-dev installs it
+          # under /usr/lib/llvm-<N>/lib, which is not on the loader's search
+          # path — so clang-sys has to be pointed at it. The <N> moves with the
+          # runner image, so find the file rather than write a version down, and
+          # fail here rather than let an empty LIBCLANG_PATH reach bindgen.
+          lib=$(find /usr/lib -name 'libclang.so*' -print -quit)
+          [ -n "$lib" ] || { echo "no libclang after installing libclang-dev"; exit 1; }
+          echo "LIBCLANG_PATH=$(dirname "$lib")" >> "$GITHUB_ENV"
+      - name: make elle
+        run: make elle
+      - name: make plugins
+        run: make plugins
+      - name: make smoke-plugins
+        run: make smoke-plugins
 
   # The corpus half of the AArch64 tier. Its Rust half is `aarch64-tests`
   # below, running at the same time on its own runner — the two share no build
@@ -439,7 +511,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, docs, tests-combined, tests, nouring, wasm, mlir, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
+    needs: [changes, qa, docs, tests-combined, tests, nouring, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -464,6 +536,12 @@ jobs:
       # longer compiles or the tier no longer boots — that blocks.
       - name: Check WASM
         if: needs.wasm.result == 'failure'
+        run: exit 1
+      # The only job that compiles the `plugins/` submodule. A failure here is
+      # either a plugin the current `elle_api!` no longer accepts, or a recorded
+      # submodule pointer left behind an ABI change — both block.
+      - name: Check plugins
+        if: needs.plugins.result == 'failure'
         run: exit 1
       - name: Check documentation build
         if: needs.docs.result == 'failure'

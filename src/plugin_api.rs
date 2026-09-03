@@ -183,13 +183,13 @@ extern "C" fn api_resolve(name_ptr: *const u8, name_len: usize) -> *const c_void
 /// Construct the `ElleApiLoader` for plugin initialization.
 pub(crate) fn build_api_loader() -> ApiLoader {
     ApiLoader {
-        // ABI version 3: plugin primitives receive an opaque per-call ctx (region
-        // + heap) as their leading argument and thread it into the allocating
-        // constructors (docs/impl/region/ctx.md "Plugins"). This changed the
-        // primitive calling convention, so a v2 plugin (no ctx arg) is incompatible
-        // and must be recompiled; the SDK's version guard turns the mismatch into a
-        // clean load failure rather than a corrupt call.
-        version: 3,
+        // Read from the SDK rather than written again here. The number is what a
+        // plugin compares itself against, so a second copy of it can disagree
+        // with the first, and the disagreement is invisible: every name still
+        // resolves, and every call is made through the wrong argument list.
+        // What the current version names, and when to bump it, is in
+        // docs/plugins.md § "The ABI version".
+        version: elle_plugin::ABI_VERSION,
         resolve: api_resolve,
     }
 }

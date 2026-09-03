@@ -659,6 +659,7 @@ dependencies = [
  "cranelift-native",
  "criterion",
  "crossbeam-channel",
+ "elle-plugin",
  "io-uring",
  "libc",
  "libffi",

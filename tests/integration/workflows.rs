@@ -200,6 +200,44 @@ fn no_job_serializes_the_corpus_and_the_rust_suite() {
     );
 }
 
+// The `plugins/` submodule is a separate workspace, and until this job existed
+// no CI job checked it out. #997 changed six `elle_api!` signatures and stopped
+// 17 plugins from compiling, at about 90 call sites, and every gate stayed
+// green — the break was found by hand (#1023). Plugins take `elle-plugin` by
+// path, so a source break never reaches a load and the ABI version guard cannot
+// see it; only a job that compiles the submodule can. The argument is in
+// docs/analysis/ci.md § "The plugins job".
+//
+// The counter-factual: this is the state main was in. Delete the job, or leave
+// it building a `plugins/` it never checked out, and an ABI change breaks every
+// plugin with nothing going red.
+#[test]
+fn a_job_builds_the_plugins_submodule() {
+    let text = workflow_text();
+
+    let building: Vec<(String, String)> = jobs(&text)
+        .into_iter()
+        .filter(|(_, body)| body.contains("make plugins") && body.contains("make smoke-plugins"))
+        .collect();
+    assert!(
+        !building.is_empty(),
+        "no job in {} runs both `make plugins` and `make smoke-plugins`, so \
+         nothing in CI compiles the `plugins/` workspace against this tree's \
+         `elle-plugin`",
+        workflow_path().display()
+    );
+
+    // Without a checkout the submodule directory is empty, `make plugins`
+    // builds nothing, and `plugins-verify` is the step that says so.
+    for (name, body) in &building {
+        assert!(
+            body.contains("submodule"),
+            "job `{name}` builds the plugins but never checks the submodule \
+             out, so it runs over an empty directory"
+        );
+    }
+}
+
 // A split pair that shares one `Swatinem/rust-cache` `shared-key` is worse than
 // no cache: the Smoke job populates the key with release artifacts, the Rust
 // Tests job restores those and saves dev-profile ones over them, and the two

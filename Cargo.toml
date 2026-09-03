@@ -17,6 +17,11 @@ repository = "https://github.com/elle-lisp/elle"
 authors = ["Andy Davidoff"]
 
 [dependencies]
+# The plugin SDK, for the one constant the host and a plugin must agree on:
+# ABI_VERSION. The types crossing that boundary stay duplicated in
+# `src/plugin_api.rs` as `#[repr(C)]` layouts, because the host side of each
+# one holds elle-internal types the SDK cannot name.
+elle-plugin = { path = "elle-plugin" }
 bumpalo = "3"
 rustc-hash = "2.0"
 smallvec = "1.11"

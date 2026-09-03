@@ -106,7 +106,8 @@ Tests are organized by feature area in separate files:
 | `elle_scripts.rs` | Process-global runtime-mode pins (guardfree/no-uring/mlir-off); the corpus itself runs via `elle test` |
 | `paths.rs` | The paths and URLs the Makefile and the doc generator name in text, checked against the tree |
 | `bytecode_doc.rs` | The instruction names and source paths the bytecode documents spell, checked against the `Instruction` enum |
-| `workflows.rs` | The PR workflow's merge gate: every job needed and enforced by `all-checks`, no job serializing the corpus and the Rust suite, no shared cache key |
+| `workflows.rs` | The PR workflow's merge gate: every job needed and enforced by `all-checks`, a job that builds the `plugins/` submodule, no job serializing the corpus and the Rust suite, no shared cache key |
+| `plugins.rs` | The plugin artifacts the Makefile demands, checked against the submodule's crates, and the assertion that fails when one is missing |
 | `budget.rs` | The wall-clock budget the Makefile's per-file corpus passes give one file |
 | `doctest.rs` | The plugins the literate documents load, checked against what the Makefile's `doctest` target builds |
 | `environment.rs` | Environment variables |
