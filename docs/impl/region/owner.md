@@ -346,15 +346,18 @@ parked fiber's accounting symmetric with its unpark:
   (`take_bodyless`) as the receipt. Both readings run at every install, and neither asks
   what the other did.
 
-  **What is resume-only is the SKIP, not the release.** A `Fresh` io op
-  (`port/read`, `accept`) builds its completion buffer IN the request's region and hands
-  that buffer back as the resume value, so at a resume that region is still live and the
-  resumer's release of the resume result is its second consumer — releasing there too
-  would free the buffer under the caller. `release_resumed_io_request` is that skip and
-  nothing else; every other install reaches the release directly. An injected error is
-  not a delivery — the abort's own `AbortDelivery` mint funds the consumer it does have —
-  so an error value that happens to live in the request's region owes this release all
-  the same, and the skip must not travel to the injection.
+  **A shared region exempts no install.** A `Fresh` io op (`port/read`, `accept`) mints
+  ONE region for the call and builds both the request and the completion buffer in it,
+  then hands that buffer back as the resume value — so the resume is the one install that
+  finds the region still live. It owes the release all the same. Two references stand on
+  such a region and they answer to different consumers: the `Fresh` mint, consumed by the
+  release of the value the suspend hands back (the request at the park, the buffer at the
+  resume), and the `SuspendEscape`, consumed here. A resume that stands down because the
+  resume value shares the region leaves the second with no consumer at all, and the region
+  survives with its buffer and its request — one region and two objects per read, which a
+  socket reader pays per frame. `tests/elle/region-io-read-strand.lisp` bounds the rate
+  and pins the other side: the release drops the retain, not the buffer, which its held
+  chunks read back after the reads that followed them.
 
   **An in-flight request needs no waiting on.** An abort reaches a fiber whose request
   the scheduler already submitted, where the release must not free a buffer the kernel

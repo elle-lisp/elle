@@ -250,9 +250,9 @@ other did, which is what a fiber denied `:io` needs: it parks under the same
 `SIG_IO` bit, and the install may reach a fiber that only relays the park and
 holds no record to defer to. The installs are `fiber/resume`, the `fiber/abort` /
 `fiber/refuse` injection, and the three `FiberResume` deliveries that reach an
-inner fiber directly. Only the resume adds a skip of its own
-(`release_resumed_io_request`), for the `Fresh` op whose completion buffer lives
-in the request's region. See docs/impl/region/owner.md § "A payload the RUNTIME
+inner fiber directly, and each owes the release — a `Fresh` op whose completion
+buffer lives in the request's own region is a second value there, not a second
+consumer of the retain. See docs/impl/region/owner.md § "A payload the RUNTIME
 built is released by the install that displaces it".
 
 Key methods:

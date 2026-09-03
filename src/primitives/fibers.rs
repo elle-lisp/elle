@@ -163,7 +163,7 @@ pub(crate) fn prim_fiber_resume(
             // goes first because it is the one that READS the parked value to
             // decide, and the denial arm's release may have been the payload's
             // last (`release_displaced_denial_payload`).
-            crate::vm::fiber::release_resumed_io_request(ctx.heap_mut(), parked, resume_value);
+            crate::vm::fiber::release_displaced_io_request(ctx.heap_mut(), parked);
             crate::vm::fiber::release_displaced_denial_payload(ctx.heap_mut(), handle);
             // And a parked TERMINAL result this resume displaces (a restarted
             // `:error` fiber, a re-resumed drained stream source): its

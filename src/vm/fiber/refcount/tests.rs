@@ -18,12 +18,6 @@ fn payload(
     alloc_in_fresh_region(heap, cons())
 }
 
-/// A resume value on a region of its own — what a mediating parent hands back,
-/// which never shares the denial payload's region.
-fn foreign(heap: &mut crate::value::fiberheap::FiberHeap) -> Value {
-    alloc_in_fresh_region(heap, cons()).0
-}
-
 /// An `IoRequest` on a region of its own — the payload a yielding io op parks,
 /// and the one thing the io arm answers for. A `Sleep` because it is the portless
 /// op: nothing else in the request has to be built for the type to be right.
@@ -244,67 +238,35 @@ fn a_non_io_park_is_answered_without_dereferencing_its_payload() {
     release_displaced_io_request(&mut heap, Some((SIG_YIELD, p)));
 }
 
-// -- release_resumed_io_request: the same arm, plus the delivery's skip --
+// -- the shared region exempts no install --
 
-/// The resume adds a shared-region skip: a `Fresh` io op builds its completion
-/// buffer in the request's own region and hands it back as the resume value, so
-/// that region is still live and the caller's release answers for it.
+/// A `Fresh` io op (`port/read`, `accept`) builds its completion buffer in the
+/// request's OWN region and hands that buffer back as the resume value. A second
+/// value on the region is not a second consumer of the suspend retain: the
+/// buffer's holders release what they took, and this arm is the retain's only
+/// consumer. An install that stands down on the shared region leaves the retain
+/// standing for good — the region survives with its buffer and its request, once
+/// per read (`tests/elle/region-io-read-strand.lisp` bounds the rate).
+///
+/// The second reference below stands for the resume value's own holder, which is
+/// what makes the release safe: it drops the retain, not the buffer.
 #[test]
-fn an_io_park_whose_resume_value_shares_its_region_releases_nothing() {
+fn an_io_park_is_released_though_its_resume_value_shares_its_region() {
     let mut heap = crate::value::fiberheap::FiberHeap::new();
     let (request, rid) = io_request(&mut heap);
-    let completion = heap.alloc_in_region(cons(), rid);
+    let _completion = heap.alloc_in_region(cons(), rid);
+    crate::value::arena::incref_region(&mut heap, Some(rid));
     let before = region_rc(&heap, rid);
 
-    release_resumed_io_request(&mut heap, Some((SIG_IO, request)), completion);
-
-    assert_eq!(
-        region_rc(&heap, rid),
-        before,
-        "the completion buffer built in the request's region keeps it live",
-    );
-}
-
-/// …and releases when the resume value comes from elsewhere, which is the io
-/// request's own orphaned escape retain.
-#[test]
-fn an_io_park_whose_resume_value_is_foreign_is_released() {
-    let mut heap = crate::value::fiberheap::FiberHeap::new();
-    let (request, rid) = io_request(&mut heap);
-    let completion = foreign(&mut heap);
-    let before = region_rc(&heap, rid);
-
-    release_resumed_io_request(&mut heap, Some((SIG_IO, request)), completion);
-
-    assert_eq!(
-        region_rc(&heap, rid),
-        before - 1,
-        "a submitted io request is dead at the resume — its region owes one decref",
-    );
-}
-
-/// The skip belongs to the DELIVERY, not to the io park: an injected error that
-/// happens to live in the request's region is not a resume value, so the
-/// injection's release stands. Sharing a region is what the resume reads as
-/// "still live"; here it means nothing.
-#[test]
-fn a_displaced_io_request_takes_no_skip_from_a_payload_sharing_its_region() {
-    let mut heap = crate::value::fiberheap::FiberHeap::new();
-    let (request, rid) = io_request(&mut heap);
-    let error_value = heap.alloc_in_region(cons(), rid);
-    let before = region_rc(&heap, rid);
-
-    release_resumed_io_request(&mut heap, Some((SIG_IO, request)), error_value);
-    let after_resume_reading = region_rc(&heap, rid);
     release_displaced_io_request(&mut heap, Some((SIG_IO, request)));
 
     assert_eq!(
-        after_resume_reading, before,
-        "the resume reading skips on a shared region — which is why it must not travel",
-    );
-    assert_eq!(
         region_rc(&heap, rid),
         before - 1,
-        "an injected error sharing the request's region still owes the release",
+        "a resume value sharing the request's region still owes the suspend retain",
+    );
+    assert!(
+        region_rc(&heap, rid) > 0,
+        "the release drops the suspend retain, not the buffer the resume hands back",
     );
 }
