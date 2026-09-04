@@ -118,6 +118,15 @@ fn regions_prints_region_assignments() {
         "missing region assignments section:\n{}",
         out
     );
+    // The regions a binding's VALUE may live in, which the scope-region section
+    // above does not answer. A binding whose source region has no entry in the
+    // decref-point section owns a value nothing frees, and that reading needs
+    // both sections side by side.
+    assert!(
+        out.contains("binding source regions"),
+        "missing binding source regions section:\n{}",
+        out
+    );
     assert!(
         out.contains("region inference stats"),
         "missing stats:\n{}",
