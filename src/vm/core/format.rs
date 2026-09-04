@@ -1,6 +1,18 @@
 use super::*;
 
 impl VM {
+    /// The spelling of `value` for a message the author reads.
+    ///
+    /// Every such message goes through here. A symbol or keyword IS its name
+    /// hash, and only this instance's memo holds the spelling
+    /// (docs/impl/symbol.md § "Reading a name, and not reading one"): a bare
+    /// `Display`/`Debug` threads no memo and prints `#<symbol:hash>` for every
+    /// name outside the static keyword vocabulary. A bare VM with no
+    /// `RuntimeCore` has no memo to thread, and prints those forms itself.
+    pub(crate) fn show_value(&self, value: Value) -> String {
+        format!("{}", value.debug_with(self.symbols().map(|table| &*table)))
+    }
+
     /// Format a runtime error value with source location.
     pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
         let mut result = String::new();
@@ -47,10 +59,9 @@ impl VM {
             }
         }
 
-        // Error value last. `{:?}` resolves symbol names through the global
-        // registry (docs/impl/symbol.md), so a symbol-bearing error value shows
-        // names, not raw ids.
-        result.push_str(&format!("✗ Runtime error: {:?}", err_value));
+        // Error value last, through the memo: a bare `{:?}` would hand the
+        // author `#<keyword:hash>` for every name the program coined.
+        result.push_str(&format!("✗ Runtime error: {}", self.show_value(err_value)));
 
         result
     }

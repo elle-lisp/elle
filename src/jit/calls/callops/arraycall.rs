@@ -411,7 +411,7 @@ fn jit_tail_call_inner(
         }
     }
 
-    vm.set_error("type-error", format!("Cannot call {:?}", func));
+    vm.set_error("type-error", format!("Cannot call {}", vm.show_value(func)));
     JitValue::nil()
 }
 
