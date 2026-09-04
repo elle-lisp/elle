@@ -538,6 +538,15 @@ pub struct RegionInfo {
     /// unwrap the cell to the inner value's caller-owned region). docs/impl/region/rules.md
     /// Rule 8 (no leaks) — these env cells need an explicit release.
     pub cell_release_regions: FxHashSet<Region>,
+    /// The leaf bindings a `Destructure` pattern binds. Each inherits the
+    /// destructured value's source regions (`Destructure` in
+    /// `region::infer::walk`), because a leaf may be an element that LIVES in
+    /// them — so a leaf NAMES the source without holding it, which is the one
+    /// way `binding_source_regions` records an alias to a part rather than to a
+    /// whole. A consumer that reads a binding's regions to decide who owns the
+    /// value has to know the difference; the tail call's ownership move is the
+    /// one that does (`lir::lower::emitops::drop_named_only_arg_exemptions`).
+    pub destructure_leaf_bindings: FxHashSet<Binding>,
     /// Call HirIds whose may-store edges are HARD: native call sites with a
     /// declared uncounted-store effect (`Stores`/`Mixed`/`Unknown`). At these
     /// sites the lowerer emits the edge incref for a call-result source by
@@ -891,6 +900,7 @@ impl RegionInfo {
             moves_out_release_sites: FxHashSet::default(),
             container_release_sites: FxHashSet::default(),
             cell_release_regions: FxHashSet::default(),
+            destructure_leaf_bindings: FxHashSet::default(),
             hard_edge_sites: FxHashSet::default(),
             suppressed_decref_regions: FxHashSet::default(),
             drop_on_overwrite_sites: FxHashSet::default(),

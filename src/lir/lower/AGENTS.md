@@ -167,7 +167,12 @@ other is structural ownership-location, NOT escape:
   stops at a `Call`/`Lambda` and records that node's own region, then closes
   the set under the three alias relations, so a region an inner call merely
   used is not exempt while one its result may live inside still is
-  (docs/impl/region/mechanism.md § "What an operand names is its VALUE").
+  (docs/impl/region/mechanism.md § "What an operand names is its VALUE"). A
+  **destructured leaf** argument names a PART of the value it was read out of,
+  and the callee takes over the leaf rather than the source, so such an argument
+  keeps the exemption only where the call passes the slot the region's own
+  release route loads (`drop_named_only_arg_exemptions`, mechanism.md § "A leaf
+  is a part, not the whole").
   And the region must be frame-held
   (`RegionInfo::frame_held_regions`), because a tail callee also reaches
   its CAPTURED environment, which no argument names. A region escaping by the

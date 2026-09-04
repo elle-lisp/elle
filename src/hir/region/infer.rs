@@ -182,6 +182,9 @@ struct RegionInference {
     /// (`region_of` the cell), not `DecrefValueRegion` (`result_region_of` the
     /// inner value). See `RegionInfo::cell_release_regions`.
     cell_release_regions: rustc_hash::FxHashSet<Region>,
+    /// The leaf bindings a `Destructure` pattern binds. See
+    /// `RegionInfo::destructure_leaf_bindings`.
+    destructure_leaf_bindings: rustc_hash::FxHashSet<Binding>,
     /// `(return_node_id, regions of the returned value)` for every
     /// `HirKind::Return`. The post-pass extends each region's `decref_point`
     /// to the Return node so the region's `DecrefRegion` is emitted
@@ -314,6 +317,7 @@ impl RegionInference {
             funnel_result_containers: Vec::new(),
             moves_out_release_sites: rustc_hash::FxHashSet::default(),
             cell_release_regions: rustc_hash::FxHashSet::default(),
+            destructure_leaf_bindings: rustc_hash::FxHashSet::default(),
             return_sites: Vec::new(),
             destructure_sites: Vec::new(),
             block_regions: HashMap::new(),

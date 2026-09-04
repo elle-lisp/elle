@@ -125,6 +125,7 @@ impl RegionInference {
             // (the `-mut` sites where locus A released a container). Empty here.
             container_release_sites: rustc_hash::FxHashSet::default(),
             cell_release_regions: self.cell_release_regions,
+            destructure_leaf_bindings: self.destructure_leaf_bindings,
             hard_edge_sites: self.hard_edge_sites,
             suppressed_decref_regions: rustc_hash::FxHashSet::default(),
             drop_on_overwrite_sites: rustc_hash::FxHashSet::default(),

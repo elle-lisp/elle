@@ -398,9 +398,22 @@ impl<'a> Lowerer<'a> {
             exempt.insert(self.region_info.merged_root(root));
         }
         self.collect_operand_regions(func, &mut exempt);
+        // The argument half is reconsidered per region before it joins `exempt`,
+        // so a region the CALLEE or the call's own result already exempts keeps
+        // that exemption whatever an argument names.
+        let mut by_args = rustc_hash::FxHashSet::default();
         for a in args {
-            self.collect_operand_regions(&a.expr, &mut exempt);
+            self.collect_operand_regions(&a.expr, &mut by_args);
         }
+        for a in args {
+            self.drop_named_only_arg_exemptions(
+                &a.expr,
+                &operand_locals,
+                &operand_captures,
+                &mut by_args,
+            );
+        }
+        exempt.extend(by_args);
         // This call dominates every position after it in the block, so it alone
         // covers them — any points a merge left here name arms that reach this
         // call, not the releases that follow it.
@@ -424,6 +437,60 @@ impl<'a> Lowerer<'a> {
         out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
     ) {
         self.region_info.operand_value_regions(h, out);
+    }
+
+    /// Take back the exemption of a region an argument only NAMES.
+    ///
+    /// An argument's region is exempt because the callee's owned-parameter
+    /// release stands in for the caller's — which holds only where the reference
+    /// the callee takes over is the one the caller's release would have dropped.
+    /// A destructured leaf is where the two come apart: `(let [[a b] t] (f a b))`
+    /// hands `f` the leaves, never `t`, yet each leaf names `t`'s region through
+    /// `binding_source_regions` (a leaf may BE an element living in it). So `t`'s
+    /// release is withheld, nothing takes it over, and `t` is held to fiber
+    /// teardown — one region per call, which every h2 frame builder pays.
+    ///
+    /// Only a leaf is reconsidered (`RegionInfo::destructure_leaf_bindings`).
+    /// Every other binding that names a region names the whole value: an alias
+    /// binder is a second name for the very reference the call moves — `arrs` for
+    /// the array `a` built and returned by an inner `let` (stdlib `zip`) — and
+    /// hoisting its release ahead of the call would free what the callee is about
+    /// to take over.
+    ///
+    /// The slot is the second half of the reading, and it is what admits the leaf
+    /// that IS the whole: a rest pattern binds a tail that shares the source's
+    /// region and can be the reference the call moves. Where the region's value
+    /// route loads a slot the call passes, the move is real and the exemption
+    /// stands whatever the binding's kind. A region with no recorded slot releases
+    /// by id, where there is no slot to compare, and stands too.
+    fn drop_named_only_arg_exemptions(
+        &self,
+        h: &Hir,
+        operand_locals: &rustc_hash::FxHashSet<u16>,
+        operand_captures: &rustc_hash::FxHashSet<u16>,
+        exempt: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
+    ) {
+        let HirKind::Var(b) = &h.kind else { return };
+        if !self.region_info.destructure_leaf_bindings.contains(b) {
+            return;
+        }
+        for &r in self
+            .region_info
+            .binding_source_regions
+            .get(b)
+            .into_iter()
+            .flatten()
+        {
+            let root = self.region_info.merged_root(r);
+            let moved = match self.region_to_slot.get(&root) {
+                Some(super::ValueSlot::Local(s)) => operand_locals.contains(s),
+                Some(super::ValueSlot::Env(i)) => operand_captures.contains(i),
+                None => true,
+            };
+            if !moved {
+                exempt.remove(&root);
+            }
+        }
     }
 
     /// Emit `f`'s instructions for `region`, placed so that every path runs the

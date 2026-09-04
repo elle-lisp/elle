@@ -25,9 +25,8 @@
 ## activation populate_env allocation. See docs/impl/region/bindings.md "Env
 ## cells in loops: release once per activation, not per iteration".
 ##
-## This is the deferred Stage-2 captured-cell facet from hand-off.md; the
-## capture analogue NOTE in tests/elle/nested-loop-inner-invariant.lisp points
-## here. Both single-loop and nested-loop shapes are covered.
+## The capture analogue NOTE in tests/elle/nested-loop-inner-invariant.lisp
+## points here. Both single-loop and nested-loop shapes are covered.
 
 ## ── 1. single loop: mutable captured local, closure called in place ──────
 ## Minimal repro. `s` is `def @s` (mutable → env cell), captured by `cl`,
