@@ -453,11 +453,13 @@ impl Ord for TableKey {
 }
 
 /// Render a `TableKey` — the shared body for `Display` (`debug == false`) and
-/// `Debug` (`debug == true`). A symbol key's name comes from the process-global
-/// registry (docs/impl/symbol.md), so nothing is threaded. The two modes diverge
-/// only in the symbol arm (Display prints the raw `SymbolId`; Debug prints the
-/// quoted name) and in the nested recursion of array/heap keys, which follows the
-/// outer mode.
+/// `Debug` (`debug == true`). A symbol or keyword key is a name hash, so its
+/// spelling comes from the threaded `symbols` memo — and, for a keyword, from
+/// the static vocabulary behind it. A spelling in neither renders unresolved
+/// (docs/impl/symbol.md § "Reading a name, and not reading one"). The two modes
+/// diverge only in the symbol arm (Display prints the raw `SymbolId`; Debug
+/// prints the quoted name) and in the nested recursion of array/heap keys, which
+/// follows the outer mode.
 pub(crate) fn fmt_table_key(
     key: &TableKey,
     symbols: Option<&crate::symbol::SymbolTable>,

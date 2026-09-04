@@ -308,6 +308,19 @@ impl VM {
             .map(str::to_string)
     }
 
+    /// The `type-error` message for a value that cannot be called, with the
+    /// value rendered through this instance's memo. A bare `Debug` would spell a
+    /// symbol `#<symbol:hash>`, and this message is the author's only view of
+    /// what they tried to call. The direct and tail-call dispatches share it so
+    /// both name the value the same way. Pinned by
+    /// `an_uncallable_values_error_message_names_it`.
+    pub(crate) fn uncallable_message(&self, func: crate::value::Value) -> String {
+        format!(
+            "Cannot call {}",
+            func.debug_with(self.symbols().map(|s| &*s))
+        )
+    }
+
     /// The owning instance's compile context, for the runtime `eval`
     /// instruction. Returns `None` for a bare VM (no `RuntimeCore`), in which
     /// case `(eval …)` of macro-using code is unsupported. The borrow is sound

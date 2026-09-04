@@ -47,10 +47,17 @@ impl VM {
             }
         }
 
-        // Error value last. `{:?}` resolves symbol names through the global
-        // registry (docs/impl/symbol.md), so a symbol-bearing error value shows
-        // names, not raw ids.
-        result.push_str(&format!("✗ Runtime error: {:?}", err_value));
+        // Error value last, rendered through this instance's memo. A bare
+        // `Debug` carries no table and so spells every symbol and keyword
+        // `#<symbol:hash>` / `#<keyword:hash>` (docs/impl/symbol.md § "Reading
+        // a name, and not reading one"); this report is the only place the
+        // author ever sees the raised value, so it must resolve the names the
+        // instance has learned. Pinned by
+        // `an_uncaught_errors_keyword_payload_is_named_in_the_report`.
+        result.push_str(&format!(
+            "✗ Runtime error: {}",
+            err_value.debug_with(self.symbols().map(|s| &*s))
+        ));
 
         result
     }

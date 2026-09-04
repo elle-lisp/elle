@@ -585,6 +585,21 @@ fn wasm_full_uncaught_error_fails() {
 }
 
 #[test]
+fn wasm_full_uncaught_error_report_names_its_keyword() {
+    // The uncaught-error message is the only place the author sees the raised
+    // value, so it must resolve names through the instance memo the way the VM's
+    // report does. The counter-factual: raise a keyword the static vocabulary
+    // already spells (`:type-error`, any error kind) and the fallback answers
+    // whether or not the message threads the memo.
+    let err = super::eval_wasm_with_stdlib("(error :vanishing-wasm-keyword)", "<uncaught>")
+        .expect_err("an uncaught error must fail under --wasm=full");
+    assert!(
+        err.contains(":vanishing-wasm-keyword"),
+        "the uncaught-error report must name the raised keyword, got: {err}"
+    );
+}
+
+#[test]
 fn wasm_full_gated_skip_is_not_a_failure() {
     // A `(gate! …)` whose condition is unmet raises a `:gated` error that the
     // harness records as SKIP (an unbuilt plugin/feature), NOT a failure. The

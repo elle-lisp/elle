@@ -398,7 +398,13 @@ pub fn run_module(
             eprintln!("SKIP (gated): {}", reason);
             return Ok(value);
         }
-        return Err(wasmtime::Error::msg(format!("Runtime error: {}", value)));
+        // Render through the instance memo, as the VM's report does: a bare
+        // `Display` spells every symbol and keyword `#<symbol:hash>`, and this
+        // message is all the author gets for an uncaught error.
+        return Err(wasmtime::Error::msg(format!(
+            "Runtime error: {}",
+            value.display_with(store.data().symbols())
+        )));
     }
 
     Ok(value)

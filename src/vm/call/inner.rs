@@ -508,7 +508,7 @@ impl VM {
             func.type_name(),
             self.heap().value_in_region_store(func)
         );
-        self.set_error("type-error", format!("Cannot call {:?}", func));
+        self.set_error("type-error", self.uncallable_message(func));
         self.fiber.stack.push(Value::NIL);
         None
     }

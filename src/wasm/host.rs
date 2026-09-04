@@ -187,6 +187,18 @@ impl ElleHost {
         unsafe { (*self.vm).heap_ptr }
     }
 
+    /// The driving instance's name memo, reached through the threaded VM, or
+    /// `None` before a store installs one. Every render of a host-side `Value`
+    /// threads it: without a memo a symbol or keyword spells `#<symbol:hash>`
+    /// (docs/impl/symbol.md § "Reading a name, and not reading one").
+    pub(crate) fn symbols(&self) -> Option<&crate::symbol::SymbolTable> {
+        if self.vm.is_null() {
+            None
+        } else {
+            unsafe { (*self.vm).symbols().map(|s| &*s) }
+        }
+    }
+
     /// Get the current fiber's ID from the stack, or 0 for top-level.
     pub fn current_fiber_id(&self) -> usize {
         self.fiber_id_stack.last().copied().unwrap_or(0)

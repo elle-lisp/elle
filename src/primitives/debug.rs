@@ -8,39 +8,44 @@ use crate::value::Value;
 
 /// Prints a value with debug information
 /// (debug-print value)
+///
+/// Renders through the instance memo: a bare `Debug` carries no table and
+/// spells every symbol and keyword `#<symbol:hash>` (docs/impl/symbol.md
+/// § "Reading a name, and not reading one").
 pub(crate) fn prim_debug_print(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    eprintln!("[DEBUG] {:?}", args[0]);
+    let symbols = ctx.vm().symbols().map(|s| &*s);
+    eprintln!("[DEBUG] {}", args[0].debug_with(symbols));
     (SIG_OK, args[0])
 }
 
 /// Traces execution with a label
 /// `(trace label value)` — prints `[TRACE] label: value` to stderr, returns value
 ///
-/// Label can be a string or symbol. Symbols are resolved to their
-/// name via the VM's symbol table (via `ctx.vm().symbols()`, same access
-/// pattern as string).
+/// Label can be a string or symbol. The label and the traced value both resolve
+/// their names through the instance memo, so a keyword or symbol in either half
+/// of the line is spelled rather than hashed.
 pub(crate) fn prim_trace(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
+    let symbols = ctx.vm().symbols().map(|s| &*s);
+    let traced = args[1].debug_with(symbols);
     if args[0]
         .with_string(|s| {
-            eprintln!("[TRACE] {}: {:?}", s, args[1]);
+            eprintln!("[TRACE] {}: {}", s, traced);
         })
         .is_some()
     {
         (SIG_OK, args[1])
     } else if let Some(sym_id) = args[0].as_symbol() {
-        let name = ctx
-            .vm()
-            .symbols()
+        let name = symbols
             .and_then(|s| s.name(sym_id))
             .map(|n| n.to_string())
             .unwrap_or_else(|| format!("#<symbol:{:#x}>", sym_id.0));
-        eprintln!("[TRACE] {}: {:?}", name, args[1]);
+        eprintln!("[TRACE] {}: {}", name, traced);
         (SIG_OK, args[1])
     } else {
         (

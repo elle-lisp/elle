@@ -424,6 +424,131 @@ fn an_unhandled_signal_at_the_root_is_named_by_its_keyword() {
     );
 }
 
+// ============================================================================
+// An error that reaches the root — how the report spells its payload
+// ============================================================================
+
+#[test]
+fn an_uncaught_errors_keyword_payload_is_named_in_the_report() {
+    // The trap: `Value`'s bare `Debug` carries no symbol table, so it spells
+    // every keyword `#<keyword:hash>`. The root report is the only place the
+    // author ever sees the raised value, so an unresolved form there names
+    // nothing at all.
+    //
+    // The counter-factual: raise a keyword the static vocabulary already spells
+    // (`:type-error`, `:timeout`, any error kind), and the fallback in
+    // `keyword::static_keyword_name` answers whether or not the report threads
+    // the memo — the assertion passes over the defect. Only a spelling this
+    // instance learned from source discriminates the two paths.
+    crate::common::eval_source("(error :vanishing-keyword)", |result| {
+        let err = result.expect_err("nothing catches the error, so it reaches the root");
+        assert!(
+            err.contains(":vanishing-keyword"),
+            "the report must name the raised keyword, got: {}",
+            err
+        );
+    });
+}
+
+#[test]
+fn an_uncaught_errors_symbol_payload_is_named_in_the_report() {
+    // Symbols reach the report through the same formatter and have no static
+    // vocabulary to fall back on, so an unthreaded report spells every one of
+    // them `#<symbol:hash>`.
+    crate::common::eval_source("(error 'vanishing-symbol)", |result| {
+        let err = result.expect_err("nothing catches the error, so it reaches the root");
+        assert!(
+            err.contains("vanishing-symbol"),
+            "the report must name the raised symbol, got: {}",
+            err
+        );
+    });
+}
+
+#[test]
+fn a_keyword_nested_in_an_uncaught_error_payload_is_named_in_the_report() {
+    // A raised payload is usually a container, not a bare keyword. The trap:
+    // threading the memo into the top-level formatter but not through its
+    // recursion leaves every nested name unresolved — which is the shape a real
+    // `(error {:code …})` takes.
+    crate::common::eval_source(
+        "(error {:code :vanishing-nested-keyword :at 'vanishing-nested-symbol})",
+        |result| {
+            let err = result.expect_err("nothing catches the error, so it reaches the root");
+            assert!(
+                err.contains(":vanishing-nested-keyword")
+                    && err.contains("vanishing-nested-symbol"),
+                "the report must name the payload's nested keyword and symbol, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+fn an_error_escaping_eval_names_its_payload_to_the_caller() {
+    // `eval` hands its caller a report string rather than a value, so it is a
+    // second formatter over the raised payload — the one an error meets when it
+    // escapes evaluated code instead of reaching the root.
+    //
+    // Both names are coined at run time and assembled from fragments, so neither
+    // spelling is ever a token this source hands the reader. The report can only
+    // spell them from what `keyword`/`gensym` taught the memo as they were
+    // minted. The trap a source literal hides: the reader learns every literal it
+    // reads, so a literal-probed test stays green for a memo that learns nothing
+    // at a native mint site.
+    const SRC: &str = "(def [ok? err] \
+           (protect (eval (list 'error \
+             {:error (keyword (append \"coined-eval-\" \"kind\")) \
+              :form (list 'quote (gensym (append \"coined-eval-\" \"form\")))})))) \
+         (assert (not ok?) \"the evaluated code raises\") \
+         (get err :message)";
+
+    crate::common::eval_source(SRC, |result| {
+        let value = result.expect("`protect` catches the error `eval` reports");
+        let report = value
+            .with_string(|s| s.to_string())
+            .expect("a caught error's :message is a string");
+        assert!(
+            report.contains("coined-eval-kind"),
+            "the report must spell the keyword the evaluated code raised, got:\n{}",
+            report,
+        );
+        assert!(
+            report.contains("coined-eval-form"),
+            "the report must spell the symbol the raised value carries, got:\n{}",
+            report,
+        );
+    });
+}
+
+#[test]
+fn an_uncallable_values_error_message_names_it() {
+    // The `:message` of a type error is a string built where the error is
+    // raised, so the report's own memo threading cannot repair it — the name has
+    // to be resolved into the string at that point or it is lost for good.
+    //
+    // The counter-factual: assert on the whole report rather than on the
+    // message, and the outer render's `:type-error` keyword satisfies a loose
+    // "some name is spelled" check while `Cannot call #<symbol:hash>` sits
+    // inside it.
+    // Both call paths: the direct dispatch, and the tail-call dispatch that a
+    // call in tail position takes instead.
+    for src in [
+        "((quote probe-symbol) 1)",
+        "(defn probe [] ((quote probe-symbol) 1)) (probe)",
+    ] {
+        crate::common::eval_source(src, |result| {
+            let err = result.expect_err("a symbol is not callable");
+            assert!(
+                err.contains("Cannot call probe-symbol"),
+                "the type error must name the uncallable value, got: {}",
+                err
+            );
+        });
+    }
+}
+
 #[test]
 fn test_closure_has_location_map() {
 

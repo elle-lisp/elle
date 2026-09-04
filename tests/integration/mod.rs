@@ -6,6 +6,9 @@ mod core {
 mod error_reporting {
     include!("error_reporting.rs");
 }
+mod diagnostics {
+    include!("diagnostics.rs");
+}
 mod repl_exit_codes {
     include!("repl_exit_codes.rs");
 }
