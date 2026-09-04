@@ -64,7 +64,7 @@
   #223 params=[] captures=[]
   #225 params=[b47(n)] captures=[b46(f)<Recursive>]
 [return_frontier]
-  [r15, r16, r35, r46, r49, r51, r7]
+  [r15, r16, r35, r46, r49, r51, r55, r7]
 [suppressed_decref_regions]
   []
 [region_instrs]
@@ -119,6 +119,7 @@
   ; closure[1] <anon>
     block0: IncrefRegion s17
     block0: IncrefRegion s18
+    block0: DecrefCellRegion v3
     block0: DecrefRegion s18
   ; closure[2] <anon>
     block0: IncrefRegion s19

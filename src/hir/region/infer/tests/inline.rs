@@ -98,6 +98,38 @@ fn a_base_arms_result_is_released_in_the_base_arm() {
 }
 
 #[test]
+fn an_inlined_callee_keeps_its_rest_params_collected_region() {
+    // A collector puts ONE binding in both `params` and `rest_param`, so the
+    // inline's save/restore visits it twice. The trap: the second visit's
+    // snapshot is taken after the first visit has already overwritten the
+    // entry, so restoring the snapshots in order ends on the overwritten value
+    // and the rest param names nothing at all.
+    //
+    // The counter-factual a plain "does it still have a region" assertion would
+    // miss is that nothing downstream complains: the collected keyword struct
+    // still allocates, the callee still runs, and only `arena/region-count`
+    // reads the difference — one region and one object per call, for every
+    // `&named`/`&keys`/`&` callee this unit can resolve
+    // (tests/elle/region-inline-rest-param-leak.lisp).
+    let (hir, arena, _symbols, info) = analyze_with_class("(let [k (fn (&named a) 42)] (k))");
+    let p = find_binding_by_name(&hir, "__named_param", &arena).expect("the named param");
+    let regions = info
+        .binding_source_regions
+        .get(&p)
+        .expect("the named param is a holder");
+    assert!(
+        !regions.is_empty(),
+        "the collected keyword struct's region must survive the callee's inline"
+    );
+    assert!(
+        regions
+            .iter()
+            .any(|r| info.region_data.contains_key(r) && info.call_result_regions.contains(r)),
+        "the collected struct's region must be an owned placeholder with a release point"
+    );
+}
+
+#[test]
 fn an_inlined_result_region_keeps_one_holder() {
     // The second consequence of adopting the callee's naming: the region gains a
     // holder binding in the sibling arm, and a two-holder region is refused the

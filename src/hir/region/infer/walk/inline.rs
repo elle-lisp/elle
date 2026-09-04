@@ -76,16 +76,33 @@ impl RegionInference {
             } => (params, rest_param, body),
             _ => return Inlined::No,
         };
-        // Save and bind params to caller's arg regions.
+        // Snapshot every binding this inline is about to rebind, BEFORE any of
+        // the rebinding writes. A collector parameter (`&`, `&keys`, `&named`)
+        // is one binding occupying the last fixed slot, so it appears in
+        // `params` AND in `rest_param`: snapshotting per write would record the
+        // rest write's "before" as the value the param write just installed,
+        // and the restore would hand that back. The callee's collector binding
+        // would then name no region at all, and the collected list/struct — an
+        // owned value the callee releases at that binding's last use — would
+        // have nothing for a release to name. Pinned by
+        // `tests/elle/region-inline-rest-param-leak.lisp`.
         let mut saved: Vec<(Binding, Option<Vec<Region>>)> = Vec::new();
+        let mut snapshotted = rustc_hash::FxHashSet::default();
+        for b in params.iter().chain(rest_param.iter()) {
+            if snapshotted.insert(*b) {
+                saved.push((*b, self.binding_regions.get(b).cloned()));
+            }
+        }
+        // Bind params to the caller's arg regions.
         for (i, p) in params.iter().enumerate() {
-            saved.push((*p, self.binding_regions.get(p).cloned()));
             let regions = arg_regions.get(i).cloned().unwrap_or_default();
             self.binding_regions.insert(*p, regions);
             self.binding_region.insert(*p, self.current_region);
         }
+        // The rest write lands last on a collector binding, and must: the
+        // collected value is built by the callee's own calling convention, so it
+        // belongs to no caller region.
         if let Some(rp) = rest_param {
-            saved.push((*rp, self.binding_regions.get(rp).cloned()));
             self.binding_regions.insert(*rp, Vec::new());
             self.binding_region.insert(*rp, self.current_region);
         }

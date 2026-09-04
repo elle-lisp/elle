@@ -339,6 +339,12 @@ impl RegionInference {
                 self.destructure_sites.push((hir.id, val_regions.clone()));
                 for b in pattern.bindings().bindings {
                     self.binding_region.insert(b, self.current_region);
+                    // A leaf NAMES the source without holding it, which the
+                    // region set below cannot express on its own. Recorded so
+                    // the consumers that ask "who owns this value" can tell a
+                    // leaf from a whole-value alias
+                    // (`RegionInfo::destructure_leaf_bindings`).
+                    self.destructure_leaf_bindings.insert(b);
                     // Destructured bindings may hold values that live in
                     // the source's region(s) — `(rest list)` returns a
                     // sublist sharing list's region; `(first xs)` on a

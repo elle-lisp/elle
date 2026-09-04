@@ -218,6 +218,21 @@ impl RegionInference {
                     let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
                     self.binding_regions.insert(*b, init_regions);
                     self.record_binder_init_site(*b, init.id);
+                    // Captured local materialized as a `populate_env` env cell: ADD a
+                    // cell placeholder so the lowerer releases the CELL at the
+                    // binding's last use, WITHOUT dropping the init value's own
+                    // region(s). Which binder introduced the local decides nothing
+                    // about the cell — `env_cell_placeholder` answers `None` outside a
+                    // lambda, where the compiled `MakeCaptureCell` the arm head mints
+                    // a region for is the cell instead — so this is the same
+                    // treatment, and the same argument, as the `Define` binder's
+                    // (tests/elle/region-let-capture-cell-leak.lisp).
+                    if let Some(cell_r) = self.env_cell_placeholder(*b) {
+                        let entry = self.binding_regions.entry(*b).or_default();
+                        if !entry.contains(&cell_r) {
+                            entry.push(cell_r);
+                        }
+                    }
                 }
 
                 // `cell ⊇ content`: the cells minted above hold their init value by an

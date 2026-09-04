@@ -51,6 +51,23 @@ pub fn format_regions(
         writeln!(buf, "  {:<20} → r{}", name, region.0).unwrap();
     }
 
+    // The regions a binding's VALUE may live in, which is a different question
+    // from the scope region above: the scope says where the binder sits, the
+    // source set says what its release will name. A release that never fires is
+    // read here — a binding whose source region has no `decref points` entry
+    // below owns a value nothing frees.
+    if !info.binding_source_regions.is_empty() {
+        writeln!(buf).unwrap();
+        writeln!(buf, ";; ── binding source regions ──").unwrap();
+        let mut sources: Vec<_> = info.binding_source_regions.iter().collect();
+        sources.sort_by_key(|(b, _)| b.0);
+        for (b, regions) in &sources {
+            let name = bname(**b, arena);
+            let rs: Vec<String> = regions.iter().map(|r| format!("r{}", r.0)).collect();
+            writeln!(buf, "  {:<20} → [{}]", name, rs.join(" ")).unwrap();
+        }
+    }
+
     if !info.cross_region_refs.is_empty() {
         writeln!(buf).unwrap();
         writeln!(buf, ";; ── cross-region refs ──").unwrap();

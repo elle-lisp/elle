@@ -1091,6 +1091,25 @@ only the frame's reference, and the moved value survives it. The one node with n
 such count is the inline `%`-opcode above, which is why the descent passes through
 it to the operand that owns the page.
 
+**A leaf is a part, not the whole.** What the exemption withholds is the frame's
+own release, on the strength of the callee's owned-parameter release standing in
+for it — so the two must name one reference. A **destructured leaf** is where they
+come apart. `(let [[a b] t] (f a b))` hands `f` the leaves; `t` itself never
+reaches the call, and each leaf is an element with a region of its own, which is
+the region the callee's release names. Yet a leaf carries the source's regions in
+`binding_source_regions`, because a leaf MAY live inside the source, so the naive
+reading withholds `t`'s release and nothing takes it over: one region per call,
+which every builder of the shape
+`(let [[ft fl si pl] (make-…)] (send-frame s ft fl si pl))` pays. So a leaf
+argument (`RegionInfo::destructure_leaf_bindings`) is reconsidered against the
+region's release ROUTE: the exemption stands only where the call passes the very
+slot that route loads. Every other binding that names a region names the whole
+value — an alias binder is a second name for the reference the call moves, and
+hoisting its release ahead of the call would free what the callee is about to take
+over (stdlib `zip`'s `arrs`, a second name for the array an inner `let` returned).
+Pinned by `tests/elle/region-tailcall-arg-transfer.lisp`, whose alias case is the
+counter-factual for reading a leaf's rule onto a whole.
+
 **Whether the frame holds the region alone** — the admission, and escape is its
 sole authority. The exemption above is a statement about *arguments*, and
 arguments are not the only path into a callee: a tail callee reaches its

@@ -80,6 +80,12 @@ impl<'a> Lowerer<'a> {
 
             if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
+                // Captured local → a `populate_env` env cell (StoreCapture into a
+                // pre-allocated cell, no compiled MakeCaptureCell). Record its
+                // env-cell placeholder so `emit_decrefs_for` releases the cell at
+                // this binding's last use (`LoadCaptureRaw` + `DecrefCellRegion`),
+                // exactly as `lower_define` does for the same cell.
+                self.record_env_cell_release_slot(*binding, slot);
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
                     src: init_reg,

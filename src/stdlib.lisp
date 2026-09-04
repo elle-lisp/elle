@@ -1771,13 +1771,14 @@
       (del select-sets waiter))
 
     (defn retire-fiber [fiber]
-      "Drop the scheduler's records of a fiber whose result a caller took.
+      "Drop the scheduler's records of a fiber that ended in success.
        Both records are keyed by the fiber, so keeping them keeps the fiber
        and its closure alive for the scheduler's whole life — one permanent
-       allocation per spawn. Nothing reads them after the delivery:
+       allocation per spawn. Nothing reads a success record at all:
        `get-completion` re-derives the status from the fiber whenever the
-       record is absent, and the unjoined-error tail reads only fibers
-       nobody joined.
+       record is absent, and the unjoined-error tail reads only failures.
+       So this runs at COMPLETION: a fiber nobody ever joins costs the loop
+       the same as one whose result a caller took.
 
        Two fibers keep their records. The program's own — `:pump` reads
        their record to know the program finished. And a FAILED one: its
@@ -1835,10 +1836,14 @@
           (let [pair [(= status :ok) (fiber/value fiber)]]
             (each w in ws
               (fiber/resume w pair)
-              (handle-fiber-after-resume w)))  # Every waiter was a joiner, and each now holds the result, so
-          # the record just written has no reader left.
-          (retire-fiber fiber))  # Wake select waiters
-        (wake-select-waiters fiber)))
+              (handle-fiber-after-resume w))))  # Wake select waiters
+        (wake-select-waiters fiber))  # A success record has no reader — the loop's tail raises failures
+      # alone, and a join that arrives later re-derives the status from the
+      # fiber — so it is retired HERE, not at a join that may never come.
+      # `retire-fiber` keeps a failure and keeps the program's own fibers;
+      # what it drops is the per-spawn record a server that never joins its
+      # handler fiber would otherwise pay for every request it ever served.
+      (retire-fiber fiber))
 
     (defn get-completion [fiber]
       "Return fiber's completion status (:ok or :error), or nil if the fiber
@@ -1867,8 +1872,7 @@
         (if (not (nil? comp))  # Already completed — resume immediately
           (begin
             (fiber/resume caller [(= comp :ok) (fiber/value target)])
-            (handle-fiber-after-resume caller)  # The caller holds the result; the records have no reader left.
-            (retire-fiber target))  # Still running — park caller on target's join waiter list
+            (handle-fiber-after-resume caller))  # Still running — park caller on target's join waiter list
           (let [ws (or (get waiters target)
                        (let [w @[]]
                          (put waiters target w)
@@ -1904,9 +1908,7 @@
             (del pending id)
             (del fiber-io target)))  # Graceful abort (runs defer/protect)
         (fiber/abort target {:error :aborted})  # Route the aborted fiber through completion
-        (handle-fiber-after-resume target))  # The aborter observed the target on its own behalf, so the
-      # records retire on the same rule a delivered join uses.
-      (retire-fiber target)  # Resume caller with nil
+        (handle-fiber-after-resume target))  # Resume caller with nil
       (fiber/resume caller nil)
       (handle-fiber-after-resume caller))
 
