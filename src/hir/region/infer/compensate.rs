@@ -149,10 +149,45 @@ pub(super) struct BranchComp {
     pub container_release_sites: std::collections::HashSet<HirId>,
 }
 
-/// A `While`/`Loop`'s post-order subtree interval, for the loop-invariant guard.
+/// A `While`/`Loop`'s node and post-order subtree interval, for the
+/// loop-invariant guard and for the env cell's once-per-activation hoist.
 struct IterScope {
+    id: HirId,
     lo: u32,
     hi: u32,
+}
+
+/// The node an env cell's per-arm release takes instead of `at`, so that it
+/// fires once per execution of the arm rather than once per iteration of a loop
+/// inside it: the outermost `While`/`Loop` that encloses `at` and is itself
+/// contained in the arm, which the lowerer emits after the loop.
+///
+/// This is the per-arm analogue of the global `decref_point`'s
+/// `post_loop_placement` (`analyze/decref.rs`), and it exists for the same
+/// reason: `populate_env` mints the box once per activation, so a release
+/// anchored at an in-loop use frees it on the first iteration and the next
+/// iteration reads a recycled cell (docs/impl/region/bindings.md § "Env cells in
+/// loops: release once per activation, not per iteration").
+///
+/// The loop must lie INSIDE the arm — a loop enclosing the whole branch is not a
+/// point this arm can host, and the loop-invariant guard has already refused the
+/// region if one encloses the branch but not the cell's allocation. `None` when
+/// `at` is in no such loop, or is already at or past the loop's own node.
+fn arm_post_loop_placement(
+    at: HirId,
+    loops: &[IterScope],
+    arm_lo: u32,
+    arm_hi: u32,
+    order: &HashMap<HirId, u32>,
+) -> Option<HirId> {
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let at_ord = ord(at);
+    loops
+        .iter()
+        .filter(|l| l.lo <= at_ord && at_ord <= l.hi && arm_lo <= l.lo && l.hi <= arm_hi)
+        .max_by_key(|l| l.hi)
+        .map(|l| l.id)
+        .filter(|&id| ord(id) > at_ord)
 }
 
 /// Compute the per-arm compensating decrefs (`head` + `tail`). See the module doc
@@ -462,6 +497,10 @@ pub(super) fn compute_branch_compensation(
                             .into_iter()
                             .max_by_key(|&n| ord(n))
                             .expect("a non-empty candidate set has a max");
+                        // Once per execution of the arm, never once per
+                        // iteration of a loop inside it.
+                        let node = arm_post_loop_placement(node, &loops, arm_lo, arm_hi, order)
+                            .unwrap_or(node);
                         tail.entry(node).or_default().push(r);
                     }
                     continue;
@@ -561,6 +600,7 @@ fn collect(
     let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
     if let HirKind::While { .. } | HirKind::Loop { .. } = &hir.kind {
         loops.push(IterScope {
+            id: hir.id,
             lo: lo(hir.id),
             hi: ord(hir.id),
         });

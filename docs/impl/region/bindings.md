@@ -618,6 +618,16 @@ re-stores the cell's *content* (StoreCapture: incref the new content's region,
 decref the displaced prior). Its `DecrefCellRegion` (the release of the cell
 box's own region) must therefore also fire **exactly once per activation**.
 
+Which binder introduced the local decides nothing here. `def @s` and `let [@s …]`
+inside a lambda are the same env cell, minted the same way and released the same
+way, so both binders record the cell placeholder that arms the release — the
+`Let` arm of [`region::infer::walk`](../../../src/hir/region/infer/walk.rs) and
+`lower_let` beside their `Define` twins. A binder that records it for one and not
+the other leaks one region and one object per activation per such local, which is
+the cost of the closure-as-module idiom: a constructor returning a struct of
+closures over its own mutable state pays it once per field, on every
+construction (`tests/elle/region-let-capture-cell-leak.lisp`).
+
 The binding-chain `decref_point` extension places a cell-release region's
 release at the binding's last use. When the only use is a capture by a closure
 built inside a loop, that last use sits *inside the loop body*, so the release
@@ -647,6 +657,20 @@ iteration, so its release must stay per-iteration — which is exactly why the
 `capture_loop_ext` "bound outside" guard refuses to hoist non-cell regions. Env
 cells are the exception that guard does not cover, because their allocation is
 loop-independent.
+
+The rule is about how many times the release RUNS, so it binds every mechanism
+that places one. A branch whose arms each loop over the cell's holder gives the
+cell a second placement: the arms that do not hold the region's `decref_point`
+get a compensating release of their own, placed after that arm's last use
+([`region::infer::compensate`](../../../src/hir/region/infer/compensate.rs)).
+Where the arm's use is inside a loop, that point is per-iteration and frees the
+once-per-activation box on iteration 1, exactly as the unhoisted `decref_point`
+does. So the compensating release takes the same hoist, to the outermost
+`While`/`Loop` **contained in that arm** — the loop the arm can host, since a
+loop enclosing the whole branch is refused upstream by the loop-invariant guard.
+`each` splices its body into one arm per sequence type, which is how ordinary
+code reaches this shape; both are pinned by
+`tests/elle/region-capture-cell-loop-uaf.lisp`.
 
 The same "the box is not the slot" fact carries the cell's release past the other
 placement rule it meets. A frame that ends in a closure tail call runs nothing the
