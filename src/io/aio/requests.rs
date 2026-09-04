@@ -478,20 +478,25 @@ impl AsyncBackend {
             .as_external::<ProcessHandle>()
             .ok_or_else(|| "io/submit: ProcessWait requires a process handle".to_string())?;
 
-        // Fast path: already exited (cached). Push immediate completion, no pending entry.
-        {
-            let state = handle.inner.borrow();
-            if let ProcessState::Exited(code) = &*state {
-                let mut inner = self.inner.borrow_mut();
-                let id = inner.mint_id();
-                inner
-                    .completions
-                    .push_back(Completion::ok(id, Value::int(*code as i64)));
-                return Ok(id);
-            }
+        // Fast path: this process is already holding the child's status, so
+        // there is nothing left to reap. Push an immediate completion and file
+        // no pending entry. See src/io/AGENTS.md § "A reap is never wasted" —
+        // the status is here whether the wait that took it was read or
+        // cancelled.
+        if let Some(code) = handle.exit().status() {
+            let mut inner = self.inner.borrow_mut();
+            let id = inner.mint_id();
+            inner
+                .completions
+                .push_back(Completion::ok(id, Value::int(code as i64)));
+            return Ok(id);
         }
 
         let pid = handle.pid();
+        let exit = handle.exit().clone();
+        // The dispatch takes its own clone rather than borrowing `exit`, which
+        // the pending entry below moves.
+        let pool_exit = exit.clone();
         self.submit_op(
             0,
             |d| match &mut *d.platform {
@@ -519,7 +524,14 @@ impl AsyncBackend {
                     // carries a stop pipe. `subprocess/wait` names no deadline,
                     // so the stop is the whole bound.
                     let bounds = d.hub.bounds(d.id, None);
-                    d.hub.submit(d.id, PoolOp::ProcessWait { pid }, bounds)?;
+                    d.hub.submit(
+                        d.id,
+                        PoolOp::ProcessWait {
+                            pid,
+                            exit: pool_exit,
+                        },
+                        bounds,
+                    )?;
                     Ok(std::ptr::null_mut())
                 }
             },
@@ -527,6 +539,7 @@ impl AsyncBackend {
                 buffer_handle: buffer,
                 handle_val: *handle_val,
                 siginfo,
+                exit,
             },
         )
     }
