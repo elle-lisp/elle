@@ -383,6 +383,39 @@ parked fiber's accounting symmetric with its unpark:
   pinned guardfree by `tests/elle/region-denial-park-uaf.lisp` and
   `tests/elle/region-io-park-uaf.lisp`, whose `:io` witnesses are the collision, direct
   and relayed.
+- **A boundary ends a park with no reader and no install, so it owes both references.** A
+  `squelch`/`attune` violation is the third way a park can end, and it is neither of the two
+  the rules above are written for. No resumer reads the payload out of `fiber.signal`, so the
+  **delivery** reference — the escape retain the park took — has no consumer at all, where a
+  fiber torn down while parked did have one: its park crossed to a resumer first, the signal
+  reaching the fiber boundary by the one route out of the driving loop that a boundary cuts.
+  And no install replaces the payload in the slot, so a payload the RUNTIME built keeps the
+  reference its allocation left besides. The boundary therefore owes two decrefs where each
+  neighbouring seam owes one, and it runs the readings above to tell them apart: the io arm
+  and the denial record for a runtime-built payload, then one further decref for the
+  delivery, which a body-allocated payload owes exactly as an `IoRequest` does. A body's OWN
+  reference is the one thing the boundary does not owe — the abandoned frames' release tables
+  name it, and the payload is exempted from those tables only where a fiber's result carries
+  it out ([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so
+  it runs the same walk").
+
+  **Two records decide it, because neither answers on its own.** The **ledger** says the
+  delivery retain has no reader — a fact only the site that took the retain knows, and one no
+  reading of a signal slot recovers, so that site writes the payload beside the retain
+  (`park_primitive` / `park_denial` / `park_emit`, next to the `bodyless` record already
+  there). The **enforcement site** says which park this exit ends, and it must: two sites reach
+  `squelch_violation` through `invoke_closure_jit`, which restores the CALLER's signal before
+  asking the boundary's question and holds the parked one in a local, so a chokepoint reading
+  the slot releases a live caller's value there. Comparing the two bit-wise is what makes the
+  release safe without a claim about every route out of a park: a record left over from a park
+  some other host ended (`VM::abandon_hosted_park`'s subject) names a payload this exit is not
+  looking at, and the next park overwrites it. That is the gate
+  `release_displaced_denial_payload` makes for the same reason, and it is why the ledger's
+  `assert_consumed` net covers the resume funding alone — a payload-named record needs no
+  route-completeness argument. Taking the record is the second receipt, so two boundaries over
+  one park release one set of references. Gauged by
+  `tests/elle/region-boundary-park.lisp` and pinned guardfree by
+  `tests/elle/region-boundary-park-uaf.lisp`.
 - **What yields is the emit OPERATION, not the `Emit` node.** A first argument the compiler
   cannot read as a keyword set falls through to the `emit` primitive
   ([../../signals/emit.md](../../signals/emit.md) § "Dynamic emit"), which parks the same way
@@ -611,6 +644,12 @@ the same way (`ParkedDues::of`). Three readings:
 - the releases the frame still owed off its **two release tables**, read against its
   saved locals and its saved activation map ([mechanism.md](mechanism.md) § "An abandoned
   frame runs the releases it still owes").
+
+A fourth reading answers for the **park itself** rather than for the frames, and it is
+the ledger's rather than any frame's: a boundary ends a park with no reader and no
+install, so what the crossing and the install would each have consumed is owed here
+(§ "A boundary ends a park with no reader and no install"). It runs after the three
+above, whose entries the delivery retain keeps standing until they have all run.
 
 Each reading names regions the discard is entitled to release, and none of them names a
 region a live frame still counts on. A node's members are exactly the regions the

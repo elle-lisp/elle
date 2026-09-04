@@ -15,7 +15,7 @@
 //! content scan records no edge for them. The counted edge for the same value
 //! is `Fiber::signal`'s.
 
-use crate::value::Value;
+use crate::value::{SignalBits, Value};
 
 /// The funding record of a fiber's current park. One instance rides each
 /// `Fiber` (`Fiber::delivery`); see the module doc for the model and
@@ -49,6 +49,36 @@ pub struct Delivery {
     /// displacing install ([`Self::take_bodyless`]) so no second install can
     /// release the same reference.
     bodyless: Option<Value>,
+    /// The live park's payload and bits, whose DELIVERY reference — the escape
+    /// retain the park took as the value went into `Fiber::signal` — no reader
+    /// has consumed. A resume consumes it: the resumer's compiler-emitted
+    /// release of the resume result is that reader, so [`Self::take_resume_funding`]
+    /// clears the record at the crossing. A `squelch`/`attune` boundary is the
+    /// one end of a park that has no reader at all, and it releases what this
+    /// names (docs/impl/region/owner.md § "A boundary ends a park with no reader
+    /// and no install").
+    ///
+    /// Written by the site that TAKES the retain — the two suspend arms, the two
+    /// denial arms, the `Emit` handler, and their JIT twins — so a record exists
+    /// exactly where a retain does and names the value it was taken on. That is
+    /// what the boundary cannot read out of `Fiber::signal`: two enforcement
+    /// sites reach it through `invoke_closure_jit`, which restores the CALLER's
+    /// signal first and holds the parked one in a local.
+    ///
+    /// An IMMEDIATE payload records nothing: `incref_for_escape` is a no-op for a
+    /// value living in no region, so such a park took no retain and there is no
+    /// reference for any seam to consume. Written through [`Self::record_park`],
+    /// which is where that gate lives.
+    ///
+    /// Payload-named like [`Self::bodyless`], and gated the same way: the consumer
+    /// compares it bit-wise against the signal it is looking at, so a record left
+    /// over from a park some other route ended names nothing and is overwritten by
+    /// the next park rather than needing a clear on every route.
+    ///
+    /// Uncounted like every other field here: the payload is compared bit-wise
+    /// and its region resolved, never structurally read, and the counted edge for
+    /// the same value is `Fiber::signal`'s.
+    undelivered: Option<(SignalBits, Value)>,
     /// Whether this fiber's innermost suspension is a PRIMITIVE call, whose
     /// resume value therefore arrives owing one reference. A parked frame
     /// re-enters at its suspending call's continuation, which runs that call's
@@ -71,19 +101,41 @@ impl Delivery {
     /// resume value owes one `ResumeDelivery` mint at the delivery funnel.
     /// Callers: `handle_primitive_signal[_tail]`'s Suspend arms and their JIT
     /// twin (`jit_handle_primitive_signal`).
-    pub(crate) fn park_primitive(&mut self) {
+    pub(crate) fn park_primitive(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = true;
+        self.record_park(bits, payload);
+    }
+
+    /// An `Emit` node parked (`handle_emit` and its JIT twin `elle_jit_yield`).
+    /// The compiler funds this continuation itself — the emit's own decref_point
+    /// balances the release past the suspend — so the park owes no resume mint,
+    /// and the record is the escape retain's alone. Never reached by a TERMINAL
+    /// emit: an error raise parks nothing and records its mint instead, and a
+    /// halt takes no retain at all.
+    pub(crate) fn park_emit(&mut self, bits: SignalBits, payload: Value) {
+        self.assert_consumed();
+        self.record_park(bits, payload);
     }
 
     /// A capability denial parked: a primitive park (the denied call never
     /// returns) whose payload also has no body reference, so the resume owes
     /// its region one decref besides the mint. Callers:
     /// `handle_capability_denial[_tail]` and `jit_capability_denial`.
-    pub(crate) fn park_denial(&mut self, payload: Value) {
+    pub(crate) fn park_denial(&mut self, bits: SignalBits, payload: Value) {
         self.assert_consumed();
         self.resume_unfunded = true;
         self.bodyless = Some(payload);
+        self.record_park(bits, payload);
+    }
+
+    /// Record the park whose escape retain no reader has consumed, where there
+    /// was a retain to take. An immediate payload lives in no region, so
+    /// `incref_for_escape` did nothing at the park and there is nothing here for
+    /// a boundary to release — recording one would leave [`Self::assert_consumed`]
+    /// asserting over a park that owes no seam anything.
+    fn record_park(&mut self, bits: SignalBits, payload: Value) {
+        self.undelivered = payload.as_heap_ptr().is_some().then_some((bits, payload));
     }
 
     /// The net for a park shape wired without a consume seam: every route out
@@ -91,6 +143,11 @@ impl Delivery {
     /// or [`Self::discharge`], so a park write finding the previous park's
     /// funding still standing means some route skipped all three — one region
     /// leaked per cycle in release builds, a panic here.
+    ///
+    /// [`Self::undelivered`] is deliberately outside the net, exactly as
+    /// [`Self::bodyless`] is: both are payload-named records, gated at their
+    /// consumers by bit-wise identity with the signal the consumer is looking
+    /// at, so a stale one names nothing and is overwritten by the next park.
     #[track_caller]
     fn assert_consumed(&self) {
         debug_assert!(
@@ -118,6 +175,7 @@ impl Delivery {
     pub(crate) fn install_abort(&mut self, payload: Value) {
         self.minted = Some(payload);
         self.bodyless = None;
+        self.undelivered = None;
         self.resume_unfunded = false;
     }
 
@@ -129,6 +187,10 @@ impl Delivery {
     /// one method for both tiers, so they cannot drift.
     pub(crate) fn take_resume_funding(&mut self) -> bool {
         self.minted = None;
+        // The crossing: the resumer read the payload out and its own release of
+        // the resume result consumes the escape retain, so the park is delivered
+        // and no boundary may claim it again.
+        self.undelivered = None;
         std::mem::take(&mut self.resume_unfunded)
     }
 
@@ -143,6 +205,7 @@ impl Delivery {
     pub(crate) fn displace(&mut self) {
         self.minted = None;
         self.bodyless = None;
+        self.undelivered = None;
     }
 
     /// `Fiber::take_parked_state` consumed the park of a fiber that can never
@@ -151,6 +214,7 @@ impl Delivery {
     pub(crate) fn discharge(&mut self) {
         self.minted = None;
         self.bodyless = None;
+        self.undelivered = None;
         self.resume_unfunded = false;
     }
 
@@ -169,6 +233,15 @@ impl Delivery {
     /// finds nothing and releases nothing.
     pub(crate) fn take_bodyless(&mut self) -> Option<Value> {
         self.bodyless.take()
+    }
+
+    /// Take the live park whose delivery reference no reader consumed — the one
+    /// consuming read, run by the `squelch`/`attune` discard chokepoint. Taking
+    /// is the receipt, so a second boundary over the same fiber releases nothing.
+    /// `None` for a fiber with no live park, and for one whose park already
+    /// crossed to a resumer.
+    pub(crate) fn take_undelivered(&mut self) -> Option<(SignalBits, Value)> {
+        self.undelivered.take()
     }
 
     /// The recorded bodyless payload, without consuming it — a read for tests;

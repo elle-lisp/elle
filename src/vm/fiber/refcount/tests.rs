@@ -57,7 +57,7 @@ fn parked_fiber(bits: SignalBits, parked: Value, record: Option<Value>) -> Fiber
     handle.with_mut(|f| {
         f.signal = Some((bits, parked));
         if let Some(payload) = record {
-            f.delivery.park_denial(payload);
+            f.delivery.park_denial(bits, payload);
         }
     });
     handle
@@ -236,6 +236,140 @@ fn a_non_io_park_is_answered_without_dereferencing_its_payload() {
     crate::value::arena::decref_region(&mut heap, Some(rid));
 
     release_displaced_io_request(&mut heap, Some((SIG_YIELD, p)));
+}
+
+// -- release_abandoned_park: the boundary owes what no seam consumed --
+
+/// A boundary ends a park with no reader and no install, so both of the park's
+/// references are its to release: the delivery retain the park took, and the one
+/// the runtime's own allocation left. Counter-factual: running only the install's
+/// reading — which is what a boundary reusing `release_displaced_io_request`
+/// alone would do — leaves the request's region at rc 1 for good, one region and
+/// one object per squelched io op (elle-lisp/elle#1031).
+#[test]
+fn a_boundary_releases_both_of_an_io_parks_references() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (request, rid) = io_request(&mut heap);
+    crate::value::arena::incref_region(&mut heap, Some(rid));
+    let mut delivery = crate::value::fiber::Delivery::new();
+    let live = Some((SIG_IO, request));
+    delivery.park_primitive(SIG_IO, request);
+    let before = region_rc(&heap, rid);
+
+    release_abandoned_park(&mut heap, &mut delivery, live);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before - 2,
+        "the allocation's reference and the delivery retain are both owed here",
+    );
+}
+
+/// A body-allocated payload owes the boundary ONE reference. Its own is the
+/// abandoned frames' release tables' to run, so a second decref here would free
+/// the value under the frame whose table is about to name it.
+#[test]
+fn a_boundary_releases_one_reference_of_a_body_allocated_park() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (p, rid) = payload(&mut heap);
+    crate::value::arena::incref_region(&mut heap, Some(rid));
+    let mut delivery = crate::value::fiber::Delivery::new();
+    let live = Some((SIG_YIELD, p));
+    delivery.park_emit(SIG_YIELD, p);
+    let before = region_rc(&heap, rid);
+
+    release_abandoned_park(&mut heap, &mut delivery, live);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before - 1,
+        "only the delivery retain has no consumer — the body's reference has one",
+    );
+}
+
+/// A denial park is runtime-built like an io request, and its second reference
+/// is named by the ledger's own record rather than by the payload's type. The
+/// record is TAKEN, so the io arm and this one cannot both claim it.
+#[test]
+fn a_boundary_releases_both_of_a_denial_parks_references() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (p, rid) = payload(&mut heap);
+    crate::value::arena::incref_region(&mut heap, Some(rid));
+    let mut delivery = crate::value::fiber::Delivery::new();
+    let live = Some((SIG_IO, p));
+    delivery.park_denial(SIG_IO, p);
+    let before = region_rc(&heap, rid);
+
+    release_abandoned_park(&mut heap, &mut delivery, live);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        before - 2,
+        "a denial's struct has no body reference either — the record names it",
+    );
+}
+
+/// The receipt: taking the record is what keeps a second boundary over the same
+/// fiber from releasing the same references again.
+#[test]
+fn a_second_boundary_over_the_same_fiber_releases_nothing() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (request, rid) = io_request(&mut heap);
+    crate::value::arena::incref_region(&mut heap, Some(rid));
+    let mut delivery = crate::value::fiber::Delivery::new();
+    let live = Some((SIG_IO, request));
+    delivery.park_primitive(SIG_IO, request);
+
+    release_abandoned_park(&mut heap, &mut delivery, live);
+    let after_first = region_rc(&heap, rid);
+    release_abandoned_park(&mut heap, &mut delivery, live);
+
+    assert_eq!(
+        region_rc(&heap, rid),
+        after_first,
+        "one park, one set of releases, however many boundaries the fiber meets",
+    );
+}
+
+/// A boundary that ends no park releases nothing. This is the ordinary case —
+/// most violations catch a raise rather than a suspension.
+#[test]
+fn a_boundary_with_no_park_releases_nothing() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (p, rid) = payload(&mut heap);
+    let live = Some((SIG_YIELD, p));
+    let mut delivery = crate::value::fiber::Delivery::new();
+    let before = region_rc(&heap, rid);
+
+    release_abandoned_park(&mut heap, &mut delivery, live);
+
+    assert_eq!(region_rc(&heap, rid), before);
+    assert!(p.as_heap_ptr().is_some(), "the payload is untouched");
+}
+
+/// The gate the ledger alone cannot supply: a record left over from a park some
+/// other route already ended names a value this exit is not looking at, and
+/// releasing it would drop a reference that park's own end already consumed.
+/// A host that refuses a suspension it cannot resume leaves exactly that
+/// (`VM::abandon_hosted_park`'s subject), and no route-completeness argument is
+/// needed once the two are compared.
+#[test]
+fn a_record_that_does_not_name_the_exits_park_releases_nothing() {
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let (stale, stale_rid) = payload(&mut heap);
+    let (live_payload, _) = payload(&mut heap);
+    let mut delivery = crate::value::fiber::Delivery::new();
+    delivery.park_emit(SIG_YIELD, stale);
+    let before = region_rc(&heap, stale_rid);
+
+    release_abandoned_park(&mut heap, &mut delivery, Some((SIG_YIELD, live_payload)));
+
+    assert_eq!(
+        region_rc(&heap, stale_rid),
+        before,
+        "the decref is owed by the park the exit is ending, not by whatever the \
+         ledger last recorded",
+    );
 }
 
 // -- the shared region exempts no install --

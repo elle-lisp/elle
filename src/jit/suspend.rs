@@ -176,6 +176,13 @@ pub extern "C" fn elle_jit_yield(
     // discharge reclaim the raise chain's own reference.
     if sig.intersects(crate::value::fiber::SIG_ERROR) {
         vm.fiber.delivery.record_mint(yielded);
+    } else {
+        // …and every other emit records the PARK, so a `squelch`/`attune`
+        // boundary can release the delivery retain no reader will consume
+        // (docs/impl/region/owner.md § "A boundary ends a park with no reader
+        // and no install"). The record follows the retain this helper took just
+        // above, which is what keeps the two balanced whatever the bits are.
+        vm.fiber.delivery.park_emit(sig, yielded);
     }
     vm.fiber.signal = Some((sig, yielded));
 

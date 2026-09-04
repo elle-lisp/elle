@@ -112,7 +112,7 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // delivery owes the reference the missing `Return` mint would have
             // carried (docs/impl/region/owner.md § "A delivery into a replayed
             // frame carries one owning reference").
-            vm.fiber.delivery.park_primitive();
+            vm.fiber.delivery.park_primitive(bits, value);
             vm.fiber.signal = Some((bits, value));
             YIELD_SENTINEL
         }
@@ -155,7 +155,7 @@ pub(crate) fn jit_capability_denial(
     // because the RUNTIME built it and the install that displaces the park owes
     // the reference the allocation left (docs/impl/region/owner.md § "Park/unpark
     // symmetry").
-    vm.fiber.delivery.park_denial(payload);
+    vm.fiber.delivery.park_denial(blocked, payload);
     vm.fiber.signal = Some((blocked, payload));
     YIELD_SENTINEL
 }

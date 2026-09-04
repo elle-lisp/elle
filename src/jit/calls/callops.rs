@@ -170,7 +170,7 @@ pub extern "C" fn elle_jit_call(
                         // what each parked frame owed before handing back the error
                         // (docs/impl/region/owner.md § "A discard runs what the
                         // abandoned frames owed").
-                        let err = vm.squelch_violation(squelched);
+                        let err = vm.squelch_violation(squelched, vm.fiber.signal);
                         vm.fiber.signal = Some((SIG_ERROR, err));
                         return JitValue::nil();
                     }
@@ -246,7 +246,7 @@ pub extern "C" fn elle_jit_call(
         let squelched = crate::signals::squelched_bits(bits, closure_squelch_mask);
         if !squelched.is_empty() {
             // The squelch discard chokepoint (see the JIT-to-JIT arm above).
-            let err = vm.squelch_violation(squelched);
+            let err = vm.squelch_violation(squelched, vm.fiber.signal);
             vm.fiber.signal = Some((SIG_ERROR, err));
             return JitValue::nil();
         }

@@ -135,8 +135,12 @@ impl VM {
                 // the code after the Call, including the call's own result
                 // release — is funded by the delivery instead of by a `Return`
                 // mint (docs/impl/region/owner.md § "A delivery into a replayed
-                // frame carries one owning reference").
-                self.fiber.delivery.park_primitive();
+                // frame carries one owning reference"). The payload rides the
+                // record too: the retain above has no consumer where a boundary
+                // ends the park, and the boundary cannot read the signal slot
+                // for it (§ "A boundary ends a park with no reader and no
+                // install").
+                self.fiber.delivery.park_primitive(bits, value);
                 let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                 let activation_region_map = self
                     .fiber
@@ -225,8 +229,9 @@ impl VM {
                 // unwinds to parks one — so the obligation rides the fiber until
                 // the delivery. The frame that driver parks resumes into the
                 // post-`TailCall` block, whose result release the missing `Return`
-                // mint would have funded.
-                self.fiber.delivery.park_primitive();
+                // mint would have funded. The payload rides the record too (see
+                // the Call-position arm).
+                self.fiber.delivery.park_primitive(bits, value);
                 self.fiber.signal = Some((bits, value));
                 bits
             }
@@ -281,8 +286,10 @@ impl VM {
         // owes, and the payload whose release the displacing install owes —
         // because only this classifier can tell a denial from an `(emit …)`
         // under the same withheld bits (docs/impl/region/owner.md § "Park/unpark
-        // symmetry").
-        self.fiber.delivery.park_denial(payload);
+        // symmetry"), and the payload once more as the park whose delivery
+        // retain a boundary would have to release (§ "A boundary ends a park
+        // with no reader and no install").
+        self.fiber.delivery.park_denial(blocked, payload);
 
         // Save the stack and build a suspended frame (same as suspending signals)
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -338,8 +345,8 @@ impl VM {
         );
         // Tail-position mirror of the Call-position denial park (see
         // `handle_capability_denial`), delivery obligation and left-over payload
-        // reference alike.
-        self.fiber.delivery.park_denial(payload);
+        // reference alike, the boundary's reading included.
+        self.fiber.delivery.park_denial(blocked, payload);
         self.fiber.signal = Some((blocked, payload));
         blocked
     }

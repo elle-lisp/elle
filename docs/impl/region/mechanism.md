@@ -1818,7 +1818,10 @@ no delivery mint, so no frame's reference funds its delivery and every release t
 tables name runs. The signal the boundary displaces is not the exemption's subject
 either: a squelched park's payload is delivered to nobody, and the park's own escape
 retain holds it independently of any frame, so a frame's reference to it is that
-frame's to release like any other.
+frame's to release like any other. That retain is then the boundary's own to release,
+along with whatever a displacing install would have owed — the park having ended with
+neither a reader nor an install ([owner.md](owner.md) § "A boundary ends a park with no
+reader and no install").
 
 **The compiled tier runs the same walk.** A compiled frame leaves by an error at two
 points, and each runs the walk before its activation's region-map pop: the check after
