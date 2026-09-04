@@ -1,6 +1,7 @@
 //! Waiting for a subprocess to exit.
 
 use super::*;
+use crate::io::request::{ExitRecord, Reap};
 
 /// How long a wait pauses between asks, and the ceiling it grows to.
 ///
@@ -20,33 +21,25 @@ const CHILD_MAX_PACE: Duration = Duration::from_millis(50);
 /// fiber that asked would never be resumed. `WNOHANG` asks instead, and the
 /// pause between asks watches the stop pipe throughout.
 ///
+/// The ask goes through `exit`, which keeps whatever it produces. A stop is
+/// only visible at the pauses, so this worker can be cancelled after it has
+/// already taken the child's status from the kernel — and a cancelled
+/// operation's completion reaches nobody (src/io/AGENTS.md § "A reap is never
+/// wasted").
+///
 /// The exit code travels in `data` rather than in the result code, so a
 /// non-zero exit cannot be read as a negative errno.
-pub(super) fn process_wait(bound: OpBound, pid: u32) -> (i32, Vec<u8>) {
+pub(super) fn process_wait(bound: OpBound, pid: u32, exit: ExitRecord) -> (i32, Vec<u8>) {
     let deadline = bound.timeout().map(|t| std::time::Instant::now() + t);
     let mut pace = CHILD_FIRST_PACE;
     loop {
-        let mut status: libc::c_int = 0;
-        let ret = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
-        if ret < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
-            if errno == libc::EINTR {
-                continue;
-            }
-            return (-errno, Vec::new());
+        match exit.reap(pid) {
+            Reap::Exited(code) => return (0, code.to_le_bytes().to_vec()),
+            Reap::Failed(errno) => return (-errno, Vec::new()),
+            // The child is still running. The kernel offers no readiness for
+            // that, so the next ask is paced.
+            Reap::Running => {}
         }
-        if ret > 0 {
-            let exit_code: i32 = if libc::WIFEXITED(status) {
-                libc::WEXITSTATUS(status)
-            } else if libc::WIFSIGNALED(status) {
-                -libc::WTERMSIG(status)
-            } else {
-                -1
-            };
-            return (0, exit_code.to_le_bytes().to_vec());
-        }
-        // `ret == 0`: the child is still running. The kernel offers no
-        // readiness for that, so the next ask is paced.
         match pace_retry(&bound, deadline, pace) {
             Wake::Ready => {}
             Wake::Stopped => return (-libc::ECANCELED, Vec::new()),

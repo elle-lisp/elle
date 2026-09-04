@@ -6,7 +6,7 @@ use crate::io::completion;
 use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
+    ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{
     Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,

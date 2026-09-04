@@ -67,14 +67,24 @@ pub(super) fn process_raw_completion(
     }
 
     match pending {
-        PendingOp::ProcessWait {
-            handle_val,
-            siginfo,
-            ..
-        } => {
+        PendingOp::ProcessWait { siginfo, exit, .. } => {
             // buffer_pool.release is already called at the top of process_raw_completion.
 
             if result_code < 0 {
+                // A wait that finds no child answers from the record when this
+                // process is holding the status: two waits on one child are
+                // legal, and the loser is entitled to what the winner reaped
+                // (src/io/AGENTS.md § "A reap is never wasted").
+                if -result_code == libc::ECHILD {
+                    if let Some(code) = exit.status() {
+                        if !siginfo.is_null() {
+                            // SAFETY: as below — allocated at submit, reclaimed
+                            // once, and this arm is the single exit point.
+                            unsafe { drop(Box::from_raw(*siginfo)) };
+                        }
+                        return Completion::ok(id, Value::int(code as i64));
+                    }
+                }
                 // Which syscall actually ran is what the `siginfo` allocation
                 // says: the kernel fills one for `IORING_OP_WAITID`, and the
                 // pool worker — which calls `waitpid(2)` itself — leaves it
@@ -106,7 +116,9 @@ pub(super) fn process_raw_completion(
             }
 
             let exit_code: i32 = if siginfo.is_null() {
-                // Thread pool path: exit code is encoded as 4-byte LE int in data.
+                // Thread pool path: exit code is encoded as 4-byte LE int in
+                // data. The worker recorded it as it reaped, so this is a read
+                // of what the record already holds.
                 if data.len() >= 4 {
                     i32::from_le_bytes(data[..4].try_into().unwrap())
                 } else {
@@ -117,31 +129,15 @@ pub(super) fn process_raw_completion(
                 // Reclaim the siginfo_t allocation.
                 // SAFETY: `siginfo` was allocated via Box::into_raw in submit_process_wait.
                 // This completion arm is the single exit point — the CQE fires exactly once
-                // per SQE.
+                // per SQE. `result_code >= 0` is the kernel saying it filled the struct.
                 let si = unsafe { Box::from_raw(*siginfo) };
-                // si_code values for SIGCHLD:
-                //   CLD_EXITED (1): si_status is exit code
-                //   CLD_KILLED (2): si_status is signal number (return as negative)
-                //   CLD_DUMPED (3): killed + core dump (return signal as negative)
-                //
-                // SAFETY: si is fully initialized (kernel wrote it on child exit;
-                // result_code >= 0 confirms the waitid completed successfully).
-                unsafe {
-                    let si_code = si.si_code;
-                    let si_status = si.si_status();
-                    match si_code {
-                        1 => si_status,      // CLD_EXITED: normal exit
-                        2 | 3 => -si_status, // CLD_KILLED / CLD_DUMPED: negative signal number
-                        _ => -1,             // unknown
-                    }
-                }
+                unsafe { crate::io::request::exit_code_from_siginfo(&si) }
             };
 
-            // Cache the exit code in the ProcessHandle.
-            if let Some(handle) = handle_val.as_external::<crate::io::request::ProcessHandle>() {
-                let mut state = handle.inner.borrow_mut();
-                *state = crate::io::request::ProcessState::Exited(exit_code);
-            }
+            // The child is reaped, so this status is the only one there will
+            // be. Keeping it is what lets a later wait on the same handle
+            // answer at all.
+            exit.keep(exit_code);
 
             Completion::ok(id, Value::int(exit_code as i64))
         }

@@ -22,7 +22,9 @@ pub use spawn::*;
 pub(crate) use buffer::{
     bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer, writeable_buffer_ptr,
 };
-pub(crate) use process::{ProcessHandle, ProcessState};
+#[cfg(test)]
+pub(crate) use process::zombie_child;
+pub(crate) use process::{exit_code_from_siginfo, ExitRecord, ProcessHandle, Reap};
 
 /// Boxed closure type for `IoOp::Task`.
 pub type TaskClosure = Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>;

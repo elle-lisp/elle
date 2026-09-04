@@ -369,6 +369,15 @@ on every iteration.
             (subprocess/wait child))))
 ```
 
+The last line above is entitled to the exit status the cancelled wait
+abandoned. A wait the deadline ends can still reap the child in the moment
+between the cancel and the wait noticing it, and a reap takes the status from
+the kernel for good. So the status is kept on the process handle rather than
+delivered and forgotten: a child's exit status goes to a waiter, or waits on
+the handle until one asks. Every `subprocess/wait` on a child that has exited
+answers with the same status, however many times it is called and whatever
+became of the wait before it.
+
 `port/open` is the one with a direction to it. POSIX blocks an `open(2)` on a
 fifo until the other end is open, and Elle keeps that for the write side: the
 open waits for a reader, and `:timeout` bounds the wait. On the read side the

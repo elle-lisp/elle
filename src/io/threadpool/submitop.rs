@@ -98,7 +98,9 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
             let _ = OpBound::detached(bounds).sleep();
             (0, Vec::new())
         }
-        PoolOp::ProcessWait { pid } => child::process_wait(OpBound::detached(bounds), pid),
+        PoolOp::ProcessWait { pid, exit } => {
+            child::process_wait(OpBound::detached(bounds), pid, exit)
+        }
         PoolOp::Open { path, flags, mode } => {
             open::open(OpBound::detached(bounds), &path, flags, mode)
         }

@@ -86,12 +86,31 @@ Enum of port types (10 variants):
 
 Struct representing a running subprocess. Fields:
 - `pid: u32` — process ID
-- `inner: RefCell<ProcessState>` — lifecycle state (Running or Exited with cached exit code)
+- `child: RefCell<Child>` — the spawned child, kept so an unreaped one can be reaped on drop
+- `exit: ExitRecord` — where the child's exit status is kept once somebody reaps it. See § "A reap is never wasted"
 
 Methods:
 - `new(pid, child) → ProcessHandle` — create from spawned child process
 - `pid() → u32` — get process ID
-- `Drop` impl — calls `try_wait()` on the child to reap zombies
+- `exit() → &ExitRecord` — the record, for the waiters and the operations that clone it
+- `Drop` impl — calls `try_wait()` on a child nothing has reaped, to reap zombies
+
+### ExitRecord
+
+The one place a child's exit status is kept (`src/io/request/process.rs`).
+`Arc<Mutex<Option<i32>>>` behind a newtype, so a pool worker on another thread
+and the scheduler thread write the same record.
+
+- `new() → ExitRecord` — an unreaped child's record
+- `status() → Option<i32>` — the status this process is holding, if any
+- `keep(code)` — record a status somebody else's reap produced (the kernel's `waitid`). The first status wins; a child is reaped once
+- `reap(pid) → Reap` — `waitpid(pid, .., WNOHANG)` under the record's lock, answering `Exited`, `Running` or `Failed(errno)`
+
+`Reap::Exited` covers both "this ask reaped the child" and "the record already
+held it": holding the lock across the syscall is what makes the ask and the
+record one step. `exit_code_from_wait_status` and `exit_code_from_siginfo` are
+the two decodes — a `waitpid` status word and a kernel-filled `siginfo_t` —
+and both live here, beside the record they feed.
 
 ### PendingOp
 
@@ -103,7 +122,7 @@ alone must remember:
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
-- `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing. Null on the thread-pool path, where the worker reports the exit code itself.
+- `ProcessWait { buffer_handle, handle_val, siginfo, exit }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing. Null on the thread-pool path, where the worker reports the exit code itself. `exit` is a clone of the handle's `ExitRecord`, so the entry can keep a reaped status without dereferencing `handle_val` — see § "A reap is never wasted".
 - `Task { buffer_handle }` — background task running on thread pool.
 - `Resolve { buffer_handle }` — getaddrinfo(3) on the thread pool.
 - `WatchNext { watcher, buffer_handle }` / `SigNext { receiver, buffer_handle }` — a read on the inotify / signalfd descriptor the external owns. Both are operands, so the entry's hold keeps the external — and therefore the descriptor it owns — for the read's lifetime; see § "Descriptor retirement".
@@ -237,6 +256,52 @@ heap those values live on may already be gone.
 A cancel for an id that is no longer in flight marks nothing. The operation
 completed and its result already reached the fiber that asked; a mark left
 behind would meet a later submission.
+
+### A reap is never wasted
+
+One operation cannot honour "no completion is delivered" on its own terms.
+`waitpid(2)` and `IORING_OP_WAITID` **consume** what they report: the kernel
+hands a child's exit status over once, and the child is gone. A wait that is
+cancelled just after the kernel handed the status over has already spent it, and
+the promise above then throws that status away. The next `subprocess/wait` on
+that child finds no child and reports `ECHILD` for a status this process took.
+
+So the status does not travel in the completion alone. `ExitRecord` is where
+whoever reaps puts it, and every `ProcessHandle` holds one. The pending entry
+and the pool operation each carry a clone, so a write reaches no heap value: a
+teardown drain keeps the status without dereferencing a handle whose region may
+already be gone.
+
+The alternative was to narrow the window rather than close it — check the stop
+pipe immediately before each `waitpid` instead of only between them. The check
+and the syscall cannot be made atomic, so a cancel landing between them still
+reaps, and the guarantee stays unstatable.
+
+The pool worker reaps **under the record's lock**, which makes the ask and the
+answer one step: `ExitRecord::reap` returns the status a previous reap left
+whenever there is one, so a second waiter can never see the gap between another
+worker's `waitpid` and its write. The ring has that gap closed for it — the
+kernel reaps, and the status is read off the `siginfo_t` where the CQE is
+processed, whether the entry is cooked or retired (`PendingOp::retire`). A
+`waitid` that lost the race reports `ECHILD` and answers from the record
+instead; the winner reaped first, so its CQE precedes the loser's in the ring
+and the record is already there.
+
+`submit_process_wait` reads the record before it submits anything. A child's
+exit status is delivered to a waiter, or held until one asks — which also
+covers a child legitimately waited on twice.
+
+Each mechanism is pinned on its own, because each fails on its own.
+`a_stopped_wait_that_reaped_the_child_keeps_its_status` and
+`a_wait_on_an_already_reaped_child_answers_from_the_record`
+(`src/io/threadpool/tests/process.rs`) hold the worker to reaping through the
+record. In `src/io/aio/tests/process.rs`,
+`a_cancelled_wait_that_reaped_the_child_answers_the_next_wait` runs the whole
+path on the pool and its `_uring_` twin runs it on the ring (where the retire is
+what keeps the status), `a_wait_on_a_held_status_files_no_operation` holds the
+submit fast path to issuing nothing, and
+`a_wait_that_finds_no_child_answers_from_the_record` builds the loser's `ECHILD`
+at the entry, which no test can make two waits collide to produce.
 
 ### A submitted operation holds the values its completion reads
 
@@ -812,8 +877,8 @@ Two operations finish inside the submit call, so they take no buffer and file
 no pending entry; both push a `Completion` straight onto the queue:
 
 - `Spawn` — the child is started synchronously by `spawn_to_struct`.
-- `ProcessWait` on a child whose exit code is already cached in its
-  `ProcessHandle`.
+- `ProcessWait` on a child whose exit status the handle's `ExitRecord` already
+  holds.
 
 A dispatch failure returns before any pending entry exists, and leaves the
 buffer reserved: `submit_linked` can fail with the operation's SQE already
@@ -833,9 +898,9 @@ the next `ring.submit()`.
 
 **`AsyncBackend::submit_spawn()`** — Calls `spawn_to_struct()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
 
-**`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the process has already exited (cached in `ProcessHandle`), returns immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation.
+**`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
 
-**`child::process_wait()`** (in `src/io/threadpool/child.rs`) — the thread-pool half. `waitpid(pid, .., WNOHANG)` asks whether the child has exited and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Pinned by `src/io/threadpool/tests/process.rs`.
+**`child::process_wait()`** (in `src/io/threadpool/child.rs`) — the thread-pool half. `ExitRecord::reap` asks with `waitpid(pid, .., WNOHANG)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. The blocking `waitpid` it replaces held the worker for the child's whole life, where neither `io/cancel` nor a deadline could reach it. Asking through the record is what keeps a reap this worker's cancellation discards — see § "A reap is never wasted". Pinned by `src/io/threadpool/tests/process.rs`.
 
 **`submit_uring_process_wait()`** (in `src/io/uring.rs`) — Low-level io_uring submission for `IORING_OP_WAITID`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit; completion processing extracts the exit code from `si_code` and `si_status`.
 
@@ -863,7 +928,7 @@ the next `ring.submit()`.
 9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
-12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
+12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`, and so does `PendingOp::retire` — which reads the exit status out of it first, because a retired wait may be the one that reaped the child (§ "A reap is never wasted"). The fast path (a status already on the handle) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 13. **IORING_OP_WAITID requirement:** Linux 6.7+; older kernels return `-EINVAL` in the CQE. The thread-pool backend reaps the child itself, asking with `WNOHANG` and pacing the asks under the operation's bound.
 14. **Open runs on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behaviour in `docs/io.md` is the same whichever platform is underneath. Pinned by `src/io/threadpool/tests/openfile.rs`.
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.

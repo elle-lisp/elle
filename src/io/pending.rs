@@ -108,8 +108,12 @@ pub(crate) enum PendingOp {
     /// It must live until the CQE arrives. Released in completion processing.
     ProcessWait {
         buffer_handle: BufferHandle,
-        handle_val: Value, // ProcessHandle — to cache exit code on completion
+        handle_val: Value,             // ProcessHandle — the child this wait names
         siginfo: *mut libc::siginfo_t, // kernel fills this when child exits
+        /// A clone of the handle's exit record. The status is kept here rather
+        /// than read out of `handle_val`, so a retire during backend teardown
+        /// records without dereferencing a value whose region may be gone.
+        exit: crate::io::request::ExitRecord,
     },
     /// Open a file path. Creates a new port on completion.
     ///
@@ -287,6 +291,13 @@ impl PendingOp {
     /// `result_fd` is the raw completion's result code, which for a connect, an
     /// open or an accept is the descriptor the operation obtained. Nobody will
     /// take it now, so it is closed here rather than leaked.
+    ///
+    /// One thing is kept rather than given back. A process wait whose `waitid`
+    /// succeeded has already reaped the child, and the status is not the
+    /// operation's to discard — see src/io/AGENTS.md § "A reap is never
+    /// wasted". The pool's half of that is in the worker, which records at the
+    /// `waitpid` itself; this is the ring's, where the kernel reaps and the
+    /// status arrives in the `siginfo_t`.
     pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
         if let Some(bh) = self.buffer_handle() {
             buffer_pool.release(bh);
@@ -318,9 +329,14 @@ impl PendingOp {
                 // SAFETY: as above — the port for this descriptor is never built.
                 unsafe { libc::close(result_fd) };
             }
-            PendingOp::ProcessWait { siginfo, .. } if !siginfo.is_null() => {
+            PendingOp::ProcessWait { siginfo, exit, .. } if !siginfo.is_null() => {
                 // SAFETY: allocated by `Box::into_raw` at submit; reclaimed once.
-                drop(unsafe { Box::from_raw(siginfo) });
+                let si = unsafe { Box::from_raw(siginfo) };
+                if result_fd >= 0 {
+                    // SAFETY: a non-negative result is the kernel saying it
+                    // completed the `waitid` and filled this `siginfo_t`.
+                    exit.keep(unsafe { crate::io::request::exit_code_from_siginfo(&si) });
+                }
             }
             _ => {}
         }

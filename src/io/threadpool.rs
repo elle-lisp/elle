@@ -90,9 +90,12 @@ pub(super) enum PoolOp {
     Sleep,
     /// Reap a child. The worker asks with `WNOHANG` and waits between asks, so
     /// `io/cancel` reaches it and a child that never exits costs no thread past
-    /// the fiber that wanted it.
+    /// the fiber that wanted it. `exit` is the handle's record: the ask goes
+    /// through it, so a reap this operation's cancellation discards is still
+    /// there for the next waiter.
     ProcessWait {
         pid: u32,
+        exit: crate::io::request::ExitRecord,
     },
     /// Open a file. Returns the fd (>= 0) on success, or -errno on failure.
     /// O_CLOEXEC is included in `flags` by the primitive — no post-hoc fcntl

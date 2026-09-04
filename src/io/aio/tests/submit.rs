@@ -353,6 +353,7 @@ fn a_completion_for_another_operation_is_withheld_from_the_entry_it_found() {
                 buffer_handle: pool.alloc(0),
                 handle_val: Value::NIL,
                 siginfo,
+                exit: crate::io::request::ExitRecord::new(),
             },
             crate::io::pending::Submitter::detached(heap),
         );
