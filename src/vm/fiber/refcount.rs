@@ -246,6 +246,67 @@ pub(crate) fn release_displaced_io_request(
     }
 }
 
+/// Release everything a park is left with when a `squelch`/`attune` boundary
+/// ends it — the one end of a park that is neither a resume nor an install
+/// (docs/impl/region/owner.md § "A boundary ends a park with no reader and no
+/// install, so it owes both references").
+///
+/// Two references stand on a park's payload and each answers to a seam this exit
+/// cuts. The **delivery** — the `EmitEscape` / `SuspendEscape` retain the park
+/// took — is consumed by the resumer's release of the resume result, and no
+/// resumer ever reads a squelched park's payload out of `fiber.signal`. The
+/// second is whatever a displacing install would have owed: for a payload the
+/// RUNTIME built (a yielding io op's `IoRequest`, a capability denial's struct)
+/// the reference its allocation left, since no `decref_point` names its region;
+/// for a body-allocated payload the body's own, which the abandoned frames'
+/// release tables run instead. So this releases the delivery for every park and
+/// the install's half for the two runtime-built shapes, reusing the readings the
+/// installs share so the three sites cannot come to disagree about which parks
+/// are which.
+///
+/// Two records decide it together, because neither answers on its own. The
+/// LEDGER says the park's delivery retain has no reader — a fact only the site
+/// that took the retain knows, and one no reading of a signal slot recovers. The
+/// enforcement site says which park this exit ends, and it must, because the
+/// slot cannot be read for it: two sites reach the boundary through
+/// `invoke_closure_jit`, which restores the CALLER's signal first and holds the
+/// parked one in a local. Releasing on the ledger alone would need every route
+/// out of a park to clear the record; comparing the two bit-wise needs no such
+/// argument, and a record left over from a park some other route ended names a
+/// payload this exit is not looking at (the gate `release_displaced_denial_payload`
+/// makes for the same reason). Taking the record is the second receipt, so two
+/// boundaries over one park release one set of references.
+///
+/// Order matters within the payload's own accounting: the io arm dereferences
+/// the parked value to reach its verdict, so it runs before either decref that
+/// could be the region's last. A no-op for a fiber with no live park, and for an
+/// exit whose signal the ledger does not name.
+pub(crate) fn release_abandoned_park(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    delivery: &mut crate::value::fiber::Delivery,
+    live: Option<(SignalBits, Value)>,
+) {
+    let Some(parked) = delivery.take_undelivered() else {
+        return;
+    };
+    let (_, payload) = parked;
+    if !live.is_some_and(|(_, v)| v.bit_identical(payload)) {
+        return;
+    }
+    // What the install would have owed, in the two readings the installs use.
+    release_displaced_io_request(heap, Some(parked));
+    if let Some(recorded) = delivery
+        .take_bodyless()
+        .filter(|r| r.bit_identical(payload))
+    {
+        let region = crate::value::arena::region_of(heap, recorded);
+        crate::value::arena::decref_region(heap, region);
+    }
+    // What the reader would have consumed.
+    let region = crate::value::arena::region_of(heap, payload);
+    crate::value::arena::decref_region(heap, region);
+}
+
 /// The region a park's `IoRequest` lives in, or `None` where the park owes this
 /// accounting nothing — no park at all, a payload some other holder answers for,
 /// or an immediate. One reading of "which parks are io parks", so the release and

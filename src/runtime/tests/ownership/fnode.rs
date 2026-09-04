@@ -460,7 +460,7 @@ fn discard_frees_parked_activation_owner_node() {
             "the body parks at the yield"
         );
 
-        vm.discard_suspended_frames(crate::value::Value::NIL);
+        vm.discard_suspended_frames(crate::value::Value::NIL, None);
         assert!(
             vm.fiber.suspended.is_none(),
             "the discard consumed the parked chain"
@@ -473,7 +473,7 @@ fn discard_frees_parked_activation_owner_node() {
              (gen {gen_before} -> {gen_after})",
         );
         // A second discard finds nothing — the release ran exactly once.
-        vm.discard_suspended_frames(crate::value::Value::NIL);
+        vm.discard_suspended_frames(crate::value::Value::NIL, None);
     }
 
     // ── multi-frame chain: two parked activations, one discard frees both ──
@@ -498,7 +498,7 @@ fn discard_frees_parked_activation_owner_node() {
         chain.extend(vm.fiber.suspended.take().expect("second park"));
 
         vm.fiber.suspended = Some(chain);
-        vm.discard_suspended_frames(crate::value::Value::NIL);
+        vm.discard_suspended_frames(crate::value::Value::NIL, None);
         let bumped_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a;
         let bumped_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get()) > gen_b;
         assert!(
@@ -591,7 +591,7 @@ fn discard_runs_the_abandoned_frames_release_tables() {
             &[(9, mapped_rid), (8, unmapped_rid)],
         );
 
-        vm.discard_suspended_frames(Value::NIL);
+        vm.discard_suspended_frames(Value::NIL, None);
 
         assert_eq!(
             vm.heap().region_rc(owed_rid),
@@ -623,7 +623,7 @@ fn discard_runs_the_abandoned_frames_release_tables() {
         let (payload, payload_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         park(&mut vm, vec![Value::NIL, payload], &[]);
 
-        vm.discard_suspended_frames(payload);
+        vm.discard_suspended_frames(payload, None);
 
         assert_eq!(
             vm.heap().region_rc(payload_rid),
@@ -638,13 +638,59 @@ fn discard_runs_the_abandoned_frames_release_tables() {
         park(&mut vm, vec![Value::NIL, payload], &[]);
         vm.fiber.delivery.record_mint(payload);
 
-        vm.discard_suspended_frames(payload);
+        vm.discard_suspended_frames(payload, None);
 
         assert_eq!(
             vm.heap().region_rc(payload_rid),
             0,
             "a recorded mint funds the delivery, so the frame's own reference is \
              reclaimed at the discard too",
+        );
+    }
+
+    // ── the park's own references, beside the frames' ──
+    // A body-allocated park: its payload sits in the frame's value-route slot,
+    // so the table drops the body's reference and the chokepoint drops the
+    // delivery retain the boundary left with no reader
+    // (docs/impl/region/owner.md § "A boundary ends a park with no reader and
+    // no install"). The exit's own payload is a different value here — the
+    // boundary's `signal-violation`, which never shares the park's region.
+    {
+        let (parked, parked_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        let (violation, _) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        unsafe { &mut *heap_ptr }.incref_region(parked_rid);
+        park(&mut vm, vec![Value::NIL, parked], &[]);
+        vm.fiber
+            .delivery
+            .park_emit(crate::value::fiber::SIG_YIELD, parked);
+
+        vm.discard_suspended_frames(violation, Some((crate::value::fiber::SIG_YIELD, parked)));
+
+        assert_eq!(
+            vm.heap().region_rc(parked_rid),
+            0,
+            "the frame's table drops the body's reference and the chokepoint the \
+             delivery retain — two references, two seams the boundary cut",
+        );
+    }
+
+    // A boundary that ends NO park releases nothing extra, whatever the ledger
+    // last recorded. The two records decide together: the exit names the park it
+    // is ending, and a record that does not name it is a park some other route
+    // already ended.
+    {
+        let (stale, stale_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
+        park(&mut vm, vec![Value::NIL, Value::NIL], &[]);
+        vm.fiber
+            .delivery
+            .park_emit(crate::value::fiber::SIG_YIELD, stale);
+
+        vm.discard_suspended_frames(Value::NIL, None);
+
+        assert_eq!(
+            vm.heap().region_rc(stale_rid),
+            1,
+            "a stale record names a park this exit is not ending",
         );
     }
 }
@@ -1039,7 +1085,11 @@ fn a_primitive_park_delivery_is_worth_one_retain() {
             // park shape the classifier recorded when the fiber suspended.
             f.signal = Some((crate::value::fiber::SIG_OK, payload));
             if unfunded {
-                f.delivery.park_primitive();
+                // The park's own payload is `nil` here: this face gauges the
+                // resume funding, and an immediate payload's record names no
+                // region, so it cannot move the counts below.
+                f.delivery
+                    .park_primitive(crate::value::fiber::SIG_YIELD, crate::value::Value::NIL);
             }
         });
         rc!("after the park is installed — the delivery has not run", 1);

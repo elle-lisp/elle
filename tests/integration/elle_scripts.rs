@@ -831,6 +831,25 @@ fn region_squelch_unwind_uaf() {
     );
 }
 
+// Guard — a squelch/attune boundary ends a park with no reader and no install,
+// so it releases both of the park's references (docs/impl/region/owner.md § "A
+// boundary ends a park with no reader and no install"). Each is a decref that
+// never ran before, and the fiber SURVIVES, so what must be whole afterwards is
+// everything that still names the payload: a body-allocated one the emitting
+// frame's own binding holds, one a longer-lived CONTAINER took a counted
+// reference to, a BORROWED module-level binding the compiler minted the body's
+// reference for, the io machinery behind 80 boundaries, and a park the install
+// path still owns — resumed after all of them. Every read happens after the
+// boundary ran, so an over-release faults there — SIGSEGV under guardfree. The
+// leak face is `region-boundary-park.lisp`.
+#[test]
+fn region_boundary_park_uaf() {
+    run_elle_script_with_args(
+        "region-boundary-park-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a deferred tail-call release runs at every end its activation can
 // reach, not only the clean break (docs/impl/region/owner.md § "A deferred
 // tail-call release has the node's life"). Each is a decref the activation

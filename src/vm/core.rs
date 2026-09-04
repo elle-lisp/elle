@@ -341,7 +341,10 @@ impl VM {
         if squelched.is_empty() {
             return false;
         }
-        let err = self.squelch_violation(squelched);
+        // The park this boundary ends is the fiber's own live signal here: every
+        // site reaching the boundary through this predicate is still holding it
+        // (the two that are not pass their own — see `squelch_violation`).
+        let err = self.squelch_violation(squelched, self.fiber.signal);
         self.fiber.signal = Some((crate::value::SIG_ERROR, err));
         true
     }
@@ -353,7 +356,18 @@ impl VM {
     /// delivers it differently — the interpreter sets `fiber.signal`, the
     /// `compile/run-on` entry returns it as the call's result. `squelched` must
     /// be non-empty, the answer `signals::squelched_bits` gives.
-    pub(crate) fn squelch_violation(&mut self, squelched: SignalBits) -> Value {
+    ///
+    /// `parked` is the signal whose park this boundary ends, named by the site
+    /// rather than read from `fiber.signal`: two sites reach here through
+    /// `invoke_closure_jit`, which restores the CALLER's signal before it asks
+    /// the boundary's question and holds the parked one in a local. What the
+    /// park owed is released against it (docs/impl/region/owner.md § "A boundary
+    /// ends a park with no reader and no install").
+    pub(crate) fn squelch_violation(
+        &mut self,
+        squelched: SignalBits,
+        parked: Option<(SignalBits, Value)>,
+    ) -> Value {
         let squelched_str = crate::signals::registry::format_bits(squelched);
         let err = self.escaping_error(
             "signal-violation",
@@ -363,7 +377,7 @@ impl VM {
         // the payload the discard's own releases must leave standing — built in a
         // fresh region of its own, so in practice it exempts nothing and the
         // abandoned frames' tables run in full.
-        self.discard_suspended_frames(err);
+        self.discard_suspended_frames(err, parked);
         err
     }
 
@@ -401,18 +415,35 @@ impl VM {
     /// the activation that catches the squelch. Those regions stay leaked on this
     /// path until an ownership cut adopts them (UAF-safe, bounded per discard).
     ///
+    /// A fourth reading answers for the PARK rather than for the frames, and it
+    /// is the delivery ledger's: this exit is neither the reader that consumes a
+    /// park's delivery retain nor the install that releases a runtime-built
+    /// payload, so both are owed here (docs/impl/region/owner.md § "A boundary
+    /// ends a park with no reader and no install").
+    ///
     /// `payload` is the value the exit leaves with — the boundary's own
     /// `signal-violation` error — whose region no release here may take, on the
     /// same reading the abandoned-frame walk makes
     /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes").
-    pub(crate) fn discard_suspended_frames(&mut self, payload: Value) {
+    /// still owes"). `parked` is the signal whose park this ends, named by the
+    /// enforcement site (see `squelch_violation`).
+    pub(crate) fn discard_suspended_frames(
+        &mut self,
+        payload: Value,
+        parked: Option<(SignalBits, Value)>,
+    ) {
         if let Some(frames) = self.fiber.suspended.take() {
             let dues = crate::value::fiber::ParkedDues::of(frames);
             let protect = Some(payload).filter(|v| !self.fiber.delivery.mint_names(*v));
             let heap = unsafe { &mut *self.heap_ptr };
             crate::vm::fiber::release_parked_dues(heap, dues, protect, None);
         }
+        // The park's own references run after the tables above, which still find
+        // the payload's region live: a body-allocated payload's own release is
+        // one of those entries, and the delivery retain dropped here is what
+        // keeps it from being the region's last.
+        let heap = unsafe { &mut *self.heap_ptr };
+        crate::vm::fiber::release_abandoned_park(heap, &mut self.fiber.delivery, parked);
         // The abandoned park's funding has no consumer — the delivery funnel
         // that would have taken it will never run for these frames.
         self.fiber.delivery.discharge();

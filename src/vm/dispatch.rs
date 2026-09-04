@@ -74,6 +74,14 @@ impl VM {
             // releases it still owes").
             if signal_bits.intersects(SIG_ERROR) {
                 self.fiber.delivery.record_mint(value);
+            } else {
+                // A SUSPENDING emit records the park instead: this retain is the
+                // delivery, and a `squelch`/`attune` boundary ends the park with
+                // no reader to consume it (docs/impl/region/owner.md § "A
+                // boundary ends a park with no reader and no install"). The two
+                // arms partition what reaches here, the halt having taken no
+                // retain to account for.
+                self.fiber.delivery.park_emit(signal_bits, value);
             }
         }
 

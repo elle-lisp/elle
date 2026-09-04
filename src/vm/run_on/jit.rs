@@ -159,7 +159,9 @@ impl VM {
             let yield_bits = post_signal.map_or(crate::value::SIG_YIELD, |(bits, _)| bits);
             let squelched = crate::signals::squelched_bits(yield_bits, closure.squelch_mask);
             if !squelched.is_empty() {
-                return (SIG_ERROR, self.squelch_violation(squelched));
+                // …and the park it ends is `post_signal` for the same reason:
+                // `fiber.signal` holds the caller's by here.
+                return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
             }
 
             if let Some((bits, val)) = post_signal {
@@ -188,7 +190,7 @@ impl VM {
             // reason for not routing through `enforce_squelch`.
             let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
             if !squelched.is_empty() {
-                return (SIG_ERROR, self.squelch_violation(squelched));
+                return (SIG_ERROR, self.squelch_violation(squelched, post_signal));
             }
             if !bits.is_empty() {
                 return (bits, val);
